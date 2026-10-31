@@ -1,0 +1,14 @@
+DSHBots
+Copyright 2026 DSHBots contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Architecture and DSH integration were informed by:
+- DS Bot, Copyright 2026 Fei2411 and the DS Bot contributors, Apache-2.0
+  https://github.com/Fei2411/DS-Bot
+- Cindy, Copyright Cindy contributors, Apache-2.0
+  https://github.com/makecindy/cindy
+
+Runtime dependency:
+- DeepSeek Harness (DSH), Copyright (c) 2026 DeepSeek, MIT License
+  https://github.com/deepseek-ai/deepseek-harness
