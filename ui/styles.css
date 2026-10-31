@@ -1,5 +1,6 @@
-/* DSHBots — DS-Bot design language: one ink, opacity-derived surfaces, a single accent.
-   Light/dark follow the system. Base type 18px, minimum displayed size 16px. */
+/* DSHBots — DS-Bot minimal design language: one ink, opacity-derived surfaces, a single accent.
+   Palette: Catppuccin Latte (light) / Macchiato (dark), following the system.
+   Base type 18px, minimum displayed size 16px. */
 
 @font-face {
   font-family: "Inter";
@@ -26,27 +27,28 @@
 :root {
   color-scheme: light;
   --ui-scale: 1;
-  --ink: #141414;
-  --ink-2: rgba(20, 20, 20, .6);
-  --ink-3: rgba(20, 20, 20, .36);
-  --main: #fcfcfc;
-  --sidebar: #f7f7f7;
-  --card: #ffffff;
-  --bubble: #eeeeee;
-  --user: #070707;
-  --user-ink: #fcfcfc;
-  --line: rgba(20, 20, 20, .08);
-  --line-2: rgba(20, 20, 20, .15);
-  --hover: rgba(119, 119, 119, .09);
-  --active: rgba(119, 119, 119, .17);
-  --accent: #4d6bfe;
-  --danger: #e02135;
-  --green: #00c972;
-  --star: #ff9800;
-  --code-bg: rgba(20, 20, 20, .05);
-  --shadow-1: 0 1px 3px rgba(20, 20, 20, .04);
-  --shadow-2: 0 2px 8px -1px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04);
-  --shadow-3: 0 16px 48px rgba(20, 20, 20, .16);
+  --ink: #4c4f69;
+  --ink-2: rgba(76, 79, 105, .68);
+  --ink-3: rgba(76, 79, 105, .42);
+  --main: #e6e9ef;
+  --sidebar: #dce0e8;
+  --card: #eff1f5;
+  --bubble: #dce0e8;
+  --user: #7287fd;
+  --user-ink: #24273a;
+  --line: rgba(76, 79, 105, .12);
+  --line-2: rgba(76, 79, 105, .2);
+  --hover: rgba(76, 79, 105, .07);
+  --active: rgba(76, 79, 105, .14);
+  --accent: #7287fd;
+  --accent-ink: #24273a;
+  --danger: #d20f39;
+  --green: #40a02b;
+  --star: #df8e1d;
+  --code-bg: rgba(76, 79, 105, .06);
+  --shadow-1: 0 1px 3px rgba(76, 79, 105, .05);
+  --shadow-2: 0 2px 8px -1px rgba(76, 79, 105, .12), 0 1px 2px rgba(76, 79, 105, .05);
+  --shadow-3: 0 16px 48px rgba(76, 79, 105, .18);
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 
@@ -63,20 +65,25 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --ink: #f2f2f2;
-    --ink-2: rgba(242, 242, 242, .6);
-    --ink-3: rgba(242, 242, 242, .36);
-    --main: #141414;
-    --sidebar: #1b1b1b;
-    --card: #1f1f1f;
-    --bubble: #262626;
-    --user: #f2f2f2;
-    --user-ink: #141414;
-    --line: rgba(255, 255, 255, .08);
-    --line-2: rgba(255, 255, 255, .15);
-    --hover: rgba(160, 160, 160, .12);
-    --active: rgba(160, 160, 160, .2);
-    --code-bg: rgba(255, 255, 255, .06);
+    --ink: #cad3f5;
+    --ink-2: rgba(202, 211, 245, .64);
+    --ink-3: rgba(202, 211, 245, .38);
+    --main: #181926;
+    --sidebar: #1e2030;
+    --card: #24273a;
+    --bubble: #363a4f;
+    --user: #b7bdf8;
+    --user-ink: #24273a;
+    --line: rgba(202, 211, 245, .1);
+    --line-2: rgba(202, 211, 245, .18);
+    --hover: rgba(202, 211, 245, .08);
+    --active: rgba(202, 211, 245, .15);
+    --accent: #b7bdf8;
+    --accent-ink: #24273a;
+    --danger: #ed8796;
+    --green: #a6da95;
+    --star: #eed49f;
+    --code-bg: rgba(202, 211, 245, .08);
     --shadow-1: 0 1px 3px rgba(0, 0, 0, .2);
     --shadow-2: 0 2px 8px -1px rgba(0, 0, 0, .28), 0 1px 2px rgba(0, 0, 0, .2);
     --shadow-3: 0 16px 48px rgba(0, 0, 0, .44);
@@ -112,7 +119,7 @@ a { color: var(--accent); text-decoration: none; }
 .boot-mark {
   width: 64px; height: 64px; border-radius: 50%;
   display: grid; place-items: center;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--accent-ink);
   font: 600 1.125rem var(--mono); letter-spacing: .02em;
 }
 .boot-mark svg { width: 26px; height: 26px; }
@@ -137,7 +144,7 @@ a { color: var(--accent); text-decoration: none; }
 .brand-mark {
   width: 22px; height: 22px; border-radius: 50%;
   display: grid; place-items: center; flex: 0 0 auto;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--accent-ink);
   font: 600 1rem var(--mono);
   transition: opacity .12s ease;
 }
@@ -279,8 +286,8 @@ a { color: var(--accent); text-decoration: none; }
 .btn:hover { background: var(--hover); color: var(--ink); }
 .btn:active { transform: none; }
 .btn svg { width: 15px; height: 15px; }
-.btn.primary { background: var(--accent); color: #fff; font-weight: 600; }
-.btn.primary:hover { background: var(--accent); color: #fff; opacity: .9; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:hover { background: var(--accent); color: var(--accent-ink); opacity: .9; }
 .btn.ghost { color: var(--ink-2); }
 .btn.danger { color: var(--danger); }
 .btn.danger:hover { background: color-mix(in srgb, var(--danger) 9%, transparent); color: var(--danger); }
@@ -288,13 +295,13 @@ a { color: var(--accent); text-decoration: none; }
 .btn.icon { padding: 0; width: 36px; height: 36px; border-radius: 50%; flex: 0 0 auto; }
 .btn:disabled { opacity: .4; cursor: default; }
 .btn:disabled:hover { background: transparent; color: var(--ink-2); }
-.btn.primary:disabled:hover { background: var(--accent); color: #fff; opacity: .4; }
+.btn.primary:disabled:hover { background: var(--accent); color: var(--accent-ink); opacity: .4; }
 .btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .send-btn {
   flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%;
   display: inline-grid; place-items: center;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--accent-ink);
   transition: opacity .12s ease;
 }
 .send-btn:hover { opacity: .9; }

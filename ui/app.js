@@ -348,6 +348,8 @@
             </div>`}
             <div class="topbar-actions">
               ${!isGlobal && project ? `<button class="btn primary" data-action="new-task">${icon('plus')}<span class="btn-label">新建任务</span></button>` : ''}
+              <button class="btn icon" data-action="nav" data-view="global" title="字体与全局配置" aria-label="字体与全局配置"><span style="font-weight:600;letter-spacing:-.04em">Aa</span></button>
+              <a class="btn icon" href="/" title="打开 DSH Web" aria-label="打开 DSH Web"><span class="mono" style="font-size:.875rem">DSH</span></a>
               <button class="btn icon" data-action="refresh" title="刷新">${icon('refresh')}</button>
             </div>
           </header>
