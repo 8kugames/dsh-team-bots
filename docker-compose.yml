@@ -1,0 +1,40 @@
+services:
+  dsh-team:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+        DSH_VERSION: ${DSH_VERSION:-}
+    image: dsh-team-bots:local
+    pull_policy: never
+    ports:
+      - "${DSH_TEAM_PORT:-13080}:3080"
+    environment:
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DSH_TRUSTED_HOST: "${DSH_TRUSTED_HOST:-localhost,127.0.0.1}"
+      DSH_HOST: "0.0.0.0"
+      DSH_LISTEN_PORT: "3080"
+      DSH_TELEMETRY_DISABLED: "1"
+      DSH_PROFILE: "bots"
+      DSH_TEAM_WORKSPACE: "/workspace"
+      DSH_TEAM_DATA: "/workspace/.data"
+      DSH_TEAM_MAX_RUNS: "${DSH_TEAM_MAX_RUNS:-3}"
+      DSH_TEAM_RUN_TIMEOUT_MS: "${DSH_TEAM_RUN_TIMEOUT_MS:-900000}"
+      DSH_TEAM_MODEL_PRICES: "${DSH_TEAM_MODEL_PRICES:-}"
+      NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org/}"
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+    volumes:
+      - "${HOME}/.dsh:/home/node/.dsh"
+      - "${DSH_TEAM_WORKSPACE_DIR:-./workspace}:/workspace"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "const net=require('net');const s=net.connect(3080,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
