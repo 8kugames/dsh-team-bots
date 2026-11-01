@@ -3522,3 +3522,147 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-small);
     line-height: 1.7;
 }
+
+/* ---------------------------------------------------------------- Project terminal tab */
+.terminal-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 920px;
+}
+.terminal-warn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink-2);
+    border: 1px solid var(--star);
+    background: var(--star-wash);
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: var(--fs-small);
+    line-height: 1.6;
+}
+.terminal-warn svg {
+    color: var(--star);
+    flex: 0 0 auto;
+}
+.terminal-card {
+    padding: 0;
+    overflow: hidden;
+}
+.terminal-input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+}
+.terminal-prompt {
+    font: 600 0.9375rem var(--mono);
+    color: var(--ink-3);
+    flex: 0 0 auto;
+}
+.terminal-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--mono);
+}
+.terminal-active-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--star-wash);
+    font-size: var(--fs-small);
+}
+.terminal-active-cmd {
+    font-family: var(--mono);
+    color: var(--ink-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.terminal-active-row .run-clock {
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+}
+.terminal-stop {
+    flex: 0 0 auto;
+}
+.terminal-output {
+    margin: 0;
+    padding: 12px 14px;
+    min-height: 180px;
+    max-height: 46vh;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: var(--fs-small);
+    line-height: 1.65;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+}
+.terminal-output .faint {
+    color: var(--ink-3);
+}
+.terminal-history-card {
+    padding: 14px 16px;
+}
+.terminal-history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.terminal-history {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.terminal-history-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--ink);
+    font: inherit;
+}
+.terminal-history-item:hover {
+    border-color: var(--line);
+    background: var(--surface-2);
+}
+.terminal-history-item .pill {
+    flex: 0 0 auto;
+}
+.terminal-history-cmd {
+    font-family: var(--mono);
+    font-size: var(--fs-small);
+    color: var(--ink-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.terminal-history-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}

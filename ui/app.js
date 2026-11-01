@@ -9,7 +9,7 @@
   const UI_THEME_KEY = 'dshb:ui-theme'
   const state = {
     data: null,
-    view: ['chat', 'solo-config', 'tasks', 'bots', 'skills', 'memory', 'evolution', 'usage', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
+    view: ['chat', 'solo-config', 'tasks', 'bots', 'skills', 'memory', 'evolution', 'usage', 'terminal', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
     projectId: params.get('project') || null,
     chatMode: 'group',
     soloBotId: null,
@@ -30,6 +30,8 @@
     bootError: null,
     wechatAuth: null,
     wechatPollTimer: null,
+    terminalDraft: '',
+    terminalPollTimer: null,
   }
 
   const STATUS = {
@@ -51,6 +53,7 @@
   const SKILL_STATUS = { active: '启用中', missing: '已失效' }
   const MEMORY_STATUS = { active: '已生效', pending: '待审', frozen: '已冻结', rejected: '已拒绝', archived: '已归档' }
   const PROPOSAL_KIND = { bot_update: 'Bot 更新', skill: '技能更新', workflow: '流程更新' }
+  const TERMINAL_STATUS = { running: '运行中', succeeded: '已完成', failed: '失败', timeout: '超时', canceled: '已停止', interrupted: '已中断' }
   const CREATOR_TYPE = { bot: 'Bot', user: '用户' }
   const EFFORT = { minimal: '最低', low: '低', medium: '中', high: '高', max: '最高' }
   // The one action in the top-right belongs to the page you are on.
@@ -70,6 +73,7 @@
     ['memory', '记忆', 'memory'],
     ['evolution', '进化', 'branch'],
     ['usage', '用量', 'chart'],
+    ['terminal', '终端', 'terminal'],
     ['settings', '设置', 'settings'],
   ]
   // 1V1 单聊上下文的导航：对话窗口 + 集中配置页 + 团队级页面（技能/记忆/进化/用量）。
@@ -312,6 +316,47 @@
     state.wechatPollTimer = null
   }
 
+  // 终端运行中把轮询提速到 1s：只直更输出区，不整页重渲染（避免打断正在输入的命令）。
+  // 命令结束（active 消失）即停，回落到常规 2.8s poll。
+  function startTerminalPoll() {
+    stopTerminalPoll()
+    state.terminalPollTimer = setInterval(async () => {
+      if (!state.projectId || state.busy > 0 || state.modal || document.hidden) return
+      try {
+        const terminal = await api('terminal_state', { projectId: state.projectId }, { quiet: true })
+        if (state.data) state.data.terminal = terminal
+        if (state.view === 'terminal') updateTerminalDom(terminal)
+        if (!terminal.active) {
+          stopTerminalPoll()
+          await refresh({ quiet: true })
+        }
+      } catch {}
+    }, 1000)
+  }
+
+  function stopTerminalPoll() {
+    if (state.terminalPollTimer) clearInterval(state.terminalPollTimer)
+    state.terminalPollTimer = null
+  }
+
+  // 每次渲染后按「当前是否处于终端视图且有活跃命令」同步轮询启停。
+  function syncTerminalPoll() {
+    if (state.view === 'terminal' && state.data?.terminal?.active) startTerminalPoll()
+    else stopTerminalPoll()
+  }
+
+  // 轮询落地的轻量 DOM 更新：输出区滚动跟随新输出；状态徽标/历史等结构性变化交给整页渲染。
+  function updateTerminalDom(terminal) {
+    const outputEl = document.getElementById('terminal-output')
+    if (outputEl) {
+      const text = terminalOutputText(terminal)
+      if (outputEl.textContent !== text) {
+        outputEl.textContent = text
+        outputEl.scrollTop = outputEl.scrollHeight
+      }
+    }
+  }
+
   function bootError(error) {
     app.className = 'boot-screen'
     app.innerHTML = `<div class="boot-mark">${icon('alert')}</div>
@@ -369,6 +414,7 @@
       : state.view === 'memory' ? '团队记忆'
       : state.view === 'evolution' ? '进化提案'
       : state.view === 'usage' ? '资源用量'
+      : state.view === 'terminal' ? (project ? `终端 · ${project.name}` : '项目终端')
       : state.view === 'global' ? '全局配置'
       : '项目设置'
     const title = viewTitle
@@ -510,7 +556,12 @@
         const messages = document.querySelector('.chat-messages')
         if (messages && state.chatAtBottom) messages.scrollTop = messages.scrollHeight
       }
+      if (state.view === 'terminal') {
+        const outputEl = document.getElementById('terminal-output')
+        if (outputEl) outputEl.scrollTop = outputEl.scrollHeight
+      }
     })
+    syncTerminalPoll()
   }
 
   function renderView() {
@@ -522,6 +573,7 @@
         case 'memory': return renderMemory()
         case 'evolution': return renderEvolution()
         case 'usage': return renderUsage()
+        case 'terminal': return renderTerminal()
         case 'settings': return renderSettings()
         case 'global': return renderGlobal()
         case 'solo-config': return renderSoloConfig()
@@ -925,6 +977,63 @@
         ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}
       </div>
     </article>`
+  }
+
+  // ── 项目「终端」tab：非交互式命令台（无 PTY/xterm），输入命令 → 项目工作目录执行 → 实时输出 ──
+  // 实时 tail 由 1s 轮询直更输出区（startTerminalPoll），常规状态走 2.8s poll 的 view.terminal。
+  function terminalStatusPill(status) {
+    const tone = status === 'succeeded' ? 'green' : ['failed', 'timeout', 'interrupted'].includes(status) ? 'red' : status === 'running' ? 'amber' : ''
+    return `<span class="pill ${tone}">${esc(TERMINAL_STATUS[status] ?? status)}</span>`
+  }
+
+  function terminalOutputText(terminal) {
+    return terminal?.active?.output ?? terminal?.history?.[0]?.output ?? ''
+  }
+
+  function renderTerminal() {
+    const project = activeProject()
+    if (!project || inSoloContext()) return noProject()
+    const terminal = state.data?.terminal ?? { active: null, history: [] }
+    const active = terminal.active
+    const latest = active ?? terminal.history[0] ?? null
+    const output = terminalOutputText(terminal)
+    // 有任务类运行在写该项目工作区时只提示不拦截：终端命令与它并发执行的风险由用户自担。
+    const taskBusy = (state.data?.runs ?? []).some(run => run.kind === 'task' && ['queued', 'running'].includes(run.status))
+    return `
+      <div class="terminal-page">
+        ${taskBusy ? `<div class="terminal-warn">${icon('alert')}<span>有任务正在写该项目工作区，终端命令与它并发需自担风险</span></div>` : ''}
+        <div class="card terminal-card">
+          <form class="terminal-input-row" data-form="terminal-run">
+            <input type="hidden" name="projectId" value="${attr(project.id)}">
+            <span class="terminal-prompt" aria-hidden="true">$</span>
+            <input class="input terminal-input" id="terminal-cmd-input" name="command" placeholder="${active ? '有命令正在运行…' : '输入命令，⌘Enter 执行'}" value="${attr(state.terminalDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${active ? 'disabled' : ''}>
+            <button class="btn primary" type="submit" ${active ? 'disabled' : ''}>${icon('play')}<span class="btn-label">执行</span></button>
+          </form>
+          ${active ? `<div class="terminal-active-row">
+            ${runDot('running')}
+            <code class="terminal-active-cmd">${esc(active.command)}</code>
+            <span class="run-clock" data-started="${attr(active.createdAt ?? '')}">${duration(active.createdAt)}</span>
+            <button class="btn danger terminal-stop" data-action="terminal-stop" data-command-id="${attr(active.id)}">${icon('stop')}<span class="btn-label">停止</span></button>
+          </div>` : ''}
+          <pre class="terminal-output" id="terminal-output" data-command-id="${attr(latest?.id ?? '')}">${output ? esc(output) : '<span class="faint">暂无输出。执行一条命令后，这里显示实时输出（最多保留末尾 200KB）。</span>'}</pre>
+        </div>
+        <div class="card terminal-history-card">
+          <div class="terminal-history-head"><strong>历史命令</strong><span class="tag">${terminal.history.length} 条</span></div>
+          ${terminal.history.length === 0 ? '<div class="side-empty" style="padding:14px 16px">还没有执行过命令。</div>' : `<div class="terminal-history">
+            ${terminal.history.map(item => `
+              <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" title="点击回填到输入框">
+                ${terminalStatusPill(item.status)}
+                <code class="terminal-history-cmd">${esc(item.command)}</code>
+                <span class="terminal-history-meta">
+                  ${item.status === 'running' ? `<span class="run-clock" data-started="${attr(item.createdAt ?? '')}">${duration(item.createdAt)}</span>` : `exit ${item.exitCode ?? '—'} · ${duration(item.createdAt, item.endedAt)}`}
+                  · ${formatTime(item.createdAt)}
+                </span>
+              </button>
+            `).join('')}
+          </div>`}
+        </div>
+      </div>
+    `
   }
 
   function renderBots() {
@@ -2907,6 +3016,20 @@
           await refresh()
           toast(`技能已回滚到 v${target.dataset.version}`, 'success')
           break
+        case 'terminal-stop': {
+          await api('cancel_command', { commandId: target.dataset.commandId })
+          toast('停止信号已发送', 'success')
+          break
+        }
+        case 'terminal-fill': {
+          state.terminalDraft = target.dataset.command ?? ''
+          const cmdInput = document.getElementById('terminal-cmd-input')
+          if (cmdInput && !cmdInput.disabled) {
+            cmdInput.value = state.terminalDraft
+            cmdInput.focus()
+          }
+          break
+        }
         default:
           break
       }
@@ -3103,6 +3226,16 @@
         toast('密钥请求已批准并物化', 'success')
         return
       }
+      if (type === 'terminal-run') {
+        const command = String(payload.command ?? '').trim()
+        if (!command) throw new Error('命令不能为空')
+        await api('run_command', { projectId: payload.projectId, command })
+        state.terminalDraft = ''
+        await loadState(state.projectId, { quiet: true })
+        render()
+        startTerminalPoll()
+        return
+      }
     } catch (error) {
       toast(error.message || String(error), 'error')
     }
@@ -3127,6 +3260,9 @@
     }
     if (el.id === 'memory-search') {
       state.memoryQuery = el.value
+    }
+    if (el.id === 'terminal-cmd-input') {
+      state.terminalDraft = el.value
     }
   })
 
@@ -3186,6 +3322,11 @@
     if (event.target.id === 'memory-search' && event.key === 'Enter') {
       event.preventDefault()
       void searchMemories()
+      return
+    }
+    if (event.target.id === 'terminal-cmd-input' && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      document.querySelector('form[data-form="terminal-run"]')?.requestSubmit()
       return
     }
   })

@@ -14,6 +14,7 @@ const ACTIONS = new Set([
   'settings', 'update_settings', 'export_usage_csv', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
   'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout',
+  'run_command', 'cancel_command', 'terminal_state',
   'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
 
@@ -66,6 +67,14 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.cancelRun(required(payload.runId, 'runId'), actor)
     case 'run_trajectory':
       return service.runTrajectory(required(payload.runId, 'runId'))
+    // 终端的安全口径与 Bot 相同：命令以当前用户执行、权限与服务进程一致；
+    // HTTP 入口由宿主的 owner 路由鉴权兜底，此处不重复校验。
+    case 'run_command':
+      return service.runTerminalCommand(required(payload.projectId, 'projectId'), payload.command, actor)
+    case 'cancel_command':
+      return service.cancelTerminalCommand(required(payload.commandId, 'commandId'), actor)
+    case 'terminal_state':
+      return service.terminalState(required(payload.projectId, 'projectId'))
     case 'create_memory':
       return service.createMemory({
         scopeType: payload.scopeType,

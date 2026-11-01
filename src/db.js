@@ -342,6 +342,23 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   applied_at TEXT NOT NULL
 );
 
+-- terminal_commands：工作台「终端」tab 的非交互式命令执行记录。
+-- status: running → succeeded | failed | timeout | canceled | interrupted；
+-- output 是密钥掩码后的末尾 200KB；每项目保留最近 20 条（terminalState 查询时顺手清理）。
+CREATE TABLE IF NOT EXISTS terminal_commands (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  command TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  exit_code INTEGER,
+  output TEXT NOT NULL DEFAULT '',
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  ended_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS terminal_commands_project_idx ON terminal_commands(project_id, created_at DESC);
+
 -- outbox：状态变更 → 建运行 的可靠交接。写入即落库，调度器按顺序领取并投递，
 -- 失败按退避重试，超过上限转 failed 供人工排查。
 CREATE TABLE IF NOT EXISTS outbox (
@@ -529,6 +546,7 @@ export function openDatabase(path) {
   recordMigration(db, 'runs_artifacts')
   recordMigration(db, 'run_trajectory')
   recordMigration(db, 'projects_production_dir')
+  recordMigration(db, 'terminal_commands')
   return new Store(db, { ftsEnabled })
 }
 

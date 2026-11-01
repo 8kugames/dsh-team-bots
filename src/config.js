@@ -60,6 +60,8 @@ export function resolveConfig(config = {}) {
     workerPreset: String(config.workerPreset ?? process.env.DSH_TEAM_WORKER_PRESET ?? '').trim(),
     schedulerIntervalMs: int(config.schedulerIntervalMs, 1_500, 250, 30_000),
     modelCacheMs: int(config.modelCacheMs, 8_000, 0, 120_000),
+    // 终端命令硬超时：默认 120s；测试可注入更短值（下限 500ms）。
+    terminalTimeoutMs: int(config.terminalTimeoutMs, 120_000, 500, 600_000),
     seedOwnerName: String(config.seedOwnerName ?? SEED_OWNER.name).slice(0, 40),
     seedOwnerRole: String(config.seedOwnerRole ?? SEED_OWNER.role).slice(0, 24),
     seedOwnerInstructions: String(config.seedOwnerInstructions ?? SEED_OWNER.instructions),
