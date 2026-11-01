@@ -130,4 +130,54 @@ export function installTeamTools(ctx, service) {
       return `Created proposal ${proposal.id}. It is pending human approval.`
     },
   })
+
+  ctx.tools.register({
+    name: 'team_message_bot',
+    description: 'Send a direct message to another bot in the same project and get its reply delivered back into your current conversation later. Idempotent: repeating the same request_id never duplicates the work, it just returns the current status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Exact bot name from the project member list' },
+        request_id: { type: 'string', description: 'Stable name for this logical request (for example review-login-error); reuse it to poll or resend without duplicating work' },
+        text: { type: 'string', description: 'Self-contained question or instruction for the other bot' },
+      },
+      required: ['to', 'request_id', 'text'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const result = service.messageFromBot({
+        sessionId,
+        toName: args.to,
+        requestId: args.request_id,
+        textBody: args.text,
+      })
+      return `[dm ${result.messageId}] ${result.created ? 'delivered to' : 'already known to'} ${args.to}: status=${result.status}. ${result.hint}`
+    },
+  })
+
+  ctx.tools.register({
+    name: 'team_request_secret',
+    description: 'Ask the human to provision a named secret (credential) for this project. The value never passes through you: once approved it is materialized into .team/secrets.env in the project workspace and you read it with `set -a; . .team/secrets.env` in the shell.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Secret name, uppercase with underscores (for example GITHUB_TOKEN); a $env:/DSH_SECRET_ prefix is stripped automatically' },
+        reason: { type: 'string', description: 'What the secret is needed for and what it will be used to do' },
+      },
+      required: ['name', 'reason'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const request = service.requestSecretFromBot({
+        sessionId,
+        name: args.name,
+        reason: args.reason,
+      })
+      return `Secret request ${request.requestId.slice(-6)} for ${request.name} is pending human approval.`
+    },
+  })
 }
