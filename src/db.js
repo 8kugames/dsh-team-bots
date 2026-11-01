@@ -23,6 +23,7 @@ const RUNS_DDL = `
   error_code TEXT,
   error_message TEXT,
   output TEXT,
+  artifacts TEXT,
   queued_at TEXT NOT NULL,
   started_at TEXT,
   ended_at TEXT,
@@ -43,7 +44,7 @@ CREATE INDEX IF NOT EXISTS runs_queue_idx ON runs(status, queued_at);
 CREATE INDEX IF NOT EXISTS runs_project_idx ON runs(project_id, queued_at DESC);
 `
 
-const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, error_code, error_message, output, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
+const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, error_code, error_message, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
 
 const BINDINGS_DDL = `
   session_id TEXT PRIMARY KEY,
@@ -408,6 +409,78 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL
 );
 
+-- bot_messages：bot 之间经 team_message_bot 的直接交互。(project_id, from_bot_id, request_id)
+-- 唯一保证具名请求幂等；status: pending → delivered（dm 运行已建）→ replied（回复已产出）| failed。
+CREATE TABLE IF NOT EXISTS bot_messages (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  from_bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  to_bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  origin_session_id TEXT,
+  origin_kind TEXT,
+  origin_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  run_id TEXT,
+  reply TEXT,
+  replied_at TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, from_bot_id, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS bot_messages_project_idx ON bot_messages(project_id, created_at DESC);
+
+-- secrets：团队/项目两级密钥，值 AES-256-GCM 加密存储；fingerprint 供 UI 确认而不回显明文。
+CREATE TABLE IF NOT EXISTS secrets (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL CHECK (scope IN ('team', 'project')),
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  purpose TEXT NOT NULL DEFAULT '',
+  value_enc TEXT NOT NULL,
+  value_iv TEXT NOT NULL,
+  value_tag TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS secrets_scope_name_idx ON secrets(scope, IFNULL(project_id, ''), name);
+
+-- secret_requests：bot 发起的密钥请求，用户在设置页处理。
+CREATE TABLE IF NOT EXISTS secret_requests (
+  id TEXT PRIMARY KEY,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  handled_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS secret_requests_status_idx ON secret_requests(status, created_at DESC);
+
+-- session_rotations：会话滚动（上下文接管）的 checkpoint 交接记录；seeded 标记新会话是否已种入。
+-- kind 与 session_bindings.kind 对齐（project/task/dm），滚动记录按会话类别配对。
+CREATE TABLE IF NOT EXISTS session_rotations (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'project',
+  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  old_session_id TEXT NOT NULL,
+  seq INTEGER NOT NULL DEFAULT 1,
+  checkpoint TEXT NOT NULL,
+  seeded INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS session_rotations_target_idx
+  ON session_rotations(bot_id, project_id, task_id, created_at DESC);
+
 ${RUNS_INDEXES}
 CREATE INDEX IF NOT EXISTS messages_project_idx ON messages(project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS solo_messages_bot_idx ON solo_messages(bot_id, created_at DESC);
@@ -459,6 +532,7 @@ export function openDatabase(path) {
   migrateProposals(db)
   migrateUsageEvents(db)
   migrateSoloSupport(db)
+  migrateContextTracking(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -468,6 +542,10 @@ export function openDatabase(path) {
   recordMigration(db, 'usage_reconciliation_table')
   recordMigration(db, 'memories_fts')
   recordMigration(db, 'solo_chat_support')
+  recordMigration(db, 'bot_direct_messages')
+  recordMigration(db, 'secrets_pipeline')
+  recordMigration(db, 'session_context_tracking')
+  recordMigration(db, 'runs_artifacts')
   recordMigration(db, 'run_trajectory')
   return new Store(db, { ftsEnabled })
 }
@@ -481,10 +559,21 @@ function addColumn(db, table, column, definition) {
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
 }
 
+// 上下文占用追踪：会话绑定记录最近一次模型调用的 input+cache tokens 估计值，
+// 供调度器在运行间隙判断是否需要滚动会话（steward 接管长任务上下文）。
+// session_rotations.kind 补列：早期开发库建表时缺 kind，按 project 回填。
+function migrateContextTracking(db) {
+  addColumn(db, 'session_bindings', 'last_ctx_tokens', 'INTEGER')
+  addColumn(db, 'session_bindings', 'ctx_window', 'INTEGER')
+  addColumn(db, 'session_bindings', 'ctx_updated_at', 'TEXT')
+  addColumn(db, 'session_rotations', 'kind', "TEXT NOT NULL DEFAULT 'project'")
+}
+
 // run.mode 区分写入型与只读型运行：同一项目同时只允许一个写运行，只读运行可并行。
 function migrateRuns(db) {
   addColumn(db, 'runs', 'mode', "TEXT NOT NULL DEFAULT 'write'")
   addColumn(db, 'runs', 'last_progress_at', 'TEXT')
+  addColumn(db, 'runs', 'artifacts', 'TEXT')
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
 }
 

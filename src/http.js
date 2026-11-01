@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppError } from './errors.js'
 import { handleAction } from './api.js'
@@ -8,6 +8,16 @@ import { handleAction } from './api.js'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const UI = join(HERE, '..', 'ui')
 const MAX_BODY = 2 * 1024 * 1024
+// 交付产物文件的单文件响应上限，超出返回 413。
+const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
+const ARTIFACT_TYPES = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+}
 
 // 静态资源 URL 的版本参数由 package.json 注入，避免手写版本号与包版本漂移。
 const ASSET_VERSION = String(createRequire(import.meta.url)('../package.json').version ?? '0')
@@ -102,6 +112,15 @@ export function installHttp(ctx, service, logger = console) {
   }
   disposers.push(ctx.webServer.register({ kind: 'exact', path: '/', handler: home }))
 
+  const errorResponse = (error) => {
+    const known = error instanceof AppError
+    if (!known) logger.error?.('dsh-team: API error: %s', error?.stack ?? error)
+    const status = known ? error.status : 500
+    const code = known ? error.code : 'INTERNAL'
+    const message = known ? error.message : '服务端处理失败'
+    return response(JSON.stringify({ ok: false, error: { code, message } }), 'application/json; charset=utf-8', status)
+  }
+
   route('/api/dsh-team/api', ['POST'], async (request) => {
     try {
       const length = Number(request.headers.get('content-length') ?? 0)
@@ -120,12 +139,42 @@ export function installHttp(ctx, service, logger = console) {
       const data = await handleAction(service, action, payload, actor)
       return response(JSON.stringify({ ok: true, data }), 'application/json; charset=utf-8')
     } catch (error) {
-      const known = error instanceof AppError
-      if (!known) logger.error?.('dsh-team: API error: %s', error?.stack ?? error)
-      const status = known ? error.status : 500
-      const code = known ? error.code : 'INTERNAL'
-      const message = known ? error.message : '服务端处理失败'
-      return response(JSON.stringify({ ok: false, error: { code, message } }), 'application/json; charset=utf-8', status)
+      return errorResponse(error)
+    }
+  })
+
+  // 交付产物：清单与文件内容。与 /api/dsh-team/api 同前缀注册，鉴权同样由宿主路由层承担。
+  const searchParams = (request) => new URL(request.url, 'http://localhost').searchParams
+
+  route('/api/dsh-team/artifacts', ['GET'], async (request) => {
+    try {
+      const runId = String(searchParams(request).get('runId') ?? '').trim()
+      if (!runId) throw new AppError('BAD_REQUEST', '缺少参数 runId', 400)
+      const data = service.listRunArtifacts(runId)
+      return response(JSON.stringify({ ok: true, data }), 'application/json; charset=utf-8')
+    } catch (error) {
+      return errorResponse(error)
+    }
+  })
+
+  route('/api/dsh-team/artifact-file', ['GET'], async (request) => {
+    try {
+      const params = searchParams(request)
+      const runId = String(params.get('runId') ?? '').trim()
+      const relPath = String(params.get('path') ?? '')
+      if (!runId || !relPath) throw new AppError('BAD_REQUEST', '缺少参数 runId 或 path', 400)
+      const { absolutePath, size } = service.artifactFile(runId, relPath)
+      if (size > MAX_ARTIFACT_BYTES) throw new AppError('ARTIFACT_TOO_LARGE', '产物文件超过 5MB 上限', 413)
+      const ext = extname(absolutePath).toLowerCase()
+      // SVG 可执行脚本，强制以附件下载，不进内联渲染。
+      const extra = ext === '.svg'
+        ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(absolutePath))}` }
+        : {}
+      const body = await readFile(absolutePath)
+      if (body.byteLength > MAX_ARTIFACT_BYTES) throw new AppError('ARTIFACT_TOO_LARGE', '产物文件超过 5MB 上限', 413)
+      return response(body, ARTIFACT_TYPES[ext] ?? 'text/plain; charset=utf-8', 200, extra)
+    } catch (error) {
+      return errorResponse(error)
     }
   })
 
