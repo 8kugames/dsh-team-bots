@@ -3644,6 +3644,7 @@ export class TeamService {
         }
         // 单聊上下文的团队页口径：记忆只看 团队 + 该 bot 自己的；运行只看该 bot 的项目外运行；
         // 提案保持全团队（提案本身不挂项目）。
+        view.proposals = this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item))
         view.memories = this.store.all(
           `SELECT * FROM memories WHERE status = 'active' AND ((scope_type = 'bot' AND scope_id = ?) OR (scope_type = 'team' AND scope_id = 'team'))
            ORDER BY updated_at DESC LIMIT 100`,

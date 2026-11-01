@@ -344,9 +344,14 @@
 
   function renderShell() {
     const data = state.data
-    const project = activeProject()
+    const solo = inSoloContext()
+    // 场景分支：单聊上下文的统计口径 = 该 Bot 的单聊运行；群聊上下文 = 当前项目。
+    const project = solo ? null : activeProject()
+    const soloRuns = solo ? (state.data?.solo?.runs ?? []) : []
     const pending = pendingProposals()
-    const running = project?.stats?.running ?? 0
+    const running = solo
+      ? soloRuns.filter(run => run.status === 'running' || run.status === 'queued').length
+      : (project?.stats?.running ?? 0)
     const tokenTotal = usageTotals('project').totalTokens ?? 0
     const isGlobal = state.view === 'global'
     // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
@@ -447,7 +452,7 @@
               ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}
               <h1>${esc(title)}</h1>
             </div>
-            ${isGlobal ? '' : `<div class="topbar-meta">
+            ${isGlobal || solo ? '' : `<div class="topbar-meta">
               <span><b>${project?.stats?.openTasks ?? 0}</b> 任务</span>
               <span class="sep"></span>
               <span><b>${running}</b> 运行中</span>
@@ -1017,7 +1022,7 @@
       render()
       return
     }
-    const project = activeProject()
+    const project = pageProject()
     const payload = { query }
     if (project) payload.projectId = project.id
     const result = await api('search_memories', payload)
@@ -1035,7 +1040,7 @@
       <div class="board-toolbar">
         <select class="select" id="memory-filter" aria-label="按作用域筛选记忆">
           <option value="all" ${state.memoryFilter === 'all' ? 'selected' : ''}>全部作用域</option>
-          <option value="project" ${state.memoryFilter === 'project' ? 'selected' : ''}>项目记忆</option>
+          ${inSoloContext() ? '' : `<option value="project" ${state.memoryFilter === 'project' ? 'selected' : ''}>项目记忆</option>`}
           <option value="bot" ${state.memoryFilter === 'bot' ? 'selected' : ''}>Bot 记忆</option>
           <option value="team" ${state.memoryFilter === 'team' ? 'selected' : ''}>团队记忆</option>
         </select>
@@ -1806,7 +1811,7 @@
 
   function modalSkill(detail) {
     if (!detail) return modalLoading('技能详情')
-    const project = activeProject()
+    const project = pageProject()
     const off = project?.disabledSkills?.includes(detail.slug) ?? false
     return modalShell({
       title: detail.name || detail.slug,
