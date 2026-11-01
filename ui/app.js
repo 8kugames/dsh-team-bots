@@ -540,6 +540,37 @@
     </div>`
   }
 
+  // typing-status:start —— 消息流末尾「Bot 响应中」状态行的纯逻辑（tests/typing-status.test.js 抽取此块断言）
+  // 只认 chat / solo_chat 的活跃运行；task、review、handle、dm、dm_reply、memory_review 与已结束运行一律不出行。
+  function activeTypingRuns(runs, kind) {
+    return (runs ?? [])
+      .filter(run => run.kind === kind && ['queued', 'running'].includes(run.status))
+      .sort((a, b) => String(a.queued_at ?? '').localeCompare(String(b.queued_at ?? '')))
+      .map(run => ({
+        botId: run.bot_id,
+        botName: run.botName ?? 'Bot',
+        status: run.status,
+        text: run.status === 'queued' ? '排队等待回复…' : '正在思考与回复…',
+        // 耗时起点：未开始运行的从排队时刻起算
+        startedAt: run.started_at ?? run.queued_at,
+      }))
+  }
+  // typing-status:end
+
+  // 活跃运行的「响应中」行：头像 + 三点跳动 + 状态文案 + 秒表（复用 .run-clock 的每秒刷新 interval）。
+  function typingRows(runs, kind) {
+    return activeTypingRuns(runs, kind).map(row => {
+      const bot = botById(row.botId)
+      return `<div class="typing-row">
+        ${avatar(bot, 'sm')}
+        <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <strong class="typing-name">${esc(row.botName)}</strong>
+        <span class="typing-text">${row.text}</span>
+        <span class="run-clock" data-started="${attr(row.startedAt ?? '')}">${duration(row.startedAt)}</span>
+      </div>`
+    }).join('')
+  }
+
   function renderChat() {
     if (state.chatMode === 'solo') return renderSoloChat()
     const project = activeProject()
@@ -569,6 +600,7 @@
               <h3>还没有人说话</h3>
               <p>直接发言会交给负责人 Bot；用 <strong>@Bot</strong> 点名成员，或输入 <strong>/task @Bot 任务标题</strong> 直接创建任务。</p>
             </div>` : messages.map(renderMessage).join('')}
+            ${typingRows(state.data.runs, 'chat')}
           </div>
           ${renderDirectMessagesCard()}
                     <div class="composer">
@@ -661,6 +693,7 @@
               <h3>和 ${esc(bot.name)} 单独聊聊</h3>
               <p>这里没有项目上下文，适合单独请教、调试指令或闲聊。需要文件产出时会落在它自己的工作区。</p>
             </div>` : messages.map(renderMessage).join('')}
+            ${typingRows(runs, 'solo_chat')}
           </div>
           <div class="composer">
             <div class="composer-box">

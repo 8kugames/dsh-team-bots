@@ -1372,6 +1372,59 @@ a.global-config.dsh-official-link:hover {
     font-weight: 500;
 }
 
+/* Bot 响应状态行：活跃运行期间在消息流末尾展示，视觉上与 Bot 气泡同族 */
+.typing-row {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: min(640px, 82%);
+    padding: 9px 13px;
+    border-radius: 4px 12px 12px 12px;
+    background: var(--surface-3);
+    color: var(--ink-2);
+    line-height: 1.7;
+}
+.typing-name {
+    font-weight: 600;
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+.typing-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.typing-dots {
+    display: inline-flex;
+    gap: 3px;
+    flex: 0 0 auto;
+}
+.typing-dots i {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    animation: typing-bounce 1.2s infinite;
+}
+.typing-dots i:nth-child(2) {
+    animation-delay: 0.15s;
+}
+.typing-dots i:nth-child(3) {
+    animation-delay: 0.3s;
+}
+@keyframes typing-bounce {
+    0%,
+    60%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.5;
+    }
+    30% {
+        transform: translateY(-3px);
+        opacity: 1;
+    }
+}
+
 .composer {
     padding: 10px 16px 14px;
 }
