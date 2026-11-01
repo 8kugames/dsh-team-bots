@@ -1,4 +1,4 @@
-import { lstat, mkdir, realpath } from 'node:fs/promises'
+import { lstat, mkdir, realpath, rm } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 export class PathError extends Error {
@@ -21,13 +21,42 @@ export function safeSlug(value) {
   return slug
 }
 
+/**
+ * Create `directory` unless it already exists as a directory.
+ *
+ * A broken or self-referencing symlink (ELOOP) makes `mkdir -p` fail, which is
+ * how `/workspace/.agents` can block startup after a bad manual `ln -s` or a
+ * half-restored backup. Replace only symlinks that do not resolve to a real
+ * directory; leave valid ones untouched.
+ */
+export async function ensureDirResilient(directory) {
+  const existing = await lstat(directory).catch(error => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
+  if (existing) {
+    if (existing.isDirectory()) return
+    if (existing.isSymbolicLink()) {
+      const real = await realpath(directory).catch(() => null)
+      if (real) {
+        const target = await lstat(real).catch(() => null)
+        if (target?.isDirectory()) return
+      }
+      await rm(directory, { force: true })
+    } else {
+      throw new PathError(`${directory} 已存在但不是目录`)
+    }
+  }
+  await mkdir(directory, { recursive: true })
+}
+
 export async function ensureProjectWorkspace(workspaceRoot, slug) {
   const safe = safeSlug(slug)
-  await mkdir(workspaceRoot, { recursive: true })
+  await ensureDirResilient(workspaceRoot)
   const rootReal = await realpath(workspaceRoot)
   const target = resolve(rootReal, safe)
   if (!within(target, rootReal) || target === rootReal) throw new PathError('项目目录越界')
-  await mkdir(target, { recursive: true })
+  await ensureDirResilient(target)
   const targetReal = await realpath(target)
   if (!within(targetReal, rootReal) || targetReal === rootReal) throw new PathError('项目目录经符号链接越界')
   const info = await lstat(targetReal)
@@ -36,12 +65,13 @@ export async function ensureProjectWorkspace(workspaceRoot, slug) {
 }
 
 export async function ensureSkillRoot(workspaceRoot) {
-  await mkdir(workspaceRoot, { recursive: true })
+  await ensureDirResilient(workspaceRoot)
   const rootReal = await realpath(workspaceRoot)
   const target = join(rootReal, '.agents')
-  await mkdir(target, { recursive: true })
+  await ensureDirResilient(target)
   const real = await realpath(target)
   if (!within(real, rootReal)) throw new PathError('共享技能池越界')
+  await ensureDirResilient(join(real, 'skills'))
   return real
 }
 
