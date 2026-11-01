@@ -532,6 +532,7 @@ export function openDatabase(path) {
   migrateProposals(db)
   migrateUsageEvents(db)
   migrateSoloSupport(db)
+  migrateSoloDirUnique(db)
   migrateContextTracking(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
@@ -566,6 +567,8 @@ function migrateContextTracking(db) {
   addColumn(db, 'session_bindings', 'last_ctx_tokens', 'INTEGER')
   addColumn(db, 'session_bindings', 'ctx_window', 'INTEGER')
   addColumn(db, 'session_bindings', 'ctx_updated_at', 'TEXT')
+  // max_tokens：滚动阈值里的回复预留取模型的输出上限，没有它只能按窗口比例估算。
+  addColumn(db, 'session_bindings', 'max_tokens', 'INTEGER')
   addColumn(db, 'session_rotations', 'kind', "TEXT NOT NULL DEFAULT 'project'")
 }
 
@@ -652,6 +655,19 @@ function migrateSoloSupport(db) {
 function columnNotNull(db, table, column) {
   const info = db.prepare(`PRAGMA table_info(${table})`).all().find(row => row.name === column)
   return Boolean(info?.notnull)
+}
+
+// 单聊目录唯一：新库建表时 solo_dir 就带 UNIQUE，老库是 addColumn 补的列，没有唯一约束，
+// 两个 bot 可能指向同一个工作目录互相覆盖。补一个部分唯一索引把这种状态挡住。
+// 老库里若已有重复目录名，这里不改名：改名等于把 bot 指向另一个工作目录，比缺约束更难收拾，
+// 只告警让使用者自己改名或合并。
+function migrateSoloDirUnique(db) {
+  if (!columnsOf(db, 'bots').includes('solo_dir')) return
+  try {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS bots_solo_dir_unique ON bots(solo_dir) WHERE solo_dir IS NOT NULL')
+  } catch (error) {
+    console.warn(`dsh-team: 单聊目录存在重复，bots.solo_dir 唯一索引未创建：${error.message}`)
+  }
 }
 
 // 全量重建一张表：原名表数据拷入 <name>_new 后删除原名表，再把新表改回原名。

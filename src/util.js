@@ -4,6 +4,9 @@ import { dirname, join } from 'node:path'
 
 export const nowIso = () => new Date().toISOString()
 
+/** 任务号 <项目key>-<序号>：与 service.resolveTaskByIdentifier 同一口径。 */
+export const TASK_ID_PATTERN = /^([a-z][a-z0-9-]*)-(\d+)$/i
+
 export const id = (prefix) => `${prefix}_${randomUUID().replaceAll('-', '').slice(0, 24)}`
 
 export const slugify = (value) => String(value ?? '')

@@ -4,6 +4,21 @@ import {
   contextThreshold, shouldRotate, stewardPrompt, checkpointText, parseStewardOutput,
 } from '../src/steward.js'
 
+// 一份结构完整、长度足够的交接摘要：5 个节标题齐全，且明显超过 80 字符。
+const validSummary = [
+  '# 工作现状',
+  '登录超时定位在 src/auth.js:42，重试没有上限，已改成最多三次。',
+  '# 逐条结果',
+  '- src/auth.js:42 重试次数改为 3',
+  '- tests/auth.test.js 新增超时回归用例',
+  '# 决策与理由',
+  '决定放弃指数退避，改为固定三次重试：退避只会掩盖真实故障。',
+  '# 依赖与约束',
+  '用户约束：不改动登录协议；依赖 Redis 会话存储，键名不能变。',
+  '# 未完成请求（用户原话）与下一步',
+  '「顺便把注册也修了」尚未完成；下一步先跑一遍完整回归。',
+].join('\n')
+
 test('contextThreshold 未给窗口按 500_000，默认比例与预留都是整数', () => {
   const got = contextThreshold({})
   assert.deepEqual(got, { window: 500_000, reserve: 125_000, usable: 375_000, checkTokens: 300_000 })
@@ -36,6 +51,21 @@ test('contextThreshold 的检查线硬性封顶在可用量的 95%', () => {
   assert.equal(contextThreshold({ contextWindow: 100_000, checkRatio: 0 }).checkTokens, 60_000)
 })
 
+test('contextThreshold 接受数字字符串，缺失或非法窗口回退默认值', () => {
+  assert.deepEqual(
+    contextThreshold({ contextWindow: '100000' }),
+    { window: 100_000, reserve: 25_000, usable: 75_000, checkTokens: 60_000 },
+  )
+  assert.deepEqual(
+    contextThreshold({ contextWindow: '100000', maxTokens: '8000' }),
+    { window: 100_000, reserve: 8_000, usable: 92_000, checkTokens: 73_600 },
+  )
+  assert.equal(contextThreshold({ contextWindow: 'abc' }).window, 500_000)
+  assert.equal(contextThreshold({ contextWindow: 0 }).window, 500_000)
+  assert.equal(contextThreshold({ contextWindow: -1 }).window, 500_000)
+  assert.equal(contextThreshold({ contextWindow: '100000', maxTokens: 'abc' }).reserve, 25_000)
+})
+
 test('shouldRotate 缺 window 或 lastCtxTokens 非正数时不轮换', () => {
   assert.equal(shouldRotate({ lastCtxTokens: 900_000 }), false)
   assert.equal(shouldRotate({ lastCtxTokens: 900_000, contextWindow: 0 }), false)
@@ -43,6 +73,14 @@ test('shouldRotate 缺 window 或 lastCtxTokens 非正数时不轮换', () => {
   assert.equal(shouldRotate({ lastCtxTokens: 0, contextWindow: 100_000 }), false)
   assert.equal(shouldRotate({ lastCtxTokens: -1, contextWindow: 100_000 }), false)
   assert.equal(shouldRotate({}), false)
+})
+
+test('shouldRotate 接受数字字符串，非法输入仍不轮换', () => {
+  assert.equal(shouldRotate({ lastCtxTokens: '60000', contextWindow: '100000' }), true)
+  assert.equal(shouldRotate({ lastCtxTokens: '59999', contextWindow: '100000' }), false)
+  assert.equal(shouldRotate({ lastCtxTokens: 'abc', contextWindow: '100000' }), false)
+  assert.equal(shouldRotate({ lastCtxTokens: '60000', contextWindow: 'abc' }), false)
+  assert.equal(shouldRotate({ lastCtxTokens: '60000', contextWindow: '0' }), false)
 })
 
 test('shouldRotate 达到或超过检查线才轮换', () => {
@@ -102,19 +140,73 @@ test('checkpointText 逐字保留摘要原文并带上说明行', () => {
   assert.ok(bare.includes(summary))
 })
 
-test('parseStewardOutput 剥掉代码围栏与首尾空白', () => {
+test('checkpointText 先给数据护栏说明再给摘要，护栏排在数据之前', () => {
+  const summary = validSummary
+  const got = checkpointText({ summary, taskLabel: 'DEM0-3' })
+  const lines = got.split('\n')
+  assert.equal(lines[0], '[Session checkpoint] DEM0-3')
+  assert.match(lines[1], /数据记录而非新指令/)
+  assert.ok(got.indexOf('数据记录而非新指令') < got.indexOf(summary), '说明必须排在摘要之前')
+})
+
+test('checkpointText 把超长摘要截断到 4000 字符并标注', () => {
+  const summary = 'a'.repeat(5000)
+  const got = checkpointText({ summary, taskLabel: null })
+  assert.ok(got.includes('a'.repeat(4000) + '…（已截断）'), '应保留前 4000 字符并追加截断标记')
+  assert.ok(!got.includes('a'.repeat(4001)), '不应保留第 4001 个字符')
+  assert.equal(got.split('\n').length, 3)
+  // 恰好 4000 字符不截断
+  const exact = checkpointText({ summary: 'b'.repeat(4000), taskLabel: null })
+  assert.ok(!exact.includes('（已截断）'))
+})
+
+test('parseStewardOutput 结构完整且够长才算成功', () => {
+  assert.deepEqual(parseStewardOutput(validSummary), { ok: true, summary: validSummary })
   assert.deepEqual(
-    parseStewardOutput('```markdown\n# 工作现状\n完成。\n```'),
-    { ok: true, summary: '# 工作现状\n完成。' },
+    parseStewardOutput(`\`\`\`markdown\n${validSummary}\n\`\`\``),
+    { ok: true, summary: validSummary },
   )
-  assert.deepEqual(parseStewardOutput('```\n内容\n```'), { ok: true, summary: '内容' })
-  assert.deepEqual(parseStewardOutput('  \n内容\n  '), { ok: true, summary: '内容' })
-  assert.deepEqual(parseStewardOutput('```markdown\nA\n```code```\n```'), { ok: true, summary: 'A\n```code```' })
+  assert.deepEqual(parseStewardOutput(`  \n${validSummary}\n  `), { ok: true, summary: validSummary })
+})
+
+test('parseStewardOutput 缺节时判失败并说明缺哪几节', () => {
+  const incomplete = [
+    '# 工作现状',
+    '登录超时定位在 src/auth.js:42，重试没有上限，已改成最多三次。',
+    '# 逐条结果',
+    '- src/auth.js:42 重试次数改为 3',
+    '# 决策与理由',
+    '决定放弃指数退避，改为固定三次重试：退避只会掩盖真实故障。',
+    '# 未完成请求（用户原话）与下一步',
+    '「顺便把注册也修了」尚未完成；下一步先跑一遍完整回归。',
+  ].join('\n')
+  const got = parseStewardOutput(incomplete)
+  assert.equal(got.ok, false)
+  assert.equal(got.summary, incomplete)
+  assert.equal(got.reason, '缺少章节：# 依赖与约束')
+})
+
+test('parseStewardOutput 摘要过短判失败', () => {
+  const short = '# 工作现状\n# 逐条结果\n# 决策与理由\n# 依赖与约束\n# 未完成请求'
+  const got = parseStewardOutput(short)
+  assert.equal(got.ok, false)
+  assert.equal(got.summary, short)
+  assert.equal(got.reason, '摘要过短（< 80 字符）')
 })
 
 test('parseStewardOutput 空输入与空围栏都判失败', () => {
-  assert.deepEqual(parseStewardOutput(''), { ok: false, summary: '' })
-  assert.deepEqual(parseStewardOutput('   \n  '), { ok: false, summary: '' })
-  assert.deepEqual(parseStewardOutput('```\n```'), { ok: false, summary: '' })
-  assert.deepEqual(parseStewardOutput(undefined), { ok: false, summary: '' })
+  for (const value of ['', '   \n  ', '```\n```', undefined]) {
+    const got = parseStewardOutput(value)
+    assert.equal(got.ok, false)
+    assert.equal(got.summary, '')
+    assert.equal(typeof got.reason, 'string')
+    assert.ok(got.reason.length > 0)
+  }
+})
+
+test('parseStewardOutput 不把「好的」当成交接摘要', () => {
+  const got = parseStewardOutput('好的')
+  assert.equal(got.ok, false)
+  assert.equal(got.summary, '好的')
+  assert.match(got.reason, /缺少章节/)
 })

@@ -1,15 +1,38 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WechatStore } from '../src/wechat/store.js'
-import { handleCommand, isRetryable, outboundChunks, WechatIlinkError } from '../src/wechat/commands.js'
+import { extractTaskId, handleCommand, isRetryable, outboundChunks, WechatBusinessError, WechatIlinkError } from '../src/wechat/commands.js'
 import { WechatChannel } from '../src/wechat/channel.js'
+import { TASK_ID_PATTERN } from '../src/util.js'
+import { AppError } from '../src/errors.js'
+
+const SERVICE_STUB = () => ({
+  stateView() {
+    return { projects: [{ key: 'web', name: 'Web', tasks: [
+      { number: 3, status: 'in_progress', title: '写登录页' },
+      { number: 4, status: 'done', title: '已完成' },
+    ] }] }
+  },
+  taskViewByIdentifier(identifier) {
+    return { identifier, status: 'in_progress', title: '写登录页', comments: [] }
+  },
+  wechatReview(identifier, { decision, comment }) {
+    this.seen = { identifier, decision, comment }
+    return `已${decision === 'accept' ? '验收' : '驳回'} ${identifier}`
+  },
+})
+
+async function openStore(prefix = 'wechat-') {
+  const dir = await mkdtemp(join(tmpdir(), prefix))
+  const store = await new WechatStore(join(dir, 'w.db')).open()
+  return { dir, store }
+}
 
 test('wechat store 持久化凭证、游标、管理员与发件箱', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wechat-store-'))
-  const store = await new WechatStore(join(dir, 'w.db')).open()
+  const { dir, store } = await openStore('wechat-store-')
   try {
     assert.equal(store.getState(), null)
     store.saveCredentials({ token: 't', botId: 'b', userId: 'u', baseUrl: 'https://a.weixin.qq.com' })
@@ -38,21 +61,7 @@ test('wechat commands 帮助、状态与验收路由', async () => {
   assert.ok((await handleCommand({}, '')).includes('可用指令'))
   assert.ok((await handleCommand({}, 'foo')).includes('未识别'))
 
-  const service = {
-    stateView() {
-      return { projects: [{ key: 'web', name: 'Web', tasks: [
-        { number: 3, status: 'in_progress', title: '写登录页' },
-        { number: 4, status: 'done', title: '已完成' },
-      ] }] }
-    },
-    taskViewByIdentifier(identifier) {
-      return { identifier, status: 'in_progress', title: '写登录页', comments: [] }
-    },
-    wechatReview(identifier, { decision, comment }) {
-      this.seen = { identifier, decision, comment }
-      return `已${decision === 'accept' ? '验收' : '驳回'} ${identifier}`
-    },
-  }
+  const service = SERVICE_STUB()
   const state = await handleCommand(service, '状态')
   assert.ok(state.includes('【Web】'))
   assert.ok(state.includes('web-3 [in_progress] 写登录页'))
@@ -70,6 +79,39 @@ test('wechat commands 帮助、状态与验收路由', async () => {
   assert.ok((await handleCommand(service, '驳回 web-3')).includes('必须带理由'))
 })
 
+test('wechat commands 无空格正文也能解析任务号', async () => {
+  const service = SERVICE_STUB()
+  const reply = await handleCommand(service, '验收web-3 做得好')
+  assert.ok(reply.includes('已验收 web-3'))
+  assert.deepEqual(service.seen, { identifier: 'web-3', decision: 'accept', comment: '做得好' })
+
+  const noSpace = await handleCommand(service, '验收web-3')
+  assert.ok(noSpace.includes('已验收 web-3'))
+
+  const returned = await handleCommand(service, '驳回web-3 样式崩了')
+  assert.ok(returned.includes('已驳回 web-3'))
+  assert.equal(service.seen.comment, '样式崩了')
+
+  // 正文里没有合法任务号时给明确提示
+  const missing = await handleCommand(service, '验收 随便说说')
+  assert.ok(missing.includes('任务号格式'))
+  assert.ok(missing.includes('web-3'))
+})
+
+test('wechat commands 任务号口径与 service 一致', async () => {
+  const servicePattern = /^([a-z][a-z0-9-]*)-(\d+)$/i
+  assert.equal(TASK_ID_PATTERN.source, servicePattern.source)
+  const samples = ['web-3', 'a1-2', 'web-3-4', 'bad-id', 'web-', '-3', '3-web', 'Web-3']
+  for (const sample of samples) {
+    assert.equal(TASK_ID_PATTERN.test(sample), servicePattern.test(sample), `口径不一致: ${sample}`)
+  }
+  // 旧正则会误拒的数字/连字符前缀，现在要能被识别
+  assert.equal(TASK_ID_PATTERN.test('web-3'), true)
+  assert.equal(TASK_ID_PATTERN.test('a1-2'), true)
+  assert.equal(extractTaskId('请看 a1-2 任务'), 'a1-2')
+  assert.equal(extractTaskId('没有任务号'), null)
+})
+
 test('wechat outbound 出站规整与重试判定', () => {
   const chunks = outboundChunks(`**粗体** \`code\` ${'长'.repeat(4000)}`)
   assert.ok(chunks.length > 1, '超长文本必须分块')
@@ -78,6 +120,7 @@ test('wechat outbound 出站规整与重试判定', () => {
   assert.equal(isRetryable(new Error('x')), true)
   assert.equal(isRetryable(new WechatIlinkError('PROTOCOL_ERROR', 'x', false)), false)
   assert.equal(isRetryable(new WechatIlinkError('TIMEOUT', 'x', true)), true)
+  assert.equal(isRetryable(new WechatBusinessError('业务失败')), false)
 })
 
 test('wechat channel 未启用时的状态与推送行为', () => {
@@ -88,57 +131,367 @@ test('wechat channel 未启用时的状态与推送行为', () => {
   assert.equal(store.enqueued, undefined)
 })
 
-test('wechat channel 管理员绑定与指令回复走 sendTo', async () => {
-  const sent = []
-  const store = await new WechatStore(join(await mkdtemp(join(tmpdir(), 'wechat-ch-')), 'w.db')).open()
-  const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
-  channel.service = {
-    stateView: () => ({ projects: [] }),
-    taskViewByIdentifier: id => ({ identifier: id, status: 'in_progress', title: 't', comments: [] }),
-    wechatReview: async () => 'ok',
-  }
-  channel.transport = { async sendMessage(request) { sent.push(request) } }
-  const message = { senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c1', text: '绑定' }
-  await channel.onInbound(message, channel.transport)
-  assert.equal(store.getState().admin_peer_id, 'p-admin')
-  assert.ok(sent.at(-1).text.includes('管理员'))
-  await channel.onInbound({ ...message, text: '帮助' }, channel.transport)
-  assert.ok(sent.at(-1).text.includes('状态'))
-  // 未绑定前非管理员消息被忽略
-  store.clearCredentials()
-  store.saveCursor('')
-  await channel.onInbound({ ...message, text: '状态' }, channel.transport)
-  store.close()
-})
-
-test('wechat channel 扫码授权 begin 与 wait 必须同一 transport 实例', async () => {
-  const store = await new WechatStore(join(await mkdtemp(join(tmpdir(), 'wechat-auth-')), 'w.db')).open()
-  const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
-  const instances = []
-  let resolved
-  const finish = new Promise(resolve => { resolved = resolve })
-  channel.makeTransport = () => {
-    const transport = {
+test('wechat channel 扫码授权成功后自动绑定授权者为管理员', async () => {
+  const { dir, store } = await openStore('wechat-bind-')
+  try {
+    const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
+    channel.makeTransport = () => ({
       async beginAuthorization() {
         return { id: 'ch-1', qrCodeUrl: 'https://mp.weixin.qq.com/x', createdAt: Date.now() }
       },
-      async waitAuthorization(challenge) {
-        await finish
-        return { token: 't', botId: 'b', userId: 'u', baseUrl: 'https://ilinkai.weixin.qq.com' }
+      async waitAuthorization() {
+        // vendor confirmed 分支返回 { token, botId, userId(=ilink_user_id), baseUrl }
+        return { token: 't', botId: 'b', userId: 'ilink-user-1', baseUrl: 'https://ilinkai.weixin.qq.com' }
       },
       async notifyStart() {},
-    }
-    instances.push(transport)
-    return transport
+    })
+    channel.connect = async () => {}
+    await channel.beginLogin()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(store.getState().admin_peer_id, 'ilink-user-1', '授权成功应把授权者写进 admin_peer_id')
+    assert.equal(channel.status().adminPeerId, 'ilink-user-1')
+    assert.equal(channel.status().pendingAdmin, false)
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
-  channel.connect = async credentials => { channel.phase = 'connected'; channel.savedCredentials = credentials }
-  const challenge = await channel.beginLogin()
-  assert.equal(challenge.id, 'ch-1')
-  assert.equal(instances.length, 1, 'begin 阶段只应创建一个 transport')
-  resolved()
-  await new Promise(resolve => setTimeout(resolve, 20))
-  assert.equal(instances.length, 1, 'wait 必须复用 begin 的同一 transport 实例（vendor active Map 在实例内部）')
-  assert.equal(channel.status().phase, 'connected')
-  assert.equal(JSON.parse(store.getState().credentials_json).token, 't')
-  store.close()
+})
+
+test('wechat channel 授权响应无用户标识时降级为首条入站消息绑定', async () => {
+  const { dir, store } = await openStore('wechat-fallback-')
+  try {
+    const sent = []
+    const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
+    channel.makeTransport = () => ({
+      async beginAuthorization() {
+        return { id: 'ch-2', qrCodeUrl: 'https://mp.weixin.qq.com/x', createdAt: Date.now() }
+      },
+      async waitAuthorization() {
+        return { token: 't', botId: 'b', baseUrl: 'https://ilinkai.weixin.qq.com' }
+      },
+      async notifyStart() {},
+    })
+    channel.connect = async () => {}
+    await channel.beginLogin()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    channel.transport = { async sendMessage(request) { sent.push(request) } }
+    assert.equal(store.getState().admin_peer_id, null)
+    assert.equal(channel.status().pendingAdmin, true, '授权成功但无用户标识时应置位待绑定标记')
+
+    await channel.onInbound({ senderId: 'p-first', contextToken: 'ctx', clientId: 'c1', text: '你好' }, channel.transport)
+    assert.equal(store.getState().admin_peer_id, 'p-first', '本次授权会话的首条入站消息发送者应被绑定')
+    assert.equal(channel.status().pendingAdmin, false)
+    assert.ok(sent.at(-1).text.includes('管理员'))
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 只有 admin_peer_id 能执行管理指令，「绑定」口令已移除', async () => {
+  const { dir, store } = await openStore('wechat-admin-')
+  try {
+    const sent = []
+    const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
+    channel.service = SERVICE_STUB()
+    channel.transport = { async sendMessage(request) { sent.push(request) } }
+    channel.bindAuthorizedAdmin({ userId: 'p-admin' })
+    assert.equal(store.getState().admin_peer_id, 'p-admin')
+
+    await channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c1', text: '帮助' }, channel.transport)
+    assert.ok(sent.at(-1).text.includes('状态'))
+
+    // 非管理员消息被忽略，不执行管理指令
+    const before = sent.length
+    await channel.onInbound({ senderId: 'p-other', contextToken: 'ctx-2', clientId: 'c2', text: '状态' }, channel.transport)
+    assert.equal(sent.length, before, '非管理员消息不应触发任何回复')
+    assert.equal(store.getState().admin_peer_id, 'p-admin')
+
+    // 「绑定」口令已移除：管理员发「绑定」不再改绑
+    await channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c3', text: '绑定' }, channel.transport)
+    assert.ok(sent.at(-1).text.includes('未识别'), '「绑定」口令应被移除')
+    assert.equal(store.getState().admin_peer_id, 'p-admin')
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 处理失败时 cursor 不前移，成功才落盘', async () => {
+  const { dir, store } = await openStore('wechat-cursor-')
+  try {
+    const logs = []
+    const channel = new WechatChannel({
+      store,
+      config: { wechat: { enabled: true } },
+      log: { info: () => {}, warn: m => logs.push(m), error: () => {} },
+    })
+    channel.service = { stateView() { throw new Error('内部故障 detail-secret') } }
+    channel.transport = { async sendMessage() {} }
+    channel.bindAuthorizedAdmin({ userId: 'p-admin' })
+
+    const controller = new AbortController()
+    const epoch = { abort: controller, drain: Promise.resolve() }
+    channel.epoch = epoch
+    const transport = {
+      async poll() {
+        controller.abort()
+        return { cursor: 'c-next', messages: [{ messageId: 'm-1', senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '状态' }] }
+      },
+    }
+    await channel.pollLoop(epoch, transport, controller.signal)
+    assert.equal(store.getState().cursor, '', '处理失败时 cursor 不能前移')
+    assert.ok(logs.some(line => line.includes('消息处理失败')), '失败要写日志')
+
+    // 处理成功时才推进并落盘
+    const store2 = await new WechatStore(join(await mkdtemp(join(tmpdir(), 'wechat-cursor2-')), 'w.db')).open()
+    const channel2 = new WechatChannel({ store: store2, config: { wechat: { enabled: true } } })
+    channel2.service = SERVICE_STUB()
+    channel2.transport = { async sendMessage() {} }
+    channel2.bindAuthorizedAdmin({ userId: 'p-admin' })
+    const controller2 = new AbortController()
+    const epoch2 = { abort: controller2, drain: Promise.resolve() }
+    channel2.epoch = epoch2
+    await channel2.pollLoop(epoch2, {
+      async poll() {
+        controller2.abort()
+        return { cursor: 'c-next', messages: [{ messageId: 'm-2', senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '帮助' }] }
+      },
+    }, controller2.signal)
+    assert.equal(store2.getState().cursor, 'c-next')
+    store2.close()
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 内部异常不回显给用户', async () => {
+  const { dir, store } = await openStore('wechat-err-')
+  try {
+    const sent = []
+    const logs = []
+    const channel = new WechatChannel({
+      store,
+      config: { wechat: { enabled: true } },
+      log: { info: () => {}, warn: m => logs.push(m), error: () => {} },
+    })
+    channel.service = { stateView() { throw new Error('内部数据库 detail-secret') } }
+    channel.transport = { async sendMessage(request) { sent.push(request) } }
+    channel.bindAuthorizedAdmin({ userId: 'p-admin' })
+    // onInbound 会把处理异常继续抛给上层（用于 cursor 不前移），但用户侧只收到通用提示
+    await assert.rejects(
+      () => channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '状态' }, channel.transport),
+      /detail-secret/,
+    )
+    const text = sent.at(-1).text
+    assert.ok(!text.includes('detail-secret'), '内部异常原文不应回显给用户')
+    assert.ok(!text.includes('Error'))
+    assert.ok(text.includes('消息处理失败'))
+    assert.ok(logs.some(line => line.includes('detail-secret')), '详细错误要写日志')
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 业务性拒绝给可读提示且不重试', async () => {
+  const { dir, store } = await openStore('wechat-biz-')
+  try {
+    const sent = []
+    const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
+    channel.service = {
+      stateView() { return { projects: [] } },
+      wechatReview() { throw new AppError('NOT_FOUND', '项目 web 没有任务 3', 404) },
+    }
+    channel.transport = { async sendMessage(request) { sent.push(request) } }
+    channel.bindAuthorizedAdmin({ userId: 'p-admin' })
+    await assert.doesNotReject(
+      () => channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '验收 web-3' }, channel.transport),
+      '业务性拒绝不应作为处理失败上抛（否则 cursor 永不推进）',
+    )
+    assert.ok(sent.at(-1).text.includes('没有任务 3'), '业务错误应给用户可读提示')
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 旧授权流程失败不会清掉新登录状态', async () => {
+  const { dir, store } = await openStore('wechat-failauth-')
+  try {
+    const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
+    const authOld = { id: 'old', state: 'scanning' }
+    const authNew = { id: 'new', state: 'scanning' }
+    channel.auth = authNew
+    channel.failAuth(new Error('旧流程失败'), authOld)
+    assert.equal(channel.auth, authNew, '旧流程失败不得清掉当前登录状态')
+    assert.equal(channel.error, null)
+
+    channel.failAuth(new Error('当前流程失败'), authNew)
+    assert.equal(channel.auth, null, '当前流程失败应清掉登录状态')
+    assert.match(channel.error, /当前流程失败/)
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 不可重试错误停止重试该条且写日志，可重试错误保留待发', async () => {
+  const { dir, store } = await openStore('wechat-outbox-')
+  try {
+    const logs = []
+    let mode = 'permanent'
+    let attempts = 0
+    const channel = new WechatChannel({
+      store,
+      config: { wechat: { enabled: true } },
+      log: { info: () => {}, warn: m => logs.push(m), error: () => {} },
+    })
+    channel.transport = {
+      async sendMessage() {
+        attempts += 1
+        if (mode === 'permanent') throw new WechatIlinkError('PROTOCOL_ERROR', '消息不完整', false)
+        throw new WechatIlinkError('TIMEOUT', '网络超时', true)
+      },
+    }
+    channel.bindAuthorizedAdmin({ userId: 'p-admin' })
+    channel.peers.set('p-admin', { contextToken: 'ctx', clientId: 'c1' })
+    store.enqueue('推送内容')
+
+    await channel.flushOutbox(channel.transport, new AbortController().signal)
+    assert.equal(attempts, 1)
+    assert.equal(store.pendingOutbox().length, 1, '发送失败不能标记为已发送')
+    assert.ok(logs.some(line => line.includes('不可重试') && line.includes('推送内容') || line.includes('不可重试')))
+
+    await channel.flushOutbox(channel.transport, new AbortController().signal)
+    assert.equal(attempts, 1, '不可重试错误应停止重试该条')
+
+    mode = 'retryable'
+    channel.failedOutbox.clear()
+    await channel.flushOutbox(channel.transport, new AbortController().signal)
+    assert.equal(attempts, 2, '可重试错误应继续尝试')
+    assert.equal(store.pendingOutbox().length, 1)
+    assert.ok(logs.some(line => line.includes('可重试')))
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 空文本不入队、推送成功才标记已发送', async () => {
+  const { dir, store } = await openStore('wechat-empty-')
+  try {
+    const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
+    channel.notify('   ')
+    assert.equal(store.pendingOutbox().length, 0, '空文本不应进入发送队列')
+    assert.equal(store.enqueue(''), false)
+
+    const sent = []
+    channel.transport = { async sendMessage(request) { sent.push(request) } }
+    channel.bindAuthorizedAdmin({ userId: 'p-admin' })
+    channel.peers.set('p-admin', { contextToken: 'ctx', clientId: 'c1' })
+    channel.notify('任务完成')
+    await channel.flushOutbox(channel.transport, new AbortController().signal)
+    assert.equal(sent.length, 1)
+    assert.equal(store.pendingOutbox().length, 0, '发送成功才标记已发送')
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat store 数据目录 0700、库文件与凭据 0600', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wechat-perm-'))
+  try {
+    const dir = join(root, 'channel')
+    await mkdir(dir, { recursive: true, mode: 0o755 })
+    await chmod(dir, 0o755)
+    const dbFile = join(dir, 'w.db')
+    await writeFile(dbFile, '')
+    await chmod(dbFile, 0o666)
+
+    const store = await new WechatStore(dbFile).open()
+    const dirStat = await stat(dir)
+    assert.equal(dirStat.mode & 0o777, 0o700, '数据目录必须是 0700')
+    const fileStat = await stat(dbFile)
+    assert.equal(fileStat.mode & 0o777, 0o600, '数据库文件（含明文 token）必须是 0600')
+    store.saveCredentials({ token: 'secret-token', botId: 'b', userId: 'u' })
+    const walStat = await stat(`${dbFile}-wal`).catch(() => null)
+    if (walStat) assert.equal(walStat.mode & 0o777, 0o600, 'WAL 文件必须 0600')
+    store.close()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('wechat store clearCredentials 同时清空 outbox', async () => {
+  const { dir, store } = await openStore('wechat-clear-')
+  try {
+    store.saveCredentials({ token: 't' })
+    store.enqueue('残留消息')
+    store.enqueue('另一条')
+    assert.equal(store.pendingOutbox().length, 2)
+    store.clearCredentials()
+    assert.equal(store.pendingOutbox().length, 0, '登出后不得残留出站消息')
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat store 清理 N 天前已发送的出站记录（默认 7 天）', async () => {
+  const { dir, store } = await openStore('wechat-purge-')
+  try {
+    store.enqueue('旧的')
+    store.enqueue('新的')
+    const items = store.pendingOutbox()
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    store.db.prepare('UPDATE outbox SET sent_at = ? WHERE id = ?').run(old, items[0].id)
+    store.markSent([items[1].id])
+    assert.equal(store.purgeSentOutbox(7), 1, '只清理超过保留期的已发送记录')
+    const left = store.db.prepare('SELECT id FROM outbox').all()
+    assert.equal(left.length, 1)
+    assert.equal(left[0].id, items[1].id)
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('wechat channel 扫码授权 begin 与 wait 必须同一 transport 实例', async () => {
+  const { dir, store } = await openStore('wechat-auth-')
+  try {
+    const channel = new WechatChannel({ store, config: { wechat: { enabled: true } } })
+    const instances = []
+    let resolved
+    const finish = new Promise(resolve => { resolved = resolve })
+    channel.makeTransport = () => {
+      const transport = {
+        async beginAuthorization() {
+          return { id: 'ch-1', qrCodeUrl: 'https://mp.weixin.qq.com/x', createdAt: Date.now() }
+        },
+        async waitAuthorization(challenge) {
+          await finish
+          return { token: 't', botId: 'b', userId: 'u', baseUrl: 'https://ilinkai.weixin.qq.com' }
+        },
+        async notifyStart() {},
+      }
+      instances.push(transport)
+      return transport
+    }
+    channel.connect = async credentials => { channel.phase = 'connected'; channel.savedCredentials = credentials }
+    const challenge = await channel.beginLogin()
+    assert.equal(challenge.id, 'ch-1')
+    assert.equal(instances.length, 1, 'begin 阶段只应创建一个 transport')
+    resolved()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(instances.length, 1, 'wait 必须复用 begin 的同一 transport 实例（vendor active Map 在实例内部）')
+    assert.equal(channel.status().phase, 'connected')
+    assert.equal(JSON.parse(store.getState().credentials_json).token, 't')
+    assert.equal(store.getState().admin_peer_id, 'u', '授权者应被绑定为管理员')
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

@@ -133,12 +133,12 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_message_bot',
-    description: 'Send a direct message to another bot in the same project and get its reply delivered back into your current conversation later. Idempotent: repeating the same request_id never duplicates the work, it just returns the current status.',
+    description: 'Send a direct message to another bot in the same project and get its reply delivered back into your current conversation later. Idempotent: repeating the same request_id with the same text never duplicates the work, it just returns the current status.',
     parameters: {
       type: 'object',
       properties: {
         to: { type: 'string', description: 'Exact bot name from the project member list' },
-        request_id: { type: 'string', description: 'Stable name for this logical request (for example review-login-error); reuse it to poll or resend without duplicating work' },
+        request_id: { type: 'string', description: 'Stable name for this logical request (for example review-login-error); reuse it to poll or resend the same text without duplicating work. A different text under the same request_id is rejected as a conflict, so use a new request_id for a new request' },
         text: { type: 'string', description: 'Self-contained question or instruction for the other bot' },
       },
       required: ['to', 'request_id', 'text'],
@@ -159,7 +159,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_request_secret',
-    description: 'Ask the human to provision a named secret (credential) for this project. The value never passes through you: once approved it is materialized into .team/secrets.env in the project workspace and you read it with `set -a; . .team/secrets.env` in the shell.',
+    description: 'Ask the human to provision a named secret (credential) for this project. The value never passes through you: once approved it is materialized into .team/secrets.env in the project workspace and you read it with `set -a; . .team/secrets.env` in the shell, where the variable name is the uppercased secret name.',
     parameters: {
       type: 'object',
       properties: {

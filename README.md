@@ -18,8 +18,8 @@
 - Bot 之间可用 `team_message_bot` 直接私信协作，回信自动送回发起会话（忙时注入、闲时新轮投递）。
 - 会话上下文由内置 steward 接管：占用达到窗口阈值时自动总结滚动到新会话，checkpoint 播种给下一轮，长任务不再被截断。
 - 每轮任务与群聊回复后自动进行记忆审查，值得留存的结论自动写入记忆（`memory_review` 关闭可停用；群聊审查用 `chat_memory_review` 单独关）。
-- 密钥管道：管理页登记的密钥 AES-256-GCM 加密落库、物化为项目 `.team/secrets.env`，Bot 侧 `set -a; . .team/secrets.env` 使用；密钥值在消息、记忆、运行输出落库前一律掩码为 `$DSH_SECRET_名称`；Bot 可用 `team_request_secret` 发起待审请求。
-- 微信通道（`DSH_TEAM_WECHAT=1` 开启）：设置页扫码绑定个人微信（腾讯 iLink 官方协议，协议实现 vendored 自 `vendor/wechat-ilink`，上游 Tencent/openclaw-weixin MIT），在微信里对 ClawBot 说「绑定」成为管理员；此后任务完成主动推送，微信内可回复 `状态`、`详情 key-N`、`验收 key-N [评语]`、`驳回 key-N 理由` 管理验收；未连接期间的消息落盘补发。
+- 密钥管道：管理页登记的密钥 AES-256-GCM 加密落库、物化为项目 `.team/secrets.env`，Bot 侧 `set -a; . .team/secrets.env` 使用；密钥值在消息、记忆、运行输出、轨迹落库前一律掩码为 `$名称`（名称与 `.team/secrets.env` 里的变量名一致）；Bot 可用 `team_request_secret` 发起待审请求。
+- 微信通道（`DSH_TEAM_WECHAT=1` 开启）：设置页扫码绑定个人微信（腾讯 iLink 官方协议，协议实现 vendored 自 `vendor/wechat-ilink`，上游 Tencent/openclaw-weixin MIT），扫码授权成功后自动把授权者绑定为管理员；此后任务完成主动推送，微信内可回复 `状态`、`详情 key-N`、`验收 key-N [评语]`、`驳回 key-N 理由` 管理验收；未连接期间的消息落盘补发。
 - 共享技能池固定为 `/workspace/.agents/skills`，技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）；技能池只列出技能根目录里当前存在的技能，文件被移除的技能在重新扫描后自动消失。
 - 项目技能池：自动扫描当前项目工作区的 `.agents/skills`、`.claude/skills`、`.codex/skills` 三个根，按 frontmatter `name` 去重（`.agents` > `.claude` > `.codex`）；这些技能只在当前项目可用，会进入该项目会话的补全与 Bot 系统提示，并优先于同名共享技能；发现结果不写入共享技能池。
 - token、调用次数、成本和运行时长按全局、项目、Bot 归集。
@@ -173,9 +173,10 @@ WORKSPACE_HOST_DIR/          -> /workspace
 
 ## 密钥管道
 
-- 设置页登记密钥（`team` 全团队或 `project` 单项目），值 AES-256-GCM 加密落库，密钥文件 `data/secret.key`（0600）。
-- 写入/删除后自动物化到目标项目工作区 `.team/secrets.env`（0600，`.team/` 已进 .gitignore）；Bot 在 shell 里 `set -a; . .team/secrets.env` 后以 `$DSH_SECRET_名称` 使用。
-- 值永不回显：管理页只显示指纹（sha256 前 8 位）；消息、运行输出、记忆落库前把已知密钥值替换为 `$DSH_SECRET_名称` 掩码。
+- 设置页登记密钥（`team` 全团队或 `project` 单项目），值 AES-256-GCM 加密落库，密钥文件 `data/secret.key`（0600）；也可用 `DSH_TEAM_SECRET_KEY` 提供主密钥（64 位十六进制），两者不同时生效，以环境变量为准。
+- 写入/删除后自动物化到目标项目工作区 `.team/secrets.env`（0600，`.team/` 已进 .gitignore）；Bot 在 shell 里 `set -a; . .team/secrets.env` 后以 `$名称` 使用。
+- 值永不回显：管理页只显示指纹（sha256 前 8 位）；消息、运行输出、记忆、轨迹落库前把已知密钥值替换为 `$名称` 掩码。
+- 主密钥指纹登记在库的 settings 里，启动时比对：库里已有密文而密钥对不上直接拒绝启动，不会静默换一把新密钥写坏既有密文。`data/secret.key` 必须与 `team.sqlite` 一起备份（`npm run backup` 会一并带走它和 `wechat-channel.sqlite`）。
 - Bot 用 `team_request_secret` 发起请求（附理由），群里出系统卡片，设置页批准（写入值并物化）或拒绝。
 - 容器内全员 `danger-full-access` 保持不变：安全边界仍是容器（见「安全边界」）。
 

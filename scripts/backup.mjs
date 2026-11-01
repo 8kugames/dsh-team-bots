@@ -1,10 +1,21 @@
 // SQLite 在线备份：用 VACUUM INTO 生成一致快照，再做完整性校验并写出行数清单。
 // 生产库不需要停服，备份期间对源库只持有读锁。
 //
+// 密钥主文件 secret.key 与微信通道库 wechat-channel.sqlite 同在数据目录里，
+// 一并备份：只备份 team.sqlite 的话，换机恢复后既有密文再也解不开。
+//
 // 用法：
 //   node scripts/backup.mjs [--db <team.sqlite>] [--out <备份目录>]
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { resolveConfig } from '../src/config.js'
@@ -88,6 +99,8 @@ async function main() {
   const config = resolveConfig()
   const dbPath = resolve(args.db && args.db !== true ? args.db : config.dbPath)
   const outDir = resolve(args.out && args.out !== true ? args.out : join(config.dataDir, 'backups'))
+  // 密钥主文件与微信通道库都跟数据库同目录，从库路径反推，避免 --db 指到别处时备错地方。
+  const dataDir = dirname(dbPath)
 
   if (!existsSync(dbPath)) throw new Error(`数据库不存在：${dbPath}`)
 
@@ -137,6 +150,7 @@ async function main() {
     integrity,
     foreignKeyIssues: foreignKeyIssues.length,
     tables,
+    extras: await backupExtras({ dataDir, outDir, base }),
   }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 
@@ -149,8 +163,52 @@ async function main() {
     integrity,
     foreignKeyIssues: foreignKeyIssues.length,
     tables,
+    extras: manifest.extras,
     durationMs: Date.now() - startedAt,
   }, null, 2))
+}
+
+// 同目录下的密钥主文件与微信通道库：一起备份，少一个都可能在换机后要命。
+async function backupExtras({ dataDir, outDir, base }) {
+  const extras = []
+
+  const keyFile = join(dataDir, 'secret.key')
+  if (existsSync(keyFile)) {
+    const target = join(outDir, `${base}.secret.key`)
+    copyFileSync(keyFile, target)
+    chmodSync(target, 0o600)
+    extras.push({
+      name: 'secret.key',
+      source: keyFile,
+      backup: target,
+      bytes: statSync(target).size,
+      sha256: await sha256File(target),
+    })
+  } else {
+    extras.push({ name: 'secret.key', source: keyFile, backup: null, missing: true })
+  }
+
+  const wechatDb = join(dataDir, 'wechat-channel.sqlite')
+  if (existsSync(wechatDb)) {
+    const target = join(outDir, `${base}.wechat.sqlite`)
+    const source = openSqlite(wechatDb)
+    try {
+      source.exec(`VACUUM INTO ${quoteSql(target)}`)
+    } finally {
+      source.close()
+    }
+    extras.push({
+      name: 'wechat-channel.sqlite',
+      source: wechatDb,
+      backup: target,
+      bytes: statSync(target).size,
+      sha256: await sha256File(target),
+    })
+  } else {
+    extras.push({ name: 'wechat-channel.sqlite', source: wechatDb, backup: null, missing: true })
+  }
+
+  return extras
 }
 
 main().catch(error => {

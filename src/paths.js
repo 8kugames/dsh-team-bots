@@ -13,9 +13,14 @@ const within = (candidate, root) => {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
+// slug 长度上限：目录名/项目名统一用它，越界会抛 PathError。
+export const SLUG_MAX = 48
+
+const SLUG_PATTERN = new RegExp(`^[a-z0-9][a-z0-9-]{0,${SLUG_MAX - 1}}$`)
+
 export function safeSlug(value) {
   const slug = String(value ?? '').trim().toLowerCase()
-  if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(slug)) {
+  if (!SLUG_PATTERN.test(slug)) {
     throw new PathError('项目 slug 只能包含小写字母、数字和连字符，长度 1–48')
   }
   return slug

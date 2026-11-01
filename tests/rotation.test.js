@@ -21,8 +21,15 @@ class ManualRuntime {
 
   async validateBotConfig() {}
 
-  async startRun({ run }) {
-    this.started.push({ runId: run.id, botId: run.bot_id, taskId: run.task_id ?? null, mode: run.mode })
+  async startRun({ run, task, sessionKind }) {
+    this.started.push({
+      runId: run.id,
+      botId: run.bot_id,
+      taskId: run.task_id ?? null,
+      mode: run.mode,
+      task: task?.id ?? null,
+      sessionKind: sessionKind ?? null,
+    })
     this.pendingRuns.set(run.id, run)
     return `session-${run.id}`
   }
@@ -146,7 +153,21 @@ test('steward 产出摘要后落 session_rotations 并删除旧绑定', async ()
     const stewardRun = store.get("SELECT * FROM runs WHERE kind = 'steward' AND status = 'running'")
     assert.ok(stewardRun)
 
-    await runtime.complete(stewardRun.id, 'succeeded', '```markdown\n# 工作现状\n做了 A\n```')
+    await runtime.complete(stewardRun.id, 'succeeded', [
+      '```markdown',
+      '# 工作现状',
+      '做了 A，当前在等上游接口的返回结构确认。',
+      '# 逐条结果',
+      '1. 登录接口返回 { code, token }，成功码是 0。',
+      '2. 错误码 401 表示令牌过期，需要重新授权。',
+      '# 决策与理由',
+      '把令牌过期当作可重试错误，不当作致命失败处理。',
+      '# 依赖与约束',
+      '依赖上游网关返回稳定的错误码表，别的地方照旧。',
+      '# 未完成请求',
+      '还有一个请求没做：确认分页参数在网关侧的默认值。',
+      '```',
+    ].join('\n'))
 
     const rotation = store.get('SELECT * FROM session_rotations')
     assert.ok(rotation)
@@ -189,6 +210,98 @@ test('steward 无可用摘要时降级滚动：删绑定、不落 rotation', asy
       store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'rotated_degraded'", stewardRun.id).n,
       1,
     )
+  } finally {
+    await closeQuietly(store)
+    await rm(ctx.root, { recursive: true, force: true })
+  }
+})
+
+test('steward 跑在被总结的那个任务会话上，不降级成项目会话', async () => {
+  const ctx = await manualSetup()
+  const { store, service, runtime, chief, dev } = ctx
+  try {
+    const project = await service.createProject({ name: 'StewardTask', key: 'STK', ownerBotId: chief.id, memberIds: [dev.id] })
+    await service.createTask({ projectId: project.id, title: '长任务', assigneeBotId: dev.id, autoStart: true })
+    const task = store.get('SELECT * FROM tasks WHERE project_id = ?', project.id)
+    insertTaskBinding(store, { sessionId: 'session-steward-task', botId: dev.id, projectId: project.id, taskId: task.id })
+
+    service.started = true
+    await service.tick()
+    await service.tick()
+
+    const stewardRun = store.get("SELECT * FROM runs WHERE kind = 'steward'")
+    assert.ok(stewardRun)
+    const started = runtime.started.find(entry => entry.runId === stewardRun.id)
+    assert.ok(started, 'steward 运行应被启动')
+    assert.equal(started.sessionKind, 'task', 'steward 应声明自己在任务会话里')
+    assert.equal(started.task, task.id, 'steward 应带上被总结的任务，否则会被降级到项目会话')
+  } finally {
+    await closeQuietly(store)
+    await rm(ctx.root, { recursive: true, force: true })
+  }
+})
+
+test('私信回信跑在来源会话上，不投到项目会话', async () => {
+  const ctx = await manualSetup()
+  const { store, service, runtime, chief, dev } = ctx
+  try {
+    const project = await service.createProject({ name: 'DmReply', key: 'DMR', ownerBotId: chief.id, memberIds: [dev.id] })
+    const task = await service.createTask({ projectId: project.id, title: '需求', assigneeBotId: dev.id })
+    insertTaskBinding(store, { sessionId: 'session-dm-origin', botId: dev.id, projectId: project.id, taskId: task.id })
+
+    const messageId = 'msg-origin-1'
+    store.run(
+      `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id,
+        origin_kind, origin_task_id, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'task', ?, 'replied', ?)`,
+      messageId, project.id, chief.id, dev.id, 'req-1', '问题在这里', 'session-dm-origin', task.id,
+      new Date().toISOString(),
+    )
+    const message = store.get('SELECT * FROM bot_messages WHERE id = ?', messageId)
+
+    service.deliverBotReply(message)
+    service.started = true
+    await service.tick()
+
+    const replyRun = store.get("SELECT * FROM runs WHERE kind = 'dm_reply'")
+    assert.ok(replyRun)
+    const started = runtime.started.find(entry => entry.runId === replyRun.id)
+    assert.ok(started, '回信运行应被启动')
+    assert.equal(started.sessionKind, 'task')
+    assert.equal(started.task, task.id, '回信应落在来源任务会话')
+  } finally {
+    await closeQuietly(store)
+    await rm(ctx.root, { recursive: true, force: true })
+  }
+})
+
+test('群聊运行达到检查线时也能触发滚动：绑定是 project 不是 chat', async () => {
+  const ctx = await manualSetup()
+  const { store, service, chief, dev } = ctx
+  try {
+    const project = await service.createProject({ name: 'ChatRotate', key: 'CRT', ownerBotId: chief.id, memberIds: [dev.id] })
+    // 群聊会话绑定落在项目会话（kind='project'）上，上下文已逼近窗口上限。
+    store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, last_ctx_tokens, ctx_window)
+       VALUES (?, ?, ?, 'project', NULL, ?, 400000, 500000)`,
+      'session-chat-one', dev.id, project.id, new Date().toISOString(),
+    )
+
+    service.started = true
+    await service.sendMessage(project.id, '@Builder 继续推进')
+    await service.tick()
+
+    const chatRun = store.get("SELECT * FROM runs WHERE kind = 'chat'")
+    assert.ok(chatRun)
+    assert.equal(chatRun.status, 'queued', '群聊运行应被推迟等待滚动')
+    assert.equal(
+      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'deferred_steward'", chatRun.id).n,
+      1,
+    )
+
+    const stewardRun = store.get("SELECT * FROM runs WHERE kind = 'steward'")
+    assert.ok(stewardRun, '群聊运行也应排 steward')
+    assert.equal(stewardRun.trigger_ref, 'session-chat-one')
   } finally {
     await closeQuietly(store)
     await rm(ctx.root, { recursive: true, force: true })

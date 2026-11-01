@@ -135,7 +135,7 @@ test('删除密钥重物化，清空后移除 secrets.env', async () => {
 })
 
 test('群消息持久化前把密钥值掩码为标签', async () => {
-  const { root, store, service, alpha } = await pipelineSetup()
+  const { root, store, service, alpha, readEnv } = await pipelineSetup()
   try {
     await service.upsertSecret({ scope: 'team', name: 'github token', purpose: 'CI', value: 'ghp_abcdefghijklmnop' })
 
@@ -147,7 +147,10 @@ test('群消息持久化前把密钥值掩码为标签', async () => {
     })
 
     const row = store.get('SELECT body FROM messages WHERE id = ?', messageId)
-    assert.equal(row.body, 'token 是 $DSH_SECRET_GITHUB_TOKEN 请检查')
+    // 占位符就是 env 文件里的变量名（不再带 DSH_SECRET_ 前缀）
+    assert.equal(row.body, 'token 是 $GITHUB_TOKEN 请检查')
+    const { contents } = await readEnv(alpha.id)
+    assert.ok(contents.includes('GITHUB_TOKEN=ghp_abcdefghijklmnop\n'), '占位符名必须与 env 变量名一致')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

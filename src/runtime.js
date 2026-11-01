@@ -87,11 +87,13 @@ function truncateDetail(value, limit = TRAJECTORY_MAX_DETAIL) {
 }
 
 export class DshRuntime {
-  constructor({ ctx, config, store, logger = console }) {
+  constructor({ ctx, config, store, logger = console, mask = null }) {
     this.ctx = ctx
     this.config = config
     this.store = store
     this.logger = logger
+    // 密钥掩码钩子：service 层注入，轨迹等落库内容在写入前先脱敏。
+    this.mask = typeof mask === 'function' ? mask : null
     this.pending = new Map()
     this.pendingByRun = new Map()
     this.childOwner = new Map()
@@ -105,6 +107,23 @@ export class DshRuntime {
 
   setCompletionHandler(handler) {
     this.completionHandler = handler
+  }
+
+  // 由 service 层注入密钥掩码函数。
+  setMask(fn) {
+    this.mask = typeof fn === 'function' ? fn : null
+  }
+
+  // 落库前的掩码：脱敏失败就不落原文，改为占位说明，避免把明文密钥写进轨迹。
+  maskForStorage(value) {
+    const raw = String(value ?? '')
+    if (!raw || !this.mask) return raw
+    try {
+      return this.mask(raw)
+    } catch (error) {
+      this.logger.warn?.('dsh-team: 轨迹掩码失败，本次内容不落库：%s', error?.message ?? error)
+      return '（密钥掩码失败，内容未记录）'
+    }
   }
 
   attach() {
@@ -476,14 +495,16 @@ export class DshRuntime {
     }
   }
 
-  // 把模型目录里的 contextWindow 写进会话绑定，供调度器判断上下文占用。
+  // 把模型目录里的 contextWindow/maxTokens 写进会话绑定，供调度器判断上下文占用。
   async refreshCtxWindow(sessionId, bot) {
     if (!bot?.provider || !bot?.model) return
     const entry = (await this.catalog()).find(item => item.provider === bot.provider && item.model === bot.model)
     if (!entry?.contextWindow) return
+    const maxTokens = Number(entry.maxTokens)
     this.store.run(
-      'UPDATE session_bindings SET ctx_window = ? WHERE session_id = ?',
+      'UPDATE session_bindings SET ctx_window = ?, max_tokens = ? WHERE session_id = ?',
       entry.contextWindow,
+      Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : null,
       sessionId,
     )
   }
@@ -694,7 +715,9 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
       sessionId,
     )
     // 单聊运行没有项目，不参与会话滚动 checkpoint。
-    const rotation = project ? this.store.get(
+    // steward 运行是 checkpoint 的生产者，不是消费者：它落进的正是被总结的那条旧会话，
+    // 那里若还挂着未播种的 checkpoint，被它吃掉就等于新会话拿不到交接摘要。
+    const rotation = project && run.kind !== 'steward' ? this.store.get(
       `SELECT * FROM session_rotations
        WHERE bot_id = ? AND project_id = ? AND kind = ? AND task_id IS ? AND seeded = 0
        ORDER BY created_at DESC LIMIT 1`,
@@ -935,7 +958,8 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
       pending.trajectorySeq = (pending.trajectorySeq ?? 0) + 1
       this.store.run(
         'INSERT INTO run_trajectory(id, run_id, seq, kind, title, detail, turn, step, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        id('traj'), pending.runId, pending.trajectorySeq, entry.kind, entry.title, truncateDetail(entry.detail),
+        id('traj'), pending.runId, pending.trajectorySeq, entry.kind, entry.title,
+        truncateDetail(this.maskForStorage(entry.detail)),
         event?.data?.turn ?? null, event?.data?.step ?? null, createdAt,
       )
     }

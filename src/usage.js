@@ -3,6 +3,14 @@ import { id, nowIso } from './util.js'
 
 const count = value => (Number.isSafeInteger(value) && value > 0 ? value : 0)
 
+// 时间边界归一：接受 ISO 字符串或毫秒时间戳，无法解析时返回 null。
+function toMillis(value) {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  const parsed = Date.parse(String(value))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export const BUDGET_CURRENCY = 'CNY'
 
 function currentPrice(store, provider, model) {
@@ -72,13 +80,20 @@ export function recordUsage(store, {
   return store.get('SELECT * FROM usage_events WHERE id = ?', eventId)
 }
 
+// priced_calls / unpriced_calls：直接按明细计价状态统计，未计价（total_cost IS NULL）单独计数，
+// 不与已计价调用混算，避免未计价被当成 0 成本。
 const AGGREGATES = `
   COALESCE(SUM(u.input_tokens), 0) AS input_tokens,
   COALESCE(SUM(u.cache_read_tokens), 0) AS cache_read_tokens,
   COALESCE(SUM(u.cache_write_tokens), 0) AS cache_write_tokens,
   COALESCE(SUM(u.output_tokens), 0) AS output_tokens,
   COALESCE(SUM(u.reasoning_tokens), 0) AS reasoning_tokens,
-  COUNT(*) AS calls`
+  COUNT(*) AS calls,
+  SUM(CASE WHEN u.total_cost IS NOT NULL THEN 1 ELSE 0 END) AS priced_calls,
+  SUM(CASE WHEN u.total_cost IS NULL THEN 1 ELSE 0 END) AS unpriced_calls,
+  COALESCE(SUM(CASE WHEN u.total_cost IS NULL
+    THEN u.input_tokens + u.cache_read_tokens + u.cache_write_tokens + u.output_tokens + u.reasoning_tokens
+    ELSE 0 END), 0) AS unpriced_tokens`
 
 // 汇总口径：成本按币种分列，cost 只取预算币种的金额，不同币种不混算。
 function filterClause(filters) {
@@ -101,26 +116,33 @@ function costBreakdown(store, where, params, budgetCurrency) {
   return { cost, costByCurrency }
 }
 
-function mapTotals(row, breakdown = { cost: null, costByCurrency: {} }, pricedCalls = 0) {
+function mapTotals(row, breakdown = { cost: null, costByCurrency: {} }) {
   const input = Number(row?.input_tokens ?? 0)
   const cacheRead = Number(row?.cache_read_tokens ?? 0)
   const cacheWrite = Number(row?.cache_write_tokens ?? 0)
   const output = Number(row?.output_tokens ?? 0)
   const reasoning = Number(row?.reasoning_tokens ?? 0)
   const calls = Number(row?.calls ?? 0)
+  const pricedCalls = Number(row?.priced_calls ?? 0)
+  const unpricedCalls = Number(row?.unpriced_calls ?? Math.max(calls - pricedCalls, 0))
+  const totalTokens = input + cacheRead + cacheWrite + output + reasoning
   return {
     inputTokens: input,
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite,
     outputTokens: output,
     reasoningTokens: reasoning,
-    totalTokens: input + cacheRead + cacheWrite + output + reasoning,
+    totalTokens,
     calls,
     cost: breakdown.cost,
     costByCurrency: breakdown.costByCurrency,
     costConfigured: pricedCalls > 0,
     pricedCalls,
-    unpricedCalls: Math.max(calls - pricedCalls, 0),
+    unpricedCalls,
+    // 未计价调用占掉的 token：预算估算按它折算成本，避免把未计价当成 0 成本而低估预算。
+    unpricedTokens: Number(row?.unpriced_tokens ?? 0),
+    // 成本完整性：存在未计价调用时 cost 只是部分值，不能当作完整成本使用。
+    costComplete: unpricedCalls === 0,
   }
 }
 
@@ -137,6 +159,8 @@ const ZERO_TOTALS = {
   costConfigured: false,
   pricedCalls: 0,
   unpricedCalls: 0,
+  unpricedTokens: 0,
+  costComplete: true,
 }
 
 // 单条件聚合：token 与调用次数 + 成本分币种。
@@ -144,107 +168,216 @@ export function aggregateUsage(store, filters = [], params = [], budgetCurrency 
   const where = filterClause(filters)
   const row = store.get(`SELECT ${AGGREGATES} FROM usage_events u ${where}`, ...params)
   const breakdown = costBreakdown(store, where, params, budgetCurrency)
-  const pricedCalls = store.get(
-    `SELECT COUNT(*) AS count FROM usage_events u ${where ? `${where} AND` : 'WHERE'} u.total_cost IS NOT NULL`,
-    ...params,
-  )?.count ?? 0
-  return mapTotals(row, breakdown, Number(pricedCalls))
+  return mapTotals(row, breakdown)
 }
 
 export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY) {
   return aggregateUsage(store, ['u.run_id = ?'], [runId], budgetCurrency)
 }
 
-function byBotRows(store, filters, params, budgetCurrency) {
+// 统计口径：since 为窗口起点（ISO 字符串），projectId 限定项目（null 表示全局）。
+function scopeFilters(scope) {
+  const filters = ['u.occurred_at >= ?']
+  const params = [scope.since]
+  if (scope.projectId) {
+    filters.push('u.project_id = ?')
+    params.push(scope.projectId)
+  }
+  return { filters, params }
+}
+
+// 运行窗口：结束、开始、入队任一时间落在窗口内即视为「窗口内跑过」。
+const RUN_IN_WINDOW = 'COALESCE(r.ended_at, r.started_at, r.queued_at) >= ?'
+
+// 零用量行口径：token 与调用数为 0；成本记 0（没有发生消费，不属于未计价），
+// 币种按预算币种记 0，界面直接显示金额而不是「未配置」。
+function zeroTotals(budgetCurrency) {
+  return {
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+    calls: 0,
+    cost: 0,
+    costByCurrency: { [budgetCurrency]: 0 },
+    costConfigured: false,
+    pricedCalls: 0,
+    unpricedCalls: 0,
+    costComplete: true,
+  }
+}
+
+// 零用量 Bot：窗口内跑过、但窗口内没有任何用量明细。
+function zeroUsageBotRows(store, scope, budgetCurrency) {
+  const runFilters = []
+  const runParams = []
+  if (scope.projectId) {
+    runFilters.push('r.project_id = ?')
+    runParams.push(scope.projectId)
+  }
+  const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
+  const rows = store.all(
+    `SELECT b.id AS bot_id, b.name AS name
+       FROM bots b
+       JOIN runs r ON r.bot_id = b.id
+      WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${RUN_IN_WINDOW}
+        AND NOT EXISTS (
+          SELECT 1 FROM usage_events u WHERE u.bot_id = b.id AND ${eventFilters.join(' AND ')}
+        )
+      GROUP BY b.id, b.name
+      ORDER BY b.name`,
+    ...runParams, scope.since, ...eventParams,
+  )
+  return rows.map(row => ({ botId: row.bot_id, name: row.name, ...zeroTotals(budgetCurrency) }))
+}
+
+// 零用量项目：窗口内跑过、但窗口内没有任何用量明细。
+function zeroUsageProjectRows(store, scope, budgetCurrency) {
+  const runFilters = []
+  const runParams = []
+  if (scope.projectId) {
+    runFilters.push('r.project_id = ?')
+    runParams.push(scope.projectId)
+  }
+  const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
+  const rows = store.all(
+    `SELECT p.id AS project_id, p.name AS name, p.key AS key
+       FROM projects p
+       JOIN runs r ON r.project_id = p.id
+      WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${RUN_IN_WINDOW}
+        AND NOT EXISTS (
+          SELECT 1 FROM usage_events u WHERE u.project_id = p.id AND ${eventFilters.join(' AND ')}
+        )
+      GROUP BY p.id, p.name, p.key
+      ORDER BY p.name`,
+    ...runParams, scope.since, ...eventParams,
+  )
+  return rows.map(row => ({ projectId: row.project_id, name: row.name, key: row.key, ...zeroTotals(budgetCurrency) }))
+}
+
+// 零用量日期：窗口内跑过、但当天没有任何用量明细的日期。
+function zeroUsageDayRows(store, scope, budgetCurrency, daySince) {
+  const runFilters = []
+  const runParams = []
+  if (scope.projectId) {
+    runFilters.push('r.project_id = ?')
+    runParams.push(scope.projectId)
+  }
+  const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
+  const rows = store.all(
+    `SELECT d.day AS day FROM (
+        SELECT DISTINCT substr(COALESCE(r.ended_at, r.started_at, r.queued_at), 1, 10) AS day
+          FROM runs r
+         WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${RUN_IN_WINDOW}
+       ) d
+      WHERE ${daySince ? 'd.day >= ? AND' : ''} NOT EXISTS (
+        SELECT 1 FROM usage_events u
+         WHERE substr(u.occurred_at, 1, 10) = d.day AND ${eventFilters.join(' AND ')}
+      )
+      ORDER BY d.day`,
+    ...runParams, scope.since, ...(daySince ? [daySince] : []), ...eventParams,
+  )
+  return rows.map(row => ({ day: row.day, ...zeroTotals(budgetCurrency) }))
+}
+
+// 分档口径：Bot / 项目 / 日期维度用 LEFT JOIN + 零用量行补齐，
+// 跑过但没有产出用量明细的 run 也会出现在分档结果里。
+function byBotRows(store, scope, budgetCurrency) {
+  const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
-    `SELECT u.bot_id AS bot_id, b.name AS name, ${AGGREGATES},
-            SUM(CASE WHEN u.total_cost IS NULL THEN 0 ELSE 1 END) AS priced_calls
-       FROM usage_events u JOIN bots b ON b.id = u.bot_id ${where}
+    `SELECT u.bot_id AS bot_id, b.name AS name, ${AGGREGATES}
+       FROM usage_events u LEFT JOIN bots b ON b.id = u.bot_id ${where}
       GROUP BY u.bot_id, b.name
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
   )
-  return rows.map(row => {
-    const breakdown = costBreakdown(store, `${where}${where ? ' AND' : ' WHERE'} u.bot_id = ?`, [...params, row.bot_id], budgetCurrency)
-    return { botId: row.bot_id, name: row.name, ...mapTotals(row, breakdown, Number(row.priced_calls ?? 0)) }
+  const used = rows.map(row => {
+    const breakdown = costBreakdown(store, `${where} AND u.bot_id IS ?`, [...params, row.bot_id], budgetCurrency)
+    return { botId: row.bot_id, name: row.name, ...mapTotals(row, breakdown) }
   })
+  return [...used, ...zeroUsageBotRows(store, scope, budgetCurrency)]
 }
 
-function byProjectRows(store, filters, params, budgetCurrency) {
+function byProjectRows(store, scope, budgetCurrency) {
+  const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
-    `SELECT u.project_id AS project_id, p.name AS name, p.key AS key, ${AGGREGATES},
-            SUM(CASE WHEN u.total_cost IS NULL THEN 0 ELSE 1 END) AS priced_calls
-       FROM usage_events u JOIN projects p ON p.id = u.project_id ${where}
+    `SELECT u.project_id AS project_id, p.name AS name, p.key AS key, ${AGGREGATES}
+       FROM usage_events u LEFT JOIN projects p ON p.id = u.project_id ${where}
       GROUP BY u.project_id, p.name, p.key
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
   )
-  return rows.map(row => {
-    const breakdown = costBreakdown(store, `${where}${where ? ' AND' : ' WHERE'} u.project_id = ?`, [...params, row.project_id], budgetCurrency)
-    return { projectId: row.project_id, name: row.name, key: row.key, ...mapTotals(row, breakdown, Number(row.priced_calls ?? 0)) }
+  const used = rows.map(row => {
+    const breakdown = costBreakdown(store, `${where} AND u.project_id IS ?`, [...params, row.project_id], budgetCurrency)
+    return { projectId: row.project_id, name: row.name, key: row.key, ...mapTotals(row, breakdown) }
   })
+  return [...used, ...zeroUsageProjectRows(store, scope, budgetCurrency)]
 }
 
-function byModelRows(store, filters, params, budgetCurrency) {
+// 模型维度来自明细本身，无法归集「跑过但零用量」的 run，因此只有事件行。
+function byModelRows(store, scope, budgetCurrency) {
+  const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
-    `SELECT u.provider AS provider, u.model AS model, ${AGGREGATES},
-            SUM(CASE WHEN u.total_cost IS NULL THEN 0 ELSE 1 END) AS priced_calls
+    `SELECT u.provider AS provider, u.model AS model, ${AGGREGATES}
        FROM usage_events u ${where}
       GROUP BY u.provider, u.model
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
   )
   return rows.map(row => {
-    const breakdown = costBreakdown(store, `${where}${where ? ' AND' : ' WHERE'} u.provider = ? AND u.model = ?`, [...params, row.provider, row.model], budgetCurrency)
-    return { provider: row.provider, model: row.model, ...mapTotals(row, breakdown, Number(row.priced_calls ?? 0)) }
+    const breakdown = costBreakdown(store, `${where} AND u.provider = ? AND u.model = ?`, [...params, row.provider, row.model], budgetCurrency)
+    return { provider: row.provider, model: row.model, ...mapTotals(row, breakdown) }
   })
 }
 
-function byDayRows(store, filters, params, budgetCurrency) {
-  const where = filterClause(filters)
+function byDayRows(store, scope, budgetCurrency, daySince = null) {
+  const { filters, params } = scopeFilters(scope)
+  const allFilters = daySince ? [...filters, 'substr(u.occurred_at, 1, 10) >= ?'] : filters
+  const allParams = daySince ? [...params, daySince] : params
+  const where = filterClause(allFilters)
   const rows = store.all(
-    `SELECT substr(u.occurred_at, 1, 10) AS day, ${AGGREGATES},
-            SUM(CASE WHEN u.total_cost IS NULL THEN 0 ELSE 1 END) AS priced_calls
+    `SELECT substr(u.occurred_at, 1, 10) AS day, ${AGGREGATES}
        FROM usage_events u ${where}
       GROUP BY day ORDER BY day`,
-    ...params,
+    ...allParams,
   )
-  return rows.map(row => {
-    const breakdown = costBreakdown(store, `${where}${where ? ' AND' : ' WHERE'} substr(u.occurred_at, 1, 10) = ?`, [...params, row.day], budgetCurrency)
-    return { day: row.day, ...mapTotals(row, breakdown, Number(row.priced_calls ?? 0)) }
+  const used = rows.map(row => {
+    const breakdown = costBreakdown(store, `${where} AND substr(u.occurred_at, 1, 10) = ?`, [...allParams, row.day], budgetCurrency)
+    return { day: row.day, ...mapTotals(row, breakdown) }
   })
+  return [...used, ...zeroUsageDayRows(store, scope, budgetCurrency, daySince)]
 }
 
-function tierSet(store, filters, params, budgetCurrency) {
+function tierSet(store, scope, budgetCurrency, daySince = null) {
   return {
-    byBot: byBotRows(store, filters, params, budgetCurrency),
-    byProject: byProjectRows(store, filters, params, budgetCurrency),
-    byModel: byModelRows(store, filters, params, budgetCurrency),
-    byDay: byDayRows(store, filters, params, budgetCurrency),
+    byBot: byBotRows(store, scope, budgetCurrency),
+    byProject: byProjectRows(store, scope, budgetCurrency),
+    byModel: byModelRows(store, scope, budgetCurrency),
+    byDay: byDayRows(store, scope, budgetCurrency, daySince),
   }
+}
+
+function scopeUsage(store, scope, budgetCurrency) {
+  const { filters, params } = scopeFilters(scope)
+  return aggregateUsage(store, filters, params, budgetCurrency)
 }
 
 export function usageSnapshot(store, projectId, days = 30, options = {}) {
   const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const since = new Date(Date.now() - days * 86_400_000).toISOString()
-  const globalFilters = ['u.occurred_at >= ?']
-  const globalParams = [since]
-  const projectFilters = ['u.occurred_at >= ?', 'u.project_id = ?']
-  const projectParams = [since, projectId]
-  const global = aggregateUsage(store, globalFilters, globalParams, budgetCurrency)
-  const project = projectId ? aggregateUsage(store, projectFilters, projectParams, budgetCurrency) : { ...ZERO_TOTALS }
-  const globalTiers = tierSet(store, globalFilters, globalParams, budgetCurrency)
-  const projectTiers = projectId ? tierSet(store, projectFilters, projectParams, budgetCurrency) : null
+  const globalScope = { since, projectId: null }
+  const projectScope = projectId ? { since, projectId } : null
+  const global = scopeUsage(store, globalScope, budgetCurrency)
+  const project = projectScope ? scopeUsage(store, projectScope, budgetCurrency) : { ...ZERO_TOTALS }
+  // byDay 只展示近 14 天。
   const cutoff = new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10)
-  const dayFilters = ['substr(u.occurred_at, 1, 10) >= ?']
-  const dayParams = [cutoff]
-  globalTiers.byDay = byDayRows(store, [...globalFilters, ...dayFilters], [...globalParams, ...dayParams], budgetCurrency)
-  if (projectTiers) {
-    projectTiers.byDay = byDayRows(store, [...projectFilters, ...dayFilters], [...projectParams, ...dayParams], budgetCurrency)
-  }
+  const globalTiers = tierSet(store, globalScope, budgetCurrency, cutoff)
+  const projectTiers = projectScope ? tierSet(store, projectScope, budgetCurrency, cutoff) : null
   const priceCount = store.get(
     "SELECT COUNT(DISTINCT provider || '|' || lower(model)) AS count FROM model_prices",
   )?.count ?? 0
@@ -270,6 +403,7 @@ export function reconciliationSummary(store) {
     `SELECT COUNT(*) AS runs_checked,
             SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok_runs,
             SUM(CASE WHEN status = 'missing' THEN 1 ELSE 0 END) AS missing_usage,
+            SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired_usage,
             SUM(CASE WHEN status = 'repaired' THEN 1 ELSE 0 END) AS repaired,
             MAX(checked_at) AS checked_at
        FROM usage_reconciliation`,
@@ -279,6 +413,8 @@ export function reconciliationSummary(store) {
     runsChecked: Number(row?.runs_checked ?? 0),
     runsWithEvents: Number(row?.ok_runs ?? 0) + Number(row?.repaired ?? 0),
     missingUsage: Number(row?.missing_usage ?? 0),
+    // 因保留期清理而消失的明细：不计入不一致，只作为过期计数暴露。
+    expiredUsage: Number(row?.expired_usage ?? 0),
     mismatched: Number(row?.missing_usage ?? 0) + Number(row?.repaired ?? 0),
     repaired: Number(row?.repaired ?? 0),
   }
@@ -332,10 +468,13 @@ export function monthUsageGlobal(store, budgetCurrency = BUDGET_CURRENCY) {
 }
 
 // 对账：运行表记录的用量与 usage_events 明细比对，修复「事件晚到」造成的缺口。
-export function reconcileUsage(store, { days = 30 } = {}) {
+// expiredBefore：用量明细的保留期清理边界（ISO 字符串或毫秒时间戳）。
+// 早于该边界、且明细已被清理的 run 判为 'expired'（不是丢数据，不计入不一致）。
+export function reconcileUsage(store, { days = 30, expiredBefore = null } = {}) {
   const since = new Date(Date.now() - days * 86_400_000).toISOString()
+  const expiredAt = toMillis(expiredBefore)
   const runs = store.all(
-    `SELECT id, usage_input, usage_cache_read, usage_cache_write, usage_output
+    `SELECT id, ended_at, usage_input, usage_cache_read, usage_cache_write, usage_output
        FROM runs WHERE ended_at IS NOT NULL AND ended_at >= ?`,
     since,
   )
@@ -344,6 +483,7 @@ export function reconcileUsage(store, { days = 30 } = {}) {
     runsChecked: runs.length,
     runsWithEvents: 0,
     missingUsage: 0,
+    expiredUsage: 0,
     mismatched: 0,
     repaired: 0,
   }
@@ -382,10 +522,18 @@ export function reconcileUsage(store, { days = 30 } = {}) {
         summary.mismatched += 1
       }
     } else if (runTokens > 0) {
-      status = 'missing'
-      note = '运行表有用量但缺少用量明细'
-      summary.missingUsage += 1
-      summary.mismatched += 1
+      const endedAt = toMillis(run.ended_at)
+      if (expiredAt !== null && endedAt !== null && endedAt < expiredAt) {
+        // 明细早于保留期边界被清理：属于过期，不是数据丢失。
+        status = 'expired'
+        note = '用量明细已按保留期清理'
+        summary.expiredUsage += 1
+      } else {
+        status = 'missing'
+        note = '运行表有用量但缺少用量明细'
+        summary.missingUsage += 1
+        summary.mismatched += 1
+      }
     }
     store.run(
       `INSERT INTO usage_reconciliation(id, run_id, event_calls, event_tokens, run_tokens, delta_tokens, status, note, checked_at)
@@ -408,11 +556,29 @@ export function reconcileUsage(store, { days = 30 } = {}) {
 }
 
 // 数据保留：按天清理明细与事件，审计与聚合结果保留。
-export function applyRetention(store, { usageDays = 0, runEventDays = 0, messageDays = 0 } = {}) {
-  const removed = { usageEvents: 0, runEvents: 0, runTrajectory: 0, messages: 0, soloMessages: 0 }
+// 返回值里带上每类清理的时间边界（before = 被删掉内容的时间上界，ISO 字符串），
+// 调用方可以把 usage.before 传给 reconcileUsage，让「明细被清理」的 run 判为 expired。
+export function applyRetention(store, {
+  usageDays = 0,
+  runEventDays = 0,
+  messageDays = 0,
+  reconciliationDays = 30,
+} = {}) {
+  const removed = {
+    usageEvents: 0,
+    runEvents: 0,
+    runTrajectory: 0,
+    messages: 0,
+    soloMessages: 0,
+    reconciliationRecords: 0,
+    usage: { removed: 0, before: null },
+    reconciliation: { removed: 0, before: null },
+  }
   const cutoff = days => new Date(Date.now() - days * 86_400_000).toISOString()
   if (usageDays > 0) {
-    removed.usageEvents = store.run('DELETE FROM usage_events WHERE occurred_at < ?', cutoff(usageDays)).changes
+    const before = cutoff(usageDays)
+    removed.usageEvents = store.run('DELETE FROM usage_events WHERE occurred_at < ?', before).changes
+    removed.usage = { removed: removed.usageEvents, before }
   }
   if (runEventDays > 0) {
     removed.runEvents = store.run('DELETE FROM run_events WHERE created_at < ?', cutoff(runEventDays)).changes
@@ -421,6 +587,12 @@ export function applyRetention(store, { usageDays = 0, runEventDays = 0, message
   if (messageDays > 0) {
     removed.messages = store.run('DELETE FROM messages WHERE created_at < ?', cutoff(messageDays)).changes
     removed.soloMessages = store.run('DELETE FROM solo_messages WHERE created_at < ?', cutoff(messageDays)).changes
+  }
+  if (reconciliationDays > 0) {
+    // 对账记录同样按保留期清理，避免 usage_reconciliation 无限增长。
+    const before = cutoff(reconciliationDays)
+    removed.reconciliationRecords = store.run('DELETE FROM usage_reconciliation WHERE checked_at < ?', before).changes
+    removed.reconciliation = { removed: removed.reconciliationRecords, before }
   }
   return removed
 }

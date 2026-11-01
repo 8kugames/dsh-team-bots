@@ -1378,7 +1378,7 @@
             ? '<button class="btn small danger" type="button" data-action="wechat-logout">退出绑定</button>'
             : '<button class="btn small" type="button" data-action="wechat-login">扫码绑定</button>'}
         </div>
-        <div class="hint">在微信里对 ClawBot 说「绑定」成为管理员；之后可用：状态 / 详情 web-3 / 验收 web-3 / 驳回 web-3 理由。任务完成会主动推送。</div>
+        <div class="hint">扫码授权成功后自动把授权者绑定为管理员；之后可用：状态 / 详情 web-3 / 验收 web-3 / 驳回 web-3 理由。任务完成会主动推送。</div>
       </div>`
   }
 

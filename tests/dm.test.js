@@ -87,10 +87,15 @@ test('messageFromBot 建立幂等私信并驱动 dm 运行与空闲投递', asyn
     const first = service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'ask-auth', textBody: '登录接口返回结构是什么？' })
     assert.equal(first.created, true)
     assert.equal(first.status, 'delivered')
-    const again = service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'ask-auth', textBody: '再问一次' })
+    const again = service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'ask-auth', textBody: '登录接口返回结构是什么？' })
     assert.equal(again.created, false)
     assert.equal(again.status, 'delivered')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM bot_messages').n, 1)
+    // 同一 request_id 换内容是语义碰撞：直接报冲突，避免新问题被旧请求静默吞掉。
+    assert.throws(
+      () => service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'ask-auth', textBody: '再问一次' }),
+      error => error?.status === 409 && /ask-auth/.test(error?.message ?? ''),
+    )
 
     await service.tick()
     const dmRun = store.get("SELECT * FROM runs WHERE kind = 'dm'")

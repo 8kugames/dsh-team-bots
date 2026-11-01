@@ -47,6 +47,8 @@ export function resolveConfig(config = {}) {
     dataDir,
     dbPath: join(dataDir, 'team.sqlite'),
     wechatDbPath: join(dataDir, 'wechat-channel.sqlite'),
+    // 密钥主文件：备份必须连它一起带走，缺了既有密文就再也解不开。
+    secretKeyPath: join(dataDir, 'secret.key'),
     // 个人微信通道（腾讯 iLink 官方协议）：默认关闭，扫码授权后生效。
     wechat: {
       enabled: bool(config.wechatEnabled ?? process.env.DSH_TEAM_WECHAT, false),

@@ -167,6 +167,44 @@ test('成功的写运行在 git 项目里记录产物清单，只读运行不记
   }
 })
 
+test('产物清单收下 git 的组合状态：AM、MM 与重命名', async () => {
+  const { root, workspace, store, service } = await setup()
+  try {
+    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const project = await service.createProject({ name: 'Status', key: 'STS', ownerBotId: chief.id })
+    const dir = join(workspace, project.slug)
+    git(dir, 'init', '-q')
+    await writeFile(join(dir, 'README.md'), 'base\n')
+    await writeFile(join(dir, 'old.txt'), 'old\n')
+    git(dir, 'add', '.')
+    git(dir, 'commit', '-q', '-m', 'init')
+
+    // AM：新增文件已入暂存区，工作区又改过。
+    await writeFile(join(dir, 'added.txt'), 'v1\n')
+    git(dir, 'add', 'added.txt')
+    await writeFile(join(dir, 'added.txt'), 'v2\n')
+    // MM：既有文件的暂存区与工作区都改过。
+    await writeFile(join(dir, 'README.md'), 'staged\n')
+    git(dir, 'add', 'README.md')
+    await writeFile(join(dir, 'README.md'), 'worktree\n')
+    // 重命名：清单只认新路径。
+    git(dir, 'mv', 'old.txt', 'new.txt')
+
+    const runId = insertRun(store, { projectId: project.id, botId: chief.id })
+    await service.finishRun({ runId, status: 'succeeded', output: 'done' })
+    const list = JSON.parse(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts)
+    const statusOf = path => list.find(item => item.path === path)?.status
+
+    assert.equal(statusOf('added.txt'), 'A', 'AM 应归为 A')
+    assert.equal(statusOf('README.md'), 'M', 'MM 应归为 M')
+    assert.equal(statusOf('new.txt'), 'R', '重命名应归为 R')
+    assert.equal(statusOf('old.txt'), undefined, '重命名的旧路径不应出现在清单里')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('非 git 项目跳过产物记录并写入 run_event', async () => {
   const { root, store, service } = await setup()
   try {
