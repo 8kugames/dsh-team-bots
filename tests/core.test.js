@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
@@ -61,6 +61,24 @@ async function waitFor(predicate, timeout = 3000) {
   throw new Error('timeout waiting for condition')
 }
 
+// FakeRuntime 通过 setImmediate 异步收尾；关闭数据库前先等队列排空，避免收尾写入落到已关闭的连接上。
+async function closeQuietly(store, timeout = 2000) {
+  const started = Date.now()
+  while (Date.now() - started < timeout) {
+    let active = 0
+    try {
+      active = Number(store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued', 'running')")?.n ?? 0)
+    } catch {
+      break
+    }
+    if (active === 0) break
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  try {
+    store.close()
+  } catch {}
+}
+
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-team-test-'))
   const workspace = join(root, 'workspace')
@@ -68,7 +86,7 @@ async function setup() {
   await mkdir(workspace, { recursive: true })
   await mkdir(join(workspace, '.agents', 'skills', 'review'), { recursive: true })
   await writeFile(join(workspace, '.agents', 'skills', 'review', 'SKILL.md'), `---\nname: review\ndescription: Review code\nversion: 1.0.0\n---\n\nReview carefully.\n`)
-  const config = resolveConfig({ workspace, dataDir, seedOwnerName: 'Chief', modelCacheMs: 0, schedulerIntervalMs: 20 })
+  const config = resolveConfig({ workspace, dataDir, modelCacheMs: 0, schedulerIntervalMs: 20 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   const runtime = new FakeRuntime(service)
@@ -78,19 +96,22 @@ async function setup() {
   return { root, workspace, dataDir, config, store, service, runtime }
 }
 
-test('boot creates Chief and syncs shared skills', async () => {
+test('boot seeds owner chief, default companions and shared skills', async () => {
   const { store, service, root } = await setup()
   try {
-    const bots = store.all('SELECT * FROM bots')
-    assert.equal(bots.length, 1)
-    assert.equal(bots[0].name, 'Chief')
+    const bots = store.all('SELECT * FROM bots ORDER BY created_at')
+    assert.equal(bots.length, 6)
+    assert.equal(bots[0].name, 'chief')
     assert.equal(bots[0].provider, 'fake')
+    for (const name of ['designer', 'programmer', 'graphics-rendering', 'devops', 'artist']) {
+      assert.ok(bots.some(bot => bot.name === name), `missing seed bot ${name}`)
+    }
     const state = await service.state()
     assert.equal(state.skills.length, 1)
     assert.equal(state.skills[0].slug, 'review')
     assert.equal(state.models.length, 1)
   } finally {
-    store.close()
+    await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -98,7 +119,7 @@ test('boot creates Chief and syncs shared skills', async () => {
 test('project, group task assignment and completion form a closed loop', async () => {
   const { root, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'Chief'")
+    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
     const dev = await service.createBot({
       name: 'Builder', role: '开发', instructions: 'Build things.', provider: 'fake', model: 'model-a', effort: 'high',
     })
@@ -121,8 +142,11 @@ test('project, group task assignment and completion form a closed loop', async (
     const state = await service.state(project.id)
     assert.equal(state.project.stats.inReview, 1)
     assert.ok(state.messages.some(message => message.taskIdentifier === 'DEMO-1'))
+    assert.ok(state.usage.scope.global.totalTokens > 0)
+    assert.equal(state.usage.scope.project.totalTokens, state.usage.scope.global.totalTokens)
+    assert.ok(state.usage.byBot.some(item => item.name === 'Builder' && item.totalTokens > 0))
   } finally {
-    store.close()
+    await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -130,16 +154,16 @@ test('project, group task assignment and completion form a closed loop', async (
 test('plain mention runs a chat reply while an empty mention goes to owner', async () => {
   const { root, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'Chief'")
+    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
     const project = await service.createProject({ name: 'Chat Project', key: 'CHAT', ownerBotId: chief.id })
     await service.sendMessage(project.id, '你好，负责人')
     await waitFor(() => service.store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 1)
-    await service.sendMessage(project.id, '@Chief 请回复')
+    await service.sendMessage(project.id, ' @chief 请回复')
     await waitFor(() => service.store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 2)
     const botMessages = service.store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)
     assert.equal(botMessages.length, 2)
   } finally {
-    store.close()
+    await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -163,7 +187,7 @@ test('API exposes state and rejects unknown actions', async () => {
     assert.ok(Array.isArray(state.bots))
     await assert.rejects(() => handleAction(service, 'rm_rf', {}, actor), /未知操作/)
   } finally {
-    store.close()
+    await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -171,7 +195,7 @@ test('API exposes state and rejects unknown actions', async () => {
 async function ownerSetup(projectKey) {
   const env = await setup()
   const { store, service } = env
-  const chief = store.get("SELECT * FROM bots WHERE name = 'Chief'")
+  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build things.', provider: 'fake', model: 'model-a', effort: 'high',
   })
@@ -195,7 +219,7 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status === 'in_review')
     await waitFor(() => store.get(
       "SELECT status FROM runs WHERE task_id = ? AND kind = 'review' AND bot_id = ?",
-      task.id, store.get("SELECT id FROM bots WHERE name = 'Chief'").id,
+      task.id, store.get("SELECT id FROM bots WHERE name = 'chief'").id,
     )?.status === 'succeeded')
     // 验收运行不翻转任务状态，也不产生新的执行运行
     assert.equal(store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status, 'in_review')
@@ -215,7 +239,7 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
     assert.equal(after.project.stats.ownerReview, 0)
     assert.equal(after.project.stats.inReview, 0)
   } finally {
-    store.close()
+    await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -240,7 +264,7 @@ test('owner return sends the task back for rework and it re-enters owner review'
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status === 'in_review')
     await waitFor(() => (store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND kind = 'review'", task.id)?.n ?? 0) >= 2)
   } finally {
-    store.close()
+    await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -254,7 +278,7 @@ test('blocked task goes to the owner bot and re-dispatch restarts it as owner-di
     // 受阻自动转负责人处理；处理运行不翻转任务状态，也不会自动重跑
     await waitFor(() => store.get(
       "SELECT status FROM runs WHERE task_id = ? AND kind = 'handle' AND bot_id = ?",
-      first.taskId, store.get("SELECT id FROM bots WHERE name = 'Chief'").id,
+      first.taskId, store.get("SELECT id FROM bots WHERE name = 'chief'").id,
     )?.status === 'succeeded')
     assert.equal(store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status, 'blocked')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND kind = 'task'", first.taskId)?.n, 1)
@@ -263,11 +287,54 @@ test('blocked task goes to the owner bot and re-dispatch restarts it as owner-di
     assert.equal(updated.review_target, 'owner_bot')
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status === 'in_review')
     await waitFor(() => (store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND kind = 'task'", first.taskId)?.n ?? 0) >= 2)
-    await waitFor(() => store.get("SELECT status FROM runs WHERE task_id = ? AND kind = 'review'", first.taskId) !== undefined)
+    await waitFor(() => store.get("SELECT status FROM runs WHERE task_id = ? AND kind = 'review'", first.taskId)?.status === 'succeeded')
     const task = await service.taskDetail(first.taskId)
     assert.equal(task.review_target, 'owner_bot')
   } finally {
-    store.close()
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('team data defaults under /workspace/.data and skill pool is separate', async () => {
+  const { resolveConfig } = await import('../src/config.js')
+  const config = resolveConfig({ workspace: '/tmp/example-workspace' })
+  assert.equal(config.dataDir, '/tmp/example-workspace/.data')
+  assert.equal(config.dbPath, '/tmp/example-workspace/.data/team.sqlite')
+  assert.equal(config.skillRoot, '/tmp/example-workspace/.agents')
+})
+
+test('workspace default uses the container mount but never the host filesystem root', async () => {
+  const { resolveConfig, defaultWorkspace } = await import('../src/config.js')
+  const previous = process.env.DSH_TEAM_WORKSPACE
+  try {
+    delete process.env.DSH_TEAM_WORKSPACE
+    assert.equal(defaultWorkspace(() => true), '/workspace')
+    assert.equal(defaultWorkspace(() => false), join(homedir(), 'workspace'))
+    process.env.DSH_TEAM_WORKSPACE = '/srv/team'
+    assert.equal(defaultWorkspace(), resolve('/srv/team'))
+    assert.equal(resolveConfig().workspace, resolve('/srv/team'))
+  } finally {
+    if (previous === undefined) delete process.env.DSH_TEAM_WORKSPACE
+    else process.env.DSH_TEAM_WORKSPACE = previous
+  }
+})
+
+test('skill proposal approval publishes into shared skill pool', async () => {
+  const { root, workspace, store, service } = await setup()
+  try {
+    const actor = { type: 'user', id: service.localUserId }
+    const project = await service.createProject({ name: 'Skills', key: 'SKL', ownerBotId: store.get("SELECT id FROM bots WHERE name = 'chief'").id })
+    const proposal = await service.createProposal({
+      kind: 'skill', projectId: project.id, title: 'Add deploy skill', rationale: 'Repeated deploy work',
+      payload: { slug: 'deploy-check', name: 'Deploy check', description: 'Check deployment', version: '1.0.0', content: '# Deploy check\n\nRun smoke tests.' },
+    }, actor)
+    const approved = await service.decideProposal(proposal.id, 'approved', actor)
+    assert.equal(approved.status, 'approved')
+    const state = await service.state(project.id)
+    assert.ok(state.skills.some(skill => skill.slug === 'deploy-check'))
+  } finally {
+    await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
 })
