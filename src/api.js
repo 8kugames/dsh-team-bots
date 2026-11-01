@@ -140,9 +140,9 @@ export async function handleAction(service, action, payload = {}, actor) {
     case 'dsh_update_info':
       return service.dshUpdateInfo()
     case 'upgrade_dsh':
-      return service.upgradeDsh(payload.version, actor)
+      return service.upgradeDsh(payload.version)
     case 'reboot_dsh':
-      return service.rebootDsh(actor)
+      return service.rebootDsh()
     case 'wechat_status':
       return service.wechatStatus()
     case 'wechat_login':

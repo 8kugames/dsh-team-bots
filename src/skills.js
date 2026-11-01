@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join, sep } from 'node:path'
 import { ensureSkillRoot } from './paths.js'
 import { parseSkill } from './skill-parse.js'
-import { resolveProjectSkillDir, scanProjectSkills } from './project-skills.js'
+import { resolveProjectDirFromStore, scanProjectSkills } from './project-skills.js'
 import { nowIso, sha256, slugify } from './util.js'
 
 const PROVIDER = 'dsh-team-skills'
@@ -197,11 +197,11 @@ export function skillProvider(skillRoot, options = {}) {
   }
 }
 
-export function installSkillProvider(ctx, config, logger) {
+export function installSkillProvider(ctx, config, logger, store) {
   ctx.inject?.({ skills: null }, scope => {
     try {
       scope.skills.registerProvider(() => skillProvider(config.skillRoot, {
-        resolveProjectDir: (cwd) => resolveProjectSkillDir(config.workspace, cwd),
+        resolveProjectDir: (cwd) => resolveProjectDirFromStore(store, config.workspace, cwd),
       }))
       logger?.info?.('shared skill provider registered: %s', config.skillRoot)
     } catch (error) {

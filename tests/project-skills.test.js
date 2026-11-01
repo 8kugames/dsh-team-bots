@@ -7,7 +7,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
-import { resolveProjectSkillDir, scanProjectSkills } from '../src/project-skills.js'
+import { resolveProjectDirFromStore, resolveProjectSkillDir, scanProjectSkills } from '../src/project-skills.js'
 import { skillProvider } from '../src/skills.js'
 import { id, nowIso } from '../src/util.js'
 
@@ -204,15 +204,18 @@ test('project session prompt tells the bot about the project skill pool', async 
   }
 })
 
-test('生产目录：会话 cwd 与 prompt 跟随 production_dir，技能池留在管理目录', async () => {
+test('生产目录：会话 cwd、prompt 与项目技能池都以生产目录为准', async () => {
   const { root, workspace, config, store, service, project } = await setup()
   try {
     const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
     const prod = join(root, 'existing-repo')
     await mkdir(prod, { recursive: true })
-    // 技能池是管理数据：放在 <工作区>/{slug}，不随生产目录搬家
-    await writeSkill(join(workspace, project.slug, '.agents', 'skills', 'deploy'), {
+    // 技能池以生产目录为准：deploy 放生产目录；管理目录只放一个旧技能，证明不再进池
+    await writeSkill(join(prod, '.agents', 'skills', 'deploy'), {
       name: 'deploy', description: 'Deploy helper',
+    })
+    await writeSkill(join(workspace, project.slug, '.codex', 'skills', 'legacy'), {
+      name: 'legacy', description: 'Stale management-dir skill',
     })
     const updated = await service.updateProject(project.id, { productionDir: prod })
     const prodReal = updated.workspace_path
@@ -237,7 +240,25 @@ test('生产目录：会话 cwd 与 prompt 跟随 production_dir，技能池留�
     assert.ok(prompt.includes(`Workspace: ${prodReal}`), '运行 prompt 应带生产目录')
     const system = runtime.systemPromptFor({ agent: { id: 'sess-prod' } })
     assert.ok(system.includes(`- Workspace: ${prodReal}`), '身份 prompt 应带生产目录')
-    assert.ok(system.includes(`${workspace}/${project.slug}/.agents/skills`), '技能池仍在管理目录')
+    assert.ok(system.includes(`${prodReal}/.agents/skills`), '技能池 mount 应指向生产目录')
+    assert.ok(!system.includes(`${workspace}/${project.slug}/.agents/skills`), '技能池 mount 不应再指向管理目录')
+    assert.ok(system.includes('`deploy`'), 'prompt 应列出生产目录技能')
+    assert.ok(!system.includes('`legacy`'), '管理目录旧技能不应进池')
+
+    const view = await service.state()
+    assert.deepEqual(view.projectSkills.map(skill => skill.name), ['deploy'], '项目技能卡应扫生产目录')
+    assert.ok(view.paths.projectSkillRoots.some(item => item.path === join(prodReal, '.agents')), '技能根路径应是生产目录')
+
+    // 会话 cwd 在工作区之外时，反解要靠 projects 表里的生产目录登记
+    assert.equal(resolveProjectDirFromStore(store, workspace, prodReal), prodReal)
+    assert.equal(resolveProjectDirFromStore(store, workspace, join(root, 'elsewhere')), null)
+    assert.equal(resolveProjectDirFromStore(store, workspace, join(workspace, 'demo')), join(workspace, 'demo'))
+
+    const provider = skillProvider(config.skillRoot, {
+      resolveProjectDir: cwd => resolveProjectDirFromStore(store, config.workspace, cwd),
+    })
+    const listed = await provider.list({ cwd: prodReal })
+    assert.ok(listed.some(item => item.name === 'deploy' && item.source === 'project'), 'Bot 会话里应能看到生产目录项目技能')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })

@@ -22,7 +22,7 @@ export function apply(ctx, config = {}) {
   service.attachRuntime(runtime)
   runtime.attach()
   installTeamTools(ctx, service)
-  installSkillProvider(ctx, resolved, logger)
+  installSkillProvider(ctx, resolved, logger, store)
   installHttp(ctx, service, logger)
 
   ctx.effect?.(() => () => {

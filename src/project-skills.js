@@ -32,6 +32,20 @@ export function resolveProjectSkillDir(workspace, cwd) {
   return target
 }
 
+// 带 projects 表的反解：登记了生产目录的项目以生产目录为准（会话 cwd 在工作区之外），
+// 精确匹配到即返回；未命中再走工作区一级子目录校验。
+export function resolveProjectDirFromStore(store, workspace, cwd) {
+  if (!cwd || !store?.all) return resolveProjectSkillDir(workspace, cwd)
+  const target = resolve(String(cwd))
+  try {
+    const rows = store.all('SELECT production_dir FROM projects WHERE production_dir IS NOT NULL') ?? []
+    for (const row of rows) {
+      if (row.production_dir && resolve(row.production_dir) === target) return target
+    }
+  } catch {}
+  return resolveProjectSkillDir(workspace, target)
+}
+
 function readPackage(rootPath, dirName) {
   const file = join(rootPath, dirName, 'SKILL.md')
   if (!existsSync(file)) return null

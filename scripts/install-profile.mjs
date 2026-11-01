@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// 一键把当前仓库打包并安装进 team-bots profile，然后重启 DSH 生效：
-//   npm run profile:install
-// 可用 --to <dir> 指定其他 profile 目录（默认 ~/.dsh/profiles/team-bots）。
-// 原理：npm pack 产物落在仓库 .dist/，pnpm 在 profile 里从该 tarball 重装；
+// 一键把当前仓库打包并安装进指定的 DSH profile：
+//   npm run profile:install                          # 缺省装进 team-bots
+//   npm run profile:install -- --profile web         # 装进任意指定 profile
+// 原理：npm pack 产物落在仓库 .dist/，`dsh plugin` 在目标 profile 里从该
+// tarball 重装并把插件登记进 profile bundles（profile 不存在时按模板初始化）；
 // profile 的 node_modules 是快照，DSH 不热更新，装完必须重启。
+// 团队数据与 profile 无关：始终由 DSH_TEAM_WORKSPACE / DSH_TEAM_DATA 决定
+// （缺省 ~/.dsh/workspace/team-bots/.data），装到哪个 profile 都共享同一份。
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, rmSync, existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { mkdirSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -16,13 +18,9 @@ function argOf(name) {
 }
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const profileDir = resolve(argOf('to') ?? join(homedir(), '.dsh', 'profiles', 'team-bots'))
+const profile = argOf('profile') ?? 'team-bots'
 
-if (!existsSync(join(profileDir, 'package.json'))) {
-  console.error(`profile 目录不存在或缺少 package.json：${profileDir}`)
-  process.exit(1)
-}
-for (const tool of ['npm', 'pnpm']) {
+for (const tool of ['npm', 'dsh']) {
   try { execFileSync(tool, ['--version'], { stdio: 'ignore' }) } catch {
     console.error(`缺少 ${tool}，请先安装后重试`)
     process.exit(1)
@@ -42,6 +40,6 @@ if (!tarballName?.endsWith('.tgz')) {
 const tarball = join(dist, tarballName)
 console.log(`已打包 ${tarballName}`)
 
-console.log(`安装到 ${profileDir} …`)
-execFileSync('pnpm', ['--dir', profileDir, 'add', `dsh-team-bots@file:${tarball}`], { stdio: 'inherit' })
-console.log('\n完成。重启 DSH 后生效：dsh --profile team-bots')
+console.log(`安装到 profile ${profile} …`)
+execFileSync('dsh', ['plugin', '--profile', profile, 'add', `dsh-team-bots@file:${tarball}`], { stdio: 'inherit' })
+console.log(`\n完成。重启 DSH 后生效：dsh --profile ${profile}`)
