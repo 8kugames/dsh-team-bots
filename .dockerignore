@@ -6,5 +6,5 @@ workspace
 .DS_Store
 .git
 tests
-scripts
+# Kept: scripts/doctor.mjs ships in the plugin package for in-container diagnostics.
 docs
