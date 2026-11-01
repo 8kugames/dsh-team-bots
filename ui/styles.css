@@ -2407,6 +2407,7 @@ a.global-config.dsh-official-link:hover {
     text-align: right;
 }
 .price-card {
+    margin-top: 12px;
     padding: 18px 20px;
 }
 .price-table td {
