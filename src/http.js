@@ -31,6 +31,29 @@ const SECURITY = {
   'Content-Security-Policy': "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
 }
 
+// 注入宿主官方 Web 界面（fallback SPA）的切换入口。官方界面没有指向本插件
+// 的链接，通过宿主的 `webserver/index-inject` 结构化注入机制补一个固定胶囊
+// 入口；与工作台侧栏里指向 /index.html（官方界面在 fallback seat 上的稳定
+// 入口，/ 已被本插件占据）的返回链接构成双向自由切换。本项目自己的 UI
+// 不走宿主 renderIndex，不会看到这个入口。
+export const OFFICIAL_UI_SWITCH_ROWS = [
+  {
+    kind: 'style',
+    text: [
+      '.dsh-team-switch{position:fixed;right:16px;bottom:16px;z-index:99999;display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:999px;text-decoration:none;cursor:pointer;font:500 13px/1 system-ui,-apple-system,"Segoe UI",sans-serif;color:#24272f;background:rgba(255,255,255,.86);border:1px solid rgba(15,23,42,.14);box-shadow:0 4px 16px rgba(15,23,42,.14);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:transform .12s ease,box-shadow .12s ease}',
+      '.dsh-team-switch svg{width:14px;height:14px;opacity:.75}',
+      '.dsh-team-switch:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(15,23,42,.2);color:#24272f}',
+      '.dsh-team-switch:focus-visible{outline:2px solid #7287fd;outline-offset:2px}',
+      '@media (prefers-color-scheme:dark){.dsh-team-switch{color:#e6e8ee;background:rgba(24,26,31,.86);border-color:rgba(255,255,255,.14);box-shadow:0 4px 16px rgba(0,0,0,.4)}.dsh-team-switch:hover{color:#e6e8ee;box-shadow:0 6px 20px rgba(0,0,0,.5)}}',
+    ].join('\n'),
+  },
+  {
+    kind: 'html',
+    placement: 'body',
+    html: '<a class="dsh-team-switch" href="/api/dsh-team/ui" title="切换到 DSH Team Bots 团队工作台" aria-label="切换到 DSH Team Bots 团队工作台"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h13l-3.5-3.5"/><path d="M20 17H7l3.5 3.5"/></svg><span>团队工作台</span></a>',
+  },
+]
+
 const response = (body, type, status = 200, extra = {}) => new Response(body, {
   status,
   headers: {
@@ -176,6 +199,12 @@ export function installHttp(ctx, service, logger = console) {
     } catch (error) {
       return errorResponse(error)
     }
+  })
+
+  // 官方界面 → 工作台的入口（见 OFFICIAL_UI_SWITCH_ROWS 注释）。监听器随
+  // 插件 context 生命周期自动清理。
+  ctx.on?.('webserver/index-inject', (table) => {
+    table.push(...OFFICIAL_UI_SWITCH_ROWS)
   })
 
   logger.info?.('team UI: /api/dsh-team/ui')

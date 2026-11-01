@@ -391,7 +391,7 @@
     return `
       <div class="shell">
         <aside class="sidebar">
-          <a class="brand" href="/" title="返回 DSH Web">
+          <a class="brand" href="/index.html" title="返回 DSH 官方 Web 界面">
             <div class="brand-mark">DSH</div>
             <div class="brand-copy"><strong>DSH Team Bots</strong></div>
           </a>
@@ -436,6 +436,9 @@
             <button class="global-config ${isGlobal ? 'active' : ''}" data-action="nav" data-view="global">
               ${icon('settings')}<span>全局配置</span>
             </button>
+            <a class="global-config dsh-official-link" href="/index.html" title="切换到 DSH 官方 Web 界面">
+              ${icon('external')}<span>DSH 官方界面</span>
+            </a>
             <div class="sidebar-meta">
               <span class="dot ${running ? 'amber' : ''}"></span>
               <span>${running ? `${running} 个运行中` : '团队空闲'}</span>
@@ -1537,16 +1540,8 @@
 
   function renderSettings() {
     const project = activeProject()
-    const paths = state.data.paths ?? {}
     const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
-    if (!project) return `${noProject()}
-      <div class="card form-card" style="margin-top:14px">
-        <div class="card-head"><h3>系统路径</h3></div>
-        <div class="path-row"><span>工作区</span>${pathCode(paths.workspace ?? '')}${copyPath(paths.workspace ?? '')}</div>
-        <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot ?? '')}${copyPath(paths.skillRoot ?? '')}</div>
-        <div class="path-row"><span>数据</span>${pathCode(paths.dataDir ?? '')}${copyPath(paths.dataDir ?? '')}</div>
-      </div>
-      ${renderSecretsCard()}`
+    if (!project) return noProject()
     const members = activeBots()
     const owner = botById(project.owner_bot_id)
     const memberIds = new Set(project.members.map(member => member.id))
@@ -1581,10 +1576,14 @@
           <div>
             <div class="card form-card">
               <div class="card-head"><h3>工作区路径</h3></div>
-              <div class="path-row"><span>生产目录</span>${pathCode(project.workspace_path)}${copyPath(project.workspace_path)}</div>
+              <div class="field">
+                <label id="settings-production-label" for="settings-production">生产目录</label>
+                <div style="display:flex;gap:8px"><input class="input mono" style="flex:1" id="settings-production" name="productionDir" value="${attr(project.production_dir ?? '')}" placeholder="/Users/you/repos/my-game（可选）"><button class="btn" type="button" data-action="pick-dir-open" data-picker-for="settings-production">${icon('folder')}选择</button></div>
+                <div class="hint">Bots 的工作目录，可指向既有代码库；留空则用默认管理目录，切换后已有密钥会自动迁移并清理旧目录。</div>
+                <div class="dir-picker" id="dir-picker-settings-production" hidden></div>
+              </div>
+              <div class="path-row"><span>当前生效</span>${pathCode(project.workspace_path)}${copyPath(project.workspace_path)}</div>
               <div class="path-row"><span>管理数据</span>${pathCode(project.data_path ?? '')}${copyPath(project.data_path ?? '')}</div>
-              <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot ?? '')}${copyPath(paths.skillRoot ?? '')}</div>
-              <div class="path-row"><span>数据</span>${pathCode(paths.dataDir ?? '')}${copyPath(paths.dataDir ?? '')}</div>
             </div>
             <div class="card form-card" style="margin-top:12px">
               <div class="card-head"><h3>项目状态</h3>${project.status === 'active' ? '<span class="pill green">运行中</span>' : '<span class="pill amber">已归档</span>'}</div>
@@ -1593,19 +1592,9 @@
               <div class="kv"><span>运行总数</span><strong>${project.stats.runs}</strong></div>
               ${project.status === 'active' ? `<div class="btn-row" style="margin-top:12px"><button class="btn small" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>` : ''}
             </div>
-            <div class="card form-card" style="margin-top:12px">
-              <div class="card-head"><h3>团队信息</h3></div>
-              <div class="kv"><span>Bot 数量</span><strong>${state.data.bots.length}</strong></div>
-              <div class="kv"><span>项目数量</span><strong>${state.data.projects.length}</strong></div>
-              <div class="kv"><span>共享技能</span><strong>${state.data.skills.length}</strong></div>
-              <div class="kv"><span>待审提案</span><strong>${state.data.proposals.filter(item => item.status === 'pending').length}</strong></div>
-            </div>
           </div>
         </div>
       </form>
-      ${renderOpsCard()}
-      ${renderWechatCard()}
-      ${renderSecretsCard()}
     `
   }
 
@@ -1675,6 +1664,9 @@
           </div>
         </div>
       </div>
+      ${renderOpsCard()}
+      ${renderWechatCard()}
+      ${renderSecretsCard()}
       ${renderPriceCard()}
     `
   }
@@ -2721,6 +2713,8 @@
           const input = document.getElementById(target.dataset.pickerFor)
           if (input && target.dataset.path) {
             input.value = target.dataset.path
+            // 程序赋值不触发 input 事件，手动把所属表单标记为未保存，暂停自动刷新直到保存。
+            input.closest('form')?.setAttribute('data-dirty', '1')
             closeDirPicker(target.dataset.pickerFor)
           }
           break
@@ -3071,6 +3065,7 @@
             memberIds,
             tokenBudget: payload.tokenBudget === '' ? null : Number(payload.tokenBudget),
             costBudget: payload.costBudget === '' ? null : Number(payload.costBudget),
+            productionDir: String(payload.productionDir ?? ''),
           },
         })
         await refresh()
@@ -3106,6 +3101,7 @@
 
   document.addEventListener('input', (event) => {
     const el = event.target
+    el.closest?.('form')?.setAttribute('data-dirty', '1')
     if (el.id === 'ui-scale') {
       const scale = applyUiScale(el.value)
       try { localStorage.setItem(UI_SCALE_KEY, String(scale)) } catch {}
@@ -3123,6 +3119,11 @@
     if (el.id === 'memory-search') {
       state.memoryQuery = el.value
     }
+  })
+
+  // select / checkbox 只发 change 不发 input，同样要计入未保存修改。
+  document.addEventListener('change', (event) => {
+    event.target.closest?.('form')?.setAttribute('data-dirty', '1')
   })
 
   document.addEventListener('keydown', (event) => {
@@ -3259,6 +3260,8 @@
 
   async function poll() {
     if (!state.data || state.modal || state.busy > 0 || document.hidden || isTyping()) return
+    // 目录选择器开着或表单有未保存修改时暂停自动刷新：整页重渲染会吞掉选择器与已选/已填的值。
+    if (document.querySelector('.dir-picker:not([hidden])') || document.querySelector('form[data-dirty]')) return
     try {
       await loadState(state.projectId, { quiet: true })
       render()

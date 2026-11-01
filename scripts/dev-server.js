@@ -76,7 +76,7 @@ async function main() {
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`)
-      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/ui')) {
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/ui' || url.pathname === '/index.html')) {
         const html = await readFile(join(ROOT, 'ui', 'index.html'), 'utf8')
         return send(res, 200, 'text/html; charset=utf-8', html.replaceAll('{{assetVersion}}', ASSET_VERSION))
       }

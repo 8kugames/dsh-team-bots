@@ -46,7 +46,10 @@ dsh --profile team-bots                         # 从启动日志读取 dsh web 
 ```text
 http://<host>:<port>/                     自动登录，直达团队工作台
 http://<host>:<port>/api/dsh-team/ui      DSH Team Bots 团队工作台（直连）
+http://<host>:<port>/index.html           DSH 官方 Web 界面
 ```
+
+工作台与 DSH 官方界面可自由切换：官方界面右下角有「团队工作台」悬浮入口（本插件通过宿主 `webserver/index-inject` 机制注入），工作台侧栏底部与左上角 logo 都提供「DSH 官方界面」入口。
 
 自动登录意味着**能连上这个端口的人即获得 owner 访问**。服务只应监听本机或受信任网络；需要对外提供时走 HTTPS 反向代理并正确转发 Host 与 WebSocket。Host 白名单栅栏（`DSH_TRUSTED_HOST`，DSH 核心 env）对伪造 Host 的请求仍然返回 403。
 
@@ -126,9 +129,9 @@ npm run doctor
 
 调度器按两条规则领取排队中的运行：
 
-| 规则 | 行为 |
-| --- | --- |
-| 会话串行 | 同一条会话上的运行永远串行；任务运行独占自己的会话，所以任务之间、任务与群聊之间可以并行 |
+| 规则     | 行为                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------ |
+| 会话串行 | 同一条会话上的运行永远串行；任务运行独占自己的会话，所以任务之间、任务与群聊之间可以并行   |
 | 项目写锁 | 同一项目共享一个工作目录，所以同一项目同时只允许一个**写**运行；群聊、验收等只读运行不受限 |
 
 `DSH_TEAM_MAX_RUNS` 是全局并发上限，跨项目生效。运行结束后任务会话保留，退回重做和重试会复用同一会话继续上下文。
@@ -152,13 +155,13 @@ npm run doctor
 
 ## 限额与看门狗
 
-| 环境变量 | 默认 | 作用 |
-| --- | --- | --- |
-| `DSH_TEAM_MAX_RUNS` | 3 | 全局并发运行上限 |
-| `DSH_TEAM_RUN_TIMEOUT_MS` | 900000 | 单个运行的硬超时 |
-| `DSH_TEAM_MAX_RUN_TOKENS` | 0 | 单运行 token 上限，超出即中止（0 关闭） |
-| `DSH_TEAM_STALL_TIMEOUT_MS` | 600000 | 运行多久没有新事件就判定卡住并回收 |
-| `DSH_TEAM_CHAT_MAX_CHARS` | 800 | 群聊消息保留的结论长度 |
+| 环境变量                    | 默认   | 作用                                    |
+| --------------------------- | ------ | --------------------------------------- |
+| `DSH_TEAM_MAX_RUNS`         | 3      | 全局并发运行上限                        |
+| `DSH_TEAM_RUN_TIMEOUT_MS`   | 900000 | 单个运行的硬超时                        |
+| `DSH_TEAM_MAX_RUN_TOKENS`   | 0      | 单运行 token 上限，超出即中止（0 关闭） |
+| `DSH_TEAM_STALL_TIMEOUT_MS` | 600000 | 运行多久没有新事件就判定卡住并回收      |
+| `DSH_TEAM_CHAT_MAX_CHARS`   | 800    | 群聊消息保留的结论长度                  |
 
 运行超时、超预算、卡住都会走同一条失败链路：运行标记失败、任务置 `blocked`、负责人 Bot 接手。
 
@@ -195,12 +198,12 @@ npm run doctor
 
 插件内置四个 CNY 模型价格（每百万 token，`hit` = 缓存读、`miss` = 输入、`out` = 输出）：
 
-| model | hit | miss | out | currency |
-| --- | --- | --- | --- | --- |
-| deepseek-flash | 0.2 | 2 | 8 | CNY |
-| glm-5.3 | 2 | 8 | 28 | CNY |
-| glm-5.3-flash | 0.23 | 0.8 | 2.8 | CNY |
-| MiniMax-M3.1-Flash | 0.1 | 1 | 4 | CNY |
+| model              | hit  | miss | out | currency |
+| ------------------ | ---- | ---- | --- | -------- |
+| deepseek-flash     | 0.2  | 2    | 8   | CNY      |
+| glm-5.3            | 2    | 8    | 28  | CNY      |
+| glm-5.3-flash      | 0.23 | 0.8  | 2.8 | CNY      |
+| MiniMax-M3.1-Flash | 0.1  | 1    | 4   | CNY      |
 
 覆盖方式三选一，优先级从高到低：
 
@@ -218,7 +221,7 @@ npm run doctor
             out: 8
             currency: CNY
           - model: glm-5.3
-            provider: zhipu   # 可选，留空表示按模型名匹配任意 provider
+            provider: zhipu # 可选，留空表示按模型名匹配任意 provider
             hit: 2
             miss: 8
             out: 28
