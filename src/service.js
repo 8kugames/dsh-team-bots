@@ -3642,6 +3642,22 @@ export class TeamService {
             soloBot.id,
           ).map(run => this.runView(run)),
         }
+        // 单聊上下文的团队页口径：记忆只看 团队 + 该 bot 自己的；运行只看该 bot 的项目外运行；
+        // 提案保持全团队（提案本身不挂项目）。
+        view.memories = this.store.all(
+          `SELECT * FROM memories WHERE status = 'active' AND ((scope_type = 'bot' AND scope_id = ?) OR (scope_type = 'team' AND scope_id = 'team'))
+           ORDER BY updated_at DESC LIMIT 100`,
+          soloBot.id,
+        ).map(item => this.memoryView(item))
+        view.pendingMemories = this.store.all(
+          `SELECT * FROM memories WHERE status = 'pending' AND ((scope_type = 'bot' AND scope_id = ?) OR (scope_type = 'team' AND scope_id = 'team'))
+           ORDER BY updated_at DESC LIMIT 100`,
+          soloBot.id,
+        ).map(item => this.memoryView(item))
+        view.runs = this.store.all(
+          'SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 60',
+          soloBot.id,
+        ).map(run => this.runView(run))
       }
     }
     return view

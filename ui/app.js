@@ -72,10 +72,14 @@
     ['usage', '用量', 'chart'],
     ['settings', '设置', 'settings'],
   ]
-  // 1V1 单聊上下文的导航：对话窗口 + 集中配置页，与群聊的 tab 集合互不混用。
+  // 1V1 单聊上下文的导航：对话窗口 + 集中配置页 + 团队级页面（技能/记忆/进化/用量）。
   const SOLO_NAV = [
     ['chat', '对话', 'message'],
     ['solo-config', '配置', 'settings'],
+    ['skills', '技能', 'spark'],
+    ['memory', '记忆', 'memory'],
+    ['evolution', '进化', 'branch'],
+    ['usage', '用量', 'chart'],
   ]
 
   const icons = {
@@ -144,6 +148,9 @@
   const botById = (id) => state.data?.bots.find(bot => bot.id === id)
   const taskById = (id) => state.data?.tasks.find(task => task.id === id)
   const activeProject = () => state.data?.project
+  // 1V1 单聊上下文（对话/配置/技能/记忆/进化/用量）不携带任何项目，页面呈现团队全局口径。
+  const inSoloContext = () => state.chatMode === 'solo' || state.view === 'solo-config'
+  const pageProject = () => (inSoloContext() ? null : activeProject())
   const activeBots = () => (state.data?.bots ?? []).filter(bot => bot.status === 'active')
 
   function formatNumber(value) {
@@ -342,9 +349,9 @@
     const running = project?.stats?.running ?? 0
     const tokenTotal = usageTotals('project').totalTokens ?? 0
     const isGlobal = state.view === 'global'
-    // 单聊是独立于项目的 1V1 上下文：对话窗口 + 集中配置页共用一套导航。
+    // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
     const isSolo = state.view === 'chat' && state.chatMode === 'solo'
-    const inSolo = isSolo || state.view === 'solo-config'
+    const inSolo = inSoloContext()
     const soloBot = inSolo ? botById(state.soloBotId) : null
     const viewTitle = isSolo
       ? (soloBot ? `@${soloBot.name}` : '单聊')
@@ -928,7 +935,7 @@
     const skills = state.data?.skills ?? []
     const projectSkills = state.data?.projectSkills ?? []
     const proposals = (state.data?.proposals ?? []).filter(item => item.kind === 'skill' && item.status === 'pending')
-    const project = activeProject()
+    const project = pageProject()
     const disabledSet = new Set(project?.disabledSkills ?? [])
     return `
       <div class="section-head">
@@ -1019,7 +1026,7 @@
   }
 
   function renderMemory() {
-    const project = activeProject()
+    const project = pageProject()
     const all = state.data?.memories ?? []
     const memories = all.filter(memory => state.memoryFilter === 'all' || memory.scope_type === state.memoryFilter)
     const pending = pendingMemoryCount()
@@ -1047,7 +1054,7 @@
           </div>
         </div>`).join('')}
       </div>` : ''}
-      ${!project ? noProject() : memories.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('memory')}</div><h3>还没有记忆</h3><p>任务完成后会自动沉淀交付经验。</p><button class="btn" data-action="new-memory">${icon('plus')}写入记忆</button></div>` : `<div class="grid">
+      ${!project && !inSoloContext() ? noProject() : memories.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('memory')}</div><h3>还没有记忆</h3><p>任务完成后会自动沉淀交付经验。</p><button class="btn" data-action="new-memory">${icon('plus')}写入记忆</button></div>` : `<div class="grid">
         ${memories.map(memory => {
           const scopeName = memory.scope_type === 'project' ? '项目' : (botById(memory.scope_id)?.name ?? 'Bot')
           const status = memory.status ?? 'active'
@@ -1246,7 +1253,7 @@
 
   async function exportUsageCsv() {
     const usage = usageSnapshot()
-    const project = activeProject()
+    const project = pageProject()
     const payload = { days: usage.days ?? 30 }
     if (state.usageScope !== 'global' && project) payload.projectId = project.id
     const result = await api('export_usage_csv', payload)
@@ -1277,7 +1284,7 @@
     const byProject = tier?.byProject ?? usage.byProject ?? []
     const byModel = tier?.byModel ?? usage.byModel ?? []
     const days = tier?.byDay ?? usage.byDay ?? []
-    const project = activeProject()
+    const project = pageProject()
     const scopeLabel = scope === 'global' ? '全局' : scope === 'project' ? '本项目' : '按 Bot'
     const maxBot = Math.max(1, ...byBot.map(item => item.totalTokens ?? 0))
     const maxProject = Math.max(1, ...byProject.map(item => item.totalTokens ?? 0))
@@ -1951,7 +1958,7 @@
   }
 
   function modalMemory(memory) {
-    const project = activeProject()
+    const project = pageProject()
     const choices = [
       ...(project ? [`<option value="project:${attr(project.id)}" ${memory?.scope_type === 'project' ? 'selected' : ''}>项目 · ${esc(project.name)}</option>`] : []),
       ...activeBots().map(bot => `<option value="bot:${attr(bot.id)}" ${memory?.scope_type === 'bot' && memory?.scope_id === bot.id ? 'selected' : ''}>Bot · ${esc(bot.name)}</option>`),
@@ -1972,7 +1979,8 @@
   }
 
   function modalProposal(kind = 'bot_update') {
-    const project = activeProject()
+    // 单聊上下文发起的提案不挂任何项目（团队级提案）。
+    const project = pageProject()
     return modalShell({
       title: '新建进化提案',
       subtitle: '审批通过后才会生效。',
