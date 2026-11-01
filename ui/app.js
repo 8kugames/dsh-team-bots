@@ -6,6 +6,7 @@
   const params = new URLSearchParams(location.search)
   const initialView = params.get('view')
   const UI_SCALE_KEY = 'dshb:ui-scale'
+  const UI_THEME_KEY = 'dshb:ui-theme'
   const state = {
     data: null,
     view: ['chat', 'tasks', 'bots', 'skills', 'memory', 'evolution', 'usage', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
@@ -17,6 +18,7 @@
     taskFilter: { status: 'all', assignee: 'all', search: '' },
     memoryFilter: 'all',
     usageScope: 'global',
+    theme: 'dsh',
     tree: { chats: true, bots: true },
     bootError: null,
   }
@@ -34,6 +36,21 @@
   const PRIORITY = { urgent: '紧急', high: '高', medium: '中', low: '低', none: '无' }
   const PROPOSAL_STATUS = { pending: '待审', approved: '已通过', rejected: '已拒绝' }
   const COLORS = ['teal', 'blue', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
+  const COLOR_NAMES = { teal: '青', blue: '蓝', violet: '紫', amber: '琥珀', coral: '珊瑚', pink: '粉', green: '绿', gray: '灰' }
+  const BOT_STATUS = { active: '运行中', paused: '已暂停', archived: '已归档' }
+  const RUN_STATUS = { queued: '排队中', running: '运行中', succeeded: '已完成', failed: '失败', canceled: '已取消' }
+  const SKILL_STATUS = { active: '启用中', missing: '已失效' }
+  const PROPOSAL_KIND = { bot_update: 'Bot 更新', skill: '技能更新', workflow: '流程更新' }
+  const CREATOR_TYPE = { bot: 'Bot', user: '用户' }
+  const EFFORT = { minimal: '最低', low: '低', medium: '中', high: '高', max: '最高' }
+  // The one action in the top-right belongs to the page you are on.
+  const VIEW_ACTION = {
+    tasks: { label: '新建任务', action: 'new-task', icon: 'plus' },
+    bots: { label: '新建 Bot', action: 'new-bot', icon: 'plus' },
+    memory: { label: '写入记忆', action: 'new-memory', icon: 'plus' },
+    skills: { label: '新建提案', action: 'new-proposal', icon: 'plus', kind: 'skill' },
+    settings: { label: '保存设置', icon: 'check', submit: 'project-settings-form' },
+  }
   const NAV = [
     ['chat', '群聊', 'message'],
     ['tasks', '任务', 'board'],
@@ -68,6 +85,7 @@
     alert: '<path d="M12 3 2 21h20z"/><path d="M12 9v5M12 18h.01"/>',
     chevron: '<path d="m9 18 6-6-6-6"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    external: '<path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
     layers: '<path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/>',
     terminal: '<path d="m4 17 6-6-6-6M12 19h8"/>',
@@ -86,10 +104,24 @@
     try { return Number(localStorage.getItem(UI_SCALE_KEY)) || null } catch { return null }
   })()
   if (savedScale) applyUiScale(savedScale)
+  function applyUiTheme(value) {
+    const theme = value === 'catppuccin' ? 'catppuccin' : 'dsh'
+    if (theme === 'dsh') document.documentElement.removeAttribute('data-theme')
+    else document.documentElement.setAttribute('data-theme', theme)
+    return theme
+  }
+  state.theme = applyUiTheme((() => {
+    try { return localStorage.getItem(UI_THEME_KEY) } catch { return null }
+  })())
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;').replaceAll("'", '&#39;')
   const attr = esc
+  const pathCode = value => `<code>${esc(value).split('/').join('/<wbr>')}</code>`
+  const costValue = value => {
+    const text = formatCost(value)
+    return /^[¥$€£]/.test(text) ? `<span class="unit">${esc(text[0])}</span>${esc(text.slice(1))}` : esc(text)
+  }
   const clamp = (value, max, fallback = '') => String(value ?? fallback).slice(0, max)
   const botById = (id) => state.data?.bots.find(bot => bot.id === id)
   const taskById = (id) => state.data?.tasks.find(task => task.id === id)
@@ -146,7 +178,15 @@
     return `<span class="pill ${tone}">${esc(text)}</span>`
   }
   function runDot(status) {
-    return `<span class="run-dot ${attr(status ?? '')}" title="${attr(status ?? '未运行')}"></span>`
+    return `<span class="run-dot ${attr(status ?? '')}" title="${attr(RUN_STATUS[status] ?? '未运行')}"></span>`
+  }
+  function memorySource(source) {
+    const value = String(source ?? '')
+    if (!value) return '手动写入'
+    if (value === 'chat-command') return '群聊指令'
+    if (value.startsWith('run:')) return '运行沉淀'
+    if (value.startsWith('session:')) return '会话沉淀'
+    return '自动沉淀'
   }
 
   function richText(value) {
@@ -189,7 +229,7 @@
       if (!response.ok || !body?.ok) {
         const message = body?.error?.message ?? (response.status === 401 || response.status === 403
           ? '登录状态已失效，请回到 DSH Web 登录后重新打开。'
-          : `请求失败 (${response.status})`)
+          : '请求失败，请稍后重试。')
         throw new Error(message)
       }
       return body.data
@@ -223,8 +263,8 @@
     app.className = 'boot-screen'
     app.innerHTML = `<div class="boot-mark">${icon('alert')}</div>
       <div style="text-align:center;max-width:440px">
-        <div style="color:var(--text);font-size:1rem;margin-bottom:6px">无法连接 DSHBots</div>
-        <div style="font-size:1rem;line-height:1.7">${esc(error?.message ?? error)}</div>
+        <div class="boot-error-title">无法连接 DSH Team Bots</div>
+        <div class="boot-error-msg">${esc(error?.message ?? error)}</div>
         <div class="btn-row" style="justify-content:center;margin-top:18px">
           <button class="btn primary" data-action="retry-boot">${icon('refresh')}重试</button>
           <a class="btn" href="/">返回 DSH</a>
@@ -267,11 +307,16 @@
       : state.view === 'global' ? '全局配置'
       : '项目设置'
     const title = state.view === 'chat' ? (project?.name ?? '团队空间') : viewTitle
+    const spec = VIEW_ACTION[state.view]
+    const cardOwnsPrimary = state.view === 'evolution' && pendingProposals() > 0
+    const primary = !project || !spec ? '' : spec.submit
+      ? `<button class="btn primary" type="submit" form="${spec.submit}">${icon(spec.icon)}<span class="btn-label">${spec.label}</span></button>`
+      : `<button class="btn ${cardOwnsPrimary ? '' : 'primary'}" data-action="${spec.action}"${spec.kind ? ` data-kind="${spec.kind}"` : ''}>${icon(spec.icon)}<span class="btn-label">${spec.label}</span></button>`
     const eyebrow = isGlobal
-      ? 'INSTANCE'
+      ? ''
       : project
-        ? `${project.key}<span class="sep"></span>${project.status === 'active' ? 'ACTIVE' : 'ARCHIVED'}`
-        : 'NO PROJECT'
+        ? `${project.key}<span class="sep"></span>${project.status === 'active' ? '进行中' : '已归档'}`
+        : '未选择项目'
     const chats = data.projects
     const bots = data.bots ?? []
     const activeBots = bots.filter(bot => bot.status === 'active')
@@ -281,7 +326,7 @@
         <aside class="sidebar">
           <a class="brand" href="/" title="返回 DSH Web">
             <div class="brand-mark">DSH</div>
-            <div class="brand-copy"><strong>DSHBots</strong><span>Team OS</span></div>
+            <div class="brand-copy"><strong>DSH Team Bots</strong></div>
           </a>
           <div class="tree">
             <div class="tree-group">
@@ -291,7 +336,7 @@
                 <button class="side-add" data-action="new-project" title="新建群聊 / 项目">${icon('plus')}</button>
               </div>
               ${state.tree.chats ? `<div class="tree-list">
-                ${chats.length === 0 ? '<div class="side-empty">还没有群聊。每个群聊对应一个项目空间。</div>' : chats.map(item => `
+                ${chats.length === 0 ? '<div class="side-empty">还没有群聊。</div>' : chats.map(item => `
                   <button class="tree-item chat-item ${item.id === project?.id && !isGlobal ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
                     <span class="chat-hash">#</span>
                     <span class="tree-item-name">${esc(item.name)}</span>
@@ -338,19 +383,19 @@
           <div class="main-head">
           <header class="topbar">
             <div class="topbar-title">
-              <div class="topbar-eyebrow">${eyebrow}</div>
+              ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}
               <h1>${esc(title)}</h1>
             </div>
-            ${isGlobal ? '' : `<div class="topbar-stats">
-              <div class="topstat"><span>Open tasks</span><strong>${project?.stats?.openTasks ?? 0}</strong></div>
-              <div class="topstat"><span>Running</span><strong>${running}</strong></div>
-              <div class="topstat"><span>Tokens</span><strong>${formatNumber(tokenTotal)}</strong></div>
+            ${isGlobal ? '' : `<div class="topbar-meta">
+              <span><b>${project?.stats?.openTasks ?? 0}</b> 任务</span>
+              <span class="sep"></span>
+              <span><b>${running}</b> 运行中</span>
+              <span class="sep"></span>
+              <span><b>${formatNumber(tokenTotal)}</b> tokens</span>
             </div>`}
             <div class="topbar-actions">
-              ${!isGlobal && project ? `<button class="btn primary" data-action="new-task">${icon('plus')}<span class="btn-label">新建任务</span></button>` : ''}
-              <button class="btn icon" data-action="nav" data-view="global" title="字体与全局配置" aria-label="字体与全局配置"><span style="font-weight:600;letter-spacing:-.04em">Aa</span></button>
-              <a class="btn icon" href="/" title="打开 DSH Web" aria-label="打开 DSH Web"><span class="mono" style="font-size:.875rem">DSH</span></a>
-              <button class="btn icon" data-action="refresh" title="刷新">${icon('refresh')}</button>
+              ${primary}
+              <button class="btn icon" data-action="refresh" title="刷新" aria-label="刷新">${icon('refresh')}</button>
             </div>
           </header>
           ${isGlobal ? '' : `<div class="tabbar">
@@ -390,25 +435,27 @@
   }
 
   function renderView() {
-    switch (state.view) {
-      case 'tasks': return renderTasks()
-      case 'bots': return renderBots()
-      case 'skills': return renderSkills()
-      case 'memory': return renderMemory()
-      case 'evolution': return renderEvolution()
-      case 'usage': return renderUsage()
-      case 'settings': return renderSettings()
-      case 'global': return renderGlobal()
-      case 'chat':
-      default: return renderChat()
-    }
+    const body = (() => {
+      switch (state.view) {
+        case 'tasks': return renderTasks()
+        case 'bots': return renderBots()
+        case 'skills': return renderSkills()
+        case 'memory': return renderMemory()
+        case 'evolution': return renderEvolution()
+        case 'usage': return renderUsage()
+        case 'settings': return renderSettings()
+        case 'global': return renderGlobal()
+        case 'chat':
+        default: return renderChat()
+      }
+    })()
+    return body
   }
 
   function noProject() {
     return `<div class="empty-state">
       <div class="empty-symbol">${icon('layers')}</div>
       <h3>先创建一个项目空间</h3>
-      <p>每个项目会自动获得一个群聊、负责人 Bot 和独立工作区。Bot 的工作会落到 <code class="mono">/workspace/{项目}</code>。</p>
       <button class="btn primary" data-action="new-project">${icon('plus')}新建项目</button>
     </div>`
   }
@@ -420,13 +467,13 @@
     const owner = botById(project.owner_bot_id)
     const members = project.members ?? []
     const open = (state.data.tasks ?? []).filter(task => !['done', 'canceled'].includes(task.status)).slice(0, 5)
-    const running = (state.data.runs ?? []).filter(run => run.status === 'running')
     return `
       <div class="chat-layout">
         <div class="card chat-panel">
           <div class="chat-head">
             <div>
-              <div class="chat-head-meta"># ${esc(project.name)}<span class="sep"></span>负责人 ${esc(owner?.name ?? '未设置')} · ${members.length} 个成员</div>
+              <div class="chat-head-title"><span class="chat-hash">#</span>群聊</div>
+              <div class="chat-head-meta"><span>负责人 ${esc(owner?.name ?? '未设置')}</span><span class="sep"></span><span>${members.length} 个成员</span></div>
             </div>
             <div class="member-stack">
               ${members.slice(0, 6).map(member => {
@@ -437,15 +484,16 @@
           </div>
           <div class="chat-messages">
             ${messages.length === 0 ? `<div class="chat-empty">
-              <div>${icon('message')}</div>
-              <p>这里是项目群聊。直接发言会交给负责人 Bot；用 <strong>@Bot</strong> 指定成员，或输入 <strong>/task @Bot 任务标题</strong> 创建任务。</p>
+              <div class="empty-symbol">${icon('message')}</div>
+              <h3>还没有人说话</h3>
+              <p>直接发言会交给负责人 Bot；用 <strong>@Bot</strong> 点名成员，或输入 <strong>/task @Bot 任务标题</strong> 直接创建任务。</p>
             </div>` : messages.map(renderMessage).join('')}
           </div>
           <div class="composer">
             <div class="composer-box">
               <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(state.draft)}</textarea>
               <div class="composer-bottom">
-                <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送 · <strong>@Bot</strong> 点名 · <strong>/task</strong> 建任务</span>
+                <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
                 <button class="send-btn" data-action="send-message" ${state.draft.trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
               </div>
             </div>
@@ -453,24 +501,19 @@
         </div>
         <aside class="chat-side">
           <div class="side-card">
-            <div class="side-card-head"><h3>项目负责人</h3><span>OWNER</span></div>
+            <div class="side-card-head"><h3>项目负责人</h3></div>
             ${owner ? `<div class="owner-row">
               ${avatar(owner, 'lg')}
               <div class="owner-info"><strong>${esc(owner.name)}</strong><span>${esc(owner.role || '项目负责人')} · ${esc(owner.model ?? '未配置模型')}</span></div>
             </div>` : '<div class="faint">未设置负责人</div>'}
-            <div class="side-stats" style="margin-top:12px">
-              <div class="side-stat"><span>运行中</span><strong>${running.length}</strong></div>
-              <div class="side-stat"><span>待验收</span><strong>${project.stats.inReview}</strong></div>
-              <div class="side-stat"><span>负责人验收中</span><strong>${project.stats.ownerReview ?? 0}</strong></div>
-            </div>
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>活跃任务</h3><span>${project.stats.openTasks}</span></div>
-            ${open.length === 0 ? '<div class="faint" style="font-size:1rem">没有进行中的任务。</div>' : `<div class="side-list">
+            ${open.length === 0 ? '<div class="faint">没有进行中的任务。</div>' : `<div class="side-list">
               ${open.map(task => {
                 const bot = botById(task.assignee_bot_id)
                 return `<div class="side-row" data-action="open-task" data-task-id="${attr(task.id)}" style="cursor:pointer">
-                  <span class="mini-status" style="background:${statusColor(task.status)}"></span>
+                  <span class="side-row-status">${esc(STATUS[task.status] ?? task.status)}</span>
                   <strong>${esc(task.identifier)}</strong>
                   <span class="side-row-title">${esc(task.title)}</span>
                   ${bot ? avatar(bot, 'sm') : ''}
@@ -487,28 +530,24 @@
                 return `<div class="side-row">
                   ${avatar(bot, 'sm')}
                   <span class="side-row-title">${esc(bot.name)}</span>
-                  <span class="faint">${member.member_role === 'owner' ? 'Owner' : esc(bot.role || 'Member')}</span>
+                  <span class="faint">${member.member_role === 'owner' ? '负责人' : esc(bot.role || '成员')}</span>
                 </div>`
               }).join('')}
             </div>
           </div>
           <div class="side-card">
-            <div class="side-card-head"><h3>工作区</h3><span>PATH</span></div>
-            <div class="path-row" style="margin-bottom:0"><code>${esc(project.workspace_path)}</code><button class="btn ghost small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="复制">${icon('copy')}</button></div>
+            <div class="side-card-head"><h3>工作区</h3></div>
+            <div class="path-row">${pathCode(project.workspace_path)}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
           </div>
         </aside>
       </div>`
-  }
-
-  function statusColor(status) {
-    return { backlog: 'var(--surface2)', todo: 'var(--blue)', in_progress: 'var(--amber)', blocked: 'var(--red)', in_review: 'var(--violet)', done: 'var(--green)', canceled: 'var(--faint)' }[status] ?? 'var(--faint)'
   }
 
   function renderMessage(message) {
     if (message.sender_type === 'system') {
       return `<div class="message-system">
         <span>${esc(message.body)}</span>
-        ${message.taskIdentifier ? `<div class="task-chip-line" style="justify-content:center"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}"><strong>${esc(message.taskIdentifier)}</strong>${esc(message.taskTitle ?? '')}</button></div>` : ''}
+        ${message.taskIdentifier ? `<div class="task-chip-line center"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}"><strong>${esc(message.taskIdentifier)}</strong>${esc(message.taskTitle ?? '')}</button></div>` : ''}
       </div>`
     }
     const isUser = message.sender_type === 'user'
@@ -541,33 +580,34 @@
     if (!project) return noProject()
     const tasks = filteredTasks()
     const members = project.members ?? []
+    const filtering = Boolean(state.taskFilter.search) || state.taskFilter.status !== 'all' || state.taskFilter.assignee !== 'all'
     return `
       <div class="section-head">
-        <p>拖拽卡片切换状态；任务执行由项目成员 Bot 在独立工作区完成。</p>
-      </div>
-      <div class="board-toolbar">
-        <input class="input search" id="task-search" placeholder="搜索任务、编号或标签" value="${attr(state.taskFilter.search)}">
-        <select class="select" data-task-filter="status">
-          <option value="all">全部状态</option>
-          ${STATUS_ORDER.map(status => `<option value="${status}" ${state.taskFilter.status === status ? 'selected' : ''}>${STATUS[status]}</option>`).join('')}
-        </select>
-        <select class="select" data-task-filter="assignee">
-          <option value="all">全部成员</option>
-          ${members.map(member => `<option value="${attr(member.id)}" ${state.taskFilter.assignee === member.id ? 'selected' : ''}>${esc(member.name)}</option>`).join('')}
-        </select>
-        <span class="muted" style="font-size:1rem;margin-left:auto">${tasks.length} 个任务</span>
+        <p>拖拽卡片切换状态。</p>
+        <div class="board-toolbar" style="margin:0">
+          <input class="input search" id="task-search" placeholder="搜索任务、编号或标签" value="${attr(state.taskFilter.search)}">
+          <select class="select" data-task-filter="status">
+            <option value="all">全部状态</option>
+            ${STATUS_ORDER.map(status => `<option value="${status}" ${state.taskFilter.status === status ? 'selected' : ''}>${STATUS[status]}</option>`).join('')}
+          </select>
+          <select class="select" data-task-filter="assignee">
+            <option value="all">全部成员</option>
+            ${members.map(member => `<option value="${attr(member.id)}" ${state.taskFilter.assignee === member.id ? 'selected' : ''}>${esc(member.name)}</option>`).join('')}
+          </select>
+          <span class="tag">${tasks.length} 个任务</span>
+        </div>
       </div>
       ${tasks.length === 0 ? `<div class="empty-state">
         <div class="empty-symbol">${icon('board')}</div>
-        <h3>${state.taskFilter.search || state.taskFilter.status !== 'all' || state.taskFilter.assignee !== 'all' ? '没有匹配的任务' : '任务面板还是空的'}</h3>
-        <p>创建一个任务并指派给项目中的 Bot，或直接在群聊输入 <code class="mono">/task @Bot 任务标题</code>。</p>
-        <button class="btn primary" data-action="new-task">${icon('plus')}新建任务</button>
+        <h3>${filtering ? '没有匹配的任务' : '任务面板还是空的'}</h3>
+        <button class="btn" data-action="new-task">${icon('plus')}新建任务</button>
       </div>` : `<div class="board">
         ${STATUS_ORDER.map(status => {
           const column = tasks.filter(task => task.status === status)
           return `<div class="column" data-drop-status="${status}">
-            <div class="column-head"><span class="column-dot ${status}"></span><strong>${STATUS[status]}</strong><span class="column-count">${column.length}</span></div>
-            ${column.length === 0 ? `<div class="board-empty">拖到这里</div>` : column.map(renderTaskCard).join('')}
+            <div class="column-head"><strong>${STATUS[status]}</strong><span class="column-count">${column.length}</span></div>
+            ${column.map(renderTaskCard).join('')}
+            ${column.length === 0 ? `<div class="board-empty">拖到这里</div>` : ''}
           </div>`
         }).join('')}
       </div>`}
@@ -577,17 +617,28 @@
   function renderTaskCard(task) {
     const bot = botById(task.assignee_bot_id)
     const run = task.latestRun
-    return `<article class="task-card" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
+    const runLabel = run ? ({
+      running: '运行中',
+      failed: '失败',
+      queued: '排队',
+      succeeded: '已完成',
+      canceled: '已取消',
+    }[run.status] ?? '') : ''
+    const tags = []
+    if (task.status === 'in_review') tags.push(task.review_target === 'owner_bot' ? '负责人验收中' : '待您验收')
+    for (const label of task.labels ?? []) tags.push(label)
+    const isRunning = run?.status === 'running'
+    return `<article class="task-card${isRunning ? ' running' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
       <div class="task-card-top">
         <span class="task-id">${esc(task.identifier)}</span>
-        <span class="priority-dot ${attr(task.priority)}" title="${attr(PRIORITY[task.priority] ?? task.priority)}"></span>
+        <span class="task-priority">${esc(PRIORITY[task.priority] ?? task.priority)}</span>
       </div>
       <div class="task-card-title">${esc(task.title)}</div>
-      ${task.status === 'in_review' ? `<div class="task-tags"><span class="tag">${task.review_target === 'owner_bot' ? '负责人bot验收中' : '待您验收'}</span></div>` : ''}
-      ${task.labels?.length ? `<div class="task-tags">${task.labels.map(label => `<span class="tag">${esc(label)}</span>`).join('')}</div>` : ''}
+      ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
       <div class="task-card-foot">
         ${run ? runDot(run.status) : ''}
-        <span>${run ? (run.status === 'running' ? '运行中' : run.status === 'failed' ? '失败' : run.status === 'queued' ? '排队' : '') : ''}</span>
+        <span>${runLabel}</span>
+        ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
         ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}
       </div>
     </article>`
@@ -596,25 +647,21 @@
   function renderBots() {
     const bots = state.data?.bots ?? []
     return `
-      <div class="section-head">
-        <p>每个 Bot 有独立角色、模型、推理强度和长期记忆。运行时统一由 DSH Session 执行。</p>
-        <button class="btn" data-action="new-bot">${icon('plus')}新建 Bot</button>
-      </div>
       ${bots.length === 0 ? `<div class="empty-state">
         <div class="empty-symbol">${icon('bot')}</div><h3>还没有 Bot</h3><p>至少创建一个 Bot 才能运行项目群聊和任务。</p>
-        <button class="btn primary" data-action="new-bot">${icon('plus')}新建 Bot</button>
+        <button class="btn" data-action="new-bot">${icon('plus')}新建 Bot</button>
       </div>` : `<div class="grid bots">
         ${bots.map(bot => `<article class="card bot-card">
           <div class="bot-card-head">
             ${avatar(bot, 'lg')}
             <div class="bot-card-title"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || '通用成员')}</span></div>
-            <span class="bot-status ${attr(bot.status)}">${bot.status === 'active' ? 'ACTIVE' : bot.status === 'paused' ? 'PAUSED' : 'ARCHIVED'}</span>
+            <span class="bot-status ${attr(bot.status)}">${esc(BOT_STATUS[bot.status] ?? bot.status)}</span>
           </div>
-          <div class="bot-model">${icon('terminal')}<span>${esc(bot.modelRef ?? '未配置模型')}${bot.effort ? ` · ${esc(bot.effort)}` : ''}</span></div>
-          <div class="bot-metrics"><span><strong>${bot.openTasks}</strong> 任务</span><span><strong>${bot.memoryCount}</strong> 记忆</span><span><strong>${bot.stats.succeeded}</strong> 次成功</span></div>
+          <div class="bot-model"><span>${esc(bot.modelRef ?? '未配置模型')}${bot.effort ? ` · ${esc(EFFORT[bot.effort] ?? bot.effort)}` : ''}</span></div>
+          <div class="bot-metrics"><span><strong>${bot.openTasks}</strong> 任务</span><span class="dot-sep"></span><span><strong>${bot.memoryCount}</strong> 记忆</span><span class="dot-sep"></span><span><strong>${bot.stats.succeeded}</strong> 次成功</span></div>
           <div class="bot-card-actions">
             <button class="btn small" data-action="edit-bot" data-bot-id="${attr(bot.id)}">${icon('edit')}配置</button>
-            ${bot.status === 'active' ? `<button class="btn small ghost" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档</button>` : ''}
+            ${bot.status === 'active' ? `<button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档</button>` : ''}
           </div>
         </article>`).join('')}
       </div>`}
@@ -626,30 +673,29 @@
     const proposals = (state.data?.proposals ?? []).filter(item => item.kind === 'skill' && item.status === 'pending')
     return `
       <div class="section-head">
-        <p>所有项目共享 <code class="mono">/workspace/.agents/skills</code>。技能变更走提案和审批，不直接覆盖。</p>
+        <p>技能变更走提案和审批，不直接覆盖。</p>
         <div class="btn-row">
           <button class="btn" data-action="sync-skills">${icon('refresh')}重新扫描</button>
-          <button class="btn" data-action="new-proposal" data-kind="skill">${icon('plus')}技能提案</button>
         </div>
       </div>
-      <div class="path-row" style="margin-bottom:14px"><span>SKILL ROOT</span><code>${esc(state.data.paths.skillRoot)}/skills</code><button class="btn ghost small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
+      <div class="path-row plain" style="margin-bottom:14px"><span>技能根目录</span><code>${esc(state.data.paths.skillRoot)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
       <div class="card list-card">
-        ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>技能池为空</h3><p>在 <code class="mono">/workspace/.agents/skills/{slug}/SKILL.md</code> 放置技能文件，或提交一个技能提案并审批。</p></div>` : skills.map(skill => `
+        ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>技能池为空</h3><p>在技能根目录放置技能文件，或提交一个技能提案并审批。</p></div>` : skills.map(skill => `
           <div class="list-row skill-row">
-            <div class="empty-symbol" style="width:34px;height:34px;border-radius:9px;margin:0">${icon('spark')}</div>
+            <div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div>
             <div class="list-main">
-              <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint">v${esc(skill.version)}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(skill.status)}</span></div>
+              <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint mono">v${esc(skill.version)}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[skill.status] ?? skill.status)}</span></div>
               <div class="list-desc">${esc(skill.description || '无描述')}</div>
-              <div class="list-meta"><span>${esc(skill.relativePath)}</span><span>${esc(skill.checksum.slice(0, 10))}</span></div>
+              <div class="list-meta"><span>${esc(skill.relativePath)}</span></div>
             </div>
           </div>
         `).join('')}
       </div>
-      ${proposals.length ? `<div class="section-head" style="margin-top:24px"><p>待审批技能提案——审批通过后写入共享技能池。</p></div>
+      ${proposals.length ? `<div class="card-head" style="margin-top:24px"><h3>待审批技能提案</h3></div>
       <div class="grid">
         ${proposals.map(item => `<div class="card proposal-card">
-          <div class="proposal-head"><div class="empty-symbol" style="width:32px;height:32px;border-radius:8px;margin:0">${icon('spark')}</div><div><h3>${esc(item.title)}</h3><p>${esc(item.rationale)}</p></div></div>
-          <div class="proposal-actions"><span class="pill amber">待审</span><button class="btn primary small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="approved">${icon('check')}通过</button><button class="btn small danger" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="rejected">拒绝</button></div>
+          <div class="proposal-head"><div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div><div><h3>${esc(item.title)}</h3><p>${esc(item.rationale)}</p></div></div>
+          <div class="proposal-actions"><span class="pill">待审</span><button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="approved">${icon('check')}通过</button><button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="rejected">拒绝</button></div>
         </div>`).join('')}
       </div>` : ''}
     `
@@ -659,28 +705,35 @@
     const project = activeProject()
     const memories = (state.data?.memories ?? []).filter(memory => state.memoryFilter === 'all' || memory.scope_type === state.memoryFilter)
     return `
-      <div class="section-head">
-        <p>Bot 记忆只属于该 Bot；项目记忆对该项目成员可见。敏感信息会被过滤。</p>
-        <button class="btn" data-action="new-memory">${icon('plus')}写入记忆</button>
-      </div>
       <div class="board-toolbar">
         <select class="select" id="memory-filter">
           <option value="all" ${state.memoryFilter === 'all' ? 'selected' : ''}>全部作用域</option>
           <option value="project" ${state.memoryFilter === 'project' ? 'selected' : ''}>项目记忆</option>
           <option value="bot" ${state.memoryFilter === 'bot' ? 'selected' : ''}>Bot 记忆</option>
         </select>
-        <span class="muted" style="font-size:1rem;margin-left:auto">${memories.length} 条</span>
+        <span class="tag" style="margin-left:auto">${memories.length} 条</span>
       </div>
-      ${!project ? noProject() : memories.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('memory')}</div><h3>还没有记忆</h3><p>任务完成后会自动沉淀交付经验；也可以手动写入项目决策或成员偏好。</p><button class="btn" data-action="new-memory">${icon('plus')}写入记忆</button></div>` : `<div class="grid">
+      ${!project ? noProject() : memories.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('memory')}</div><h3>还没有记忆</h3><p>任务完成后会自动沉淀交付经验。</p><button class="btn" data-action="new-memory">${icon('plus')}写入记忆</button></div>` : `<div class="grid">
         ${memories.map(memory => {
           const scopeName = memory.scope_type === 'project' ? '项目' : (botById(memory.scope_id)?.name ?? 'Bot')
-          return `<article class="card" style="padding:14px">
-            <div class="section-head" style="margin-bottom:8px">
-              <div><span class="pill ${memory.scope_type === 'project' ? 'violet' : ''}">${esc(scopeName)}</span> <strong style="font-size:1rem;margin-left:6px">${esc(memory.topic)}</strong></div>
-              <div class="btn-row"><button class="btn ghost small" data-action="edit-memory" data-memory-id="${attr(memory.id)}">${icon('edit')}</button><button class="btn ghost small" data-action="delete-memory" data-memory-id="${attr(memory.id)}">${icon('trash')}</button></div>
+          return `<article class="card list-card">
+            <div class="list-row">
+              <div class="list-main">
+                <div class="card-head">
+                  <div class="list-title">${esc(memory.topic)}</div>
+                  <div class="btn-row">
+                    <span class="pill">${esc(scopeName)}</span>
+                    <button class="btn icon" data-action="edit-memory" data-memory-id="${attr(memory.id)}" title="编辑记忆" aria-label="编辑记忆">${icon('edit')}</button>
+                    <button class="btn icon" data-action="delete-memory" data-memory-id="${attr(memory.id)}" title="删除记忆" aria-label="删除记忆">${icon('trash')}</button>
+                  </div>
+                </div>
+                <div class="list-desc">${esc(memory.content)}</div>
+                <div class="list-meta" style="justify-content:space-between">
+                  <span>${esc(memorySource(memory.source))}</span>
+                  <span>${esc(timeAgo(memory.updated_at))} · 置信度 ${Number(memory.confidence).toFixed(2)}</span>
+                </div>
+              </div>
             </div>
-            <div style="color:var(--muted);font-size:1rem;line-height:1.7;white-space:pre-wrap">${esc(memory.content)}</div>
-            <div class="list-meta" style="margin-top:9px"><span>${esc(memory.source || 'manual')}</span><span>${esc(timeAgo(memory.updated_at))}</span><span>confidence ${Number(memory.confidence).toFixed(2)}</span></div>
           </article>`
         }).join('')}
       </div>`}
@@ -699,22 +752,63 @@
   function renderEvolution() {
     const proposals = state.data?.proposals ?? []
     const pending = proposals.filter(item => item.status === 'pending')
+    const proposalDiff = (proposal) => {
+      const payload = proposal.payload ?? {}
+      const bot = proposal.bot_id ? botById(proposal.bot_id) : null
+      const blocks = []
+      if (proposal.kind === 'bot_update' && bot) {
+        const fields = [
+          ['role', bot.role, payload.role],
+          ['instructions', bot.instructions, payload.instructions],
+          ['model', bot.modelRef ?? bot.model, payload.model ? `${payload.provider ?? bot.provider}/${payload.model}` : ''],
+          ['effort', bot.effort, payload.effort]
+        ]
+        for (const [field, before, after] of fields) {
+          if (!after || String(before ?? '') === String(after)) continue
+          blocks.push(`${field}\n- ${before}\n+ ${after}`)
+        }
+      }
+      if (proposal.kind === 'skill') {
+        blocks.push(`skill ${payload.slug ?? payload.name ?? 'new'}\n+ ${payload.content ?? proposalPreview(proposal)}`)
+      }
+      if (!blocks.length) blocks.push(proposalPreview(proposal))
+      return blocks.join('\n\n')
+    }
     return `
       <div class="section-head">
-        <p>角色、模型、强度和技能的变化都必须经过评估与人工审批，并生成不可变版本。</p>
-        <button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button>
+        <p>变更需经人工审批后生效。</p>
+        <div class="btn-row">
+          ${pending.length ? `<span class="pill">${pending.length} 个待审批</span>` : ''}
+          <button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button>
+        </div>
       </div>
-      ${pending.length ? `<div class="pill amber" style="margin-bottom:12px">${pending.length} 个待审批</div>` : ''}
-      ${proposals.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('branch')}</div><h3>还没有进化提案</h3><p>Bot 可以用 <code class="mono">team_propose_evolution</code> 提交自我改进建议，但无法自行批准。</p><button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button></div>` : `<div class="grid">
-        ${proposals.map(proposal => `<article class="card proposal-card">
-          <div class="proposal-head">
-            <div class="empty-symbol" style="width:34px;height:34px;border-radius:9px;margin:0">${icon(proposal.kind === 'skill' ? 'spark' : 'branch')}</div>
-            <div style="flex:1;min-width:0"><div class="list-title">${esc(proposal.title)}<span class="pill ${proposal.status === 'approved' ? 'green' : proposal.status === 'rejected' ? 'red' : 'amber'}">${esc(PROPOSAL_STATUS[proposal.status] ?? proposal.status)}</span></div><p>${esc(proposal.rationale)}</p></div>
-          </div>
-          <div class="proposal-body">${esc(proposalPreview(proposal).slice(0, 6000))}</div>
-          <div class="list-meta"><span>${esc(proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>by ${esc(proposal.decided_by)}</span>` : ''}</div>
-          ${proposal.status === 'pending' ? `<div class="proposal-actions"><button class="btn primary small" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="approved">${icon('check')}通过并应用</button><button class="btn small danger" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="rejected">拒绝</button></div>` : ''}
-        </article>`).join('')}
+      ${proposals.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('branch')}</div><h3>还没有进化提案</h3><p>Bot 可以提交自我改进建议，但无法自行批准。</p><button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button></div>` : `<div class="grid" style="gap:16px">
+        ${proposals.map(proposal => {
+          const tone = proposal.status === 'approved' ? 'green' : proposal.status === 'rejected' ? 'red' : ''
+          return `<article class="card proposal-card">
+            <div class="card-head">
+              <div class="proposal-head" style="flex:1;min-width:0">
+                <div class="empty-symbol" style="width:34px;height:34px;border-radius:9px;margin:0">${icon(proposal.kind === 'skill' ? 'spark' : 'branch')}</div>
+                <div class="list-main">
+                  <h3>${esc(proposal.title)}</h3>
+                  <p>${esc(proposal.rationale)}</p>
+                </div>
+              </div>
+              <span class="pill ${tone}">${esc(PROPOSAL_STATUS[proposal.status] ?? proposal.status)}</span>
+            </div>
+            <div class="proposal-body" style="margin-top:0">${esc(proposalPreview(proposal).slice(0, 6000))}</div>
+            <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>由 ${esc(proposal.decided_by)} 决定</span>` : ''}</div>
+            ${proposal.evaluation ? `<div class="list-desc">评估 · ${esc(proposal.evaluation)}</div>` : ''}
+            ${proposal.status === 'pending' ? `<details class="proposal-diff">
+              <summary class="btn small">${icon('chevron', 'chev')}查看差异</summary>
+              <div class="proposal-body" style="margin-top:8px">${esc(proposalDiff(proposal).slice(0, 4000))}</div>
+            </details>
+            <div class="proposal-actions end">
+              <button class="btn ${proposal.id === pending[0]?.id ? 'primary' : ''}" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="approved">${icon('check')}通过并应用</button>
+              <button class="btn" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="rejected">拒绝</button>
+            </div>` : ''}
+          </article>`
+        }).join('')}
       </div>`}
     `
   }
@@ -736,41 +830,55 @@
     const days = usage.byDay ?? []
     const maxDay = Math.max(1, ...days.map(item => item.totalTokens))
     const usingProject = state.usageScope === 'project' && activeProject()
+    const barList = (rows, key, max) => rows.map(item => `<div class="bar-row"><span class="bar-label">${esc(item[key])}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, item.totalTokens / max * 100)}%"></span></span><span class="bar-value">${formatNumber(item.totalTokens)}</span></div>`).join('')
     return `
       <div class="section-head">
-        <p>token 与成本按 DSH 模型调用归集；全局、项目、Bot 三个维度可下钻。</p>
-        <div class="btn-row">
-          <button class="btn small ${state.usageScope === 'global' ? 'primary' : ''}" data-action="usage-scope" data-scope="global">全局</button>
-          <button class="btn small ${state.usageScope === 'project' ? 'primary' : ''}" data-action="usage-scope" data-scope="project" ${activeProject() ? '' : 'disabled'}>本项目</button>
+        <div class="seg">
+          <button data-action="usage-scope" data-scope="global" aria-pressed="${state.usageScope === 'global'}">全局</button>
+          <button data-action="usage-scope" data-scope="project" aria-pressed="${state.usageScope === 'project'}" ${activeProject() ? '' : 'disabled'}>本项目</button>
         </div>
       </div>
       <div class="metric-grid">
-        <div class="metric"><span>${usingProject ? '项目 TOTAL TOKENS' : '全局 TOTAL TOKENS'}</span><strong>${formatNumber(scope.totalTokens)}</strong><small>${formatNumber(scope.inputTokens)} 输入 · ${formatNumber(scope.outputTokens)} 输出</small></div>
-        <div class="metric"><span>模型调用</span><strong>${formatNumber(scope.calls)}</strong><small>缓存读 ${formatNumber(scope.cacheReadTokens)}</small></div>
-        <div class="metric"><span>成本</span><strong>${formatCost(scope.cost)}</strong><small>${usage.priceCount ? `${usage.priceCount} 条价格规则` : '尚未配置模型价格'}</small></div>
-        <div class="metric"><span>统计窗口</span><strong>${usage.days ?? 30}d</strong><small>按调用时间归集</small></div>
+        <div class="card metric">
+          <span class="metric-label">总 tokens（${usingProject ? '项目' : '全局'}）</span>
+          <strong>${formatNumber(scope.totalTokens)}</strong>
+          <small class="mono">${formatNumber(scope.inputTokens)} 输入 · ${formatNumber(scope.outputTokens)} 输出</small>
+        </div>
+        <div class="card metric">
+          <span class="metric-label">模型调用</span>
+          <strong>${formatNumber(scope.calls)}</strong>
+          <small class="mono">缓存读 ${formatNumber(scope.cacheReadTokens)}</small>
+        </div>
+        <div class="card metric">
+          <span class="metric-label">成本</span>
+          <strong>${costValue(scope.cost)}</strong>
+          <small class="mono">${usage.priceCount ? `${usage.priceCount} 条价格规则` : '尚未配置模型价格'}</small>
+        </div>
+        <div class="card metric">
+          <span class="metric-label">统计窗口</span>
+          <strong>${usage.days ?? 30}d</strong>
+          <small class="mono">${usingProject ? '本项目' : '全局'} · 按调用时间归集</small>
+        </div>
       </div>
       <div class="usage-grid">
         <div class="card usage-panel">
-          <div class="side-card-head"><h3>按 Bot</h3><span>TOKENS</span></div>
-          ${byBot.length === 0 ? '<div class="faint" style="font-size:1rem">暂无调用记录。</div>' : `<div class="bar-list">
-            ${byBot.map(item => `<div class="bar-row"><span class="bar-label">${esc(item.name)}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, item.totalTokens / maxBot * 100)}%"></span></span><span class="bar-value">${formatNumber(item.totalTokens)}</span></div>`).join('')}
-          </div>`}
+          <div class="card-head"><h3>按 Bot</h3></div>
+          ${byBot.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${barList(byBot, 'name', maxBot)}</div>`}
         </div>
         <div class="card usage-panel">
-          <div class="side-card-head"><h3>${usingProject ? '按模型' : '按项目'}</h3><span>${usingProject ? 'MODEL' : 'PROJECT'}</span></div>
-          ${usingProject ? (byModel.length === 0 ? '<div class="faint" style="font-size:1rem">暂无调用记录。</div>' : `<div class="bar-list">${byModel.map(item => `<div class="bar-row"><span class="bar-label">${esc(item.model)}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, item.totalTokens / maxModel * 100)}%"></span></span><span class="bar-value">${formatNumber(item.totalTokens)}</span></div>`).join('')}</div>`)
-            : (byProject.length === 0 ? '<div class="faint" style="font-size:1rem">暂无调用记录。</div>' : `<div class="bar-list">${byProject.map(item => `<div class="bar-row"><span class="bar-label">${esc(item.name)}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, item.totalTokens / maxProject * 100)}%"></span></span><span class="bar-value">${formatNumber(item.totalTokens)}</span></div>`).join('')}</div>`)}
+          <div class="card-head"><h3>${usingProject ? '按模型' : '按项目'}</h3></div>
+          ${usingProject ? (byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${barList(byModel, 'model', maxModel)}</div>`)
+            : (byProject.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${barList(byProject, 'name', maxProject)}</div>`)}
         </div>
       </div>
       <div class="usage-grid" style="margin-top:12px">
         <div class="card usage-panel">
-          <div class="side-card-head"><h3>近 14 天</h3><span>${usingProject ? 'PROJECT' : 'ALL'}</span></div>
-          ${days.length === 0 ? '<div class="faint" style="font-size:1rem">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar" style="height:${Math.max(3, day.totalTokens / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"><span>${esc(day.day.slice(5))}</span></div>`).join('')}</div>`}
+          <div class="card-head"><h3>近 14 天</h3></div>
+          ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, day.totalTokens / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % 3 === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
         </div>
         <div class="card usage-panel">
-          <div class="side-card-head"><h3>模型明细</h3><button class="btn ghost small" data-action="new-price">设置价格</button></div>
-          ${byModel.length === 0 ? '<div class="faint" style="font-size:1rem">暂无数据。</div>' : `<table class="usage-table"><thead><tr><th>Model</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>${byModel.map(item => `<tr><td>${esc(item.model)}</td><td>${formatNumber(item.calls)}</td><td>${formatNumber(item.totalTokens)}</td><td>${formatCost(item.cost)}</td></tr>`).join('')}</tbody></table>`}
+          <div class="card-head"><h3>模型明细</h3><button class="btn small" data-action="new-price">设置价格</button></div>
+          ${byModel.length === 0 ? '<div class="faint">暂无数据。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td>${esc(item.model)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono">${formatCost(item.cost)}</td></tr>`).join('')}</tbody></table>`}
           <div class="usage-note">未配置价格时成本显示“未配置”，不会按 0 计费。价格按每百万 token 配置。</div>
         </div>
       </div>
@@ -779,58 +887,70 @@
 
   function renderSettings() {
     const project = activeProject()
+    const paths = state.data.paths ?? {}
+    const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
     if (!project) return `${noProject()}
       <div class="card form-card" style="margin-top:14px">
-        <h3>系统路径</h3>
-        <div class="path-row"><span>WORKSPACE</span><code>${esc(state.data.paths.workspace)}</code></div>
-        <div class="path-row"><span>SHARED</span><code>${esc(state.data.paths.skillRoot)}</code></div>
-        <div class="path-row"><span>DATA</span><code>${esc(state.data.paths.dataDir)}</code></div>
+        <div class="card-head"><h3>系统路径</h3></div>
+        <div class="path-row"><span>工作区</span>${pathCode(paths.workspace ?? '')}${copyPath(paths.workspace ?? '')}</div>
+        <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot ?? '')}${copyPath(paths.skillRoot ?? '')}</div>
+        <div class="path-row"><span>数据</span>${pathCode(paths.dataDir ?? '')}${copyPath(paths.dataDir ?? '')}</div>
       </div>`
     const members = activeBots()
     const owner = botById(project.owner_bot_id)
+    const memberIds = new Set(project.members.map(member => member.id))
     return `
-      <div class="section-head"><p>负责人、成员、工作区和预算会直接影响群聊路由与调度。</p></div>
-      <div class="settings-grid">
-        <form class="card form-card" data-form="save-project">
-          <h3>项目资料</h3>
-          <input type="hidden" name="projectId" value="${attr(project.id)}">
-          <div class="field"><label>项目名称</label><input class="input" style="width:100%" name="name" value="${attr(project.name)}" maxlength="80"></div>
-          <div class="field"><label>项目描述</label><textarea class="textarea" name="description">${esc(project.description || '')}</textarea></div>
-          <div class="field-row">
-            <div class="field"><label>负责人 Bot</label><select class="select" style="width:100%" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
-            <div class="field"><label>群聊回复模式</label><select class="select" style="width:100%" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>负责人优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
+      <form id="project-settings-form" data-form="save-project">
+        <div class="settings-grid">
+          <div>
+            <div class="card form-card">
+              <div class="card-head"><h3>项目资料</h3><span class="meta">${esc(project.key ?? project.id)}</span></div>
+              <input type="hidden" name="projectId" value="${attr(project.id)}">
+              <div class="field"><label>项目名称</label><input class="input" name="name" value="${attr(project.name)}" maxlength="80"></div>
+              <div class="field"><label>项目描述</label><textarea class="textarea" name="description">${esc(project.description || '')}</textarea></div>
+              <div class="field-row">
+                <div class="field"><label>负责人 Bot</label><select class="select" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
+                <div class="field"><label>群聊回复模式</label><select class="select" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>负责人优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
+              </div>
+            </div>
+            <div class="card form-card" style="margin-top:12px">
+              <div class="card-head"><h3>项目成员</h3><span class="meta">${project.members.length} 位</span></div>
+              <div class="check-list">${members.map(bot => `<div class="check-row"><input type="checkbox" id="member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}" ${memberIds.has(bot.id) ? 'checked' : ''} ${bot.id === project.owner_bot_id ? 'disabled' : ''}>${avatar(bot, 'sm')}<label for="member-${attr(bot.id)}">${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div>
+              <div class="hint">负责人始终是成员，取消勾选即可调整其他成员的参与范围。</div>
+            </div>
+            <div class="card form-card" style="margin-top:12px">
+              <div class="card-head"><h3>月度预算</h3></div>
+              <div class="field-row">
+                <div class="field"><label>Token 预算</label><input class="input mono" style="text-align:right" type="number" min="0" name="tokenBudget" value="${project.token_budget ?? ''}" placeholder="不限制"></div>
+                <div class="field"><label>成本预算 (USD)</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" name="costBudget" value="${project.cost_budget ?? ''}" placeholder="不限制"></div>
+              </div>
+              <div class="hint">超出预算时项目会提示预算已用尽。</div>
+            </div>
           </div>
-          <div class="field"><label>项目成员</label>
-            <div class="check-list">${members.map(bot => `<label class="check-row"><input type="checkbox" name="memberIds" value="${attr(bot.id)}" ${project.members.some(member => member.id === bot.id) ? 'checked' : ''} ${bot.id === project.owner_bot_id ? 'disabled' : ''}> ${avatar(bot, 'sm')} ${esc(bot.name)} <span class="faint" style="margin-left:auto">${esc(bot.role || '')}</span></label>`).join('')}</div>
-            <div class="hint">负责人始终是成员。当前成员 ${project.members.length} 个。</div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label>月度 token 预算</label><input class="input" style="width:100%" type="number" min="0" name="tokenBudget" value="${project.token_budget ?? ''}" placeholder="不限制"></div>
-            <div class="field"><label>月度成本预算 (USD)</label><input class="input" style="width:100%" type="number" min="0" step="0.01" name="costBudget" value="${project.cost_budget ?? ''}" placeholder="不限制"></div>
-          </div>
-          <div class="btn-row"><button class="btn primary" type="submit">${icon('check')}保存设置</button>${project.status === 'active' ? `<button class="btn danger" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button>` : '<span class="pill amber">项目已归档</span>'}</div>
-        </form>
-        <div>
-          <div class="card form-card">
-            <h3>路径与容量</h3>
-            <div class="path-row"><span>WORKSPACE</span><code>${esc(project.workspace_path)}</code><button class="btn ghost small" data-action="copy" data-copy="${attr(project.workspace_path)}">${icon('copy')}</button></div>
-            <div class="path-row"><span>SHARED</span><code>${esc(state.data.paths.skillRoot)}</code><button class="btn ghost small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot)}">${icon('copy')}</button></div>
-            <div class="path-row"><span>DATA</span><code>${esc(state.data.paths.dataDir)}</code></div>
-            <div class="kv"><span>负责人</span><strong>${esc(owner?.name ?? '未设置')}</strong></div>
-            <div class="kv"><span>项目状态</span><strong>${esc(project.status)}</strong></div>
-            <div class="kv"><span>任务总数</span><strong>${project.stats.tasks}</strong></div>
-            <div class="kv"><span>运行总数</span><strong>${project.stats.runs}</strong></div>
-          </div>
-          <div class="card form-card" style="margin-top:12px">
-            <h3>团队信息</h3>
-            <div class="kv"><span>Bot 数量</span><strong>${state.data.bots.length}</strong></div>
-            <div class="kv"><span>项目数量</span><strong>${state.data.projects.length}</strong></div>
-            <div class="kv"><span>共享技能</span><strong>${state.data.skills.length}</strong></div>
-            <div class="kv"><span>待审提案</span><strong>${state.data.proposals.filter(item => item.status === 'pending').length}</strong></div>
-            <div class="usage-note">DSH 运行在容器内，容器是安全边界；项目目录提供逻辑隔离，不是强沙箱。</div>
+          <div>
+            <div class="card form-card">
+              <div class="card-head"><h3>工作区路径</h3></div>
+              <div class="path-row"><span>工作区</span>${pathCode(project.workspace_path)}${copyPath(project.workspace_path)}</div>
+              <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot ?? '')}${copyPath(paths.skillRoot ?? '')}</div>
+              <div class="path-row"><span>数据</span>${pathCode(paths.dataDir ?? '')}${copyPath(paths.dataDir ?? '')}</div>
+            </div>
+            <div class="card form-card" style="margin-top:12px">
+              <div class="card-head"><h3>项目状态</h3>${project.status === 'active' ? '<span class="pill green">运行中</span>' : '<span class="pill amber">已归档</span>'}</div>
+              <div class="kv"><span>负责人</span><strong>${esc(owner?.name ?? '未设置')}</strong></div>
+              <div class="kv"><span>任务总数</span><strong>${project.stats.tasks}</strong></div>
+              <div class="kv"><span>运行总数</span><strong>${project.stats.runs}</strong></div>
+              ${project.status === 'active' ? `<div class="btn-row" style="margin-top:12px"><button class="btn small" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>` : ''}
+            </div>
+            <div class="card form-card" style="margin-top:12px">
+              <div class="card-head"><h3>团队信息</h3></div>
+              <div class="kv"><span>Bot 数量</span><strong>${state.data.bots.length}</strong></div>
+              <div class="kv"><span>项目数量</span><strong>${state.data.projects.length}</strong></div>
+              <div class="kv"><span>共享技能</span><strong>${state.data.skills.length}</strong></div>
+              <div class="kv"><span>待审提案</span><strong>${state.data.proposals.filter(item => item.status === 'pending').length}</strong></div>
+            </div>
           </div>
         </div>
-      </div>
+      </form>
     `
   }
 
@@ -845,64 +965,62 @@
     const bots = data.bots ?? []
     const activeBots = bots.filter(bot => bot.status === 'active')
     const pending = pendingProposals()
+    const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
     return `
-      <div class="section-head">
-        <p>这些设置作用于整个 DSHBots 实例，与具体项目无关。</p>
-        <div class="btn-row">
-          <button class="btn" data-action="sync-skills">${icon('refresh')}重新扫描技能池</button>
-          <button class="btn" data-action="new-price">${icon('plus')}模型价格</button>
-        </div>
-      </div>
       <div class="global-grid">
         <div class="card form-card">
-          <h3>界面</h3>
+          <div class="card-head">
+            <h3>界面</h3>
+            <div class="btn-row"><button class="btn small" type="button" data-action="reset-scale">${icon('refresh')}重置</button></div>
+          </div>
           <div class="field">
             <label>界面字号 <span class="mono" id="ui-scale-value">${Math.round(scale * 100)}%</span></label>
             <input type="range" id="ui-scale" class="range" min="1" max="1.4" step="0.05" value="${scale}">
-            <div class="field-row scale-row">
+            <div class="scale-row">
               <span class="faint">小</span>
-              <button class="btn ghost small" data-action="reset-scale" type="button">重置</button>
               <span class="faint" style="margin-left:auto">大</span>
             </div>
-            <div class="hint">保存在本地浏览器；字体默认 Inter。</div>
           </div>
+          <div class="field">
+            <label>配色</label>
+            <div class="seg" role="group" aria-label="配色">
+              <button data-action="set-theme" data-theme="dsh" aria-pressed="${state.theme === 'dsh'}">DSH</button>
+              <button data-action="set-theme" data-theme="catppuccin" aria-pressed="${state.theme === 'catppuccin'}">Catppuccin</button>
+            </div>
+          </div>
+          <div class="kv"><span>缩放范围</span><strong>100% – 140%</strong></div>
+          <div class="kv"><span>偏好存储</span><strong>本地浏览器</strong></div>
         </div>
         <div class="card form-card">
-          <h3>DSH 继承与路径</h3>
-          <div class="path-row"><span>DSH HOME</span><code>${esc(data.paths.dshHome ?? '~/.dsh')}</code><button class="btn ghost small" data-action="copy" data-copy="${attr(data.paths.dshHome ?? '')}">${icon('copy')}</button></div>
-          <div class="path-row"><span>WORKSPACE</span><code>${esc(data.paths.workspace)}</code><button class="btn ghost small" data-action="copy" data-copy="${attr(data.paths.workspace)}">${icon('copy')}</button></div>
-          <div class="path-row"><span>SHARED</span><code>${esc(data.paths.skillRoot)}</code><button class="btn ghost small" data-action="copy" data-copy="${attr(data.paths.skillRoot)}">${icon('copy')}</button></div>
-          <div class="path-row"><span>DATA</span><code>${esc(data.paths.dataDir)}</code><button class="btn ghost small" data-action="copy" data-copy="${attr(data.paths.dataDir)}">${icon('copy')}</button></div>
-          <div class="usage-note">DSH 全局配置继承自宿主机 <code class="mono">~/.dsh</code>，本插件配置落在 <code class="mono">~/.dsh/profiles/bots</code>。所有 Bot 运行时统一使用 DSH Session、模型与工具。</div>
+          <div class="card-head"><h3>DSH 路径</h3><button class="btn small" data-action="sync-skills">${icon('refresh')}重新扫描技能</button></div>
+          <div class="path-row"><span>DSH 目录</span>${pathCode(data.paths.dshHome ?? '~/.dsh')}${copyPath(data.paths.dshHome ?? '')}</div>
+          <div class="path-row"><span>工作区</span>${pathCode(data.paths.workspace)}${copyPath(data.paths.workspace)}</div>
+          <div class="path-row"><span>共享</span>${pathCode(data.paths.skillRoot)}${copyPath(data.paths.skillRoot)}</div>
+          <div class="path-row"><span>数据</span>${pathCode(data.paths.dataDir)}${copyPath(data.paths.dataDir)}</div>
         </div>
         <div class="card form-card">
-          <h3>DSH 运行时</h3>
-          <div class="kv"><span>运行内核</span><strong>DSH Session</strong></div>
-          <div class="kv"><span>版本</span><strong class="mono">${esc(data.dsh?.version ?? '—')}</strong></div>
-          <div class="kv"><span>Profile</span><strong>${esc(data.dsh?.profile ?? 'bots')}</strong></div>
-          <div class="kv"><span>模型 Provider</span><strong>${(data.models ?? []).length}</strong></div>
-          <div class="kv"><span>DSH Tools</span><strong>${data.dsh?.toolCount ? `${data.dsh.toolCount} 个，已继承` : '继承全局'}</strong></div>
-          <div class="kv"><span>插件 / MCP</span><strong>继承全局</strong></div>
-          <div class="kv"><span>登录态</span><strong>DSH Cookie</strong></div>
-          <div class="usage-note">Bot 运行在原生 DSH Session 中，模型、工具、MCP、技能和鉴权均继承 DSH；本插件只增加团队编排、任务、记忆和统计。</div>
+          <div class="card-head"><h3>DSH 服务</h3></div>
           <div class="btn-row" style="margin-top:12px">
-            <a class="btn" href="/">${icon('arrow')}打开 DSH Web</a>
             <button class="btn" data-action="check-dsh-update">${icon('refresh')}检查更新</button>
-            <button class="btn primary" data-action="upgrade-dsh">升级并热重启</button>
+            <button class="btn" data-action="reboot-dsh">仅重启 DSH</button>
           </div>
-          <div class="usage-note">升级会查询 npm 上最新非 alpha 版本，停止 DSH 进程后由容器入口脚本安装并原地重启；有排队或运行中任务时会拒绝升级。</div>
+          <div class="btn-row split">
+            <button class="btn danger" data-action="upgrade-dsh">升级并重启</button>
+          </div>
+          <div class="usage-note">有排队或运行中任务时会拒绝升级。</div>
         </div>
-        <div class="card form-card">
-          <h3>团队与资源</h3>
-          <div class="kv"><span>活跃 Bot</span><strong>${activeBots.length} / ${bots.length}</strong></div>
-          <div class="kv"><span>群聊 / 项目</span><strong>${data.projects.length}</strong></div>
-          <div class="kv"><span>共享技能</span><strong>${(data.skills ?? []).length}</strong></div>
-          <div class="kv"><span>待审提案</span><strong>${pending}</strong></div>
-          <div class="kv"><span>模型价格规则</span><strong>${data.usage?.priceCount ?? 0}</strong></div>
-          <div class="usage-note">容器是安全边界，项目目录只提供逻辑隔离；每个群聊对应 <code class="mono">/workspace/{项目}</code> 下的独立工作区。</div>
+        <div class="card form-card" style="grid-column:1/-1">
+          <div class="card-head"><h3>团队与资源</h3></div>
+          <div class="kv-grid">
+            <div class="kv"><span>活跃 Bot</span><strong>${activeBots.length} / ${bots.length}</strong></div>
+            <div class="kv"><span>群聊 / 项目</span><strong>${data.projects.length}</strong></div>
+            <div class="kv"><span>共享技能</span><strong>${(data.skills ?? []).length}</strong></div>
+            <div class="kv"><span>待审提案</span><strong>${pending}</strong></div>
+            <div class="kv"><span>模型价格规则</span><strong>${data.usage?.priceCount ?? 0}</strong></div>
+          </div>
         </div>
-        ${renderPriceCard()}
       </div>
+      ${renderPriceCard()}
     `
   }
 
@@ -910,7 +1028,7 @@
     return `<div class="modal-backdrop" data-action="modal-backdrop">
       <div class="modal ${size}" role="dialog" aria-modal="true" aria-label="${attr(title)}">
         <div class="modal-head">
-          <div class="modal-head-main"><div class="eyebrow">${badge || 'DSHBOTS'}</div><h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div>
+          <div class="modal-head-main">${badge ? `<div class="eyebrow">${badge}</div>` : ''}<h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div>
           <button class="modal-close" data-action="close-modal" aria-label="关闭">×</button>
         </div>
         <div class="modal-body">${body}</div>
@@ -922,8 +1040,7 @@
   function modalLoading(title) {
     return modalShell({
       title,
-      badge: 'LOADING',
-      body: '<div class="empty-state" style="min-height:180px;border:0"><div class="boot-mark" style="width:42px;height:42px;border-radius:12px;font-size:13px">DSH</div><p style="margin-top:12px">正在读取数据…</p></div>',
+      body: '<div class="modal-loading"><div class="boot-mark sm">DSH</div><div>正在读取数据…</div></div>',
       footer: '<button class="btn" data-action="close-modal">关闭</button>',
       size: 'small',
     })
@@ -955,24 +1072,23 @@
   function effortOptions(modelRef, current) {
     const model = (state.data?.models ?? []).find(item => item.ref === modelRef)
     const efforts = model?.efforts ?? []
-    if (efforts.length === 0) return `<option value="">模型默认${current ? `（当前 ${esc(current)}）` : ''}</option>`
-    return `<option value="">模型默认</option>${efforts.map(effort => `<option value="${attr(effort.id)}" ${current === effort.id ? 'selected' : ''}>${esc(effort.name)}</option>`).join('')}`
+    if (efforts.length === 0) return `<option value="">模型默认${current ? `（当前 ${esc(EFFORT[current] ?? current)}）` : ''}</option>`
+    return `<option value="">模型默认</option>${efforts.map(effort => `<option value="${attr(effort.id)}" ${current === effort.id ? 'selected' : ''}>${esc(EFFORT[effort.id] ?? effort.name)}</option>`).join('')}`
   }
 
   function modalNewProject() {
     const bots = activeBots()
     return modalShell({
       title: '新建项目空间',
-      subtitle: '每个项目自动创建群聊、负责人和独立工作区。',
-      badge: 'PROJECT',
+      badge: '',
       body: `<form data-form="create-project" id="modal-form">
         <div class="field"><label>项目名称</label><input class="input" style="width:100%" name="name" placeholder="例如：官网重构" required maxlength="80" autofocus></div>
         <div class="field-row">
-          <div class="field"><label>项目 Key</label><input class="input mono" style="width:100%" name="key" placeholder="WEB" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{0,9}"><div class="hint">任务编号前缀，同时生成小写工作区目录。</div></div>
+          <div class="field"><label>项目 Key</label><input class="input mono" style="width:100%" name="key" placeholder="WEB" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{0,9}"><div class="hint">任务的编号前缀。</div></div>
           <div class="field"><label>负责人 Bot</label><select class="select" style="width:100%" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label>项目说明</label><textarea class="textarea" name="description" placeholder="项目目标、边界和验收标准"></textarea></div>
-        ${bots.length > 1 ? `<div class="field"><label>其他成员</label><div class="check-list">${bots.slice(1).map(bot => `<label class="check-row"><input type="checkbox" name="memberIds" value="${attr(bot.id)}"> ${avatar(bot, 'sm')} ${esc(bot.name)} <span class="faint" style="margin-left:auto">${esc(bot.role || '')}</span></label>`).join('')}</div></div>` : ''}
+        ${bots.length > 1 ? `<div class="field"><label>其他成员</label><div class="check-list">${bots.slice(1).map(bot => `<label class="check-row"><input type="checkbox" name="memberIds" value="${attr(bot.id)}"> ${avatar(bot, 'sm')} ${esc(bot.name)} <span class="role">${esc(bot.role || '')}</span></label>`).join('')}</div></div>` : ''}
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建项目</button>`,
     })
@@ -983,8 +1099,8 @@
     const modelRef = bot?.modelRef ?? state.data?.models?.[0]?.ref ?? ''
     return modalShell({
       title: bot ? `配置 ${bot.name}` : '新建 Bot',
-      subtitle: bot ? '角色、模型和推理强度会形成新的不可变版本。' : '每个 Bot 运行时都通过 DSH Session 执行。',
-      badge: bot ? `VERSION ${bot.current_revision}` : 'NEW BOT',
+      subtitle: '',
+      badge: '',
       size: 'wide',
       body: `<div class="${bot ? 'task-detail-grid' : ''}">
         <form data-form="${bot ? 'update-bot' : 'create-bot'}" id="modal-form">
@@ -997,18 +1113,18 @@
             <div class="field"><label>模型</label><select class="select" style="width:100%" name="modelRef" data-model-select>${modelOptions(bot?.provider, bot?.model)}</select></div>
             <div class="field"><label>推理强度</label><select class="select" style="width:100%" name="effort" data-effort-select>${effortOptions(modelRef, bot?.effort)}</select></div>
           </div>
-          <div class="field"><label>外观颜色</label><select class="select" style="width:100%" name="color">${COLORS.map(color => `<option value="${color}" ${bot?.color === color ? 'selected' : ''}>${color}</option>`).join('')}</select></div>
-          <div class="field"><label>角色指令</label><textarea class="textarea" name="instructions" rows="10" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot?.instructions ?? '')}</textarea><div class="hint">这段内容会作为 DSH Session 的系统提示词注入。</div></div>
-          ${bot ? `<div class="btn-row"><button class="btn danger" type="button" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档 Bot</button></div>` : ''}
+          <div class="field"><label>外观颜色</label><select class="select" style="width:100%" name="color">${COLORS.map(color => `<option value="${color}" ${bot?.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
+          <div class="field"><label>角色指令</label><textarea class="textarea" name="instructions" rows="10" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot?.instructions ?? '')}</textarea></div>
+          ${bot ? `<div class="btn-row"><button class="btn small" type="button" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档 Bot</button></div>` : ''}
         </form>
         ${bot ? `<aside class="task-detail-side">
-          <div class="eyebrow" style="margin-bottom:9px">VERSION HISTORY</div>
-          ${(detail.revisions ?? []).map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span><button class="btn ghost small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}" ${revision.version === bot.current_revision ? 'disabled' : ''}>回滚</button></div>`).join('') || '<div class="faint">暂无版本</div>'}
+          <div class="eyebrow" style="margin-bottom:9px">版本历史</div>
+          ${(detail.revisions ?? []).map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span><button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}" ${revision.version === bot.current_revision ? 'disabled' : ''}>回滚</button></div>`).join('') || '<div class="faint">暂无版本</div>'}
           <div class="divider"></div>
           <div class="kv"><span>运行次数</span><strong>${bot.stats.runs}</strong></div>
           <div class="kv"><span>成功 / 失败</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
           <div class="kv"><span>长期记忆</span><strong>${bot.memoryCount}</strong></div>
-          <div class="kv"><span>状态</span><strong>${esc(bot.status)}</strong></div>
+          <div class="kv"><span>状态</span><strong>${esc(BOT_STATUS[bot.status] ?? bot.status)}</strong></div>
           <div class="usage-note">模型或强度变更会在下一次运行时生效，不会中断当前运行。</div>
         </aside>` : ''}
       </div>`,
@@ -1022,7 +1138,7 @@
     return modalShell({
       title: '新建任务',
       subtitle: `${project.key} · ${project.name}`,
-      badge: 'TASK',
+      badge: '',
       body: `<form data-form="create-task" id="modal-form">
         <input type="hidden" name="projectId" value="${attr(project.id)}">
         <div class="field"><label>标题</label><input class="input" style="width:100%" name="title" required maxlength="240" placeholder="一个可执行、可验收的结果" autofocus></div>
@@ -1044,8 +1160,7 @@
     const latestFailed = (task.runs ?? []).find(run => ['failed', 'canceled'].includes(run.status))
     return modalShell({
       title: `${task.identifier} · ${task.title}`,
-      subtitle: `${project?.key ?? ''} · ${STATUS[task.status] ?? task.status}`,
-      badge: task.status.replace('_', ' ').toUpperCase(),
+      badge: '',
       size: 'wide',
       body: `<div class="task-detail-grid">
         <div class="task-detail-main">
@@ -1059,12 +1174,11 @@
               <div class="field"><label>优先级</label><select class="select" style="width:100%" name="priority">${Object.entries(PRIORITY).map(([key, label]) => `<option value="${key}" ${task.priority === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
             </div>
             <div class="field"><label>负责人</label><select class="select" style="width:100%" name="assigneeBotId"><option value="">未指派</option>${project.members.map(member => `<option value="${attr(member.id)}" ${task.assignee_bot_id === member.id ? 'selected' : ''}>${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
-            <div class="btn-row"><button class="btn primary" type="submit">${icon('check')}保存</button><button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button>${activeRun ? `<button class="btn danger" type="button" data-action="cancel-run" data-run-id="${attr(activeRun.id)}">${icon('stop')}停止运行</button>` : ''}${latestFailed ? `<button class="btn" type="button" data-action="retry-run" data-run-id="${attr(latestFailed.id)}">${icon('refresh')}重试</button>` : ''}</div>
           </form>
           <div class="divider"></div>
-          <div class="eyebrow" style="margin-bottom:6px">COMMENTS</div>
-          ${(task.comments ?? []).length === 0 ? '<div class="faint" style="font-size:1rem;margin:10px 0">还没有评论。</div>' : task.comments.map(comment => `<div class="comment">
-            ${avatar(comment.author_type === 'bot' ? (botById(comment.author_id) ?? { name: comment.authorName, color: 'gray' }) : { name: 'You', color: 'teal' }, 'sm')}
+          <div class="eyebrow" style="margin-bottom:6px">评论</div>
+          ${(task.comments ?? []).length === 0 ? '<div class="note">还没有评论。</div>' : task.comments.map(comment => `<div class="comment">
+            ${avatar(comment.author_type === 'bot' ? (botById(comment.author_id) ?? { name: comment.authorName, color: 'gray' }) : { name: '我', color: 'teal' }, 'sm')}
             <div class="comment-main"><div class="comment-head"><strong>${esc(comment.authorName)}</strong><span>${esc(timeAgo(comment.created_at))}</span></div><div class="comment-body">${richText(comment.body)}</div></div>
           </div>`).join('')}
           <form data-form="add-comment" style="margin-top:14px">
@@ -1074,24 +1188,24 @@
           </form>
         </div>
         <aside class="task-detail-side">
-          <div class="eyebrow">RUNS</div>
-          <div style="margin-top:8px">${(task.runs ?? []).length === 0 ? '<div class="faint" style="font-size:1rem">还没有运行。</div>' : task.runs.map(run => `<div class="run-row">
-            <div class="run-row-top">${runDot(run.status)}<strong>#${run.attempt}</strong><span>${esc(run.status)}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
+          <div class="eyebrow">运行记录</div>
+          ${(activeRun || latestFailed) ? `<div class="btn-row" style="margin:9px 0 2px">${activeRun ? `<button class="btn danger small" type="button" data-action="cancel-run" data-run-id="${attr(activeRun.id)}">${icon('stop')}停止运行</button>` : ''}${latestFailed ? `<button class="btn small" type="button" data-action="retry-run" data-run-id="${attr(latestFailed.id)}">${icon('refresh')}重试</button>` : ''}</div>` : ''}
+          <div style="margin-top:8px">${(task.runs ?? []).length === 0 ? '<div class="note">还没有运行。</div>' : task.runs.map(run => `<div class="run-row">
+            <div class="run-row-top">${runDot(run.status)}<strong>#${run.attempt}</strong><span>${esc(RUN_STATUS[run.status] ?? run.status)}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
             <div class="run-row-meta"><span>${esc(duration(run.started_at, run.ended_at))}</span><span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
-            ${run.error_message ? `<div class="run-output" style="color:var(--red)">${esc(run.error_message)}</div>` : ''}
-            ${run.output ? `<details style="margin-top:6px"><summary class="faint" style="font-size:1rem;cursor:pointer">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
+            ${run.error_message ? `<div class="run-output error">${esc(run.error_message)}</div>` : ''}
+            ${run.output ? `<details style="margin-top:6px"><summary class="summary-link">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
           </div>`).join('')}</div>
           <div class="divider"></div>
-          <div class="eyebrow" style="margin-bottom:7px">DETAILS</div>
+          <div class="eyebrow" style="margin-bottom:7px">详情</div>
           <div class="kv"><span>编号</span><strong>${esc(task.identifier)}</strong></div>
           <div class="kv"><span>负责人</span><strong>${esc(task.assignee_name || '未指派')}</strong></div>
-          <div class="kv"><span>创建者</span><strong>${esc(task.creator_type)}</strong></div>
+          <div class="kv"><span>创建者</span><strong>${esc(CREATOR_TYPE[task.creator_type] ?? task.creator_type)}</strong></div>
           <div class="kv"><span>更新时间</span><strong>${esc(timeAgo(task.updated_at))}</strong></div>
-          <div class="kv"><span>版本</span><strong>v${task.version}</strong></div>
-          ${(task.dependencies ?? []).length ? `<div class="divider"></div><div class="eyebrow" style="margin-bottom:7px">DEPENDS ON</div>${task.dependencies.map(dep => `<div class="kv"><span>${esc(dep.title)}</span><strong>${esc(STATUS[dep.status] ?? dep.status)}</strong></div>`).join('')}` : ''}
+          ${(task.dependencies ?? []).length ? `<div class="divider"></div><div class="eyebrow" style="margin-bottom:7px">依赖</div>${task.dependencies.map(dep => `<div class="kv"><span>${esc(dep.title)}</span><strong>${esc(STATUS[dep.status] ?? dep.status)}</strong></div>`).join('')}` : ''}
         </aside>
       </div>`,
-      footer: `<button class="btn" data-action="close-modal">关闭</button>`,
+      footer: `<button class="btn" data-action="close-modal">关闭</button><button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button><button class="btn primary" type="submit" form="task-form">${icon('check')}保存</button>`,
     })
   }
 
@@ -1103,8 +1217,7 @@
     ]
     return modalShell({
       title: memory ? '编辑记忆' : '写入记忆',
-      subtitle: '记忆会进入对应 Bot 或项目后续运行的上下文。',
-      badge: 'MEMORY',
+      badge: '',
       body: `<form data-form="${memory ? 'update-memory' : 'create-memory'}" id="modal-form">
         <input type="hidden" name="memoryId" value="${attr(memory?.id ?? '')}">
         <div class="field"><label>作用域</label>${memory
@@ -1121,8 +1234,8 @@
     const project = activeProject()
     return modalShell({
       title: '新建进化提案',
-      subtitle: '审批通过后才会生成新的 Bot 版本或技能版本。',
-      badge: 'EVOLUTION',
+      subtitle: '审批通过后才会生效。',
+      badge: '',
       size: 'wide',
       body: `<form data-form="create-proposal" id="modal-form">
         <input type="hidden" name="projectId" value="${attr(project?.id ?? '')}">
@@ -1134,10 +1247,10 @@
         <div class="field"><label>依据</label><textarea class="textarea" name="rationale" rows="4" required placeholder="为什么需要变更，来自哪些失败或重复模式"></textarea></div>
         <div data-section="bot"><div class="field"><label>新的角色指令</label><textarea class="textarea" name="instructions" rows="9" placeholder="完整替换现有指令，而不是追加"></textarea></div></div>
         <div data-section="skill" style="display:none">
-          <div class="field-row"><div class="field"><label>技能 slug</label><input class="input mono" style="width:100%" name="slug" placeholder="release-check"></div><div class="field"><label>版本</label><input class="input" style="width:100%" name="version" value="1.0.0"></div></div>
+          <div class="field-row"><div class="field"><label>技能标识</label><input class="input mono" style="width:100%" name="slug" placeholder="发布检查"></div><div class="field"><label>版本</label><input class="input" style="width:100%" name="version" value="1.0.0"></div></div>
           <div class="field"><label>显示名称</label><input class="input" style="width:100%" name="name"></div>
           <div class="field"><label>描述</label><input class="input" style="width:100%" name="description"></div>
-          <div class="field"><label>SKILL.md 内容</label><textarea class="textarea" name="content" rows="10" placeholder="## When to use&#10;..."></textarea></div>
+          <div class="field"><label>技能内容（Markdown）</label><textarea class="textarea" name="content" rows="10" placeholder="## When to use&#10;..."></textarea></div>
         </div>
         <div class="field"><label>评估方式</label><textarea class="textarea" name="evaluation" rows="3" placeholder="审批前如何验证：回归任务、失败案例、人工检查点"></textarea></div>
       </form>`,
@@ -1161,18 +1274,25 @@
     const providers = [...new Set((state.data?.models ?? []).map(item => item.provider))]
     const fallback = defaultPriceFor(seed.model)
     const hint = fallback
-      ? `配置默认：hit ${fallback.cacheReadPerMtok} / miss ${fallback.inputPerMtok} / out ${fallback.outputPerMtok} ${fallback.currency}（每百万 token）`
-      : '每百万 token 计价。Provider 留空表示按模型名匹配任意 provider。'
+      ? `配置默认：缓存读 ${fallback.cacheReadPerMtok} / 输入 ${fallback.inputPerMtok} / 输出 ${fallback.outputPerMtok} ${fallback.currency}（每百万 token）`
+      : '每百万 token 计价。供应商留空表示匹配任意模型。'
+    const overridden = Boolean(editing && fallback) && (
+      Number(seed.cache_read_per_mtok) !== Number(fallback.cacheReadPerMtok)
+      || Number(seed.input_per_mtok) !== Number(fallback.inputPerMtok)
+      || Number(seed.output_per_mtok) !== Number(fallback.outputPerMtok)
+      || String(seed.currency ?? fallback.currency).toUpperCase() !== String(fallback.currency).toUpperCase()
+    )
     return modalShell({
       title: editing ? `编辑价格 · ${seed.model}` : '设置模型价格',
-      subtitle: '保存后仅影响后续调用。配置默认只在首次启动播种，Web 修改优先。',
-      badge: 'PRICING',
+      subtitle: '保存后仅影响后续调用。',
+      badge: '',
       body: `<form data-form="save-price" id="modal-form">
-        <div class="field-row"><div class="field"><label>Provider（可留空）</label><input class="input mono" style="width:100%" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="留空 = 通配"></div><div class="field"><label>Model</label><input class="input mono" style="width:100%" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
-        <div class="field-row"><div class="field"><label>miss / 输入</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="inputPerMtok" value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? 0)}"></div><div class="field"><label>out / 输出</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="outputPerMtok" value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? 0)}"></div></div>
-        <div class="field-row"><div class="field"><label>hit / 缓存读</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? 0)}"></div><div class="field"><label>缓存写</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? 0)}"></div></div>
+        <div class="field-row"><div class="field"><label>模型供应商（可留空）</label><input class="input mono" style="width:100%" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="留空 = 匹配任意供应商"></div><div class="field"><label>模型名</label><input class="input mono" style="width:100%" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
+        <div class="field-row"><div class="field"><label>输入</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="inputPerMtok" value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? 0)}"></div><div class="field"><label>输出</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="outputPerMtok" value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? 0)}"></div></div>
+        <div class="field-row"><div class="field"><label>缓存读</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? 0)}"></div><div class="field"><label>缓存写</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? 0)}"></div></div>
         <div class="field"><label>币种</label><input class="input mono" style="width:100%" name="currency" value="${attr(seed.currency ?? fallback?.currency ?? 'CNY')}" placeholder="CNY"></div>
         <div class="hint">${esc(hint)}</div>
+        ${overridden ? `<div class="btn-row"><button class="btn danger" type="button" data-action="reset-price" data-model="${attr(seed.model)}" data-provider="${attr(seed.provider ?? '')}">恢复默认价格</button></div>` : ''}
         <datalist id="price-models">${knownModels.map(model => `<option value="${attr(model)}"></option>`).join('')}</datalist>
         <datalist id="price-providers">${providers.map(provider => `<option value="${attr(provider)}"></option>`).join('')}</datalist>
       </form>`,
@@ -1183,24 +1303,49 @@
   function renderPriceCard() {
     const prices = state.data?.prices ?? []
     const defaults = priceDefaults()
-    const rows = prices.length > 0
-      ? prices.map(price => {
-        const fallback = defaultPriceFor(price.model)
-        return `<tr>
-          <td>${esc(price.model)}<div class="faint mono" style="font-size:.85em">${price.provider ? esc(price.provider) : '任意 provider'}</div></td>
-          <td>${esc(price.cache_read_per_mtok)}</td>
-          <td>${esc(price.input_per_mtok)}</td>
-          <td>${esc(price.output_per_mtok)}</td>
-          <td>${esc(price.currency)}</td>
-          <td><button class="btn ghost small" data-action="edit-price" data-model="${attr(price.model)}" data-provider="${attr(price.provider)}">编辑</button>${fallback ? `<button class="btn ghost small" data-action="reset-price" data-model="${attr(price.model)}" data-provider="${attr(price.provider)}">默认</button>` : ''}</td>
-        </tr>`
-      }).join('')
-      : '<tr><td colspan="6" class="faint">还没有价格规则。</td></tr>'
     const missing = defaults.filter(item => !prices.some(price => price.model.toLowerCase() === item.model.toLowerCase()))
-    return `<div class="card form-card" style="grid-column:1/-1">
-      <div class="side-card-head"><h3>模型价格</h3><button class="btn small" data-action="new-price">${icon('plus')}新增</button></div>
-      <table class="usage-table"><thead><tr><th>Model</th><th>hit</th><th>miss</th><th>out</th><th>币种</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-      <div class="usage-note">价格为每百万 token。配置默认（${defaults.length} 个）只在首次启动播种，之后以这里为准，点「默认」恢复配置值。${missing.length ? `配置中但未生效：${missing.map(item => esc(item.model)).join('、')}。` : ''}</div>
+    const rows = prices.map(price => {
+      const fallback = defaultPriceFor(price.model)
+      const builtin = Boolean(fallback)
+        && Number(price.cache_read_per_mtok) === Number(fallback.cacheReadPerMtok)
+        && Number(price.cache_write_per_mtok) === Number(fallback.cacheWritePerMtok)
+        && Number(price.input_per_mtok) === Number(fallback.inputPerMtok)
+        && Number(price.output_per_mtok) === Number(fallback.outputPerMtok)
+      const provider = price.provider ? price.provider : '任意供应商'
+      return `<tr>
+        <td class="price-model">${esc(price.model)}<span class="pill ${builtin ? 'green' : 'violet'}">${builtin ? '内置' : '自定义'}</span></td>
+        <td class="num mono">${esc(price.cache_read_per_mtok)}</td>
+        <td class="num mono">${esc(price.input_per_mtok)}</td>
+        <td class="num mono">${esc(price.output_per_mtok)}</td>
+        <td>${esc(price.currency)}</td>
+        <td>${esc(provider)}</td>
+        <td class="num"><button class="btn small" data-action="edit-price" data-model="${attr(price.model)}" data-provider="${attr(price.provider)}">${icon('edit')}编辑</button></td>
+      </tr>`
+    }).join('')
+    const body = prices.length
+      ? `<table class="usage-table price-table">
+          <thead><tr>
+            <th class="eyebrow mono">模型</th>
+            <th class="eyebrow mono num">缓存读</th>
+            <th class="eyebrow mono num">输入</th>
+            <th class="eyebrow mono num">输出</th>
+            <th class="eyebrow mono">币种</th>
+            <th class="eyebrow mono">供应商</th>
+            <th class="eyebrow mono num"></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      : `<div class="empty-state"><div class="empty-symbol">${icon('chart')}</div><h3>还没有价格规则</h3><p>新增一条模型价格，成本估算才会生效。</p></div>`
+    return `<div class="card price-card">
+      <div class="card-head">
+        <h3>模型价格</h3>
+        <div class="btn-row">
+          <span class="meta">${prices.length} 条规则</span>
+          <button class="btn" data-action="new-price">${icon('plus')}新增</button>
+        </div>
+      </div>
+      ${body}
+      <div class="usage-note">价格为每百万 token。在「编辑」里可以还原配置默认值。${missing.length ? `配置中但未生效：${missing.map(item => esc(item.model)).join('、')}。` : ''}</div>
     </div>`
   }
 
@@ -1292,7 +1437,7 @@
 
   async function saveTaskFromForm(taskId) {
     const form = document.getElementById('task-form')
-    if (!form) throw new Error('任务表单不可用')
+    if (!form) throw new Error('保存失败，请重试。')
     const formData = new FormData(form)
     const assignee = formData.get('assigneeBotId')
     await api('update_task', {
@@ -1346,6 +1491,12 @@
           render()
           break
         }
+        case 'set-theme': {
+          state.theme = applyUiTheme(target.dataset.theme)
+          try { localStorage.setItem(UI_THEME_KEY, state.theme) } catch {}
+          render()
+          break
+        }
         case 'check-dsh-update': {
           const info = await api('dsh_update_info', {})
           toast(info.updateAvailable
@@ -1354,7 +1505,7 @@
           break
         }
         case 'upgrade-dsh': {
-          if (!window.confirm('升级 DSH 会短暂中断服务并重启容器内进程。确认继续？')) break
+          if (!window.confirm('升级 DSH 会短暂中断服务。确认继续？')) break
           const info = await api('upgrade_dsh', {})
           if (info.upToDate) {
             toast(`当前 ${info.current} 已是可用的最新版本`, 'success')
@@ -1362,6 +1513,13 @@
           }
           toast(`正在升级到 ${info.target}，服务将在约 1 秒后重启…`, 'success')
           setTimeout(() => location.reload(), 9000)
+          break
+        }
+        case 'reboot-dsh': {
+          if (!window.confirm('重启会短暂中断 DSH 和团队 Bot 运行。确认继续？')) break
+          await api('reboot_dsh', {})
+          toast('DSH 正在重启，页面将在完成后自动重载…', 'success')
+          setTimeout(() => location.reload(), 7000)
           break
         }
         case 'select-project':
@@ -1417,6 +1575,7 @@
           const model = target.dataset.model
           if (!window.confirm(`把 ${model} 的价格恢复为配置默认值？`)) break
           await api('reset_price', { provider: target.dataset.provider ?? '', model })
+          state.modal = null
           await loadState(state.projectId, { quiet: true })
           render()
           toast(`${model} 已恢复默认价格`, 'success')
@@ -1458,7 +1617,7 @@
         }
         case 'rollback-bot': {
           const botId = target.dataset.botId
-          if (!window.confirm('回滚到该版本并创建新的版本记录？')) break
+          if (!window.confirm('回滚到该版本？')) break
           await api('rollback_bot', { botId, revisionId: target.dataset.revisionId })
           await loadState(state.projectId, { quiet: true })
           await openBot(botId)
@@ -1497,7 +1656,7 @@
           break
         }
         case 'delete-memory': {
-          if (!window.confirm('归档这条记忆？归档后不再进入上下文。')) break
+          if (!window.confirm('归档这条记忆？归档后不会再被 Bot 引用。')) break
           await api('delete_memory', { memoryId: target.dataset.memoryId })
           await refresh()
           toast('记忆已归档', 'success')
@@ -1601,10 +1760,10 @@
         return
       }
       if (type === 'add-comment') {
-        await api('add_comment', { taskId: payload.taskId, body: payload.body })
+        const comment = await api('add_comment', { taskId: payload.taskId, body: payload.body })
         await loadState(state.projectId, { quiet: true })
         await reloadTaskModal(payload.taskId)
-        toast('评论已添加', 'success')
+        toast(comment?.steered ? '评论已直通执行中的会话' : '评论已添加', 'success')
         return
       }
       if (type === 'create-memory') {
@@ -1653,11 +1812,11 @@
         if (kind === 'skill' && !payload.content) throw new Error('技能内容不能为空')
         state.modal = null
         await refresh()
-        toast(`提案 ${proposal.id.slice(-6)} 已提交审批`, 'success')
+        toast('提案已提交审批', 'success')
         return
       }
       if (type === 'save-price') {
-        if (!String(payload.model ?? '').trim()) throw new Error('Model 不能为空')
+        if (!String(payload.model ?? '').trim()) throw new Error('模型不能为空')
         await api('save_price', {
           provider: payload.provider ?? '',
           model: payload.model,
@@ -1816,5 +1975,10 @@
   observer.observe(app, { childList: true, subtree: false })
 
   setInterval(() => { void poll() }, 2800)
+  setInterval(() => {
+    for (const el of document.querySelectorAll('.run-clock[data-started]')) {
+      el.textContent = duration(el.dataset.started)
+    }
+  }, 1000)
   void init()
 })()
