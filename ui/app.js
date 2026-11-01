@@ -738,7 +738,7 @@
               <div class="field"><label for="solo-bot-model">模型</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
               <div class="field"><label for="solo-bot-effort">推理强度</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
             </div>
-            <div class="field"><label for="solo-bot-color">外观颜色</label><select class="select" style="width:100%" id="solo-bot-color" name="color">${COLORS.map(color => `<option value="${color}" ${bot.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
+            <div class="field"><span class="field-label" id="solo-bot-color-label">外观颜色</span><div class="swatch-row" role="radiogroup" aria-labelledby="solo-bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div></div>
             <div class="field"><label for="solo-bot-instructions">角色指令</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="12" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot.instructions ?? '')}</textarea></div>
           </form>
           <div class="divider"></div>
@@ -757,7 +757,7 @@
           <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
           <div class="divider"></div>
           <div class="eyebrow" style="margin-bottom:9px">版本历史</div>
-          ${revisions.length === 0 ? '<div class="faint">' + (state.soloDetail ? '暂无版本' : '加载中…') + '</div>' : revisions.map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span><button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}" ${revision.version === bot.current_revision ? 'disabled' : ''}>回滚</button></div>`).join('')}
+          ${revisions.length === 0 ? '<div class="faint">' + (state.soloDetail ? '暂无版本' : '加载中…') + '</div>' : revisions.map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span>${revision.version === bot.current_revision ? '' : `<button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}">回滚</button>`}</div>`).join('')}
           <div class="usage-note">模型或强度变更会在下一次运行时生效，不会中断当前运行。</div>
         </aside>
       </div>`
@@ -1530,7 +1530,7 @@
             <input class="input mono" id="secret-value" name="value" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 个字符，保存后不再回显">
             <div class="hint">至少 8 个字符；同作用域同名会覆盖旧值。</div>
           </div>
-          <div class="btn-row"><button class="btn primary small" type="submit">${icon('check')}保存密钥</button></div>
+          <div class="btn-row"><button class="btn small" type="submit">${icon('check')}保存密钥</button></div>
         </form>
       </div>`
   }
@@ -1813,13 +1813,13 @@
             <div class="field"><label id="bot-model-label" for="bot-model">模型</label><select class="select" style="width:100%" id="bot-model" name="modelRef" data-model-select>${modelOptions(bot?.provider, bot?.model)}</select></div>
             <div class="field"><label id="bot-effort-label" for="bot-effort">推理强度</label><select class="select" style="width:100%" id="bot-effort" name="effort" data-effort-select>${effortOptions(modelRef, bot?.effort)}</select></div>
           </div>
-          <div class="field"><label id="bot-color-label" for="bot-color">外观颜色</label><select class="select" style="width:100%" id="bot-color" name="color">${COLORS.map(color => `<option value="${color}" ${bot?.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
+          <div class="field"><span class="field-label" id="bot-color-label">外观颜色</span><div class="swatch-row" role="radiogroup" aria-labelledby="bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot?.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div></div>
           <div class="field"><label id="bot-instructions-label" for="bot-instructions">角色指令</label><textarea class="textarea" id="bot-instructions" name="instructions" rows="10" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot?.instructions ?? '')}</textarea></div>
           ${bot ? `<div class="btn-row"><button class="btn small" type="button" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档 Bot</button></div>` : ''}
         </form>
         ${bot ? `<aside class="task-detail-side">
           <div class="eyebrow" style="margin-bottom:9px">版本历史</div>
-          ${(detail.revisions ?? []).map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span><button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}" ${revision.version === bot.current_revision ? 'disabled' : ''}>回滚</button></div>`).join('') || '<div class="faint">暂无版本</div>'}
+          ${(detail.revisions ?? []).map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span>${revision.version === bot.current_revision ? '' : `<button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}">回滚</button>`}</div>`).join('') || '<div class="faint">暂无版本</div>'}
           <div class="divider"></div>
           <div class="kv"><span>运行次数</span><strong>${bot.stats.runs}</strong></div>
           <div class="kv"><span>成功 / 失败</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
@@ -1828,7 +1828,7 @@
           <div class="usage-note">模型或强度变更会在下一次运行时生效，不会中断当前运行。</div>
         </aside>` : ''}
       </div>`,
-      footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('check')}${bot ? '保存新版本' : '创建 Bot'}</button>`,
+      footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${bot ? `${icon('check')}保存新版本` : `${icon('plus')}创建 Bot`}</button>`,
     })
   }
 
@@ -1865,17 +1865,16 @@
       body: `<div class="kv-grid">
           <div><div class="eyebrow">状态</div><div class="pill ${detail.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[detail.status] ?? detail.status)}</div></div>
           <div><div class="eyebrow">版本</div><div>v${esc(currentSkillVersion(detail))}</div></div>
-          <div><div class="eyebrow">本项目</div><div>${off ? '<span class="pill red">已关闭</span>' : '<span class="pill green">可用</span>'}</div></div>
+          <div><div class="eyebrow">本项目</div><div>${off ? '<span class="pill">已停用</span>' : '<span class="pill green">可用</span>'}</div></div>
         </div>
-        <div style="margin-top:12px"><div class="eyebrow" style="margin-bottom:5px">描述</div><div>${esc(detail.description || '无描述')}</div></div>
-        <div style="margin-top:12px"><div class="eyebrow" style="margin-bottom:5px">文件</div><code class="mono" style="font-size:var(--fs-caption);word-break:break-all">${esc(detail.path || detail.sharedPath || '')}</code></div>
+        <div class="detail-block"><div class="eyebrow">描述</div><div>${esc(detail.description || '无描述')}</div></div>
+        <div class="detail-block"><div class="eyebrow">文件</div><code class="mono detail-path">${esc(detail.path || detail.sharedPath || '')}</code></div>
         <div class="divider"></div>
-        <div class="eyebrow" style="margin-bottom:5px">SKILL.md 全文</div>
+        <div class="eyebrow">SKILL.md 全文</div>
         ${detail.readable ? `<pre class="detail-pre">${esc(detail.content)}</pre>` : '<div class="note">技能文件当前不可读（可能已被移动或删除），可尝试重新扫描。</div>'}
         ${(detail.versions ?? []).length ? `<div class="divider"></div>
-        <div class="eyebrow" style="margin-bottom:5px">版本历史</div>
         ${skillVersions(detail)}` : ''}`,
-      footer: `<button class="btn" data-action="close-modal">关闭</button>${project ? `<button class="btn ${off ? 'primary' : ''}" data-action="toggle-skill" data-slug="${attr(detail.slug)}" data-disabled="${off ? '0' : '1'}">${off ? '在本项目恢复' : '在本项目关闭'}</button>` : ''}`,
+      footer: `<button class="btn" data-action="close-modal">关闭</button>${project ? `<button class="btn ${off ? 'primary' : ''}" data-action="toggle-skill" data-slug="${attr(detail.slug)}" data-disabled="${off ? '0' : '1'}">${off ? '在本项目恢复' : '在本项目停用'}</button>` : ''}`,
     })
   }
 
@@ -1942,7 +1941,7 @@
       : `<div class="traj-stream">${entries.map(trajectoryEntry).join('')}</div>`
     return modalShell({
       title: '思考过程',
-      subtitle: entries.length ? `${entries.length} 条轨迹记录` : '这次运行没有可展示的轨迹。',
+      subtitle: entries.length ? `${entries.length} 条轨迹记录` : '',
       body,
       footer: '<button class="btn" data-action="close-modal">关闭</button>',
       size: 'wide',
@@ -2023,7 +2022,7 @@
         <div class="field"><label id="memory-topic-label" for="memory-topic">主题</label><input class="input" style="width:100%" id="memory-topic" name="topic" value="${attr(memory?.topic ?? '')}" maxlength="120" placeholder="例如：发布流程约束" required></div>
         <div class="field"><label id="memory-content-label" for="memory-content">内容</label><textarea class="textarea" id="memory-content" name="content" rows="9" required placeholder="写清楚背景、结论和适用范围">${esc(memory?.content ?? '')}</textarea><div class="hint">密钥、密码和 token 会被自动过滤为 [REDACTED]。</div></div>
       </form>`,
-      footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('check')}${memory ? '保存记忆' : '写入记忆'}</button>`,
+      footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${memory ? `${icon('check')}保存记忆` : `${icon('plus')}写入记忆`}</button>`,
     })
   }
 
@@ -2042,12 +2041,11 @@
           <div class="field" data-field="bot"><label id="proposal-bot-label" for="proposal-bot">目标 Bot</label><select class="select" style="width:100%" id="proposal-bot" name="botId">${activeBots().map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label id="proposal-title-label" for="proposal-title">标题</label><input class="input" style="width:100%" id="proposal-title" name="title" required maxlength="200" placeholder="一句话说明变更"></div>
-        <div class="field"><label id="proposal-rationale-label" for="proposal-rationale">依据</label><textarea class="textarea" id="proposal-rationale" name="rationale" rows="4" required placeholder="为什么需要变更，来自哪些失败或重复模式"></textarea></div>
+        <div class="field"><label id="proposal-rationale-label" for="proposal-rationale">变更理由</label><textarea class="textarea" id="proposal-rationale" name="rationale" rows="4" required placeholder="为什么需要变更，来自哪些失败或重复模式"></textarea></div>
         <div data-section="bot"><div class="field"><label id="proposal-instructions-label" for="proposal-instructions">新的角色指令</label><textarea class="textarea" id="proposal-instructions" name="instructions" rows="9" placeholder="完整替换现有指令，而不是追加"></textarea></div></div>
         <div data-section="skill" style="display:none">
           <div class="field-row"><div class="field"><label id="proposal-slug-label" for="proposal-slug">技能标识</label><input class="input mono" style="width:100%" id="proposal-slug" name="slug" placeholder="发布检查"></div><div class="field"><label id="proposal-version-label" for="proposal-version">版本</label><input class="input" style="width:100%" id="proposal-version" name="version" value="1.0.0"></div></div>
-          <div class="field"><label id="proposal-name-label" for="proposal-name">显示名称</label><input class="input" style="width:100%" id="proposal-name" name="name"></div>
-          <div class="field"><label id="proposal-description-label" for="proposal-description">描述</label><input class="input" style="width:100%" id="proposal-description" name="description"></div>
+          <div class="field-row"><div class="field"><label id="proposal-name-label" for="proposal-name">显示名称</label><input class="input" style="width:100%" id="proposal-name" name="name"></div><div class="field"><label id="proposal-description-label" for="proposal-description">描述</label><input class="input" style="width:100%" id="proposal-description" name="description"></div></div>
           <div class="field"><label id="proposal-content-label" for="proposal-content">技能内容（Markdown）</label><textarea class="textarea" id="proposal-content" name="content" rows="10" placeholder="## When to use&#10;..."></textarea></div>
         </div>
         <div class="field"><label id="proposal-evaluation-label" for="proposal-evaluation">评估方式</label><textarea class="textarea" id="proposal-evaluation" name="evaluation" rows="3" placeholder="审批前如何验证：回归任务、失败案例、人工检查点"></textarea></div>
@@ -2073,7 +2071,7 @@
     const fallback = defaultPriceFor(seed.model)
     const hint = fallback
       ? `配置默认：缓存读 ${fallback.cacheReadPerMtok} / 输入 ${fallback.inputPerMtok} / 输出 ${fallback.outputPerMtok} ${fallback.currency}（每百万 token）`
-      : '每百万 token 计价。供应商留空表示匹配任意模型。'
+      : '价格为每百万 token。供应商留空表示匹配任意供应商。'
     const overridden = Boolean(editing && fallback) && (
       Number(seed.cache_read_per_mtok) !== Number(fallback.cacheReadPerMtok)
       || Number(seed.input_per_mtok) !== Number(fallback.inputPerMtok)
@@ -2085,9 +2083,9 @@
       subtitle: '保存后仅影响后续调用。',
       badge: '',
       body: `<form data-form="save-price" id="modal-form">
-        <div class="field-row"><div class="field"><label id="price-provider-label" for="price-provider">模型供应商（可留空）</label><input class="input mono" style="width:100%" id="price-provider" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="留空 = 匹配任意供应商"></div><div class="field"><label id="price-model-label" for="price-model">模型名</label><input class="input mono" style="width:100%" id="price-model" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
-        <div class="field-row"><div class="field"><label id="price-input-label" for="price-input">输入</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-input" name="inputPerMtok" value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? 0)}"></div><div class="field"><label id="price-output-label" for="price-output">输出</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-output" name="outputPerMtok" value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? 0)}"></div></div>
-        <div class="field-row"><div class="field"><label id="price-cache-read-label" for="price-cache-read">缓存读</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-read" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? 0)}"></div><div class="field"><label id="price-cache-write-label" for="price-cache-write">缓存写</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-write" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? 0)}"></div></div>
+        <div class="field-row"><div class="field"><label id="price-provider-label" for="price-provider">模型供应商</label><input class="input mono" style="width:100%" id="price-provider" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="留空 = 匹配任意供应商"></div><div class="field"><label id="price-model-label" for="price-model">模型名</label><input class="input mono" style="width:100%" id="price-model" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
+        <div class="field-row"><div class="field"><label id="price-input-label" for="price-input">输入</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-input" name="inputPerMtok" required value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? '')}" placeholder="2"></div><div class="field"><label id="price-output-label" for="price-output">输出</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-output" name="outputPerMtok" required value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? '')}" placeholder="8"></div></div>
+        <div class="field-row"><div class="field"><label id="price-cache-read-label" for="price-cache-read">缓存读</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-read" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? '')}" placeholder="0.2"></div><div class="field"><label id="price-cache-write-label" for="price-cache-write">缓存写</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-write" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? '')}" placeholder="0"></div></div>
         <div class="field"><label id="price-currency-label" for="price-currency">币种</label><input class="input mono" style="width:100%" id="price-currency" name="currency" value="${attr(seed.currency ?? fallback?.currency ?? 'CNY')}" placeholder="CNY"></div>
         <div class="hint">${esc(hint)}</div>
         ${overridden ? `<div class="btn-row"><button class="btn danger" type="button" data-action="reset-price" data-model="${attr(seed.model)}" data-provider="${attr(seed.provider ?? '')}">恢复默认价格</button></div>` : ''}
@@ -3045,13 +3043,15 @@
       }
       if (type === 'save-price') {
         if (!String(payload.model ?? '').trim()) throw new Error('模型不能为空')
+        const price = value => (String(value ?? '').trim() === '' ? 0 : Number(value))
+        if ([payload.inputPerMtok, payload.outputPerMtok, payload.cacheReadPerMtok, payload.cacheWritePerMtok].some(value => Number.isNaN(price(value)))) throw new Error('价格需要是数字')
         await api('save_price', {
           provider: payload.provider ?? '',
           model: payload.model,
-          inputPerMtok: Number(payload.inputPerMtok),
-          cacheReadPerMtok: Number(payload.cacheReadPerMtok),
-          cacheWritePerMtok: Number(payload.cacheWritePerMtok),
-          outputPerMtok: Number(payload.outputPerMtok),
+          inputPerMtok: price(payload.inputPerMtok),
+          cacheReadPerMtok: price(payload.cacheReadPerMtok),
+          cacheWritePerMtok: price(payload.cacheWritePerMtok),
+          outputPerMtok: price(payload.outputPerMtok),
           currency: (payload.currency || 'CNY').toUpperCase(),
         })
         state.modal = null
