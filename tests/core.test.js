@@ -338,3 +338,33 @@ test('skill proposal approval publishes into shared skill pool', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('/clear empties group chat history without touching tasks or memories', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const project = await service.createProject({ name: 'Clear', key: 'CLR', ownerBotId: chief.id })
+    await service.sendMessage(project.id, '/remember 先写测试再上线', { type: 'user', id: 'u1' })
+    await service.sendMessage(project.id, '你好，请看一下这个问题', { type: 'user', id: 'u1' })
+    await waitFor(() => store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued','running')")?.n === 0)
+    const before = Number(store.get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0)
+    assert.ok(before >= 3, '清空前应已有消息')
+
+    const result = await service.sendMessage(project.id, '/clear', { type: 'user', id: 'u1' })
+    assert.equal(result.cleared, before)
+    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 0)
+    // /clear 不入消息、不触发 Bot 运行
+    const runsAfter = Number(store.get('SELECT COUNT(*) AS n FROM runs')?.n ?? 0)
+    await waitFor(() => store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued','running')")?.n === 0)
+    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM runs')?.n ?? 0), runsAfter)
+    // 记忆与后续聊天不受影响
+    assert.ok(store.get("SELECT COUNT(*) AS n FROM memories WHERE scope_type = 'project' AND scope_id = ?", project.id)?.n >= 1)
+    await service.sendMessage(project.id, '继续聊', { type: 'user', id: 'u1' })
+    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 1)
+    // 审计留痕
+    assert.ok(store.get("SELECT id FROM audit_log WHERE action = 'chat.clear' AND target_id = ?", project.id))
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})

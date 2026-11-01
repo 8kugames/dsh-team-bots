@@ -58,6 +58,16 @@ export const parseMentions = (body, candidates) => {
 
 export const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+// projects.disabled_skills 是 JSON 字符串数组；坏数据一律安全降级为空数组。
+export const parseDisabledSkills = (value) => {
+  try {
+    const list = JSON.parse(value ?? '[]')
+    return Array.isArray(list) ? list.filter(item => typeof item === 'string' && item.length > 0) : []
+  } catch {
+    return []
+  }
+}
+
 export const sanitizeFilename = (value) => slugify(value) || 'item'
 
 export async function ensureDir(path) {

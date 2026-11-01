@@ -8,7 +8,7 @@ const ACTIONS = new Set([
   'retry_run', 'cancel_run',
   'create_memory', 'update_memory', 'delete_memory',
   'create_proposal', 'decide_proposal',
-  'sync_skills', 'save_price', 'reset_price',
+  'sync_skills', 'skill_detail', 'toggle_skill', 'save_price', 'reset_price',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
 ])
 
@@ -75,6 +75,15 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.decideProposal(required(payload.proposalId, 'proposalId'), required(payload.decision, 'decision'), actor)
     case 'sync_skills':
       return service.syncSkillsNow()
+    case 'skill_detail':
+      return service.skillDetail(required(payload.slug, 'slug'))
+    case 'toggle_skill':
+      return service.setProjectSkillDisabled(
+        required(payload.projectId, 'projectId'),
+        required(payload.slug, 'slug'),
+        payload.disabled === true,
+        actor,
+      )
     case 'save_price':
       return service.savePrice(payload, actor)
     case 'reset_price':

@@ -13,6 +13,7 @@
     projectId: params.get('project') || null,
     modal: null,
     draft: '',
+    ac: null,
     busy: 0,
     chatAtBottom: true,
     taskFilter: { status: 'all', assignee: 'all', search: '' },
@@ -423,6 +424,7 @@
 
   function render() {
     if (!state.data) return
+    state.ac = null
     app.className = ''
     app.innerHTML = renderShell()
     requestAnimationFrame(() => {
@@ -491,6 +493,7 @@
           </div>
           <div class="composer">
             <div class="composer-box">
+              <div class="composer-ac" id="composer-ac" role="listbox" aria-label="输入补全" hidden></div>
               <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(state.draft)}</textarea>
               <div class="composer-bottom">
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
@@ -671,25 +674,33 @@
   function renderSkills() {
     const skills = state.data?.skills ?? []
     const proposals = (state.data?.proposals ?? []).filter(item => item.kind === 'skill' && item.status === 'pending')
+    const project = activeProject()
+    const disabledSet = new Set(project?.disabledSkills ?? [])
     return `
       <div class="section-head">
-        <p>技能变更走提案和审批，不直接覆盖。</p>
+        <p>技能变更走提案和审批，不直接覆盖。${project ? `开关只作用于当前项目「${esc(project.name)}」：关闭后补全不再列出，Bot 会被明确告知不要调用；技能池本身不变。` : '进入一个项目后可按项目关闭特定技能。'}</p>
         <div class="btn-row">
           <button class="btn" data-action="sync-skills">${icon('refresh')}重新扫描</button>
         </div>
       </div>
       <div class="path-row plain" style="margin-bottom:14px"><span>技能根目录</span><code>${esc(state.data.paths.skillRoot)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
       <div class="card list-card">
-        ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>技能池为空</h3><p>在技能根目录放置技能文件，或提交一个技能提案并审批。</p></div>` : skills.map(skill => `
+        ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>技能池为空</h3><p>在技能根目录放置技能文件，或提交一个技能提案并审批。</p></div>` : skills.map(skill => {
+          const off = disabledSet.has(skill.slug)
+          return `
           <div class="list-row skill-row">
             <div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div>
             <div class="list-main">
-              <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint mono">v${esc(skill.version)}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[skill.status] ?? skill.status)}</span></div>
+              <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint mono">v${esc(skill.version)}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[skill.status] ?? skill.status)}</span>${off ? '<span class="pill red">本项目已关闭</span>' : ''}</div>
               <div class="list-desc">${esc(skill.description || '无描述')}</div>
               <div class="list-meta"><span>${esc(skill.relativePath)}</span></div>
             </div>
+            <div class="btn-row">
+              <button class="btn small" data-action="skill-detail" data-slug="${attr(skill.slug)}">详情</button>
+              ${project ? `<button class="btn small" data-action="toggle-skill" data-slug="${attr(skill.slug)}" data-disabled="${off ? '0' : '1'}">${off ? '恢复' : '本项目关闭'}</button>` : ''}
+            </div>
           </div>
-        `).join('')}
+        `}).join('')}
       </div>
       ${proposals.length ? `<div class="card-head" style="margin-top:24px"><h3>待审批技能提案</h3></div>
       <div class="grid">
@@ -1056,6 +1067,7 @@
       case 'edit-bot': return modalBot(modal.detail)
       case 'new-task': return modalNewTask()
       case 'task': return modalTask(modal.detail)
+      case 'skill-detail': return modalSkill(modal.detail)
       case 'memory': return modalMemory(modal.memory)
       case 'proposal': return modalProposal(modal.kind)
       case 'price': return modalPrice(modal.price ?? {})
@@ -1150,6 +1162,32 @@
         <label class="check-row"><input type="checkbox" name="autoStart" checked> 创建后立即进入执行队列</label>
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建任务</button>`,
+    })
+  }
+
+  function modalSkill(detail) {
+    if (!detail) return modalLoading('技能详情')
+    const project = activeProject()
+    const off = project?.disabledSkills?.includes(detail.slug) ?? false
+    return modalShell({
+      title: detail.name || detail.slug,
+      subtitle: `/${detail.slug}`,
+      badge: '共享技能',
+      size: 'wide',
+      body: `<div class="kv-grid">
+          <div><div class="eyebrow">状态</div><div class="pill ${detail.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[detail.status] ?? detail.status)}</div></div>
+          <div><div class="eyebrow">版本</div><div>v${esc(detail.version)}</div></div>
+          <div><div class="eyebrow">本项目</div><div>${off ? '<span class="pill red">已关闭</span>' : '<span class="pill green">可用</span>'}</div></div>
+        </div>
+        <div style="margin-top:12px"><div class="eyebrow" style="margin-bottom:5px">描述</div><div>${esc(detail.description || '无描述')}</div></div>
+        <div style="margin-top:12px"><div class="eyebrow" style="margin-bottom:5px">文件</div><code class="mono" style="font-size:var(--fs-caption);word-break:break-all">${esc(detail.path || detail.sharedPath || '')}</code></div>
+        <div class="divider"></div>
+        <div class="eyebrow" style="margin-bottom:5px">SKILL.md 全文</div>
+        ${detail.readable ? `<pre class="detail-pre">${esc(detail.content)}</pre>` : '<div class="note">技能文件当前不可读（可能已被移动或删除），可尝试重新扫描。</div>'}
+        ${(detail.versions ?? []).length ? `<div class="divider"></div>
+        <div class="eyebrow" style="margin-bottom:5px">版本历史</div>
+        ${detail.versions.map(version => `<div class="list-meta"><span class="mono">v${esc(version.version)}</span><span>${esc(version.status)}</span><span>${esc(timeAgo(version.created_at))}</span></div>`).join('')}` : ''}`,
+      footer: `<button class="btn" data-action="close-modal">关闭</button>${project ? `<button class="btn ${off ? 'primary' : ''}" data-action="toggle-skill" data-slug="${attr(detail.slug)}" data-disabled="${off ? '0' : '1'}">${off ? '在本项目恢复' : '在本项目关闭'}</button>` : ''}`,
     })
   }
 
@@ -1373,6 +1411,19 @@
     }
   }
 
+  async function openSkillDetail(slug) {
+    state.modal = { type: 'skill-detail', loading: true, title: '技能详情' }
+    render()
+    try {
+      const detail = await api('skill_detail', { slug })
+      if (state.modal?.type !== 'skill-detail') return
+      state.modal = { type: 'skill-detail', detail }
+      render()
+    } catch {
+      closeModal()
+    }
+  }
+
   async function openBot(botId) {
     state.modal = { type: 'edit-bot', loading: true, title: 'Bot 配置' }
     render()
@@ -1420,16 +1471,157 @@
     return Object.fromEntries(new FormData(form).entries())
   }
 
+  // ac-core:start —— 输入框 / 与 @ 自动补全的纯逻辑（tests/ac.test.js 抽取此块断言）
+  const AC_COMMANDS = [
+    { kind: 'command', label: '/task', title: '派任务', desc: '创建任务并排队执行：/task @成员 标题', insert: '/task @', then: 'mention' },
+    { kind: 'command', label: '/remember', title: '写项目记忆', desc: '写入项目级记忆：/remember 内容', insert: '/remember ' },
+    { kind: 'command', label: '/clear', title: '清空聊天', desc: '清空本群全部聊天记录（任务与记忆保留）', insert: '/clear' },
+  ]
+  const acWordChar = (ch) => ch !== undefined && !/[\s@/]/.test(ch)
+
+  // 光标处的补全令牌：slash 仅在消息开头（服务端命令都锚定行首）；mention 需 @ 前是行首或空白，与 src/util.js parseMentions 一致
+  function detectAcToken(value, caret) {
+    const pos = Math.min(Math.max(caret ?? 0, 0), value.length)
+    if (pos > 0 && value[0] === '/') {
+      let end = 1
+      while (end < value.length && acWordChar(value[end])) end += 1
+      if (pos <= end) return { mode: 'slash', from: 0, to: end, query: value.slice(1, end) }
+    }
+    let start = pos
+    while (start > 0 && acWordChar(value[start - 1])) start -= 1
+    const at = start - 1
+    if (at >= 0 && value[at] === '@' && (at === 0 || /\s/.test(value[at - 1]))) {
+      let end = pos
+      while (end < value.length && acWordChar(value[end])) end += 1
+      return { mode: 'mention', from: at, to: end, query: value.slice(start, end) }
+    }
+    return null
+  }
+
+  function buildAcItems(mode, query, sources) {
+    const needle = String(query ?? '').trim().toLowerCase()
+    const hit = (text) => !needle || String(text ?? '').toLowerCase().includes(needle)
+    const items = []
+    if (mode === 'slash') {
+      for (const command of AC_COMMANDS) {
+        if (hit(command.label.slice(1)) || hit(command.title)) items.push(command)
+      }
+      for (const skill of sources.skills ?? []) {
+        if (hit(skill.slug) || hit(skill.name)) items.push({
+          kind: 'skill', label: `/${skill.slug}`, title: skill.name || skill.slug,
+          desc: skill.description || '共享技能', insert: `/${skill.slug} `,
+        })
+      }
+    } else {
+      for (const member of sources.members ?? []) {
+        if (hit(member.name) || hit(member.role)) items.push({
+          kind: 'member', label: `@${member.name}`, title: member.name, color: member.color,
+          desc: member.owner ? `负责人 · ${member.role || '成员'}` : (member.role || '成员'),
+          insert: `@${member.name} `,
+        })
+      }
+    }
+    return items
+  }
+  // ac-core:end
+
+  function acSources() {
+    const project = activeProject()
+    const disabled = new Set(project?.disabledSkills ?? [])
+    const members = (project?.members ?? [])
+      .map(member => botById(member.id))
+      .filter(bot => bot && bot.status === 'active')
+      .map(bot => ({ id: bot.id, name: bot.name, role: bot.role, color: bot.color, owner: bot.id === project.owner_bot_id }))
+    const skills = (state.data?.skills ?? [])
+      .filter(skill => skill.status === 'active' && !disabled.has(skill.slug))
+      .map(skill => ({ slug: skill.slug, name: skill.name, description: skill.description }))
+    return { skills, members }
+  }
+
+  function updateAutocomplete() {
+    const input = document.getElementById('composer-input')
+    const popup = document.getElementById('composer-ac')
+    if (!input || !popup) { state.ac = null; return }
+    const token = input === document.activeElement ? detectAcToken(input.value, input.selectionStart) : null
+    const items = token ? buildAcItems(token.mode, token.query, acSources()) : []
+    if (items.length === 0) { state.ac = null; renderAcPopup(popup, null); return }
+    const keep = state.ac && state.ac.mode === token.mode && state.ac.query === token.query
+    state.ac = { ...token, items, selected: keep ? Math.min(state.ac.selected, items.length - 1) : 0 }
+    renderAcPopup(popup, state.ac)
+  }
+
+  function renderAcPopup(popup, session) {
+    if (!popup) return
+    const input = document.getElementById('composer-input')
+    if (!session) {
+      popup.hidden = true
+      popup.innerHTML = ''
+      input?.removeAttribute('aria-activedescendant')
+      return
+    }
+    popup.innerHTML = session.items.map((item, index) => {
+      const glyph = item.kind === 'member'
+        ? `<span class="avatar sm ${attr(item.color || 'gray')}">${esc(initials(item.title))}</span>`
+        : `<span class="composer-ac-glyph">${icon(item.kind === 'skill' ? 'spark' : 'terminal')}</span>`
+      return `<button type="button" class="composer-ac-item${index === session.selected ? ' active' : ''}" role="option" aria-selected="${index === session.selected}" data-ac-idx="${index}" id="composer-ac-item-${index}">
+        ${glyph}
+        <span class="composer-ac-text"><strong>${esc(item.label)}</strong><span>${esc(item.desc)}</span></span>
+      </button>`
+    }).join('') + `<div class="composer-ac-hint">↑↓ 选择 · Enter 或 Tab 插入 · Esc 关闭</div>`
+    popup.hidden = false
+    const active = popup.querySelector('.composer-ac-item.active')
+    if (active && input) input.setAttribute('aria-activedescendant', active.id)
+  }
+
+  function moveAcSelection(delta) {
+    if (!state.ac) return
+    const count = state.ac.items.length
+    state.ac.selected = (state.ac.selected + delta + count) % count
+    const popup = document.getElementById('composer-ac')
+    renderAcPopup(popup, state.ac)
+    popup?.querySelector('.composer-ac-item.active')?.scrollIntoView({ block: 'nearest' })
+  }
+
+  function closeAutocomplete() {
+    state.ac = null
+    renderAcPopup(document.getElementById('composer-ac'), null)
+  }
+
+  function applyAutocomplete(item) {
+    const input = document.getElementById('composer-input')
+    if (!input || !item || !state.ac) return
+    const { from, to } = state.ac
+    input.value = input.value.slice(0, from) + item.insert + input.value.slice(to)
+    const caret = from + item.insert.length
+    state.ac = null
+    input.focus()
+    input.setSelectionRange(caret, caret)
+    syncComposerBox(input)
+    closeAutocomplete()
+    if (item.then === 'mention') updateAutocomplete()
+  }
+
+  function syncComposerBox(input) {
+    state.draft = input.value
+    input.style.height = 'auto'
+    input.style.height = `${Math.min(150, input.scrollHeight)}px`
+    const button = document.querySelector('[data-action="send-message"]')
+    if (button) button.disabled = state.draft.trim() === ''
+  }
+
   async function sendMessage() {
     const body = state.draft.trim()
     const project = activeProject()
     if (!body || !project) return
+    if (body === '/clear' && !window.confirm('清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
+    closeAutocomplete()
     try {
-      await api('send_message', { projectId: project.id, body })
+      const result = await api('send_message', { projectId: project.id, body })
       state.draft = ''
       state.chatAtBottom = true
       await loadState(project.id, { quiet: true })
       render()
+      if (body === '/clear') toast(`已清空 ${result.cleared} 条消息`, 'success')
       const input = document.getElementById('composer-input')
       input?.focus()
     } catch {}
@@ -1603,6 +1795,21 @@
           await loadState(state.projectId, { quiet: true })
           render()
           toast(`已扫描 ${result.count} 个共享技能`, 'success')
+          break
+        }
+        case 'skill-detail': {
+          void openSkillDetail(String(target.dataset.slug || ''))
+          break
+        }
+        case 'toggle-skill': {
+          const project = activeProject()
+          const slug = String(target.dataset.slug || '')
+          const disabled = target.dataset.disabled === '1'
+          if (!project || !slug) break
+          await api('toggle_skill', { projectId: project.id, slug, disabled })
+          await loadState(state.projectId, { quiet: true })
+          render()
+          toast(disabled ? `已在项目「${project.name}」关闭 ${slug}` : `已在项目「${project.name}」恢复 ${slug}`, 'success')
           break
         }
         case 'archive-bot': {
@@ -1864,11 +2071,8 @@
       return
     }
     if (el.id === 'composer-input') {
-      state.draft = el.value
-      el.style.height = 'auto'
-      el.style.height = `${Math.min(150, el.scrollHeight)}px`
-      const button = document.querySelector('[data-action="send-message"]')
-      if (button) button.disabled = state.draft.trim() === ''
+      syncComposerBox(el)
+      updateAutocomplete()
     }
     if (el.id === 'task-search') {
       state.taskFilter.search = el.value
@@ -1876,6 +2080,23 @@
   })
 
   document.addEventListener('keydown', (event) => {
+    if (state.ac && event.target.id === 'composer-input') {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        moveAcSelection(event.key === 'ArrowDown' ? 1 : -1)
+        return
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        applyAutocomplete(state.ac.items[state.ac.selected])
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeAutocomplete()
+        return
+      }
+    }
     if (event.key === 'Escape' && state.modal) {
       closeModal()
       return
@@ -1889,6 +2110,20 @@
       event.preventDefault()
       render()
     }
+  })
+
+  document.addEventListener('mousedown', (event) => {
+    if (event.target.closest('.composer-ac-item')) {
+      event.preventDefault()
+      return
+    }
+    if (state.ac && !event.target.closest('.composer-box')) closeAutocomplete()
+  })
+
+  document.addEventListener('click', (event) => {
+    const el = event.target.closest('.composer-ac-item')
+    if (!el || !state.ac) return
+    applyAutocomplete(state.ac.items[Number(el.dataset.acIdx)])
   })
 
   document.addEventListener('change', (event) => {

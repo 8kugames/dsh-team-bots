@@ -8,7 +8,7 @@ import { latestDshVersion, compareVersions, validTargetVersion } from './updater
 import { priceKey, seedModelPrices } from './pricing.js'
 import { publishSkill, skillSnapshot, syncSkills } from './skills.js'
 import {
-  clampNumber, id, jsonParse, nowIso, parseMentions, projectKey, redactSecrets,
+  clampNumber, id, jsonParse, nowIso, parseDisabledSkills, parseMentions, projectKey, redactSecrets,
   slugify, text, sanitizeFilename, writeIfChanged,
 } from './util.js'
 
@@ -28,6 +28,7 @@ const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'green', 'gr
 const botNamePattern = /^[\p{L}\p{N}_-]{1,24}$/u
 const commandTaskPattern = /^\/task\s+@([\p{L}\p{N}_-]+)\s+([\s\S]+)$/u
 const commandRememberPattern = /^\/remember\s+([\s\S]+)$/u
+const commandClearPattern = /^\/clear$/u
 
 export class TeamService {
   constructor({ store, config, logger = console }) {
@@ -345,6 +346,7 @@ export class TeamService {
       ...project,
       workspace_path: join(this.config.workspace, project.slug),
       workspace_relative: `/${project.slug}`,
+      disabledSkills: parseDisabledSkills(project.disabled_skills),
       group,
       members,
       stats: {
@@ -517,6 +519,10 @@ export class TeamService {
     const body = text(bodyInput, 20_000)
     if (!body) throw badRequest('消息不能为空')
     const members = this.membersOf(projectId).filter(bot => bot.status === 'active')
+    if (commandClearPattern.test(body)) {
+      const cleared = this.clearChatHistory(projectId, actor)
+      return { cleared }
+    }
     if (commandRememberPattern.test(body)) {
       const messageId = this.insertMessage({
         projectId,
@@ -566,6 +572,15 @@ export class TeamService {
     for (const bot of targets) this.enqueueChatRun(project, bot, messageId)
     void this.tick()
     return { messageId, runBots: targets.map(bot => bot.id) }
+  }
+
+  // /clear：清空本群全部聊天记录。任务、记忆等不受影响；操作进审计。
+  clearChatHistory(projectId, actor = this.actor()) {
+    const project = this.projectRow(projectId)
+    const count = Number(this.store.get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)?.count ?? 0)
+    this.store.run('DELETE FROM messages WHERE project_id = ?', project.id)
+    this.audit(actor, 'chat.clear', 'project', project.id, { cleared: count })
+    return count
   }
 
   async rememberCommand(projectId, body, actor) {
@@ -1729,6 +1744,46 @@ export class TeamService {
       count: entries.length,
       skills: skillSnapshot(this.store, this.config),
     }
+  }
+
+  // 项目内关闭/恢复技能：仅影响该项目（补全过滤 + Bot 系统提示禁用清单），技能池本身不变。
+  async setProjectSkillDisabled(projectId, slug, disabled, actor = this.actor()) {
+    await this.initialize()
+    const project = this.projectRow(projectId)
+    const cleanSlug = String(slug ?? '').trim()
+    const skill = this.store.get('SELECT slug FROM skills WHERE slug = ?', cleanSlug)
+    if (!skill) throw notFound(`技能 ${cleanSlug || '(空)'} 不存在`)
+    const current = parseDisabledSkills(project.disabled_skills)
+    const next = disabled === true
+      ? [...new Set([...current, cleanSlug])]
+      : current.filter(item => item !== cleanSlug)
+    this.store.run('UPDATE projects SET disabled_skills = ?, updated_at = ? WHERE id = ?', JSON.stringify(next), nowIso(), project.id)
+    this.audit(actor, 'project.skill_toggle', 'project', project.id, { slug: cleanSlug, disabled: disabled === true })
+    return this.projectView(this.projectRow(project.id))
+  }
+
+  // 技能详情：按需读盘返回 SKILL.md 全文与版本历史（不进 state 载荷）。
+  async skillDetail(slug) {
+    await this.initialize()
+    const cleanSlug = String(slug ?? '').trim()
+    const row = this.store.get('SELECT * FROM skills WHERE slug = ?', cleanSlug)
+    if (!row) throw notFound(`技能 ${cleanSlug || '(空)'} 不存在`)
+    const fallbackPath = join(this.config.skillRoot, 'skills', cleanSlug, 'SKILL.md')
+    let content = ''
+    let readable = false
+    for (const locator of [row.path, fallbackPath]) {
+      if (!locator) continue
+      try {
+        content = readFileSync(locator, 'utf8')
+        readable = true
+        break
+      } catch {}
+    }
+    const versions = this.store.all(
+      'SELECT version, checksum, status, created_at FROM skill_versions WHERE slug = ? ORDER BY created_at DESC',
+      cleanSlug,
+    )
+    return { ...row, content, readable, sharedPath: fallbackPath, versions }
   }
 
   async savePrice(input, actor = this.actor()) {

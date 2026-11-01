@@ -9,12 +9,12 @@
 - 每个 Bot 独立配置角色、模型、reasoning effort 和长期记忆。
 - 首次启动默认出场负责人「chief」与五个游戏团队伙伴：designer、programmer、graphics-rendering、devops、artist（定义见 `src/seed-bots.js`）。
 - 每个项目自动创建群聊、负责人 Bot、任务编号和独立工作区。
-- 群聊支持普通消息、`@Bot`、`/task @Bot 标题` 和 `/remember 内容`。
+- 群聊支持普通消息、`@Bot`、`/task @Bot 标题`、`/remember 内容` 和 `/clear`（清空本群聊天记录，任务与记忆保留）；输入 `/` 或 `@` 会弹出命令、共享技能与成员的自动补全。
 - 任务运行使用独立会话，长任务不会阻塞同一个 Bot 的群聊回复。
 - Linear 风格任务面板：状态、优先级、负责人、评论、运行记录、拖拽流转。
 - 负责人 Bot 可用 `team_assign_task` 向成员分派或重派任务，用 `team_review_task` 验收交付。
 - Bot 可用 `team_remember` 写入记忆，用 `team_propose_evolution` 提交角色/技能提案。
-- 共享技能池固定为 `/workspace/.agents/skills`，技能变更需审批。
+- 共享技能池固定为 `/workspace/.agents/skills`，技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）。
 - token、调用次数、成本和运行时长按全局、项目、Bot 归集。
 
 ## Docker 启动
@@ -123,6 +123,8 @@ WORKSPACE_HOST_DIR/          -> /workspace
 - `@Builder 看一下这个问题` 直接调用 Builder，不额外唤醒负责人。
 - `/task @Builder 实现登录页` 创建 `KEY-1` 任务并立即排队。
 - `/remember 发布必须先通过回归测试` 写入项目记忆。
+- `/clear` 清空本群聊天记录（发送前会弹确认；任务、记忆不受影响，操作进审计日志）。
+- 输入框补全：输入 `/` 列出命令与共享技能（全量展示、弹层内滚动），输入 `@` 列出项目成员；↑↓ 选择、Enter 或 Tab 插入，Esc 关闭。项目内已关闭的技能不会出现在补全里。
 - 任务完成后进入 `in_review`。用户派单的任务由用户验收；负责人 Bot 通过 `team_assign_task` 派单的任务自动转负责人 Bot 用 `team_review_task` 验收，验收不通过可退回重做。
 - 任务执行失败置 `blocked`，自动转负责人 Bot 处理：可用 `team_assign_task` 重派（含换人），需要用户决策时提请用户介入。
 - 负责人 Bot 通过 `team_assign_task` 分派，任务和运行都可在面板追踪。

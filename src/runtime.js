@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { AppError } from './errors.js'
 import { ensureProjectWorkspace } from './paths.js'
 import { recordUsage } from './usage.js'
-import { id, nowIso } from './util.js'
+import { id, nowIso, parseDisabledSkills } from './util.js'
 
 const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
@@ -138,8 +138,11 @@ export class DshRuntime {
     const roleLine = taskSession
       ? `- You are executing one assigned task in ${project.name}${assignedTask ? ` (${project.key}-${assignedTask.number}: ${assignedTask.title})` : ''}. This session is not the group chat: do the work, verify it, and report back. Do not triage other requests here.`
       : `- You are ${owner ? 'the owner of this project group. Triage requests, split work and assign tasks; review deliveries with team_review_task and handle blocked tasks yourself instead of waiting for the user.' : 'a project member. Focus on work assigned to you.'}`
+    const disabledSkills = parseDisabledSkills(project.disabled_skills)
     const sharedRules = [
-      '- The shared skill library is mounted at `/workspace/.agents/skills`; use installed skills when relevant.',
+      disabledSkills.length === 0
+        ? '- The shared skill library is mounted at `/workspace/.agents/skills`; use installed skills when relevant.'
+        : `- The shared skill library is mounted at \`/workspace/.agents/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
       '- Work only inside this project workspace unless the user explicitly authorizes another mounted path.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',

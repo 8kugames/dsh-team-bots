@@ -327,6 +327,7 @@ export function openDatabase(path) {
   }
   migrateRuns(db)
   migrateSessionBindings(db)
+  migrateProjects(db)
   db.exec(BINDING_INDEXES)
   return new Store(db)
 }
@@ -345,6 +346,11 @@ function migrateRuns(db) {
   addColumn(db, 'runs', 'mode', "TEXT NOT NULL DEFAULT 'write'")
   addColumn(db, 'runs', 'last_progress_at', 'TEXT')
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
+}
+
+// projects.disabled_skills 存项目内关闭的技能 slug JSON 数组。
+function migrateProjects(db) {
+  addColumn(db, 'projects', 'disabled_skills', "TEXT NOT NULL DEFAULT '[]'")
 }
 
 // 旧的 session_bindings 带 UNIQUE(bot_id, project_id, kind)，无法容纳每任务一条会话绑定。
