@@ -24,6 +24,7 @@
     "dev": "node scripts/dev-server.js",
     "start": "node scripts/dev-server.js",
     "doctor": "node scripts/doctor.mjs",
+    "profile:install": "node scripts/install-profile.mjs",
     "verify:agent-team": "node scripts/verify-agent-team.mjs",
     "backup": "node scripts/backup.mjs",
     "restore-check": "node scripts/restore-check.mjs",

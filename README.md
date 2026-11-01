@@ -35,6 +35,8 @@ dsh plugin --profile team-bots add ./dsh-team-bots-<version>.tgz
 dsh --profile team-bots                         # 从启动日志读取 dsh web 的带 token 入口
 ```
 
+已有 pnpm 管理的 profile（依赖钉在本地 tarball）时，用 `npm run profile:install` 一键刷新：打包到仓库 `.dist/` 并在 `~/.dsh/profiles/team-bots` 重装，完成后重启 DSH 生效。
+
 项目管理走工作区目录：`DSH_TEAM_WORKSPACE` 指定任意目录，项目、`_the_bots` 单聊区、共享技能池（`.agents`）与团队数据（`.data`）都落在它下面；不设置时默认 `~/.dsh/workspace/team-bots/`。数据目录还可用 `DSH_TEAM_DATA` 单独指定。常用变量的模板见 `.env.example`——本地按需导出即可，不要在仓库根目录放 `.env`：direnv、编辑器 dotenv 插件或手动 `set -a; . .env` 会把 `DSH_*` 带进本机进程，污染 `npm test` / `npm run dev`。
 
 首次访问 `http://<host>:<port>/` 会自动完成登录并直接进入团队工作台：浏览器首次打开首页时，插件用当前启动 token 兑换一枚 30 天登录 Cookie，随后跳转到 `/api/dsh-team/ui`；此后打开首页同样直达工作台，无需任何手动步骤。禁用 Cookie 的浏览器会陷入重定向循环，此类客户端改用下面的手动 token 入口。
