@@ -669,11 +669,13 @@ Do the task in the project workspace. Use tools as needed. End with a concise de
     const taskList = openTasks.length === 0
       ? 'none'
       : openTasks.map(item => `- ${project.key}-${item.number} [${item.status}] ${item.title}`).join('\n')
+    // 引用回复上下文：本次消息带 reply_to 时，明确告知 bot 用户在回哪条消息（含 m_ 短 id 供 team_recall 取全文）。
+    const quoteLine = this.quotedLineFor(chatMessage)
     return `${header}
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
-
+${quoteLine}
 Recent project messages (truncated, ids are for team_recall):
 ${context}
 
@@ -681,6 +683,18 @@ Open tasks:
 ${taskList}
 
 Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.`
+  }
+
+  // 引用行：正文控制在 200 字内；bot 发送者查名字，其余回退 sender_type:sender_id 展示。
+  quotedLineFor(chatMessage) {
+    if (!chatMessage?.reply_to_id) return ''
+    const quoted = this.store.get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', chatMessage.reply_to_id)
+    if (!quoted) return '\n(用户引用的消息已不存在)\n'
+    const senderName = quoted.sender_type === 'bot'
+      ? this.store.get('SELECT name FROM bots WHERE id = ?', quoted.sender_id)?.name ?? `bot:${quoted.sender_id}`
+      : `${quoted.sender_type}:${quoted.sender_id}`
+    const excerpt = quoted.body.slice(0, 200)
+    return `\n用户引用了 ${senderName} 的消息 [m_${quoted.id.slice(-6)}]：${excerpt}\n`
   }
 
   async startRun({ run, bot, project, task, chatMessage, sessionKind }) {

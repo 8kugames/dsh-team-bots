@@ -775,36 +775,51 @@ export class TeamService {
     return this.updateProject(projectId, { status: 'archived' }, actor)
   }
 
-  insertMessage({ projectId, senderType, senderId, body, mentions = [], taskId = null, runId = null, createdAt = nowIso() }) {
+  insertMessage({ projectId, senderType, senderId, body, mentions = [], taskId = null, runId = null, replyToId = null, createdAt = nowIso() }) {
     const group = this.groupOf(projectId)
     if (!group) throw notFound('项目群聊不存在')
     const messageId = id('msg')
     // 群消息持久化前过密钥掩码：密文值不进转录，模型下一轮只会看到 $<NAME> 标签（NAME 与 .team/secrets.env 里的变量名一致）。
     const maskedBody = this.maskSecretValues(body)
     this.store.run(
-      `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      messageId, projectId, group.id, senderType, senderId, maskedBody, JSON.stringify(mentions), taskId, runId, createdAt,
+      `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, reply_to_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      messageId, projectId, group.id, senderType, senderId, maskedBody, JSON.stringify(mentions), taskId, runId, replyToId, createdAt,
     )
     return messageId
   }
 
+  // 消息发送者显示名：bot 查名字，system 固定「系统」，其余按用户 actor 取名。
+  senderNameOf(senderType, senderId) {
+    if (senderType === 'bot') return this.store.get('SELECT name FROM bots WHERE id = ?', senderId)?.name ?? 'Bot'
+    if (senderType === 'system') return '系统'
+    return this.actorName({ type: 'user', id: senderId })
+  }
+
+  // 引用视图：excerpt 取原消息正文前 120 字。入库正文已过 maskSecretValues，这里不再掩码；
+  // 目标行已被删（/clear 或级联）时 reply_to 置 null，引用悬空不炸视图。
+  replyView(replyToId) {
+    if (!replyToId) return null
+    const row = this.store.get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', replyToId)
+    if (!row) return null
+    return { id: row.id, sender_name: this.senderNameOf(row.sender_type, row.sender_id), excerpt: row.body.slice(0, 120) }
+  }
+
   messageView(row) {
-    const senderName = row.sender_type === 'bot'
-      ? this.store.get('SELECT name FROM bots WHERE id = ?', row.sender_id)?.name ?? 'Bot'
-      : row.sender_type === 'system' ? '系统' : this.actorName({ type: 'user', id: row.sender_id })
+    const senderName = this.senderNameOf(row.sender_type, row.sender_id)
     const task = row.task_id ? this.store.get('SELECT number, title, project_id FROM tasks WHERE id = ?', row.task_id) : undefined
     const project = task ? this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id) : undefined
     return {
       ...row,
       mentions: jsonParse(row.mentions_json, []),
       senderName,
+      reply_to: this.replyView(row.reply_to_id),
       taskIdentifier: task && project ? `${project.key}-${task.number}` : null,
       taskTitle: task?.title ?? null,
     }
   }
 
-  async sendMessage(projectId, bodyInput, actor = this.actor()) {
+  async sendMessage(projectId, bodyInput, actor = this.actor(), replyTo = null) {
     const project = this.projectRow(projectId)
     if (project.status !== 'active') throw conflict('项目已归档')
     const body = text(bodyInput, 20_000)
@@ -851,14 +866,24 @@ export class TeamService {
       this.store.run('UPDATE messages SET task_id = ? WHERE id = ?', task.id, messageId)
       return { messageId, taskId: task.id }
     }
+    // 引用回复：目标消息必须存在于同项目，否则 400。命令路径（/clear、/remember、/task）不走到这里，按规格忽略引用。
+    const replyMessage = replyTo
+      ? this.store.get('SELECT id, sender_type, sender_id FROM messages WHERE id = ? AND project_id = ?', String(replyTo), projectId)
+      : null
+    if (replyTo && !replyMessage) throw badRequest('引用的消息不存在')
     const mentions = parseMentions(body, members)
-    const targets = (mentions.length > 0 ? mentions : members.filter(bot => bot.id === project.owner_bot_id)).slice(0, 3)
+    // 目标解析：显式 @mention 优先（引用只作上下文）；无显式 @ 时引用 bot 消息则定向该 bot（替换 owner 兜底）；最后落 owner。
+    const targets = (mentions.length > 0
+      ? mentions
+      : members.filter(bot => bot.id === (replyMessage?.sender_type === 'bot' ? replyMessage.sender_id : project.owner_bot_id))
+    ).slice(0, 3)
     const messageId = this.insertMessage({
       projectId,
       senderType: actor.type,
       senderId: actor.id,
       body,
       mentions: mentions.map(bot => bot.id),
+      replyToId: replyMessage?.id ?? null,
     })
     for (const bot of targets) {
       this.enqueueOutbox({

@@ -1304,6 +1304,56 @@ a.global-config.dsh-official-link:hover {
     text-decoration: underline;
     text-underline-offset: 2px;
 }
+/* 引用块：气泡顶部的「↩ 名字：摘要」行，单行截断。颜色继承气泡正文，
+   bot 气泡（surface-3）与用户气泡（accent）各自可读，明暗主题共用变量。 */
+.msg-quote {
+    margin: 0 0 6px;
+    padding: 3px 8px;
+    border-left: 2px solid var(--accent);
+    background: var(--code-bg);
+    border-radius: 4px 8px 8px 4px;
+    font-size: var(--fs-small);
+    opacity: 0.88;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+/* 用户气泡本身是 accent 底，引用条边线换成 accent-ink 区分。 */
+.message-row.user .msg-quote {
+    border-left-color: var(--accent-ink);
+}
+/* hover 引用按钮：平时隐形，悬停消息行或键盘聚焦时出现。 */
+.msg-quote-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+        opacity 0.12s ease,
+        color 0.12s ease,
+        background-color 0.12s ease;
+}
+.msg-quote-btn svg {
+    width: 13px;
+    height: 13px;
+}
+.message-row:hover .msg-quote-btn,
+.msg-quote-btn:focus-visible {
+    opacity: 1;
+}
+.msg-quote-btn:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
 .message-system {
     text-align: center;
     color: var(--ink-3);
@@ -1427,6 +1477,58 @@ a.global-config.dsh-official-link:hover {
 
 .composer {
     padding: 10px 16px 14px;
+}
+/* 引用条：发送前挂在 composer 上方的待回复目标（发送者名 + 摘要 + 取消）。 */
+.reply-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 2px 6px;
+    padding: 5px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-left: 2px solid var(--accent);
+    border-radius: 8px;
+    font-size: var(--fs-small);
+}
+.reply-bar-icon {
+    display: inline-flex;
+    flex: none;
+    color: var(--ink-3);
+}
+.reply-bar-icon svg {
+    width: 13px;
+    height: 13px;
+}
+.reply-bar-text {
+    flex: 1;
+    min-width: 0;
+    color: var(--ink-3);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.reply-bar-text strong {
+    margin-right: 6px;
+    color: var(--ink-2);
+    font-weight: 600;
+}
+.reply-bar-cancel {
+    display: inline-flex;
+    flex: none;
+    padding: 2px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+}
+.reply-bar-cancel:hover {
+    color: var(--ink);
+}
+.reply-bar-cancel svg {
+    width: 13px;
+    height: 13px;
 }
 .composer-box {
     position: relative;

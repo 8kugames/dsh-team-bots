@@ -16,6 +16,8 @@
     soloDetail: null,
     modal: null,
     draft: '',
+    // 群聊引用回复：{ id, senderName, excerpt }，非空时 composer 上方显示引用条，随发送/取消清除。
+    replyTo: null,
     ac: null,
     busy: 0,
     chatAtBottom: true,
@@ -116,6 +118,7 @@
     users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
     download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',
+    reply: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>',
   }
 
   const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.settings}</svg>`
@@ -538,6 +541,20 @@
     document.documentElement.style.setProperty('--chrome-h', `${chrome}px`)
   }
 
+  // 引用交互专用重渲染：render() 全量重建 DOM，用户往上翻历史点「引用」时保持消息列表滚动位置
+  // （chatAtBottom 为 true 时仍由 render 的 rAF 落底，与本函数不冲突），并聚焦输入框。
+  function renderKeepingChatScroll() {
+    const list = document.querySelector('.chat-messages')
+    const scrollTop = list?.scrollTop ?? null
+    const wasAtBottom = state.chatAtBottom
+    render()
+    if (!wasAtBottom && scrollTop !== null) {
+      const fresh = document.querySelector('.chat-messages')
+      if (fresh) fresh.scrollTop = scrollTop
+    }
+    document.getElementById('composer-input')?.focus()
+  }
+
   function render() {
     if (!state.data) return
     state.ac = null
@@ -656,6 +673,11 @@
           </div>
           ${renderDirectMessagesCard()}
                     <div class="composer">
+            ${state.replyTo ? `<div class="reply-bar" id="reply-bar">
+              <span class="reply-bar-icon">${icon('reply')}</span>
+              <span class="reply-bar-text"><strong>${esc(state.replyTo.senderName)}</strong><span>${esc(state.replyTo.excerpt)}</span></span>
+              <button class="reply-bar-cancel" data-action="cancel-reply" title="取消引用（Esc）" aria-label="取消引用">${icon('close')}</button>
+            </div>` : ''}
             <div class="composer-box">
               <div class="composer-ac" id="composer-ac" role="listbox" aria-label="输入补全" hidden></div>
               <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(state.draft)}</textarea>
@@ -859,11 +881,15 @@
     }
     const isUser = message.sender_type === 'user'
     const bot = isUser ? null : botById(message.sender_id)
+    // 引用块：气泡顶部一行「↩ 名字：摘要」，纯展示。
+    const quoteBlock = message.reply_to ? `<div class="msg-quote" title="引用自 ${attr(message.reply_to.sender_name)}">↩ ${esc(message.reply_to.sender_name)}：${esc(message.reply_to.excerpt)}</div>` : ''
+    // hover 引用按钮：仅群聊；点击进入引用回复（选中该消息作为回复目标）。
+    const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(message.body.slice(0, 120))}" title="引用回复" aria-label="引用回复这条消息">${icon('reply')}</button>` : ''
     return `<div class="message-row ${isUser ? 'user' : ''}">
       ${isUser ? '' : avatar(bot ?? { name: message.senderName, color: 'gray' })}
       <div class="message-body-wrap">
-        <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span></div>
-        <div class="message-bubble">${richText(message.body)}</div>
+        <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}</div>
+        <div class="message-bubble">${quoteBlock}${richText(message.body)}</div>
         ${message.taskIdentifier ? `<div class="task-chip-line"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button></div>` : ''}
         ${message.run_id && !isUser ? `<div class="task-chip-line"><button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button></div>` : ''}
       </div>
@@ -2559,9 +2585,11 @@
         const project = activeProject()
         if (!project) return
         if (body === '/clear' && !window.confirm('清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
-        result = await api('send_message', { projectId: project.id, body })
+        // 引用回复：带上 replyTo；命令路径（/clear、/task、/remember）后端会忽略该参数。
+        result = await api('send_message', { projectId: project.id, body, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}) })
       }
       state.draft = ''
+      state.replyTo = null
       state.chatAtBottom = true
       await loadState(state.projectId, { quiet: true })
       render()
@@ -2714,6 +2742,7 @@
         }
         case 'select-project':
           state.projectId = target.dataset.projectId
+          state.replyTo = null // 切项目即切群聊，引用不能跨项目
           state.chatMode = 'group'
           state.view = 'chat'
           await refresh()
@@ -2784,6 +2813,20 @@
         case 'send-message':
           await sendMessage()
           break
+        case 'quote-message': {
+          // 引用回复：把目标消息挂到 composer 上方的引用条；再点同一条则取消。
+          const messageId = target.dataset.messageId
+          if (!messageId) break
+          state.replyTo = state.replyTo?.id === messageId
+            ? null
+            : { id: messageId, senderName: target.dataset.senderName ?? '', excerpt: (target.dataset.excerpt ?? '').slice(0, 120) }
+          renderKeepingChatScroll()
+          break
+        }
+        case 'cancel-reply':
+          state.replyTo = null
+          renderKeepingChatScroll()
+          break
         case 'solo-bot': {
           const botId = target.dataset.botId
           if (!botId) break
@@ -2793,6 +2836,7 @@
             state.draft = ''
             closeAutocomplete()
           }
+          state.replyTo = null // 单聊无引用语义，跨上下文不留引用条
           state.chatMode = 'solo'
           state.view = 'chat'
           await loadState(state.projectId, { quiet: true })
@@ -3307,6 +3351,13 @@
     }
     if (event.key === 'Escape' && state.modal) {
       closeModal()
+      return
+    }
+    // 引用条：Esc 取消（优先级低于补全与 modal，高于 composer 快捷键）。
+    if (event.key === 'Escape' && state.replyTo) {
+      event.preventDefault()
+      state.replyTo = null
+      renderKeepingChatScroll()
       return
     }
     if (event.target.id === 'composer-input' && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {

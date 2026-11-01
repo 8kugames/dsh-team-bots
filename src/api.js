@@ -46,7 +46,7 @@ export async function handleAction(service, action, payload = {}, actor) {
     case 'browse_dirs':
       return service.browseDirectories(payload)
     case 'send_message':
-      return service.sendMessage(required(payload.projectId, 'projectId'), required(payload.body, 'body'), actor)
+      return service.sendMessage(required(payload.projectId, 'projectId'), required(payload.body, 'body'), actor, payload.replyTo ?? null)
     case 'send_solo_message':
       return service.sendSoloMessage(required(payload.botId, 'botId'), required(payload.body, 'body'), actor)
     case 'create_task':

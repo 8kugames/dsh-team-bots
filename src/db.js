@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS messages (
   mentions_json TEXT NOT NULL DEFAULT '[]',
   task_id TEXT,
   run_id TEXT,
+  reply_to_id TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -533,6 +534,7 @@ export function openDatabase(path) {
   migrateUsageEvents(db)
   migrateSoloSupport(db)
   migrateSoloDirUnique(db)
+  migrateMessages(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -547,6 +549,7 @@ export function openDatabase(path) {
   recordMigration(db, 'run_trajectory')
   recordMigration(db, 'projects_production_dir')
   recordMigration(db, 'terminal_commands')
+  recordMigration(db, 'messages_reply_to')
   return new Store(db, { ftsEnabled })
 }
 
@@ -658,6 +661,12 @@ function migrateSoloDirUnique(db) {
   } catch (error) {
     console.warn(`dsh-team: 单聊目录存在重复，bots.solo_dir 唯一索引未创建：${error.message}`)
   }
+}
+
+// 群聊消息引用回复：messages.reply_to_id 存被引用消息的 id，一级引用不建链。
+// 不加外键约束：引用目标可能被级联删除，引用悬空时由 service/messageView 容忍（视图里 reply_to 置 null）。
+function migrateMessages(db) {
+  addColumn(db, 'messages', 'reply_to_id', 'TEXT')
 }
 
 // 全量重建一张表：原名表数据拷入 <name>_new 后删除原名表，再把新表改回原名。
