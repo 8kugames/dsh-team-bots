@@ -27,6 +27,8 @@
     theme: 'dsh',
     tree: { chats: true, bots: true },
     bootError: null,
+    wechatAuth: null,
+    wechatPollTimer: null,
   }
 
   const STATUS = {
@@ -266,6 +268,33 @@
     } catch (error) {
       if (!state.data) bootError(error)
     }
+  }
+
+  // 微信扫码/验证码期间轮询通道状态，状态落地即停。
+  function startWechatPoll() {
+    stopWechatPoll()
+    state.wechatPollTimer = setInterval(async () => {
+      try {
+        const status = await api('wechat_status', {}, { quiet: true })
+        const changed = JSON.stringify(status) !== JSON.stringify(state.data?.wechat)
+        if (state.data) state.data.wechat = status
+        if (['connected', 'needs_reauth', 'unbound'].includes(status.phase)) {
+          stopWechatPoll()
+          if (status.phase === 'connected') {
+            state.wechatAuth = null
+            toast('微信通道已连接', 'success')
+          }
+          render()
+        } else if (changed && state.view === 'settings') {
+          render()
+        }
+      } catch {}
+    }, 3000)
+  }
+
+  function stopWechatPoll() {
+    if (state.wechatPollTimer) clearInterval(state.wechatPollTimer)
+    state.wechatPollTimer = null
   }
 
   function bootError(error) {
@@ -514,6 +543,8 @@
               <p>直接发言会交给负责人 Bot；用 <strong>@Bot</strong> 点名成员，或输入 <strong>/task @Bot 任务标题</strong> 直接创建任务。</p>
             </div>` : messages.map(renderMessage).join('')}
           </div>
+          ${renderDirectMessagesCard()}
+          ${renderRotationsCard()}
           <div class="composer">
             <div class="composer-box">
               <div class="composer-ac" id="composer-ac" role="listbox" aria-label="输入补全" hidden></div>
@@ -664,8 +695,57 @@
         <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span></div>
         <div class="message-bubble">${richText(message.body)}</div>
         ${message.taskIdentifier ? `<div class="task-chip-line"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}"><strong>${esc(message.taskIdentifier)}</strong>${esc(message.taskTitle ?? '')}</button></div>` : ''}
+        ${message.run_id && !isUser ? `<div class="task-chip-line"><button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button></div>` : ''}
       </div>
     </div>`
+  }
+
+  // ===== Bot 私信 / 会话滚动（项目群聊视图的折叠面板，数据来自 state.directMessages / state.rotations）=====
+
+  const DM_STATUS = { pending: '待回复', delivered: '已送达', replied: '已回复', failed: '失败' }
+  const DM_STATUS_TONE = { pending: '', delivered: 'violet', replied: 'green', failed: 'red' }
+  const ROTATION_KIND = { project: '项目会话', task: '任务会话', solo: '单聊会话' }
+
+  function renderDirectMessagesCard() {
+    const items = state.data?.directMessages ?? []
+    return `<details class="chat-subpanel">
+      <summary title="展开 / 收起 Bot 私信">${icon('chevron', 'chev')}<span>Bot 私信</span><span class="subpanel-count">${items.length}</span></summary>
+      <div class="subpanel-body">
+        ${items.length === 0 ? '<div class="subpanel-empty">Bot 之间经 <code>team_message_bot</code> 的直接交互会出现在这里。</div>' : items.map(dm => `
+          <div class="subpanel-row">
+            <div class="subpanel-row-head">
+              <strong>${esc(dm.fromName)} → ${esc(dm.toName)}</strong>
+              <span class="pill ${DM_STATUS_TONE[dm.status] ?? ''}">${esc(DM_STATUS[dm.status] ?? dm.status)}</span>
+              <span class="faint">${esc(formatTime(dm.createdAt))}</span>
+              ${dm.repliedAt ? `<span class="faint">回复于 ${esc(formatTime(dm.repliedAt))}</span>` : ''}
+              <span class="subpanel-tag">#${esc(dm.id)}</span>
+            </div>
+            ${dm.textSnippet ? `<div class="subpanel-row-text">${esc(dm.textSnippet)}</div>` : ''}
+            ${dm.replySnippet ? `<div class="subpanel-row-sub">↩ ${esc(dm.replySnippet)}</div>` : ''}
+          </div>`).join('')}
+      </div>
+    </details>`
+  }
+
+  function renderRotationsCard() {
+    const items = state.data?.rotations ?? []
+    return `<details class="chat-subpanel">
+      <summary title="展开 / 收起会话滚动">${icon('chevron', 'chev')}<span>会话滚动</span><span class="subpanel-count">${items.length}</span></summary>
+      <div class="subpanel-body">
+        ${items.length === 0 ? '<div class="subpanel-empty">暂无会话滚动记录；Bot 会话上下文接近上限时会在此登记交接进度。</div>' : items.map(item => `
+          <div class="subpanel-row">
+            <div class="subpanel-row-head">
+              <strong>#${esc(item.seq)}</strong>
+              <span>${esc(item.botName)}</span>
+              <span class="pill">${esc(ROTATION_KIND[item.kind] ?? item.kind)}</span>
+              ${item.taskIdentifier ? `<span class="subpanel-tag">${esc(item.taskIdentifier)}</span>` : ''}
+              <span class="faint">检查点 ${formatNumber(item.checkpointChars)} 字</span>
+              ${item.seeded ? '<span class="pill green">已播种</span>' : '<span class="pill amber">待播种</span>'}
+              <span class="faint">${esc(formatTime(item.createdAt))}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </details>`
   }
 
   function filteredTasks() {
@@ -1247,6 +1327,106 @@
       </div>`
   }
 
+  function renderWechatCard() {
+    const wechat = state.data.wechat ?? { enabled: false, phase: 'disabled' }
+    if (!wechat.enabled) return ''
+    const phaseText = {
+      disabled: '未启用', unbound: '未绑定', connecting: '连接中', connected: '已连接',
+      reconnecting: '重连中', needs_reauth: '凭证失效', scanning: '待扫码',
+      verification: '待输验证码',
+    }
+    const auth = state.wechatAuth
+    const pillClass = wechat.phase === 'connected' ? 'green' : ['needs_reauth'].includes(wechat.phase) ? 'amber' : ''
+    return `
+      <div class="card form-card" style="margin-top:12px" id="wechat-card">
+        <div class="card-head"><h3>微信通道</h3><span class="pill ${pillClass}">${phaseText[wechat.phase] ?? wechat.phase}</span></div>
+        ${wechat.adminPeerId ? `<div class="kv"><span>管理员</span><strong>${esc(String(wechat.adminPeerId).slice(0, 12))}…</strong></div>` : ''}
+        ${wechat.error ? `<div class="hint" style="color:var(--coral,#e5484d)">${esc(wechat.error)}</div>` : ''}
+        ${auth?.qrSvg ? `
+          <div class="wechat-qr">${auth.qrSvg}</div>
+          <div class="hint">微信扫码授权 ClawBot；手机上确认后此处会自动变为已连接。</div>` : ''}
+        ${wechat.phase === 'verification' || auth?.verification ? `
+          <div class="field-row" style="margin-top:8px">
+            <div class="field"><label for="wechat-code">微信验证码</label><input class="input mono" id="wechat-code" inputmode="numeric" placeholder="扫码后手机上的验证码"></div>
+            <div class="field"><label>&nbsp;</label><button class="btn small" type="button" data-action="wechat-code">提交验证码</button></div>
+          </div>` : ''}
+        <div class="btn-row" style="margin-top:12px">
+          ${['connected', 'reconnecting', 'connecting'].includes(wechat.phase)
+            ? '<button class="btn small danger" type="button" data-action="wechat-logout">退出绑定</button>'
+            : '<button class="btn small" type="button" data-action="wechat-login">扫码绑定</button>'}
+        </div>
+        <div class="hint">在微信里对 ClawBot 说「绑定」成为管理员；之后可用：状态 / 详情 web-3 / 验收 web-3 / 驳回 web-3 理由。任务完成会主动推送。</div>
+      </div>`
+  }
+
+  // 密钥管理：团队/项目两级密钥列表 + Bot 发起的待审请求，均来自 state.secrets / state.secretRequests。
+  function renderSecretsCard() {
+    const secrets = state.data?.secrets ?? []
+    const requests = state.data?.secretRequests ?? []
+    const projects = (state.data?.projects ?? []).filter(project => project.status === 'active')
+    return `
+      <div class="card form-card" style="margin-top:12px">
+        <div class="card-head"><h3>密钥管理</h3><span class="meta">${secrets.length} 条 · ${requests.length} 待审</span></div>
+        <div class="hint" style="margin:2px 0 12px">密钥加密存储，保存后物化到项目的 <code>.team/secrets.env</code>，Bot 在 shell 里 <code>set -a; . .team/secrets.env</code> 即可使用；团队级密钥对所有活动项目生效。</div>
+        ${requests.length === 0 ? '' : `<div class="secret-block">
+          ${requests.map(request => `
+            <form class="secret-request" data-form="approve-secret">
+              <input type="hidden" name="requestId" value="${attr(request.id)}">
+              <div class="secret-request-info">
+                <strong>${esc(request.botName)}</strong>
+                <span>请求 <code>${esc(request.name)}</code></span>
+                ${request.projectName ? `<span class="faint">${esc(request.projectName)}</span>` : ''}
+                <span class="faint">${esc(formatTime(request.createdAt))}</span>
+              </div>
+              ${request.reason ? `<div class="secret-request-reason">${esc(request.reason)}</div>` : ''}
+              <div class="secret-request-actions">
+                <input class="input mono" type="password" name="value" minlength="8" autocomplete="new-password" placeholder="填写密钥值（至少 8 个字符）后批准">
+                <button class="btn primary small" type="submit">批准</button>
+                <button class="btn small" type="button" data-action="deny-secret-request" data-request-id="${attr(request.id)}">拒绝</button>
+              </div>
+            </form>`).join('')}
+        </div>`}
+        ${secrets.length === 0 ? '<div class="faint" style="padding:6px 0 12px">还没有密钥。</div>' : `<div class="secret-list">
+          ${secrets.map(secret => `
+            <div class="secret-row">
+              <span class="pill ${secret.scope === 'team' ? 'violet' : ''}">${secret.scope === 'team' ? '团队' : '项目'}</span>
+              <strong class="mono">${esc(secret.name)}</strong>
+              ${secret.scope === 'project' && secret.projectName ? `<span class="faint">${esc(secret.projectName)}</span>` : ''}
+              <span class="secret-purpose">${esc(secret.purpose || '')}</span>
+              <span class="subpanel-tag" title="值指纹（sha256 前 8 位）">${esc(secret.fingerprint)}</span>
+              <span class="faint">${esc(formatTime(secret.updatedAt))}</span>
+              <span class="faint">${esc(secret.updatedBy ?? '')}</span>
+              <button class="btn icon small" type="button" data-action="delete-secret" data-secret-id="${attr(secret.id)}" data-secret-name="${attr(secret.name)}" title="删除密钥" aria-label="删除密钥 ${attr(secret.name)}">${icon('trash')}</button>
+            </div>`).join('')}
+        </div>`}
+        <form data-form="upsert-secret" style="margin-top:12px">
+          <div class="field-row">
+            <div class="field"><label for="secret-scope">作用域</label>
+              <select class="select" id="secret-scope" name="scope">
+                <option value="team">团队（全部活动项目）</option>
+                <option value="project">单个项目</option>
+              </select>
+            </div>
+            <div class="field"><label for="secret-project">所属项目</label>
+              <select class="select" id="secret-project" name="projectId">
+                <option value="">团队级无需选择</option>
+                ${projects.map(project => `<option value="${attr(project.id)}">${esc(project.name)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label for="secret-name">名称</label><input class="input mono" id="secret-name" name="name" maxlength="64" placeholder="如 DEPLOY_TOKEN" required></div>
+            <div class="field"><label for="secret-purpose">用途说明</label><input class="input" id="secret-purpose" name="purpose" maxlength="200" placeholder="选填"></div>
+          </div>
+          <div class="field"><label for="secret-value">密钥值</label>
+            <input class="input mono" id="secret-value" name="value" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 个字符，保存后不再回显">
+            <div class="hint">至少 8 个字符；同作用域同名会覆盖旧值并更新指纹。</div>
+          </div>
+          <div class="btn-row"><button class="btn primary small" type="submit">${icon('check')}保存密钥</button></div>
+        </form>
+      </div>`
+  }
+
   function renderSettings() {
     const project = activeProject()
     const paths = state.data.paths ?? {}
@@ -1257,7 +1437,8 @@
         <div class="path-row"><span>工作区</span>${pathCode(paths.workspace ?? '')}${copyPath(paths.workspace ?? '')}</div>
         <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot ?? '')}${copyPath(paths.skillRoot ?? '')}</div>
         <div class="path-row"><span>数据</span>${pathCode(paths.dataDir ?? '')}${copyPath(paths.dataDir ?? '')}</div>
-      </div>`
+      </div>
+      ${renderSecretsCard()}`
     const members = activeBots()
     const owner = botById(project.owner_bot_id)
     const memberIds = new Set(project.members.map(member => member.id))
@@ -1311,9 +1492,11 @@
               <div class="kv"><span>待审提案</span><strong>${state.data.proposals.filter(item => item.status === 'pending').length}</strong></div>
             </div>
             ${renderOpsCard()}
+            ${renderWechatCard()}
           </div>
         </div>
       </form>
+      ${renderSecretsCard()}
     `
   }
 
@@ -1423,6 +1606,7 @@
       case 'memory': return modalMemory(modal.memory)
       case 'proposal': return modalProposal(modal.kind)
       case 'price': return modalPrice(modal.price ?? {})
+      case 'trajectory': return modalTrajectory(modal.detail)
       default: return ''
     }
   }
@@ -1543,6 +1727,76 @@
     })
   }
 
+  const ARTIFACT_IMAGE = /\.(png|jpe?g|gif|webp)$/i
+  const artifactFileUrl = (runId, path) =>
+    `/api/dsh-team/artifact-file?runId=${encodeURIComponent(runId)}&path=${encodeURIComponent(path)}`
+
+  // 已完成写运行的交付产物：图片内联预览（点击新窗口打开），其余文件列出路径与扩展名徽标。
+  function runArtifacts(run) {
+    const list = Array.isArray(run.artifacts) ? run.artifacts : []
+    if (run.status !== 'succeeded' || list.length === 0) return ''
+    const rows = []
+    for (const item of list) {
+      const path = String(item?.path ?? '')
+      if (!path) continue
+      const url = artifactFileUrl(run.id, path)
+      if (ARTIFACT_IMAGE.test(path)) {
+        rows.push(`<button type="button" class="artifact-thumb" data-action="open-artifact" data-url="${attr(url)}" title="${attr(path)}"><img src="${attr(url)}" alt="${attr(path)}" loading="lazy"></button>`)
+      } else {
+        const ext = (path.match(/\.([a-z0-9]+)$/i)?.[1] ?? 'file').toUpperCase().slice(0, 6)
+        rows.push(`<a class="artifact-file" href="${attr(url)}" target="_blank" rel="noopener"><span class="artifact-path">${esc(path)}</span><span class="artifact-ext mono">${esc(ext)}</span></a>`)
+      }
+    }
+    if (!rows.length) return ''
+    return `<div class="artifact-list"><div class="eyebrow" style="margin:8px 0 5px">交付产物</div>${rows.join('')}</div>`
+  }
+
+  // ===== 思考过程：Bot 运行轨迹（run_trajectory）=====
+
+  const TRAJ_LABELS = { thinking: '思考', text: '回复', tool_call: '调用工具', tool_result: '工具返回', end: '运行结束' }
+
+  function trajectoryLabel(entry) {
+    const kind = String(entry?.kind ?? '')
+    const title = String(entry?.title ?? '').trim()
+    if (kind === 'tool_call') return title ? (title.startsWith('调用工具') ? title : `调用工具 ${title}`) : TRAJ_LABELS.tool_call
+    if (kind === 'tool_result') return title ? (title.startsWith('工具') ? title : `工具 ${title} 返回`) : TRAJ_LABELS.tool_result
+    return title || TRAJ_LABELS[kind] || ''
+  }
+
+  function trajectoryEntry(entry) {
+    const kind = String(entry?.kind ?? '')
+    const title = String(entry?.title ?? '').trim()
+    const detail = String(entry?.detail ?? '')
+    const label = trajectoryLabel(entry)
+    if (kind === 'turn') {
+      return `<div class="traj-turn"><span>${esc(title || `第 ${entry?.turn ?? ''} 轮`)}</span></div>`
+    }
+    if (kind === 'note') {
+      return `<div class="traj-note">${esc([title, detail].filter(Boolean).join(' · '))}</div>`
+    }
+    if (kind === 'thinking' || kind === 'tool_call' || kind === 'tool_result') {
+      const body = detail ? `<div class="traj-detail${kind === 'thinking' ? '' : ' traj-json'}">${esc(detail)}</div>` : ''
+      return `<details class="traj-entry traj-fold"><summary class="traj-entry-head">${esc(label)}</summary>${body}</details>`
+    }
+    const head = `<div class="traj-entry-head">${esc(label || title || kind)}</div>`
+    const body = detail ? `<div class="traj-detail">${esc(detail)}</div>` : ''
+    return `<div class="traj-entry${kind === 'end' ? ' traj-end' : ''}">${head}${body}</div>`
+  }
+
+  function modalTrajectory(detail) {
+    const entries = Array.isArray(detail?.entries) ? detail.entries : []
+    const body = entries.length === 0
+      ? '<div class="faint">这次运行没有可展示的轨迹。</div>'
+      : `<div class="traj-stream">${entries.map(trajectoryEntry).join('')}</div>`
+    return modalShell({
+      title: '思考过程',
+      subtitle: entries.length ? `${entries.length} 条轨迹记录` : '这次运行没有可展示的轨迹。',
+      body,
+      footer: '<button class="btn" data-action="close-modal">关闭</button>',
+      size: 'wide',
+    })
+  }
+
   function modalTask(task) {
     if (!task) return modalLoading('任务')
     const project = activeProject()
@@ -1585,6 +1839,7 @@
             <div class="run-row-meta"><span>${esc(duration(run.started_at, run.ended_at))}</span><span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
             ${run.error_message ? `<div class="run-output error">${esc(run.error_message)}</div>` : ''}
             ${run.output ? `<details style="margin-top:6px"><summary class="summary-link">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
+            ${runArtifacts(run)}
           </div>`).join('')}</div>
           <div class="divider"></div>
           <div class="eyebrow" style="margin-bottom:7px">详情</div>
@@ -1822,6 +2077,19 @@
       render()
     } catch {
       closeModal()
+    }
+  }
+
+  async function openTrajectory(runId) {
+    openModal({ type: 'trajectory', loading: true, title: '思考过程' })
+    try {
+      const detail = await api('run_trajectory', { runId }, { quiet: true })
+      if (state.modal?.type !== 'trajectory') return
+      state.modal = { type: 'trajectory', detail }
+      render()
+    } catch (error) {
+      closeModal()
+      toast(error?.message || '读取思考过程失败', 'error')
     }
   }
 
@@ -2148,6 +2416,35 @@
           setTimeout(() => location.reload(), 7000)
           break
         }
+        case 'wechat-login': {
+          const result = await api('wechat_login', {})
+          state.wechatAuth = { qrSvg: result.qrSvg, qrCodeUrl: result.qrCodeUrl }
+          toast('二维码已生成，请用微信扫码', 'success')
+          startWechatPoll()
+          render()
+          break
+        }
+        case 'wechat-code': {
+          const code = document.getElementById('wechat-code')?.value?.trim()
+          if (!code) {
+            toast('请输入微信验证码', 'error')
+            break
+          }
+          await api('wechat_code', { code })
+          state.wechatAuth = null
+          toast('验证码已提交', 'success')
+          startWechatPoll()
+          break
+        }
+        case 'wechat-logout': {
+          if (!window.confirm('退出绑定后需要重新扫码才能恢复推送。确认退出？')) break
+          await api('wechat_logout', {})
+          state.wechatAuth = null
+          stopWechatPoll()
+          await refresh({ quiet: true })
+          toast('已退出微信绑定', 'success')
+          break
+        }
         case 'select-project':
           state.projectId = target.dataset.projectId
           state.view = 'chat'
@@ -2209,6 +2506,9 @@
         }
         case 'open-task':
           await openTask(target.dataset.taskId)
+          break
+        case 'open-trajectory':
+          await openTrajectory(target.dataset.runId)
           break
         case 'edit-bot':
           await openBot(target.dataset.botId)
@@ -2323,6 +2623,25 @@
           const run = await api('retry_run', { runId: target.dataset.runId })
           await refreshAfterTask(run.task_id)
           toast('已重新排队', 'success')
+          break
+        }
+        case 'open-artifact': {
+          window.open(target.dataset.url, '_blank', 'noopener')
+          break
+        }
+        case 'delete-secret': {
+          const name = target.dataset.secretName || '该密钥'
+          if (!window.confirm(`删除密钥 ${name}？各项目的 .team/secrets.env 会同步更新。`)) break
+          await api('delete_secret', { secretId: target.dataset.secretId })
+          await refresh()
+          toast('密钥已删除', 'success')
+          break
+        }
+        case 'deny-secret-request': {
+          if (!window.confirm('拒绝该密钥请求？发起的 Bot 会在群里收到系统提示。')) break
+          await api('deny_secret_request', { requestId: target.dataset.requestId })
+          await refresh()
+          toast('已拒绝该密钥请求', 'success')
           break
         }
         case 'delete-memory': {
@@ -2570,6 +2889,28 @@
         toast('项目设置已保存', 'success')
         return
       }
+      if (type === 'upsert-secret') {
+        const scope = payload.scope === 'team' ? 'team' : 'project'
+        if (scope === 'project' && !payload.projectId) throw new Error('项目级密钥必须选择项目')
+        if (String(payload.value ?? '').length < 8) throw new Error('密钥值至少 8 个字符')
+        await api('upsert_secret', {
+          scope,
+          projectId: scope === 'project' ? payload.projectId : null,
+          name: payload.name,
+          purpose: payload.purpose ?? '',
+          value: payload.value,
+        })
+        await refresh()
+        toast('密钥已保存并物化到项目 .team/secrets.env', 'success')
+        return
+      }
+      if (type === 'approve-secret') {
+        if (String(payload.value ?? '').length < 8) throw new Error('密钥值至少 8 个字符')
+        await api('approve_secret_request', { requestId: payload.requestId, value: payload.value })
+        await refresh()
+        toast('密钥请求已批准并物化', 'success')
+        return
+      }
     } catch (error) {
       toast(error.message || String(error), 'error')
     }
@@ -2676,6 +3017,13 @@
       render()
     }
     if (el.matches('[data-model-select]')) updateEffortOptions(el)
+    if (el.id === 'secret-scope') {
+      const projectSelect = document.getElementById('secret-project')
+      if (projectSelect) {
+        projectSelect.disabled = el.value !== 'project'
+        if (el.value !== 'project') projectSelect.value = ''
+      }
+    }
   })
 
   document.addEventListener('scroll', (event) => {

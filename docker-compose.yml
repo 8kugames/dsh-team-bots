@@ -37,6 +37,7 @@ services:
       DSH_TEAM_AGENT_TEAM: "${DSH_TEAM_AGENT_TEAM:-0}"
       DSH_TEAM_MAX_TEAMMATES: "${DSH_TEAM_MAX_TEAMMATES:-3}"
       DSH_TEAM_MODEL_PRICES: "${DSH_TEAM_MODEL_PRICES:-}"
+      DSH_TEAM_WECHAT: "${DSH_TEAM_WECHAT:-0}"
       NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org/}"
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"

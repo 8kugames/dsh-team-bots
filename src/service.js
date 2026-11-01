@@ -1,12 +1,18 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { join, sep } from 'node:path'
 import { AppError, badRequest, conflict, forbidden, notFound } from './errors.js'
-import { botWorkspaceDir, botsHome, ensureDirResilient, ensureProjectWorkspace, ensureSkillRoot, projectDir } from './paths.js'
+import { assertInside, botWorkspaceDir, botsHome, ensureDirResilient, ensureProjectWorkspace, ensureSkillRoot, projectDir } from './paths.js'
 import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal, reconcileUsage, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
 import { latestDshVersion, compareVersions, validTargetVersion } from './updater.js'
 import { priceKey, seedModelPrices } from './pricing.js'
 import { publishSkill, rollbackSkill, skillSnapshot, stageSkill, syncSkills } from './skills.js'
+import { parseStewardOutput, shouldRotate } from './steward.js'
+import { deliveryPlan, replyDeliveryPrompt, summarizeForUi, upsertBotMessage } from './botmsg.js'
+import { ENV_PREFIX, SecretBox, maskSecrets, materializeEnvFile, normalizeSecretName, secretFingerprint } from './secrets.js'
+import { WechatStore } from './wechat/store.js'
+import { WechatChannel } from './wechat/channel.js'
 import {
   clampNumber, id, jsonParse, nowIso, parseDisabledSkills, parseMentions, projectKey, redactSecrets,
   sha256, slugify, text, sanitizeFilename, writeIfChanged,
@@ -24,6 +30,15 @@ const TRANSITIONS = {
   canceled: new Set(['todo']),
 }
 const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
+
+// 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
+const makeQr = createRequire(import.meta.url)('../vendor/qrcode/qrcode.js')
+function wechatQrSvg(url) {
+  const qr = makeQr(0, 'M')
+  qr.addData(url)
+  qr.make()
+  return qr.createSvgTag({ cellSize: 4, margin: 2 })
+}
 
 const botNamePattern = /^[\p{L}\p{N}_-]{1,24}$/u
 const commandTaskPattern = /^\/task\s+@([\p{L}\p{N}_-]+)\s+([\s\S]+)$/u
@@ -61,6 +76,7 @@ export class TeamService {
     // 只读运行开始时的项目工作区指纹，用于事后发现“只读会话改了文件”。
     this.fingerprints = new Map()
     this.lastMaintenanceAt = 0
+    this.wechat = null
   }
 
   attachRuntime(runtime) {
@@ -75,7 +91,6 @@ export class TeamService {
       await ensureDirResilient(this.config.memoryDir)
       await ensureDirResilient(this.config.messageDir)
       await ensureSkillRoot(this.config.workspace)
-      // 单聊：为每个 bot 准备 _the_bots/<dir> 专属目录（回填 solo_dir 并建目录）。
       await this.ensureSoloWorkspaces()
       this.store.run(
         `INSERT INTO users(id, name, role, created_at) VALUES (?, ?, 'admin', ?)
@@ -123,6 +138,14 @@ export class TeamService {
           id('evt'), run.id, '宿主重启，运行重新排队', nowIso(),
         )
       }
+      if (this.config.wechat?.enabled) {
+        const wechatStore = await new WechatStore(this.config.wechatDbPath).open()
+        this.wechat = new WechatChannel({ store: wechatStore, config: this.config, log: this.logger })
+        this.wechat.setService(this)
+        await this.wechat.start().catch(error => {
+          this.logger.warn?.(`[wechat] 通道启动失败: ${error?.message ?? error}`)
+        })
+      }
     })()
     return this.ready
   }
@@ -136,6 +159,7 @@ export class TeamService {
       retention_run_event_days: '0',
       retention_message_days: '0',
       memory_review: '1',
+      chat_memory_review: '1',
     }
     for (const [key, value] of Object.entries(defaults)) {
       if (this.store.setting(key) === null) this.store.setSetting(key, value)
@@ -150,7 +174,7 @@ export class TeamService {
     const keys = [
       'budget_currency', 'global_token_budget', 'global_cost_budget',
       'retention_usage_days', 'retention_run_event_days', 'retention_message_days',
-      'memory_review',
+      'memory_review', 'chat_memory_review',
     ]
     const values = {}
     for (const key of keys) values[key] = this.store.setting(key, '')
@@ -199,6 +223,7 @@ export class TeamService {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.started = false
+    void this.wechat?.stop()
   }
 
   actor(actor = { type: 'user', id: this.localUserId }) {
@@ -430,9 +455,9 @@ export class TeamService {
     )
     return {
       ...bot,
+      modelRef: bot.provider && bot.model ? `${bot.provider}/${bot.model}` : null,
       soloDir: bot.solo_dir ?? null,
       soloWorkspace: bot.solo_dir ? join(this.config.workspace, '_the_bots', bot.solo_dir) : null,
-      modelRef: bot.provider && bot.model ? `${bot.provider}/${bot.model}` : null,
       memoryCount: Number(memoryCount),
       openTasks: Number(openTasks),
       stats: {
@@ -520,6 +545,11 @@ export class TeamService {
       }
       this.audit(actor, 'project.create', 'project', projectId, { name, key, owner: owner.id })
     })
+    // 团队级密钥已存在时，新项目立即物化 .team/secrets.env，成员 Bot 开箱可用。
+    const teamSecrets = this.store.get("SELECT COUNT(*) AS n FROM secrets WHERE scope = 'team'")
+    if (Number(teamSecrets?.n) > 0) {
+      try { await this.materializeProjectSecrets(this.projectRow(projectId)) } catch {}
+    }
     return this.projectView(this.projectRow(projectId))
   }
 
@@ -624,10 +654,12 @@ export class TeamService {
     const group = this.groupOf(projectId)
     if (!group) throw notFound('项目群聊不存在')
     const messageId = id('msg')
+    // 群消息持久化前过密钥掩码：密文值不进转录，模型下一轮只会看到 $DSH_SECRET_<NAME> 标签。
+    const maskedBody = this.maskSecretValues(body)
     this.store.run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      messageId, projectId, group.id, senderType, senderId, body, JSON.stringify(mentions), taskId, runId, createdAt,
+      messageId, projectId, group.id, senderType, senderId, maskedBody, JSON.stringify(mentions), taskId, runId, createdAt,
     )
     return messageId
   }
@@ -746,7 +778,7 @@ export class TeamService {
     return true
   }
 
-  // ── 单聊（项目外）：与单个 Bot 的一对一对话 ────────────────────────────────
+  // ===== 单聊：项目外与单个 Bot 的一对一会话，工作目录 _the_bots/<solo_dir> =====
 
   insertSoloMessage({ botId, senderType, senderId, body, runId = null, createdAt = nowIso() }) {
     const messageId = id('msg')
@@ -1132,9 +1164,8 @@ export class TeamService {
     if (!binding) throw forbidden('当前会话不属于任何项目')
     const raw = String(ref ?? '').trim()
     if (!raw) throw badRequest('缺少要展开的引用 id')
-
-    // 单聊会话：只支持展开本 bot 的单聊消息引用。
     if (!binding.project_id) {
+      // 单聊会话：没有项目上下文，只能展开本会话的消息引用。
       if (!raw.startsWith('m_')) throw notFound('单聊会话中只支持展开 m_ 消息引用')
       const message = this.store.get(
         'SELECT * FROM solo_messages WHERE bot_id = ? AND substr(id, -6) = ?',
@@ -1277,11 +1308,6 @@ export class TeamService {
       if (!project || !bot || project.status !== 'active' || bot.status !== 'active') return null
       return this.enqueueChatRun(project, bot, payload.messageId)
     }
-    if (row.kind === 'solo_chat_run') {
-      const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
-      if (!bot || bot.status !== 'active') return null
-      return this.enqueueSoloChatRun(bot, payload.messageId)
-    }
     if (row.kind === 'task_run') {
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', payload.taskId)
       if (!task) return null
@@ -1312,9 +1338,105 @@ export class TeamService {
       }
       return reviewRunId
     }
+    if (row.kind === 'solo_chat_run') {
+      const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
+      if (!bot || bot.status !== 'active') return null
+      return this.enqueueSoloChatRun(bot, payload.messageId)
+    }
+    if (row.kind === 'dm_run') {
+      const message = this.store.get('SELECT * FROM bot_messages WHERE id = ?', payload.messageId)
+      if (!message || message.status !== 'pending') return null
+      const target = this.store.get('SELECT * FROM bots WHERE id = ?', message.to_bot_id)
+      if (!target || target.status !== 'active') {
+        this.store.run(
+          "UPDATE bot_messages SET status = 'failed', reply = '目标 Bot 不可用，私信未投递', replied_at = ? WHERE id = ?",
+          nowIso(), message.id,
+        )
+        return null
+      }
+      return this.enqueueDmRun(message, target)
+    }
+    if (row.kind === 'dm_reply') {
+      const message = this.store.get('SELECT * FROM bot_messages WHERE id = ?', payload.messageId)
+      if (!message || message.status !== 'replied') return null
+      return this.deliverBotReply(message)
+    }
     const error = badRequest(`未知的 outbox 类型 ${row.kind}`)
     error.permanent = true
     throw error
+  }
+
+  // 建私信执行运行：目标 Bot 的 dm 会话收到来信，产出回信写入 bot_messages.reply。
+  enqueueDmRun(message, target) {
+    const existing = this.store.get(
+      "SELECT id FROM runs WHERE kind = 'dm' AND trigger_ref = ?",
+      message.id,
+    )
+    if (existing) return existing.id
+    const runId = id('run')
+    const createdAt = nowIso()
+    this.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
+        attempt, idempotency_key, queued_at)
+       VALUES (?, ?, ?, 'dm', 'read', 'dm', ?, 'queued', 1, ?, ?)`,
+      runId, message.project_id, target.id, message.id, `dm:${message.id}`, createdAt,
+    )
+    this.store.run(
+      "UPDATE bot_messages SET status = 'delivered', run_id = ? WHERE id = ?",
+      runId, message.id,
+    )
+    this.insertRunEvent(runId, 'queued', '收到 team_message_bot 私信，开始处理')
+    return runId
+  }
+
+  // 回信投递回发送方会话：忙时 steer 注入，闲时排 dm_reply 运行（新会话自动播种 checkpoint）。
+  deliverBotReply(message) {
+    const caller = this.store.get('SELECT * FROM bots WHERE id = ?', message.from_bot_id)
+    if (!caller || caller.status !== 'active') return null
+    const kind = message.origin_kind === 'task' ? 'task' : message.origin_kind === 'dm' ? 'dm' : 'project'
+    const binding = message.origin_kind === 'task' && message.origin_task_id
+      ? this.store.get(
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ?",
+        caller.id, message.project_id, message.origin_task_id,
+      )
+      : this.store.get(
+        'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ?',
+        caller.id, message.project_id, kind,
+      )
+    // 无绑定（会话被轮换清理或首次私信）：走 dm_reply 运行，由 startRun 重建会话。
+    let plan
+    if (!binding) {
+      plan = 'run'
+    } else {
+      try {
+        plan = deliveryPlan({ row: message, callerSessionBusy: this.runtime.sessionBusy(binding.session_id) })
+      } catch {
+        return null
+      }
+    }
+    if (plan === 'steer') {
+      const fromBot = this.store.get('SELECT name FROM bots WHERE id = ?', message.to_bot_id)
+      void this.runtime.steer(binding.session_id, replyDeliveryPrompt({
+        fromBotName: fromBot?.name ?? 'teammate',
+        reply: message.reply ?? '',
+        originKind: message.origin_kind ?? 'project',
+      }))
+      this.insertRunEvent(message.run_id, 'reply_delivered', `回信已 steer 注入发送方会话（${message.id.slice(-6)}）`)
+      return null
+    }
+    const runId = id('run')
+    const createdAt = nowIso()
+    // task_id 同 steward 留空（one_active_run_per_task 不限 kind，任务排队中投回信会撞索引）；
+    // 任务会话定位由 sessionKindFor→bot_messages.origin_kind 完成，不依赖 run.task_id。
+    this.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+        attempt, idempotency_key, queued_at)
+       VALUES (?, ?, ?, NULL, 'dm_reply', 'read', 'dm_reply', ?, 'queued', 1, ?, ?)`,
+      runId, message.project_id, caller.id,
+      message.id, `dm_reply:${message.id}`, createdAt,
+    )
+    this.insertRunEvent(runId, 'queued', '私信回信排队投递给发送方会话')
+    return runId
   }
 
   enqueueSoloChatRun(bot, messageId) {
@@ -1390,6 +1512,27 @@ export class TeamService {
     await this.cancelRunInternal(runId, true)
     this.audit(actor, 'run.cancel', 'run', runId, {})
     return this.runRow(runId)
+  }
+
+  // 运行轨迹：模型回合、思考文本、助手文本、工具调用与工具结果的展示账本。
+  runTrajectory(runId) {
+    const run = this.runRow(runId)
+    const rows = this.store.all(
+      'SELECT seq, kind, title, detail, turn, step, created_at FROM run_trajectory WHERE run_id = ? ORDER BY seq ASC',
+      run.id,
+    )
+    return {
+      runId: run.id,
+      entries: rows.map(row => ({
+        seq: row.seq,
+        kind: row.kind,
+        title: row.title,
+        detail: row.detail,
+        turn: row.turn ?? null,
+        step: row.step ?? null,
+        at: row.created_at,
+      })),
+    }
   }
 
   async cancelRunsForTask(taskId) {
@@ -1476,7 +1619,6 @@ export class TeamService {
         "SELECT bot_id, kind, task_id, project_id, mode FROM runs WHERE status = 'running'",
       )
       const activeKeys = new Set(activeRows.map(row => this.claimKey(row)))
-      // project_id 为 NULL 的单聊运行不占任何项目的写锁（各 bot 目录互不相干）。
       const writingProjects = new Set(activeRows.filter(row => row.mode === 'write' && row.project_id).map(row => row.project_id))
       let activeTotal = activeRows.length
       if (activeTotal >= this.config.maxConcurrentRuns) return
@@ -1486,8 +1628,8 @@ export class TeamService {
         const claimKey = this.claimKey(run)
         if (activeKeys.has(claimKey)) continue
         // 同一项目共享一个工作目录：写运行之间必须串行，只读运行可以并行。
+        // 单聊运行 project_id 为空，写锁落在各自独立的 _the_bots/<dir>，不占项目锁。
         if (run.mode === 'write' && run.project_id && writingProjects.has(run.project_id)) continue
-        // 单聊运行（solo_chat）没有项目上下文，只有 bot 与全局预算。
         const needsProject = run.kind !== 'solo_chat'
         const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
         const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
@@ -1537,6 +1679,7 @@ export class TeamService {
     }
   }
 
+  // budgetError(project 传 null 表示项目外运行，只受全局预算约束)
   budgetError(project) {
     const currency = this.budgetCurrency()
     const global = this.globalBudget()
@@ -1549,7 +1692,6 @@ export class TeamService {
         return `全局本月成本预算已用尽（${usage.cost.toFixed(4)}/${global.costBudget} ${currency}）`
       }
     }
-    // project 为 null 表示项目外运行（单聊）：只受全局预算约束。
     if (!project || (!project.token_budget && !project.cost_budget)) return null
     const usage = monthUsageForProject(this.store, project.id, currency)
     if (project.token_budget && usage.totalTokens >= project.token_budget) {
@@ -1581,11 +1723,26 @@ export class TeamService {
     const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
     try {
       const task = run.task_id ? this.taskRow(run.task_id) : null
-      const chatMessage = (run.kind === 'chat' || run.kind === 'solo_chat') && run.trigger_ref
-        ? this.store.get(`SELECT * FROM ${run.kind === 'solo_chat' ? 'solo_messages' : 'messages'} WHERE id = ?`, run.trigger_ref)
-        : null
+      const chatMessage = run.kind === 'chat' && run.trigger_ref
+        ? this.store.get('SELECT * FROM messages WHERE id = ?', run.trigger_ref)
+        : run.kind === 'solo_chat' && run.trigger_ref
+          ? this.store.get('SELECT * FROM solo_messages WHERE id = ?', run.trigger_ref)
+          : null
+      // 上下文滚动预检：占用达到检查线的会话先做 steward 总结，本运行延后到新会话播种后执行。
+      const rotationBinding = this.rotationTarget(run, bot, project)
+      if (rotationBinding) {
+        this.enqueueStewardRun(bot, project, rotationBinding)
+        this.store.run(
+          "UPDATE runs SET status = 'queued', session_id = NULL, queued_at = ? WHERE id = ? AND status = 'running'",
+          new Date(Date.now() + 1000).toISOString(),
+          run.id,
+        )
+        this.insertRunEvent(run.id, 'deferred_steward', '上下文接近窗口上限，先执行会话滚动（steward 总结），本运行延后重排')
+        void this.tick()
+        return
+      }
       if (run.mode === 'read') this.fingerprints.set(runId, this.workspaceFingerprint(project))
-      await this.runtime.startRun({ run, bot, project, task, chatMessage })
+      await this.runtime.startRun({ run, bot, project, task, chatMessage, sessionKind: this.sessionKindFor(run) })
     } catch (error) {
       this.logger.warn?.('dsh-team: run %s failed to start: %s', runId, error)
       this.fingerprints.delete(runId)
@@ -1599,6 +1756,103 @@ export class TeamService {
         },
       })
     }
+  }
+
+  // 跨类别运行的目标会话类别：steward 按被总结会话的类别，dm_reply 按来信来源的类别。
+  sessionKindFor(run) {
+    if (run.kind === 'steward') {
+      const binding = run.trigger_ref
+        ? this.store.get('SELECT kind FROM session_bindings WHERE session_id = ?', run.trigger_ref)
+        : null
+      return binding?.kind ?? 'project'
+    }
+    if (run.kind === 'dm_reply') {
+      const message = run.trigger_ref
+        ? this.store.get('SELECT origin_kind FROM bot_messages WHERE id = ?', run.trigger_ref)
+        : null
+      return message?.origin_kind === 'task' ? 'task' : message?.origin_kind === 'dm' ? 'dm' : 'project'
+    }
+    return undefined
+  }
+
+  // 会话滚动判定：task/chat/dm 三类会话占用达到检查线时返回绑定行，其余返回 null。
+  rotationTarget(run, bot, project) {
+    if (!project || !bot) return null
+    if (!['task', 'chat', 'dm'].includes(run.kind)) return null
+    const kind = run.kind === 'task' ? 'task' : run.kind
+    const taskId = run.kind === 'task' ? run.task_id ?? null : null
+    const binding = this.store.get(
+      'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ? AND task_id IS ?',
+      bot.id,
+      project.id,
+      kind,
+      taskId,
+    )
+    if (!binding?.last_ctx_tokens || !binding?.ctx_window) return null
+    if (!shouldRotate({ lastCtxTokens: binding.last_ctx_tokens, contextWindow: binding.ctx_window })) return null
+    return binding
+  }
+
+  enqueueStewardRun(bot, project, binding) {
+    // 幂等：同一会话已有排队/执行中的 steward 就不再建。
+    const pending = this.store.get(
+      "SELECT id FROM runs WHERE kind = 'steward' AND status IN ('queued', 'running') AND trigger_ref = ?",
+      binding.session_id,
+    )
+    if (pending) return pending.id
+    const stewardRunId = id('run')
+    const createdAt = nowIso()
+    // task_id 留空：one_active_run_per_task 唯一索引不限 kind，原任务 run 尚在
+    // queued/running 时带 task_id 插 steward 会撞唯一约束；任务关联经 trigger_ref→binding 保留。
+    this.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+        attempt, idempotency_key, queued_at)
+       VALUES (?, ?, ?, NULL, 'steward', 'read', 'rotation', ?, 'queued', 1, ?, ?)`,
+      stewardRunId, project.id, bot.id, binding.session_id,
+      `steward:${binding.session_id}`, createdAt,
+    )
+    this.insertRunEvent(stewardRunId, 'queued', `会话上下文达到滚动阈值（${binding.last_ctx_tokens}/${binding.ctx_window}），触发 steward 总结`)
+    return stewardRunId
+  }
+
+  insertRunEvent(runId, type, message) {
+    if (!runId) return
+    this.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'), runId, type, message, nowIso(),
+    )
+  }
+
+  // 成功写运行的交付产物清单：项目目录 git status 的相对路径快照（M/A/?? 状态）。
+  // 非 git 仓库或 git 不可用时跳过并记 run_event；清单上限 200 条，不复制文件内容。
+  captureRunArtifacts(run, project) {
+    const dir = join(this.config.workspace, project.slug)
+    if (!existsSync(join(dir, '.git'))) {
+      this.insertRunEvent(run.id, 'artifacts_skipped', '项目工作区不是 git 仓库，跳过产物记录')
+      return null
+    }
+    let raw
+    try {
+      raw = execFileSync('git', ['-c', 'core.quotePath=false', 'status', '--porcelain', '-uall', '--no-renames'], {
+        cwd: dir,
+        timeout: 5_000,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+    } catch {
+      this.insertRunEvent(run.id, 'artifacts_skipped', 'git 不可用，跳过产物记录')
+      return null
+    }
+    const list = []
+    for (const line of String(raw).split('\n')) {
+      if (line.length < 4) continue
+      const status = line.slice(0, 2).trim()
+      const path = line.slice(3).trim()
+      if (!['M', 'A', '??'].includes(status) || !path || path.startsWith('"')) continue
+      list.push({ path, status })
+      if (list.length >= 200) break
+    }
+    return list.length ? JSON.stringify(list) : null
   }
 
   // 项目目录的 git 指纹；不是 git 仓库时返回 null，跳过审计。
@@ -1647,13 +1901,16 @@ export class TeamService {
     const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
     this.auditReadRunWrites(run, project)
     const usage = runUsageTotals(this.store, runId, this.budgetCurrency())
-    const cleanOutput = text(output, 120_000)
+    const cleanOutput = this.maskSecretValues(text(output, 120_000))
+    const artifactsJson = status === 'succeeded' && run.mode === 'write' && project
+      ? this.captureRunArtifacts(run, project)
+      : null
     const endedAt = nowIso()
     this.store.run(
-      `UPDATE runs SET status = ?, output = ?, error_code = ?, error_message = ?, ended_at = ?,
+      `UPDATE runs SET status = ?, output = ?, artifacts = ?, error_code = ?, error_message = ?, ended_at = ?,
        usage_input = ?, usage_cache_read = ?, usage_cache_write = ?, usage_output = ?, usage_cost = ?
        WHERE id = ? AND status IN ('running', 'queued')`,
-      status, cleanOutput, error?.code ?? null, error?.message ?? null, endedAt,
+      status, cleanOutput, artifactsJson, error?.code ?? null, error?.message ?? null, endedAt,
       usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens, usage.cost,
       runId,
     )
@@ -1662,6 +1919,47 @@ export class TeamService {
       id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
     )
     const refreshed = this.runRow(runId)
+    if (run.kind === 'steward') {
+      await this.completeStewardRun(run, status === 'succeeded' ? cleanOutput : '', error)
+      if (this.rate[run.project_id]) delete this.rate[run.project_id]
+      return
+    }
+    if (run.kind === 'dm') {
+      const message = run.trigger_ref
+        ? this.store.get('SELECT * FROM bot_messages WHERE id = ?', run.trigger_ref)
+        : null
+      if (message) {
+        if (status === 'succeeded') {
+          this.store.run(
+            "UPDATE bot_messages SET status = 'replied', reply = ?, replied_at = ? WHERE id = ?",
+            cleanOutput || '（对方未返回文本）',
+            endedAt,
+            message.id,
+          )
+        } else {
+          this.store.run(
+            "UPDATE bot_messages SET status = 'failed', reply = ?, replied_at = ? WHERE id = ?",
+            `私信运行失败：${error?.message ?? '未知错误'}`,
+            endedAt,
+            message.id,
+          )
+        }
+        this.enqueueOutbox({
+          kind: 'dm_reply',
+          payload: { messageId: message.id },
+          projectId: message.project_id,
+          idempotencyKey: `dm_reply:${message.id}`,
+        })
+        void this.tick()
+      }
+      if (this.rate[run.project_id]) delete this.rate[run.project_id]
+      return
+    }
+    if (run.kind === 'dm_reply') {
+      // 投递运行本身无后续动作；回信内容已由 dm 运行写入 bot_messages，投递提示词在 runtime.promptFor。
+      if (this.rate[run.project_id]) delete this.rate[run.project_id]
+      return
+    }
     if (run.kind === 'memory_review') {
       await this.completeMemoryReview(run, status === 'succeeded' ? cleanOutput : '', error)
       if (this.rate[run.project_id]) delete this.rate[run.project_id]
@@ -1729,6 +2027,7 @@ export class TeamService {
           taskId: task.id,
           runId,
         })
+        this.wechat?.notify(`任务 ${project.key}-${task.number}《${task.title}》${ownerReview ? '已交付，等待负责人验收' : '已完成，待您验收'}。回复「详情 ${project.key}-${task.number}」查看，回复「验收 ${project.key}-${task.number}」通过。`)
         this.enqueueOutbox({
           kind: 'memory_review',
           payload: { taskId: task.id, sourceRunId: runId },
@@ -1767,6 +2066,10 @@ export class TeamService {
           body: cleanOutput || '模型未返回文本。',
           runId,
         })
+        // 群聊回复后的自动记忆审查（可在设置关闭；与任务交付审查同一队列同一幂等键规则）。
+        if (this.chatMemoryReviewEnabled()) {
+          this.enqueueMemoryReview(project, bot, null, runId)
+        }
       } else if (run.kind === 'solo_chat') {
         this.insertSoloMessage({
           botId: bot.id,
@@ -1821,7 +2124,7 @@ export class TeamService {
 
   learnFromTask(project, bot, task, output, runId) {
     if (!output || output.trim().length < 40) return
-    const content = redactSecrets(`${task.title}：${output.trim().slice(0, 900)}`)
+    const content = maskSecrets(redactSecrets(`${task.title}：${output.trim().slice(0, 900)}`), this.secretEntries())
     const source = `run:${runId}`
     const existing = this.store.get("SELECT id FROM memories WHERE source = ? AND scope_type = 'bot' AND scope_id = ?", source, bot.id)
     if (existing) return
@@ -1853,6 +2156,11 @@ export class TeamService {
   memoryReviewEnabled() {
     if (this.config.memoryReview === false) return false
     return this.store.setting('memory_review', '1') !== '0'
+  }
+
+  // 群聊回复的记忆审查独立开关：闲聊占比高，默认开但可单关。
+  chatMemoryReviewEnabled() {
+    return this.memoryReviewEnabled() && this.store.setting('chat_memory_review', '1') !== '0'
   }
 
   enqueueMemoryReview(project, bot, task, sourceRunId) {
@@ -1903,7 +2211,7 @@ export class TeamService {
     for (const item of items) {
       const scopeType = ['bot', 'project', 'team'].includes(item.scope) ? item.scope : 'bot'
       const scopeId = scopeType === 'bot' ? bot.id : scopeType === 'project' ? project.id : 'team'
-      const content = redactSecrets(text(item.content, 8000))
+      const content = maskSecrets(redactSecrets(text(item.content, 8000)), this.secretEntries())
       if (!content) continue
       const confidence = Math.min(1, Math.max(0, Number(item.confidence) || 0.5))
       try {
@@ -1929,6 +2237,355 @@ export class TeamService {
       id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条`, nowIso(),
     )
     return { applied }
+  }
+
+  // ===== 会话滚动（上下文 steward 接管）=====
+
+  // steward 运行完成：解析摘要 → 落 session_rotations 等待播种 → 删除旧绑定（新会话在下个运行时重建）。
+  async completeStewardRun(run, output, error) {
+    const sessionId = run.trigger_ref
+    const binding = sessionId
+      ? this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+      : null
+    if (!binding) {
+      this.insertRunEvent(run.id, 'rotation_skipped', '原会话绑定已不存在（可能已被轮换或失效），无需滚动')
+      return
+    }
+    const parsed = error ? null : parseStewardOutput(output)
+    const createdAt = nowIso()
+    if (parsed?.ok && parsed.summary?.trim()) {
+      const prior = this.store.get(
+        'SELECT COUNT(*) AS n FROM session_rotations WHERE bot_id = ? AND project_id = ? AND kind = ? AND task_id IS ?',
+        binding.bot_id, binding.project_id, binding.kind, binding.task_id ?? null,
+      )
+      const seq = (Number(prior?.n) || 0) + 1
+      const checkpoint = parsed.summary.trim()
+      this.store.transaction(() => {
+        this.store.run(
+          `INSERT INTO session_rotations(id, bot_id, project_id, kind, task_id, old_session_id, seq, checkpoint, seeded, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+          id('rot'), binding.bot_id, binding.project_id, binding.kind, binding.task_id ?? null,
+          sessionId, seq, checkpoint, createdAt,
+        )
+        this.store.run('DELETE FROM session_bindings WHERE session_id = ?', sessionId)
+      })
+      this.insertRunEvent(run.id, 'rotated', `会话滚动 #${seq} 完成：checkpoint ${checkpoint.length} 字符已存，新会话将在下个运行播种`)
+    } else {
+      // 降级滚动：steward 没产出可用摘要也换会话——继续逼近硬上限的代价大于丢一段摘要。
+      this.store.run('DELETE FROM session_bindings WHERE session_id = ?', sessionId)
+      this.insertRunEvent(run.id, 'rotated_degraded', `steward 未产出可用摘要（${error?.message ?? '输出解析失败'}），已无摘要换新会话`)
+      if (binding.kind === 'project') {
+        const botName = this.store.get('SELECT name FROM bots WHERE id = ?', binding.bot_id)?.name ?? 'Bot'
+        this.insertMessage({
+          projectId: binding.project_id,
+          senderType: 'system',
+          senderId: 'system',
+          body: `${botName} 的群聊会话上下文达到滚动阈值，已重置（自动摘要失败，上一段上下文未保留；细节见运行记录）。`,
+        })
+      }
+    }
+  }
+
+  rotationsView(projectId) {
+    const rows = this.store.all(
+      'SELECT * FROM session_rotations WHERE project_id = ? ORDER BY created_at DESC LIMIT 50',
+      projectId,
+    )
+    return rows.map((row) => {
+      const botName = this.store.get('SELECT name FROM bots WHERE id = ?', row.bot_id)?.name ?? 'Bot'
+      const task = row.task_id
+        ? this.store.get('SELECT number FROM tasks WHERE id = ?', row.task_id)
+        : null
+      const project = this.projectRow(row.project_id)
+      return {
+        id: row.id,
+        seq: row.seq,
+        kind: row.kind,
+        botName,
+        taskIdentifier: task ? `${project.key}-${task.number}` : null,
+        checkpointChars: (row.checkpoint ?? '').length,
+        seeded: Boolean(row.seeded),
+        createdAt: row.created_at,
+      }
+    })
+  }
+
+  // ===== Bot 间私信（team_message_bot）=====
+
+  // 工具入口：同项目成员间具名幂等私信。发信人由会话绑定推出；返回给调用 Bot 的结果里带状态，重发同名请求不产生新工作。
+  messageFromBot({ sessionId, toName, requestId, textBody }) {
+    const origin = sessionId
+      ? this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+      : null
+    if (!origin) throw badRequest('找不到发起会话的项目绑定')
+    const fromBotId = origin.bot_id
+    const from = this.store.get('SELECT * FROM bots WHERE id = ?', fromBotId)
+    if (!from || from.status !== 'active') throw forbidden('发信 Bot 不存在或不可用')
+    if (!toName || typeof toName !== 'string') throw badRequest('缺少收信 Bot 名称')
+    if (!requestId || typeof requestId !== 'string') throw badRequest('缺少 request_id（每次逻辑请求一个稳定名字，重发同名不重复执行）')
+    const project = this.projectRow(origin.project_id)
+    const target = (this.membersOf(project.id) ?? []).find(bot => bot.name === toName.trim())
+    if (!target) throw notFound(`项目 ${project.name} 里没有叫 ${toName} 的成员 Bot`)
+    if (target.id === fromBotId) throw badRequest('不能给自己发私信')
+    const { row, created } = upsertBotMessage(this.store, {
+      projectId: project.id,
+      fromBotId,
+      toBotId: target.id,
+      requestId,
+      text: text(textBody, 50_000),
+      originSessionId: sessionId,
+      originKind: origin.kind,
+      originTaskId: origin.task_id ?? null,
+    })
+    if (created) {
+      this.enqueueOutbox({
+        kind: 'dm_run',
+        payload: { messageId: row.id },
+        projectId: project.id,
+        idempotencyKey: `dm_run:${row.id}`,
+      })
+      void this.tick()
+    }
+    // enqueueOutbox 同步投递会推进状态（pending→delivered），返回前重读最新行。
+    const fresh = this.store.get('SELECT * FROM bot_messages WHERE id = ?', row.id) ?? row
+    return {
+      messageId: fresh.id.slice(-6),
+      status: fresh.status,
+      created,
+      hint: fresh.status === 'replied' ? '该请求此前已有回信，回信会重新投递' : '私信已入队，回信将送回你的当前会话',
+    }
+  }
+
+  botMessagesView(projectId) {
+    const rows = this.store.all(
+      'SELECT * FROM bot_messages WHERE project_id = ? ORDER BY created_at DESC LIMIT 50',
+      projectId,
+    )
+    const bots = new Map(this.store.all('SELECT id, name FROM bots').map(bot => [bot.id, bot.name]))
+    return summarizeForUi(rows).map(item => ({
+      ...item,
+      fromName: bots.get(item.from) ?? item.from,
+      toName: bots.get(item.to) ?? item.to,
+    }))
+  }
+
+  // ===== 密钥管道 =====
+
+  ensureSecretBox() {
+    if (!this._secretBox) {
+      this._secretBox = new SecretBox({ keyFile: join(this.config.dataDir, 'secret.key') })
+    }
+    return this._secretBox
+  }
+
+  // 解密后的 {name, value} 全集（掩码用），写入时失效缓存。
+  secretEntries() {
+    if (this._secretEntries) return this._secretEntries
+    const rows = this.store.all('SELECT * FROM secrets')
+    const box = rows.length ? this.ensureSecretBox() : null
+    this._secretEntries = rows.map(row => ({
+      name: row.name,
+      value: box.decrypt({ valueEnc: row.value_enc, valueIv: row.value_iv, valueTag: row.value_tag }),
+      scope: row.scope,
+      projectId: row.project_id,
+    }))
+    return this._secretEntries
+  }
+
+  maskSecretValues(body) {
+    if (typeof body !== 'string' || !body) return body
+    try {
+      const entries = this.secretEntries()
+      if (!entries.length) return body
+      return maskSecrets(body, entries)
+    } catch (error) {
+      // 解密失败（如密钥文件损坏）不应打断消息/记忆主链路；放行原文并告警。
+      this.logger.warn?.('dsh-team: maskSecretValues failed: %s', error?.message ?? error)
+      return body
+    }
+  }
+
+  listSecrets() {
+    const rows = this.store.all('SELECT * FROM secrets ORDER BY scope, name')
+    return rows.map((row) => {
+      const project = row.project_id ? this.store.get('SELECT key, name FROM projects WHERE id = ?', row.project_id) : null
+      return {
+        id: row.id,
+        scope: row.scope,
+        projectName: project?.name ?? null,
+        name: row.name,
+        purpose: row.purpose,
+        fingerprint: row.fingerprint,
+        updatedBy: row.created_by,
+        updatedAt: row.updated_at,
+      }
+    })
+  }
+
+  // 写入后物化：团队级写所有活动项目，项目级写该项目。bot 的 shell 里 `set -a; . .team/secrets.env` 生效。
+  async materializeProjectSecrets(project) {
+    const rows = this.store.all(
+      "SELECT * FROM secrets WHERE scope = 'team' OR (scope = 'project' AND project_id = ?)",
+      project.id,
+    )
+    const entries = rows.map((row) => {
+      const box = this.ensureSecretBox()
+      return { name: row.name, value: box.decrypt({ valueEnc: row.value_enc, valueIv: row.value_iv, valueTag: row.value_tag }) }
+    })
+    if (!entries.length) return null
+    const dir = join(this.config.workspace, project.slug)
+    return materializeEnvFile(entries, dir)
+  }
+
+  async upsertSecret({ scope, projectId, name, purpose, value }, actor = this.actor()) {
+    if (!['team', 'project'].includes(scope)) throw badRequest('密钥作用域必须是 team 或 project')
+    if (scope === 'project' && !projectId) throw badRequest('项目级密钥必须指定项目')
+    if (scope === 'project') this.projectRow(projectId)
+    const normalized = normalizeSecretName(name)
+    const trimmed = String(value ?? '')
+    if (trimmed.length < 8) throw badRequest('密钥值至少 8 个字符（太短的值不参与掩码，也不允许存）')
+    const box = this.ensureSecretBox()
+    const { valueEnc, valueIv, valueTag } = box.encrypt(trimmed)
+    const fingerprint = secretFingerprint(trimmed)
+    const now = nowIso()
+    const existing = this.store.get(
+      "SELECT id FROM secrets WHERE scope = ? AND IFNULL(project_id, '') = ? AND name = ?",
+      scope, scope === 'project' ? projectId : '', normalized,
+    )
+    let secretId
+    this.store.transaction(() => {
+      if (existing) {
+        secretId = existing.id
+        this.store.run(
+          'UPDATE secrets SET purpose = ?, value_enc = ?, value_iv = ?, value_tag = ?, fingerprint = ?, created_by = ?, updated_at = ? WHERE id = ?',
+          text(purpose, 200) ?? '', valueEnc, valueIv, valueTag, fingerprint, `${actor.type}:${actor.id}`, now, secretId,
+        )
+      } else {
+        secretId = id('sec')
+        this.store.run(
+          `INSERT INTO secrets(id, scope, project_id, name, purpose, value_enc, value_iv, value_tag, fingerprint, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          secretId, scope, scope === 'project' ? projectId : null, normalized,
+          text(purpose, 200) ?? '', valueEnc, valueIv, valueTag, fingerprint,
+          `${actor.type}:${actor.id}`, now, now,
+        )
+      }
+      this.audit(actor, existing ? 'secret.update' : 'secret.create', 'secret', secretId, { scope, name: normalized })
+    })
+    this._secretEntries = null
+    const targets = scope === 'team'
+      ? this.store.all("SELECT * FROM projects WHERE status = 'active'")
+      : [this.projectRow(projectId)]
+    for (const project of targets) await this.materializeProjectSecrets(project)
+    return { id: secretId, name: normalized, fingerprint }
+  }
+
+  async deleteSecret(secretId, actor = this.actor()) {
+    const row = this.store.get('SELECT * FROM secrets WHERE id = ?', secretId)
+    if (!row) throw notFound('密钥不存在')
+    this.store.transaction(() => {
+      this.store.run('DELETE FROM secrets WHERE id = ?', secretId)
+      this.audit(actor, 'secret.delete', 'secret', secretId, { scope: row.scope, name: row.name })
+    })
+    this._secretEntries = null
+    // 删除后剩余条目重新物化；没有剩余条目时保留旧文件会误导，删除之。
+    const targets = row.scope === 'team'
+      ? this.store.all("SELECT * FROM projects WHERE status = 'active'")
+      : [this.projectRow(row.project_id)]
+    for (const project of targets) {
+      const path = await this.materializeProjectSecrets(project)
+      if (!path) {
+        try { rmSync(join(this.config.workspace, project.slug, '.team', 'secrets.env'), { force: true }) } catch {}
+      }
+    }
+    return { deleted: true }
+  }
+
+  // Bot 发起的密钥请求：进待审队列 + 群里一张系统卡片，用户在设置页批准（写值）或拒绝。
+  requestSecretFromBot({ sessionId, name, reason }) {
+    const binding = sessionId
+      ? this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+      : null
+    if (!binding?.project_id) throw badRequest('密钥请求必须在项目会话内发起')
+    const bot = this.store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
+    if (!bot || bot.status !== 'active') throw forbidden('发起请求的 Bot 不存在或不可用')
+    const normalized = normalizeSecretName(name)
+    const requestId = id('secreq')
+    this.store.run(
+      `INSERT INTO secret_requests(id, project_id, bot_id, name, reason, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+      requestId, binding.project_id, binding.bot_id, normalized, text(reason, 500) ?? '', nowIso(),
+    )
+    const project = this.projectRow(binding.project_id)
+    this.insertMessage({
+      projectId: binding.project_id,
+      senderType: 'system',
+      senderId: 'system',
+      body: `${bot.name} 请求密钥 ${normalized}（项目 ${project.name}）。\n理由：${text(reason, 300) ?? '（未说明）'}\n请在设置页「密钥」中批准或拒绝。`,
+    })
+    return { requestId, name: normalized, status: 'pending' }
+  }
+
+  listSecretRequests() {
+    const rows = this.store.all(
+      "SELECT * FROM secret_requests WHERE status = 'pending' ORDER BY created_at DESC LIMIT 50",
+    )
+    return rows.map((row) => {
+      const bot = this.store.get('SELECT name FROM bots WHERE id = ?', row.bot_id)
+      const project = row.project_id ? this.store.get('SELECT name FROM projects WHERE id = ?', row.project_id) : null
+      return {
+        id: row.id,
+        projectName: project?.name ?? null,
+        botName: bot?.name ?? 'Bot',
+        name: row.name,
+        reason: row.reason,
+        createdAt: row.created_at,
+      }
+    })
+  }
+
+  async approveSecretRequest(requestId, { value }, actor = this.actor()) {
+    const request = this.store.get("SELECT * FROM secret_requests WHERE id = ? AND status = 'pending'", requestId)
+    if (!request) throw notFound('密钥请求不存在或已处理')
+    const created = await this.upsertSecret({
+      scope: 'project',
+      projectId: request.project_id,
+      name: request.name,
+      purpose: `bot 请求（${request.reason?.slice(0, 120) ?? '未说明'}）`,
+      value,
+    }, actor)
+    this.store.run(
+      "UPDATE secret_requests SET status = 'approved', handled_at = ? WHERE id = ?",
+      nowIso(), requestId,
+    )
+    if (request.project_id) {
+      this.insertMessage({
+        projectId: request.project_id,
+        senderType: 'system',
+        senderId: 'system',
+        body: `密钥 ${request.name} 已批准并物化到项目 .team/secrets.env，Bot 下次 shell 里 set -a; . .team/secrets.env 即可使用。`,
+      })
+    }
+    return created
+  }
+
+  async denySecretRequest(requestId, actor = this.actor()) {
+    const request = this.store.get("SELECT * FROM secret_requests WHERE id = ? AND status = 'pending'", requestId)
+    if (!request) throw notFound('密钥请求不存在或已处理')
+    this.store.run(
+      "UPDATE secret_requests SET status = 'denied', handled_at = ? WHERE id = ?",
+      nowIso(), requestId,
+    )
+    this.audit(actor, 'secret_request.deny', 'secret_request', requestId, { name: request.name })
+    if (request.project_id) {
+      this.insertMessage({
+        projectId: request.project_id,
+        senderType: 'system',
+        senderId: 'system',
+        body: `密钥 ${request.name} 的请求被拒绝。`,
+      })
+    }
+    return { denied: true }
   }
 
   // 记忆写入权限：用户可写任意作用域；Bot 只能写自己的记忆、是成员的项目记忆，
@@ -2381,11 +3038,16 @@ export class TeamService {
     const { project, actor } = this.ownerContextFor(sessionId)
     if (!['accept', 'return'].includes(input.decision)) throw badRequest('验收结果只能是 accept 或 return')
     const task = this.resolveBotTask(project, input.task)
+    return this.applyReview(task, project, input.decision, input.comment, actor)
+  }
+
+  /** 验收/退回的共用流程：owner Bot 会话与微信管理员共用。 */
+  async applyReview(task, project, decision, comment, actor) {
     const identifier = `${project.key}-${task.number}`
     if (task.status !== 'in_review') throw conflict(`任务 ${identifier} 不在待验收状态`)
-    if (input.decision === 'accept') {
+    if (decision === 'accept') {
       await this.updateTask(task.id, { status: 'done' }, actor)
-      if (input.comment) await this.addComment(task.id, input.comment, actor)
+      if (comment) await this.addComment(task.id, comment, actor)
       this.insertMessage({
         projectId: project.id,
         senderType: 'system',
@@ -2394,11 +3056,11 @@ export class TeamService {
         taskId: task.id,
       })
     } else {
-      const comment = text(input.comment, 20_000)
-      if (!comment) throw badRequest('退回任务必须说明原因')
+      const reason = text(comment, 20_000)
+      if (!reason) throw badRequest('退回任务必须说明原因')
       if (!task.assignee_bot_id) throw conflict(`任务 ${identifier} 没有负责人，无法退回重做`)
       await this.updateTask(task.id, { status: 'in_progress' }, actor)
-      await this.addComment(task.id, `退回重做：${comment}`, actor)
+      await this.addComment(task.id, `退回重做：${reason}`, actor)
       // 若负责人验收运行仍在进行，由其结束时的收尾逻辑补排；否则立即重排执行。
       const active = this.store.get(
         "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
@@ -2423,6 +3085,80 @@ export class TeamService {
       })
     }
     return this.taskView(this.taskRow(task.id))
+  }
+
+  resolveTaskByIdentifier(identifier) {
+    const match = /^([a-z][a-z0-9-]*)-(\d+)$/i.exec(String(identifier ?? '').trim())
+    if (!match) throw badRequest('任务号格式应为 <项目key>-<序号>，如 web-3')
+    const project = this.store.get('SELECT * FROM projects WHERE key = ? COLLATE NOCASE', match[1])
+    if (!project) throw notFound(`没有 key 为 ${match[1]} 的项目`)
+    const task = this.store.get(
+      'SELECT * FROM tasks WHERE project_id = ? AND number = ?',
+      project.id, Number(match[2]),
+    )
+    if (!task) throw notFound(`项目 ${project.key} 没有任务 ${match[2]}`)
+    return { project, task }
+  }
+
+  /** 微信管理员指令：按 <key-N> 定位并验收/退回任务。 */
+  async wechatReview(identifier, { decision, comment }) {
+    await this.initialize()
+    if (!['accept', 'return'].includes(decision)) throw badRequest('验收结果只能是 accept 或 return')
+    const { project, task } = this.resolveTaskByIdentifier(identifier)
+    const view = await this.applyReview(task, project, decision, comment, { type: 'user', id: this.localUserId })
+    return decision === 'accept'
+      ? `任务 ${identifier}《${view.title}》已验收通过。`
+      : `任务 ${identifier}《${view.title}》已退回重做。`
+  }
+
+  /** 微信管理员指令：各项目未完结任务概览。 */
+  stateView() {
+    const projects = this.store.all("SELECT * FROM projects WHERE status = 'active' ORDER BY updated_at DESC")
+    return {
+      projects: projects.map(project => ({
+        key: project.key,
+        name: project.name,
+        tasks: this.store.all(
+          "SELECT number, status, title FROM tasks WHERE project_id = ? AND status NOT IN ('done', 'canceled') ORDER BY number",
+          project.id,
+        ),
+      })),
+    }
+  }
+
+  /** 微信管理员指令：按 <key-N> 取任务卡片（含最近评论）。 */
+  taskViewByIdentifier(identifier) {
+    const { task } = this.resolveTaskByIdentifier(identifier)
+    return {
+      ...this.taskView(task),
+      comments: this.store.all(
+        'SELECT author_type, author_id, body, created_at FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 3',
+        task.id,
+      ).reverse(),
+    }
+  }
+
+  wechatStatus() {
+    return this.wechat?.status()
+      ?? { phase: 'disabled', enabled: false, error: null, adminPeerId: null, auth: null }
+  }
+
+  async wechatBeginLogin() {
+    await this.initialize()
+    if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
+    const challenge = await this.wechat.beginLogin()
+    return { qrCodeUrl: challenge.qrCodeUrl, qrSvg: wechatQrSvg(challenge.qrCodeUrl) }
+  }
+
+  wechatSubmitCode(code) {
+    if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
+    return this.wechat.submitVerificationCode(code)
+  }
+
+  async wechatLogout() {
+    if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
+    await this.wechat.logout()
+    return { phase: this.wechat.status().phase }
   }
 
   rememberFromBot(sessionId, input) {
@@ -2486,13 +3222,52 @@ export class TeamService {
   runView(run) {
     const bot = this.store.get('SELECT name FROM bots WHERE id = ?', run.bot_id)
     const task = run.task_id ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', run.task_id) : undefined
-    const project = this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id)
+    const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
     return {
       ...run,
+      artifacts: jsonParse(run.artifacts, []),
       botName: bot?.name ?? 'Bot',
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,
     }
+  }
+
+  // 产物清单视图：HTTP 端点与运行详情面板共用。
+  listRunArtifacts(runId) {
+    const run = this.runRow(runId)
+    const list = jsonParse(run.artifacts, [])
+    return { runId, artifacts: Array.isArray(list) ? list : [] }
+  }
+
+  // 产物文件定位：仅允许读取该运行清单里的相对路径，且必须落在项目工作区内（含符号链接校验）。
+  artifactFile(runId, relPath) {
+    const run = this.runRow(runId)
+    const project = run.project_id
+      ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
+      : null
+    if (!project?.slug) throw notFound('运行没有关联的项目工作区')
+    const list = jsonParse(run.artifacts, [])
+    if (!Array.isArray(list) || !list.some(item => item?.path === relPath)) {
+      throw forbidden('文件不在该运行的产物清单中')
+    }
+    const dir = join(this.config.workspace, project.slug)
+    let absolutePath
+    try {
+      absolutePath = assertInside(dir, join(dir, relPath))
+    } catch {
+      throw forbidden('产物路径越界')
+    }
+    let info
+    try {
+      info = statSync(absolutePath)
+    } catch {
+      throw notFound('产物文件不存在')
+    }
+    if (!info.isFile()) throw notFound('产物不是常规文件')
+    const realFile = realpathSync(absolutePath)
+    const realDir = realpathSync(dir)
+    if (realFile === realDir || !realFile.startsWith(realDir + sep)) throw forbidden('产物路径越界')
+    return { absolutePath, size: info.size }
   }
 
   async state(projectId, soloBotId = null) {
@@ -2544,6 +3319,7 @@ export class TeamService {
       prices: this.latestPrices(),
       // 配置里的默认价格，Web 中可据此一键恢复。
       priceDefaults: this.config.modelPrices ?? [],
+      wechat: this.wechatStatus(),
       now: nowIso(),
     }
     if (project) {
@@ -2585,8 +3361,11 @@ export class TeamService {
       ).map(item => this.proposalView(item))
       view.prices = this.latestPrices()
       view.skillBindings = this.skillBindings(project.id)
+      view.directMessages = this.botMessagesView(project.id)
+      view.rotations = this.rotationsView(project.id)
     }
-    // 单聊视图：某个 bot 的一对一会话（消息 + 最近运行）。
+    view.secrets = this.listSecrets()
+    view.secretRequests = this.listSecretRequests()
     if (soloBotId) {
       const soloBot = this.store.get('SELECT * FROM bots WHERE id = ?', soloBotId)
       if (soloBot) {
@@ -2603,7 +3382,6 @@ export class TeamService {
         }
       }
     }
-
     return view
   }
 

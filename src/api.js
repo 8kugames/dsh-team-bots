@@ -6,13 +6,15 @@ const ACTIONS = new Set([
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
   'create_project', 'update_project', 'archive_project',
   'send_message', 'send_solo_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
-  'retry_run', 'cancel_run',
+  'retry_run', 'cancel_run', 'run_trajectory',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
   'settings', 'update_settings', 'export_usage_csv', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
+  'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout',
+  'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
 
 export async function handleAction(service, action, payload = {}, actor) {
@@ -60,6 +62,8 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.retryRun(required(payload.runId, 'runId'), actor)
     case 'cancel_run':
       return service.cancelRun(required(payload.runId, 'runId'), actor)
+    case 'run_trajectory':
+      return service.runTrajectory(required(payload.runId, 'runId'))
     case 'create_memory':
       return service.createMemory({
         scopeType: payload.scopeType,
@@ -137,6 +141,32 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.upgradeDsh(payload.version, actor)
     case 'reboot_dsh':
       return service.rebootDsh(actor)
+    case 'wechat_status':
+      return service.wechatStatus()
+    case 'wechat_login':
+      return service.wechatBeginLogin()
+    case 'wechat_code':
+      return service.wechatSubmitCode(required(payload.code, 'code'))
+    case 'wechat_logout':
+      return service.wechatLogout()
+    case 'list_secrets':
+      return service.listSecrets()
+    case 'upsert_secret':
+      return service.upsertSecret({
+        scope: payload.scope === 'team' ? 'team' : 'project',
+        projectId: payload.projectId ?? null,
+        name: required(payload.name, 'name'),
+        purpose: payload.purpose ?? '',
+        value: required(payload.value, 'value'),
+      }, actor)
+    case 'delete_secret':
+      return service.deleteSecret(required(payload.secretId, 'secretId'), actor)
+    case 'list_secret_requests':
+      return service.listSecretRequests()
+    case 'approve_secret_request':
+      return service.approveSecretRequest(required(payload.requestId, 'requestId'), { value: required(payload.value, 'value') }, actor)
+    case 'deny_secret_request':
+      return service.denySecretRequest(required(payload.requestId, 'requestId'), actor)
     default:
       throw new AppError('UNKNOWN_ACTION', `未知操作 ${action}`, 404)
   }

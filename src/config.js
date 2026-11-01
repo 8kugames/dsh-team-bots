@@ -46,6 +46,11 @@ export function resolveConfig(config = {}) {
     workspace,
     dataDir,
     dbPath: join(dataDir, 'team.sqlite'),
+    wechatDbPath: join(dataDir, 'wechat-channel.sqlite'),
+    // 个人微信通道（腾讯 iLink 官方协议）：默认关闭，扫码授权后生效。
+    wechat: {
+      enabled: bool(config.wechatEnabled ?? process.env.DSH_TEAM_WECHAT, false),
+    },
     memoryDir: join(dataDir, 'memory'),
     messageDir: join(dataDir, 'messages'),
     skillRoot: join(workspace, '.agents'),
