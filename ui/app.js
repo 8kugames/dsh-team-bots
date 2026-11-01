@@ -267,7 +267,8 @@
   }
 
   async function loadState(projectId = state.projectId, { quiet = false } = {}) {
-    const data = await api('state', { projectId: projectId || undefined, soloBotId: state.soloBotId || undefined }, { quiet })
+    // 仅单聊场景携带 soloBotId，避免把单聊口径的 runs/memories 泄漏进群聊视图。
+    const data = await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet })
     state.data = data
     if (!state.projectId || !data.projects.some(project => project.id === state.projectId)) {
       state.projectId = data.project?.id ?? data.projects.find(project => project.status === 'active')?.id ?? null
@@ -1025,6 +1026,7 @@
     const project = pageProject()
     const payload = { query }
     if (project) payload.projectId = project.id
+    else if (inSoloContext() && state.soloBotId) payload.botId = state.soloBotId
     const result = await api('search_memories', payload)
     state.memoryResults = Array.isArray(result) ? result : (result?.items ?? [])
     render()
@@ -1033,16 +1035,18 @@
   function renderMemory() {
     const project = pageProject()
     const all = state.data?.memories ?? []
-    const memories = all.filter(memory => state.memoryFilter === 'all' || memory.scope_type === state.memoryFilter)
+    // 单聊上下文没有项目记忆：把群聊遗留的「项目记忆」筛选回退为全部作用域。
+    const filter = inSoloContext() && state.memoryFilter === 'project' ? 'all' : state.memoryFilter
+    const memories = all.filter(memory => filter === 'all' || memory.scope_type === filter)
     const pending = pendingMemoryCount()
     const results = state.memoryResults
     return `
       <div class="board-toolbar">
         <select class="select" id="memory-filter" aria-label="按作用域筛选记忆">
-          <option value="all" ${state.memoryFilter === 'all' ? 'selected' : ''}>全部作用域</option>
-          ${inSoloContext() ? '' : `<option value="project" ${state.memoryFilter === 'project' ? 'selected' : ''}>项目记忆</option>`}
-          <option value="bot" ${state.memoryFilter === 'bot' ? 'selected' : ''}>Bot 记忆</option>
-          <option value="team" ${state.memoryFilter === 'team' ? 'selected' : ''}>团队记忆</option>
+          <option value="all" ${filter === 'all' ? 'selected' : ''}>全部作用域</option>
+          ${inSoloContext() ? '' : `<option value="project" ${filter === 'project' ? 'selected' : ''}>项目记忆</option>`}
+          <option value="bot" ${filter === 'bot' ? 'selected' : ''}>Bot 记忆</option>
+          <option value="team" ${filter === 'team' ? 'selected' : ''}>团队记忆</option>
         </select>
         <input class="input search" id="memory-search" placeholder="搜索记忆主题或内容" aria-label="搜索记忆主题或内容" value="${attr(state.memoryQuery)}">
         <button class="btn" data-action="search-memories">${icon('search')}搜索</button>
