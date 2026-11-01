@@ -409,13 +409,14 @@ export function reconcileUsage(store, { days = 30 } = {}) {
 
 // 数据保留：按天清理明细与事件，审计与聚合结果保留。
 export function applyRetention(store, { usageDays = 0, runEventDays = 0, messageDays = 0 } = {}) {
-  const removed = { usageEvents: 0, runEvents: 0, messages: 0, soloMessages: 0 }
+  const removed = { usageEvents: 0, runEvents: 0, runTrajectory: 0, messages: 0, soloMessages: 0 }
   const cutoff = days => new Date(Date.now() - days * 86_400_000).toISOString()
   if (usageDays > 0) {
     removed.usageEvents = store.run('DELETE FROM usage_events WHERE occurred_at < ?', cutoff(usageDays)).changes
   }
   if (runEventDays > 0) {
     removed.runEvents = store.run('DELETE FROM run_events WHERE created_at < ?', cutoff(runEventDays)).changes
+    removed.runTrajectory = store.run('DELETE FROM run_trajectory WHERE created_at < ?', cutoff(runEventDays)).changes
   }
   if (messageDays > 0) {
     removed.messages = store.run('DELETE FROM messages WHERE created_at < ?', cutoff(messageDays)).changes
