@@ -79,6 +79,31 @@ export async function projectDir(workspaceRoot, slug) {
   return ensureProjectWorkspace(workspaceRoot, slug)
 }
 
+// 单聊工作区：workspaceRoot/_the_bots/<soloDir>，与项目目录同一套越界防护。
+export async function botsHome(workspaceRoot) {
+  await ensureDirResilient(workspaceRoot)
+  const rootReal = await realpath(workspaceRoot)
+  const target = join(rootReal, '_the_bots')
+  if (!within(target, rootReal)) throw new PathError('单聊根目录越界')
+  await ensureDirResilient(target)
+  const real = await realpath(target)
+  if (!within(real, rootReal)) throw new PathError('单聊根目录经符号链接越界')
+  return real
+}
+
+export async function botWorkspaceDir(workspaceRoot, soloDir) {
+  const safe = safeSlug(soloDir)
+  const home = await botsHome(workspaceRoot)
+  const target = resolve(home, safe)
+  if (!within(target, home) || target === home) throw new PathError('单聊目录越界')
+  await ensureDirResilient(target)
+  const targetReal = await realpath(target)
+  if (!within(targetReal, home) || targetReal === home) throw new PathError('单聊目录经符号链接越界')
+  const info = await lstat(targetReal)
+  if (!info.isDirectory()) throw new PathError('单聊工作区不是目录')
+  return targetReal
+}
+
 export function relativeWorkspacePath(workspaceRoot, absolutePath) {
   const rel = relative(workspaceRoot, absolutePath)
   if (rel.startsWith('..') || isAbsolute(rel)) throw new PathError('工作区路径越界')

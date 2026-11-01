@@ -11,6 +11,8 @@
     data: null,
     view: ['chat', 'tasks', 'bots', 'skills', 'memory', 'evolution', 'usage', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
     projectId: params.get('project') || null,
+    chatMode: 'group',
+    soloBotId: null,
     modal: null,
     draft: '',
     ac: null,
@@ -249,7 +251,7 @@
   }
 
   async function loadState(projectId = state.projectId, { quiet = false } = {}) {
-    const data = await api('state', { projectId: projectId || undefined }, { quiet })
+    const data = await api('state', { projectId: projectId || undefined, soloBotId: state.soloBotId || undefined }, { quiet })
     state.data = data
     if (!state.projectId || !data.projects.some(project => project.id === state.projectId)) {
       state.projectId = data.project?.id ?? data.projects.find(project => project.status === 'active')?.id ?? null
@@ -477,6 +479,7 @@
   }
 
   function renderChat() {
+    if (state.chatMode === 'solo') return renderSoloChat()
     const project = activeProject()
     if (!project) return noProject()
     const messages = state.data.messages ?? []
@@ -491,11 +494,17 @@
               <div class="chat-head-title"><span class="chat-hash">#</span>群聊</div>
               <div class="chat-head-meta"><span>负责人 ${esc(owner?.name ?? '未设置')}</span><span class="sep"></span><span>${members.length} 个成员</span></div>
             </div>
-            <div class="member-stack">
-              ${members.slice(0, 6).map(member => {
-                const bot = botById(member.id)
-                return bot ? avatar(bot, 'sm') : ''
-              }).join('')}
+            <div class="chat-head-actions">
+              <div class="mode-switch" aria-label="会话模式">
+                <button type="button" class="active" data-action="chat-mode" data-mode="group">群聊</button>
+                <button type="button" data-action="chat-mode" data-mode="solo">单聊</button>
+              </div>
+              <div class="member-stack">
+                ${members.slice(0, 6).map(member => {
+                  const bot = botById(member.id)
+                  return bot ? avatar(bot, 'sm') : ''
+                }).join('')}
+              </div>
             </div>
           </div>
           <div class="chat-messages">
@@ -555,6 +564,86 @@
           <div class="side-card">
             <div class="side-card-head"><h3>工作区</h3></div>
             <div class="path-row">${pathCode(project.workspace_path)}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+          </div>
+        </aside>
+      </div>`
+  }
+
+  // 项目外单聊：每个 Bot 一条独立会话，运行目录在 _the_bots/<bot> 下。
+  function renderSoloChat() {
+    const bots = (state.data?.bots ?? []).filter(bot => bot.status === 'active')
+    if (bots.length === 0) {
+      return `<div class="empty-state">
+        <div class="empty-symbol">${icon('bot')}</div>
+        <h3>还没有可单聊的 Bot</h3>
+        <p>先创建一个 Bot，就可以和它一对一对话。</p>
+        <button class="btn primary" data-action="new-bot">${icon('plus')}新建 Bot</button>
+      </div>`
+    }
+    if (!state.soloBotId || !bots.some(bot => bot.id === state.soloBotId)) state.soloBotId = bots[0].id
+    const bot = botById(state.soloBotId)
+    const solo = state.data?.solo?.bot?.id === bot.id ? state.data.solo : null
+    const messages = solo?.messages ?? []
+    const runs = solo?.runs ?? []
+    const running = runs.filter(run => run.status === 'running' || run.status === 'queued').length
+    return `
+      <div class="chat-layout">
+        <div class="card chat-panel">
+          <div class="chat-head">
+            <div>
+              <div class="chat-head-title">${avatar(bot, 'sm')}<span>@${esc(bot.name)}</span></div>
+              <div class="chat-head-meta"><span>${esc(bot.role || '团队成员')}</span><span class="sep"></span><span>${esc(bot.modelRef ?? '未配置模型')}</span>${running > 0 ? `<span class="sep"></span><span class="run-dot"></span><span>${running} 个运行中</span>` : ''}</div>
+            </div>
+            <div class="chat-head-actions">
+              <div class="mode-switch" aria-label="会话模式">
+                <button type="button" data-action="chat-mode" data-mode="group">群聊</button>
+                <button type="button" class="active" data-action="chat-mode" data-mode="solo">单聊</button>
+              </div>
+            </div>
+          </div>
+          <div class="solo-bot-strip" aria-label="切换单聊对象">
+            ${bots.map(item => `<button type="button" class="solo-pick${item.id === bot.id ? ' active' : ''}" data-action="pick-solo-bot" data-bot-id="${attr(item.id)}" title="${attr(item.name)}">
+              ${avatar(item, 'sm')}<span>${esc(item.name)}</span>
+            </button>`).join('')}
+          </div>
+          <div class="chat-messages">
+            ${messages.length === 0 ? `<div class="chat-empty">
+              <div class="empty-symbol">${icon('message')}</div>
+              <h3>和 ${esc(bot.name)} 单独聊聊</h3>
+              <p>这里没有项目上下文，适合单独请教、调试指令或闲聊。需要文件产出时会落在它自己的工作区。</p>
+            </div>` : messages.map(renderMessage).join('')}
+          </div>
+          <div class="composer">
+            <div class="composer-box">
+              <textarea id="composer-input" rows="2" placeholder="和 ${esc(bot.name)} 单聊，/clear 清空本会话，/remember 内容 写入 Bot 记忆">${esc(state.draft)}</textarea>
+              <div class="composer-bottom">
+                <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
+                <button class="send-btn" data-action="send-message" ${state.draft.trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <aside class="chat-side">
+          <div class="side-card">
+            <div class="side-card-head"><h3>单聊对象</h3></div>
+            <div class="owner-row">
+              ${avatar(bot, 'lg')}
+              <div class="owner-info"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || '团队成员')} · ${esc(bot.modelRef ?? '未配置模型')}</span></div>
+            </div>
+          </div>
+          <div class="side-card">
+            <div class="side-card-head"><h3>最近单聊运行</h3><span>${runs.length}</span></div>
+            ${runs.length === 0 ? '<div class="faint">还没有单聊运行。</div>' : `<div class="side-list">
+              ${runs.slice(0, 5).map(run => `<div class="side-row">
+                <span class="run-dot ${attr(run.status)}"></span>
+                <strong>${esc(RUN_STATUS[run.status] ?? run.status)}</strong>
+                <span class="side-row-title">${esc(formatTime(run.queued_at))}</span>
+              </div>`).join('')}
+            </div>`}
+          </div>
+          <div class="side-card">
+            <div class="side-card-head"><h3>专属工作区</h3></div>
+            <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
           </div>
         </aside>
       </div>`
@@ -678,7 +767,7 @@
           <div class="bot-metrics"><span><strong>${bot.openTasks}</strong> 任务</span><span class="dot-sep"></span><span><strong>${bot.memoryCount}</strong> 记忆</span><span class="dot-sep"></span><span><strong>${bot.stats.succeeded}</strong> 次成功</span></div>
           <div class="bot-card-actions">
             <button class="btn small" data-action="edit-bot" data-bot-id="${attr(bot.id)}">${icon('edit')}配置</button>
-            ${bot.status === 'active' ? `<button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档</button>` : ''}
+            ${bot.status === 'active' ? `<button class="btn small" data-action="solo-bot" data-bot-id="${attr(bot.id)}">单聊</button><button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档</button>` : ''}
           </div>
         </article>`).join('')}
       </div>`}
@@ -1923,17 +2012,27 @@
 
   async function sendMessage() {
     const body = state.draft.trim()
-    const project = activeProject()
-    if (!body || !project) return
-    if (body === '/clear' && !window.confirm('清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
+    if (!body) return
     closeAutocomplete()
     try {
-      const result = await api('send_message', { projectId: project.id, body })
+      let result
+      if (state.chatMode === 'solo') {
+        const bot = botById(state.soloBotId)
+        if (!bot) return
+        if (body === '/clear' && !window.confirm(`清空和 ${bot.name} 的全部单聊记录？清除后不可恢复（记忆保留）。`)) return
+        result = await api('send_solo_message', { botId: bot.id, body })
+      } else {
+        const project = activeProject()
+        if (!project) return
+        if (body === '/clear' && !window.confirm('清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
+        result = await api('send_message', { projectId: project.id, body })
+      }
       state.draft = ''
       state.chatAtBottom = true
-      await loadState(project.id, { quiet: true })
+      await loadState(state.projectId, { quiet: true })
       render()
       if (body === '/clear') toast(`已清空 ${result.cleared} 条消息`, 'success')
+      if (result?.memory) toast('已写入 Bot 记忆', 'success')
       const input = document.getElementById('composer-input')
       input?.focus()
     } catch {}
@@ -2117,6 +2216,35 @@
         case 'send-message':
           await sendMessage()
           break
+        case 'chat-mode': {
+          const mode = target.dataset.mode === 'solo' ? 'solo' : 'group'
+          if (mode === 'solo' && !state.soloBotId) {
+            const first = (state.data?.bots ?? []).find(bot => bot.status === 'active')
+            if (first) state.soloBotId = first.id
+          }
+          state.chatMode = mode
+          render()
+          break
+        }
+        case 'pick-solo-bot':
+          if (target.dataset.botId) {
+            state.soloBotId = target.dataset.botId
+            state.draft = ''
+            closeAutocomplete()
+            await loadState(state.projectId, { quiet: true })
+            render()
+          }
+          break
+        case 'solo-bot': {
+          const botId = target.dataset.botId
+          if (!botId) break
+          state.soloBotId = botId
+          state.chatMode = 'solo'
+          state.view = 'chat'
+          await loadState(state.projectId, { quiet: true })
+          render()
+          break
+        }
         case 'copy': {
           const value = target.dataset.copy
           if (value) {

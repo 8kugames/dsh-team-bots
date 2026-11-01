@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { AppError, badRequest, conflict, forbidden, notFound } from './errors.js'
-import { ensureDirResilient, ensureProjectWorkspace, ensureSkillRoot, projectDir } from './paths.js'
+import { botWorkspaceDir, botsHome, ensureDirResilient, ensureProjectWorkspace, ensureSkillRoot, projectDir } from './paths.js'
 import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal, reconcileUsage, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
 import { latestDshVersion, compareVersions, validTargetVersion } from './updater.js'
 import { priceKey, seedModelPrices } from './pricing.js'
@@ -75,6 +75,8 @@ export class TeamService {
       await ensureDirResilient(this.config.memoryDir)
       await ensureDirResilient(this.config.messageDir)
       await ensureSkillRoot(this.config.workspace)
+      // 单聊：为每个 bot 准备 _the_bots/<dir> 专属目录（回填 solo_dir 并建目录）。
+      await this.ensureSoloWorkspaces()
       this.store.run(
         `INSERT INTO users(id, name, role, created_at) VALUES (?, ?, 'admin', ?)
          ON CONFLICT(id) DO NOTHING`,
@@ -277,12 +279,13 @@ export class TeamService {
     const role = text(input.role, 24)
     const instructions = text(input.instructions, 12_000)
     const color = COLORS.includes(input.color) ? input.color : 'blue'
+    const soloDir = this.soloDirFor(name, botId)
     this.store.transaction(() => {
       this.store.run(
-        `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort,
+        `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort, solo_dir,
           status, current_revision, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
-        botId, name, role, instructions, color, provider, model, effort, createdAt, createdAt,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
+        botId, name, role, instructions, color, provider, model, effort, soloDir, createdAt, createdAt,
       )
       this.store.run(
         `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, provider, model, effort, created_by, created_at)
@@ -291,7 +294,44 @@ export class TeamService {
       )
       this.audit(actor, 'bot.create', 'bot', botId, { name, provider, model, effort })
     })
+    await this.ensureBotDir(soloDir)
     return this.botView(this.botRow(botId))
+  }
+
+  // 单聊目录名：优先用名字的 slug，纯中文名回退到 bot-<id 末 6 位>；冲突时追加序号。
+  soloDirFor(name, botId) {
+    const base = slugify(name) || `bot-${botId.slice(-6)}`
+    let candidate = base
+    let suffix = 1
+    while (this.store.get('SELECT 1 AS ok FROM bots WHERE solo_dir = ?', candidate)) {
+      suffix += 1
+      candidate = `${base}-${suffix}`
+    }
+    return candidate
+  }
+
+  // 建 _the_bots/<dir> 专属目录；失败不阻断建号，单聊真正启动时再暴露错误。
+  async ensureBotDir(soloDir) {
+    try {
+      return await botWorkspaceDir(this.config.workspace, soloDir)
+    } catch (error) {
+      this.logger.warn?.(`单聊目录 ${soloDir} 创建失败：${error.message}`)
+      return null
+    }
+  }
+
+  // 存量 bot 回填 solo_dir 并确保每个 bot 的专属目录存在。
+  async ensureSoloWorkspaces() {
+    const bots = this.store.all('SELECT id, name, solo_dir FROM bots')
+    if (!bots.length) return
+    await botsHome(this.config.workspace)
+    for (const bot of bots) {
+      const dir = bot.solo_dir || this.soloDirFor(bot.name, bot.id)
+      if (dir !== bot.solo_dir) {
+        this.store.run('UPDATE bots SET solo_dir = ? WHERE id = ? AND solo_dir IS NULL', dir, bot.id)
+      }
+      await this.ensureBotDir(dir)
+    }
   }
 
   async updateBot(botId, patch, actor = this.actor()) {
@@ -390,6 +430,8 @@ export class TeamService {
     )
     return {
       ...bot,
+      soloDir: bot.solo_dir ?? null,
+      soloWorkspace: bot.solo_dir ? join(this.config.workspace, '_the_bots', bot.solo_dir) : null,
       modelRef: bot.provider && bot.model ? `${bot.provider}/${bot.model}` : null,
       memoryCount: Number(memoryCount),
       openTasks: Number(openTasks),
@@ -704,6 +746,83 @@ export class TeamService {
     return true
   }
 
+  // ── 单聊（项目外）：与单个 Bot 的一对一对话 ────────────────────────────────
+
+  insertSoloMessage({ botId, senderType, senderId, body, runId = null, createdAt = nowIso() }) {
+    const messageId = id('msg')
+    this.store.run(
+      `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, run_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      messageId, botId, senderType, senderId, body, runId, createdAt,
+    )
+    return messageId
+  }
+
+  soloMessageView(row) {
+    const senderName = row.sender_type === 'bot'
+      ? this.store.get('SELECT name FROM bots WHERE id = ?', row.sender_id)?.name ?? 'Bot'
+      : row.sender_type === 'system' ? '系统' : this.actorName({ type: 'user', id: row.sender_id })
+    return { ...row, senderName }
+  }
+
+  clearSoloHistory(botId, actor = this.actor()) {
+    const bot = this.botRow(botId)
+    const count = Number(this.store.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', bot.id)?.count ?? 0)
+    this.store.run('DELETE FROM solo_messages WHERE bot_id = ?', bot.id)
+    this.audit(actor, 'chat.solo_clear', 'bot', bot.id, { cleared: count })
+    return count
+  }
+
+  async sendSoloMessage(botId, bodyInput, actor = this.actor()) {
+    const bot = this.botRow(botId)
+    if (bot.status !== 'active') throw conflict('Bot 已归档或暂停')
+    const body = text(bodyInput, 20_000)
+    if (!body) throw badRequest('消息不能为空')
+    if (commandClearPattern.test(body)) {
+      const cleared = this.clearSoloHistory(bot.id, actor)
+      return { cleared }
+    }
+    if (commandRememberPattern.test(body)) {
+      const matched = commandRememberPattern.exec(body)
+      const messageId = this.insertSoloMessage({
+        botId: bot.id,
+        senderType: actor.type,
+        senderId: actor.id,
+        body,
+      })
+      this.createMemory({
+        scopeType: 'bot',
+        scopeId: bot.id,
+        topic: body.slice(10, 60),
+        content: matched[1],
+        source: 'chat-command',
+        createdBy: `${actor.type}:${actor.id}`,
+      })
+      this.insertSoloMessage({
+        botId: bot.id,
+        senderType: 'system',
+        senderId: 'system',
+        body: `已写入 ${bot.name} 的记忆。`,
+      })
+      return { messageId, memory: true }
+    }
+    const messageId = this.insertSoloMessage({
+      botId: bot.id,
+      senderType: actor.type,
+      senderId: actor.id,
+      body,
+    })
+    this.enqueueOutbox({
+      kind: 'solo_chat_run',
+      payload: { botId: bot.id, messageId },
+      projectId: null,
+      sourceId: messageId,
+      idempotencyKey: `solo_chat:${messageId}`,
+    })
+    void this.tick()
+    return { messageId, runBot: bot.id }
+  }
+
   async createTask(input, actor = this.actor()) {
     const project = this.projectRow(input.projectId)
     if (project.status !== 'active') throw conflict('项目已归档')
@@ -1001,6 +1120,7 @@ export class TeamService {
   ownerContextFor(sessionId) {
     const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
     if (!binding) throw forbidden('只有项目群中的 Bot 可以执行该操作')
+    if (!binding.project_id) throw forbidden('单聊会话不在项目中，无法管理任务')
     const project = this.projectRow(binding.project_id)
     if (project.owner_bot_id !== binding.bot_id) throw forbidden('只有项目负责人 Bot 可以执行该操作')
     return { binding, project, actor: { type: 'bot', id: binding.bot_id } }
@@ -1010,9 +1130,20 @@ export class TeamService {
   recall(sessionId, ref) {
     const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
     if (!binding) throw forbidden('当前会话不属于任何项目')
-    const project = this.projectRow(binding.project_id)
     const raw = String(ref ?? '').trim()
     if (!raw) throw badRequest('缺少要展开的引用 id')
+
+    // 单聊会话：只支持展开本 bot 的单聊消息引用。
+    if (!binding.project_id) {
+      if (!raw.startsWith('m_')) throw notFound('单聊会话中只支持展开 m_ 消息引用')
+      const message = this.store.get(
+        'SELECT * FROM solo_messages WHERE bot_id = ? AND substr(id, -6) = ?',
+        binding.bot_id, raw.slice(2),
+      )
+      if (!message) throw notFound('消息不存在')
+      return `[${raw}] ${message.sender_type}:${message.sender_id} at ${message.created_at}\n\n${message.body}`
+    }
+    const project = this.projectRow(binding.project_id)
 
     if (raw.startsWith('m_')) {
       const message = this.store.get(
@@ -1146,6 +1277,11 @@ export class TeamService {
       if (!project || !bot || project.status !== 'active' || bot.status !== 'active') return null
       return this.enqueueChatRun(project, bot, payload.messageId)
     }
+    if (row.kind === 'solo_chat_run') {
+      const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
+      if (!bot || bot.status !== 'active') return null
+      return this.enqueueSoloChatRun(bot, payload.messageId)
+    }
     if (row.kind === 'task_run') {
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', payload.taskId)
       if (!task) return null
@@ -1179,6 +1315,28 @@ export class TeamService {
     const error = badRequest(`未知的 outbox 类型 ${row.kind}`)
     error.permanent = true
     throw error
+  }
+
+  enqueueSoloChatRun(bot, messageId) {
+    const existing = this.store.get(
+      "SELECT id FROM runs WHERE trigger_ref = ? AND bot_id = ? AND kind = 'solo_chat'",
+      messageId,
+      bot.id,
+    )
+    if (existing) return existing.id
+    const runId = id('run')
+    const createdAt = nowIso()
+    this.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
+        attempt, idempotency_key, queued_at)
+       VALUES (?, NULL, ?, 'solo_chat', 'write', 'mention', ?, 'queued', 1, ?, ?)`,
+      runId, bot.id, messageId, `solo_chat:${messageId}`, createdAt,
+    )
+    this.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'), runId, 'queued', '单聊消息触发', createdAt,
+    )
+    return runId
   }
 
   enqueueChatRun(project, bot, messageId) {
@@ -1318,7 +1476,8 @@ export class TeamService {
         "SELECT bot_id, kind, task_id, project_id, mode FROM runs WHERE status = 'running'",
       )
       const activeKeys = new Set(activeRows.map(row => this.claimKey(row)))
-      const writingProjects = new Set(activeRows.filter(row => row.mode === 'write').map(row => row.project_id))
+      // project_id 为 NULL 的单聊运行不占任何项目的写锁（各 bot 目录互不相干）。
+      const writingProjects = new Set(activeRows.filter(row => row.mode === 'write' && row.project_id).map(row => row.project_id))
       let activeTotal = activeRows.length
       if (activeTotal >= this.config.maxConcurrentRuns) return
       const candidates = this.store.all("SELECT * FROM runs WHERE status = 'queued' ORDER BY queued_at LIMIT 50")
@@ -1327,18 +1486,20 @@ export class TeamService {
         const claimKey = this.claimKey(run)
         if (activeKeys.has(claimKey)) continue
         // 同一项目共享一个工作目录：写运行之间必须串行，只读运行可以并行。
-        if (run.mode === 'write' && writingProjects.has(run.project_id)) continue
-        const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
+        if (run.mode === 'write' && run.project_id && writingProjects.has(run.project_id)) continue
+        // 单聊运行（solo_chat）没有项目上下文，只有 bot 与全局预算。
+        const needsProject = run.kind !== 'solo_chat'
+        const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
         const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
-        if (!project || !bot) {
+        if (!bot || (needsProject && !project)) {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'MISSING_CONTEXT', message: '项目或 Bot 已删除' } })
           continue
         }
-        if (project.status !== 'active' || bot.status !== 'active') {
+        if (bot.status !== 'active' || (needsProject && project.status !== 'active')) {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'UNAVAILABLE', message: '项目或 Bot 不可用' } })
           continue
         }
-        const budgetError = this.budgetError(project)
+        const budgetError = this.budgetError(needsProject ? project : null)
         if (budgetError) {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'BUDGET_EXCEEDED', message: budgetError } })
           continue
@@ -1350,7 +1511,7 @@ export class TeamService {
         if (Number(claimed.changes) !== 1) continue
         activeTotal += 1
         activeKeys.add(claimKey)
-        if (run.mode === 'write') writingProjects.add(run.project_id)
+        if (run.mode === 'write' && run.project_id) writingProjects.add(run.project_id)
         if (run.task_id && run.kind === 'task') {
           this.store.run(
             "UPDATE tasks SET status = 'in_progress', version = version + 1, updated_at = ? WHERE id = ? AND status NOT IN ('done', 'canceled')",
@@ -1388,7 +1549,8 @@ export class TeamService {
         return `全局本月成本预算已用尽（${usage.cost.toFixed(4)}/${global.costBudget} ${currency}）`
       }
     }
-    if (!project.token_budget && !project.cost_budget) return null
+    // project 为 null 表示项目外运行（单聊）：只受全局预算约束。
+    if (!project || (!project.token_budget && !project.cost_budget)) return null
     const usage = monthUsageForProject(this.store, project.id, currency)
     if (project.token_budget && usage.totalTokens >= project.token_budget) {
       return `项目本月 token 预算已用尽（${usage.totalTokens}/${Math.round(project.token_budget)}）`
@@ -1416,11 +1578,11 @@ export class TeamService {
   async executeRun(runId) {
     const run = this.runRow(runId)
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
-    const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
+    const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
     try {
       const task = run.task_id ? this.taskRow(run.task_id) : null
-      const chatMessage = run.kind === 'chat' && run.trigger_ref
-        ? this.store.get('SELECT * FROM messages WHERE id = ?', run.trigger_ref)
+      const chatMessage = (run.kind === 'chat' || run.kind === 'solo_chat') && run.trigger_ref
+        ? this.store.get(`SELECT * FROM ${run.kind === 'solo_chat' ? 'solo_messages' : 'messages'} WHERE id = ?`, run.trigger_ref)
         : null
       if (run.mode === 'read') this.fingerprints.set(runId, this.workspaceFingerprint(project))
       await this.runtime.startRun({ run, bot, project, task, chatMessage })
@@ -1605,6 +1767,14 @@ export class TeamService {
           body: cleanOutput || '模型未返回文本。',
           runId,
         })
+      } else if (run.kind === 'solo_chat') {
+        this.insertSoloMessage({
+          botId: bot.id,
+          senderType: 'bot',
+          senderId: bot.id,
+          body: cleanOutput || '模型未返回文本。',
+          runId,
+        })
       }
     } else {
       if (run.task_id) {
@@ -1636,9 +1806,17 @@ export class TeamService {
           body: `运行失败：${error?.message ?? '未知错误'}`,
           runId,
         })
+      } else if (run.kind === 'solo_chat') {
+        this.insertSoloMessage({
+          botId: bot.id,
+          senderType: 'bot',
+          senderId: bot.id,
+          body: `运行失败：${error?.message ?? '未知错误'}`,
+          runId,
+        })
       }
     }
-    if (this.rate[run.project_id]) delete this.rate[run.project_id]
+    if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
   }
 
   learnFromTask(project, bot, task, output, runId) {
@@ -2251,6 +2429,7 @@ export class TeamService {
     const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
     if (!binding) throw forbidden('只有项目群中的 Bot 可以写记忆')
     const scopeType = ['bot', 'project', 'team'].includes(input.scope) ? input.scope : 'bot'
+    if (scopeType === 'project' && !binding.project_id) throw badRequest('单聊会话不在项目中，只能写 bot 或 team 记忆')
     const scopeId = scopeType === 'project' ? binding.project_id : scopeType === 'team' ? 'team' : binding.bot_id
     return this.createMemory({
       scopeType,
@@ -2316,7 +2495,7 @@ export class TeamService {
     }
   }
 
-  async state(projectId) {
+  async state(projectId, soloBotId = null) {
     await this.initialize()
     const projects = this.store.all(`
       SELECT p.*, (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status NOT IN ('done','canceled')) AS open_tasks,
@@ -2407,6 +2586,24 @@ export class TeamService {
       view.prices = this.latestPrices()
       view.skillBindings = this.skillBindings(project.id)
     }
+    // 单聊视图：某个 bot 的一对一会话（消息 + 最近运行）。
+    if (soloBotId) {
+      const soloBot = this.store.get('SELECT * FROM bots WHERE id = ?', soloBotId)
+      if (soloBot) {
+        view.solo = {
+          bot: this.botView(soloBot),
+          messages: this.store.all(
+            `SELECT * FROM (SELECT * FROM solo_messages WHERE bot_id = ? ORDER BY created_at DESC LIMIT 200) ORDER BY created_at ASC`,
+            soloBot.id,
+          ).map(message => this.soloMessageView(message)),
+          runs: this.store.all(
+            "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 30",
+            soloBot.id,
+          ).map(run => this.runView(run)),
+        }
+      }
+    }
+
     return view
   }
 

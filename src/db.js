@@ -4,6 +4,58 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { nowIso } from './util.js'
 
+// runs 与 session_bindings 的表体：project_id 可空以支持项目外单聊（kind='solo'）。
+// 新库建表与旧库迁移重建共用同一段 DDL，避免两处定义漂移。
+const RUNS_DDL = `
+  id TEXT PRIMARY KEY,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  bot_id TEXT NOT NULL REFERENCES bots(id),
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  parent_run_id TEXT,
+  kind TEXT NOT NULL DEFAULT 'chat',
+  mode TEXT NOT NULL DEFAULT 'write',
+  trigger_type TEXT NOT NULL,
+  trigger_ref TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  attempt INTEGER NOT NULL DEFAULT 1,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  session_id TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  output TEXT,
+  queued_at TEXT NOT NULL,
+  started_at TEXT,
+  ended_at TEXT,
+  last_progress_at TEXT,
+  usage_input INTEGER NOT NULL DEFAULT 0,
+  usage_cache_read INTEGER NOT NULL DEFAULT 0,
+  usage_cache_write INTEGER NOT NULL DEFAULT 0,
+  usage_output INTEGER NOT NULL DEFAULT 0,
+  usage_cost REAL,
+  cancel_requested INTEGER NOT NULL DEFAULT 0
+`
+
+const RUNS_INDEXES = `
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_task
+  ON runs(task_id)
+  WHERE task_id IS NOT NULL AND status IN ('queued', 'running');
+CREATE INDEX IF NOT EXISTS runs_queue_idx ON runs(status, queued_at);
+CREATE INDEX IF NOT EXISTS runs_project_idx ON runs(project_id, queued_at DESC);
+`
+
+const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, error_code, error_message, output, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
+
+const BINDINGS_DDL = `
+  session_id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'project',
+  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL
+`
+
+const BINDING_COLUMNS = 'session_id, bot_id, project_id, kind, task_id, created_at'
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -26,6 +78,7 @@ CREATE TABLE IF NOT EXISTS bots (
   provider TEXT,
   model TEXT,
   effort TEXT,
+  solo_dir TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'active',
   current_revision INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -91,6 +144,17 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL
 );
 
+-- 单聊：项目外与单个 Bot 的一对一对话记录，不依赖项目与群聊。
+CREATE TABLE IF NOT EXISTS solo_messages (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  sender_type TEXT NOT NULL,
+  sender_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  run_id TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -146,34 +210,7 @@ CREATE TABLE IF NOT EXISTS task_events (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS runs (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  bot_id TEXT NOT NULL REFERENCES bots(id),
-  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
-  parent_run_id TEXT,
-  kind TEXT NOT NULL DEFAULT 'chat',
-  mode TEXT NOT NULL DEFAULT 'write',
-  trigger_type TEXT NOT NULL,
-  trigger_ref TEXT,
-  status TEXT NOT NULL DEFAULT 'queued',
-  attempt INTEGER NOT NULL DEFAULT 1,
-  idempotency_key TEXT NOT NULL UNIQUE,
-  session_id TEXT,
-  error_code TEXT,
-  error_message TEXT,
-  output TEXT,
-  queued_at TEXT NOT NULL,
-  started_at TEXT,
-  ended_at TEXT,
-  last_progress_at TEXT,
-  usage_input INTEGER NOT NULL DEFAULT 0,
-  usage_cache_read INTEGER NOT NULL DEFAULT 0,
-  usage_cache_write INTEGER NOT NULL DEFAULT 0,
-  usage_output INTEGER NOT NULL DEFAULT 0,
-  usage_cost REAL,
-  cancel_requested INTEGER NOT NULL DEFAULT 0
-);
+CREATE TABLE IF NOT EXISTS runs (${RUNS_DDL});
 
 CREATE TABLE IF NOT EXISTS run_events (
   id TEXT PRIMARY KEY,
@@ -183,14 +220,22 @@ CREATE TABLE IF NOT EXISTS run_events (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS session_bindings (
-  session_id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL DEFAULT 'project',
-  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+-- 运行轨迹：模型回合、思考文本、工具调用与工具结果的前端展示账本。
+CREATE TABLE IF NOT EXISTS run_trajectory (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  turn INTEGER,
+  step INTEGER,
   created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS run_trajectory_run_idx ON run_trajectory(run_id, seq);
+
+CREATE TABLE IF NOT EXISTS session_bindings (${BINDINGS_DDL});
 
 CREATE TABLE IF NOT EXISTS memories (
   id TEXT PRIMARY KEY,
@@ -363,12 +408,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_task
-  ON runs(task_id)
-  WHERE task_id IS NOT NULL AND status IN ('queued', 'running');
-CREATE INDEX IF NOT EXISTS runs_queue_idx ON runs(status, queued_at);
-CREATE INDEX IF NOT EXISTS runs_project_idx ON runs(project_id, queued_at DESC);
+${RUNS_INDEXES}
 CREATE INDEX IF NOT EXISTS messages_project_idx ON messages(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS solo_messages_bot_idx ON solo_messages(bot_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS tasks_project_idx ON tasks(project_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS usage_project_idx ON usage_events(project_id, occurred_at);
 CREATE INDEX IF NOT EXISTS usage_bot_idx ON usage_events(bot_id, occurred_at);
@@ -416,6 +458,7 @@ export function openDatabase(path) {
   migrateMemories(db)
   migrateProposals(db)
   migrateUsageEvents(db)
+  migrateSoloSupport(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -424,6 +467,8 @@ export function openDatabase(path) {
   recordMigration(db, 'skill_bindings_table')
   recordMigration(db, 'usage_reconciliation_table')
   recordMigration(db, 'memories_fts')
+  recordMigration(db, 'solo_chat_support')
+  recordMigration(db, 'run_trajectory')
   return new Store(db, { ftsEnabled })
 }
 
@@ -496,21 +541,41 @@ function recordMigration(db, name) {
 // task_id 为 NULL 时用部分唯一索引表达「每 Bot 每项目一个会话」，非 NULL 时按任务唯一。
 function migrateSessionBindings(db) {
   if (columnsOf(db, 'session_bindings').includes('task_id')) return
+  rebuildTable(db, 'session_bindings', `CREATE TABLE session_bindings (${BINDINGS_DDL})`)
+}
+
+// 单聊支持：runs 与 session_bindings 的 project_id 放宽为可空（项目外会话与运行），
+// bots 增加 solo_dir。子表（run_events/usage_events/usage_reconciliation）按名字引用 runs，
+// 「建新表→拷贝→删旧表→改回原名」后名字恢复，外键子句无需改写。
+function migrateSoloSupport(db) {
+  addColumn(db, 'bots', 'solo_dir', 'TEXT')
+  // 旧版 one_project_binding 覆盖 project_id 为 NULL 的行，单聊绑定会撞唯一约束；先删，BINDING_INDEXES 重建收窄版。
+  db.exec('DROP INDEX IF EXISTS one_project_binding')
+  if (columnNotNull(db, 'runs', 'project_id')) {
+    rebuildTable(db, 'runs', `CREATE TABLE runs (${RUNS_DDL})`)
+    db.exec(RUNS_INDEXES)
+  }
+  if (columnNotNull(db, 'session_bindings', 'project_id')) {
+    rebuildTable(db, 'session_bindings', `CREATE TABLE session_bindings (${BINDINGS_DDL})`)
+  }
+}
+
+function columnNotNull(db, table, column) {
+  const info = db.prepare(`PRAGMA table_info(${table})`).all().find(row => row.name === column)
+  return Boolean(info?.notnull)
+}
+
+// 全量重建一张表：原名表数据拷入 <name>_new 后删除原名表，再把新表改回原名。
+function rebuildTable(db, name, createSql) {
+  const columns = db.prepare(`PRAGMA table_info(${name})`).all().map(row => row.name)
   db.exec('PRAGMA foreign_keys = OFF')
   try {
     db.exec('BEGIN IMMEDIATE')
-    db.exec('ALTER TABLE session_bindings RENAME TO session_bindings_legacy')
-    db.exec(`CREATE TABLE session_bindings (
-      session_id TEXT PRIMARY KEY,
-      bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL DEFAULT 'project',
-      task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL
-    )`)
-    db.exec(`INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
-      SELECT session_id, bot_id, project_id, kind, NULL, created_at FROM session_bindings_legacy`)
-    db.exec('DROP TABLE session_bindings_legacy')
+    db.exec(createSql.replace(`CREATE TABLE ${name} (`, `CREATE TABLE ${name}_new (`))
+    db.exec(`INSERT INTO ${name}_new(${columns.join(', ')})
+      SELECT ${columns.join(', ')} FROM ${name}`)
+    db.exec(`DROP TABLE ${name}`)
+    db.exec(`ALTER TABLE ${name}_new RENAME TO ${name}`)
     db.exec('COMMIT')
   } catch (error) {
     try { db.exec('ROLLBACK') } catch {}
@@ -522,9 +587,11 @@ function migrateSessionBindings(db) {
 
 const BINDING_INDEXES = `
 CREATE UNIQUE INDEX IF NOT EXISTS one_project_binding
-  ON session_bindings(bot_id, project_id, kind) WHERE task_id IS NULL;
+  ON session_bindings(bot_id, project_id, kind) WHERE task_id IS NULL AND project_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS one_task_binding
   ON session_bindings(bot_id, project_id, kind, task_id) WHERE task_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS one_solo_binding
+  ON session_bindings(bot_id) WHERE kind = 'solo' AND project_id IS NULL AND task_id IS NULL;
 CREATE INDEX IF NOT EXISTS session_bindings_task_idx ON session_bindings(task_id);
 `
 

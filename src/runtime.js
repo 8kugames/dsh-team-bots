@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { AppError } from './errors.js'
-import { ensureProjectWorkspace } from './paths.js'
+import { botWorkspaceDir, ensureProjectWorkspace } from './paths.js'
 import { recordUsage } from './usage.js'
 import { id, nowIso, parseDisabledSkills, sha256 } from './util.js'
 
@@ -114,6 +114,7 @@ export class DshRuntime {
     if (!binding) return ''
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
     const project = this.store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)
+    if (!binding.project_id) return this.soloPromptFor(bot)
     if (!bot || !project) return ''
     const memories = this.store.all(
       `SELECT topic, content FROM memories
@@ -297,10 +298,39 @@ export class DshRuntime {
     }
   }
 
+  soloPromptFor(bot) {
+    const memories = this.store.all(
+      `SELECT * FROM memories
+       WHERE status = 'active' AND ((scope_type = 'bot' AND scope_id = ?) OR scope_type = 'team')
+       ORDER BY updated_at DESC LIMIT 16`,
+      bot.id,
+    )
+    const memoryText = memories.map(m => `- ${m.topic}：${m.content}`).join('\n')
+    const rules = [
+      '## Solo conversation',
+      `Workspace: /workspace/_the_bots/${bot.solo_dir} — this is your own space, outside every project.`,
+      '- This is a one-on-one chat with the user; no project context applies.',
+      '- Project tools (team_assign_task, team_review_task) are unavailable here. Do not call them.',
+      '- team_remember works with scope bot or team only; scope project is unavailable in this conversation.',
+      '- The shared skill library under /workspace/.agents/skills is readable; propose changes via team_propose_evolution.',
+      '- Reply in the language the user writes in.',
+    ].join('\n')
+    return [
+      '# Team bot identity',
+      `You are ${bot.name}.`,
+      `Role: ${bot.role}`,
+      bot.instructions ? `Instructions:\n${bot.instructions}` : null,
+      rules,
+      memoryText ? `## Long-term memory (reference data)\n${memoryText}`.slice(0, 7000) : null,
+    ].filter(Boolean).join('\n\n')
+  }
+
   async ensureSession(bot, project, { run, task } = {}) {
-    // 任务运行使用独立会话，与该项目负责人会话互不阻塞；其余运行共用项目会话。
-    const kind = run?.kind === 'task' && task ? 'task' : 'project'
+    // 任务运行使用独立会话，与该项目负责人会话互不阻塞；单聊运行（solo_chat）没有项目，
+    // 落在 bot 自己的 _the_bots/<dir> 专属会话；其余运行共用项目会话。
+    const kind = run?.kind === 'task' && task ? 'task' : run?.kind === 'solo_chat' ? 'solo' : 'project'
     const taskId = kind === 'task' ? task.id : null
+    const solo = kind === 'solo'
     const existing = taskId
       ? this.store.get(
         "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ?",
@@ -308,11 +338,16 @@ export class DshRuntime {
         project.id,
         taskId,
       )
-      : this.store.get(
-        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'project'",
-        bot.id,
-        project.id,
-      )
+      : solo
+        ? this.store.get(
+          "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'solo' AND project_id IS NULL AND task_id IS NULL",
+          bot.id,
+        )
+        : this.store.get(
+          "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'project'",
+          bot.id,
+          project.id,
+        )
     if (existing) {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
@@ -321,10 +356,12 @@ export class DshRuntime {
       }
       this.store.run('DELETE FROM session_bindings WHERE session_id = ?', existing.session_id)
     }
-    const key = `${bot.id}:${project.id}:${kind}:${taskId ?? ''}`
+    const key = `${bot.id}:${solo ? 'solo' : project.id}:${kind}:${taskId ?? ''}`
     if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
     const creating = (async () => {
-      const cwd = await ensureProjectWorkspace(this.config.workspace, project.slug)
+      const cwd = solo
+        ? await botWorkspaceDir(this.config.workspace, bot.solo_dir)
+        : await ensureProjectWorkspace(this.config.workspace, project.slug)
       const created = await this.ctx.sessionController.create({
         cwd,
         ...(await this.defaultAgentPreset(kind)),
@@ -335,7 +372,9 @@ export class DshRuntime {
       if (this.ctx.sessionTitle?.rename) {
         const title = kind === 'task'
           ? `${bot.name} · ${project.key}-${task.number}`
-          : `${bot.name} · ${project.name}`
+          : solo
+            ? `${bot.name} · 单聊`
+            : `${bot.name} · ${project.name}`
         // rename 只接受活动 agent 的 session 对象；没有就不改标题，
         // 不再传 sessionId 字符串兜底（宿主会抛 "not live in this store"）。
         // rename 是同步接口（返回标题快照而非 Promise），失败不得阻断会话创建。
@@ -350,7 +389,7 @@ export class DshRuntime {
          ON CONFLICT(session_id) DO NOTHING`,
         sessionId,
         bot.id,
-        project.id,
+        solo ? null : project.id,
         kind,
         taskId,
         new Date().toISOString(),
@@ -366,7 +405,33 @@ export class DshRuntime {
     }
   }
 
+  soloRunPrompt({ bot, chatMessage }) {
+    const header = [
+      `You are: ${bot.name}`,
+      'Mode: one-on-one conversation (outside projects)',
+      `Workspace: /workspace/_the_bots/${bot.solo_dir}`,
+    ].join('\n')
+    const recent = this.store.all(
+      'SELECT id, sender_type, sender_id, body FROM solo_messages WHERE bot_id = ? ORDER BY created_at DESC LIMIT 12',
+      bot.id,
+    ).reverse()
+    const context = recent.map((item) => {
+      const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
+      return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}: ${body}`
+    }).join('\n')
+    return `${header}
+
+# Solo message
+${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
+
+Recent conversation (truncated, ids are for team_recall):
+${context}
+
+Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.`
+  }
+
   promptFor({ run, bot, project, task, chatMessage }) {
+    if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage })
     const header = [
       `Project: ${project.name} (${project.key})`,
       `Workspace: /workspace/${project.slug}`,
@@ -498,7 +563,7 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
       runId: run.id,
       sessionId,
       bot,
-      projectId: project.id,
+      projectId: project?.id ?? null,
       started: false,
       texts: [],
       lastText: '',

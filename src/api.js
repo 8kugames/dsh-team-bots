@@ -5,7 +5,7 @@ const ACTIONS = new Set([
   'health', 'state', 'models', 'bot_detail',
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
   'create_project', 'update_project', 'archive_project',
-  'send_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
+  'send_message', 'send_solo_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
   'retry_run', 'cancel_run',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
@@ -21,7 +21,7 @@ export async function handleAction(service, action, payload = {}, actor) {
     case 'health':
       return service.health()
     case 'state':
-      return service.state(payload.projectId)
+      return service.state(payload.projectId, payload.soloBotId ?? null)
     case 'models':
       return service.models(Boolean(payload.force))
     case 'bot_detail':
@@ -42,6 +42,8 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.archiveProject(required(payload.projectId, 'projectId'), actor)
     case 'send_message':
       return service.sendMessage(required(payload.projectId, 'projectId'), required(payload.body, 'body'), actor)
+    case 'send_solo_message':
+      return service.sendSoloMessage(required(payload.botId, 'botId'), required(payload.body, 'body'), actor)
     case 'create_task':
       return service.createTask({ ...payload, projectId: required(payload.projectId, 'projectId') }, actor)
     case 'update_task':

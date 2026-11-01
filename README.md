@@ -112,6 +112,7 @@ docker compose exec dsh-team node /home/node/.dsh/profiles/team-bots/node_module
 WORKSPACE_HOST_DIR/          -> /workspace
   .agents/skills/            -> 共享技能池
   .data/                     -> 团队 SQLite、运行记录、记忆镜像
+  _the_bots/{bot}/           -> 各 Bot 的单聊专属工作区
   {project-slug}/            -> 各项目工作区
 ```
 
@@ -129,6 +130,16 @@ WORKSPACE_HOST_DIR/          -> /workspace
 - 任务执行失败置 `blocked`，自动转负责人 Bot 处理：可用 `team_assign_task` 重派（含换人），需要用户决策时提请用户介入。
 - 负责人 Bot 通过 `team_assign_task` 分派，任务和运行都可在面板追踪。
 - 任务运行期间在面板追加的评论会直投给正在执行的会话，Bot 在当轮按新信息调整；没有运行中的任务时，评论只落库并进入下一次运行的上下文。
+
+## 单聊（项目外）
+
+聊天页顶部可在 **群聊 / 单聊** 之间切换，Bots 页每张卡片的「单聊」按钮直达对应会话。每个 Bot 一条独立单聊线程，不挂任何项目：
+
+- 单聊会话运行在 Bot 自己的专属工作区 `_the_bots/{bot}`（目录在启动和建 Bot 时自动创建，命名取自 Bot 名的 slug）。
+- 没有 项目/任务 上下文：`team_assign_task`、`team_review_task` 不可用，`team_remember` 只能写 bot/team 范围记忆。
+- `/clear` 清空与该 Bot 的单聊记录；`/remember 内容` 直接写一条该 Bot 的记忆。
+- 调度上单聊是写运行但独立于项目写锁：不同 Bot 的单聊互相并行，同一 Bot 的单聊与群聊回复串行（共用会话串行键），任务运行不受影响；用量只计入全局预算。
+- 消息保留随全局 `retention_message_days` 一并清理。
 
 ## 会话与并发
 
