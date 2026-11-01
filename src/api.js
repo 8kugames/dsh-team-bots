@@ -42,6 +42,8 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.updateProject(required(payload.projectId, 'projectId'), payload.patch ?? payload, actor)
     case 'archive_project':
       return service.archiveProject(required(payload.projectId, 'projectId'), actor)
+    case 'browse_dirs':
+      return service.browseDirectories(payload)
     case 'send_message':
       return service.sendMessage(required(payload.projectId, 'projectId'), required(payload.body, 'body'), actor)
     case 'send_solo_message':

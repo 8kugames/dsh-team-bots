@@ -453,7 +453,7 @@
               ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}
               <h1>${esc(title)}</h1>
             </div>
-            ${isGlobal || solo ? '' : `<div class="topbar-meta">
+            ${isGlobal || solo || !project ? '' : `<div class="topbar-meta">
               <span><b>${project?.stats?.openTasks ?? 0}</b> 任务</span>
               <span class="sep"></span>
               <span><b>${running}</b> 运行中</span>
@@ -767,7 +767,7 @@
     if (message.sender_type === 'system') {
       return `<div class="message-system">
         <span>${esc(message.body)}</span>
-        ${message.taskIdentifier ? `<div class="task-chip-line center"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}"><strong>${esc(message.taskIdentifier)}</strong>${esc(message.taskTitle ?? '')}</button></div>` : ''}
+        ${message.taskIdentifier ? `<div class="task-chip-line center"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button></div>` : ''}
       </div>`
     }
     const isUser = message.sender_type === 'user'
@@ -777,7 +777,7 @@
       <div class="message-body-wrap">
         <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span></div>
         <div class="message-bubble">${richText(message.body)}</div>
-        ${message.taskIdentifier ? `<div class="task-chip-line"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}"><strong>${esc(message.taskIdentifier)}</strong>${esc(message.taskTitle ?? '')}</button></div>` : ''}
+        ${message.taskIdentifier ? `<div class="task-chip-line"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button></div>` : ''}
         ${message.run_id && !isUser ? `<div class="task-chip-line"><button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button></div>` : ''}
       </div>
     </div>`
@@ -791,6 +791,7 @@
 
   function renderDirectMessagesCard() {
     const items = state.data?.directMessages ?? []
+    if (items.length === 0) return ''
     return `<details class="chat-subpanel">
       <summary title="展开 / 收起 Bot 私信">${icon('chevron', 'chev')}<span>Bot 私信</span><span class="subpanel-count">${items.length}</span></summary>
       <div class="subpanel-body">
@@ -812,8 +813,9 @@
 
   function renderRotationsCard() {
     const items = state.data?.rotations ?? []
+    if (items.length === 0) return ''
     return `<details class="chat-subpanel">
-      <summary title="展开 / 收起会话滚动">${icon('chevron', 'chev')}<span>会话滚动</span><span class="subpanel-count">${items.length}</span></summary>
+      <summary title="展开 / 收起会话交接">${icon('chevron', 'chev')}<span>会话交接</span><span class="subpanel-count">${items.length}</span></summary>
       <div class="subpanel-body">
         ${items.length === 0 ? '<div class="subpanel-empty">暂无会话滚动记录；Bot 会话上下文接近上限时会在此登记交接进度。</div>' : items.map(item => `
           <div class="subpanel-row">
@@ -822,8 +824,8 @@
               <span>${esc(item.botName)}</span>
               <span class="pill">${esc(ROTATION_KIND[item.kind] ?? item.kind)}</span>
               ${item.taskIdentifier ? `<span class="subpanel-tag">${esc(item.taskIdentifier)}</span>` : ''}
-              <span class="faint">检查点 ${formatNumber(item.checkpointChars)} 字</span>
-              ${item.seeded ? '<span class="pill green">已播种</span>' : '<span class="pill amber">待播种</span>'}
+              <span class="faint">交接 ${formatNumber(item.checkpointChars)} 字</span>
+              ${item.seeded ? '<span class="pill green">已续接</span>' : '<span class="pill amber">待续接</span>'}
               <span class="faint">${esc(formatTime(item.createdAt))}</span>
             </div>
           </div>`).join('')}
@@ -1041,7 +1043,7 @@
     const pending = pendingMemoryCount()
     const results = state.memoryResults
     return `
-      <div class="board-toolbar">
+      ${(state.data?.memories ?? []).length === 0 ? '' : `<div class="board-toolbar">
         <select class="select" id="memory-filter" aria-label="按作用域筛选记忆">
           <option value="all" ${filter === 'all' ? 'selected' : ''}>全部作用域</option>
           ${inSoloContext() ? '' : `<option value="project" ${filter === 'project' ? 'selected' : ''}>项目记忆</option>`}
@@ -1052,7 +1054,7 @@
         <button class="btn" data-action="search-memories">${icon('search')}搜索</button>
         ${pending ? `<span class="pill amber">${pending} 条待审</span>` : ''}
         <span class="tag" style="margin-left:auto">${memories.length} 条</span>
-      </div>
+      </div>`}
       ${results ? `<div class="card list-card" style="margin-bottom:12px">
         <div class="card-head"><h3>搜索结果（${results.length}）</h3><button class="btn small" data-action="clear-memory-search">${icon('close')}清除</button></div>
         ${results.length === 0 ? '<div class="faint">没有匹配的记忆。</div>' : results.map(item => `<div class="list-row">
@@ -1364,15 +1366,15 @@
         </div>
       </div>
       ${unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : ''}
-      ${reconciliation ? `<div class="usage-note">用量对账：检查 ${Number(reconciliation.runsChecked ?? 0)} 次运行，${Number(reconciliation.runsWithEvents ?? 0)} 次有用量记录，${Number(reconciliation.missingUsage ?? 0)} 次缺记录，${Number(reconciliation.mismatched ?? 0)} 次不一致${reconciliation.checkedAt ? `（${esc(timeAgo(reconciliation.checkedAt))}）` : ''}。</div>` : ''}
+      ${Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${Number(reconciliation.mismatched)} 次运行的用量记录对不上，数据可能不完整。</div>` : ''}
       ${usage.legacy ? '<div class="usage-note">服务端尚未按口径过滤明细，下方分组仍是全局数据。</div>' : ''}
       <div class="usage-grid">
         <div class="card usage-panel">
-          <div class="card-head"><h3>按 Bot</h3><span class="meta">${byBot.length} 个 · 点击下钻运行</span></div>
+          <div class="card-head"><h3>按 Bot</h3><span class="meta">${byBot.length} 个</span></div>
           ${byBot.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byBot.map(item => botRow(item, maxBot)).join('')}</div>`}
         </div>
         <div class="card usage-panel">
-          <div class="card-head"><h3>${scope === 'global' ? '按项目' : scope === 'project' ? '按模型' : '运行下钻'}</h3>${drillBot ? `<button class="btn small" data-action="usage-clear-drill">${icon('close')}清除选择</button>` : ''}</div>
+          <div class="card-head"><h3>${scope === 'global' ? '按项目' : scope === 'project' ? '按模型' : '运行记录'}</h3>${drillBot ? `<button class="btn small" data-action="usage-clear-drill">${icon('close')}清除选择</button>` : ''}</div>
           ${scope === 'global' ? (byProject.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byProject.map(item => barRow(item, item.name ?? item.key ?? item.projectId ?? '', maxProject)).join('')}</div>`)
             : scope === 'project' ? (byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byModel.map(item => barRow(item, item.model ?? '', maxModel)).join('')}</div>`)
             : (drillBot ? (drillRuns.length === 0 ? '<div class="faint">该 Bot 还没有运行记录。</div>' : `<div class="run-list">${drillRuns.map(runRow).join('')}</div>`) : '<div class="faint">在上方选择一个 Bot，查看它的运行记录。</div>')}
@@ -1386,7 +1388,7 @@
         <div class="card usage-panel">
           <div class="card-head"><h3>模型明细</h3><button class="btn small" data-action="new-price">设置价格</button></div>
           ${byModel.length === 0 ? '<div class="faint">暂无数据。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td>${esc(item.model)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono">${costSplit(item)}</td></tr>`).join('')}</tbody></table>`}
-          <div class="usage-note">成本按币种分组显示；未配置价格时显示“未配置”，不会按 0 计费。价格按每百万 token 配置。</div>
+          <div class="usage-note">未配置价格的成本不会按 0 计费；价格按每百万 token 配置。</div>
         </div>
       </div>
     `
@@ -1428,12 +1430,8 @@
         <div class="hint">全局预算对所有项目生效；保留天数按天清理过期用量、运行事件与消息，0 表示永久保留。</div>
         <div class="btn-row" style="margin-top:12px">
           <button class="btn small" type="button" data-action="save-settings">保存系统设置</button>
-          <button class="btn small" type="button" data-action="reconcile-usage">立即对账</button>
         </div>
-        <div class="kv" style="margin-top:12px"><span>投递队列</span><strong>待投 ${outbox.pending ?? 0} · 失败 ${outbox.failed ?? 0} · 已投 ${outbox.delivered ?? 0}</strong></div>
-        <div class="kv"><span>用量对账</span><strong>${reconciliation
-          ? `检查 ${reconciliation.runsChecked ?? 0} 个运行，差异 ${reconciliation.mismatched ?? 0} 个`
-          : '暂无对账记录'}</strong></div>
+        ${Number(outbox.failed ?? 0) > 0 ? `<div class="kv" style="margin-top:12px"><span>投递队列</span><strong>${outbox.failed} 条消息投递失败</strong></div>` : ''}
       </div>`
   }
 
@@ -1477,7 +1475,7 @@
     return `
       <div class="card form-card" style="margin-top:12px">
         <div class="card-head"><h3>密钥管理</h3><span class="meta">${secrets.length} 条 · ${requests.length} 待审</span></div>
-        <div class="hint" style="margin:2px 0 12px">密钥加密存储，保存后物化到项目的 <code>.team/secrets.env</code>，Bot 在 shell 里 <code>set -a; . .team/secrets.env</code> 即可使用；团队级密钥对所有活动项目生效。</div>
+        <div class="hint" style="margin:2px 0 12px">密钥加密存储；团队级密钥对所有活动项目生效，Bot 可以直接使用。</div>
         ${requests.length === 0 ? '' : `<div class="secret-block">
           ${requests.map(request => `
             <form class="secret-request" data-form="approve-secret">
@@ -1530,7 +1528,7 @@
           </div>
           <div class="field"><label for="secret-value">密钥值</label>
             <input class="input mono" id="secret-value" name="value" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 个字符，保存后不再回显">
-            <div class="hint">至少 8 个字符；同作用域同名会覆盖旧值并更新指纹。</div>
+            <div class="hint">至少 8 个字符；同作用域同名会覆盖旧值。</div>
           </div>
           <div class="btn-row"><button class="btn primary small" type="submit">${icon('check')}保存密钥</button></div>
         </form>
@@ -1602,11 +1600,11 @@
               <div class="kv"><span>共享技能</span><strong>${state.data.skills.length}</strong></div>
               <div class="kv"><span>待审提案</span><strong>${state.data.proposals.filter(item => item.status === 'pending').length}</strong></div>
             </div>
-            ${renderOpsCard()}
-            ${renderWechatCard()}
           </div>
         </div>
       </form>
+      ${renderOpsCard()}
+      ${renderWechatCard()}
       ${renderSecretsCard()}
     `
   }
@@ -1747,11 +1745,53 @@
           <div class="field"><label id="new-project-owner-label" for="new-project-owner">负责人 Bot</label><select class="select" style="width:100%" id="new-project-owner" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label id="new-project-description-label" for="new-project-description">项目说明</label><textarea class="textarea" id="new-project-description" name="description" placeholder="项目目标、边界和验收标准"></textarea></div>
-        <div class="field"><label id="new-project-production-label" for="new-project-production">生产目录</label><input class="input mono" style="width:100%" id="new-project-production" name="productionDir" placeholder="/Users/you/repos/my-game（可选）"><div class="hint">Bots 的工作目录，可指向既有代码库等本机目录；留空则用默认管理目录。</div></div>
+        <div class="field"><label id="new-project-production-label" for="new-project-production">生产目录</label><div style="display:flex;gap:8px"><input class="input mono" style="flex:1" id="new-project-production" name="productionDir" placeholder="/Users/you/repos/my-game（可选）"><button class="btn" type="button" data-action="pick-dir-open" data-picker-for="new-project-production">${icon('folder')}选择</button></div><div class="hint">Bots 的工作目录，可指向既有代码库等本机目录；留空则用默认管理目录。</div><div class="dir-picker" id="dir-picker-new-project-production" hidden></div></div>
         ${bots.length > 1 ? `<div class="field"><span class="field-label" id="new-project-members-label">其他成员</span><div class="check-list" role="group" aria-labelledby="new-project-members-label">${bots.slice(1).map(bot => `<div class="check-row"><input type="checkbox" id="new-project-member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}"><label for="new-project-member-${attr(bot.id)}">${avatar(bot, 'sm')} ${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div></div>` : ''}
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建项目</button>`,
     })
+  }
+
+  // 生产目录路径选择器：逐级浏览本机目录后回填目标输入框。
+  // 只改写选择器子树与目标输入框，不触发全局 render，避免重建创建表单丢掉已填内容。
+  function closeDirPicker(inputId) {
+    const box = document.getElementById(`dir-picker-${inputId}`)
+    if (box) {
+      box.hidden = true
+      box.innerHTML = ''
+    }
+  }
+
+  async function renderDirPicker(inputId, path) {
+    const box = document.getElementById(`dir-picker-${inputId}`)
+    if (!box) return
+    box.hidden = false
+    let data = null
+    let error = ''
+    try {
+      data = await api('browse_dirs', { path }, { quiet: true })
+    } catch (err) {
+      error = err?.message || String(err)
+    }
+    const current = data?.path ?? path ?? ''
+    const head = `
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <button class="btn small" type="button" data-action="pick-dir-up" data-picker-for="${attr(inputId)}" data-path="${attr(current)}" title="上一级">↑</button>
+        <button class="btn small" type="button" data-action="pick-dir-home" data-picker-for="${attr(inputId)}">主目录</button>
+        <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(current)}">${esc(current)}</span>
+        <button class="btn primary small" type="button" data-action="pick-dir-choose" data-picker-for="${attr(inputId)}" data-path="${attr(current)}">选定此目录</button>
+        <button class="btn small" type="button" data-action="pick-dir-close" data-picker-for="${attr(inputId)}" title="关闭">✕</button>
+      </div>`
+    if (error) {
+      box.innerHTML = `${head}<div class="hint" style="color:#c0392b">${esc(error)}</div>`
+      return
+    }
+    const dirs = data?.dirs ?? []
+    const list = dirs.length === 0
+      ? '<div class="hint">没有子目录</div>'
+      : dirs.map(name => `
+        <button class="btn small" type="button" style="display:block;width:100%;text-align:left;margin-bottom:4px" data-action="pick-dir-nav" data-picker-for="${attr(inputId)}" data-path="${attr(`${current.replace(/\/+$/, '')}/${name}`)}">${icon('folder')} ${esc(name)}</button>`).join('')
+    box.innerHTML = `${head}<div style="max-height:220px;overflow:auto">${list}</div>`
   }
 
   function modalBot(detail) {
@@ -2659,6 +2699,38 @@
           }
           break
         }
+        case 'pick-dir-open': {
+          const input = document.getElementById(target.dataset.pickerFor)
+          const current = input?.value?.trim() ?? ''
+          await renderDirPicker(target.dataset.pickerFor, current.startsWith('/') ? current : '')
+          break
+        }
+        case 'pick-dir-nav': {
+          await renderDirPicker(target.dataset.pickerFor, target.dataset.path || '')
+          break
+        }
+        case 'pick-dir-up': {
+          const from = target.dataset.path || '/'
+          const parent = from.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/'
+          await renderDirPicker(target.dataset.pickerFor, parent)
+          break
+        }
+        case 'pick-dir-home': {
+          await renderDirPicker(target.dataset.pickerFor, '')
+          break
+        }
+        case 'pick-dir-choose': {
+          const input = document.getElementById(target.dataset.pickerFor)
+          if (input && target.dataset.path) {
+            input.value = target.dataset.path
+            closeDirPicker(target.dataset.pickerFor)
+          }
+          break
+        }
+        case 'pick-dir-close': {
+          closeDirPicker(target.dataset.pickerFor)
+          break
+        }
         case 'sync-skills': {
           const result = await api('sync_skills', {})
           await loadState(state.projectId, { quiet: true })
@@ -3017,7 +3089,7 @@
           value: payload.value,
         })
         await refresh()
-        toast('密钥已保存并物化到项目 .team/secrets.env', 'success')
+        toast('密钥已保存', 'success')
         return
       }
       if (type === 'approve-secret') {

@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { join, sep } from 'node:path'
+import { join, sep, dirname, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { AppError, badRequest, conflict, forbidden, notFound } from './errors.js'
 import { assertInside, botWorkspaceDir, botsHome, ensureDirResilient, ensureExternalDir, ensureProjectWorkspace, ensureSkillRoot, projectDir, SLUG_MAX } from './paths.js'
 import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal, reconcileUsage, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
@@ -507,6 +508,32 @@ export class TeamService {
     } catch (error) {
       throw badRequest(error.message || '生产目录无效')
     }
+  }
+
+  // 生产目录路径选择：列出本机某目录下的子目录（只列目录名，不含文件），供 UI 逐级浏览。
+  // 插件本机运行、UI 与 bots 同属已声明的无沙箱模型，目录名不构成额外暴露面。
+  browseDirectories(input) {
+    const raw = typeof input.path === 'string' ? input.path.trim() : ''
+    const target = resolve(raw || homedir())
+    let entries
+    try {
+      entries = readdirSync(target, { withFileTypes: true })
+    } catch (error) {
+      throw badRequest(`无法读取目录 ${target}：${error?.message ?? error}`)
+    }
+    const dirs = []
+    for (const entry of entries) {
+      if (entry.isDirectory()) { dirs.push(entry.name); continue }
+      // 指向目录的符号链接也列出（外置卷、修复过的备份等常见形态）
+      if (entry.isSymbolicLink()) {
+        try {
+          if (statSync(join(target, entry.name)).isDirectory()) dirs.push(entry.name)
+        } catch {}
+      }
+    }
+    dirs.sort((a, b) => a.localeCompare(b))
+    const parent = dirname(target)
+    return { path: target, parent: parent === target ? null : parent, home: homedir(), dirs }
   }
 
   projectView(project) {

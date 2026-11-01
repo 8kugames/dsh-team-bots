@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDatabase } from '../src/db.js'
@@ -349,6 +349,29 @@ test('项目生产目录：可选绝对路径，默认与管理目录一致，�
     assert.equal(updated.workspace_path, await realpath(join(root, 'prod-2')))
     const cleared = await service.updateProject(project.id, { productionDir: '' })
     assert.equal(cleared.workspace_path, join(workspace, 'ext'))
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('browse_dirs 只列目录（含符号链接目录），默认从主目录开始', async () => {
+  const { root, store, service } = await setup()
+  try {
+    await mkdir(join(root, 'repo-a', '.git'), { recursive: true })
+    await mkdir(join(root, 'repo-b'), { recursive: true })
+    await writeFile(join(root, 'plain.txt'), 'not a dir')
+    await symlink(join(root, 'repo-a'), join(root, 'repo-link'))
+    const result = service.browseDirectories({ path: root })
+    assert.equal(result.path, root)
+    assert.deepEqual(result.dirs, ['data', 'repo-a', 'repo-b', 'repo-link', 'workspace'])
+    const parent = service.browseDirectories({ path: result.parent })
+    assert.ok(parent.dirs.length > 0)
+    // 指向文件报错而不是崩
+    await assert.throws(() => service.browseDirectories({ path: join(root, 'plain.txt') }), /无法读取目录/)
+    // 缺省与空串都落到主目录
+    assert.equal(service.browseDirectories({}).path, resolve(homedir()))
+    assert.equal(service.browseDirectories({ path: '   ' }).path, resolve(homedir()))
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
