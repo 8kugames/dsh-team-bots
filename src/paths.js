@@ -84,6 +84,19 @@ export async function projectDir(workspaceRoot, slug) {
   return ensureProjectWorkspace(workspaceRoot, slug)
 }
 
+// 项目生产目录：允许指向工作区外的任意本机目录（如既有代码库）。
+// 只要求绝对路径且最终解析为真实目录，不做工作区越界限制。
+export async function ensureExternalDir(dir) {
+  const raw = String(dir ?? '').trim()
+  if (!raw) throw new PathError('生产目录不能为空')
+  if (!isAbsolute(raw)) throw new PathError('生产目录必须是绝对路径')
+  await ensureDirResilient(raw)
+  const real = await realpath(raw)
+  const info = await lstat(real)
+  if (!info.isDirectory()) throw new PathError('生产目录不是目录')
+  return real
+}
+
 // 单聊工作区：workspaceRoot/_the_bots/<soloDir>，与项目目录同一套越界防护。
 export async function botsHome(workspaceRoot) {
   await ensureDirResilient(workspaceRoot)

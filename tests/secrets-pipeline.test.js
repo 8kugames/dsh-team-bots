@@ -203,3 +203,26 @@ test('Bot 密钥请求规范化名称，批准物化到项目，拒绝不留密�
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('生产目录切换：secrets.env 物化到生产目录，切换后旧目录清理、新目录重新物化', async () => {
+  const { root, store, service, chief, workspace } = await pipelineSetup()
+  try {
+    await service.upsertSecret({ scope: 'team', name: 'github token', purpose: 'CI', value: 'ghp_abcdefghijklmnop' })
+    const prod1 = join(root, 'repo-one')
+    const prod2 = join(root, 'repo-two')
+    const project = await service.createProject({ name: 'Ext', key: 'EXT', ownerBotId: chief.id, productionDir: prod1 })
+    assert.ok((await readFile(join(prod1, '.team', 'secrets.env'), 'utf8')).includes('GITHUB_TOKEN'))
+    assert.equal(existsSync(join(workspace, project.slug, '.team', 'secrets.env')), false, '管理目录不应有明文密钥')
+
+    await service.updateProject(project.id, { productionDir: prod2 })
+    assert.equal(existsSync(join(prod1, '.team', 'secrets.env')), false, '旧生产目录的明文必须清掉')
+    assert.ok((await readFile(join(prod2, '.team', 'secrets.env'), 'utf8')).includes('GITHUB_TOKEN'))
+
+    await service.updateProject(project.id, { productionDir: '' })
+    assert.equal(existsSync(join(prod2, '.team', 'secrets.env')), false, '清空生产目录后旧明文必须清掉')
+    assert.ok((await readFile(join(workspace, project.slug, '.team', 'secrets.env'), 'utf8')).includes('GITHUB_TOKEN'))
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})

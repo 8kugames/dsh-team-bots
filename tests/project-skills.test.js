@@ -203,3 +203,43 @@ test('project session prompt tells the bot about the project skill pool', async 
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('生产目录：会话 cwd 与 prompt 跟随 production_dir，技能池留在管理目录', async () => {
+  const { root, workspace, config, store, service, project } = await setup()
+  try {
+    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const prod = join(root, 'existing-repo')
+    await mkdir(prod, { recursive: true })
+    // 技能池是管理数据：放在 <工作区>/{slug}，不随生产目录搬家
+    await writeSkill(join(workspace, project.slug, '.agents', 'skills', 'deploy'), {
+      name: 'deploy', description: 'Deploy helper',
+    })
+    const updated = await service.updateProject(project.id, { productionDir: prod })
+    const prodReal = updated.workspace_path
+
+    const created = []
+    const runtime = new DshRuntime({
+      ctx: {
+        sessionController: {
+          create: async payload => { created.push(payload); return { sessionId: 'sess-prod' } },
+          resolveAgent: async () => ({ agent: { session: {} } }),
+          selectModel: async () => ({}),
+        },
+      },
+      config, store, logger: { info() {}, warn() {}, error() {} },
+    })
+    const row = store.get('SELECT * FROM projects WHERE id = ?', project.id)
+    await runtime.ensureSession(chief, row, { sessionKind: 'project' })
+    assert.equal(created.length, 1)
+    assert.equal(created[0].cwd, prodReal, '会话 cwd 应是生产目录')
+
+    const prompt = runtime.promptFor({ run: { kind: 'task' }, project: row, bot: chief })
+    assert.ok(prompt.includes(`Workspace: ${prodReal}`), '运行 prompt 应带生产目录')
+    const system = runtime.systemPromptFor({ agent: { id: 'sess-prod' } })
+    assert.ok(system.includes(`- Workspace: ${prodReal}`), '身份 prompt 应带生产目录')
+    assert.ok(system.includes(`${workspace}/${project.slug}/.agents/skills`), '技能池仍在管理目录')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

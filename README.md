@@ -87,10 +87,12 @@ npm run doctor
     .agents/skills/          共享技能池
     .data/                   团队 SQLite、运行记录、记忆镜像
     _the_bots/{bot}/         各 Bot 的单聊专属工作区
-    {project-slug}/          各项目工作区
+    {project-slug}/          各项目管理目录（技能池等团队数据）
 ```
 
-所有可变团队数据都在工作区的 `.data`，不依赖仓库目录；DSH 全局配置与会话在本机 `~/.dsh`。备份必须同时包含 `~/.dsh`（profile、sessions）和整个工作区目录（含 `.data/secret.key`）。
+新建项目时可指定**生产目录**（绝对路径，可指向既有代码库等本机目录）：Bot 会话的工作目录、`.team/secrets.env` 物化与运行产物清单都跟随生产目录。未指定时生产目录就是 `<工作区>/{project-slug}`，行为不变。
+
+所有可变团队数据都在工作区的 `.data`，不依赖仓库目录；DSH 全局配置与会话在本机 `~/.dsh`。备份必须同时包含 `~/.dsh`（profile、sessions）、整个工作区目录（含 `.data/secret.key`）以及各项目的外部生产目录。
 
 ## 群聊和任务
 

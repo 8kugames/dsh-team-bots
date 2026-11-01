@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDatabase } from '../src/db.js'
@@ -326,6 +326,32 @@ test('workspace default resolves to ~/.dsh/workspace/team-bots unless configured
   } finally {
     if (previous === undefined) delete process.env.DSH_TEAM_WORKSPACE
     else process.env.DSH_TEAM_WORKSPACE = previous
+  }
+})
+
+test('项目生产目录：可选绝对路径，默认与管理目录一致，可更新可清空', async () => {
+  const { root, workspace, store, service } = await setup()
+  try {
+    const chief = store.get("SELECT id FROM bots WHERE name = 'chief'").id
+    const prod = join(root, 'prod-repo')
+    const project = await service.createProject({ name: 'External', key: 'EXT', ownerBotId: chief, productionDir: prod })
+    // macOS 上 /var 是 /private/var 的符号链接，服务端会 realpath 后落库
+    assert.equal(project.workspace_path, await realpath(prod))
+    assert.equal(project.data_path, join(workspace, 'ext'))
+    await assert.rejects(
+      () => service.createProject({ name: 'Bad', key: 'BAD', ownerBotId: chief, productionDir: 'relative/dir' }),
+      /绝对路径/,
+    )
+    const plain = await service.createProject({ name: 'Plain', key: 'PLN', ownerBotId: chief })
+    assert.equal(plain.workspace_path, join(workspace, 'pln'))
+    assert.equal(plain.data_path, join(workspace, 'pln'))
+    const updated = await service.updateProject(project.id, { productionDir: join(root, 'prod-2') })
+    assert.equal(updated.workspace_path, await realpath(join(root, 'prod-2')))
+    const cleared = await service.updateProject(project.id, { productionDir: '' })
+    assert.equal(cleared.workspace_path, join(workspace, 'ext'))
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
   }
 })
 

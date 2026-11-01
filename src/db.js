@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL DEFAULT 'active',
   token_budget REAL,
   cost_budget REAL,
+  production_dir TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -548,6 +549,7 @@ export function openDatabase(path) {
   recordMigration(db, 'session_context_tracking')
   recordMigration(db, 'runs_artifacts')
   recordMigration(db, 'run_trajectory')
+  recordMigration(db, 'projects_production_dir')
   return new Store(db, { ftsEnabled })
 }
 
@@ -581,8 +583,10 @@ function migrateRuns(db) {
 }
 
 // projects.disabled_skills 存项目内关闭的技能 slug JSON 数组。
+// projects.production_dir 存项目生产目录（bots 的 cwd）；NULL 表示用默认 <工作区>/{slug}。
 function migrateProjects(db) {
   addColumn(db, 'projects', 'disabled_skills', "TEXT NOT NULL DEFAULT '[]'")
+  addColumn(db, 'projects', 'production_dir', 'TEXT')
 }
 
 // 记忆的来源引用、审批人、版本号与派生路径。

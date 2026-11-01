@@ -1567,7 +1567,8 @@
           <div>
             <div class="card form-card">
               <div class="card-head"><h3>工作区路径</h3></div>
-              <div class="path-row"><span>工作区</span>${pathCode(project.workspace_path)}${copyPath(project.workspace_path)}</div>
+              <div class="path-row"><span>生产目录</span>${pathCode(project.workspace_path)}${copyPath(project.workspace_path)}</div>
+              <div class="path-row"><span>管理数据</span>${pathCode(project.data_path ?? '')}${copyPath(project.data_path ?? '')}</div>
               <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot ?? '')}${copyPath(paths.skillRoot ?? '')}</div>
               <div class="path-row"><span>数据</span>${pathCode(paths.dataDir ?? '')}${copyPath(paths.dataDir ?? '')}</div>
             </div>
@@ -1730,6 +1731,7 @@
           <div class="field"><label id="new-project-owner-label" for="new-project-owner">负责人 Bot</label><select class="select" style="width:100%" id="new-project-owner" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label id="new-project-description-label" for="new-project-description">项目说明</label><textarea class="textarea" id="new-project-description" name="description" placeholder="项目目标、边界和验收标准"></textarea></div>
+        <div class="field"><label id="new-project-production-label" for="new-project-production">生产目录</label><input class="input mono" style="width:100%" id="new-project-production" name="productionDir" placeholder="/Users/you/repos/my-game（可选）"><div class="hint">Bots 的工作目录，可指向既有代码库等本机目录；留空则用默认管理目录。</div></div>
         ${bots.length > 1 ? `<div class="field"><span class="field-label" id="new-project-members-label">其他成员</span><div class="check-list" role="group" aria-labelledby="new-project-members-label">${bots.slice(1).map(bot => `<div class="check-row"><input type="checkbox" id="new-project-member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}"><label for="new-project-member-${attr(bot.id)}">${avatar(bot, 'sm')} ${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div></div>` : ''}
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建项目</button>`,
@@ -2837,6 +2839,7 @@
           description: payload.description,
           ownerBotId: payload.ownerBotId,
           memberIds: new FormData(form).getAll('memberIds'),
+          productionDir: payload.productionDir?.trim() || undefined,
         })
         state.modal = null
         state.projectId = result.id

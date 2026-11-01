@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { join, sep } from 'node:path'
 import { AppError, badRequest, conflict, forbidden, notFound } from './errors.js'
-import { assertInside, botWorkspaceDir, botsHome, ensureDirResilient, ensureProjectWorkspace, ensureSkillRoot, projectDir, SLUG_MAX } from './paths.js'
+import { assertInside, botWorkspaceDir, botsHome, ensureDirResilient, ensureExternalDir, ensureProjectWorkspace, ensureSkillRoot, projectDir, SLUG_MAX } from './paths.js'
 import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal, reconcileUsage, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
 import { latestDshVersion, compareVersions, validTargetVersion } from './updater.js'
 import { priceKey, seedModelPrices } from './pricing.js'
@@ -492,6 +492,23 @@ export class TeamService {
     }
   }
 
+  // 项目生产目录：显式指定的外部目录优先（Bot 的 cwd、密钥物化、产物清单），
+  // 未指定时与 <工作区>/{slug} 管理目录一致。
+  projectWorkDir(project) {
+    return project.production_dir || join(this.config.workspace, project.slug)
+  }
+
+  // 解析用户指定的生产目录：空串/null 表示回退默认；必须是可用的绝对路径目录。
+  async resolveProductionDir(value) {
+    const raw = typeof value === 'string' ? value.trim() : ''
+    if (!raw) return null
+    try {
+      return await ensureExternalDir(raw)
+    } catch (error) {
+      throw badRequest(error.message || '生产目录无效')
+    }
+  }
+
   projectView(project) {
     const group = this.groupOf(project.id)
     const members = this.membersOf(project.id)
@@ -512,7 +529,8 @@ export class TeamService {
     const messages = this.store.get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)
     return {
       ...project,
-      workspace_path: join(this.config.workspace, project.slug),
+      workspace_path: this.projectWorkDir(project),
+      data_path: join(this.config.workspace, project.slug),
       workspace_relative: `/${project.slug}`,
       disabledSkills: parseDisabledSkills(project.disabled_skills),
       group,
@@ -548,13 +566,14 @@ export class TeamService {
     const memberIds = [...new Set([owner.id, ...(Array.isArray(input.memberIds) ? input.memberIds : [])])]
     for (const botId of memberIds) this.botRow(botId)
     await ensureProjectWorkspace(this.config.workspace, slug)
+    const productionDir = await this.resolveProductionDir(input.productionDir)
     this.store.transaction(() => {
       this.store.run(
-        `INSERT INTO projects(id, key, name, slug, description, owner_bot_id, status, token_budget, cost_budget, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+        `INSERT INTO projects(id, key, name, slug, description, owner_bot_id, status, token_budget, cost_budget, production_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
         projectId, key, name, slug, text(input.description, 20_000), owner.id,
         clampNumber(input.tokenBudget, 0, 1e15, null), clampNumber(input.costBudget, 0, 1e12, null),
-        createdAt, createdAt,
+        productionDir, createdAt, createdAt,
       )
       this.store.run(
         'INSERT INTO group_chats(id, project_id, title, owner_bot_id, reply_mode, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -596,6 +615,11 @@ export class TeamService {
     }
     if (patch.tokenBudget !== undefined) updates.token_budget = clampNumber(patch.tokenBudget, 0, 1e15, null)
     if (patch.costBudget !== undefined) updates.cost_budget = clampNumber(patch.costBudget, 0, 1e12, null)
+    let productionDirChanged = false
+    if (patch.productionDir !== undefined) {
+      updates.production_dir = await this.resolveProductionDir(patch.productionDir)
+      productionDirChanged = (updates.production_dir ?? null) !== (project.production_dir ?? null)
+    }
     if (patch.status !== undefined) {
       if (!['active', 'archived'].includes(patch.status)) throw badRequest('项目状态无效')
       updates.status = patch.status
@@ -670,6 +694,24 @@ export class TeamService {
       }
       this.audit(actor, 'project.update', 'project', projectId, updates)
     })
+    // 生产目录切换后：旧目录的明文 secrets.env 不许留下；新目录立即物化已有密钥。
+    if (productionDirChanged && project.production_dir) {
+      try {
+        rmSync(join(project.production_dir, '.team', 'secrets.env'), { force: true })
+      } catch (error) {
+        this.logger.warn?.(`dsh-team: 切换生产目录后清理旧目录密钥失败：${error?.message ?? error}`)
+      }
+    }
+    if (productionDirChanged) {
+      const teamSecrets = this.store.get("SELECT COUNT(*) AS n FROM secrets WHERE scope = 'team' OR (scope = 'project' AND project_id = ?)", projectId)
+      if (Number(teamSecrets?.n) > 0) {
+        try {
+          await this.materializeProjectSecrets(this.projectRow(projectId))
+        } catch (error) {
+          this.logger.warn?.(`dsh-team: 切换生产目录后重新物化密钥失败：${error?.message ?? error}`)
+        }
+      }
+    }
     return this.projectView(this.projectRow(projectId))
   }
 
@@ -1952,7 +1994,7 @@ export class TeamService {
   // 成功写运行的交付产物清单：项目目录 git status 的相对路径快照（M/A/?? 状态）。
   // 非 git 仓库或 git 不可用时跳过并记 run_event；清单上限 200 条，不复制文件内容。
   captureRunArtifacts(run, project) {
-    const dir = join(this.config.workspace, project.slug)
+    const dir = this.projectWorkDir(project)
     if (!existsSync(join(dir, '.git'))) {
       this.insertRunEvent(run.id, 'artifacts_skipped', '项目工作区不是 git 仓库，跳过产物记录')
       return null
@@ -2003,7 +2045,7 @@ export class TeamService {
   // 项目目录的 git 指纹；不是 git 仓库时返回 null，跳过审计。
   workspaceFingerprint(project) {
     if (!project?.slug) return null
-    const dir = join(this.config.workspace, project.slug)
+    const dir = this.projectWorkDir(project)
     if (!existsSync(join(dir, '.git'))) return null
     try {
       return execFileSync('git', ['status', '--porcelain'], {
@@ -2639,7 +2681,7 @@ export class TeamService {
       return { name: row.name, value: box.decrypt({ valueEnc: row.value_enc, valueIv: row.value_iv, valueTag: row.value_tag }) }
     })
     if (!entries.length) return null
-    const dir = join(this.config.workspace, project.slug)
+    const dir = this.projectWorkDir(project)
     return materializeEnvFile(entries, dir)
   }
 
@@ -2703,7 +2745,7 @@ export class TeamService {
       if (!path) {
         // 删掉密钥后必须把工作区里的明文 env 一并清掉；清不掉要留痕，不能默默留着明文文件。
         try {
-          rmSync(join(this.config.workspace, project.slug, '.team', 'secrets.env'), { force: true })
+          rmSync(join(this.projectWorkDir(project), '.team', 'secrets.env'), { force: true })
         } catch (error) {
           this.logger.warn?.('dsh-team: 删除密钥后清理 %s 失败：%s', project.slug, error?.message ?? error)
         }
@@ -3466,7 +3508,7 @@ export class TeamService {
     if (!Array.isArray(list) || !list.some(item => item?.path === relPath)) {
       throw forbidden('文件不在该运行的产物清单中')
     }
-    const dir = join(this.config.workspace, project.slug)
+    const dir = this.projectWorkDir(project)
     let absolutePath
     try {
       absolutePath = assertInside(dir, join(dir, relPath))

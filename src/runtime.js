@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { AppError } from './errors.js'
-import { botWorkspaceDir, ensureProjectWorkspace } from './paths.js'
+import { botWorkspaceDir, ensureExternalDir, ensureProjectWorkspace } from './paths.js'
 import { scanProjectSkills } from './project-skills.js'
 import { recordUsage } from './usage.js'
 import { id, nowIso, parseDisabledSkills, sha256 } from './util.js'
@@ -256,7 +256,7 @@ export class DshRuntime {
       '## Current project',
       `- Name: ${project.name}`,
       `- Key: ${project.key}`,
-      `- Workspace: ${project.workspace_path || join(this.config.workspace, project.slug)}`,
+      `- Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
       roleLine,
       '',
       teamRules,
@@ -449,7 +449,9 @@ export class DshRuntime {
     const creating = (async () => {
       const cwd = solo
         ? await botWorkspaceDir(this.config.workspace, bot.solo_dir)
-        : await ensureProjectWorkspace(this.config.workspace, project.slug)
+        : project.production_dir
+          ? await ensureExternalDir(project.production_dir)
+          : await ensureProjectWorkspace(this.config.workspace, project.slug)
       const created = await this.ctx.sessionController.create({
         cwd,
         ...(await this.defaultAgentPreset(kind)),
@@ -540,7 +542,7 @@ Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatRe
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage })
     const header = [
       `Project: ${project.name} (${project.key})`,
-      `Workspace: ${join(this.config.workspace, project.slug)}`,
+      `Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
       `You are: ${bot.name}`,
     ].join('\n')
     const taskComments = task
