@@ -7,7 +7,7 @@ import { installSkillProvider } from './src/skills.js'
 import { installTeamTools } from './src/tools.js'
 
 export const name = 'dsh-team-bots'
-export const inject = ['llm', 'tools', 'systemPrompt', 'sessionController', 'sessionTitle', 'connection']
+export const inject = ['llm', 'tools', 'systemPrompt', 'sessionController', 'sessionTitle', 'connection', 'webServer']
 
 export function apply(ctx, config = {}) {
   const resolved = resolveConfig(config)
