@@ -338,7 +338,7 @@
     const viewTitle = state.view === 'chat' ? (project?.name ?? '团队空间')
       : state.view === 'tasks' ? '任务面板'
       : state.view === 'bots' ? '团队 Bots'
-      : state.view === 'skills' ? '共享技能池'
+      : state.view === 'skills' ? '技能池'
       : state.view === 'memory' ? '团队记忆'
       : state.view === 'evolution' ? '进化提案'
       : state.view === 'usage' ? '资源用量'
@@ -856,6 +856,7 @@
 
   function renderSkills() {
     const skills = state.data?.skills ?? []
+    const projectSkills = state.data?.projectSkills ?? []
     const proposals = (state.data?.proposals ?? []).filter(item => item.kind === 'skill' && item.status === 'pending')
     const project = activeProject()
     const disabledSet = new Set(project?.disabledSkills ?? [])
@@ -866,6 +867,7 @@
           <button class="btn" data-action="sync-skills">${icon('refresh')}重新扫描</button>
         </div>
       </div>
+      <div class="card-head" style="margin-bottom:10px"><h3>共享技能池</h3></div>
       <div class="path-row plain" style="margin-bottom:14px"><span>技能根目录</span><code>${esc(state.data.paths.skillRoot)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
       <div class="card list-card">
         ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>技能池为空</h3><p>在技能根目录放置技能文件，或提交一个技能提案并审批。</p></div>` : skills.map(skill => {
@@ -886,6 +888,28 @@
           </div>
         `}).join('')}
       </div>
+      ${project ? `<div class="card-head" style="margin-top:24px"><h3>当前项目技能</h3></div>
+      <div class="section-head"><p>从项目工作区的 <code>.agents</code>、<code>.claude</code>、<code>.codex</code> 三个根扫描发现；同名技能按 .agents &gt; .claude &gt; .codex 去重。这些技能只在当前项目可用，且优先于同名共享技能。</p></div>
+      ${(state.data.paths.projectSkillRoots ?? []).map(root => `<div class="path-row plain" style="margin-bottom:6px"><span style="text-transform:none">${esc(root.root)}</span><code>${esc(root.path)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(root.path + '/skills')}">${icon('copy')}</button></div>`).join('')}
+      <div class="card list-card">
+        ${projectSkills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>项目内没有技能</h3><p>在项目目录的 .agents、.claude 或 .codex 下放置 skills/&lt;技能名&gt;/SKILL.md 即可。</p></div>` : projectSkills.map(skill => {
+          const off = disabledSet.has(skill.name)
+          const dupRoots = (skill.roots ?? []).filter(root => root !== skill.root)
+          return `
+          <div class="list-row skill-row">
+            <div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div>
+            <div class="list-main">
+              <div class="list-title"><span class="skill-slug">${esc(skill.name)}</span><span class="faint mono">v${esc(skill.version ?? '1.0.0')}</span><span class="pill green">${esc(skill.root)}</span>${off ? '<span class="pill red">本项目已关闭</span>' : ''}</div>
+              <div class="list-desc">${esc(skill.description || '无描述')}</div>
+              <div class="list-meta"><span>${esc(skill.relativePath)}</span></div>
+              ${dupRoots.length ? `<div class="list-meta"><span>同名技能也出现在 ${dupRoots.map(root => esc(root)).join('、')}，按 ${esc(skill.root)} 优先取用</span></div>` : ''}
+            </div>
+            <div class="btn-row">
+              <button class="btn small" data-action="copy" data-copy="${attr(skill.path)}">${icon('copy')}复制路径</button>
+            </div>
+          </div>
+        `}).join('')}
+      </div>` : ''}
       ${proposals.length ? `<div class="card-head" style="margin-top:24px"><h3>待审批技能提案</h3></div>
       <div class="grid">
         ${proposals.map(item => `<div class="card proposal-card">
@@ -2204,7 +2228,12 @@
     const skills = (state.data?.skills ?? [])
       .filter(skill => skill.status === 'active' && !disabled.has(skill.slug))
       .map(skill => ({ slug: skill.slug, name: skill.name, description: skill.description }))
-    return { skills, members }
+    // 项目技能只在当前项目可用；与共享技能同名时项目技能优先。
+    const projectSkills = (state.data?.projectSkills ?? [])
+      .filter(skill => !disabled.has(skill.name))
+      .map(skill => ({ slug: skill.name, name: skill.name, description: skill.description }))
+    const projectNames = new Set(projectSkills.map(skill => skill.slug))
+    return { skills: [...projectSkills, ...skills.filter(skill => !projectNames.has(skill.slug))], members }
   }
 
   function updateAutocomplete() {

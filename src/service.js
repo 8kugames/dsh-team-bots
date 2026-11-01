@@ -8,11 +8,10 @@ import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal,
 import { latestDshVersion, compareVersions, validTargetVersion } from './updater.js'
 import { priceKey, seedModelPrices } from './pricing.js'
 import { publishSkill, rollbackSkill, skillSnapshot, stageSkill, syncSkills } from './skills.js'
+import { projectSkillRoots, scanProjectSkills } from './project-skills.js'
 import { parseStewardOutput, shouldRotate } from './steward.js'
 import { deliveryPlan, replyDeliveryPrompt, summarizeForUi, upsertBotMessage } from './botmsg.js'
 import { ENV_PREFIX, SecretBox, maskSecrets, materializeEnvFile, normalizeSecretName, secretFingerprint } from './secrets.js'
-import { WechatStore } from './wechat/store.js'
-import { WechatChannel } from './wechat/channel.js'
 import {
   clampNumber, id, jsonParse, nowIso, parseDisabledSkills, parseMentions, projectKey, redactSecrets,
   sha256, slugify, text, sanitizeFilename, writeIfChanged,
@@ -32,8 +31,9 @@ const TRANSITIONS = {
 const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
-const makeQr = createRequire(import.meta.url)('../vendor/qrcode/qrcode.js')
+// 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
 function wechatQrSvg(url) {
+  const makeQr = createRequire(import.meta.url)('../vendor/qrcode/qrcode.js')
   const qr = makeQr(0, 'M')
   qr.addData(url)
   qr.make()
@@ -139,12 +139,20 @@ export class TeamService {
         )
       }
       if (this.config.wechat?.enabled) {
-        const wechatStore = await new WechatStore(this.config.wechatDbPath).open()
-        this.wechat = new WechatChannel({ store: wechatStore, config: this.config, log: this.logger })
-        this.wechat.setService(this)
-        await this.wechat.start().catch(error => {
-          this.logger.warn?.(`[wechat] 通道启动失败: ${error?.message ?? error}`)
-        })
+        // 微信通道是可选集成，其 vendor 依赖按需加载：缺失或损坏时只降级该通道，
+        // 不应让整个插件加载失败、工作台路由全部不可用。
+        try {
+          const { WechatStore } = await import('./wechat/store.js')
+          const { WechatChannel } = await import('./wechat/channel.js')
+          const wechatStore = await new WechatStore(this.config.wechatDbPath).open()
+          this.wechat = new WechatChannel({ store: wechatStore, config: this.config, log: this.logger })
+          this.wechat.setService(this)
+          await this.wechat.start().catch(error => {
+            this.logger.warn?.(`[wechat] 通道启动失败: ${error?.message ?? error}`)
+          })
+        } catch (error) {
+          this.logger.warn?.(`[wechat] 通道加载失败，已跳过: ${error?.message ?? error}`)
+        }
       }
     })()
     return this.ready
@@ -3297,6 +3305,7 @@ export class TeamService {
       runs: [],
       memories: [],
       skills: skillSnapshot(this.store, this.config),
+      projectSkills: project ? this.projectSkillView(project) : [],
       skillBindings: this.skillBindings(project?.id ?? null),
       outbox: this.outboxCounts(),
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
@@ -3307,6 +3316,9 @@ export class TeamService {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,
         skillRoot: this.config.skillRoot,
+        projectSkillRoots: project
+          ? projectSkillRoots(join(this.config.workspace, project.slug)).map(item => ({ root: item.root, path: item.path }))
+          : [],
         dataDir: this.config.dataDir,
       },
       dsh: {
@@ -3411,6 +3423,24 @@ export class TeamService {
 
   async models(force = false) {
     return this.runtime?.catalog(force) ?? []
+  }
+
+  // 当前项目的技能池：扫描项目工作区的 .agents / .claude / .codex 三个根，
+  // 同名技能按根优先级去重；只做发现，不写入共享技能池。
+  projectSkillView(project) {
+    const dir = join(this.config.workspace, project.slug)
+    const { skills } = scanProjectSkills(dir)
+    return skills.map(skill => ({
+      name: skill.name,
+      slug: skill.slug,
+      description: skill.description,
+      version: skill.version,
+      path: skill.path,
+      root: skill.root,
+      roots: skill.roots,
+      duplicates: skill.duplicates,
+      relativePath: skill.relativePath,
+    }))
   }
 
   async syncSkillsNow(actor = this.actor()) {

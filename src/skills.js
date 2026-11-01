@@ -1,34 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, sep } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { ensureSkillRoot } from './paths.js'
+import { parseSkill } from './skill-parse.js'
+import { resolveProjectSkillDir, scanProjectSkills } from './project-skills.js'
 import { nowIso, sha256, slugify } from './util.js'
 
 const PROVIDER = 'dsh-team-skills'
 
-export function parseSkill(raw, locator) {
-  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(raw)
-  const metadata = {}
-  if (frontmatter?.[1]) {
-    for (const line of frontmatter[1].split('\n')) {
-      const match = /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line.trim())
-      if (match) metadata[match[1]] = match[2].replace(/^["']|["']$/g, '').trim()
-    }
-  }
-  const name = metadata.name || basename(dirname(locator)) || basename(locator, '.md')
-  const description = metadata.description || firstParagraph(raw.slice(frontmatter?.[0]?.length ?? 0))
-  return {
-    name,
-    description: description.slice(0, 500),
-    version: metadata.version || '1.0.0',
-    content: raw.slice(frontmatter?.[0]?.length ?? 0).trim(),
-    raw,
-  }
-}
+// 候选 rank 越小越优先：项目技能优先于共享技能池。
+const PROJECT_RANKS = { '.agents': 100, '.claude': 110, '.codex': 120 }
+const SHARED_RANK = 700
 
-const firstParagraph = (value) => String(value)
-  .split(/\r?\n/)
-  .map(line => line.trim())
-  .find(line => line !== '' && !line.startsWith('#')) ?? ''
+export { parseSkill }
 
 // 技能目录结构：skills/{slug}/SKILL.md 为当前版本，versions/{version}.md 保留历史版本，
 // current.json 记录当前指针，便于回滚与追溯。
@@ -159,21 +142,52 @@ export function syncSkills(store, skillRoot) {
   return entries
 }
 
-export function skillProvider(skillRoot) {
-  const list = () => scanSkills(skillRoot).map(entry => ({
-    name: entry.slug,
-    description: entry.description,
-    invocation: { modelInvocable: true, userInvocable: true },
-    provider: PROVIDER,
-    source: 'workspace',
-    rank: 700,
-    resourceBase: { kind: 'directory', path: entry.resourceBase.split(sep).join('/') },
-    locator: entry.path,
-    version: entry.version,
-  }))
+// 技能 provider：共享技能池 + 当前会话所在项目的项目技能池。
+// 项目技能按 .agents > .claude > .codex 优先级去重，且优先于同名共享技能。
+export function skillProvider(skillRoot, options = {}) {
+  const resolveProjectDir = options.resolveProjectDir ?? (() => null)
+  const list = (cwd) => {
+    const candidates = []
+    const projectDir = resolveProjectDir(cwd)
+    if (projectDir) {
+      for (const skill of scanProjectSkills(projectDir).skills) {
+        candidates.push({
+          name: skill.name,
+          description: skill.description,
+          invocation: { modelInvocable: true, userInvocable: true },
+          provider: PROVIDER,
+          source: 'project',
+          rank: PROJECT_RANKS[skill.root] ?? 200,
+          resourceBase: { kind: 'directory', path: dirname(skill.path).split(sep).join('/') },
+          locator: skill.path,
+          version: skill.version,
+        })
+      }
+    }
+    for (const entry of scanSkills(skillRoot)) {
+      candidates.push({
+        name: entry.slug,
+        description: entry.description,
+        invocation: { modelInvocable: true, userInvocable: true },
+        provider: PROVIDER,
+        source: 'workspace',
+        rank: SHARED_RANK,
+        resourceBase: { kind: 'directory', path: entry.resourceBase.split(sep).join('/') },
+        locator: entry.path,
+        version: entry.version,
+      })
+    }
+    // 同一个 provider 内按技能名去重：rank 小的（项目技能）优先。
+    const seen = new Set()
+    return candidates.filter(candidate => {
+      if (seen.has(candidate.name)) return false
+      seen.add(candidate.name)
+      return true
+    })
+  }
   return {
     name: PROVIDER,
-    list: async () => list(),
+    list: async (opts) => list(opts?.cwd),
     async get(candidate) {
       const locator = candidate.locator
       const raw = readFileSync(locator, 'utf8')
@@ -186,7 +200,9 @@ export function skillProvider(skillRoot) {
 export function installSkillProvider(ctx, config, logger) {
   ctx.inject?.({ skills: null }, scope => {
     try {
-      scope.skills.registerProvider(() => skillProvider(config.skillRoot))
+      scope.skills.registerProvider(() => skillProvider(config.skillRoot, {
+        resolveProjectDir: (cwd) => resolveProjectSkillDir(config.workspace, cwd),
+      }))
       logger?.info?.('shared skill provider registered: %s', config.skillRoot)
     } catch (error) {
       logger?.warn?.('shared skill provider failed: %s', error)

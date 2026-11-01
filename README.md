@@ -21,18 +21,21 @@
 - 密钥管道：管理页登记的密钥 AES-256-GCM 加密落库、物化为项目 `.team/secrets.env`，Bot 侧 `set -a; . .team/secrets.env` 使用；密钥值在消息、记忆、运行输出落库前一律掩码为 `$DSH_SECRET_名称`；Bot 可用 `team_request_secret` 发起待审请求。
 - 微信通道（`DSH_TEAM_WECHAT=1` 开启）：设置页扫码绑定个人微信（腾讯 iLink 官方协议，协议实现 vendored 自 `vendor/wechat-ilink`，上游 Tencent/openclaw-weixin MIT），在微信里对 ClawBot 说「绑定」成为管理员；此后任务完成主动推送，微信内可回复 `状态`、`详情 key-N`、`验收 key-N [评语]`、`驳回 key-N 理由` 管理验收；未连接期间的消息落盘补发。
 - 共享技能池固定为 `/workspace/.agents/skills`，技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）；技能池只列出技能根目录里当前存在的技能，文件被移除的技能在重新扫描后自动消失。
+- 项目技能池：自动扫描当前项目工作区的 `.agents/skills`、`.claude/skills`、`.codex/skills` 三个根，按 frontmatter `name` 去重（`.agents` > `.claude` > `.codex`）；这些技能只在当前项目可用，会进入该项目会话的补全与 Bot 系统提示，并优先于同名共享技能；发现结果不写入共享技能池。
 - token、调用次数、成本和运行时长按全局、项目、Bot 归集。
 
 ## Docker 启动
 
 要求 Docker 24+、Compose v2.24+。容器挂载宿主机的 `~/.dsh`，因此全局 provider、插件、凭据和 DSH 配置全部继承；本插件只使用独立的 `~/.dsh/profiles/team-bots` profile。
 
+栈配置放在仓库外：`cp .env.example ~/.dsh/team-bots.env`（用 `DSH_TEAM_ENV_FILE` 可指向任意路径）。不要在项目根目录放 `.env`：compose 会自动加载它，direnv、编辑器 dotenv 插件或手动 `set -a; . .env` 还会把 `DSH_*` 带进本机进程，污染 `npm test` / `npm run dev`。文件可选，不创建则全部走 `docker-compose.yml` 里的默认值。
+
 ```sh
-cp .env.example .env
+cp .env.example ~/.dsh/team-bots.env
 # 填写 DEEPSEEK_API_KEY；把实际访问域名/IP 加入 DSH_TRUSTED_HOST
 # Linux 下把 PUID/PGID 改成 ~/.dsh 和 workspace 的属主
-docker compose up -d --build   # 等价：npm run docker:up（见下方宿主能力桥，推荐）
-docker compose logs -f dsh-team
+npm run docker:up   # 扫描宿主能力后以 --env-file 启动（见下方宿主能力桥，推荐）
+docker compose --env-file ~/.dsh/team-bots.env -f docker-compose.yml -f docker-compose.host-caps.yml logs -f dsh-team
 ```
 
 Docker Compose 把 `${HOME}/.dsh` 挂到容器 `/home/node/.dsh`。若宿主没有 `profiles/team-bots`，入口脚本会从镜像模板初始化；不会覆盖宿主其他 profile 或全局配置。
@@ -190,7 +193,7 @@ WORKSPACE_HOST_DIR/          -> /workspace
 
 ## 官方 Agent Teams 开关
 
-构建与运行使用同一个 `DSH_TEAM_AGENT_TEAM`（默认 0）：构建时为 1 才把 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 装进镜像 profile 模板，运行时为 1 才在 profile 里启用。要开团队层，在 `.env` 设一次 `DSH_TEAM_AGENT_TEAM=1`，两端同时生效。
+构建与运行使用同一个 `DSH_TEAM_AGENT_TEAM`（默认 0）：构建时为 1 才把 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 装进镜像 profile 模板，运行时为 1 才在 profile 里启用。要开团队层，在 `~/.dsh/team-bots.env` 设一次 `DSH_TEAM_AGENT_TEAM=1`，两端同时生效。
 
 - `1`：每个任务会话可以把任务拆成具名 teammate 并行执行（共享项目工作区），最多 `DSH_TEAM_MAX_TEAMMATES` 个；群聊、验收仍由项目会话负责。
 - `0`（默认）：不加载团队层。
@@ -286,7 +289,7 @@ node scripts/dev-server.js
 
 ## DSH 版本与升级
 
-Docker 构建不写死 DSH 版本：未设置 `DSH_VERSION` 时，构建阶段从 npm registry 解析最新的非 alpha 版本并安装。需要固定时可在 `.env` 设置 `DSH_VERSION`。
+Docker 构建不写死 DSH 版本：未设置 `DSH_VERSION` 时，构建阶段从 npm registry 解析最新的非 alpha 版本并安装。需要固定时可在 `~/.dsh/team-bots.env` 设置 `DSH_VERSION`。
 
 运行中可在「全局配置 → DSH 运行时」检查并升级：
 
@@ -309,7 +312,7 @@ Docker 构建不写死 DSH 版本：未设置 `DSH_VERSION` 时，构建阶段�
 
 **`/workspace` 不可写**
 
-容器首次启动会创建缺失的挂载目录（属主 root）。入口脚本用 `gosu node test -w /workspace` 探测，只有不可写时才改属主，不会动已有的宿主目录结构。若仍提示不可写，检查 `.env` 里的 `PUID`/`PGID` 是否等于宿主机目录属主。
+容器首次启动会创建缺失的挂载目录（属主 root）。入口脚本用 `gosu node test -w /workspace` 探测，只有不可写时才改属主，不会动已有的宿主目录结构。若仍提示不可写，检查 `~/.dsh/team-bots.env` 里的 `PUID`/`PGID` 是否等于宿主机目录属主。
 
 ## 基线
 

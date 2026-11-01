@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import { AppError } from './errors.js'
 import { botWorkspaceDir, ensureProjectWorkspace } from './paths.js'
+import { scanProjectSkills } from './project-skills.js'
 import { recordUsage } from './usage.js'
 import { id, nowIso, parseDisabledSkills, sha256 } from './util.js'
 import { checkpointText, stewardPrompt } from './steward.js'
@@ -200,6 +202,15 @@ export class DshRuntime {
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
     ]
+    const projectSkills = this.config?.workspace
+      ? scanProjectSkills(join(this.config.workspace, project.slug)).skills
+      : []
+    const projectSkillRules = projectSkills.length === 0
+      ? []
+      : [
+          `- Project skill pools are mounted at \`/workspace/${project.slug}/.agents/skills\`, \`/workspace/${project.slug}/.claude/skills\`, \`/workspace/${project.slug}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
+          `- Project skills available here: ${projectSkills.map(skill => `\`${skill.name}\``).join(', ')}.`,
+        ]
     const collaborationRules = taskSession
       ? [
           '- Do the work yourself unless the task genuinely splits into independent parts; do not assign work to other project bots.',
@@ -215,7 +226,7 @@ export class DshRuntime {
           '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
           '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
         ]
-    const teamRules = ['## How this team works', ...collaborationRules, secretRule, ...sharedRules].join('\n')
+    const teamRules = ['## How this team works', ...collaborationRules, secretRule, ...sharedRules, ...projectSkillRules].join('\n')
     return [
       '# Team bot identity',
       `You are ${bot.name}, a project bot on the user's team.`,
