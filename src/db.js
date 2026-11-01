@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS runs (
   task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
   parent_run_id TEXT,
   kind TEXT NOT NULL DEFAULT 'chat',
+  mode TEXT NOT NULL DEFAULT 'write',
   trigger_type TEXT NOT NULL,
   trigger_ref TEXT,
   status TEXT NOT NULL DEFAULT 'queued',
@@ -165,6 +166,7 @@ CREATE TABLE IF NOT EXISTS runs (
   queued_at TEXT NOT NULL,
   started_at TEXT,
   ended_at TEXT,
+  last_progress_at TEXT,
   usage_input INTEGER NOT NULL DEFAULT 0,
   usage_cache_read INTEGER NOT NULL DEFAULT 0,
   usage_cache_write INTEGER NOT NULL DEFAULT 0,
@@ -186,8 +188,8 @@ CREATE TABLE IF NOT EXISTS session_bindings (
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   kind TEXT NOT NULL DEFAULT 'project',
-  created_at TEXT NOT NULL,
-  UNIQUE(bot_id, project_id, kind)
+  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS memories (
@@ -323,8 +325,63 @@ export function openDatabase(path) {
     db.exec("ALTER TABLE tasks ADD COLUMN review_target TEXT NOT NULL DEFAULT 'user'")
     db.exec("UPDATE tasks SET review_target = CASE WHEN creator_type = 'bot' THEN 'owner_bot' ELSE 'user' END")
   }
+  migrateRuns(db)
+  migrateSessionBindings(db)
+  db.exec(BINDING_INDEXES)
   return new Store(db)
 }
+
+function columnsOf(db, table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name)
+}
+
+function addColumn(db, table, column, definition) {
+  if (columnsOf(db, table).includes(column)) return
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+}
+
+// run.mode 区分写入型与只读型运行：同一项目同时只允许一个写运行，只读运行可并行。
+function migrateRuns(db) {
+  addColumn(db, 'runs', 'mode', "TEXT NOT NULL DEFAULT 'write'")
+  addColumn(db, 'runs', 'last_progress_at', 'TEXT')
+  db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
+}
+
+// 旧的 session_bindings 带 UNIQUE(bot_id, project_id, kind)，无法容纳每任务一条会话绑定。
+// task_id 为 NULL 时用部分唯一索引表达「每 Bot 每项目一个会话」，非 NULL 时按任务唯一。
+function migrateSessionBindings(db) {
+  if (columnsOf(db, 'session_bindings').includes('task_id')) return
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    db.exec('BEGIN IMMEDIATE')
+    db.exec('ALTER TABLE session_bindings RENAME TO session_bindings_legacy')
+    db.exec(`CREATE TABLE session_bindings (
+      session_id TEXT PRIMARY KEY,
+      bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL DEFAULT 'project',
+      task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL
+    )`)
+    db.exec(`INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
+      SELECT session_id, bot_id, project_id, kind, NULL, created_at FROM session_bindings_legacy`)
+    db.exec('DROP TABLE session_bindings_legacy')
+    db.exec('COMMIT')
+  } catch (error) {
+    try { db.exec('ROLLBACK') } catch {}
+    throw error
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+}
+
+const BINDING_INDEXES = `
+CREATE UNIQUE INDEX IF NOT EXISTS one_project_binding
+  ON session_bindings(bot_id, project_id, kind) WHERE task_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS one_task_binding
+  ON session_bindings(bot_id, project_id, kind, task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS session_bindings_task_idx ON session_bindings(task_id);
+`
 
 export class Store {
   constructor(db) {
