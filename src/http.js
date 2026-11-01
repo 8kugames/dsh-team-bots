@@ -16,7 +16,9 @@ const SECURITY = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
   'X-Frame-Options': 'SAMEORIGIN',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
+  // default-src 里放开 blob:：CSV 导出用 Blob URL 交给浏览器下载；
+  // script-src 仍是 'self'，blob: 无法被当成脚本执行。
+  'Content-Security-Policy': "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
 }
 
 const response = (body, type, status = 200, extra = {}) => new Response(body, {

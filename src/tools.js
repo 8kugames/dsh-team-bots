@@ -77,7 +77,7 @@ export function installTeamTools(ctx, service) {
     parameters: {
       type: 'object',
       properties: {
-        scope: { type: 'string', enum: ['bot', 'project'], description: 'bot: only you remember it; project: every project bot can use it' },
+        scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'bot: only you remember it; project: every project bot can use it; team: shared by the whole team (owner bots only)' },
         topic: { type: 'string', description: 'Short topic label' },
         content: { type: 'string', description: 'The durable memory, with enough context to be useful later' },
       },

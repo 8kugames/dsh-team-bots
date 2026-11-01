@@ -42,11 +42,21 @@ class FakeRuntime {
       void this.handler({
         runId: run.id,
         status: shouldFail ? 'failed' : 'succeeded',
-        output: shouldFail ? '' : (task ? `Implemented ${task.title}. Changed src/demo.js and verified it.` : `Reply from ${bot.name}.`),
+        output: shouldFail ? '' : this.outputFor(run, bot, task),
         error: shouldFail ? { code: 'TEST_FAILURE', message: 'simulated failure' } : null,
       })
     })
     return `session-${run.id}`
+  }
+
+  outputFor(run, bot, task) {
+    if (run.kind === 'memory_review') {
+      return JSON.stringify([
+        { scope: 'bot', topic: '交付习惯', content: '交付前先跑一遍校验脚本。', confidence: 0.9 },
+        { scope: 'project', topic: '目录约定', content: '演示页面放在 src/demo.js。', confidence: 0.85 },
+      ])
+    }
+    return task ? `Implemented ${task.title}. Changed src/demo.js and verified it.` : `Reply from ${bot.name}.`
   }
 
   async cancelRun() { return true }
@@ -103,7 +113,7 @@ test('boot seeds owner chief, default companions and shared skills', async () =>
     assert.equal(bots.length, 6)
     assert.equal(bots[0].name, 'chief')
     assert.equal(bots[0].provider, 'fake')
-    for (const name of ['designer', 'programmer', 'graphics-rendering', 'devops', 'artist']) {
+    for (const name of ['designer', 'programmer', 'graphics', 'devops', 'artist']) {
       assert.ok(bots.some(bot => bot.name === name), `missing seed bot ${name}`)
     }
     const state = await service.state()
@@ -329,10 +339,14 @@ test('skill proposal approval publishes into shared skill pool', async () => {
       kind: 'skill', projectId: project.id, title: 'Add deploy skill', rationale: 'Repeated deploy work',
       payload: { slug: 'deploy-check', name: 'Deploy check', description: 'Check deployment', version: '1.0.0', content: '# Deploy check\n\nRun smoke tests.' },
     }, actor)
+    // 没有评估结论时不允许直接批准。
+    await assert.rejects(() => service.decideProposal(proposal.id, 'approved', actor), /评估/)
+    await service.evaluateProposal(proposal.id, { verdict: 'pass', notes: '内容可执行' }, actor)
     const approved = await service.decideProposal(proposal.id, 'approved', actor)
     assert.equal(approved.status, 'approved')
     const state = await service.state(project.id)
     assert.ok(state.skills.some(skill => skill.slug === 'deploy-check'))
+    assert.ok(state.skillBindings.some(binding => binding.slug === 'deploy-check'))
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

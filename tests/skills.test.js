@@ -96,6 +96,29 @@ test('skill detail returns full markdown content and version history', async () 
   }
 })
 
+test('skill pool only lists skills that still exist in the skill root', async () => {
+  const { root, workspace, store, service } = await setup()
+  try {
+    const before = await service.state()
+    assert.deepEqual(before.skills.map(skill => skill.slug), ['review'])
+    assert.equal(before.skills[0].status, 'active')
+
+    // 技能文件被移出技能根目录后，重新扫描即失效
+    await rm(join(workspace, '.agents', 'skills', 'review'), { recursive: true, force: true })
+    const synced = await service.syncSkillsNow()
+    assert.equal(synced.count, 0)
+    assert.deepEqual(synced.skills, [])
+
+    const after = await service.state()
+    assert.deepEqual(after.skills.map(skill => skill.slug), [])
+    // 失效记录仍留在库里，便于追溯
+    assert.equal(store.get('SELECT status FROM skills WHERE slug = ?', 'review')?.status, 'missing')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('project-level skill toggle flows through service, api and system prompt', async () => {
   const { root, store, service, config } = await setup()
   try {

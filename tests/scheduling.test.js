@@ -104,11 +104,11 @@ test('同项目写运行串行，跨项目与只读运行可并行', async () =>
     assert.ok(running.every(run => run.mode === 'write'))
     assert.ok(runtime.started.some(item => item.taskId === first.id))
 
-    // 唯一的正在运行的 Alpha 运行结束后，排队的第二个任务才会被领取。
+    // 唯一的正在运行的 Alpha 写运行结束后，排队的第二个任务才会被领取。
     const alphaRun = running.find(run => run.project_id === alpha.id)
     await runtime.complete(alphaRun.id)
     await service.tick()
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running'", alpha.id).n, 1)
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running' AND mode = 'write'", alpha.id).n, 1)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

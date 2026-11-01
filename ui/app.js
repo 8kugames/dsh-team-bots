@@ -19,6 +19,9 @@
     taskFilter: { status: 'all', assignee: 'all', search: '' },
     memoryFilter: 'all',
     usageScope: 'global',
+    usageBot: null,
+    memoryQuery: '',
+    memoryResults: null,
     theme: 'dsh',
     tree: { chats: true, bots: true },
     bootError: null,
@@ -35,12 +38,13 @@
   }
   const STATUS_ORDER = ['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled']
   const PRIORITY = { urgent: '紧急', high: '高', medium: '中', low: '低', none: '无' }
-  const PROPOSAL_STATUS = { pending: '待审', approved: '已通过', rejected: '已拒绝' }
+  const PROPOSAL_STATUS = { pending: '待审', canary: '灰度中', approved: '已通过', rejected: '已拒绝' }
   const COLORS = ['teal', 'blue', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
   const COLOR_NAMES = { teal: '青', blue: '蓝', violet: '紫', amber: '琥珀', coral: '珊瑚', pink: '粉', green: '绿', gray: '灰' }
   const BOT_STATUS = { active: '运行中', paused: '已暂停', archived: '已归档' }
   const RUN_STATUS = { queued: '排队中', running: '运行中', succeeded: '已完成', failed: '失败', canceled: '已取消' }
   const SKILL_STATUS = { active: '启用中', missing: '已失效' }
+  const MEMORY_STATUS = { active: '已生效', pending: '待审', frozen: '已冻结', rejected: '已拒绝', archived: '已归档' }
   const PROPOSAL_KIND = { bot_update: 'Bot 更新', skill: '技能更新', workflow: '流程更新' }
   const CREATOR_TYPE = { bot: 'Bot', user: '用户' }
   const EFFORT = { minimal: '最低', low: '低', medium: '中', high: '高', max: '最高' }
@@ -91,6 +95,8 @@
     layers: '<path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/>',
     terminal: '<path d="m4 17 6-6-6-6M12 19h8"/>',
     users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+    download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',
   }
 
   const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.settings}</svg>`
@@ -296,7 +302,7 @@
     const project = activeProject()
     const pending = pendingProposals()
     const running = project?.stats?.running ?? 0
-    const tokenTotal = data.usage?.scope?.project?.totalTokens ?? data.usage?.totalTokens ?? 0
+    const tokenTotal = usageTotals('project').totalTokens ?? 0
     const isGlobal = state.view === 'global'
     const viewTitle = state.view === 'chat' ? (project?.name ?? '团队空间')
       : state.view === 'tasks' ? '任务面板'
@@ -399,14 +405,15 @@
               <button class="btn icon" data-action="refresh" title="刷新" aria-label="刷新">${icon('refresh')}</button>
             </div>
           </header>
-          ${isGlobal ? '' : `<div class="tabbar">
+          ${isGlobal ? '' : `<div class="tabbar" role="tablist" aria-label="主导航">
             ${NAV.map(([key, label]) => {
               const dot = tabDot(key)
-              return `<button class="tab ${state.view === key ? 'active' : ''}" data-action="nav" data-view="${key}">${label}${dot ? '<span class="red-dot" title="有待人工处理事项"></span>' : ''}</button>`
+              const active = state.view === key
+              return `<button class="tab ${active ? 'active' : ''}" role="tab" id="tab-${key}" aria-controls="main-content" aria-selected="${active}" tabindex="${active ? '0' : '-1'}" data-action="nav" data-view="${key}">${label}${dot ? '<span class="red-dot" title="有待人工处理事项"></span>' : ''}</button>`
             }).join('')}
           </div>`}
           </div>
-          <section class="content">
+          <section class="content" id="main-content" role="tabpanel" tabindex="-1"${state.view === 'global' ? '' : ` aria-labelledby="tab-${state.view}"`}>
             ${renderView()}
           </section>
         </main>
@@ -426,7 +433,14 @@
     if (!state.data) return
     state.ac = null
     app.className = ''
+    const hadModal = Boolean(document.querySelector('.modal'))
+    const previousFocus = document.activeElement
     app.innerHTML = renderShell()
+    if (state.modal && !hadModal) {
+      lastFocused = previousFocus
+      focusModal()
+    }
+    if (!state.modal && hadModal) restoreFocus()
     requestAnimationFrame(() => {
       syncChromeHeight()
       if (state.view === 'chat') {
@@ -588,7 +602,7 @@
       <div class="section-head">
         <p>拖拽卡片切换状态。</p>
         <div class="board-toolbar" style="margin:0">
-          <input class="input search" id="task-search" placeholder="搜索任务、编号或标签" value="${attr(state.taskFilter.search)}">
+          <input class="input search" id="task-search" placeholder="搜索任务、编号或标签" aria-label="搜索任务、编号或标签" value="${attr(state.taskFilter.search)}">
           <select class="select" data-task-filter="status">
             <option value="all">全部状态</option>
             ${STATUS_ORDER.map(status => `<option value="${status}" ${state.taskFilter.status === status ? 'selected' : ''}>${STATUS[status]}</option>`).join('')}
@@ -691,9 +705,10 @@
           <div class="list-row skill-row">
             <div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div>
             <div class="list-main">
-              <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint mono">v${esc(skill.version)}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[skill.status] ?? skill.status)}</span>${off ? '<span class="pill red">本项目已关闭</span>' : ''}</div>
+              <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint mono">v${esc(currentSkillVersion(skill))}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[skill.status] ?? skill.status)}</span>${off ? '<span class="pill red">本项目已关闭</span>' : ''}</div>
               <div class="list-desc">${esc(skill.description || '无描述')}</div>
               <div class="list-meta"><span>${esc(skill.relativePath)}</span></div>
+              ${skillVersions(skill)}
             </div>
             <div class="btn-row">
               <button class="btn small" data-action="skill-detail" data-slug="${attr(skill.slug)}">详情</button>
@@ -712,27 +727,74 @@
     `
   }
 
+  function memoryStatusTone(status) {
+    if (status === 'active') return 'green'
+    if (status === 'pending') return 'amber'
+    if (status === 'rejected' || status === 'archived') return 'red'
+    return ''
+  }
+
+  function pendingMemoryCount() {
+    const list = state.data?.memories
+    if (Array.isArray(list)) return list.filter(item => item.status === 'pending').length
+    return Number(list?.pending ?? 0)
+  }
+
+  async function searchMemories() {
+    const query = String(state.memoryQuery ?? '').trim()
+    if (!query) {
+      state.memoryResults = null
+      render()
+      return
+    }
+    const project = activeProject()
+    const payload = { query }
+    if (project) payload.projectId = project.id
+    const result = await api('search_memories', payload)
+    state.memoryResults = Array.isArray(result) ? result : (result?.items ?? [])
+    render()
+  }
+
   function renderMemory() {
     const project = activeProject()
-    const memories = (state.data?.memories ?? []).filter(memory => state.memoryFilter === 'all' || memory.scope_type === state.memoryFilter)
+    const all = state.data?.memories ?? []
+    const memories = all.filter(memory => state.memoryFilter === 'all' || memory.scope_type === state.memoryFilter)
+    const pending = pendingMemoryCount()
+    const results = state.memoryResults
     return `
       <div class="board-toolbar">
-        <select class="select" id="memory-filter">
+        <select class="select" id="memory-filter" aria-label="按作用域筛选记忆">
           <option value="all" ${state.memoryFilter === 'all' ? 'selected' : ''}>全部作用域</option>
           <option value="project" ${state.memoryFilter === 'project' ? 'selected' : ''}>项目记忆</option>
           <option value="bot" ${state.memoryFilter === 'bot' ? 'selected' : ''}>Bot 记忆</option>
+          <option value="team" ${state.memoryFilter === 'team' ? 'selected' : ''}>团队记忆</option>
         </select>
+        <input class="input search" id="memory-search" placeholder="搜索记忆主题或内容" aria-label="搜索记忆主题或内容" value="${attr(state.memoryQuery)}">
+        <button class="btn" data-action="search-memories">${icon('search')}搜索</button>
+        ${pending ? `<span class="pill amber">${pending} 条待审</span>` : ''}
         <span class="tag" style="margin-left:auto">${memories.length} 条</span>
       </div>
+      ${results ? `<div class="card list-card" style="margin-bottom:12px">
+        <div class="card-head"><h3>搜索结果（${results.length}）</h3><button class="btn small" data-action="clear-memory-search">${icon('close')}清除</button></div>
+        ${results.length === 0 ? '<div class="faint">没有匹配的记忆。</div>' : results.map(item => `<div class="list-row">
+          <div class="list-main">
+            <div class="list-title">${esc(item.topic)}<span class="pill ${memoryStatusTone(item.status)}">${esc(MEMORY_STATUS[item.status] ?? item.status ?? '未知')}</span></div>
+            <div class="list-desc">${esc(item.content)}</div>
+            <div class="list-meta"><span>${esc(item.scope_type === 'project' ? '项目' : (botById(item.scope_id)?.name ?? 'Bot'))}</span><span>${esc(timeAgo(item.updated_at))}</span></div>
+          </div>
+        </div>`).join('')}
+      </div>` : ''}
       ${!project ? noProject() : memories.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('memory')}</div><h3>还没有记忆</h3><p>任务完成后会自动沉淀交付经验。</p><button class="btn" data-action="new-memory">${icon('plus')}写入记忆</button></div>` : `<div class="grid">
         ${memories.map(memory => {
           const scopeName = memory.scope_type === 'project' ? '项目' : (botById(memory.scope_id)?.name ?? 'Bot')
+          const status = memory.status ?? 'active'
           return `<article class="card list-card">
             <div class="list-row">
               <div class="list-main">
                 <div class="card-head">
-                  <div class="list-title">${esc(memory.topic)}</div>
+                  <div class="list-title">${esc(memory.topic)}<span class="pill ${memoryStatusTone(status)}">${esc(MEMORY_STATUS[status] ?? status)}</span></div>
                   <div class="btn-row">
+                    ${status === 'pending' ? `<button class="btn small" data-action="approve-memory" data-memory-id="${attr(memory.id)}">${icon('check')}通过</button><button class="btn small" data-action="reject-memory" data-memory-id="${attr(memory.id)}">${icon('close')}拒绝</button>` : ''}
                     <span class="pill">${esc(scopeName)}</span>
                     <button class="btn icon" data-action="edit-memory" data-memory-id="${attr(memory.id)}" title="编辑记忆" aria-label="编辑记忆">${icon('edit')}</button>
                     <button class="btn icon" data-action="delete-memory" data-memory-id="${attr(memory.id)}" title="删除记忆" aria-label="删除记忆">${icon('trash')}</button>
@@ -741,7 +803,7 @@
                 <div class="list-desc">${esc(memory.content)}</div>
                 <div class="list-meta" style="justify-content:space-between">
                   <span>${esc(memorySource(memory.source))}</span>
-                  <span>${esc(timeAgo(memory.updated_at))} · 置信度 ${Number(memory.confidence).toFixed(2)}</span>
+                  <span>${esc(timeAgo(memory.updated_at))} · 置信度 ${Number(memory.confidence ?? 0).toFixed(2)}${memory.approved_by ? ` · 审批人 ${esc(memory.approved_by)}` : ''}</span>
                 </div>
               </div>
             </div>
@@ -749,6 +811,48 @@
         }).join('')}
       </div>`}
     `
+  }
+
+  function currentSkillVersion(skill) {
+    return skill?.currentVersion ?? skill?.version ?? '—'
+  }
+
+  function skillVersions(skill, { rollback = true } = {}) {
+    const versions = skill?.versions ?? []
+    if (!versions.length) return ''
+    const current = String(currentSkillVersion(skill))
+    return `<details class="skill-versions">
+      <summary class="summary-link">版本历史（${versions.length}）</summary>
+      ${versions.map(version => `<div class="list-meta">
+        <span class="mono">v${esc(version.version)}</span>
+        <span>${esc(version.status ?? '')}</span>
+        <span>${esc(timeAgo(version.created_at))}</span>
+        ${String(version.version) !== current && rollback ? `<button class="btn small" data-action="rollback-skill" data-slug="${attr(skill.slug)}" data-version="${attr(version.version)}">回滚</button>` : ''}
+      </div>`).join('')}
+    </details>`
+  }
+
+  function canaryText(canary) {
+    if (!canary) return ''
+    if (typeof canary === 'string') return canary
+    if (typeof canary === 'object') {
+      const parts = Object.entries(canary).map(([key, value]) => {
+        const label = key === 'projectIds' ? '项目' : key
+        const values = Array.isArray(value) ? value.join('、') : String(value)
+        return `${label} ${values}`
+      })
+      return parts.join(' · ')
+    }
+    return String(canary)
+  }
+
+  function evaluationText(evaluation) {
+    if (!evaluation) return ''
+    if (typeof evaluation === 'string') return evaluation
+    const verdict = { pass: '通过', fail: '不通过', pending: '待评估' }[evaluation.verdict] ?? evaluation.verdict ?? ''
+    const notes = evaluation.notes ? `：${evaluation.notes}` : ''
+    const by = evaluation.evaluatedBy ? `（${evaluation.evaluatedBy}）` : ''
+    return `${verdict}${notes}${by}`
   }
 
   function proposalPreview(proposal) {
@@ -785,6 +889,19 @@
       if (!blocks.length) blocks.push(proposalPreview(proposal))
       return blocks.join('\n\n')
     }
+    const proposalDiffText = (proposal) => {
+      const diff = proposal?.diff
+      if (diff && typeof diff === 'object') {
+        const blocks = Object.entries(diff).map(([field, change]) => {
+          const from = change?.from ?? ''
+          const to = change?.to ?? ''
+          if (!from && !to) return ''
+          return `${field}\n- ${from}\n+ ${to}`
+        }).filter(Boolean)
+        if (blocks.length) return blocks.join('\n\n')
+      }
+      return proposalDiff(proposal)
+    }
     return `
       <div class="section-head">
         <p>变更需经人工审批后生效。</p>
@@ -807,16 +924,22 @@
               </div>
               <span class="pill ${tone}">${esc(PROPOSAL_STATUS[proposal.status] ?? proposal.status)}</span>
             </div>
+            ${proposal.kind === 'workflow' ? '<div class="note">工作流提案尚未支持执行。</div>' : ''}
             <div class="proposal-body" style="margin-top:0">${esc(proposalPreview(proposal).slice(0, 6000))}</div>
-            <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>由 ${esc(proposal.decided_by)} 决定</span>` : ''}</div>
-            ${proposal.evaluation ? `<div class="list-desc">评估 · ${esc(proposal.evaluation)}</div>` : ''}
+            <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>由 ${esc(proposal.decided_by)} 决定</span>` : ''}${proposal.approvedBy ? `<span>审批人 ${esc(proposal.approvedBy)}</span>` : ''}${proposal.appliedAt ? `<span>已生效 ${esc(formatTime(proposal.appliedAt))}</span>` : ''}${proposal.canary ? `<span>灰度 ${esc(canaryText(proposal.canary))}</span>` : ''}</div>
+            ${proposal.evaluation ? `<div class="list-desc">评估 · ${esc(evaluationText(proposal.evaluation))}</div>` : ''}
             ${proposal.status === 'pending' ? `<details class="proposal-diff">
               <summary class="btn small">${icon('chevron', 'chev')}查看差异</summary>
-              <div class="proposal-body" style="margin-top:8px">${esc(proposalDiff(proposal).slice(0, 4000))}</div>
+              <div class="proposal-body" style="margin-top:8px">${esc(proposalDiffText(proposal).slice(0, 4000))}</div>
             </details>
             <div class="proposal-actions end">
+              <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="pass">评估通过</button>
+              <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="fail">评估不通过</button>
               <button class="btn ${proposal.id === pending[0]?.id ? 'primary' : ''}" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="approved">${icon('check')}通过并应用</button>
               <button class="btn" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="rejected">拒绝</button>
+            </div>` : ''}
+            ${proposal.status === 'canary' ? `<div class="proposal-actions end">
+              <button class="btn primary" data-action="promote-proposal" data-proposal-id="${attr(proposal.id)}">${icon('check')}转正全量</button>
             </div>` : ''}
           </article>`
         }).join('')}
@@ -824,76 +947,215 @@
     `
   }
 
-  function usageScopeData() {
-    if (state.usageScope === 'project' && state.data?.usage?.scope?.project) return state.data.usage.scope.project
-    return state.data?.usage?.scope?.global ?? state.data?.usage ?? {}
+  function usageSnapshot() {
+    const raw = state.data?.usage ?? {}
+    const tiers = raw.scopeTiers ?? null
+    const legacy = tiers ? null : (raw.scope && typeof raw.scope === 'object' ? raw.scope : null)
+    const global = raw.global ?? legacy?.global ?? {}
+    const project = raw.project ?? legacy?.project ?? null
+    const scope = typeof raw.scope === 'string' ? raw.scope : (project ? 'project' : 'global')
+    return { ...raw, tiers, global, project, scope, legacy: Boolean(legacy) }
+  }
+
+  function usageTotals(scope = state.usageScope) {
+    const usage = usageSnapshot()
+    if (scope === 'project') return usage.project ?? usage.global ?? {}
+    return usage.global ?? {}
+  }
+
+  function formatAmount(value) {
+    const n = Number(value ?? 0)
+    if (!Number.isFinite(n)) return '0.00'
+    if (n === 0) return '0.00'
+    if (Math.abs(n) < 0.01) return n.toFixed(4)
+    return n.toFixed(2)
+  }
+
+  function costSplit(totals) {
+    const map = totals?.costByCurrency
+    if (map && typeof map === 'object') {
+      const codes = Object.keys(map).sort()
+      if (codes.length) return codes.map(code => `${code} ${formatAmount(map[code])}`).join(' / ')
+    }
+    if (totals?.cost === null || totals?.cost === undefined) return '未配置'
+    return `${formatAmount(totals.cost)}（币种未知）`
+  }
+
+  async function exportUsageCsv() {
+    const usage = usageSnapshot()
+    const project = activeProject()
+    const payload = { days: usage.days ?? 30 }
+    if (state.usageScope !== 'global' && project) payload.projectId = project.id
+    const result = await api('export_usage_csv', payload)
+    const csv = String(result?.csv ?? '')
+    if (!csv) throw new Error('导出内容为空，请稍后重试。')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = result?.filename || 'usage.csv'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    toast('CSV 已导出', 'success')
   }
 
   function renderUsage() {
-    const usage = state.data?.usage ?? {}
-    const scope = usageScopeData()
-    const byBot = usage.byBot ?? []
-    const byProject = usage.byProject ?? []
-    const byModel = usage.byModel ?? []
-    const maxBot = Math.max(1, ...byBot.map(item => item.totalTokens))
-    const maxProject = Math.max(1, ...byProject.map(item => item.totalTokens))
-    const maxModel = Math.max(1, ...byModel.map(item => item.totalTokens))
-    const days = usage.byDay ?? []
-    const maxDay = Math.max(1, ...days.map(item => item.totalTokens))
-    const usingProject = state.usageScope === 'project' && activeProject()
-    const barList = (rows, key, max) => rows.map(item => `<div class="bar-row"><span class="bar-label">${esc(item[key])}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, item.totalTokens / max * 100)}%"></span></span><span class="bar-value">${formatNumber(item.totalTokens)}</span></div>`).join('')
+    const usage = usageSnapshot()
+    const scope = state.usageScope
+    // 分组明细跟随当前口径：scopeTiers.global / scopeTiers.project，缺省回退顶层（全局口径）。
+    const tier = scope === 'project' ? usage.tiers?.project : usage.tiers?.global
+    const byBot = tier?.byBot ?? usage.byBot ?? []
+    const selectedBot = scope === 'bot' && state.usageBot
+      ? byBot.find(item => String(item.botId ?? item.id ?? '') === String(state.usageBot))
+      : null
+    const totals = scope === 'bot' ? (selectedBot ?? usageTotals('global')) : usageTotals(scope)
+    const byProject = tier?.byProject ?? usage.byProject ?? []
+    const byModel = tier?.byModel ?? usage.byModel ?? []
+    const days = tier?.byDay ?? usage.byDay ?? []
+    const project = activeProject()
+    const scopeLabel = scope === 'global' ? '全局' : scope === 'project' ? '本项目' : '按 Bot'
+    const maxBot = Math.max(1, ...byBot.map(item => item.totalTokens ?? 0))
+    const maxProject = Math.max(1, ...byProject.map(item => item.totalTokens ?? 0))
+    const maxModel = Math.max(1, ...byModel.map(item => item.totalTokens ?? 0))
+    const maxDay = Math.max(1, ...days.map(item => item.totalTokens ?? 0))
+    const unpriced = Number(totals.unpricedCalls ?? 0)
+    const reconciliation = usage.reconciliation ?? null
+    const drillBot = state.usageBot ? botById(state.usageBot) : null
+    const drillRuns = drillBot
+      ? (state.data?.runs ?? []).filter(run => run.bot_id === drillBot.id
+        && (scope !== 'project' || !project || run.project_id === project.id))
+      : []
+
+    const barRow = (item, label, max) => `<div class="bar-row">
+      <span class="bar-label">${esc(label)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (item.totalTokens ?? 0) / max * 100)}%"></span></span>
+      <span class="bar-value">${formatNumber(item.totalTokens)}</span>
+      <span class="bar-calls">${formatNumber(item.calls)} 次</span>
+      <span class="bar-cost">${costSplit(item)}</span>
+    </div>`
+    const botRow = (item, max) => {
+      const id = item.botId ?? item.id ?? ''
+      const name = item.name ?? botById(id)?.name ?? '未知 Bot'
+      const active = state.usageBot === id
+      return `<button type="button" class="bar-row bar-row-action${active ? ' active' : ''}" data-action="usage-drill" data-bot-id="${attr(id)}" aria-pressed="${active}" title="查看该 Bot 的运行记录">
+        <span class="bar-label">${esc(name)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (item.totalTokens ?? 0) / max * 100)}%"></span></span>
+        <span class="bar-value">${formatNumber(item.totalTokens)}</span>
+        <span class="bar-calls">${formatNumber(item.calls)} 次</span>
+        <span class="bar-cost">${costSplit(item)}</span>
+      </button>`
+    }
+    const runRow = (run) => `<div class="run-row">
+      <div class="run-row-top">${runDot(run.status)}<strong class="mono">${esc(String(run.id ?? '').slice(0, 8))}</strong><span>${esc(RUN_STATUS[run.status] ?? run.status)}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
+      <div class="run-row-meta"><span>${esc(run.kind || '—')}</span><span>${formatNumber(Number(run.usage_input ?? 0) + Number(run.usage_output ?? 0))} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
+    </div>`
     return `
       <div class="section-head">
-        <div class="seg">
-          <button data-action="usage-scope" data-scope="global" aria-pressed="${state.usageScope === 'global'}">全局</button>
-          <button data-action="usage-scope" data-scope="project" aria-pressed="${state.usageScope === 'project'}" ${activeProject() ? '' : 'disabled'}>本项目</button>
+        <div class="seg" role="group" aria-label="用量口径">
+          <button data-action="usage-scope" data-scope="global" aria-pressed="${scope === 'global'}">全局</button>
+          <button data-action="usage-scope" data-scope="project" aria-pressed="${scope === 'project'}" ${project ? '' : 'disabled'}>本项目</button>
+          <button data-action="usage-scope" data-scope="bot" aria-pressed="${scope === 'bot'}">按 Bot</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn" data-action="export-usage-csv">${icon('download')}导出 CSV</button>
         </div>
       </div>
       <div class="metric-grid">
         <div class="card metric">
-          <span class="metric-label">总 tokens（${usingProject ? '项目' : '全局'}）</span>
-          <strong>${formatNumber(scope.totalTokens)}</strong>
-          <small class="mono">${formatNumber(scope.inputTokens)} 输入 · ${formatNumber(scope.outputTokens)} 输出</small>
+          <span class="metric-label">总 tokens（${scopeLabel}）</span>
+          <strong>${formatNumber(totals.totalTokens)}</strong>
+          <small class="mono">${formatNumber(totals.inputTokens)} 输入 · ${formatNumber(totals.outputTokens)} 输出</small>
         </div>
         <div class="card metric">
           <span class="metric-label">模型调用</span>
-          <strong>${formatNumber(scope.calls)}</strong>
-          <small class="mono">缓存读 ${formatNumber(scope.cacheReadTokens)}</small>
+          <strong>${formatNumber(totals.calls)}</strong>
+          <small class="mono">缓存读 ${formatNumber(totals.cacheReadTokens)}</small>
         </div>
         <div class="card metric">
-          <span class="metric-label">成本</span>
-          <strong>${costValue(scope.cost)}</strong>
+          <span class="metric-label">成本（${scopeLabel}）</span>
+          <strong class="metric-cost">${costSplit(totals)}</strong>
           <small class="mono">${usage.priceCount ? `${usage.priceCount} 条价格规则` : '尚未配置模型价格'}</small>
         </div>
         <div class="card metric">
           <span class="metric-label">统计窗口</span>
           <strong>${usage.days ?? 30}d</strong>
-          <small class="mono">${usingProject ? '本项目' : '全局'} · 按调用时间归集</small>
+          <small class="mono">${scopeLabel} · 按调用时间归集</small>
         </div>
       </div>
+      ${unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : ''}
+      ${reconciliation ? `<div class="usage-note">用量对账：检查 ${Number(reconciliation.runsChecked ?? 0)} 次运行，${Number(reconciliation.runsWithEvents ?? 0)} 次有用量记录，${Number(reconciliation.missingUsage ?? 0)} 次缺记录，${Number(reconciliation.mismatched ?? 0)} 次不一致${reconciliation.checkedAt ? `（${esc(timeAgo(reconciliation.checkedAt))}）` : ''}。</div>` : ''}
+      ${usage.legacy ? '<div class="usage-note">服务端尚未按口径过滤明细，下方分组仍是全局数据。</div>' : ''}
       <div class="usage-grid">
         <div class="card usage-panel">
-          <div class="card-head"><h3>按 Bot</h3></div>
-          ${byBot.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${barList(byBot, 'name', maxBot)}</div>`}
+          <div class="card-head"><h3>按 Bot</h3><span class="meta">${byBot.length} 个 · 点击下钻运行</span></div>
+          ${byBot.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byBot.map(item => botRow(item, maxBot)).join('')}</div>`}
         </div>
         <div class="card usage-panel">
-          <div class="card-head"><h3>${usingProject ? '按模型' : '按项目'}</h3></div>
-          ${usingProject ? (byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${barList(byModel, 'model', maxModel)}</div>`)
-            : (byProject.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${barList(byProject, 'name', maxProject)}</div>`)}
+          <div class="card-head"><h3>${scope === 'global' ? '按项目' : scope === 'project' ? '按模型' : '运行下钻'}</h3>${drillBot ? `<button class="btn small" data-action="usage-clear-drill">${icon('close')}清除选择</button>` : ''}</div>
+          ${scope === 'global' ? (byProject.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byProject.map(item => barRow(item, item.name ?? item.key ?? item.projectId ?? '', maxProject)).join('')}</div>`)
+            : scope === 'project' ? (byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byModel.map(item => barRow(item, item.model ?? '', maxModel)).join('')}</div>`)
+            : (drillBot ? (drillRuns.length === 0 ? '<div class="faint">该 Bot 还没有运行记录。</div>' : `<div class="run-list">${drillRuns.map(runRow).join('')}</div>`) : '<div class="faint">在上方选择一个 Bot，查看它的运行记录。</div>')}
         </div>
       </div>
       <div class="usage-grid" style="margin-top:12px">
         <div class="card usage-panel">
           <div class="card-head"><h3>近 14 天</h3></div>
-          ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, day.totalTokens / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % 3 === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
+          ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % 3 === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
         </div>
         <div class="card usage-panel">
           <div class="card-head"><h3>模型明细</h3><button class="btn small" data-action="new-price">设置价格</button></div>
-          ${byModel.length === 0 ? '<div class="faint">暂无数据。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td>${esc(item.model)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono">${formatCost(item.cost)}</td></tr>`).join('')}</tbody></table>`}
-          <div class="usage-note">未配置价格时成本显示“未配置”，不会按 0 计费。价格按每百万 token 配置。</div>
+          ${byModel.length === 0 ? '<div class="faint">暂无数据。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td>${esc(item.model)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono">${costSplit(item)}</td></tr>`).join('')}</tbody></table>`}
+          <div class="usage-note">成本按币种分组显示；未配置价格时显示“未配置”，不会按 0 计费。价格按每百万 token 配置。</div>
         </div>
       </div>
     `
+  }
+
+  function renderOpsCard() {
+    const settings = state.data.settings ?? {}
+    const outbox = state.data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
+    const reconciliation = state.data.usage?.reconciliation ?? null
+    const currency = settings.budget_currency || 'CNY'
+    const num = value => (value === '' || value === undefined || value === null ? '' : String(value))
+    return `
+      <div class="card form-card" style="margin-top:12px">
+        <div class="card-head"><h3>系统与运维</h3></div>
+        <div class="field-row">
+          <div class="field">
+            <label id="settings-currency-label" for="settings-currency">预算币种</label>
+            <select class="select" id="settings-currency" name="budget_currency">
+              ${['CNY', 'USD'].map(code => `<option value="${code}" ${code === currency ? 'selected' : ''}>${code}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label id="settings-memory-review-label" for="settings-memory-review">记忆自动审查</label>
+            <select class="select" id="settings-memory-review" name="memory_review">
+              <option value="1" ${settings.memory_review !== '0' ? 'selected' : ''}>开启</option>
+              <option value="0" ${settings.memory_review === '0' ? 'selected' : ''}>关闭</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label id="settings-global-token-budget-label" for="settings-global-token-budget">全局 Token 预算</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-global-token-budget" name="global_token_budget" value="${attr(num(settings.global_token_budget))}" placeholder="不限制"></div>
+          <div class="field"><label id="settings-global-cost-budget-label" for="settings-global-cost-budget">全局成本预算</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" id="settings-global-cost-budget" name="global_cost_budget" value="${attr(num(settings.global_cost_budget))}" placeholder="不限制"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label id="settings-retention-usage-label" for="settings-retention-usage">用量保留天数</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-usage" name="retention_usage_days" value="${attr(num(settings.retention_usage_days))}" placeholder="永久"></div>
+          <div class="field"><label id="settings-retention-run-label" for="settings-retention-run">运行事件保留天数</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-run" name="retention_run_event_days" value="${attr(num(settings.retention_run_event_days))}" placeholder="永久"></div>
+        </div>
+        <div class="field"><label id="settings-retention-message-label" for="settings-retention-message">消息保留天数</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-message" name="retention_message_days" value="${attr(num(settings.retention_message_days))}" placeholder="永久"></div>
+        <div class="hint">全局预算对所有项目生效；保留天数按天清理过期用量、运行事件与消息，0 表示永久保留。</div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn small" type="button" data-action="save-settings">保存系统设置</button>
+          <button class="btn small" type="button" data-action="reconcile-usage">立即对账</button>
+        </div>
+        <div class="kv" style="margin-top:12px"><span>投递队列</span><strong>待投 ${outbox.pending ?? 0} · 失败 ${outbox.failed ?? 0} · 已投 ${outbox.delivered ?? 0}</strong></div>
+        <div class="kv"><span>用量对账</span><strong>${reconciliation
+          ? `检查 ${reconciliation.runsChecked ?? 0} 个运行，差异 ${reconciliation.mismatched ?? 0} 个`
+          : '暂无对账记录'}</strong></div>
+      </div>`
   }
 
   function renderSettings() {
@@ -917,11 +1179,11 @@
             <div class="card form-card">
               <div class="card-head"><h3>项目资料</h3><span class="meta">${esc(project.key ?? project.id)}</span></div>
               <input type="hidden" name="projectId" value="${attr(project.id)}">
-              <div class="field"><label>项目名称</label><input class="input" name="name" value="${attr(project.name)}" maxlength="80"></div>
-              <div class="field"><label>项目描述</label><textarea class="textarea" name="description">${esc(project.description || '')}</textarea></div>
+              <div class="field"><label id="settings-name-label" for="settings-name">项目名称</label><input class="input" id="settings-name" name="name" value="${attr(project.name)}" maxlength="80"></div>
+              <div class="field"><label id="settings-description-label" for="settings-description">项目描述</label><textarea class="textarea" id="settings-description" name="description">${esc(project.description || '')}</textarea></div>
               <div class="field-row">
-                <div class="field"><label>负责人 Bot</label><select class="select" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
-                <div class="field"><label>群聊回复模式</label><select class="select" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>负责人优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
+                <div class="field"><label id="settings-owner-label" for="settings-owner">负责人 Bot</label><select class="select" id="settings-owner" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
+                <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">群聊回复模式</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>负责人优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
               </div>
             </div>
             <div class="card form-card" style="margin-top:12px">
@@ -932,10 +1194,10 @@
             <div class="card form-card" style="margin-top:12px">
               <div class="card-head"><h3>月度预算</h3></div>
               <div class="field-row">
-                <div class="field"><label>Token 预算</label><input class="input mono" style="text-align:right" type="number" min="0" name="tokenBudget" value="${project.token_budget ?? ''}" placeholder="不限制"></div>
-                <div class="field"><label>成本预算 (USD)</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" name="costBudget" value="${project.cost_budget ?? ''}" placeholder="不限制"></div>
+                <div class="field"><label id="settings-token-budget-label" for="settings-token-budget">Token 预算</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-token-budget" name="tokenBudget" value="${project.token_budget ?? ''}" placeholder="不限制"></div>
+                <div class="field"><label id="settings-cost-budget-label" for="settings-cost-budget">成本预算</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" id="settings-cost-budget" name="costBudget" value="${project.cost_budget ?? ''}" placeholder="不限制"></div>
               </div>
-              <div class="hint">超出预算时项目会提示预算已用尽。</div>
+              <div class="hint">超出预算时项目会提示预算已用尽。成本预算与模型价格使用同一币种计价。</div>
             </div>
           </div>
           <div>
@@ -959,6 +1221,7 @@
               <div class="kv"><span>共享技能</span><strong>${state.data.skills.length}</strong></div>
               <div class="kv"><span>待审提案</span><strong>${state.data.proposals.filter(item => item.status === 'pending').length}</strong></div>
             </div>
+            ${renderOpsCard()}
           </div>
         </div>
       </form>
@@ -985,7 +1248,7 @@
             <div class="btn-row"><button class="btn small" type="button" data-action="reset-scale">${icon('refresh')}重置</button></div>
           </div>
           <div class="field">
-            <label>界面字号 <span class="mono" id="ui-scale-value">${Math.round(scale * 100)}%</span></label>
+            <label id="ui-scale-label" for="ui-scale">界面字号 <span class="mono" id="ui-scale-value">${Math.round(scale * 100)}%</span></label>
             <input type="range" id="ui-scale" class="range" min="1" max="1.4" step="0.05" value="${scale}">
             <div class="scale-row">
               <span class="faint">小</span>
@@ -993,8 +1256,8 @@
             </div>
           </div>
           <div class="field">
-            <label>配色</label>
-            <div class="seg" role="group" aria-label="配色">
+            <span class="field-label" id="ui-theme-label">配色</span>
+            <div class="seg" role="group" aria-labelledby="ui-theme-label">
               <button data-action="set-theme" data-theme="dsh" aria-pressed="${state.theme === 'dsh'}">DSH</button>
               <button data-action="set-theme" data-theme="catppuccin" aria-pressed="${state.theme === 'catppuccin'}">Catppuccin</button>
             </div>
@@ -1037,7 +1300,7 @@
 
   function modalShell({ title, subtitle = '', body = '', footer = '', size = '', badge = '' }) {
     return `<div class="modal-backdrop" data-action="modal-backdrop">
-      <div class="modal ${size}" role="dialog" aria-modal="true" aria-label="${attr(title)}">
+      <div class="modal ${size}" role="dialog" aria-modal="true" aria-label="${attr(title)}" tabindex="-1">
         <div class="modal-head">
           <div class="modal-head-main">${badge ? `<div class="eyebrow">${badge}</div>` : ''}<h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div>
           <button class="modal-close" data-action="close-modal" aria-label="关闭">×</button>
@@ -1094,13 +1357,13 @@
       title: '新建项目空间',
       badge: '',
       body: `<form data-form="create-project" id="modal-form">
-        <div class="field"><label>项目名称</label><input class="input" style="width:100%" name="name" placeholder="例如：官网重构" required maxlength="80" autofocus></div>
+        <div class="field"><label id="new-project-name-label" for="new-project-name">项目名称</label><input class="input" style="width:100%" id="new-project-name" name="name" placeholder="例如：官网重构" required maxlength="80" autofocus></div>
         <div class="field-row">
-          <div class="field"><label>项目 Key</label><input class="input mono" style="width:100%" name="key" placeholder="WEB" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{0,9}"><div class="hint">任务的编号前缀。</div></div>
-          <div class="field"><label>负责人 Bot</label><select class="select" style="width:100%" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}</select></div>
+          <div class="field"><label id="new-project-key-label" for="new-project-key">项目 Key</label><input class="input mono" style="width:100%" id="new-project-key" name="key" placeholder="WEB" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{0,9}"><div class="hint">任务的编号前缀。</div></div>
+          <div class="field"><label id="new-project-owner-label" for="new-project-owner">负责人 Bot</label><select class="select" style="width:100%" id="new-project-owner" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}</select></div>
         </div>
-        <div class="field"><label>项目说明</label><textarea class="textarea" name="description" placeholder="项目目标、边界和验收标准"></textarea></div>
-        ${bots.length > 1 ? `<div class="field"><label>其他成员</label><div class="check-list">${bots.slice(1).map(bot => `<label class="check-row"><input type="checkbox" name="memberIds" value="${attr(bot.id)}"> ${avatar(bot, 'sm')} ${esc(bot.name)} <span class="role">${esc(bot.role || '')}</span></label>`).join('')}</div></div>` : ''}
+        <div class="field"><label id="new-project-description-label" for="new-project-description">项目说明</label><textarea class="textarea" id="new-project-description" name="description" placeholder="项目目标、边界和验收标准"></textarea></div>
+        ${bots.length > 1 ? `<div class="field"><span class="field-label" id="new-project-members-label">其他成员</span><div class="check-list" role="group" aria-labelledby="new-project-members-label">${bots.slice(1).map(bot => `<div class="check-row"><input type="checkbox" id="new-project-member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}"><label for="new-project-member-${attr(bot.id)}">${avatar(bot, 'sm')} ${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div></div>` : ''}
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建项目</button>`,
     })
@@ -1118,15 +1381,15 @@
         <form data-form="${bot ? 'update-bot' : 'create-bot'}" id="modal-form">
           <input type="hidden" name="botId" value="${attr(bot?.id ?? '')}">
           <div class="field-row">
-            <div class="field"><label>名称</label><input class="input" style="width:100%" name="name" value="${attr(bot?.name ?? '')}" placeholder="例如：Builder" required maxlength="24"></div>
-            <div class="field"><label>角色标签</label><input class="input" style="width:100%" name="role" value="${attr(bot?.role ?? '')}" placeholder="例如：开发" maxlength="24"></div>
+            <div class="field"><label id="bot-name-label" for="bot-name">名称</label><input class="input" style="width:100%" id="bot-name" name="name" value="${attr(bot?.name ?? '')}" placeholder="例如：Builder" required maxlength="24"></div>
+            <div class="field"><label id="bot-role-label" for="bot-role">角色标签</label><input class="input" style="width:100%" id="bot-role" name="role" value="${attr(bot?.role ?? '')}" placeholder="例如：开发" maxlength="24"></div>
           </div>
           <div class="field-row">
-            <div class="field"><label>模型</label><select class="select" style="width:100%" name="modelRef" data-model-select>${modelOptions(bot?.provider, bot?.model)}</select></div>
-            <div class="field"><label>推理强度</label><select class="select" style="width:100%" name="effort" data-effort-select>${effortOptions(modelRef, bot?.effort)}</select></div>
+            <div class="field"><label id="bot-model-label" for="bot-model">模型</label><select class="select" style="width:100%" id="bot-model" name="modelRef" data-model-select>${modelOptions(bot?.provider, bot?.model)}</select></div>
+            <div class="field"><label id="bot-effort-label" for="bot-effort">推理强度</label><select class="select" style="width:100%" id="bot-effort" name="effort" data-effort-select>${effortOptions(modelRef, bot?.effort)}</select></div>
           </div>
-          <div class="field"><label>外观颜色</label><select class="select" style="width:100%" name="color">${COLORS.map(color => `<option value="${color}" ${bot?.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
-          <div class="field"><label>角色指令</label><textarea class="textarea" name="instructions" rows="10" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot?.instructions ?? '')}</textarea></div>
+          <div class="field"><label id="bot-color-label" for="bot-color">外观颜色</label><select class="select" style="width:100%" id="bot-color" name="color">${COLORS.map(color => `<option value="${color}" ${bot?.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
+          <div class="field"><label id="bot-instructions-label" for="bot-instructions">角色指令</label><textarea class="textarea" id="bot-instructions" name="instructions" rows="10" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot?.instructions ?? '')}</textarea></div>
           ${bot ? `<div class="btn-row"><button class="btn small" type="button" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档 Bot</button></div>` : ''}
         </form>
         ${bot ? `<aside class="task-detail-side">
@@ -1153,13 +1416,13 @@
       badge: '',
       body: `<form data-form="create-task" id="modal-form">
         <input type="hidden" name="projectId" value="${attr(project.id)}">
-        <div class="field"><label>标题</label><input class="input" style="width:100%" name="title" required maxlength="240" placeholder="一个可执行、可验收的结果" autofocus></div>
-        <div class="field"><label>描述</label><textarea class="textarea" name="description" rows="8" placeholder="背景、范围、约束、验收标准"></textarea></div>
+        <div class="field"><label id="new-task-title-label" for="new-task-title">标题</label><input class="input" style="width:100%" id="new-task-title" name="title" required maxlength="240" placeholder="一个可执行、可验收的结果" autofocus></div>
+        <div class="field"><label id="new-task-description-label" for="new-task-description">描述</label><textarea class="textarea" id="new-task-description" name="description" rows="8" placeholder="背景、范围、约束、验收标准"></textarea></div>
         <div class="field-row">
-          <div class="field"><label>指派给</label><select class="select" style="width:100%" name="assigneeBotId">${project.members.map(member => `<option value="${attr(member.id)}">${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
-          <div class="field"><label>优先级</label><select class="select" style="width:100%" name="priority"><option value="medium">中</option><option value="high">高</option><option value="urgent">紧急</option><option value="low">低</option><option value="none">无</option></select></div>
+          <div class="field"><label id="new-task-assignee-label" for="new-task-assignee">指派给</label><select class="select" style="width:100%" id="new-task-assignee" name="assigneeBotId">${project.members.map(member => `<option value="${attr(member.id)}">${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
+          <div class="field"><label id="new-task-priority-label" for="new-task-priority">优先级</label><select class="select" style="width:100%" id="new-task-priority" name="priority"><option value="medium">中</option><option value="high">高</option><option value="urgent">紧急</option><option value="low">低</option><option value="none">无</option></select></div>
         </div>
-        <label class="check-row"><input type="checkbox" name="autoStart" checked> 创建后立即进入执行队列</label>
+        <div class="check-row"><input type="checkbox" id="new-task-autostart" name="autoStart" checked><label for="new-task-autostart">创建后立即进入执行队列</label></div>
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建任务</button>`,
     })
@@ -1176,7 +1439,7 @@
       size: 'wide',
       body: `<div class="kv-grid">
           <div><div class="eyebrow">状态</div><div class="pill ${detail.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[detail.status] ?? detail.status)}</div></div>
-          <div><div class="eyebrow">版本</div><div>v${esc(detail.version)}</div></div>
+          <div><div class="eyebrow">版本</div><div>v${esc(currentSkillVersion(detail))}</div></div>
           <div><div class="eyebrow">本项目</div><div>${off ? '<span class="pill red">已关闭</span>' : '<span class="pill green">可用</span>'}</div></div>
         </div>
         <div style="margin-top:12px"><div class="eyebrow" style="margin-bottom:5px">描述</div><div>${esc(detail.description || '无描述')}</div></div>
@@ -1186,7 +1449,7 @@
         ${detail.readable ? `<pre class="detail-pre">${esc(detail.content)}</pre>` : '<div class="note">技能文件当前不可读（可能已被移动或删除），可尝试重新扫描。</div>'}
         ${(detail.versions ?? []).length ? `<div class="divider"></div>
         <div class="eyebrow" style="margin-bottom:5px">版本历史</div>
-        ${detail.versions.map(version => `<div class="list-meta"><span class="mono">v${esc(version.version)}</span><span>${esc(version.status)}</span><span>${esc(timeAgo(version.created_at))}</span></div>`).join('')}` : ''}`,
+        ${skillVersions(detail)}` : ''}`,
       footer: `<button class="btn" data-action="close-modal">关闭</button>${project ? `<button class="btn ${off ? 'primary' : ''}" data-action="toggle-skill" data-slug="${attr(detail.slug)}" data-disabled="${off ? '0' : '1'}">${off ? '在本项目恢复' : '在本项目关闭'}</button>` : ''}`,
     })
   }
@@ -1205,13 +1468,13 @@
           <form data-form="update-task" id="task-form">
             <input type="hidden" name="taskId" value="${attr(task.id)}">
             <input type="hidden" name="version" value="${task.version}">
-            <div class="field"><label>标题</label><input class="input" style="width:100%" name="title" value="${attr(task.title)}" required maxlength="240"></div>
-            <div class="field"><label>描述</label><textarea class="textarea" name="description" rows="9">${esc(task.description || '')}</textarea></div>
+            <div class="field"><label id="task-title-label" for="task-title">标题</label><input class="input" style="width:100%" id="task-title" name="title" value="${attr(task.title)}" required maxlength="240"></div>
+            <div class="field"><label id="task-description-label" for="task-description">描述</label><textarea class="textarea" id="task-description" name="description" rows="9">${esc(task.description || '')}</textarea></div>
             <div class="field-row">
-              <div class="field"><label>状态</label><select class="select" style="width:100%" name="status">${STATUS_ORDER.map(status => `<option value="${status}" ${task.status === status ? 'selected' : ''}>${STATUS[status]}</option>`).join('')}</select></div>
-              <div class="field"><label>优先级</label><select class="select" style="width:100%" name="priority">${Object.entries(PRIORITY).map(([key, label]) => `<option value="${key}" ${task.priority === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+              <div class="field"><label id="task-status-label" for="task-status">状态</label><select class="select" style="width:100%" id="task-status" name="status">${STATUS_ORDER.map(status => `<option value="${status}" ${task.status === status ? 'selected' : ''}>${STATUS[status]}</option>`).join('')}</select></div>
+              <div class="field"><label id="task-priority-label" for="task-priority">优先级</label><select class="select" style="width:100%" id="task-priority" name="priority">${Object.entries(PRIORITY).map(([key, label]) => `<option value="${key}" ${task.priority === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
             </div>
-            <div class="field"><label>负责人</label><select class="select" style="width:100%" name="assigneeBotId"><option value="">未指派</option>${project.members.map(member => `<option value="${attr(member.id)}" ${task.assignee_bot_id === member.id ? 'selected' : ''}>${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
+            <div class="field"><label id="task-assignee-label" for="task-assignee">负责人</label><select class="select" style="width:100%" id="task-assignee" name="assigneeBotId"><option value="">未指派</option>${project.members.map(member => `<option value="${attr(member.id)}" ${task.assignee_bot_id === member.id ? 'selected' : ''}>${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
           </form>
           <div class="divider"></div>
           <div class="eyebrow" style="margin-bottom:6px">评论</div>
@@ -1221,7 +1484,7 @@
           </div>`).join('')}
           <form data-form="add-comment" style="margin-top:14px">
             <input type="hidden" name="taskId" value="${attr(task.id)}">
-            <textarea class="textarea" name="body" rows="3" placeholder="补充说明、验收意见或阻塞原因"></textarea>
+            <textarea class="textarea" id="task-comment-body" name="body" rows="3" aria-label="评论内容" placeholder="补充说明、验收意见或阻塞原因"></textarea>
             <div class="btn-row" style="margin-top:7px"><button class="btn small" type="submit">${icon('send')}添加评论</button></div>
           </form>
         </div>
@@ -1258,11 +1521,11 @@
       badge: '',
       body: `<form data-form="${memory ? 'update-memory' : 'create-memory'}" id="modal-form">
         <input type="hidden" name="memoryId" value="${attr(memory?.id ?? '')}">
-        <div class="field"><label>作用域</label>${memory
-          ? `<input class="input" style="width:100%" value="${esc(memory.scope_type === 'project' ? '项目记忆' : `Bot · ${botById(memory.scope_id)?.name ?? ''}`)}" disabled>`
-          : `<select class="select" style="width:100%" name="scope">${choices.join('')}</select>`}</div>
-        <div class="field"><label>主题</label><input class="input" style="width:100%" name="topic" value="${attr(memory?.topic ?? '')}" maxlength="120" placeholder="例如：发布流程约束" required></div>
-        <div class="field"><label>内容</label><textarea class="textarea" name="content" rows="9" required placeholder="写清楚背景、结论和适用范围">${esc(memory?.content ?? '')}</textarea><div class="hint">密钥、密码和 token 会被自动过滤为 [REDACTED]。</div></div>
+        <div class="field"><label id="memory-scope-label" for="memory-scope">作用域</label>${memory
+          ? `<input class="input" style="width:100%" id="memory-scope" value="${esc(memory.scope_type === 'project' ? '项目记忆' : `Bot · ${botById(memory.scope_id)?.name ?? ''}`)}" disabled>`
+          : `<select class="select" style="width:100%" id="memory-scope" name="scope">${choices.join('')}</select>`}</div>
+        <div class="field"><label id="memory-topic-label" for="memory-topic">主题</label><input class="input" style="width:100%" id="memory-topic" name="topic" value="${attr(memory?.topic ?? '')}" maxlength="120" placeholder="例如：发布流程约束" required></div>
+        <div class="field"><label id="memory-content-label" for="memory-content">内容</label><textarea class="textarea" id="memory-content" name="content" rows="9" required placeholder="写清楚背景、结论和适用范围">${esc(memory?.content ?? '')}</textarea><div class="hint">密钥、密码和 token 会被自动过滤为 [REDACTED]。</div></div>
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('check')}${memory ? '保存记忆' : '写入记忆'}</button>`,
     })
@@ -1278,19 +1541,19 @@
       body: `<form data-form="create-proposal" id="modal-form">
         <input type="hidden" name="projectId" value="${attr(project?.id ?? '')}">
         <div class="field-row">
-          <div class="field"><label>提案类型</label><select class="select" style="width:100%" name="kind" data-proposal-kind><option value="bot_update" ${kind === 'bot_update' ? 'selected' : ''}>Bot 指令更新</option><option value="skill" ${kind === 'skill' ? 'selected' : ''}>共享技能</option></select></div>
-          <div class="field" data-field="bot"><label>目标 Bot</label><select class="select" style="width:100%" name="botId">${activeBots().map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)}</option>`).join('')}</select></div>
+          <div class="field"><label id="proposal-kind-label" for="proposal-kind">提案类型</label><select class="select" style="width:100%" id="proposal-kind" name="kind" data-proposal-kind><option value="bot_update" ${kind === 'bot_update' ? 'selected' : ''}>Bot 指令更新</option><option value="skill" ${kind === 'skill' ? 'selected' : ''}>共享技能</option></select></div>
+          <div class="field" data-field="bot"><label id="proposal-bot-label" for="proposal-bot">目标 Bot</label><select class="select" style="width:100%" id="proposal-bot" name="botId">${activeBots().map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)}</option>`).join('')}</select></div>
         </div>
-        <div class="field"><label>标题</label><input class="input" style="width:100%" name="title" required maxlength="200" placeholder="一句话说明变更"></div>
-        <div class="field"><label>依据</label><textarea class="textarea" name="rationale" rows="4" required placeholder="为什么需要变更，来自哪些失败或重复模式"></textarea></div>
-        <div data-section="bot"><div class="field"><label>新的角色指令</label><textarea class="textarea" name="instructions" rows="9" placeholder="完整替换现有指令，而不是追加"></textarea></div></div>
+        <div class="field"><label id="proposal-title-label" for="proposal-title">标题</label><input class="input" style="width:100%" id="proposal-title" name="title" required maxlength="200" placeholder="一句话说明变更"></div>
+        <div class="field"><label id="proposal-rationale-label" for="proposal-rationale">依据</label><textarea class="textarea" id="proposal-rationale" name="rationale" rows="4" required placeholder="为什么需要变更，来自哪些失败或重复模式"></textarea></div>
+        <div data-section="bot"><div class="field"><label id="proposal-instructions-label" for="proposal-instructions">新的角色指令</label><textarea class="textarea" id="proposal-instructions" name="instructions" rows="9" placeholder="完整替换现有指令，而不是追加"></textarea></div></div>
         <div data-section="skill" style="display:none">
-          <div class="field-row"><div class="field"><label>技能标识</label><input class="input mono" style="width:100%" name="slug" placeholder="发布检查"></div><div class="field"><label>版本</label><input class="input" style="width:100%" name="version" value="1.0.0"></div></div>
-          <div class="field"><label>显示名称</label><input class="input" style="width:100%" name="name"></div>
-          <div class="field"><label>描述</label><input class="input" style="width:100%" name="description"></div>
-          <div class="field"><label>技能内容（Markdown）</label><textarea class="textarea" name="content" rows="10" placeholder="## When to use&#10;..."></textarea></div>
+          <div class="field-row"><div class="field"><label id="proposal-slug-label" for="proposal-slug">技能标识</label><input class="input mono" style="width:100%" id="proposal-slug" name="slug" placeholder="发布检查"></div><div class="field"><label id="proposal-version-label" for="proposal-version">版本</label><input class="input" style="width:100%" id="proposal-version" name="version" value="1.0.0"></div></div>
+          <div class="field"><label id="proposal-name-label" for="proposal-name">显示名称</label><input class="input" style="width:100%" id="proposal-name" name="name"></div>
+          <div class="field"><label id="proposal-description-label" for="proposal-description">描述</label><input class="input" style="width:100%" id="proposal-description" name="description"></div>
+          <div class="field"><label id="proposal-content-label" for="proposal-content">技能内容（Markdown）</label><textarea class="textarea" id="proposal-content" name="content" rows="10" placeholder="## When to use&#10;..."></textarea></div>
         </div>
-        <div class="field"><label>评估方式</label><textarea class="textarea" name="evaluation" rows="3" placeholder="审批前如何验证：回归任务、失败案例、人工检查点"></textarea></div>
+        <div class="field"><label id="proposal-evaluation-label" for="proposal-evaluation">评估方式</label><textarea class="textarea" id="proposal-evaluation" name="evaluation" rows="3" placeholder="审批前如何验证：回归任务、失败案例、人工检查点"></textarea></div>
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('branch')}提交提案</button>`,
     })
@@ -1325,10 +1588,10 @@
       subtitle: '保存后仅影响后续调用。',
       badge: '',
       body: `<form data-form="save-price" id="modal-form">
-        <div class="field-row"><div class="field"><label>模型供应商（可留空）</label><input class="input mono" style="width:100%" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="留空 = 匹配任意供应商"></div><div class="field"><label>模型名</label><input class="input mono" style="width:100%" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
-        <div class="field-row"><div class="field"><label>输入</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="inputPerMtok" value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? 0)}"></div><div class="field"><label>输出</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="outputPerMtok" value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? 0)}"></div></div>
-        <div class="field-row"><div class="field"><label>缓存读</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? 0)}"></div><div class="field"><label>缓存写</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? 0)}"></div></div>
-        <div class="field"><label>币种</label><input class="input mono" style="width:100%" name="currency" value="${attr(seed.currency ?? fallback?.currency ?? 'CNY')}" placeholder="CNY"></div>
+        <div class="field-row"><div class="field"><label id="price-provider-label" for="price-provider">模型供应商（可留空）</label><input class="input mono" style="width:100%" id="price-provider" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="留空 = 匹配任意供应商"></div><div class="field"><label id="price-model-label" for="price-model">模型名</label><input class="input mono" style="width:100%" id="price-model" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
+        <div class="field-row"><div class="field"><label id="price-input-label" for="price-input">输入</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-input" name="inputPerMtok" value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? 0)}"></div><div class="field"><label id="price-output-label" for="price-output">输出</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-output" name="outputPerMtok" value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? 0)}"></div></div>
+        <div class="field-row"><div class="field"><label id="price-cache-read-label" for="price-cache-read">缓存读</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-read" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? 0)}"></div><div class="field"><label id="price-cache-write-label" for="price-cache-write">缓存写</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-write" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? 0)}"></div></div>
+        <div class="field"><label id="price-currency-label" for="price-currency">币种</label><input class="input mono" style="width:100%" id="price-currency" name="currency" value="${attr(seed.currency ?? fallback?.currency ?? 'CNY')}" placeholder="CNY"></div>
         <div class="hint">${esc(hint)}</div>
         ${overridden ? `<div class="btn-row"><button class="btn danger" type="button" data-action="reset-price" data-model="${attr(seed.model)}" data-provider="${attr(seed.provider ?? '')}">恢复默认价格</button></div>` : ''}
         <datalist id="price-models">${knownModels.map(model => `<option value="${attr(model)}"></option>`).join('')}</datalist>
@@ -1385,6 +1648,55 @@
       ${body}
       <div class="usage-note">价格为每百万 token。在「编辑」里可以还原配置默认值。${missing.length ? `配置中但未生效：${missing.map(item => esc(item.model)).join('、')}。` : ''}</div>
     </div>`
+  }
+
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+  let lastFocused = null
+
+  function focusableItems(root) {
+    if (!root) return []
+    return Array.from(root.querySelectorAll(FOCUSABLE))
+      .filter(el => el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement)
+  }
+
+  function focusModal() {
+    const modal = document.querySelector('.modal')
+    if (!modal) return
+    const body = modal.querySelector('.modal-body')
+    const preferred = body?.querySelector('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])')
+    const items = focusableItems(modal)
+    ;(preferred ?? items[0] ?? modal).focus()
+  }
+
+  function restoreFocus() {
+    const target = lastFocused && document.contains(lastFocused) ? lastFocused : document.getElementById('main-content')
+    lastFocused = null
+    if (target) target.focus()
+  }
+
+  function trapModalFocus(event) {
+    const modal = document.querySelector('.modal')
+    if (!modal) return false
+    const items = focusableItems(modal)
+    if (items.length === 0) {
+      event.preventDefault()
+      modal.focus()
+      return true
+    }
+    const first = items[0]
+    const last = items[items.length - 1]
+    const active = document.activeElement
+    if (event.shiftKey && (active === first || !modal.contains(active))) {
+      event.preventDefault()
+      last.focus()
+      return true
+    }
+    if (!event.shiftKey && (active === last || !modal.contains(active))) {
+      event.preventDefault()
+      first.focus()
+      return true
+    }
+    return false
   }
 
   function openModal(modal) {
@@ -1689,6 +2001,29 @@
           render()
           break
         }
+        case 'save-settings': {
+          const value = id => document.getElementById(id)?.value ?? ''
+          const patch = {
+            budget_currency: value('settings-currency'),
+            memory_review: value('settings-memory-review'),
+            global_token_budget: value('settings-global-token-budget'),
+            global_cost_budget: value('settings-global-cost-budget'),
+            retention_usage_days: value('settings-retention-usage'),
+            retention_run_event_days: value('settings-retention-run'),
+            retention_message_days: value('settings-retention-message'),
+          }
+          await api('update_settings', patch)
+          await loadState(state.projectId)
+          toast('系统设置已保存', 'success')
+          break
+        }
+        case 'reconcile-usage': {
+          const result = await api('reconcile_usage', {})
+          const reconciliation = result?.reconciliation ?? {}
+          toast(`对账完成：检查 ${reconciliation.runsChecked ?? 0} 个运行，差异 ${reconciliation.mismatched ?? 0} 个`, 'success')
+          await loadState(state.projectId)
+          break
+        }
         case 'check-dsh-update': {
           const info = await api('dsh_update_info', {})
           toast(info.updateAvailable
@@ -1883,9 +2218,60 @@
           toast(decision === 'approved' ? '提案已应用' : '提案已拒绝', 'success')
           break
         }
+        case 'evaluate-proposal': {
+          const verdict = target.dataset.verdict === 'fail' ? 'fail' : 'pass'
+          const notes = window.prompt('评估说明（可留空）', '') ?? ''
+          await api('evaluate_proposal', { proposalId: target.dataset.proposalId, evaluation: { verdict, notes } })
+          await refresh()
+          toast(verdict === 'pass' ? '已记录评估结论：通过' : '已记录评估结论：不通过', 'success')
+          break
+        }
+        case 'promote-proposal': {
+          if (!window.confirm('确认把灰度提案转正为全量生效？')) break
+          await api('promote_proposal', { proposalId: target.dataset.proposalId })
+          await refresh()
+          toast('提案已转正', 'success')
+          break
+        }
         case 'usage-scope':
           state.usageScope = target.dataset.scope
+          if (state.usageScope !== 'bot') state.usageBot = null
           render()
+          break
+        case 'usage-drill':
+          state.usageBot = target.dataset.botId || null
+          state.usageScope = 'bot'
+          render()
+          break
+        case 'usage-clear-drill':
+          state.usageBot = null
+          render()
+          break
+        case 'export-usage-csv':
+          await exportUsageCsv()
+          break
+        case 'search-memories':
+          await searchMemories()
+          break
+        case 'clear-memory-search':
+          state.memoryQuery = ''
+          state.memoryResults = null
+          render()
+          break
+        case 'approve-memory':
+          await api('approve_memory', { memoryId: target.dataset.memoryId })
+          await refresh()
+          toast('记忆已通过', 'success')
+          break
+        case 'reject-memory':
+          await api('reject_memory', { memoryId: target.dataset.memoryId })
+          await refresh()
+          toast('记忆已拒绝', 'success')
+          break
+        case 'rollback-skill':
+          await api('rollback_skill', { slug: target.dataset.slug, version: target.dataset.version })
+          await refresh()
+          toast(`技能已回滚到 v${target.dataset.version}`, 'success')
           break
         default:
           break
@@ -2077,9 +2463,28 @@
     if (el.id === 'task-search') {
       state.taskFilter.search = el.value
     }
+    if (el.id === 'memory-search') {
+      state.memoryQuery = el.value
+    }
   })
 
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Tab' && state.modal) {
+      trapModalFocus(event)
+      return
+    }
+    const tab = event.target.closest?.('[role="tab"]')
+    if (tab && ['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault()
+      const tabs = Array.from(document.querySelectorAll('[role="tab"]'))
+      const index = tabs.indexOf(tab)
+      const next = event.key === 'Home' ? tabs[0]
+        : event.key === 'End' ? tabs[tabs.length - 1]
+        : tabs[(index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]
+      next?.focus()
+      next?.click()
+      return
+    }
     if (state.ac && event.target.id === 'composer-input') {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
@@ -2109,6 +2514,12 @@
     if (event.target.id === 'task-search' && event.key === 'Enter') {
       event.preventDefault()
       render()
+      return
+    }
+    if (event.target.id === 'memory-search' && event.key === 'Enter') {
+      event.preventDefault()
+      void searchMemories()
+      return
     }
   })
 

@@ -3,13 +3,13 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { AppError, badRequest, conflict, forbidden, notFound } from './errors.js'
 import { ensureDirResilient, ensureProjectWorkspace, ensureSkillRoot, projectDir } from './paths.js'
-import { monthUsageForProject, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
+import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal, reconcileUsage, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
 import { latestDshVersion, compareVersions, validTargetVersion } from './updater.js'
 import { priceKey, seedModelPrices } from './pricing.js'
-import { publishSkill, skillSnapshot, syncSkills } from './skills.js'
+import { publishSkill, rollbackSkill, skillSnapshot, stageSkill, syncSkills } from './skills.js'
 import {
   clampNumber, id, jsonParse, nowIso, parseDisabledSkills, parseMentions, projectKey, redactSecrets,
-  slugify, text, sanitizeFilename, writeIfChanged,
+  sha256, slugify, text, sanitizeFilename, writeIfChanged,
 } from './util.js'
 
 const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
@@ -30,6 +30,22 @@ const commandTaskPattern = /^\/task\s+@([\p{L}\p{N}_-]+)\s+([\s\S]+)$/u
 const commandRememberPattern = /^\/remember\s+([\s\S]+)$/u
 const commandClearPattern = /^\/clear$/u
 
+// 记忆审查输出：模型返回 JSON 数组，形如 [{scope, topic, content, confidence}]。
+function parseMemoryReview(output) {
+  const raw = String(output ?? '').trim()
+  if (!raw) return []
+  const start = raw.indexOf('[')
+  const end = raw.lastIndexOf(']')
+  if (start < 0 || end <= start) return []
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1))
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(item => item && typeof item === 'object' && item.content).slice(0, 10)
+  } catch {
+    return []
+  }
+}
+
 export class TeamService {
   constructor({ store, config, logger = console }) {
     this.store = store
@@ -44,6 +60,7 @@ export class TeamService {
     this.rate = {}
     // 只读运行开始时的项目工作区指纹，用于事后发现“只读会话改了文件”。
     this.fingerprints = new Map()
+    this.lastMaintenanceAt = 0
   }
 
   attachRuntime(runtime) {
@@ -92,6 +109,7 @@ export class TeamService {
       }
       syncSkills(this.store, this.config.skillRoot)
       seedModelPrices(this.store, this.config.modelPrices ?? [])
+      this.ensureSettings()
       const interrupted = this.store.all("SELECT id FROM runs WHERE status = 'running'")
       this.store.run(
         `UPDATE runs SET status = 'queued', started_at = NULL, last_progress_at = NULL, session_id = NULL
@@ -105,6 +123,66 @@ export class TeamService {
       }
     })()
     return this.ready
+  }
+
+  ensureSettings() {
+    const defaults = {
+      budget_currency: 'CNY',
+      global_token_budget: '',
+      global_cost_budget: '',
+      retention_usage_days: '0',
+      retention_run_event_days: '0',
+      retention_message_days: '0',
+      memory_review: '1',
+    }
+    for (const [key, value] of Object.entries(defaults)) {
+      if (this.store.setting(key) === null) this.store.setSetting(key, value)
+    }
+  }
+
+  budgetCurrency() {
+    return String(this.store.setting('budget_currency', 'CNY') || 'CNY').toUpperCase()
+  }
+
+  settingsView() {
+    const keys = [
+      'budget_currency', 'global_token_budget', 'global_cost_budget',
+      'retention_usage_days', 'retention_run_event_days', 'retention_message_days',
+      'memory_review',
+    ]
+    const values = {}
+    for (const key of keys) values[key] = this.store.setting(key, '')
+    return values
+  }
+
+  updateSettings(patch, actor = this.actor()) {
+    const values = {}
+    for (const [key, value] of Object.entries(patch ?? {})) {
+      if (!Object.keys(this.settingsView()).includes(key)) throw badRequest(`不支持的设置项：${key}`)
+      values[key] = String(value ?? '').trim()
+    }
+    if (values.budget_currency !== undefined) {
+      const currency = values.budget_currency.toUpperCase()
+      if (!/^[A-Z]{3}$/.test(currency)) throw badRequest('预算币种必须是三位货币代码')
+      values.budget_currency = currency
+    }
+    for (const key of ['global_token_budget', 'global_cost_budget']) {
+      if (values[key] === undefined || values[key] === '') continue
+      const num = Number(values[key])
+      if (!Number.isFinite(num) || num < 0) throw badRequest(`${key} 必须是非负数`)
+      values[key] = String(num)
+    }
+    for (const key of ['retention_usage_days', 'retention_run_event_days', 'retention_message_days']) {
+      if (values[key] === undefined || values[key] === '') continue
+      const num = Number(values[key])
+      if (!Number.isInteger(num) || num < 0) throw badRequest(`${key} 必须是天数的整数`)
+      values[key] = String(num)
+    }
+    this.store.transaction(() => {
+      for (const [key, value] of Object.entries(values)) this.store.setSetting(key, value)
+      this.audit(actor, 'settings.update', 'settings', 'global', 'global', values)
+    })
+    return this.settingsView()
   }
 
   start() {
@@ -447,6 +525,20 @@ export class TeamService {
       fields.push('updated_at = ?')
       values.push(nowIso())
       this.store.run(`UPDATE projects SET ${fields.join(', ')} WHERE id = ?`, ...values, projectId)
+      if (updates.status === 'archived') {
+        const frozen = this.store.all(
+          "SELECT id FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status IN ('active', 'pending')",
+          projectId,
+        )
+        for (const memory of frozen) {
+          this.store.run("UPDATE memories SET status = 'frozen', updated_at = ? WHERE id = ?", nowIso(), memory.id)
+          this.store.run(
+            `INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at)
+             VALUES (?, ?, 'frozen', ?, ?, 'active', 'frozen', ?)`,
+            id('mev'), memory.id, actor.type, actor.id, nowIso(),
+          )
+        }
+      }
       if (updates.name) this.store.run('UPDATE group_chats SET title = ? WHERE project_id = ?', updates.name, projectId)
       if (updates.owner_bot_id) {
         this.store.run('UPDATE group_chats SET owner_bot_id = ? WHERE project_id = ?', updates.owner_bot_id, projectId)
@@ -569,7 +661,15 @@ export class TeamService {
       body,
       mentions: mentions.map(bot => bot.id),
     })
-    for (const bot of targets) this.enqueueChatRun(project, bot, messageId)
+    for (const bot of targets) {
+      this.enqueueOutbox({
+        kind: 'chat_run',
+        payload: { projectId: project.id, botId: bot.id, messageId },
+        projectId: project.id,
+        sourceId: messageId,
+        idempotencyKey: `chat:${messageId}:${bot.id}`,
+      })
+    }
     void this.tick()
     return { messageId, runBots: targets.map(bot => bot.id) }
   }
@@ -651,7 +751,15 @@ export class TeamService {
         taskId,
       })
     }
-    if (input.autoStart && assigneeId) this.enqueueTaskRun(this.taskRow(taskId), 'task_created', actor)
+    if (input.autoStart && assigneeId) {
+      this.enqueueOutbox({
+        kind: 'task_run',
+        payload: { taskId, triggerType: 'task_created' },
+        projectId: project.id,
+        taskId,
+        idempotencyKey: `task:${taskId}:task_created`,
+      })
+    }
     void this.tick()
     return this.taskView(this.taskRow(taskId))
   }
@@ -759,7 +867,15 @@ export class TeamService {
     })
     // 负责人bot的验收/受阻处理运行本身占用任务的唯一活动运行名额，
     // 此时由 finishRun 的收尾逻辑负责重新排队执行，这里跳过。
-    if (!active) this.enqueueTaskRun(this.taskRow(taskId), 'assigned', actor)
+    if (!active) {
+      this.enqueueOutbox({
+        kind: 'task_run',
+        payload: { taskId, triggerType: 'assigned' },
+        projectId: task.project_id,
+        taskId,
+        idempotencyKey: `task:${taskId}:assigned`,
+      })
+    }
     if (autoStart) void this.tick()
     return this.taskView(this.taskRow(taskId))
   }
@@ -942,6 +1058,129 @@ export class TeamService {
     ].filter(Boolean).join('\n')
   }
 
+  // outbox：把「状态变更 → 建运行」这一跳变成可重放的持久交接。
+  // 写事件时立刻落库，调度器按顺序领取投递，失败退避重试，超过上限转 failed。
+  enqueueOutbox({ kind, payload = {}, projectId = null, taskId = null, sourceId = null, idempotencyKey = null }) {
+    const now = nowIso()
+    const outboxId = id('out')
+    this.store.run(
+      `INSERT INTO outbox(id, kind, project_id, task_id, source_id, idempotency_key, payload_json,
+        status, attempts, available_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+       ON CONFLICT(idempotency_key) DO NOTHING`,
+      outboxId, kind, projectId, taskId, sourceId, idempotencyKey,
+      JSON.stringify(payload), now, now,
+    )
+    if (idempotencyKey) {
+      const existing = this.store.get('SELECT id FROM outbox WHERE idempotency_key = ?', idempotencyKey)
+      if (existing && existing.id !== outboxId) return existing.id
+    }
+    // 事务性 outbox：记录先落库，再立即投递；投递失败留 pending，由调度器重试。
+    this.applyOutboxRow(this.store.get('SELECT * FROM outbox WHERE id = ?', outboxId))
+    return outboxId
+  }
+
+  // 单条投递：成功标记 delivered，失败按退避重试，超过上限转 failed。
+  applyOutboxRow(row) {
+    if (!row) return null
+    try {
+      const result = this.applyOutbox(row)
+      this.store.run(
+        "UPDATE outbox SET status = 'delivered', delivered_at = ?, attempts = attempts + 1, last_error = NULL WHERE id = ?",
+        nowIso(), row.id,
+      )
+      return result
+    } catch (error) {
+      const attempts = Number(row.attempts ?? 0) + 1
+      const permanent = error?.permanent === true
+      const exhausted = permanent || attempts >= 5
+      this.store.run(
+        `UPDATE outbox SET status = ?, attempts = ?, last_error = ?, available_at = ? WHERE id = ?`,
+        exhausted ? 'failed' : 'pending',
+        attempts,
+        text(error?.message ?? String(error), 500),
+        exhausted ? row.available_at : new Date(Date.now() + Math.min(60_000, 1000 * 2 ** attempts)).toISOString(),
+        row.id,
+      )
+      this.logger.warn?.('dsh-team: outbox %s (%s) failed: %s', row.id, row.kind, error?.message ?? error)
+      return null
+    }
+  }
+
+  // outbox 可见性：投递概况与失败明细（运维排查用）。
+  outboxView() {
+    const failed = this.store.all(
+      "SELECT id, kind, task_id, source_id, attempts, last_error, created_at FROM outbox WHERE status = 'failed' ORDER BY created_at DESC LIMIT 20",
+    )
+    return { ...this.outboxCounts(), failed }
+  }
+
+  outboxCounts() {
+    const row = this.store.get(
+      `SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+              SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS delivered
+         FROM outbox`,
+    )
+    return {
+      pending: Number(row?.pending ?? 0),
+      failed: Number(row?.failed ?? 0),
+      delivered: Number(row?.delivered ?? 0),
+    }
+  }
+
+  // 领取并投递 outbox 记录；投递成功标记 delivered，失败按指数退避重试。
+  dispatchOutbox() {
+    const rows = this.store.all(
+      "SELECT * FROM outbox WHERE status = 'pending' AND available_at <= ? ORDER BY created_at LIMIT 50",
+      nowIso(),
+    )
+    for (const row of rows) this.applyOutboxRow(row)
+  }
+
+  applyOutbox(row) {
+    const payload = jsonParse(row.payload_json, {})
+    if (row.kind === 'chat_run') {
+      const project = this.store.get('SELECT * FROM projects WHERE id = ?', payload.projectId)
+      const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
+      if (!project || !bot || project.status !== 'active' || bot.status !== 'active') return null
+      return this.enqueueChatRun(project, bot, payload.messageId)
+    }
+    if (row.kind === 'task_run') {
+      const task = this.store.get('SELECT * FROM tasks WHERE id = ?', payload.taskId)
+      if (!task) return null
+      if (['done', 'canceled'].includes(task.status)) return null
+      if (!task.assignee_bot_id) {
+        const error = badRequest('任务没有负责人')
+        error.permanent = true
+        throw error
+      }
+      return this.enqueueTaskRun(task, payload.triggerType ?? 'task_created', { type: 'system', id: 'system' })
+    }
+    if (row.kind === 'owner_task_run') {
+      const task = this.store.get('SELECT * FROM tasks WHERE id = ?', payload.taskId)
+      if (!task || ['done', 'canceled'].includes(task.status)) return null
+      return this.enqueueOwnerTaskRun(task, payload.reviewKind ?? 'review')
+    }
+    if (row.kind === 'memory_review') {
+      const sourceRun = this.store.get('SELECT * FROM runs WHERE id = ?', payload.sourceRunId)
+      if (!sourceRun) return null
+      const task = sourceRun.task_id ? this.store.get('SELECT * FROM tasks WHERE id = ?', sourceRun.task_id) : null
+      if (!task) return null
+      const project = this.projectRow(sourceRun.project_id)
+      const bot = this.botRow(sourceRun.bot_id)
+      const reviewRunId = this.enqueueMemoryReview(project, bot, task, sourceRun.id)
+      if (!reviewRunId) {
+        // 记忆审查未启用：按规则沉淀兜底，保证任务交付有沉淀。
+        this.learnFromTask(project, bot, task, sourceRun.output ?? '', sourceRun.id)
+      }
+      return reviewRunId
+    }
+    const error = badRequest(`未知的 outbox 类型 ${row.kind}`)
+    error.permanent = true
+    throw error
+  }
+
   enqueueChatRun(project, bot, messageId) {
     if (bot.status !== 'active') return null
     const existing = this.store.get(
@@ -1072,6 +1311,8 @@ export class TeamService {
     if (this.ticking || !this.started) return
     this.ticking = true
     try {
+      this.runMaintenance()
+      this.dispatchOutbox()
       await this.reapStalledRuns()
       const activeRows = this.store.all(
         "SELECT bot_id, kind, task_id, project_id, mode FROM runs WHERE status = 'running'",
@@ -1126,16 +1367,50 @@ export class TeamService {
     }
   }
 
+  globalBudget() {
+    const token = Number(this.store.setting('global_token_budget', '') || 0)
+    const cost = Number(this.store.setting('global_cost_budget', '') || 0)
+    return {
+      tokenBudget: Number.isFinite(token) && token > 0 ? token : 0,
+      costBudget: Number.isFinite(cost) && cost > 0 ? cost : 0,
+    }
+  }
+
   budgetError(project) {
+    const currency = this.budgetCurrency()
+    const global = this.globalBudget()
+    if (global.tokenBudget || global.costBudget) {
+      const usage = monthUsageGlobal(this.store, currency)
+      if (global.tokenBudget && usage.totalTokens >= global.tokenBudget) {
+        return `全局本月 token 预算已用尽（${usage.totalTokens}/${Math.round(global.tokenBudget)}）`
+      }
+      if (global.costBudget && usage.cost !== null && usage.cost >= global.costBudget) {
+        return `全局本月成本预算已用尽（${usage.cost.toFixed(4)}/${global.costBudget} ${currency}）`
+      }
+    }
     if (!project.token_budget && !project.cost_budget) return null
-    const usage = monthUsageForProject(this.store, project.id)
+    const usage = monthUsageForProject(this.store, project.id, currency)
     if (project.token_budget && usage.totalTokens >= project.token_budget) {
       return `项目本月 token 预算已用尽（${usage.totalTokens}/${Math.round(project.token_budget)}）`
     }
     if (project.cost_budget && usage.cost !== null && usage.cost >= project.cost_budget) {
-      return `项目本月成本预算已用尽（${usage.cost.toFixed(4)}/${project.cost_budget}）`
+      return `项目本月成本预算已用尽（${usage.cost.toFixed(4)}/${project.cost_budget} ${currency}）`
     }
     return null
+  }
+
+  // 定期维护：用量对账 + 数据保留清理。
+  runMaintenance({ force = false } = {}) {
+    const now = Date.now()
+    if (!force && now - this.lastMaintenanceAt < 10 * 60 * 1000) return null
+    this.lastMaintenanceAt = now
+    const reconciliation = reconcileUsage(this.store, { days: 30 })
+    const retention = applyRetention(this.store, {
+      usageDays: Number(this.store.setting('retention_usage_days', '0') || 0),
+      runEventDays: Number(this.store.setting('retention_run_event_days', '0') || 0),
+      messageDays: Number(this.store.setting('retention_message_days', '0') || 0),
+    })
+    return { reconciliation, retention }
   }
 
   async executeRun(runId) {
@@ -1209,7 +1484,7 @@ export class TeamService {
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
     const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
     this.auditReadRunWrites(run, project)
-    const usage = runUsageTotals(this.store, runId)
+    const usage = runUsageTotals(this.store, runId, this.budgetCurrency())
     const cleanOutput = text(output, 120_000)
     const endedAt = nowIso()
     this.store.run(
@@ -1217,7 +1492,7 @@ export class TeamService {
        usage_input = ?, usage_cache_read = ?, usage_cache_write = ?, usage_output = ?, usage_cost = ?
        WHERE id = ? AND status IN ('running', 'queued')`,
       status, cleanOutput, error?.code ?? null, error?.message ?? null, endedAt,
-      usage.input, usage.cacheRead, usage.cacheWrite, usage.output, usage.cost,
+      usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens, usage.cost,
       runId,
     )
     this.store.run(
@@ -1225,6 +1500,11 @@ export class TeamService {
       id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
     )
     const refreshed = this.runRow(runId)
+    if (run.kind === 'memory_review') {
+      await this.completeMemoryReview(run, status === 'succeeded' ? cleanOutput : '', error)
+      if (this.rate[run.project_id]) delete this.rate[run.project_id]
+      return
+    }
     if (run.kind === 'review' || run.kind === 'handle') {
       const label = run.kind === 'review' ? '验收' : '受阻处理'
       if (run.task_id) {
@@ -1242,7 +1522,13 @@ export class TeamService {
         // 此时任务的唯一活动运行名额刚被本次运行释放，这里负责补排执行运行。
         const task = this.taskRow(run.task_id)
         if (['todo', 'in_progress'].includes(task.status) && task.assignee_bot_id) {
-          this.enqueueTaskRun(task, run.kind === 'review' ? 'returned' : 'redispatched', { type: 'bot', id: bot.id })
+          this.enqueueOutbox({
+            kind: 'task_run',
+            payload: { taskId: task.id, triggerType: run.kind === 'review' ? 'returned' : 'redispatched' },
+            projectId: task.project_id,
+            taskId: task.id,
+            idempotencyKey: `task:${task.id}:${run.kind === 'review' ? 'returned' : 'redispatched'}:${run.id}`,
+          })
           void this.tick()
         }
       } else if (status !== 'succeeded') {
@@ -1281,10 +1567,27 @@ export class TeamService {
           taskId: task.id,
           runId,
         })
-        this.learnFromTask(project, bot, task, cleanOutput, runId)
+        this.enqueueOutbox({
+          kind: 'memory_review',
+          payload: { taskId: task.id, sourceRunId: runId },
+          projectId: project.id,
+          taskId: task.id,
+          sourceId: runId,
+          idempotencyKey: `memory_review:${runId}`,
+        })
         if (ownerReview) {
-          const reviewRunId = this.enqueueOwnerTaskRun(this.taskRow(task.id), 'review')
-          if (!reviewRunId) {
+          const ownerBot = project.owner_bot_id
+            ? this.store.get("SELECT id FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
+            : null
+          if (ownerBot) {
+            this.enqueueOutbox({
+              kind: 'owner_task_run',
+              payload: { taskId: task.id, reviewKind: 'review' },
+              projectId: project.id,
+              taskId: task.id,
+              idempotencyKey: `owner_review:${task.id}:${runId}`,
+            })
+          } else {
             this.insertMessage({
               projectId: project.id,
               senderType: 'system',
@@ -1318,7 +1621,13 @@ export class TeamService {
           taskId: run.task_id,
           runId,
         })
-        this.enqueueOwnerTaskRun(this.taskRow(run.task_id), 'handle')
+        this.enqueueOutbox({
+          kind: 'owner_task_run',
+          payload: { taskId: run.task_id, reviewKind: 'handle' },
+          projectId: run.project_id,
+          taskId: run.task_id,
+          idempotencyKey: `owner_handle:${run.task_id}:${run.id}`,
+        })
       } else if (run.kind === 'chat') {
         this.insertMessage({
           projectId: project.id,
@@ -1346,43 +1655,255 @@ export class TeamService {
       source,
       confidence: 0.7,
       createdBy: `bot:${bot.id}`,
+      actor: { type: 'bot', id: bot.id },
     })
-    this.createMemory({
-      scopeType: 'project',
-      scopeId: project.id,
-      topic: `${project.key}-${task.number} 交付记录`,
-      content,
-      source,
-      confidence: 0.6,
-      createdBy: `bot:${bot.id}`,
-    })
+    if (project.owner_bot_id === bot.id) {
+      this.createMemory({
+        scopeType: 'project',
+        scopeId: project.id,
+        topic: `${project.key}-${task.number} 交付记录`,
+        content,
+        source,
+        confidence: 0.6,
+        createdBy: `bot:${bot.id}`,
+        actor: { type: 'bot', id: bot.id },
+      })
+    }
   }
 
-  createMemory({ scopeType, scopeId, topic, content, source = '', confidence = 1, createdBy = 'system' }) {
-    const cleanScope = ['bot', 'project'].includes(scopeType) ? scopeType : null
+  // 记忆审查：任务交付后由模型抽取可复用事实，置信度不足的进入待审队列。
+  memoryReviewEnabled() {
+    if (this.config.memoryReview === false) return false
+    return this.store.setting('memory_review', '1') !== '0'
+  }
+
+  enqueueMemoryReview(project, bot, task, sourceRunId) {
+    if (!this.memoryReviewEnabled()) return null
+    const active = this.store.get(
+      "SELECT id FROM runs WHERE kind = 'memory_review' AND trigger_ref = ? AND status IN ('queued', 'running')",
+      sourceRunId,
+    )
+    if (active) return active.id
+    const reviewRunId = id('run')
+    const createdAt = nowIso()
+    this.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+        attempt, idempotency_key, queued_at)
+       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?)`,
+      reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`, createdAt,
+    )
+    this.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'), reviewRunId, 'queued', '任务交付完成，触发记忆审查', createdAt,
+    )
+    void this.tick()
+    return reviewRunId
+  }
+
+  async completeMemoryReview(reviewRun, output, error) {
+    const sourceRunId = reviewRun.trigger_ref
+    const sourceRun = sourceRunId ? this.store.get('SELECT * FROM runs WHERE id = ?', sourceRunId) : null
+    const items = error ? [] : parseMemoryReview(output)
+    if (!items.length) {
+      // 审查失败或模型没给出可用结论时，回退到规则沉淀，保证任务交付不会颗粒无收。
+      if (sourceRun?.task_id) {
+        this.store.run(
+          'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+          id('evt'), reviewRun.id, 'review_fallback', `记忆审查未产出可用结论，回退规则沉淀：${error?.message ?? '无有效条目'}`, nowIso(),
+        )
+        const project = this.projectRow(reviewRun.project_id)
+        const bot = this.botRow(reviewRun.bot_id)
+        const task = this.taskRow(sourceRun.task_id)
+        this.learnFromTask(project, bot, task, sourceRun.output ?? '', sourceRun.id)
+      }
+      return { applied: 0 }
+    }
+    const project = this.projectRow(reviewRun.project_id)
+    const bot = this.botRow(reviewRun.bot_id)
+    const source = `run:${sourceRunId}`
+    let applied = 0
+    for (const item of items) {
+      const scopeType = ['bot', 'project', 'team'].includes(item.scope) ? item.scope : 'bot'
+      const scopeId = scopeType === 'bot' ? bot.id : scopeType === 'project' ? project.id : 'team'
+      const content = redactSecrets(text(item.content, 8000))
+      if (!content) continue
+      const confidence = Math.min(1, Math.max(0, Number(item.confidence) || 0.5))
+      try {
+        this.createMemory({
+          scopeType,
+          scopeId,
+          topic: text(item.topic, 120) || `任务 ${project.key} 记忆`,
+          content,
+          source,
+          confidence,
+          createdBy: `bot:${bot.id}`,
+          actor: { type: 'bot', id: bot.id },
+          status: confidence >= 0.8 ? 'active' : 'pending',
+          sourceRefs: sourceRunId ? [sourceRunId] : [],
+        })
+        applied += 1
+      } catch (writeError) {
+        this.logger.warn?.('dsh-team: 记忆审查写入失败：%s', writeError?.message ?? writeError)
+      }
+    }
+    this.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条`, nowIso(),
+    )
+    return { applied }
+  }
+
+  // 记忆写入权限：用户可写任意作用域；Bot 只能写自己的记忆、是成员的项目记忆，
+  // 团队级记忆仅团队负责人（任一项目 owner Bot）可写。
+  assertMemoryWriteScope(scopeType, scopeId, actor) {
+    if (actor?.type === 'user') return
+    if (actor?.type !== 'bot') throw forbidden('当前身份不能写入记忆')
+    if (scopeType === 'bot') {
+      if (actor.id === scopeId) return
+      throw forbidden('Bot 只能写入自己的记忆')
+    }
+    if (scopeType === 'project') {
+      const project = this.projectRow(scopeId)
+      if (project.owner_bot_id === actor.id) return
+      if (this.membersOf(project.id).some(member => member.id === actor.id)) return
+      throw forbidden('Bot 不是该项目成员，不能写入项目记忆')
+    }
+    if (scopeType === 'team') {
+      if (this.isTeamOwner(actor.id)) return
+      throw forbidden('仅团队负责人可以写入团队级记忆')
+    }
+    throw badRequest('记忆作用域无效')
+  }
+
+  isTeamOwner(botId) {
+    const row = this.store.get("SELECT id FROM projects WHERE owner_bot_id = ? LIMIT 1", botId)
+    return Boolean(row)
+  }
+
+  createMemory({ scopeType, scopeId, topic, content, source = '', confidence = 1, createdBy = 'system', actor = null, status = 'active', sourceRefs = [] }) {
+    const cleanScope = ['bot', 'project', 'team'].includes(scopeType) ? scopeType : null
     if (!cleanScope) throw badRequest('记忆作用域无效')
     const cleanContent = redactSecrets(text(content, 8000))
     if (!cleanContent) throw badRequest('记忆内容不能为空')
-    if (cleanScope === 'bot') this.botRow(scopeId)
-    else this.projectRow(scopeId)
+    const writeActor = actor ?? { type: createdBy.split(':')[0] || 'system', id: createdBy.split(':').slice(1).join(':') || 'system' }
+    this.assertMemoryWriteScope(cleanScope, scopeId, writeActor)
+    if (cleanScope === 'bot') {
+      const bot = this.botRow(scopeId)
+      if (bot.status !== 'active') throw conflict('Bot 已归档，不能写入记忆')
+    }
+    if (cleanScope === 'project') {
+      const project = this.projectRow(scopeId)
+      if (project.status !== 'active') throw conflict('项目已归档，记忆已冻结')
+    }
     const memoryId = id('mem')
     const createdAt = nowIso()
+    const cleanStatus = status === 'pending' ? 'pending' : 'active'
+    const refs = JSON.stringify(Array.isArray(sourceRefs) ? sourceRefs.slice(0, 50) : [])
     this.store.transaction(() => {
       this.store.run(
-        `INSERT INTO memories(id, scope_type, scope_id, topic, content, source, confidence, status, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+        `INSERT INTO memories(id, scope_type, scope_id, topic, content, source, confidence, status, created_by, created_at, updated_at,
+          approved_by, revision, summary, source_refs_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         memoryId, cleanScope, scopeId, text(topic, 120) || '未命名记忆', cleanContent, text(source, 500),
-        Math.min(1, Math.max(0, Number(confidence) || 0)), createdBy, createdAt, createdAt,
+        Math.min(1, Math.max(0, Number(confidence) || 0)), cleanStatus, createdBy, createdAt, createdAt,
+        cleanStatus === 'active' ? `${writeActor.type}:${writeActor.id}` : null,
+        text(cleanContent, 300), refs,
       )
       this.store.run(
         'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)',
-        id('mevt'), memoryId, 'created', createdBy.split(':')[0] || 'system', createdBy, cleanContent, createdAt,
+        id('mevt'), memoryId, 'created', writeActor.type, writeActor.id, cleanContent, createdAt,
       )
-      this.audit({ type: createdBy.split(':')[0] || 'system', id: createdBy.split(':').slice(1).join(':') || 'system' },
-        'memory.create', 'memory', memoryId, { scopeType: cleanScope, scopeId })
+      this.audit(writeActor, 'memory.create', 'memory', memoryId, { scopeType: cleanScope, scopeId, status: cleanStatus })
     })
     this.writeMemoryMirror(memoryId)
     return this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
+  }
+
+  // 待审记忆的审批与驳回。
+  async approveMemory(memoryId, actor = this.actor()) {
+    const memory = this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
+    if (!memory) throw notFound('记忆不存在')
+    if (memory.status !== 'pending') throw conflict('只有待审记忆可以批准')
+    const now = nowIso()
+    this.store.run(
+      "UPDATE memories SET status = 'active', approved_by = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+      `${actor.type}:${actor.id}`, now, memoryId,
+    )
+    this.store.run(
+      'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      id('mevt'), memoryId, 'approved', actor.type, actor.id, memory.content, memory.content, now,
+    )
+    this.audit(actor, 'memory.approve', 'memory', memoryId, {})
+    this.writeMemoryMirror(memoryId)
+    return this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
+  }
+
+  async rejectMemory(memoryId, actor = this.actor()) {
+    const memory = this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
+    if (!memory) throw notFound('记忆不存在')
+    if (memory.status !== 'pending') throw conflict('只有待审记忆可以驳回')
+    const now = nowIso()
+    this.store.run(
+      "UPDATE memories SET status = 'rejected', approved_by = ?, updated_at = ? WHERE id = ?",
+      `${actor.type}:${actor.id}`, now, memoryId,
+    )
+    this.store.run(
+      'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',
+      id('mevt'), memoryId, 'rejected', actor.type, actor.id, memory.content, now,
+    )
+    this.audit(actor, 'memory.reject', 'memory', memoryId, {})
+    return this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
+  }
+
+  // 记忆检索：项目/成员 Bot/团队三级作用域，优先走 FTS5 全文索引，索引不可用时回退 LIKE。
+  searchMemories({ projectId = null, botId = null, query = '', limit = 20 } = {}) {
+    const scopes = []
+    if (projectId) {
+      const project = this.projectRow(projectId)
+      scopes.push({ type: 'project', id: project.id })
+      for (const member of this.membersOf(project.id)) scopes.push({ type: 'bot', id: member.id })
+      scopes.push({ type: 'team', id: 'team' })
+    } else if (botId) {
+      scopes.push({ type: 'bot', id: botId })
+    } else {
+      scopes.push({ type: 'team', id: 'team' })
+    }
+    const clause = scopes.map(() => '(m.scope_type = ? AND m.scope_id = ?)').join(' OR ')
+    const params = scopes.flatMap(scope => [scope.type, scope.id])
+    const keyword = text(query, 200).trim()
+    const limitN = Math.min(100, Math.max(1, Number(limit) || 20))
+    let rows
+    if (keyword && this.store.ftsEnabled) {
+      const match = `"${keyword.replace(/"/g, '""')}"`
+      rows = this.store.all(
+        `SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.memory_id
+         WHERE memories_fts MATCH ? AND m.status = 'active' AND (${clause})
+         ORDER BY m.updated_at DESC LIMIT ?`,
+        match, ...params, limitN,
+      )
+    } else {
+      const like = `%${keyword}%`
+      rows = this.store.all(
+        `SELECT m.* FROM memories m
+         WHERE m.status = 'active' AND (${clause})
+           ${keyword ? 'AND (m.topic LIKE ? OR m.content LIKE ?)' : ''}
+         ORDER BY m.updated_at DESC LIMIT ?`,
+        ...params, ...(keyword ? [like, like] : []), limitN,
+      )
+    }
+    return rows.map(row => this.memoryView(row))
+  }
+
+  memoryView(memory) {
+    return {
+      ...memory,
+      sourceRefs: jsonParse(memory.source_refs_json, []),
+      scopeLabel: memory.scope_type === 'team'
+        ? '团队'
+        : memory.scope_type === 'project'
+          ? (this.store.get('SELECT name FROM projects WHERE id = ?', memory.scope_id)?.name ?? memory.scope_id)
+          : (this.store.get('SELECT name FROM bots WHERE id = ?', memory.scope_id)?.name ?? memory.scope_id),
+    }
   }
 
   writeMemoryMirror(memoryId) {
@@ -1403,6 +1924,7 @@ export class TeamService {
       '',
     ].join('\n')
     writeFileSync(path, body, 'utf8')
+    this.store.run('UPDATE memories SET path = ? WHERE id = ?', path, memoryId)
   }
 
   async updateMemory(memoryId, patch) {
@@ -1436,7 +1958,7 @@ export class TeamService {
 
   async createProposal(input, actor = this.actor()) {
     const kind = input.kind
-    if (!['bot_update', 'skill', 'workflow'].includes(kind)) throw badRequest('提案类型无效')
+    if (!['bot_update', 'skill'].includes(kind)) throw badRequest('当前版本仅支持 bot_update 与 skill 提案')
     const title = text(input.title, 200)
     if (!title) throw badRequest('提案标题不能为空')
     if (kind === 'bot_update') {
@@ -1444,14 +1966,19 @@ export class TeamService {
       this.botRow(input.botId)
     }
     if (kind === 'skill' && !input.payload?.content) throw badRequest('技能提案必须包含内容')
+    const payload = input.payload ?? {}
+    const canary = this.proposalCanary(input, kind)
+    const diff = kind === 'bot_update' ? this.botProposalDiff(input.botId, payload) : this.skillProposalDiff(payload)
     const proposalId = id('prop')
     this.store.transaction(() => {
       this.store.run(
         `INSERT INTO proposals(id, kind, bot_id, project_id, title, rationale, payload_json, evaluation,
-          status, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+          evaluation_json, diff_json, canary_json, status, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
         proposalId, kind, input.botId ?? null, input.projectId ?? null, title,
-        text(input.rationale, 10_000), JSON.stringify(input.payload ?? {}), text(input.evaluation, 6000),
+        text(input.rationale, 10_000), JSON.stringify(payload), text(input.evaluation, 6000),
+        JSON.stringify({ verdict: 'pending', notes: text(input.evaluation, 6000), evaluatedBy: null, evaluatedAt: null }),
+        JSON.stringify(diff), JSON.stringify(canary),
         `${actor.type}:${actor.id}`, nowIso(),
       )
       this.audit(actor, 'proposal.create', 'proposal', proposalId, { kind, title })
@@ -1459,12 +1986,73 @@ export class TeamService {
     return this.proposalView(this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId))
   }
 
+  // 差异统一成 {字段: {from, to}}，前端与审计日志用同一形状。
+  botProposalDiff(botId, payload) {
+    const bot = this.botRow(botId)
+    const diff = {}
+    for (const field of ['role', 'instructions', 'provider', 'model', 'effort']) {
+      if (payload[field] === undefined) continue
+      const before = bot[field] ?? null
+      if (String(before ?? '') === String(payload[field] ?? '')) continue
+      diff[field] = { from: before, to: payload[field] }
+    }
+    return diff
+  }
+
+  skillProposalDiff(payload) {
+    const slug = slugify(payload.slug ?? '')
+    const current = slug ? this.store.get('SELECT slug, version, checksum FROM skills WHERE slug = ?', slug) : null
+    return {
+      slug: { from: current?.slug ?? null, to: slug || null },
+      version: { from: current?.version ?? null, to: text(payload.version, 40) || '1.0.0' },
+      checksum: { from: current?.checksum ?? null, to: sha256(String(payload.content ?? '')) },
+      bytes: { from: current ? String(payload.content ?? '').length : 0, to: String(payload.content ?? '').length },
+    }
+  }
+
+  proposalCanary(input, kind) {
+    const raw = input.canary ?? null
+    if (!raw) return null
+    const projectIds = (Array.isArray(raw.projectIds) ? raw.projectIds : []).filter(Boolean)
+    const botIds = (Array.isArray(raw.botIds) ? raw.botIds : []).filter(Boolean)
+    if (kind === 'bot_update' && (projectIds.length || botIds.length)) {
+      throw badRequest('Bot 配置提案暂不支持灰度')
+    }
+    if (kind === 'skill' && !projectIds.length) {
+      throw badRequest('技能灰度必须指定至少一个项目')
+    }
+    for (const projectId of projectIds) this.projectRow(projectId)
+    return projectIds.length ? { projectIds } : null
+  }
+
   proposalView(proposal) {
     return {
       ...proposal,
       payload: jsonParse(proposal.payload_json, {}),
+      diff: jsonParse(proposal.diff_json, null),
+      evaluation: jsonParse(proposal.evaluation_json, null),
+      canary: jsonParse(proposal.canary_json, null),
       botName: proposal.bot_id ? this.store.get('SELECT name FROM bots WHERE id = ?', proposal.bot_id)?.name ?? null : null,
+      approvedBy: proposal.approved_by ?? null,
+      appliedAt: proposal.applied_at ?? null,
     }
+  }
+
+  // 评估：提案必须先有评估结论，结论为 pass 才允许批准。
+  async evaluateProposal(proposalId, evaluation, actor = this.actor()) {
+    const proposal = this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId)
+    if (!proposal) throw notFound('提案不存在')
+    if (!['pending', 'canary'].includes(proposal.status)) throw conflict('提案已处理')
+    const verdict = ['pass', 'fail', 'pending'].includes(evaluation?.verdict) ? evaluation.verdict : 'pending'
+    const payload = {
+      verdict,
+      notes: text(evaluation?.notes, 6000),
+      evaluatedBy: `${actor.type}:${actor.id}`,
+      evaluatedAt: nowIso(),
+    }
+    this.store.run('UPDATE proposals SET evaluation_json = ? WHERE id = ?', JSON.stringify(payload), proposalId)
+    this.audit(actor, 'proposal.evaluate', 'proposal', proposalId, { verdict })
+    return this.proposalView(this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId))
   }
 
   async decideProposal(proposalId, decision, actor = this.actor()) {
@@ -1473,19 +2061,18 @@ export class TeamService {
     if (!proposal) throw notFound('提案不存在')
     if (proposal.status !== 'pending') throw conflict('提案已处理')
     const payload = jsonParse(proposal.payload_json, {})
+    const evaluation = jsonParse(proposal.evaluation_json, {})
+    const canary = jsonParse(proposal.canary_json, null)
     if (decision === 'approved') {
-      if (proposal.kind === 'bot_update') {
-        await this.updateBot(proposal.bot_id, {
-          ...(payload.role !== undefined ? { role: payload.role } : {}),
-          ...(payload.instructions !== undefined ? { instructions: payload.instructions } : {}),
-          ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
-          ...(payload.model !== undefined ? { model: payload.model } : {}),
-          ...(payload.effort !== undefined ? { effort: payload.effort } : {}),
-        }, actor)
-      } else if (proposal.kind === 'skill') {
-        await publishSkill(this.config, payload)
-        syncSkills(this.store, this.config.skillRoot)
-      }
+      if (evaluation?.verdict !== 'pass') throw conflict('提案缺少通过的评估结果，请先完成评估')
+      const applied = await this.applyProposal(proposal, payload, canary, actor)
+      const nextStatus = applied.canary ? 'canary' : 'approved'
+      this.store.run(
+        'UPDATE proposals SET status = ?, decided_by = ?, decided_at = ?, approved_by = ?, applied_at = ? WHERE id = ?',
+        nextStatus, `${actor.type}:${actor.id}`, nowIso(), `${actor.type}:${actor.id}`, nowIso(), proposalId,
+      )
+      this.audit(actor, `proposal.${decision}`, 'proposal', proposalId, { canary: applied.canary, detail: applied.detail })
+      return this.proposalView(this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId))
     }
     this.store.run(
       'UPDATE proposals SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?',
@@ -1493,6 +2080,100 @@ export class TeamService {
     )
     this.audit(actor, `proposal.${decision}`, 'proposal', proposalId, {})
     return this.proposalView(this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId))
+  }
+
+  async applyProposal(proposal, payload, canary, actor) {
+    if (proposal.kind === 'bot_update') {
+      await this.updateBot(proposal.bot_id, {
+        ...(payload.role !== undefined ? { role: payload.role } : {}),
+        ...(payload.instructions !== undefined ? { instructions: payload.instructions } : {}),
+        ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
+        ...(payload.model !== undefined ? { model: payload.model } : {}),
+        ...(payload.effort !== undefined ? { effort: payload.effort } : {}),
+      }, actor)
+      return { canary: false, detail: { botId: proposal.bot_id } }
+    }
+    if (proposal.kind === 'skill') {
+      if (canary?.projectIds?.length) {
+        const staged = await stageSkill(this.config, payload)
+        for (const projectId of canary.projectIds) {
+          this.setSkillBinding({ scopeType: 'project', scopeId: projectId, slug: staged.slug, version: staged.version, status: 'canary' }, actor)
+        }
+        syncSkills(this.store, this.config.skillRoot)
+        return { canary: true, detail: { slug: staged.slug, version: staged.version, projectIds: canary.projectIds } }
+      }
+      const published = await publishSkill(this.config, payload)
+      syncSkills(this.store, this.config.skillRoot)
+      this.setSkillBinding({
+        scopeType: 'global', scopeId: 'global', slug: published.slug, version: published.version, status: 'active',
+      }, actor)
+      return { canary: false, detail: { slug: published.slug, version: published.version } }
+    }
+    throw badRequest('提案类型无效')
+  }
+
+  // 灰度提案转正：技能版本全量生效，灰度项目的绑定升级为 active。
+  async promoteProposal(proposalId, actor = this.actor()) {
+    const proposal = this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId)
+    if (!proposal) throw notFound('提案不存在')
+    if (proposal.status !== 'canary') throw conflict('只有灰度中的提案可以转正')
+    const payload = jsonParse(proposal.payload_json, {})
+    const canary = jsonParse(proposal.canary_json, null)
+    const published = await publishSkill(this.config, payload)
+    syncSkills(this.store, this.config.skillRoot)
+    for (const projectId of canary?.projectIds ?? []) {
+      this.setSkillBinding({ scopeType: 'project', scopeId: projectId, slug: published.slug, version: published.version, status: 'active' }, actor)
+    }
+    this.setSkillBinding({
+      scopeType: 'global', scopeId: 'global', slug: published.slug, version: published.version, status: 'active',
+    }, actor)
+    this.store.run(
+      "UPDATE proposals SET status = 'approved', applied_at = ? WHERE id = ?",
+      nowIso(), proposalId,
+    )
+    this.audit(actor, 'proposal.promote', 'proposal', proposalId, { slug: published.slug, version: published.version })
+    return this.proposalView(this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId))
+  }
+
+  // 技能绑定：项目/全局维度把某个技能钉在指定版本，取代只能禁用的旧能力。
+  setSkillBinding({ scopeType, scopeId, slug, version, status = 'active' }, actor = this.actor()) {
+    const scope = scopeType === 'project' ? 'project' : scopeType === 'global' ? 'global' : null
+    if (!scope) throw badRequest('绑定作用域无效')
+    const cleanSlug = slugify(slug ?? '')
+    if (!cleanSlug) throw badRequest('技能 slug 无效')
+    if (scope === 'project') this.projectRow(scopeId)
+    const bindingId = id('bind')
+    const now = nowIso()
+    this.store.run(
+      `INSERT INTO skill_bindings(id, scope_type, scope_id, slug, version, status, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope_type, scope_id, slug) DO UPDATE SET
+         version = excluded.version, status = excluded.status, updated_at = excluded.updated_at`,
+      bindingId, scope, scopeId ?? 'global', cleanSlug, text(version, 40) || null,
+      status === 'canary' ? 'canary' : 'active', `${actor.type}:${actor.id}`, now, now,
+    )
+    this.audit(actor, 'skill.bind', 'skill', cleanSlug, { scope, scopeId, version, status })
+    return this.store.get('SELECT * FROM skill_bindings WHERE scope_type = ? AND scope_id = ? AND slug = ?', scope, scopeId ?? 'global', cleanSlug)
+  }
+
+  skillBindings(projectId = null) {
+    const rows = projectId
+      ? this.store.all("SELECT * FROM skill_bindings WHERE scope_type = 'global' OR (scope_type = 'project' AND scope_id = ?)", projectId)
+      : this.store.all('SELECT * FROM skill_bindings')
+    return rows.map(row => ({
+      ...row,
+      projectName: row.scope_type === 'project'
+        ? this.store.get('SELECT name FROM projects WHERE id = ?', row.scope_id)?.name ?? row.scope_id
+        : '全局',
+    }))
+  }
+
+  async rollbackSkillVersion(slug, version, actor = this.actor()) {
+    const cleanSlug = slugify(slug ?? '')
+    const result = rollbackSkill(this.config, { slug: cleanSlug, version: text(version, 40) })
+    syncSkills(this.store, this.config.skillRoot)
+    this.audit(actor, 'skill.rollback', 'skill', cleanSlug, { version: result.version })
+    return result
   }
 
   async assignFromBot(sessionId, input) {
@@ -1545,7 +2226,15 @@ export class TeamService {
         "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
         task.id,
       )
-      if (!active) this.enqueueTaskRun(this.taskRow(task.id), 'returned', actor)
+      if (!active) {
+        this.enqueueOutbox({
+          kind: 'task_run',
+          payload: { taskId: task.id, triggerType: 'returned' },
+          projectId: task.project_id,
+          taskId: task.id,
+          idempotencyKey: `task:${task.id}:returned:${Date.now()}`,
+        })
+      }
       void this.tick()
       this.insertMessage({
         projectId: project.id,
@@ -1561,8 +2250,8 @@ export class TeamService {
   rememberFromBot(sessionId, input) {
     const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
     if (!binding) throw forbidden('只有项目群中的 Bot 可以写记忆')
-    const scopeType = input.scope === 'project' ? 'project' : 'bot'
-    const scopeId = scopeType === 'project' ? binding.project_id : binding.bot_id
+    const scopeType = ['bot', 'project', 'team'].includes(input.scope) ? input.scope : 'bot'
+    const scopeId = scopeType === 'project' ? binding.project_id : scopeType === 'team' ? 'team' : binding.bot_id
     return this.createMemory({
       scopeType,
       scopeId,
@@ -1571,6 +2260,7 @@ export class TeamService {
       source: `session:${sessionId}`,
       confidence: 0.9,
       createdBy: `bot:${binding.bot_id}`,
+      actor: { type: 'bot', id: binding.bot_id },
     })
   }
 
@@ -1653,9 +2343,12 @@ export class TeamService {
       runs: [],
       memories: [],
       skills: skillSnapshot(this.store, this.config),
+      skillBindings: this.skillBindings(project?.id ?? null),
+      outbox: this.outboxCounts(),
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
       revisions: {},
-      usage: usageSnapshot(this.store, project?.id, 30),
+      usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency() }),
+      settings: this.settingsView(),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,
@@ -1696,15 +2389,23 @@ export class TeamService {
       const botIds = this.membersOf(project.id).map(bot => bot.id)
       const botFilter = botIds.length > 0 ? `OR (scope_type = 'bot' AND scope_id IN (${botIds.map(() => '?').join(',')}))` : ''
       view.memories = this.store.all(
-        `SELECT * FROM memories WHERE status = 'active' AND ((scope_type = 'project' AND scope_id = ?) ${botFilter})
+        `SELECT * FROM memories WHERE status = 'active' AND ((scope_type = 'project' AND scope_id = ?) ${botFilter}
+          OR (scope_type = 'team' AND scope_id = 'team'))
          ORDER BY updated_at DESC LIMIT 100`,
         project.id, ...botIds,
-      )
+      ).map(item => this.memoryView(item))
+      view.pendingMemories = this.store.all(
+        `SELECT * FROM memories WHERE status = 'pending' AND ((scope_type = 'project' AND scope_id = ?) ${botFilter}
+          OR (scope_type = 'team' AND scope_id = 'team'))
+         ORDER BY updated_at DESC LIMIT 100`,
+        project.id, ...botIds,
+      ).map(item => this.memoryView(item))
       view.proposals = this.store.all(
         'SELECT * FROM proposals WHERE project_id = ? OR bot_id IN (SELECT id FROM bots) ORDER BY created_at DESC LIMIT 100',
         project.id,
       ).map(item => this.proposalView(item))
       view.prices = this.latestPrices()
+      view.skillBindings = this.skillBindings(project.id)
     }
     return view
   }

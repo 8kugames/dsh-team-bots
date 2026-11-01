@@ -1,3 +1,12 @@
+# Host capability bridge (absolute paths referenced by ~/.dsh patches) is
+# discovered and generated into docker-compose.host-caps.yml by
+# scripts/host-capabilities.mjs. It is included here (optional) so a bare
+# `docker compose up` also mounts the host capabilities; `npm run docker:up`
+# regenerates the overlay before starting.
+include:
+  - path: docker-compose.host-caps.yml
+    required: false
+
 services:
   dsh-team:
     build:

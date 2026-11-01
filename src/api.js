@@ -1,4 +1,5 @@
 import { AppError } from './errors.js'
+import { exportUsageCsv } from './usage.js'
 
 const ACTIONS = new Set([
   'health', 'state', 'models', 'bot_detail',
@@ -6,9 +7,11 @@ const ACTIONS = new Set([
   'create_project', 'update_project', 'archive_project',
   'send_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
   'retry_run', 'cancel_run',
-  'create_memory', 'update_memory', 'delete_memory',
-  'create_proposal', 'decide_proposal',
-  'sync_skills', 'skill_detail', 'toggle_skill', 'save_price', 'reset_price',
+  'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
+  'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
+  'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
+  'save_price', 'reset_price',
+  'settings', 'update_settings', 'export_usage_csv', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
 ])
 
@@ -69,10 +72,25 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.updateMemory(required(payload.memoryId, 'memoryId'), payload)
     case 'delete_memory':
       return service.deleteMemory(required(payload.memoryId, 'memoryId'), actor)
+    case 'search_memories':
+      return service.searchMemories({
+        projectId: payload.projectId ?? null,
+        botId: payload.botId ?? null,
+        query: payload.query ?? '',
+        limit: payload.limit ?? 20,
+      })
+    case 'approve_memory':
+      return service.approveMemory(required(payload.memoryId, 'memoryId'), actor)
+    case 'reject_memory':
+      return service.rejectMemory(required(payload.memoryId, 'memoryId'), actor)
     case 'create_proposal':
       return service.createProposal(payload, actor)
     case 'decide_proposal':
       return service.decideProposal(required(payload.proposalId, 'proposalId'), required(payload.decision, 'decision'), actor)
+    case 'evaluate_proposal':
+      return service.evaluateProposal(required(payload.proposalId, 'proposalId'), payload.evaluation ?? payload, actor)
+    case 'promote_proposal':
+      return service.promoteProposal(required(payload.proposalId, 'proposalId'), actor)
     case 'sync_skills':
       return service.syncSkillsNow()
     case 'skill_detail':
@@ -84,10 +102,33 @@ export async function handleAction(service, action, payload = {}, actor) {
         payload.disabled === true,
         actor,
       )
+    case 'set_skill_binding':
+      return service.setSkillBinding({
+        scopeType: payload.scopeType ?? 'project',
+        scopeId: payload.scopeId,
+        slug: required(payload.slug, 'slug'),
+        version: payload.version,
+        status: payload.status ?? 'active',
+      }, actor)
+    case 'rollback_skill':
+      return service.rollbackSkillVersion(required(payload.slug, 'slug'), required(payload.version, 'version'), actor)
     case 'save_price':
       return service.savePrice(payload, actor)
     case 'reset_price':
       return service.resetPrice(payload, actor)
+    case 'settings':
+      return service.settingsView()
+    case 'update_settings':
+      return service.updateSettings(payload.patch ?? payload, actor)
+    case 'export_usage_csv':
+      return {
+        filename: `dsh-team-usage-${new Date().toISOString().slice(0, 10)}.csv`,
+        csv: exportUsageCsv(service.store, { projectId: payload.projectId ?? null, days: payload.days ?? 30 }),
+      }
+    case 'outbox':
+      return service.outboxView()
+    case 'reconcile_usage':
+      return service.runMaintenance({ force: true })
     case 'dsh_update_info':
       return service.dshUpdateInfo()
     case 'upgrade_dsh':

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { AppError } from './errors.js'
 import { ensureProjectWorkspace } from './paths.js'
 import { recordUsage } from './usage.js'
-import { id, nowIso, parseDisabledSkills } from './util.js'
+import { id, nowIso, parseDisabledSkills, sha256 } from './util.js'
 
 const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
@@ -119,6 +119,7 @@ export class DshRuntime {
       `SELECT topic, content FROM memories
        WHERE status = 'active' AND (
          (scope_type = 'bot' AND scope_id = ?) OR (scope_type = 'project' AND scope_id = ?)
+         OR (scope_type = 'team' AND scope_id = 'team')
        ) ORDER BY updated_at DESC LIMIT 16`,
       bot.id,
       project.id,
@@ -139,11 +140,22 @@ export class DshRuntime {
       ? `- You are executing one assigned task in ${project.name}${assignedTask ? ` (${project.key}-${assignedTask.number}: ${assignedTask.title})` : ''}. This session is not the group chat: do the work, verify it, and report back. Do not triage other requests here.`
       : `- You are ${owner ? 'the owner of this project group. Triage requests, split work and assign tasks; review deliveries with team_review_task and handle blocked tasks yourself instead of waiting for the user.' : 'a project member. Focus on work assigned to you.'}`
     const disabledSkills = parseDisabledSkills(project.disabled_skills)
+    const bindings = this.store.all(
+      `SELECT slug, version FROM skill_bindings
+       WHERE status IN ('active', 'canary') AND (scope_type = 'global' OR (scope_type = 'project' AND scope_id = ?))
+       ORDER BY slug`,
+      project.id,
+    )
     const sharedRules = [
       disabledSkills.length === 0
         ? '- The shared skill library is mounted at `/workspace/.agents/skills`; use installed skills when relevant.'
         : `- The shared skill library is mounted at \`/workspace/.agents/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
+      bindings.length > 0
+        ? `- Pinned skill versions for this project: ${bindings.map(item => `\`${item.slug}\`@${item.version ?? 'latest'}`).join(', ')}.`
+        : '- No skill version is pinned for this project; use the current published version.',
       '- Work only inside this project workspace unless the user explicitly authorizes another mounted path.',
+      '- The shared skill library at `/workspace/.agents` is read-only for you; publish skill changes through `team_propose_evolution` so the user can approve them.',
+      '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
     ]
@@ -404,6 +416,29 @@ As the project owner, handle this blocked task:
 - If it needs the user's decision (scope change, missing access, repeated failures), do not re-dispatch; reply in the group explaining what you need from the user.
 Avoid re-dispatching more than once without progress. Reply in the user's language with a short verdict.`
     }
+    if (run.kind === 'memory_review') {
+      const sourceRun = run.trigger_ref
+        ? this.store.get('SELECT id, task_id, output FROM runs WHERE id = ?', run.trigger_ref)
+        : null
+      const sourceTask = sourceRun?.task_id
+        ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', sourceRun.task_id)
+        : null
+      return `${header}
+
+# Memory review for a finished task
+Task: ${sourceTask ? `${project.key}-${sourceTask.number} ${sourceTask.title}` : '(unknown task)'}
+Delivery output:
+${(sourceRun?.output ?? '').slice(0, 6000)}
+
+Extract the durable facts worth remembering for later runs. Reply with a JSON array only, no prose and no code fence. Each item:
+{"scope":"bot|project|team","topic":"short label","content":"one durable fact","confidence":0.0-1.0}
+Rules:
+- scope "bot" for your own working habits, "project" for project-level facts and decisions, "team" for rules that apply to every project.
+- Only durable facts: decisions, constraints, conventions, preferences, recurring pitfalls. Skip transient steps, file listings, and anything already stated in the task description.
+- Never store secrets, tokens, credentials or personal data.
+- Use confidence 0.5-0.7 for inferences and 0.8-1.0 for facts stated explicitly in the output.
+- Return [] when nothing is worth remembering.`
+    }
     if (task) {
       const parallel = this.config.agentTeam ? `
 
@@ -551,9 +586,17 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
     if (!usage) return
     pending.usageCounter += 1
     const occurredAt = Number.isFinite(event.time) ? new Date(event.time).toISOString() : nowIso()
-    const sourceKey = `run:${pending.runId}:sess:${sessionId}:msg:${pending.turn ?? 0}:${pending.usageCounter}:${event.time ?? Date.now()}`
+    // 幂等键必须只依赖事件自身身份，不能依赖处理时刻或进程内顺序，
+    // 否则同一事件重放会写成两条用量。
+    const messageId = String(event.data?.message?.id ?? event.id ?? event.data?.id ?? '')
+    const fingerprint = messageId || sha256(JSON.stringify(usage))
+    pending.usageCounters = pending.usageCounters ?? new Map()
+    const ordinal = pending.usageCounters.get(fingerprint) ?? 0
+    pending.usageCounters.set(fingerprint, ordinal + 1)
+    const sourceKey = `run:${pending.runId}:sess:${sessionId}:turn:${pending.turn ?? 0}:msg:${fingerprint}:${ordinal}`
     const row = recordUsage(this.store, {
       sourceKey,
+      sourceEventId: messageId || null,
       run: { id: pending.runId, project_id: pending.projectId, bot_id: pending.bot.id },
       provider: pending.bot.provider ?? '',
       model: pending.bot.model ?? '',

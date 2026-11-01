@@ -202,6 +202,11 @@ CREATE TABLE IF NOT EXISTS memories (
   confidence REAL NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
+  approved_by TEXT,
+  revision INTEGER NOT NULL DEFAULT 1,
+  summary TEXT NOT NULL DEFAULT '',
+  path TEXT,
+  source_refs_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -247,22 +252,81 @@ CREATE TABLE IF NOT EXISTS proposals (
   rationale TEXT NOT NULL DEFAULT '',
   payload_json TEXT NOT NULL DEFAULT '{}',
   evaluation TEXT NOT NULL DEFAULT '',
+  evaluation_json TEXT NOT NULL DEFAULT '{}',
+  diff_json TEXT NOT NULL DEFAULT '{}',
+  canary_json TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   created_by TEXT NOT NULL,
   decided_by TEXT,
+  approved_by TEXT,
+  applied_at TEXT,
   created_at TEXT NOT NULL,
   decided_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS skill_bindings (
+  id TEXT PRIMARY KEY,
+  scope_type TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(scope_type, scope_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS usage_reconciliation (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  event_calls INTEGER NOT NULL DEFAULT 0,
+  event_tokens INTEGER NOT NULL DEFAULT 0,
+  run_tokens INTEGER NOT NULL DEFAULT 0,
+  delta_tokens INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ok',
+  note TEXT NOT NULL DEFAULT '',
+  checked_at TEXT NOT NULL,
+  UNIQUE(run_id)
+);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  name TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL
+);
+
+-- outbox：状态变更 → 建运行 的可靠交接。写入即落库，调度器按顺序领取并投递，
+-- 失败按退避重试，超过上限转 failed 供人工排查。
+CREATE TABLE IF NOT EXISTS outbox (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  source_id TEXT,
+  idempotency_key TEXT UNIQUE,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  available_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  delivered_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox(status, available_at);
+
 CREATE TABLE IF NOT EXISTS usage_events (
   id TEXT PRIMARY KEY,
   source_key TEXT NOT NULL UNIQUE,
+  source_event_id TEXT,
   run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   bot_id TEXT REFERENCES bots(id) ON DELETE SET NULL,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
   provider TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
   purpose TEXT NOT NULL DEFAULT 'run',
+  currency TEXT NOT NULL DEFAULT 'CNY',
   input_tokens INTEGER NOT NULL DEFAULT 0,
   cache_read_tokens INTEGER NOT NULL DEFAULT 0,
   cache_write_tokens INTEGER NOT NULL DEFAULT 0,
@@ -283,7 +347,7 @@ CREATE TABLE IF NOT EXISTS model_prices (
   cache_read_per_mtok REAL NOT NULL DEFAULT 0,
   cache_write_per_mtok REAL NOT NULL DEFAULT 0,
   output_per_mtok REAL NOT NULL DEFAULT 0,
-  currency TEXT NOT NULL DEFAULT 'USD',
+  currency TEXT NOT NULL DEFAULT 'CNY',
   effective_at TEXT NOT NULL,
   UNIQUE(provider, model, effective_at)
 );
@@ -310,6 +374,27 @@ CREATE INDEX IF NOT EXISTS usage_project_idx ON usage_events(project_id, occurre
 CREATE INDEX IF NOT EXISTS usage_bot_idx ON usage_events(bot_id, occurred_at);
 CREATE INDEX IF NOT EXISTS memories_scope_idx ON memories(scope_type, scope_id, status);
 CREATE INDEX IF NOT EXISTS proposals_status_idx ON proposals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS skill_bindings_scope_idx ON skill_bindings(scope_type, scope_id, status);
+CREATE INDEX IF NOT EXISTS usage_events_run_idx ON usage_events(run_id);
+CREATE INDEX IF NOT EXISTS usage_events_occurred_idx ON usage_events(occurred_at);
+`
+
+const FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+  memory_id UNINDEXED,
+  topic,
+  content,
+  tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS memories_fts_insert AFTER INSERT ON memories BEGIN
+  INSERT INTO memories_fts(memory_id, topic, content) VALUES (new.id, new.topic, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_fts_delete AFTER DELETE ON memories BEGIN
+  DELETE FROM memories_fts WHERE memory_id = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS memories_fts_update AFTER UPDATE ON memories BEGIN
+  UPDATE memories_fts SET topic = new.topic, content = new.content WHERE memory_id = old.id;
+END;
 `
 
 export function openDatabase(path) {
@@ -328,8 +413,18 @@ export function openDatabase(path) {
   migrateRuns(db)
   migrateSessionBindings(db)
   migrateProjects(db)
+  migrateMemories(db)
+  migrateProposals(db)
+  migrateUsageEvents(db)
   db.exec(BINDING_INDEXES)
-  return new Store(db)
+  const ftsEnabled = setupFts(db)
+  recordMigration(db, 'memories_source_refs_revision')
+  recordMigration(db, 'proposals_diff_evaluation_canary')
+  recordMigration(db, 'usage_events_currency_task')
+  recordMigration(db, 'skill_bindings_table')
+  recordMigration(db, 'usage_reconciliation_table')
+  recordMigration(db, 'memories_fts')
+  return new Store(db, { ftsEnabled })
 }
 
 function columnsOf(db, table) {
@@ -351,6 +446,50 @@ function migrateRuns(db) {
 // projects.disabled_skills 存项目内关闭的技能 slug JSON 数组。
 function migrateProjects(db) {
   addColumn(db, 'projects', 'disabled_skills', "TEXT NOT NULL DEFAULT '[]'")
+}
+
+// 记忆的来源引用、审批人、版本号与派生路径。
+function migrateMemories(db) {
+  addColumn(db, 'memories', 'source_refs_json', "TEXT NOT NULL DEFAULT '[]'")
+  addColumn(db, 'memories', 'approved_by', 'TEXT')
+  addColumn(db, 'memories', 'revision', 'INTEGER NOT NULL DEFAULT 1')
+  addColumn(db, 'memories', 'summary', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'memories', 'path', 'TEXT')
+}
+
+// 提案的结构化差异、评估结果、灰度范围与审批痕迹。
+function migrateProposals(db) {
+  addColumn(db, 'proposals', 'evaluation_json', "TEXT NOT NULL DEFAULT '{}'")
+  addColumn(db, 'proposals', 'diff_json', "TEXT NOT NULL DEFAULT '{}'")
+  addColumn(db, 'proposals', 'canary_json', 'TEXT')
+  addColumn(db, 'proposals', 'approved_by', 'TEXT')
+  addColumn(db, 'proposals', 'applied_at', 'TEXT')
+}
+
+// 用量事件补齐币种、来源事件 id 与任务关联。
+function migrateUsageEvents(db) {
+  addColumn(db, 'usage_events', 'currency', "TEXT NOT NULL DEFAULT 'CNY'")
+  addColumn(db, 'usage_events', 'source_event_id', 'TEXT')
+  addColumn(db, 'usage_events', 'task_id', 'TEXT REFERENCES tasks(id) ON DELETE SET NULL')
+}
+
+// FTS5 全文索引：可用则建立并回填，不可用则回退到 LIKE 扫描。
+function setupFts(db) {
+  try {
+    db.exec(FTS_SCHEMA)
+  } catch {
+    return false
+  }
+  db.exec(`INSERT INTO memories_fts(memory_id, topic, content)
+    SELECT id, topic, content FROM memories
+    WHERE id NOT IN (SELECT memory_id FROM memories_fts)`)
+  return true
+}
+
+function recordMigration(db, name) {
+  db.prepare(
+    'INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING',
+  ).run(name, nowIso())
 }
 
 // 旧的 session_bindings 带 UNIQUE(bot_id, project_id, kind)，无法容纳每任务一条会话绑定。
@@ -390,8 +529,9 @@ CREATE INDEX IF NOT EXISTS session_bindings_task_idx ON session_bindings(task_id
 `
 
 export class Store {
-  constructor(db) {
+  constructor(db, options = {}) {
     this.db = db
+    this.ftsEnabled = options.ftsEnabled === true
   }
 
   all(sql, ...params) {
