@@ -160,7 +160,7 @@ export function skillSnapshot(store, config) {
   return rows.map(row => ({
     ...row,
     exists: existsSync(row.path),
-    sharedPath: `/workspace/.agents/skills/${row.slug}/SKILL.md`,
+    sharedPath: join(config.skillRoot, 'skills', row.slug, 'SKILL.md'),
     relativePath: row.path.startsWith(config.workspace) ? row.path.slice(config.workspace.length + 1) : row.path,
   }))
 }

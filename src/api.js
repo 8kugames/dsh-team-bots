@@ -9,7 +9,7 @@ const ACTIONS = new Set([
   'create_memory', 'update_memory', 'delete_memory',
   'create_proposal', 'decide_proposal',
   'sync_skills', 'save_price', 'reset_price',
-  'dsh_update_info', 'upgrade_dsh',
+  'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
 ])
 
 export async function handleAction(service, action, payload = {}, actor) {
@@ -83,6 +83,8 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.dshUpdateInfo()
     case 'upgrade_dsh':
       return service.upgradeDsh(payload.version, actor)
+    case 'reboot_dsh':
+      return service.rebootDsh(actor)
     default:
       throw new AppError('UNKNOWN_ACTION', `未知操作 ${action}`, 404)
   }

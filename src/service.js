@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { AppError, badRequest, conflict, forbidden, notFound } from './errors.js'
-import { ensureProjectWorkspace, projectDir } from './paths.js'
+import { ensureDirResilient, ensureProjectWorkspace, ensureSkillRoot, projectDir } from './paths.js'
 import { monthUsageForProject, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
 import { latestDshVersion, compareVersions, validTargetVersion } from './updater.js'
 import { priceKey, seedModelPrices } from './pricing.js'
@@ -40,6 +41,8 @@ export class TeamService {
     this.started = false
     this.ready = null
     this.rate = {}
+    // 只读运行开始时的项目工作区指纹，用于事后发现“只读会话改了文件”。
+    this.fingerprints = new Map()
   }
 
   attachRuntime(runtime) {
@@ -50,10 +53,10 @@ export class TeamService {
   async initialize() {
     if (this.ready) return this.ready
     this.ready = (async () => {
-      mkdirSync(this.config.dataDir, { recursive: true })
-      mkdirSync(this.config.memoryDir, { recursive: true })
-      mkdirSync(this.config.messageDir, { recursive: true })
-      mkdirSync(join(this.config.workspace, '.agents', 'skills'), { recursive: true })
+      await ensureDirResilient(this.config.dataDir)
+      await ensureDirResilient(this.config.memoryDir)
+      await ensureDirResilient(this.config.messageDir)
+      await ensureSkillRoot(this.config.workspace)
       this.store.run(
         `INSERT INTO users(id, name, role, created_at) VALUES (?, ?, 'admin', ?)
          ON CONFLICT(id) DO NOTHING`,
@@ -74,12 +77,23 @@ export class TeamService {
           effort: model?.defaultEffort,
           color: 'teal',
         }, { type: 'system', id: 'system' })
+        for (const seed of this.config.seedBots ?? []) {
+          await this.createBot({
+            name: seed.name,
+            role: seed.role,
+            instructions: seed.instructions,
+            provider: model?.provider,
+            model: model?.model,
+            effort: model?.defaultEffort,
+            color: seed.color,
+          }, { type: 'system', id: 'system' })
+        }
       }
       syncSkills(this.store, this.config.skillRoot)
       seedModelPrices(this.store, this.config.modelPrices ?? [])
       const interrupted = this.store.all("SELECT id FROM runs WHERE status = 'running'")
       this.store.run(
-        `UPDATE runs SET status = 'queued', started_at = NULL, session_id = NULL
+        `UPDATE runs SET status = 'queued', started_at = NULL, last_progress_at = NULL, session_id = NULL
          WHERE status = 'running'`,
       )
       for (const run of interrupted) {
@@ -752,7 +766,35 @@ export class TeamService {
       this.addTaskEvent(taskId, 'commented', actor, { commentId })
       this.audit(actor, 'task.comment', 'task', taskId, { commentId })
     })
-    return this.store.get('SELECT * FROM task_comments WHERE id = ?', commentId)
+    const comment = this.store.get('SELECT * FROM task_comments WHERE id = ?', commentId)
+    const steered = await this.steerRunningTaskRun(task, comment, actor)
+    return { ...comment, steered }
+  }
+
+  // 任务运行期间的评论直接投递给正在执行的会话，避免只能等下一次运行才被读到。
+  async steerRunningTaskRun(task, comment, actor) {
+    if (!this.runtime?.steer || actor.type === 'bot') return false
+    const run = this.store.get(
+      "SELECT * FROM runs WHERE task_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+      task.id,
+    )
+    if (!run?.session_id) return false
+    const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
+    const author = this.actorName(actor)
+    try {
+      await this.runtime.steer(
+        run.session_id,
+        `New comment on ${project?.key ?? 'TASK'}-${task.number} from ${author}:\n${comment.body}\n\nIf this changes the plan, adjust the work in progress; otherwise keep going and mention it in the delivery report.`,
+      )
+      this.store.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), run.id, 'steered', `评论直通（${author}）`, nowIso(),
+      )
+      return true
+    } catch (error) {
+      this.logger.warn?.('dsh-team: steer run %s failed: %s', run.id, error)
+      return false
+    }
   }
 
   enqueueTaskRun(task, triggerType, actor) {
@@ -766,9 +808,9 @@ export class TeamService {
     const runId = id('run')
     const createdAt = nowIso()
     this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, trigger_type, trigger_ref, status,
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
         attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, ?, 'task', ?, ?, 'queued', 1, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?)`,
       runId, task.project_id, task.assignee_bot_id, task.id, triggerType, task.id, `task:${task.id}:${Date.now()}:${runId}`, createdAt,
     )
     this.store.run(
@@ -793,9 +835,9 @@ export class TeamService {
     const createdAt = nowIso()
     const triggerType = kind === 'review' ? 'review_requested' : 'blocked_handoff'
     this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, trigger_type, trigger_ref, status,
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
         attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 1, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?)`,
       runId, project.id, owner.id, task.id, kind, triggerType, task.id,
       `${kind}:${task.id}:${Date.now()}:${runId}`, createdAt,
     )
@@ -833,6 +875,58 @@ export class TeamService {
     return { binding, project, actor: { type: 'bot', id: binding.bot_id } }
   }
 
+  // 按需展开一条被截断的上下文：m_/c_/run_ 短 id 或任务编号 KEY-N。
+  recall(sessionId, ref) {
+    const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+    if (!binding) throw forbidden('当前会话不属于任何项目')
+    const project = this.projectRow(binding.project_id)
+    const raw = String(ref ?? '').trim()
+    if (!raw) throw badRequest('缺少要展开的引用 id')
+
+    if (raw.startsWith('m_')) {
+      const message = this.store.get(
+        'SELECT * FROM messages WHERE project_id = ? AND substr(id, -6) = ?',
+        project.id, raw.slice(2),
+      )
+      if (!message) throw notFound('消息不存在')
+      return `[${raw}] ${message.sender_type}:${message.sender_id} at ${message.created_at}\n\n${message.body}`
+    }
+    if (raw.startsWith('c_')) {
+      const comment = this.store.get(
+        `SELECT tc.*, t.number FROM task_comments tc JOIN tasks t ON t.id = tc.task_id
+         WHERE t.project_id = ? AND substr(tc.id, -6) = ?`,
+        project.id, raw.slice(2),
+      )
+      if (!comment) throw notFound('评论不存在')
+      return `[${raw}] ${project.key}-${comment.number} ${comment.author_type}:${comment.author_id} at ${comment.created_at}\n\n${comment.body}`
+    }
+    if (raw.startsWith('run_')) {
+      const run = this.store.get(
+        'SELECT * FROM runs WHERE project_id = ? AND substr(id, -6) = ?',
+        project.id, raw.slice(4),
+      )
+      if (!run) throw notFound('运行不存在')
+      return [
+        `[${raw}] kind=${run.kind} status=${run.status} bot=${run.bot_id}`,
+        run.error_code ? `error=${run.error_code}: ${run.error_message}` : '',
+        '',
+        run.output ?? '(no output)',
+      ].filter(Boolean).join('\n')
+    }
+    const task = this.resolveBotTask(project, raw)
+    const comments = this.store.all(
+      'SELECT author_type, author_id, body, created_at FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 10',
+      task.id,
+    ).reverse()
+    return [
+      `${project.key}-${task.number} [${task.status}] ${task.title}`,
+      `assignee: ${task.assignee_bot_id ?? 'unassigned'} | priority: ${task.priority} | review: ${task.review_target}`,
+      '',
+      task.description || '(no description)',
+      comments.length === 0 ? '' : `\nComments:\n${comments.map(item => `- ${item.author_type}:${item.author_id} (${item.created_at}): ${item.body}`).join('\n')}`,
+    ].filter(Boolean).join('\n')
+  }
+
   enqueueChatRun(project, bot, messageId) {
     if (bot.status !== 'active') return null
     const existing = this.store.get(
@@ -844,9 +938,9 @@ export class TeamService {
     const runId = id('run')
     const createdAt = nowIso()
     this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, kind, trigger_type, trigger_ref, status,
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
         attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, 'chat', 'mention', ?, 'queued', 1, ?, ?)`,
+       VALUES (?, ?, ?, 'chat', 'read', 'mention', ?, 'queued', 1, ?, ?)`,
       runId, project.id, bot.id, messageId, `chat:${messageId}:${bot.id}`, createdAt,
     )
     this.store.run(
@@ -902,9 +996,9 @@ export class TeamService {
     const newRunId = id('run')
     const createdAt = nowIso()
     this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, trigger_type, trigger_ref, status,
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
         attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, ?, 'task', 'retry', ?, 'queued', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'task', 'write', 'retry', ?, 'queued', ?, ?, ?)`,
       newRunId, task.project_id, task.assignee_bot_id, task.id, task.id,
       Number(run.attempt) + 1, `retry:${task.id}:${Date.now()}:${newRunId}`, createdAt,
     )
@@ -917,18 +1011,67 @@ export class TeamService {
     return this.store.get('SELECT * FROM runs WHERE id = ?', newRunId)
   }
 
+  // 同一条会话上的运行必须串行；任务运行独占自己的会话，可与群聊回复并行。
+  claimKey(run) {
+    return run.kind === 'task' && run.task_id ? `task:${run.task_id}` : `bot:${run.bot_id}`
+  }
+
+  // 运行超时由 runtime 的定时器负责；这里补充“还活着但没有任何进展”的判定。
+  async reapStalledRuns() {
+    const stallMs = this.config.stallTimeoutMs
+    if (!stallMs) return
+    const cutoff = new Date(Date.now() - stallMs).toISOString()
+    const stalled = this.store.all(
+      `SELECT id, kind, started_at, last_progress_at FROM runs
+       WHERE status = 'running' AND COALESCE(last_progress_at, started_at) < ?`,
+      cutoff,
+    )
+    for (const run of stalled) {
+      this.logger.warn?.('dsh-team: run %s made no progress since %s', run.id, run.last_progress_at ?? run.started_at)
+      try {
+        await this.runtime?.cancelRun?.(run.id)
+      } catch (error) {
+        this.logger.warn?.('dsh-team: cancel stalled run %s failed: %s', run.id, error)
+      }
+      await this.finishRun({
+        runId: run.id,
+        status: 'failed',
+        output: '',
+        error: {
+          code: 'RUN_STALLED',
+          message: `超过 ${Math.round(stallMs / 60_000)} 分钟没有任何进展，已中止`,
+        },
+      })
+    }
+  }
+
+  // 群聊只放结论：压缩空白、取首段、按上限截断。
+  chatSummary(output, maxChars = this.config.chatReplyMaxChars) {
+    const clean = String(output ?? '').replace(/\s+/g, ' ').trim()
+    if (!clean) return '模型未返回文本。'
+    if (clean.length <= maxChars) return clean
+    return `${clean.slice(0, maxChars).trimEnd()}…`
+  }
+
   async tick() {
     if (this.ticking || !this.started) return
     this.ticking = true
     try {
-      const activeRows = this.store.all("SELECT bot_id, COUNT(*) AS count FROM runs WHERE status = 'running' GROUP BY bot_id")
-      const activeByBot = new Map(activeRows.map(row => [row.bot_id, Number(row.count)]))
-      let activeTotal = activeRows.reduce((sum, row) => sum + Number(row.count), 0)
+      await this.reapStalledRuns()
+      const activeRows = this.store.all(
+        "SELECT bot_id, kind, task_id, project_id, mode FROM runs WHERE status = 'running'",
+      )
+      const activeKeys = new Set(activeRows.map(row => this.claimKey(row)))
+      const writingProjects = new Set(activeRows.filter(row => row.mode === 'write').map(row => row.project_id))
+      let activeTotal = activeRows.length
       if (activeTotal >= this.config.maxConcurrentRuns) return
       const candidates = this.store.all("SELECT * FROM runs WHERE status = 'queued' ORDER BY queued_at LIMIT 50")
       for (const run of candidates) {
         if (activeTotal >= this.config.maxConcurrentRuns) break
-        if ((activeByBot.get(run.bot_id) ?? 0) > 0) continue
+        const claimKey = this.claimKey(run)
+        if (activeKeys.has(claimKey)) continue
+        // 同一项目共享一个工作目录：写运行之间必须串行，只读运行可以并行。
+        if (run.mode === 'write' && writingProjects.has(run.project_id)) continue
         const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
         const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
         if (!project || !bot) {
@@ -945,12 +1088,13 @@ export class TeamService {
           continue
         }
         const claimed = this.store.run(
-          "UPDATE runs SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'",
-          nowIso(), run.id,
+          "UPDATE runs SET status = 'running', started_at = ?, last_progress_at = ? WHERE id = ? AND status = 'queued'",
+          nowIso(), nowIso(), run.id,
         )
         if (Number(claimed.changes) !== 1) continue
         activeTotal += 1
-        activeByBot.set(run.bot_id, 1)
+        activeKeys.add(claimKey)
+        if (run.mode === 'write') writingProjects.add(run.project_id)
         if (run.task_id && run.kind === 'task') {
           this.store.run(
             "UPDATE tasks SET status = 'in_progress', version = version + 1, updated_at = ? WHERE id = ? AND status NOT IN ('done', 'canceled')",
@@ -988,9 +1132,11 @@ export class TeamService {
       const chatMessage = run.kind === 'chat' && run.trigger_ref
         ? this.store.get('SELECT * FROM messages WHERE id = ?', run.trigger_ref)
         : null
+      if (run.mode === 'read') this.fingerprints.set(runId, this.workspaceFingerprint(project))
       await this.runtime.startRun({ run, bot, project, task, chatMessage })
     } catch (error) {
       this.logger.warn?.('dsh-team: run %s failed to start: %s', runId, error)
+      this.fingerprints.delete(runId)
       await this.finishRun({
         runId,
         status: 'failed',
@@ -1003,11 +1149,51 @@ export class TeamService {
     }
   }
 
+  // 项目目录的 git 指纹；不是 git 仓库时返回 null，跳过审计。
+  workspaceFingerprint(project) {
+    if (!project?.slug) return null
+    const dir = join(this.config.workspace, project.slug)
+    if (!existsSync(join(dir, '.git'))) return null
+    try {
+      return execFileSync('git', ['status', '--porcelain'], {
+        cwd: dir,
+        timeout: 5_000,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim()
+    } catch {
+      return null
+    }
+  }
+
+  // 只读运行（群聊、验收、受阻处理）不应该改文件；改了就在群里点名。
+  auditReadRunWrites(run, project) {
+    if (run.mode !== 'read' || !this.fingerprints.has(run.id)) {
+      this.fingerprints.delete(run.id)
+      return
+    }
+    const before = this.fingerprints.get(run.id)
+    this.fingerprints.delete(run.id)
+    if (before === null || !project) return
+    const after = this.workspaceFingerprint(project)
+    if (after === null || after === before) return
+    this.insertMessage({
+      projectId: project.id,
+      senderType: 'system',
+      senderId: 'system',
+      body: `只读运行（${run.kind}）修改了项目工作区，请确认是否应该由任务运行来做：\n${after.slice(0, 800)}`,
+      taskId: run.task_id ?? undefined,
+      runId: run.id,
+    })
+    this.logger.warn?.('dsh-team: read-only run %s changed the workspace', run.id)
+  }
+
   async finishRun({ runId, status, output, error }) {
     const run = this.runRow(runId)
     if (!['running', 'queued'].includes(run.status)) return
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
     const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
+    this.auditReadRunWrites(run, project)
     const usage = runUsageTotals(this.store, runId)
     const cleanOutput = text(output, 120_000)
     const endedAt = nowIso()
@@ -1069,13 +1255,14 @@ export class TeamService {
           )
           this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, { runId, identifier: `${project.key}-${task.number}` })
         })
+        const summary = this.chatSummary(cleanOutput)
         this.insertMessage({
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
           body: ownerReview
-            ? `任务 ${project.key}-${task.number} 已交付，等待负责人验收。\n\n${truncate(cleanOutput || '模型未返回文本。', 16_000)}`
-            : `任务 ${project.key}-${task.number} 已完成，待您验收。\n\n${truncate(cleanOutput || '模型未返回文本。', 16_000)}`,
+            ? `任务 ${project.key}-${task.number} 已交付，等待负责人验收。\n\n${summary}\n\n完整交付与验证记录见该任务评论。`
+            : `任务 ${project.key}-${task.number} 已完成，待您验收。\n\n${summary}\n\n完整交付与验证记录见该任务评论。`,
           taskId: task.id,
           runId,
         })
@@ -1462,7 +1649,7 @@ export class TeamService {
       },
       dsh: {
         native: true,
-        profile: this.runtime?.capabilityInfo?.().profile ?? process.env.DSH_PROFILE ?? 'bots',
+        profile: this.runtime?.capabilityInfo?.().profile ?? process.env.DSH_PROFILE ?? 'team-bots',
         home: this.config.dshHome,
         ...this.runtime?.capabilityInfo?.() ?? {},
       },
@@ -1561,8 +1748,10 @@ export class TeamService {
     return {
       current,
       latest,
-      profile: process.env.DSH_PROFILE || 'bots',
+      profile: process.env.DSH_PROFILE || 'team-bots',
       updateAvailable: current !== 'unknown' && compareVersions(latest, current) > 0,
+      // 仅容器部署（entrypoint 监督 exit 75）支持热升级；本机模式此值为 false。
+      hotUpgradeSupported: process.env.DSH_TEAM_CONTAINER === '1',
       checkedAt: nowIso(),
     }
   }
@@ -1587,6 +1776,31 @@ export class TeamService {
     if (current !== 'unknown' && compareVersions(target, current) <= 0) {
       return { current, target, restarted: false, upToDate: true }
     }
+    return this.requestDshRestart(target, current, actor)
+  }
+
+  async rebootDsh(actor = this.actor()) {
+    await this.initialize()
+    const active = this.store.get(
+      "SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')",
+    )?.count ?? 0
+    if (Number(active) > 0) {
+      throw conflict(`当前还有 ${active} 个排队或运行中的任务，请先停止后再重启 DSH`)
+    }
+    const current = process.env.DSH_RUNTIME_VERSION || 'unknown'
+    return this.requestDshRestart(current, current, actor)
+  }
+
+  requestDshRestart(target, current, actor) {
+    // exit(75) 只在容器内有 entrypoint 监督循环接管（root 重装并原地重启）；
+    // 本机模式下退出码无人接手，等于直接杀死宿主 dsh。因此仅容器内放行。
+    if (process.env.DSH_TEAM_CONTAINER !== '1') {
+      throw new AppError(
+        'DSH_HOT_UPGRADE_UNSUPPORTED',
+        '热升级/重启仅在容器部署下可用：本机模式请手动升级 dsh 后重启',
+        409,
+      )
+    }
     mkdirSync(this.config.dataDir, { recursive: true })
     const requestPath = join(this.config.dataDir, 'dsh-upgrade.json')
     writeFileSync(requestPath, JSON.stringify({
@@ -1595,13 +1809,13 @@ export class TeamService {
       requestedAt: nowIso(),
       requestedBy: `${actor.type}:${actor.id}`,
     }, null, 2), 'utf8')
-    this.audit(actor, 'dsh.upgrade.request', 'dsh', target, { current, target })
+    this.audit(actor, target === current ? 'dsh.reboot.request' : 'dsh.upgrade.request', 'dsh', target, { current, target })
     setTimeout(() => {
       // The container entrypoint sees 75, installs the requested version as root,
       // and relaunches DSH in place. Other exit codes are not retried.
       process.exit(75)
     }, 900)
-    return { current, target, restarted: true, upToDate: false, latest }
+    return { current, target, restarted: true, upToDate: false }
   }
 
   // 把某条价格恢复为配置里的默认值：写一条新版本，保留历史。
@@ -1631,7 +1845,7 @@ export class TeamService {
     await this.initialize()
     return {
       ok: true,
-      version: '0.1.0',
+      version: '0.2.0',
       ready: true,
       bots: this.store.get('SELECT COUNT(*) AS count FROM bots')?.count ?? 0,
       projects: this.store.get('SELECT COUNT(*) AS count FROM projects')?.count ?? 0,
@@ -1639,9 +1853,4 @@ export class TeamService {
       running: this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status = 'running'")?.count ?? 0,
     }
   }
-}
-
-function truncate(value, max) {
-  const textValue = String(value ?? '')
-  return textValue.length <= max ? textValue : `${textValue.slice(0, max)}\n\n[已截断，完整结果见运行记录]`
 }

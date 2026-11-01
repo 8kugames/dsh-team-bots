@@ -54,6 +54,24 @@ export function installTeamTools(ctx, service) {
   })
 
   ctx.tools.register({
+    name: 'team_recall',
+    description: 'Expand one truncated context item by its reference id. Accepts a message id (m_xxxxxx), a task comment id (c_xxxxxx), a run id (run_xxxxxx), or a task number such as DEMO-7. Returns the full stored text for that project only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Reference id copied from the prompt or a previous tool result' },
+      },
+      required: ['ref'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      return service.recall(sessionId, args.ref)
+    },
+  })
+
+  ctx.tools.register({
     name: 'team_remember',
     description: 'Save a durable fact, preference, decision or lesson to long-term memory. Do not store credentials or temporary details.',
     parameters: {
