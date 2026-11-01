@@ -1,25 +1,12 @@
-import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { resolveModelPrices } from './pricing.js'
 import { SEED_BOTS, SEED_OWNER } from './seed-bots.js'
 
-// Inside the container this is always the bound project workspace. Outside a
-// container it usually does not exist, and defaulting to it would create a
-// directory at the filesystem root, so fall back to the user's own workspace.
-const CONTAINER_WORKSPACE = '/workspace'
-
-export function defaultWorkspace(isDirectory = path => {
-  try {
-    return existsSync(path) && statSync(path).isDirectory()
-  } catch {
-    return false
-  }
-}) {
+export function defaultWorkspace() {
   const configured = process.env.DSH_TEAM_WORKSPACE?.trim()
   if (configured) return resolve(configured)
-  if (isDirectory(CONTAINER_WORKSPACE)) return CONTAINER_WORKSPACE
-  return join(homedir(), 'workspace')
+  return join(homedir(), '.dsh', 'workspace', 'team-bots')
 }
 
 const bool = (value, fallback = false) => {

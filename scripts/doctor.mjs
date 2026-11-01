@@ -1,12 +1,12 @@
-// Diagnostics for path and permission problems, useful both locally and in the
-// container. It prints the resolved layout and reports anything that would stop
-// the service from writing to its own directories.
+// Diagnostics for path and permission problems. It prints the resolved layout
+// and reports anything that would stop the service from writing to its own
+// directories.
 import { accessSync, constants, existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { resolveConfig, defaultWorkspace } from '../src/config.js'
+import { resolveConfig } from '../src/config.js'
 
 // Absolute filesystem paths referenced by a dsh patch (the global
 // ~/.dsh/cordis.patch.yml registers MCP runtimes this way). Returns unique
@@ -76,7 +76,6 @@ function main() {
   ]
 
   console.log(`node        ${process.versions.node}  uid=${process.getuid?.() ?? 'n/a'} gid=${process.getgid?.() ?? 'n/a'} home=${homedir()}`)
-  console.log(`container   ${defaultWorkspace() === '/workspace' ? 'yes (/workspace present)' : `no, using ${defaultWorkspace()}`}`)
 
   const dsh = spawnSync('dsh', ['--version'], { encoding: 'utf8' })
   const dshVersion = dsh.status === 0 ? String(dsh.stdout).trim() : (dsh.error?.code === 'ENOENT' ? 'not installed' : 'unknown')
@@ -110,7 +109,7 @@ function main() {
       console.log(`${''.padEnd(11)} ${ok ? 'ok      ' : 'MISSING '} ${ref}`)
     }
     if (refs.some(ref => !existsSync(ref))) {
-      console.log(`${''.padEnd(11)} regenerate the bridge with npm run docker:up (README 宿主能力桥), or fix the patch entry`)
+      console.log(`${''.padEnd(11)} fix the entry so the path exists on this machine, or remove it from the patch file`)
     }
   }
 

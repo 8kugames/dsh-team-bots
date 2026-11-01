@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Reports whether the official Agent Teams layer is loadable in the current
-// profile and which tool rows the profile ends up with. Run it inside the
-// container (or anywhere the `dsh` CLI and the profile are available):
+// profile and which tool rows the profile ends up with. Run it anywhere the
+// `dsh` CLI and the profile are available:
 //
-//   docker compose exec dsh-team node /app/scripts/verify-agent-team.mjs
+//   npm run verify:agent-team
 //
 // Exit code 0 means the profile configuration is consistent; 1 means the flag
 // and the installed packages disagree.

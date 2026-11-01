@@ -30,7 +30,7 @@ export function safeSlug(value) {
  * Create `directory` unless it already exists as a directory.
  *
  * A broken or self-referencing symlink (ELOOP) makes `mkdir -p` fail, which is
- * how `/workspace/.agents` can block startup after a bad manual `ln -s` or a
+ * how `<workspace>/.agents` can block startup after a bad manual `ln -s` or a
  * half-restored backup. Replace only symlinks that do not resolve to a real
  * directory; leave valid ones untouched.
  */

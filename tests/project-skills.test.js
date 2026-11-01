@@ -196,7 +196,7 @@ test('project session prompt tells the bot about the project skill pool', async 
     const runtime = new DshRuntime({ ctx: {}, config, store, logger: { info() {}, warn() {}, error() {} } })
     const prompt = runtime.systemPromptFor({ agent: { id: sessionId } })
     assert.ok(prompt.includes('Project skill pools are mounted at'), 'prompt 应说明项目技能池位置')
-    assert.ok(prompt.includes(`/workspace/${project.slug}/.agents/skills`), 'prompt 应带出项目技能根路径')
+    assert.ok(prompt.includes(`${workspace}/${project.slug}/.agents/skills`), 'prompt 应带出项目技能根路径')
     assert.ok(prompt.includes('`deploy`'), 'prompt 应列出可用项目技能')
   } finally {
     store.close()

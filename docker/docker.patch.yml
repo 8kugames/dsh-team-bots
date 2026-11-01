@@ -1,9 +1,0 @@
-- id: permission
-  config:
-    presets:
-      danger-full-access:
-        sandbox: danger-full-access
-        approval: never
-        name: Full access
-        description: The container is the security boundary. Bots can change every mounted file.
-    defaultPreset: danger-full-access

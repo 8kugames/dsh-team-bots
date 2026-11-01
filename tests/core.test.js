@@ -314,13 +314,12 @@ test('team data defaults under /workspace/.data and skill pool is separate', asy
   assert.equal(config.skillRoot, '/tmp/example-workspace/.agents')
 })
 
-test('workspace default uses the container mount but never the host filesystem root', async () => {
+test('workspace default resolves to ~/.dsh/workspace/team-bots unless configured', async () => {
   const { resolveConfig, defaultWorkspace } = await import('../src/config.js')
   const previous = process.env.DSH_TEAM_WORKSPACE
   try {
     delete process.env.DSH_TEAM_WORKSPACE
-    assert.equal(defaultWorkspace(() => true), '/workspace')
-    assert.equal(defaultWorkspace(() => false), join(homedir(), 'workspace'))
+    assert.equal(defaultWorkspace(), join(homedir(), '.dsh', 'workspace', 'team-bots'))
     process.env.DSH_TEAM_WORKSPACE = '/srv/team'
     assert.equal(defaultWorkspace(), resolve('/srv/team'))
     assert.equal(resolveConfig().workspace, resolve('/srv/team'))

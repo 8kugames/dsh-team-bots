@@ -1,6 +1,6 @@
 # DSH Team Bots
 
-运行在 Docker 中的 DSH Web + 团队 Bots 插件（包名 `dsh-team-bots`）。提供项目群聊、Linear 风格任务、Bot 长期记忆、共享技能池、版本化进化和全局/项目/Bot 三档用量统计。
+DSH Web + 团队 Bots 插件（包名 `dsh-team-bots`），本机随 DSH 运行。提供项目群聊、Linear 风格任务、Bot 长期记忆、共享技能池、版本化进化和全局/项目/Bot 三档用量统计。
 
 所有 Bot 执行统一走 DeepSeek Harness（DSH）Session，不接入 Claude Code、Codex、AutoGen 或其他 agent runtime。
 
@@ -20,86 +20,51 @@
 - 每轮任务与群聊回复后自动进行记忆审查，值得留存的结论自动写入记忆（`memory_review` 关闭可停用；群聊审查用 `chat_memory_review` 单独关）。
 - 密钥管道：管理页登记的密钥 AES-256-GCM 加密落库、物化为项目 `.team/secrets.env`，Bot 侧 `set -a; . .team/secrets.env` 使用；密钥值在消息、记忆、运行输出、轨迹落库前一律掩码为 `$名称`（名称与 `.team/secrets.env` 里的变量名一致）；Bot 可用 `team_request_secret` 发起待审请求。
 - 微信通道（`DSH_TEAM_WECHAT=1` 开启）：设置页扫码绑定个人微信（腾讯 iLink 官方协议，协议实现 vendored 自 `vendor/wechat-ilink`，上游 Tencent/openclaw-weixin MIT），扫码授权成功后自动把授权者绑定为管理员；此后任务完成主动推送，微信内可回复 `状态`、`详情 key-N`、`验收 key-N [评语]`、`驳回 key-N 理由` 管理验收；未连接期间的消息落盘补发。
-- 共享技能池固定为 `/workspace/.agents/skills`，技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）；技能池只列出技能根目录里当前存在的技能，文件被移除的技能在重新扫描后自动消失。
+- 共享技能池固定为 `<工作区>/.agents/skills`，技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）；技能池只列出技能根目录里当前存在的技能，文件被移除的技能在重新扫描后自动消失。
 - 项目技能池：自动扫描当前项目工作区的 `.agents/skills`、`.claude/skills`、`.codex/skills` 三个根，按 frontmatter `name` 去重（`.agents` > `.claude` > `.codex`）；这些技能只在当前项目可用，会进入该项目会话的补全与 Bot 系统提示，并优先于同名共享技能；发现结果不写入共享技能池。
 - token、调用次数、成本和运行时长按全局、项目、Bot 归集。
 
-## Docker 启动
+## 启动
 
-要求 Docker 24+、Compose v2.24+。容器挂载宿主机的 `~/.dsh`，因此全局 provider、插件、凭据和 DSH 配置全部继承；本插件只使用独立的 `~/.dsh/profiles/team-bots` profile。
-
-栈配置放在仓库外：`cp .env.example ~/.dsh/team-bots.env`（用 `DSH_TEAM_ENV_FILE` 可指向任意路径）。不要在项目根目录放 `.env`：compose 会自动加载它，direnv、编辑器 dotenv 插件或手动 `set -a; . .env` 还会把 `DSH_*` 带进本机进程，污染 `npm test` / `npm run dev`。文件可选，不创建则全部走 `docker-compose.yml` 里的默认值。
-
-```sh
-cp .env.example ~/.dsh/team-bots.env
-# 填写 DEEPSEEK_API_KEY；把实际访问域名/IP 加入 DSH_TRUSTED_HOST
-# Linux 下把 PUID/PGID 改成 ~/.dsh 和 workspace 的属主
-npm run docker:up   # 扫描宿主能力后以 --env-file 启动（见下方宿主能力桥，推荐）
-docker compose --env-file ~/.dsh/team-bots.env -f docker-compose.yml -f docker-compose.host-caps.yml logs -f dsh-team
-```
-
-Docker Compose 把 `${HOME}/.dsh` 挂到容器 `/home/node/.dsh`。若宿主没有 `profiles/team-bots`，入口脚本会从镜像模板初始化；不会覆盖宿主其他 profile 或全局配置。
-
-### 宿主能力桥
-
-宿主 `~/.dsh/cordis.patch.yml` 与当前 profile（`DSH_TEAM_PROFILE`，默认 `team-bots`；不复用宿主全局的 `DSH_PROFILE`，避免 shell 环境把容器带到别的 profile）的 patch 会以宿主绝对路径注册能力（例如 TapTap Maker MCP 的 `~/.taptap-maker/mcp-runtime/<ver>/dist/maker.js`）。`npm run docker:up` 在启动前自动扫描这些引用，推导挂载根并生成 `docker-compose.host-caps.yml`（已 gitignore，幂等再生），把每个能力**按原路径**挂进容器——注册引用逐字生效，宿主升级版本号后容器自动跟随：
-
-- home 内的能力树挂两条：原路径（注册里的绝对路径原样解析）+ `/home/node/<目录>`（供运行时以 `os.homedir()` 定位数据与凭据），默认可写（能力树通常带需刷新的登录态）；
-- home 外的目录挂原路径、只读；容器镜像自有的目录（`/usr`、`/opt` 等）永不被遮蔽，深层路径（如 npm 全局包所在）可正常挂载。
-
-接入新的宿主能力只需在宿主 patch 里注册，再跑一次 `npm run docker:up`——无需手改任何 YAML。`npm run doctor`（本地与容器内均可）逐条报告引用解析结果，缺失项提示重新生成桥。macOS 上 Docker Desktop 的 File Sharing 默认不含 `/Applications` 等路径：生成器会警告，要么在 Docker 设置中添加该路径，要么移除该引用，否则容器无法启动。
-
-访问 `http://<host>:13080/` 会自动完成登录并直接进入团队工作台：浏览器首次打开首页时，插件用当前启动 token 兑换一枚 30 天登录 Cookie，随后跳转到 `/api/dsh-team/ui`；此后打开首页同样直达工作台，无需任何手动步骤。禁用 Cookie 的浏览器会陷入重定向循环，此类客户端改用下面的手动 token 入口。
-
-手动入口（无 Cookie 客户端 / API 调试）：从日志读取 `dsh web: http://127.0.0.1:3080/?token=...`，把容器内 `3080` 换成宿主机端口 `13080` 打开。
-
-```text
-http://<host>:13080/                    自动登录，直达团队工作台
-http://<host>:13080/api/dsh-team/ui     DSH Team Bots 团队工作台（直连）
-```
-
-自动登录意味着**能连上这个端口的人即获得 owner 访问**。默认端口绑定 `0.0.0.0`，局域网内可达即等于授权；需要收紧时用防火墙或把 `DSH_TEAM_PORT` 发布改为 `127.0.0.1:13080:3080`。Host 白名单栅栏（`DSH_TRUSTED_HOST`）对伪造 Host 的请求仍然返回 403。
-
-界面按工作区逻辑组织多项目：左侧树展示「群聊」（每个群聊对应一个项目）与「Bots」两棵列表，底部是全局配置；选中群聊后，顶部以 tab 切换群聊、任务、Bots、技能、记忆、进化、用量、设置八个模块，有待人工处理事项（待验收任务、待审提案）的 tab 会亮小红点。
-
-## 本地运行（不用 Docker）
-
-Docker 在这里只做一件事——**当沙箱**。Bot 运行在 DSH 的 `danger-full-access` 下，能执行任意命令；容器把它关在可随意丢弃的文件系统里，直接在宿主机跑，等于把你账户的全部权限交给自动执行的 Bot。**改 UI、调 prompt 用本地，真正跑任务用容器。**
-
-### 模式 A：本机真实 DSH（有完整能力，没有沙箱）
-
-本机已可检测到 DSH CLI（`dsh --version`）。把插件装进同一个 `team-bots` profile 即可，UI 路由与容器内完全一致：
+本插件随 DSH Web 在本机进程内运行。要求 Node 22.19+ 与已安装的 DSH CLI（`dsh --version` 自查）。插件使用独立的 `team-bots` profile，不与日常 profile 混用：
 
 ```sh
 cd <repo>
 npm pack                                        # 产出 dsh-team-bots-<version>.tgz
 dsh plugin --profile team-bots add ./dsh-team-bots-<version>.tgz
-DSH_TEAM_WORKSPACE=$HOME/workspace \
-DSH_TEAM_DATA=$HOME/workspace/.data \
-  dsh --profile team-bots
-# 打开 http://127.0.0.1:<port>/api/dsh-team/ui
+dsh --profile team-bots                         # 从启动日志读取 dsh web 的带 token 入口
 ```
 
-路径解析规则：`DSH_TEAM_WORKSPACE` > 容器内 `/workspace`（存在时）> `~/workspace`。**本机不会去创建根目录下的 `/workspace`**。数据目录默认落在工作区下的 `.data`。
+项目管理走工作区目录：`DSH_TEAM_WORKSPACE` 指定任意目录，项目、`_the_bots` 单聊区、共享技能池（`.agents`）与团队数据（`.data`）都落在它下面；不设置时默认 `~/.dsh/workspace/team-bots/`。数据目录还可用 `DSH_TEAM_DATA` 单独指定。常用变量的模板见 `.env.example`——本地按需导出即可，不要在仓库根目录放 `.env`：direnv、编辑器 dotenv 插件或手动 `set -a; . .env` 会把 `DSH_*` 带进本机进程，污染 `npm test` / `npm run dev`。
 
-风险要自己承担：Bot 用你的 uid 运行，读写你的 `~/.ssh`、`~/.aws` 和任何其他目录；只建议用于 UI 验证和单次调试。
+首次访问 `http://<host>:<port>/` 会自动完成登录并直接进入团队工作台：浏览器首次打开首页时，插件用当前启动 token 兑换一枚 30 天登录 Cookie，随后跳转到 `/api/dsh-team/ui`；此后打开首页同样直达工作台，无需任何手动步骤。禁用 Cookie 的浏览器会陷入重定向循环，此类客户端改用下面的手动 token 入口。
 
-### 模式 B：纯 UI 开发预览
+手动入口（无 Cookie 客户端 / API 调试）：从启动日志读取 `dsh web: http://127.0.0.1:<port>/?token=...` 打开。
+
+```text
+http://<host>:<port>/                     自动登录，直达团队工作台
+http://<host>:<port>/api/dsh-team/ui      DSH Team Bots 团队工作台（直连）
+```
+
+自动登录意味着**能连上这个端口的人即获得 owner 访问**。服务只应监听本机或受信任网络；需要对外提供时走 HTTPS 反向代理并正确转发 Host 与 WebSocket。Host 白名单栅栏（`DSH_TRUSTED_HOST`，DSH 核心 env）对伪造 Host 的请求仍然返回 403。
+
+界面按工作区逻辑组织多项目：左侧树展示「群聊」（每个群聊对应一个项目）与「Bots」两棵列表，底部是全局配置；选中群聊后，顶部以 tab 切换群聊、任务、Bots、技能、记忆、进化、用量、设置八个模块，有待人工处理事项（待验收任务、待审提案）的 tab 会亮小红点。
+
+## UI 开发预览
 
 ```sh
 npm run dev        # http://127.0.0.1:4317
 ```
 
-使用假 runtime，不动任何 DSH 配置，数据写在仓库内的 `.dev/`，无认证。改 UI 用它，不要用它跑任务。
+使用假 runtime，不动任何 DSH 配置，数据写在仓库内的 `.dev/`，无认证。改 UI、调 prompt 用它，不要用它跑任务。
 
-### 路径与权限自查
+## 路径与权限自查
 
 ```sh
-npm run doctor                                   # 本机
-docker compose exec dsh-team node /home/node/.dsh/profiles/team-bots/node_modules/dsh-team-bots/scripts/doctor.mjs
+npm run doctor
 ```
 
-输出 Node/DSH 版本、是否判定为容器环境、`DSH_HOME`、`workspace`、`.data`、`.agents` 的类型与实际路径，并标注是否可写；有问题时退出码 1。启动报错先跑它。
+输出 Node/DSH 版本、`DSH_HOME`、`workspace`、`.data`、`.agents` 的类型与实际路径，并标注是否可写；有问题时退出码 1。启动报错先跑它。它还会逐条报告 `~/.dsh/cordis.patch.yml` 里引用的宿主绝对路径是否解析得到（patch 注册的 MCP 能力按本机绝对路径生效，断链会让对应 bundle 每次启动失败）。
 
 ## 字体、主题与 DSH 能力
 
@@ -108,24 +73,24 @@ docker compose exec dsh-team node /home/node/.dsh/profiles/team-bots/node_module
 - 顶栏 `Aa` 或左侧「全局配置」可调整字号（100%–140%），保存在浏览器本地。
 - 每个 Bot 是 DSH 原生 Session；角色作为 system prompt section 注入，不替换 DSH prompt。
 - 模型、reasoning effort、Tools、插件、MCP、Skill 注册表、文件工具、流式事件和登录态全部继承 DSH。
-- 本插件只额外注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_propose_evolution`、`team_recall`，并将 `/workspace/.agents` 注册为 Skill Provider。
-- 全局配置来自宿主机 `~/.dsh`，插件 profile 固定为 `~/.dsh/profiles/team-bots`。
+- 本插件只额外注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_propose_evolution`、`team_recall`，并将 `<工作区>/.agents` 注册为 Skill Provider。
+- 全局配置来自本机 `~/.dsh`，插件 profile 固定为 `~/.dsh/profiles/team-bots`。
 
 ## 目录
 
 ```text
-~/.dsh/                      -> /home/node/.dsh（宿主机挂载）
-  cordis.patch.yml           -> 宿主机全局 provider / 插件配置
-  profiles/team-bots/        -> DSH Team Bots 插件的 DSH profile
-  sessions/                  -> DSH 原生会话
-WORKSPACE_HOST_DIR/          -> /workspace
-  .agents/skills/            -> 共享技能池
-  .data/                     -> 团队 SQLite、运行记录、记忆镜像
-  _the_bots/{bot}/           -> 各 Bot 的单聊专属工作区
-  {project-slug}/            -> 各项目工作区
+~/.dsh/
+  cordis.patch.yml           全局 provider / 插件配置
+  profiles/team-bots/        DSH Team Bots 插件的 DSH profile
+  sessions/                  DSH 原生会话
+  workspace/team-bots/       默认团队工作区（DSH_TEAM_WORKSPACE 可指向别处）
+    .agents/skills/          共享技能池
+    .data/                   团队 SQLite、运行记录、记忆镜像
+    _the_bots/{bot}/         各 Bot 的单聊专属工作区
+    {project-slug}/          各项目工作区
 ```
 
-所有可变团队数据都在 `/workspace/.data`，不依赖宿主 `/data` 卷；DSH 全局配置与会话仍在宿主 `~/.dsh`。备份必须包含宿主机 `~/.dsh` 和 `/workspace`。不要挂载宿主机根目录或 Docker socket。
+所有可变团队数据都在工作区的 `.data`，不依赖仓库目录；DSH 全局配置与会话在本机 `~/.dsh`。备份必须同时包含 `~/.dsh`（profile、sessions）和整个工作区目录（含 `.data/secret.key`）。
 
 ## 群聊和任务
 
@@ -178,7 +143,7 @@ WORKSPACE_HOST_DIR/          -> /workspace
 - 值永不回显：管理页只显示指纹（sha256 前 8 位）；消息、运行输出、记忆、轨迹落库前把已知密钥值替换为 `$名称` 掩码。
 - 主密钥指纹登记在库的 settings 里，启动时比对：库里已有密文而密钥对不上直接拒绝启动，不会静默换一把新密钥写坏既有密文。`data/secret.key` 必须与 `team.sqlite` 一起备份（`npm run backup` 会一并带走它和 `wechat-channel.sqlite`）。
 - Bot 用 `team_request_secret` 发起请求（附理由），群里出系统卡片，设置页批准（写入值并物化）或拒绝。
-- 容器内全员 `danger-full-access` 保持不变：安全边界仍是容器（见「安全边界」）。
+- Bot 以当前用户身份运行（见「安全边界」），密钥物化与掩码照常生效。
 
 ## 限额与看门狗
 
@@ -194,18 +159,18 @@ WORKSPACE_HOST_DIR/          -> /workspace
 
 ## 官方 Agent Teams 开关
 
-构建与运行使用同一个 `DSH_TEAM_AGENT_TEAM`（默认 0）：构建时为 1 才把 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 装进镜像 profile 模板，运行时为 1 才在 profile 里启用。要开团队层，在 `~/.dsh/team-bots.env` 设一次 `DSH_TEAM_AGENT_TEAM=1`，两端同时生效。
+`DSH_TEAM_AGENT_TEAM`（默认 0）控制插件侧是否启用官方团队层。启用前需先给 `team-bots` profile 安装配套包 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 并挂入 profile bundle；插件侧只控制提示词与调度。要开团队层，启动前导出 `DSH_TEAM_AGENT_TEAM=1`。
 
 - `1`：每个任务会话可以把任务拆成具名 teammate 并行执行（共享项目工作区），最多 `DSH_TEAM_MAX_TEAMMATES` 个；群聊、验收仍由项目会话负责。
 - `0`（默认）：不加载团队层。
 
-注意：启用该层会替换 DSH 顶层 `subagent` 工具。先把共享技能池和 Bot 指令里对 `subagent` 的依赖改掉再开。启用后用 `npm run verify:agent-team`（容器内同路径）检查 profile 状态；Router 会话要真正不带写工具，需按 `docs/agent-teams-plan.md` 附录 A 定义受限 agent preset 并设 `DSH_TEAM_ROUTER_PRESET`，只读运行的越权写入由项目写审计兜底。
+注意：启用该层会替换 DSH 顶层 `subagent` 工具。先把共享技能池和 Bot 指令里对 `subagent` 的依赖改掉再开。启用后用 `npm run verify:agent-team` 检查 profile 状态；Router 会话要真正不带写工具，需按 `docs/agent-teams-plan.md` 附录 A 定义受限 agent preset 并设 `DSH_TEAM_ROUTER_PRESET`，只读运行的越权写入由项目写审计兜底。
 
 ## 模型与强度
 
 模型列表来自 DSH 的 provider 注册表。Bot 保存 `provider + model + effort`，每次运行前通过 `sessionController.selectModel` 应用。没有配置模型时 Bot 可以创建，但运行会明确报错。
 
-若使用 OpenAI 兼容中转，在宿主机 `~/.dsh/cordis.patch.yml` 中配置 DSH provider，参考 [DSH / DS-Bot 配置方式](https://github.com/Fei2411/DS-Bot/blob/main/docker/README.md#custom-model-endpoint)。团队插件不维护独立 provider 配置。
+若使用 OpenAI 兼容中转，在本机 `~/.dsh/cordis.patch.yml` 中配置 DSH provider，参考 [DSH / DS-Bot 配置方式](https://github.com/Fei2411/DS-Bot/blob/main/docker/README.md#custom-model-endpoint)。团队插件不维护独立 provider 配置。
 
 ## 记忆与进化
 
@@ -255,7 +220,7 @@ WORKSPACE_HOST_DIR/          -> /workspace
             currency: CNY
 ```
 
-2. 环境变量 `DSH_TEAM_MODEL_PRICES`（JSON 数组，字段同上；`docker-compose.yml` 已透传）。
+2. 环境变量 `DSH_TEAM_MODEL_PRICES`（JSON 数组，字段同上）。
 3. 内置默认值。
 
 生效规则：
@@ -267,15 +232,13 @@ WORKSPACE_HOST_DIR/          -> /workspace
 
 输入、输出、缓存读写都按每百万 token 计价。
 
-限制：单容器内无法可靠按 Bot 归因 CPU/内存，只归因 token、成本、调用次数和运行时长。
+限制：不做按 Bot 的 CPU/内存归因，只归因 token、成本、调用次数和运行时长。
 
 ## 安全边界
 
-- Docker 容器是安全边界，DSH 在容器内使用 `danger-full-access`。
-- `/workspace/{project}` 是逻辑隔离，不是强沙箱；不要在一个容器中运行互不信任的团队。
+- 本插件不自带沙箱：Bot 会话在 DSH 的 `danger-full-access` 下以当前用户身份执行任意命令，能读写该用户可达的一切文件；`~/.dsh/cordis.patch.yml` 注册的 MCP 能力也按本机路径直接生效，其登录态与缓存同样暴露给 Bot。
+- `<工作区>/{project}` 只是逻辑隔离，不是强沙箱；互不信任的团队不要共用同一个 DSH 实例与工作区。
 - 生产必须通过 HTTPS 反向代理，并正确转发 Host 和 WebSocket。
-- 不要给容器挂载宿主机根目录、SSH 私钥、其他项目或 Docker socket。
-- 宿主能力桥（`docker-compose.host-caps.yml`，自动生成）把 patch 引用的能力树挂入容器：home 内可写（与 `~/.dsh` 同一边界语义，bot 可读写宿主登录态与缓存），home 外只读。不需要某能力就从宿主 patch 注册中移除该引用，再跑 `npm run docker:up`。
 - 群聊、自动记忆和任务会产生模型调用，请设置项目预算和并发上限。
 
 ## 开发
@@ -290,20 +253,18 @@ node scripts/dev-server.js
 
 ## DSH 版本与升级
 
-Docker 构建不写死 DSH 版本：未设置 `DSH_VERSION` 时，构建阶段从 npm registry 解析最新的非 alpha 版本并安装。需要固定时可在 `~/.dsh/team-bots.env` 设置 `DSH_VERSION`。
-
 运行中可在「全局配置 → DSH 运行时」检查并升级：
 
 1. 插件查询 npm 上最新非 alpha 版本。
 2. 有排队/运行中任务时拒绝升级。
 3. 写入升级请求，DSH 进程以退出码 75 结束。
-4. 容器入口脚本以 root 安装目标版本，再以相同 profile 原地启动 DSH，完成热重启。
+4. 本地没有入口脚本代劳：按页面显示的目标版本手动安装（如 `npm install -g @deepseek-ai/dsh@<version>`），再以相同 profile 重启 DSH。
 
 ## 故障排查
 
-**`mkdir: cannot create directory '/workspace/.agents': Too many levels of symbolic links`**
+**`mkdir: cannot create directory '<工作区>/.agents': Too many levels of symbolic links`**
 
-工作区里的 `.agents` 或 `.data` 是自引用/断链符号链接（同步盘、手工 `ln -s`、半恢复的备份都可能造成），`mkdir -p` 直接以 ELOOP 退出。入口脚本会先探测：
+工作区里的 `.agents` 或 `.data` 是自引用/断链符号链接（同步盘、手工 `ln -s`、半恢复的备份都可能造成），`mkdir -p` 直接以 ELOOP 退出。插件启动时会先探测：
 
 - 链接能解析到真实目录且在工作区内：保留，不动。
 - 链接断链、自引用：打印一行说明后替换成真实目录。
@@ -311,12 +272,12 @@ Docker 构建不写死 DSH 版本：未设置 `DSH_VERSION` 时，构建阶段�
 
 `ensureSkillRoot`（`src/paths.js`）同样处理，并拒绝指向工作区外的技能池链接。
 
-**`/workspace` 不可写**
+**工作区不可写**
 
-容器首次启动会创建缺失的挂载目录（属主 root）。入口脚本用 `gosu node test -w /workspace` 探测，只有不可写时才改属主，不会动已有的宿主目录结构。若仍提示不可写，检查 `~/.dsh/team-bots.env` 里的 `PUID`/`PGID` 是否等于宿主机目录属主。
+Bot 与服务以当前用户运行，工作区目录属主必须可写。用 `npm run doctor` 逐项检查 `workspace`、`.data`、`.agents` 的实际路径与可写性。
 
 ## 基线
 
-- DSH：构建时动态解析最新非 alpha 版本；实际版本显示在「全局配置 → DSH 运行时」。
+- DSH：本机安装的版本；最新版检查见「全局配置 → DSH 运行时」。
 - 架构参考：[DS-Bot](https://github.com/Fei2411/DS-Bot)、[Cindy](https://github.com/makecindy/cindy)
 - License: Apache-2.0，见 `LICENSE` 和 `NOTICE`

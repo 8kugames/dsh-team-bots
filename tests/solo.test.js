@@ -248,7 +248,7 @@ test('单聊会话：身份提示词、运行提示词与 recall', async () => {
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('sess-solo', 'b1', NULL, 'solo', NULL, ?)",
       now,
     )
-    const runtime = new DshRuntime({ ctx: {}, config: { chatReplyMaxChars: 800 }, store, logger: { warn() {} } })
+    const runtime = new DshRuntime({ ctx: {}, config, store, logger: { warn() {} } })
 
     const identity = runtime.systemPromptFor({ agent: { id: 'sess-solo' } })
     assert.match(identity, /Solo conversation/)

@@ -317,7 +317,7 @@ test('任务会话的 system prompt 走执行者身份，不再承担群聊分�
       `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)`,
       'sess-project', 'b1', 'p1', 'project', null, now,
     )
-    const runtime = new DshRuntime({ ctx: {}, config: {}, store, logger: { warn() {} } })
+    const runtime = new DshRuntime({ ctx: {}, config: { workspace: join(root, 'workspace') }, store, logger: { warn() {} } })
 
     const taskPrompt = runtime.systemPromptFor({ agent: { id: 'sess-task' } })
     assert.match(taskPrompt, /executing one assigned task/)

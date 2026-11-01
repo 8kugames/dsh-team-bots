@@ -208,15 +208,16 @@ export class DshRuntime {
        ORDER BY slug`,
       project.id,
     )
+    const ws = this.config.workspace
     const sharedRules = [
       disabledSkills.length === 0
-        ? '- The shared skill library is mounted at `/workspace/.agents/skills`; use installed skills when relevant.'
-        : `- The shared skill library is mounted at \`/workspace/.agents/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
+        ? `- The shared skill library is mounted at \`${ws}/.agents/skills\`; use installed skills when relevant.`
+        : `- The shared skill library is mounted at \`${ws}/.agents/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
       bindings.length > 0
         ? `- Pinned skill versions for this project: ${bindings.map(item => `\`${item.slug}\`@${item.version ?? 'latest'}`).join(', ')}.`
         : '- No skill version is pinned for this project; use the current published version.',
       '- Work only inside this project workspace unless the user explicitly authorizes another mounted path.',
-      '- The shared skill library at `/workspace/.agents` is read-only for you; publish skill changes through `team_propose_evolution` so the user can approve them.',
+      `- The shared skill library at \`${ws}/.agents\` is read-only for you; publish skill changes through \`team_propose_evolution\` so the user can approve them.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
@@ -227,7 +228,7 @@ export class DshRuntime {
     const projectSkillRules = projectSkills.length === 0
       ? []
       : [
-          `- Project skill pools are mounted at \`/workspace/${project.slug}/.agents/skills\`, \`/workspace/${project.slug}/.claude/skills\`, \`/workspace/${project.slug}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
+          `- Project skill pools are mounted at \`${ws}/${project.slug}/.agents/skills\`, \`${ws}/${project.slug}/.claude/skills\`, \`${ws}/${project.slug}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
           `- Project skills available here: ${projectSkills.map(skill => `\`${skill.name}\``).join(', ')}.`,
         ]
     const collaborationRules = taskSession
@@ -255,7 +256,7 @@ export class DshRuntime {
       '## Current project',
       `- Name: ${project.name}`,
       `- Key: ${project.key}`,
-      `- Workspace: ${project.workspace_path || `/workspace/${project.slug}`}`,
+      `- Workspace: ${project.workspace_path || join(this.config.workspace, project.slug)}`,
       roleLine,
       '',
       teamRules,
@@ -278,7 +279,7 @@ export class DshRuntime {
     const memoryText = memories.length === 0
       ? 'No saved memories yet.'
       : memories.map(item => `- ${item.topic}: ${item.content}`).join('\n')
-    const workspace = bot.solo_dir ? `/workspace/_the_bots/${bot.solo_dir}` : '/workspace/_the_bots'
+    const workspace = bot.solo_dir ? join(this.config.workspace, '_the_bots', bot.solo_dir) : join(this.config.workspace, '_the_bots')
     return [
       '# Team bot identity',
       `You are ${bot.name}, a project bot on the user's team.`,
@@ -290,7 +291,7 @@ export class DshRuntime {
       `- Your workspace for this conversation is \`${workspace}\`; work inside it when the user asks you to produce or store files.`,
       '- Project tools (team_assign_task, team_review_task) do not apply here because there is no project context. If the user wants project work, suggest opening that project instead.',
       '- Use `team_remember` with scope bot or team for durable facts worth keeping; scope project is unavailable in this conversation. Never store secrets or credentials.',
-      '- The shared skill library is mounted at `/workspace/.agents/skills`; use installed skills when relevant. The library at `/workspace/.agents` is read-only for you; publish skill changes through `team_propose_evolution`.',
+      `- The shared skill library is mounted at \`${this.config.workspace}/.agents/skills\`; use installed skills when relevant. The library at \`${this.config.workspace}/.agents\` is read-only for you; publish skill changes through \`team_propose_evolution\`.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
@@ -514,7 +515,7 @@ export class DshRuntime {
     const header = [
       `You are: ${bot.name}`,
       'Mode: one-on-one conversation (outside projects)',
-      `Workspace: /workspace/_the_bots/${bot.solo_dir}`,
+      `Workspace: ${join(this.config.workspace, '_the_bots', bot.solo_dir)}`,
     ].join('\n')
     const recent = this.store.all(
       'SELECT id, sender_type, sender_id, body FROM solo_messages WHERE bot_id = ? ORDER BY created_at DESC LIMIT 12',
@@ -539,7 +540,7 @@ Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatRe
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage })
     const header = [
       `Project: ${project.name} (${project.key})`,
-      `Workspace: /workspace/${project.slug}`,
+      `Workspace: ${join(this.config.workspace, project.slug)}`,
       `You are: ${bot.name}`,
     ].join('\n')
     const taskComments = task
