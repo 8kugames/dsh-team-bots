@@ -7,7 +7,7 @@ DSH Web + 团队 Bots 插件（包名 `dsh-team-bots`），本机随 DSH 运行�
 ## 功能
 
 - 每个 Bot 独立配置角色、模型、reasoning effort 和长期记忆。
-- 首次启动默认出场负责人「chief」与五个游戏团队伙伴：designer、programmer、graphics-rendering、devops、artist（定义见 `src/seed-bots.js`）。
+- 首次启动默认出场负责人「chief」与五个游戏团队伙伴：designer（策划）、programmer（程序）、graphics（图形渲染）、devops（工具链与运维）、artist（美术）（定义见 `src/seed-bots.js`）。
 - 每个项目自动创建群聊、负责人 Bot、任务编号和独立工作区。
 - 群聊支持普通消息、`@Bot`、`/task @Bot 标题`、`/remember 内容` 和 `/clear`（清空本群聊天记录，任务与记忆保留）；输入 `/` 或 `@` 会弹出命令、共享技能与成员的自动补全。
 - 任务运行使用独立会话，长任务不会阻塞同一个 Bot 的群聊回复。
@@ -16,26 +16,27 @@ DSH Web + 团队 Bots 插件（包名 `dsh-team-bots`），本机随 DSH 运行�
 - 负责人 Bot 可用 `team_assign_task` 向成员分派或重派任务，用 `team_review_task` 验收交付。
 - Bot 可用 `team_remember` 写入记忆，用 `team_propose_evolution` 提交角色/技能提案。
 - Bot 之间可用 `team_message_bot` 直接私信协作，回信自动送回发起会话（忙时注入、闲时新轮投递）。
-- 会话上下文由内置 steward 接管：占用达到窗口阈值时自动总结滚动到新会话，checkpoint 播种给下一轮，长任务不再被截断。
 - 每轮任务与群聊回复后自动进行记忆审查，值得留存的结论自动写入记忆（`memory_review` 关闭可停用；群聊审查用 `chat_memory_review` 单独关）。
 - 密钥管道：管理页登记的密钥 AES-256-GCM 加密落库、物化为项目 `.team/secrets.env`，Bot 侧 `set -a; . .team/secrets.env` 使用；密钥值在消息、记忆、运行输出、轨迹落库前一律掩码为 `$名称`（名称与 `.team/secrets.env` 里的变量名一致）；Bot 可用 `team_request_secret` 发起待审请求。
 - 微信通道（`DSH_TEAM_WECHAT=1` 开启）：设置页扫码绑定个人微信（腾讯 iLink 官方协议，协议实现 vendored 自 `vendor/wechat-ilink`，上游 Tencent/openclaw-weixin MIT），扫码授权成功后自动把授权者绑定为管理员；此后任务完成主动推送，微信内可回复 `状态`、`详情 key-N`、`验收 key-N [评语]`、`驳回 key-N 理由` 管理验收；未连接期间的消息落盘补发。
 - 共享技能池固定为本机 `~/.agents/skills`（与用户其他 agent 工具共用同一目录），技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）；技能池只列出技能根目录里当前存在的技能，文件被移除的技能在重新扫描后自动消失。
-- 项目技能池：自动扫描当前项目工作区的 `.agents/skills`、`.claude/skills`、`.codex/skills` 三个根，按 frontmatter `name` 去重（`.agents` > `.claude` > `.codex`）；这些技能只在当前项目可用，会进入该项目会话的补全与 Bot 系统提示，并优先于同名共享技能；发现结果不写入共享技能池。
+- 项目技能池：自动扫描项目目录（项目设了生产目录时以生产目录为准，否则为工作区 `{project-slug}`）的 `.agents/skills`、`.claude/skills`、`.codex/skills` 三个根，按 frontmatter `name` 去重（`.agents` > `.claude` > `.codex`）；这些技能只在当前项目可用，会进入该项目会话的补全与 Bot 系统提示，并优先于同名共享技能；发现结果不写入共享技能池。
 - token、调用次数、成本和运行时长按全局、项目、Bot 归集。
 
 ## 启动
 
-本插件随 DSH Web 在本机进程内运行。要求 Node 22.19+ 与已安装的 DSH CLI（`dsh --version` 自查）。插件使用独立的 `team-bots` profile，不与日常 profile 混用：
+本插件随 DSH Web 在本机进程内运行。要求 Node 22.19+ 与已安装的 DSH CLI（`dsh --version` 自查）。插件直接安装进指定的 `--profile`（可以是日常 `web` 等任意 profile；profile 不存在时 `dsh plugin` 按模板初始化）：
 
 ```sh
 cd <repo>
 npm pack                                        # 产出 dsh-team-bots-<version>.tgz
-dsh plugin --profile team-bots add ./dsh-team-bots-<version>.tgz
-dsh --profile team-bots                         # 从启动日志读取 dsh web 的带 token 入口
+dsh plugin --profile <名字> add ./dsh-team-bots-<version>.tgz
+dsh --profile <名字>                             # 从启动日志读取 dsh web 的带 token 入口
 ```
 
-已有 pnpm 管理的 profile（依赖钉在本地 tarball）时，用 `npm run profile:install` 一键刷新：打包到仓库 `.dist/` 并在 `~/.dsh/profiles/team-bots` 重装，完成后重启 DSH 生效。
+一键刷新（打包到仓库 `.dist/` 并重装进指定 profile，依赖钉在本地 tarball；缺省装 `team-bots`）：`npm run profile:install -- --profile <名字>`，完成后重启 DSH 生效。
+
+无论装进哪个 profile，团队数据都与 profile 解耦：数据目录只由 `DSH_TEAM_WORKSPACE` / `DSH_TEAM_DATA` 决定（缺省 `~/.dsh/workspace/team-bots/.data`），换 profile 安装或并存多份安装读写的都是同一份数据。
 
 项目管理走工作区目录：`DSH_TEAM_WORKSPACE` 指定任意目录，项目、`_the_bots` 单聊区与团队数据（`.data`）都落在它下面；不设置时默认 `~/.dsh/workspace/team-bots/`。共享技能池不随工作区走，固定为本机 `~/.agents/skills`。数据目录还可用 `DSH_TEAM_DATA` 单独指定。常用变量的模板见 `.env.example`——本地按需导出即可，不要在仓库根目录放 `.env`：direnv、编辑器 dotenv 插件或手动 `set -a; . .env` 会把 `DSH_*` 带进本机进程，污染 `npm test` / `npm run dev`。
 
@@ -78,23 +79,23 @@ npm run doctor
 - 顶栏 `Aa` 或左侧「全局配置」可调整字号（100%–140%），保存在浏览器本地。
 - 每个 Bot 是 DSH 原生 Session；角色作为 system prompt section 注入，不替换 DSH prompt。
 - 模型、reasoning effort、Tools、插件、MCP、Skill 注册表、文件工具、流式事件和登录态全部继承 DSH。
-- 本插件只额外注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_propose_evolution`、`team_recall`，并将 `~/.agents` 注册为 Skill Provider。
-- 全局配置来自本机 `~/.dsh`，插件 profile 固定为 `~/.dsh/profiles/team-bots`。
+- 本插件只额外注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_recall`、`team_propose_evolution`、`team_message_bot`、`team_request_secret` 七个团队工具，并将 `~/.agents` 注册为 Skill Provider。
+- 全局配置来自本机 `~/.dsh`；插件装在你指定的 `~/.dsh/profiles/<名字>`（缺省 `team-bots`），数据不随 profile 走。
 
 ## 目录
 
 ```text
 ~/.dsh/
   cordis.patch.yml           全局 provider / 插件配置
-  profiles/team-bots/        DSH Team Bots 插件的 DSH profile
+  profiles/<名字>/           安装了本插件的 DSH profile（缺省 team-bots，可装多份共享同一数据）
   sessions/                  DSH 原生会话
   workspace/team-bots/       默认团队工作区（DSH_TEAM_WORKSPACE 可指向别处）
     .data/                   团队 SQLite、运行记录、记忆镜像
     _the_bots/{bot}/         各 Bot 的单聊专属工作区
-    {project-slug}/          各项目管理目录（技能池等团队数据）
+    {project-slug}/          各项目管理目录（无外部生产目录时兼作项目技能池位置）
 ```
 
-新建项目时可指定**生产目录**（绝对路径，可指向既有代码库等本机目录）：Bot 会话的工作目录、`.team/secrets.env` 物化与运行产物清单都跟随生产目录。界面上可手输路径，也可点「选择」逐级浏览本机目录。未指定时生产目录就是 `<工作区>/{project-slug}`，行为不变。
+新建项目时可指定**生产目录**（绝对路径，可指向既有代码库等本机目录）：Bot 会话的工作目录、项目技能池、`.team/secrets.env` 物化与运行产物清单都跟随生产目录。界面上可手输路径，也可点「选择」逐级浏览本机目录。未指定时生产目录就是 `<工作区>/{project-slug}`，行为不变。
 
 所有可变团队数据都在工作区的 `.data`，不依赖仓库目录；DSH 全局配置与会话在本机 `~/.dsh`。备份必须同时包含 `~/.dsh`（profile、sessions）、整个工作区目录（含 `.data/secret.key`）、共享技能池 `~/.agents` 以及各项目的外部生产目录。
 
@@ -136,10 +137,6 @@ npm run doctor
 
 `DSH_TEAM_MAX_RUNS` 是全局并发上限，跨项目生效。运行结束后任务会话保留，退回重做和重试会复用同一会话继续上下文。
 
-### 上下文滚动（steward 接管）
-
-每条会话的上下文占用（输入 + 缓存读 + 缓存写 token）随用量事件实时记账。占用达到窗口检查线（默认 `(window − reserve) × 0.8`，reserve 取模型 maxTokens，至少保住窗口一半）时，下一个运行让位给 steward 总结：旧会话按固定五节模板（工作现状 / 逐条结果 / 决策与理由 / 依赖约束 / 未完成请求原话）自总结产出 checkpoint，随后旧绑定删除、新会话在下一个运行自动播种 checkpoint 开工。总结失败时降级为无摘要换新会话（继续逼近上限的代价更大）。原会话若在此期间被重试/重派复用，checkpoint 一样会播种进新会话。
-
 ### Bot 私信（team_message_bot）
 
 同项目成员之间点对点通信，`request_id` 具名幂等——同名重发不重复执行，只返回当前状态。回信投递分两路：发起会话正忙（任务运行中）时直接 steer 注入当前轮；空闲时排一轮 `dm_reply` 只读运行送达，若发起方的任务会话已经滚动，投递靠 `origin_task_id` 找到当前绑定。私信与回信在群聊面板的「Bot 私信」区可见，不进群聊消息流。
@@ -167,12 +164,12 @@ npm run doctor
 
 ## 官方 Agent Teams 开关
 
-`DSH_TEAM_AGENT_TEAM`（默认 0）控制插件侧是否启用官方团队层。启用前需先给 `team-bots` profile 安装配套包 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 并挂入 profile bundle；插件侧只控制提示词与调度。要开团队层，启动前导出 `DSH_TEAM_AGENT_TEAM=1`。
+`DSH_TEAM_AGENT_TEAM`（默认 0）控制插件侧是否启用官方团队层。启用前需先给所用 profile 安装配套包 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 并挂入 profile bundle；插件侧只控制提示词与调度。要开团队层，启动前导出 `DSH_TEAM_AGENT_TEAM=1`。
 
 - `1`：每个任务会话可以把任务拆成具名 teammate 并行执行（共享项目工作区），最多 `DSH_TEAM_MAX_TEAMMATES` 个；群聊、验收仍由项目会话负责。
 - `0`（默认）：不加载团队层。
 
-注意：启用该层会替换 DSH 顶层 `subagent` 工具。先把共享技能池和 Bot 指令里对 `subagent` 的依赖改掉再开。启用后用 `npm run verify:agent-team` 检查 profile 状态；Router 会话要真正不带写工具，需按 `docs/agent-teams-plan.md` 附录 A 定义受限 agent preset 并设 `DSH_TEAM_ROUTER_PRESET`，只读运行的越权写入由项目写审计兜底。
+注意：启用该层会替换 DSH 顶层 `subagent` 工具。先把共享技能池和 Bot 指令里对 `subagent` 的依赖改掉再开。启用后用 `npm run verify:agent-team` 检查 profile 状态（`DSH_TEAM_PROFILE` 指定 profile，缺省 `team-bots`）；Router 会话要真正不带写工具，需按 `docs/agent-teams-plan.md` 附录 A 定义受限 agent preset 并设 `DSH_TEAM_ROUTER_PRESET`，只读运行的越权写入由项目写审计兜底。
 
 ## 模型与强度
 
@@ -207,7 +204,7 @@ npm run doctor
 
 覆盖方式三选一，优先级从高到低：
 
-1. 插件配置（宿主 `~/.dsh/profiles/team-bots/cordis.patch.yml` 或 bundle patch）：
+1. 插件配置（宿主 `~/.dsh/profiles/<名字>/cordis.patch.yml` 或 bundle patch）：
 
 ```yaml
 - insert:
@@ -261,12 +258,13 @@ node scripts/dev-server.js
 
 ## DSH 版本与升级
 
-运行中可在「全局配置 → DSH 运行时」检查并升级：
+运行中可在「全局配置 → DSH 运行时」查看当前版本，并查询 npm 上最新非 alpha 版本（registry 可用 `NPM_REGISTRY` 覆盖）。查询失败时报 `DSH_REGISTRY_UNAVAILABLE`，不影响运行。
 
-1. 插件查询 npm 上最新非 alpha 版本。
-2. 有排队/运行中任务时拒绝升级。
-3. 写入升级请求，DSH 进程以退出码 75 结束。
-4. 本地没有入口脚本代劳：按页面显示的目标版本手动安装（如 `npm install -g @deepseek-ai/dsh@<version>`），再以相同 profile 重启 DSH。
+不支持热升级/热重启：发起升级或重启会直接返回 409 `DSH_HOT_UPGRADE_UNSUPPORTED`，页面提示手动升级。实际升级步骤：
+
+1. 确认没有排队/运行中的任务。
+2. 手动安装目标版本：`npm install -g @deepseek-ai/dsh@<version>`。
+3. 以相同 profile 重启 DSH，回到「DSH 运行时」确认版本已更新。
 
 ## 故障排查
 

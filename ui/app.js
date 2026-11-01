@@ -571,8 +571,7 @@
             </div>` : messages.map(renderMessage).join('')}
           </div>
           ${renderDirectMessagesCard()}
-          ${renderRotationsCard()}
-          <div class="composer">
+                    <div class="composer">
             <div class="composer-box">
               <div class="composer-ac" id="composer-ac" role="listbox" aria-label="输入补全" hidden></div>
               <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(state.draft)}</textarea>
@@ -786,11 +785,10 @@
     </div>`
   }
 
-  // ===== Bot 私信 / 会话滚动（项目群聊视图的折叠面板，数据来自 state.directMessages / state.rotations）=====
+  // ===== Bot 私信（项目群聊视图的折叠面板，数据来自 state.directMessages）=====
 
   const DM_STATUS = { pending: '待回复', delivered: '已送达', replied: '已回复', failed: '失败' }
   const DM_STATUS_TONE = { pending: '', delivered: 'violet', replied: 'green', failed: 'red' }
-  const ROTATION_KIND = { project: '项目会话', task: '任务会话', solo: '单聊会话' }
 
   function renderDirectMessagesCard() {
     const items = state.data?.directMessages ?? []
@@ -809,28 +807,6 @@
             </div>
             ${dm.textSnippet ? `<div class="subpanel-row-text">${esc(dm.textSnippet)}</div>` : ''}
             ${dm.replySnippet ? `<div class="subpanel-row-sub">↩ ${esc(dm.replySnippet)}</div>` : ''}
-          </div>`).join('')}
-      </div>
-    </details>`
-  }
-
-  function renderRotationsCard() {
-    const items = state.data?.rotations ?? []
-    if (items.length === 0) return ''
-    return `<details class="chat-subpanel">
-      <summary title="展开 / 收起会话交接">${icon('chevron', 'chev')}<span>会话交接</span><span class="subpanel-count">${items.length}</span></summary>
-      <div class="subpanel-body">
-        ${items.length === 0 ? '<div class="subpanel-empty">暂无会话滚动记录；Bot 会话上下文接近上限时会在此登记交接进度。</div>' : items.map(item => `
-          <div class="subpanel-row">
-            <div class="subpanel-row-head">
-              <strong>#${esc(item.seq)}</strong>
-              <span>${esc(item.botName)}</span>
-              <span class="pill">${esc(ROTATION_KIND[item.kind] ?? item.kind)}</span>
-              ${item.taskIdentifier ? `<span class="subpanel-tag">${esc(item.taskIdentifier)}</span>` : ''}
-              <span class="faint">交接 ${formatNumber(item.checkpointChars)} 字</span>
-              ${item.seeded ? '<span class="pill green">已续接</span>' : '<span class="pill amber">待续接</span>'}
-              <span class="faint">${esc(formatTime(item.createdAt))}</span>
-            </div>
           </div>`).join('')}
       </div>
     </details>`
@@ -977,7 +953,7 @@
         `}).join('')}
       </div>
       ${project ? `<div class="card-head" style="margin-top:24px"><h3>当前项目技能</h3></div>
-      <div class="section-head"><p>从项目工作区的 <code>.agents</code>、<code>.claude</code>、<code>.codex</code> 三个根扫描发现；同名技能按 .agents &gt; .claude &gt; .codex 去重。这些技能只在当前项目可用，且优先于同名共享技能。</p></div>
+      <div class="section-head"><p>从项目目录（设了生产目录以生产目录为准，见下方实际路径）的 <code>.agents</code>、<code>.claude</code>、<code>.codex</code> 三个根扫描发现；同名技能按 .agents &gt; .claude &gt; .codex 去重。这些技能只在当前项目可用，且优先于同名共享技能。</p></div>
       ${(state.data.paths.projectSkillRoots ?? []).map(root => `<div class="path-row plain" style="margin-bottom:6px"><span style="text-transform:none">${esc(root.root)}</span><code>${esc(root.path)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(root.path + '/skills')}">${icon('copy')}</button></div>`).join('')}
       <div class="card list-card">
         ${projectSkills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>项目内没有技能</h3><p>在项目目录的 .agents、.claude 或 .codex 下放置 skills/&lt;技能名&gt;/SKILL.md 即可。</p></div>` : projectSkills.map(skill => {

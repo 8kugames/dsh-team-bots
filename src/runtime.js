@@ -5,7 +5,6 @@ import { botWorkspaceDir, ensureExternalDir, ensureProjectWorkspace } from './pa
 import { scanProjectSkills } from './project-skills.js'
 import { recordUsage } from './usage.js'
 import { id, nowIso, parseDisabledSkills, sha256 } from './util.js'
-import { checkpointText, stewardPrompt } from './steward.js'
 import { dmPrompt, replyDeliveryPrompt } from './botmsg.js'
 
 const EFFORT_FALLBACK = (bot) => bot.effort || undefined
@@ -209,6 +208,7 @@ export class DshRuntime {
       project.id,
     )
     const ws = this.config.workspace
+    const projectDir = project.production_dir || (ws ? join(ws, project.slug) : null)
     const sharedSkills = this.config.skillRoot
     const sharedRules = [
       disabledSkills.length === 0
@@ -223,13 +223,11 @@ export class DshRuntime {
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
     ]
-    const projectSkills = this.config?.workspace
-      ? scanProjectSkills(join(this.config.workspace, project.slug)).skills
-      : []
+    const projectSkills = projectDir ? scanProjectSkills(projectDir).skills : []
     const projectSkillRules = projectSkills.length === 0
       ? []
       : [
-          `- Project skill pools are mounted at \`${ws}/${project.slug}/.agents/skills\`, \`${ws}/${project.slug}/.claude/skills\`, \`${ws}/${project.slug}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
+          `- Project skill pools are mounted at \`${projectDir}/.agents/skills\`, \`${projectDir}/.claude/skills\`, \`${projectDir}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
           `- Project skills available here: ${projectSkills.map(skill => `\`${skill.name}\``).join(', ')}.`,
         ]
     const collaborationRules = taskSession
@@ -410,10 +408,10 @@ export class DshRuntime {
   async ensureSession(bot, project, { run, task, sessionKind } = {}) {
     // 任务运行使用独立会话，与该项目负责人会话互不阻塞；dm 运行用独立私信会话；
     // 单聊运行（solo_chat）没有项目，落在 bot 自己的 _the_bots/<dir> 专属会话；其余运行共用项目会话。
-    // sessionKind 由调用方显式指定（steward 总结 dm 会话、dm_reply 投递回任务会话等跨类别场景）。
+    // sessionKind 由调用方显式指定（dm_reply 投递回任务会话等跨类别场景）。
     const kind0 = sessionKind
       ?? (run?.kind === 'task' && task ? 'task' : run?.kind === 'dm' ? 'dm' : run?.kind === 'solo_chat' ? 'solo' : 'project')
-    // 任务会话的兜底：任务行已被删除（如 steward 排队期间任务被清理）时退回项目会话，
+    // 任务会话的兜底：任务行已被删除时退回项目会话，
     // 避免 task.id 空引用把整条运行链路炸掉。
     const kind = kind0 === 'task' && !task ? 'project' : kind0
     const taskId = kind === 'task' ? task.id : null
@@ -440,7 +438,6 @@ export class DshRuntime {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
         await this.selectModel(existing.session_id, bot)
-        void this.refreshCtxWindow(existing.session_id, bot).catch(() => {})
         return existing.session_id
       }
       this.store.run('DELETE FROM session_bindings WHERE session_id = ?', existing.session_id)
@@ -488,7 +485,6 @@ export class DshRuntime {
         new Date().toISOString(),
       )
       await this.selectModel(sessionId, bot)
-      void this.refreshCtxWindow(sessionId, bot).catch(() => {})
       return sessionId
     })()
     this.sessionCreates.set(key, creating)
@@ -497,20 +493,6 @@ export class DshRuntime {
     } finally {
       this.sessionCreates.delete(key)
     }
-  }
-
-  // 把模型目录里的 contextWindow/maxTokens 写进会话绑定，供调度器判断上下文占用。
-  async refreshCtxWindow(sessionId, bot) {
-    if (!bot?.provider || !bot?.model) return
-    const entry = (await this.catalog()).find(item => item.provider === bot.provider && item.model === bot.model)
-    if (!entry?.contextWindow) return
-    const maxTokens = Number(entry.maxTokens)
-    this.store.run(
-      'UPDATE session_bindings SET ctx_window = ?, max_tokens = ? WHERE session_id = ?',
-      entry.contextWindow,
-      Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : null,
-      sessionId,
-    )
   }
 
   // 单聊运行提示词：没有项目上下文，只带本会话最近消息。
@@ -609,13 +591,6 @@ Avoid re-dispatching more than once without progress. Reply in the user's langua
       }
       return `${header}\n\n[Direct-message delivery record missing; nothing to do. Reply with a short note only.]`
     }
-    if (run.kind === 'steward') {
-      return `${header}\n\n${stewardPrompt({
-        botName: bot.name,
-        projectName: project.name,
-        taskLabel: task ? `${project.key}-${task.number} ${task.title}` : null,
-      })}`
-    }
     if (run.kind === 'memory_review') {
       const sourceRun = run.trigger_ref
         ? this.store.get('SELECT id, kind, task_id, trigger_ref, output FROM runs WHERE id = ?', run.trigger_ref)
@@ -712,34 +687,6 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
     if (!this.ctx?.sessionController) throw new AppError('DSH_UNAVAILABLE', 'DSH Session 服务不可用')
     const sessionId = await this.ensureSession(bot, project, { run, task, sessionKind })
     let prompt = this.promptFor({ run, bot, project, task, chatMessage })
-    // 会话滚动后的第一运行：把 checkpoint 作为数据头并入本次提示词（不单独起一轮）。
-    const taskId = task?.id ?? null
-    const binding = this.store.get(
-      'SELECT kind FROM session_bindings WHERE session_id = ?',
-      sessionId,
-    )
-    // 单聊运行没有项目，不参与会话滚动 checkpoint。
-    // steward 运行是 checkpoint 的生产者，不是消费者：它落进的正是被总结的那条旧会话，
-    // 那里若还挂着未播种的 checkpoint，被它吃掉就等于新会话拿不到交接摘要。
-    const rotation = project && run.kind !== 'steward' ? this.store.get(
-      `SELECT * FROM session_rotations
-       WHERE bot_id = ? AND project_id = ? AND kind = ? AND task_id IS ? AND seeded = 0
-       ORDER BY created_at DESC LIMIT 1`,
-      bot.id,
-      project.id,
-      binding?.kind ?? 'project',
-      taskId,
-    ) : null
-    if (rotation) {
-      prompt = `${checkpointText({ summary: rotation.checkpoint, taskLabel: task ? `${project.key}-${task.number} ${task.title}` : null })}\n\n${prompt}`
-      this.store.run('UPDATE session_rotations SET seeded = 1 WHERE id = ?', rotation.id)
-      this.store.run(
-        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-        id('evt'), run.id, 'checkpoint_seeded',
-        `会话滚动 #${rotation.seq} 的 checkpoint 已并入本轮提示`,
-        nowIso(),
-      )
-    }
     const pending = {
       runId: run.id,
       sessionId,
@@ -856,15 +803,6 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
       occurredAt,
     })
     if (!row) return
-    // 上下文占用估计：最近一次模型调用的 input+cache 之和即当前会话上下文规模，
-    // 写回会话绑定，供调度器在运行间隙做滚动（steward）判断。
-    const ctxTokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens
-    this.store.run(
-      'UPDATE session_bindings SET last_ctx_tokens = ?, ctx_updated_at = ? WHERE session_id = ?',
-      ctxTokens,
-      nowIso(),
-      sessionId,
-    )
     pending.tokens = (pending.tokens ?? 0)
       + row.input_tokens + row.cache_read_tokens + row.cache_write_tokens + row.output_tokens + row.reasoning_tokens
     const cap = this.config.maxRunTokens

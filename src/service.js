@@ -3,14 +3,13 @@ import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { join, sep, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { AppError, badRequest, conflict, forbidden, notFound } from './errors.js'
+import { AppError, badRequest, conflict, forbidden, hotUpgradeUnsupported, notFound } from './errors.js'
 import { assertInside, botWorkspaceDir, botsHome, ensureDirResilient, ensureExternalDir, ensureProjectWorkspace, ensureSkillRoot, projectDir, SLUG_MAX } from './paths.js'
 import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal, reconcileUsage, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
 import { latestDshVersion, compareVersions, validTargetVersion } from './updater.js'
 import { priceKey, seedModelPrices } from './pricing.js'
 import { publishSkill, rollbackSkill, skillSnapshot, stageSkill, syncSkills } from './skills.js'
 import { projectSkillRoots, scanProjectSkills } from './project-skills.js'
-import { parseStewardOutput, shouldRotate } from './steward.js'
 import { deliveryPlan, replyDeliveryPrompt, summarizeForUi, upsertBotMessage } from './botmsg.js'
 import { ENV_PREFIX, SecretBox, maskSecrets, materializeEnvFile, normalizeSecretName, secretFingerprint, secretKeyFingerprint } from './secrets.js'
 import {
@@ -1487,7 +1486,7 @@ export class TeamService {
     return runId
   }
 
-  // 回信投递回发送方会话：忙时 steer 注入，闲时排 dm_reply 运行（新会话自动播种 checkpoint）。
+  // 回信投递回发送方会话：忙时 steer 注入，闲时排 dm_reply 运行。
   deliverBotReply(message) {
     const caller = this.store.get('SELECT * FROM bots WHERE id = ?', message.from_bot_id)
     if (!caller || caller.status !== 'active') return null
@@ -1525,7 +1524,7 @@ export class TeamService {
     }
     const runId = id('run')
     const createdAt = nowIso()
-    // task_id 同 steward 留空（one_active_run_per_task 不限 kind，任务排队中投回信会撞索引）；
+    // task_id 留空（one_active_run_per_task 不限 kind，任务排队中投回信会撞索引）；
     // 任务会话定位由 sessionKindFor→bot_messages.origin_kind 完成，不依赖 run.task_id。
     // 幂等：outbox 重投时不能重复建运行，否则唯一索引会直接把重试打成失败。
     const existingRun = this.store.get('SELECT id FROM runs WHERE idempotency_key = ?', `dm_reply:${message.id}`)
@@ -1882,26 +1881,6 @@ export class TeamService {
         : run.kind === 'solo_chat' && run.trigger_ref
           ? this.store.get('SELECT * FROM solo_messages WHERE id = ?', run.trigger_ref)
           : null
-      // 上下文滚动预检：占用达到检查线的会话先做 steward 总结，本运行延后到新会话播种后执行。
-      const rotationBinding = this.rotationTarget(run, bot, project)
-      if (rotationBinding) {
-        // 已经在排/在跑的 steward：本次运行继续等，不重复排 steward、不重复记事件。
-        const stewardBefore = this.store.get(
-          "SELECT id FROM runs WHERE kind = 'steward' AND status IN ('queued', 'running') AND trigger_ref = ?",
-          rotationBinding.session_id,
-        )
-        this.enqueueStewardRun(bot, project, rotationBinding)
-        this.store.run(
-          "UPDATE runs SET status = 'queued', session_id = NULL, queued_at = ? WHERE id = ? AND status = 'running'",
-          new Date(Date.now() + 1000).toISOString(),
-          run.id,
-        )
-        if (!stewardBefore) {
-          this.insertRunEvent(run.id, 'deferred_steward', '上下文接近窗口上限，先执行会话滚动（steward 总结），本运行延后重排')
-        }
-        void this.tick()
-        return
-      }
       if (run.mode === 'read') this.fingerprints.set(runId, this.workspaceFingerprint(project))
       const sessionKind = this.sessionKindFor(run)
       await this.runtime.startRun({
@@ -1927,14 +1906,8 @@ export class TeamService {
     }
   }
 
-  // 跨类别运行的目标会话类别：steward 按被总结会话的类别，dm_reply 按来信来源的类别。
+  // 跨类别运行的目标会话类别：dm_reply 按来信来源的类别。
   sessionKindFor(run) {
-    if (run.kind === 'steward') {
-      const binding = run.trigger_ref
-        ? this.store.get('SELECT kind FROM session_bindings WHERE session_id = ?', run.trigger_ref)
-        : null
-      return binding?.kind ?? 'project'
-    }
     if (run.kind === 'dm_reply') {
       const message = run.trigger_ref
         ? this.store.get('SELECT origin_kind FROM bot_messages WHERE id = ?', run.trigger_ref)
@@ -1944,41 +1917,13 @@ export class TeamService {
     return undefined
   }
 
-  // 会话滚动判定：task/chat/dm 三类会话占用达到检查线时返回绑定行，其余返回 null。
-  rotationTarget(run, bot, project) {
-    if (!project || !bot) return null
-    if (!['task', 'chat', 'dm'].includes(run.kind)) return null
-    // 会话绑定的类别只有 task/project/dm/solo：群聊运行落在 project 会话上。
-    const kind = run.kind === 'task' ? 'task' : run.kind === 'chat' ? 'project' : 'dm'
-    const taskId = run.kind === 'task' ? run.task_id ?? null : null
-    const binding = this.store.get(
-      'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ? AND task_id IS ?',
-      bot.id,
-      project.id,
-      kind,
-      taskId,
-    )
-    if (!binding?.last_ctx_tokens || !binding?.ctx_window) return null
-    if (!shouldRotate({
-      lastCtxTokens: binding.last_ctx_tokens,
-      contextWindow: binding.ctx_window,
-      maxTokens: binding.max_tokens ?? undefined,
-    })) return null
-    return binding
-  }
-
-  // steward / dm_reply 的 runs.task_id 留空（避开 one_active_run_per_task 索引），
-  // 但它们要落进被总结/来源的那个任务会话：这里把任务行解析出来交给 runtime，
+  // dm_reply 的 runs.task_id 留空（避开 one_active_run_per_task 索引），
+  // 但它要落进来源的那个任务会话：这里把任务行解析出来交给 runtime，
   // runtime 才能按 task 类别找回同一条会话绑定，而不是退化成项目会话。
   sessionTaskFor(run, sessionKind) {
     if (sessionKind !== 'task') return null
     let taskId = null
-    if (run.kind === 'steward') {
-      const binding = run.trigger_ref
-        ? this.store.get('SELECT task_id FROM session_bindings WHERE session_id = ?', run.trigger_ref)
-        : null
-      taskId = binding?.task_id ?? null
-    } else if (run.kind === 'dm_reply') {
+if (run.kind === 'dm_reply') {
       const message = run.trigger_ref
         ? this.store.get('SELECT origin_task_id FROM bot_messages WHERE id = ?', run.trigger_ref)
         : null
@@ -1986,28 +1931,6 @@ export class TeamService {
     }
     if (!taskId) return null
     return this.store.get('SELECT * FROM tasks WHERE id = ?', taskId) ?? null
-  }
-
-  enqueueStewardRun(bot, project, binding) {
-    // 幂等：同一会话已有排队/执行中的 steward 就不再建。
-    const pending = this.store.get(
-      "SELECT id FROM runs WHERE kind = 'steward' AND status IN ('queued', 'running') AND trigger_ref = ?",
-      binding.session_id,
-    )
-    if (pending) return pending.id
-    const stewardRunId = id('run')
-    const createdAt = nowIso()
-    // task_id 留空：one_active_run_per_task 唯一索引不限 kind，原任务 run 尚在
-    // queued/running 时带 task_id 插 steward 会撞唯一约束；任务关联经 trigger_ref→binding 保留。
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, NULL, 'steward', 'read', 'rotation', ?, 'queued', 1, ?, ?)`,
-      stewardRunId, project.id, bot.id, binding.session_id,
-      `steward:${binding.session_id}`, createdAt,
-    )
-    this.insertRunEvent(stewardRunId, 'queued', `会话上下文达到滚动阈值（${binding.last_ctx_tokens}/${binding.ctx_window}），触发 steward 总结`)
-    return stewardRunId
   }
 
   insertRunEvent(runId, type, message) {
@@ -2133,11 +2056,6 @@ export class TeamService {
       id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
     )
     const refreshed = this.runRow(runId)
-    if (run.kind === 'steward') {
-      await this.completeStewardRun(run, status === 'succeeded' ? cleanOutput : '', error)
-      if (this.rate[run.project_id]) delete this.rate[run.project_id]
-      return
-    }
     if (run.kind === 'dm') {
       const message = run.trigger_ref
         ? this.store.get('SELECT * FROM bot_messages WHERE id = ?', run.trigger_ref)
@@ -2468,78 +2386,6 @@ export class TeamService {
       id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${deduped ? `，去重 ${deduped} 条` : ''}`, nowIso(),
     )
     return { applied, deduped }
-  }
-
-  // ===== 会话滚动（上下文 steward 接管）=====
-
-  // steward 运行完成：解析摘要 → 落 session_rotations 等待播种 → 删除旧绑定（新会话在下个运行时重建）。
-  async completeStewardRun(run, output, error) {
-    const sessionId = run.trigger_ref
-    const binding = sessionId
-      ? this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
-      : null
-    if (!binding) {
-      this.insertRunEvent(run.id, 'rotation_skipped', '原会话绑定已不存在（可能已被轮换或失效），无需滚动')
-      return
-    }
-    const parsed = error ? null : parseStewardOutput(output)
-    const createdAt = nowIso()
-    if (parsed?.ok && parsed.summary?.trim()) {
-      const prior = this.store.get(
-        'SELECT COUNT(*) AS n FROM session_rotations WHERE bot_id = ? AND project_id = ? AND kind = ? AND task_id IS ?',
-        binding.bot_id, binding.project_id, binding.kind, binding.task_id ?? null,
-      )
-      const seq = (Number(prior?.n) || 0) + 1
-      // checkpoint 会播种进下一次会话的提示词，必须先过密钥掩码。
-      const checkpoint = this.maskSecretValues(parsed.summary.trim())
-      this.store.transaction(() => {
-        this.store.run(
-          `INSERT INTO session_rotations(id, bot_id, project_id, kind, task_id, old_session_id, seq, checkpoint, seeded, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          id('rot'), binding.bot_id, binding.project_id, binding.kind, binding.task_id ?? null,
-          sessionId, seq, checkpoint, createdAt,
-        )
-        this.store.run('DELETE FROM session_bindings WHERE session_id = ?', sessionId)
-      })
-      this.insertRunEvent(run.id, 'rotated', `会话滚动 #${seq} 完成：checkpoint ${checkpoint.length} 字符已存，新会话将在下个运行播种`)
-    } else {
-      // 降级滚动：steward 没产出可用摘要也换会话——继续逼近硬上限的代价大于丢一段摘要。
-      this.store.run('DELETE FROM session_bindings WHERE session_id = ?', sessionId)
-      this.insertRunEvent(run.id, 'rotated_degraded', `steward 未产出可用摘要（${error?.message ?? '输出解析失败'}），已无摘要换新会话`)
-      if (binding.kind === 'project') {
-        const botName = this.store.get('SELECT name FROM bots WHERE id = ?', binding.bot_id)?.name ?? 'Bot'
-        this.insertMessage({
-          projectId: binding.project_id,
-          senderType: 'system',
-          senderId: 'system',
-          body: `${botName} 的群聊会话上下文达到滚动阈值，已重置（自动摘要失败，上一段上下文未保留；细节见运行记录）。`,
-        })
-      }
-    }
-  }
-
-  rotationsView(projectId) {
-    const rows = this.store.all(
-      'SELECT * FROM session_rotations WHERE project_id = ? ORDER BY created_at DESC LIMIT 50',
-      projectId,
-    )
-    return rows.map((row) => {
-      const botName = this.store.get('SELECT name FROM bots WHERE id = ?', row.bot_id)?.name ?? 'Bot'
-      const task = row.task_id
-        ? this.store.get('SELECT number FROM tasks WHERE id = ?', row.task_id)
-        : null
-      const project = this.projectRow(row.project_id)
-      return {
-        id: row.id,
-        seq: row.seq,
-        kind: row.kind,
-        botName,
-        taskIdentifier: task ? `${project.key}-${task.number}` : null,
-        checkpointChars: (row.checkpoint ?? '').length,
-        seeded: Boolean(row.seeded),
-        createdAt: row.created_at,
-      }
-    })
   }
 
   // ===== Bot 间私信（team_message_bot）=====
@@ -3594,7 +3440,7 @@ export class TeamService {
         workspace: this.config.workspace,
         skillRoot: this.config.skillRoot,
         projectSkillRoots: project
-          ? projectSkillRoots(join(this.config.workspace, project.slug)).map(item => ({ root: item.root, path: item.path }))
+          ? projectSkillRoots(this.projectWorkDir(project)).map(item => ({ root: item.root, path: item.path }))
           : [],
         dataDir: this.config.dataDir,
       },
@@ -3651,7 +3497,6 @@ export class TeamService {
       view.prices = this.latestPrices()
       view.skillBindings = this.skillBindings(project.id)
       view.directMessages = this.botMessagesView(project.id)
-      view.rotations = this.rotationsView(project.id)
     }
     view.secrets = this.listSecrets()
     view.secretRequests = this.listSecretRequests()
@@ -3719,10 +3564,10 @@ export class TeamService {
     return this.runtime?.catalog(force) ?? []
   }
 
-  // 当前项目的技能池：扫描项目工作区的 .agents / .claude / .codex 三个根，
-  // 同名技能按根优先级去重；只做发现，不写入共享技能池。
+  // 当前项目的技能池：扫描项目目录（生产目录优先，见 projectWorkDir）的
+  // .agents / .claude / .codex 三个根，同名技能按根优先级去重；只做发现，不写入共享技能池。
   projectSkillView(project) {
-    const dir = join(this.config.workspace, project.slug)
+    const dir = this.projectWorkDir(project)
     const { skills } = scanProjectSkills(dir)
     return skills.map(skill => ({
       name: skill.name,
@@ -3805,13 +3650,11 @@ export class TeamService {
       latest,
       profile: process.env.DSH_PROFILE || 'team-bots',
       updateAvailable: current !== 'unknown' && compareVersions(latest, current) > 0,
-      // 仅容器部署（entrypoint 监督 exit 75）支持热升级；本机模式此值为 false。
-      hotUpgradeSupported: process.env.DSH_TEAM_CONTAINER === '1',
       checkedAt: nowIso(),
     }
   }
 
-  async upgradeDsh(targetVersion, actor = this.actor()) {
+  async upgradeDsh(targetVersion) {
     await this.initialize()
     const active = this.store.get(
       "SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')",
@@ -3826,15 +3669,15 @@ export class TeamService {
     const target = targetVersion || latest
     if (!validTargetVersion(target)) throw badRequest('DSH 版本号格式无效')
     if (current === target) {
-      return { current, target, restarted: false, upToDate: true }
+      return { current, target, upToDate: true }
     }
     if (current !== 'unknown' && compareVersions(target, current) <= 0) {
-      return { current, target, restarted: false, upToDate: true }
+      return { current, target, upToDate: true }
     }
-    return this.requestDshRestart(target, current, actor)
+    throw hotUpgradeUnsupported()
   }
 
-  async rebootDsh(actor = this.actor()) {
+  async rebootDsh() {
     await this.initialize()
     const active = this.store.get(
       "SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')",
@@ -3842,35 +3685,7 @@ export class TeamService {
     if (Number(active) > 0) {
       throw conflict(`当前还有 ${active} 个排队或运行中的任务，请先停止后再重启 DSH`)
     }
-    const current = process.env.DSH_RUNTIME_VERSION || 'unknown'
-    return this.requestDshRestart(current, current, actor)
-  }
-
-  requestDshRestart(target, current, actor) {
-    // exit(75) 只在容器内有 entrypoint 监督循环接管（root 重装并原地重启）；
-    // 本机模式下退出码无人接手，等于直接杀死宿主 dsh。因此仅容器内放行。
-    if (process.env.DSH_TEAM_CONTAINER !== '1') {
-      throw new AppError(
-        'DSH_HOT_UPGRADE_UNSUPPORTED',
-        '热升级/重启仅在容器部署下可用：本机模式请手动升级 dsh 后重启',
-        409,
-      )
-    }
-    mkdirSync(this.config.dataDir, { recursive: true })
-    const requestPath = join(this.config.dataDir, 'dsh-upgrade.json')
-    writeFileSync(requestPath, JSON.stringify({
-      version: target,
-      current,
-      requestedAt: nowIso(),
-      requestedBy: `${actor.type}:${actor.id}`,
-    }, null, 2), 'utf8')
-    this.audit(actor, target === current ? 'dsh.reboot.request' : 'dsh.upgrade.request', 'dsh', target, { current, target })
-    setTimeout(() => {
-      // The container entrypoint sees 75, installs the requested version as root,
-      // and relaunches DSH in place. Other exit codes are not retried.
-      process.exit(75)
-    }, 900)
-    return { current, target, restarted: true, upToDate: false }
+    throw hotUpgradeUnsupported()
   }
 
   // 把某条价格恢复为配置里的默认值：写一条新版本，保留历史。

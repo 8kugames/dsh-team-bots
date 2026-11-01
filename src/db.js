@@ -464,24 +464,6 @@ CREATE TABLE IF NOT EXISTS secret_requests (
 
 CREATE INDEX IF NOT EXISTS secret_requests_status_idx ON secret_requests(status, created_at DESC);
 
--- session_rotations：会话滚动（上下文接管）的 checkpoint 交接记录；seeded 标记新会话是否已种入。
--- kind 与 session_bindings.kind 对齐（project/task/dm），滚动记录按会话类别配对。
-CREATE TABLE IF NOT EXISTS session_rotations (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL DEFAULT 'project',
-  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-  old_session_id TEXT NOT NULL,
-  seq INTEGER NOT NULL DEFAULT 1,
-  checkpoint TEXT NOT NULL,
-  seeded INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS session_rotations_target_idx
-  ON session_rotations(bot_id, project_id, task_id, created_at DESC);
-
 ${RUNS_INDEXES}
 CREATE INDEX IF NOT EXISTS messages_project_idx ON messages(project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS solo_messages_bot_idx ON solo_messages(bot_id, created_at DESC);
@@ -534,7 +516,6 @@ export function openDatabase(path) {
   migrateUsageEvents(db)
   migrateSoloSupport(db)
   migrateSoloDirUnique(db)
-  migrateContextTracking(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -545,8 +526,6 @@ export function openDatabase(path) {
   recordMigration(db, 'memories_fts')
   recordMigration(db, 'solo_chat_support')
   recordMigration(db, 'bot_direct_messages')
-  recordMigration(db, 'secrets_pipeline')
-  recordMigration(db, 'session_context_tracking')
   recordMigration(db, 'runs_artifacts')
   recordMigration(db, 'run_trajectory')
   recordMigration(db, 'projects_production_dir')
@@ -562,17 +541,6 @@ function addColumn(db, table, column, definition) {
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
 }
 
-// 上下文占用追踪：会话绑定记录最近一次模型调用的 input+cache tokens 估计值，
-// 供调度器在运行间隙判断是否需要滚动会话（steward 接管长任务上下文）。
-// session_rotations.kind 补列：早期开发库建表时缺 kind，按 project 回填。
-function migrateContextTracking(db) {
-  addColumn(db, 'session_bindings', 'last_ctx_tokens', 'INTEGER')
-  addColumn(db, 'session_bindings', 'ctx_window', 'INTEGER')
-  addColumn(db, 'session_bindings', 'ctx_updated_at', 'TEXT')
-  // max_tokens：滚动阈值里的回复预留取模型的输出上限，没有它只能按窗口比例估算。
-  addColumn(db, 'session_bindings', 'max_tokens', 'INTEGER')
-  addColumn(db, 'session_rotations', 'kind', "TEXT NOT NULL DEFAULT 'project'")
-}
 
 // run.mode 区分写入型与只读型运行：同一项目同时只允许一个写运行，只读运行可并行。
 function migrateRuns(db) {
