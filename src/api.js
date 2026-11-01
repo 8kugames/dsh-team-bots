@@ -4,7 +4,7 @@ import { exportUsageCsv } from './usage.js'
 const ACTIONS = new Set([
   'health', 'state', 'models', 'bot_detail',
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
-  'create_project', 'update_project', 'archive_project',
+  'create_project', 'update_project', 'archive_project', 'browse_dirs',
   'send_message', 'send_solo_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
   'retry_run', 'cancel_run', 'run_trajectory',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',

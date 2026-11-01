@@ -372,6 +372,11 @@ test('browse_dirs 只列目录（含符号链接目录），默认从主目录�
     // 缺省与空串都落到主目录
     assert.equal(service.browseDirectories({}).path, resolve(homedir()))
     assert.equal(service.browseDirectories({ path: '   ' }).path, resolve(homedir()))
+    // API 白名单放行：走 handleAction 全链路（曾漏加 ACTIONS 导致 404 未知操作）
+    const actor = { type: 'user', id: service.localUserId }
+    const viaApi = await handleAction(service, 'browse_dirs', { path: root }, actor)
+    assert.equal(viaApi.path, root)
+    await assert.rejects(() => handleAction(service, 'browse_dirs', { path: join(root, 'plain.txt') }, actor), /无法读取目录/)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
