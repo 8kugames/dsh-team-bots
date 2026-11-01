@@ -9,52 +9,35 @@ async function tempRoot() {
   return realpath(await mkdtemp(join(tmpdir(), 'dsh-paths-')))
 }
 
-test('ensureSkillRoot replaces a self-referencing .agents symlink', async () => {
+test('ensureSkillRoot replaces a self-referencing skill-root symlink', async () => {
   const root = await tempRoot()
-  const workspace = join(root, 'workspace')
+  const pool = join(root, 'agents')
   try {
-    await mkdir(workspace, { recursive: true })
-    const workspaceReal = await realpath(workspace)
-    await symlink('.agents', join(workspaceReal, '.agents'))
+    await symlink('agents', pool)
 
-    const real = await ensureSkillRoot(workspaceReal)
+    const real = await ensureSkillRoot(pool)
 
-    assert.equal(real, join(workspaceReal, '.agents'))
-    assert.equal(await readlink(join(workspaceReal, '.agents')).catch(() => null), null)
+    assert.equal(real, join(root, 'agents'))
+    assert.equal(await readlink(pool).catch(() => null), null)
     await writeFile(join(real, 'skills', 'probe.md'), 'ok')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('ensureSkillRoot keeps a symlinked pool that stays inside the workspace', async () => {
+test('ensureSkillRoot keeps a symlinked pool and ensures the skills directory', async () => {
   const root = await tempRoot()
-  const workspace = join(root, 'workspace')
+  const pool = join(root, 'agents')
+  const cache = join(root, 'skills-cache')
   try {
-    await mkdir(join(workspace, 'skills-cache'), { recursive: true })
-    const workspaceReal = await realpath(workspace)
-    const link = join(workspaceReal, '.agents')
-    await symlink(join(workspaceReal, 'skills-cache'), link)
+    await mkdir(cache, { recursive: true })
+    await symlink(cache, pool)
 
-    const real = await ensureSkillRoot(workspaceReal)
+    const real = await ensureSkillRoot(pool)
 
-    assert.equal(real, join(workspaceReal, 'skills-cache'))
-    assert.equal(await readlink(link), join(workspaceReal, 'skills-cache'))
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test('ensureSkillRoot rejects a symlink that escapes the workspace', async () => {
-  const root = await tempRoot()
-  const workspace = join(root, 'workspace')
-  try {
-    await mkdir(workspace, { recursive: true })
-    const workspaceReal = await realpath(workspace)
-    const outside = join(root, 'outside')
-    await mkdir(outside, { recursive: true })
-    await symlink(outside, join(workspaceReal, '.agents'))
-    await assert.rejects(() => ensureSkillRoot(workspaceReal), /共享技能池越界/)
+    assert.equal(real, cache)
+    assert.equal(await readlink(pool), cache)
+    await writeFile(join(real, 'skills', 'probe.md'), 'ok')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

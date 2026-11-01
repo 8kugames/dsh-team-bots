@@ -20,7 +20,7 @@ DSH Web + 团队 Bots 插件（包名 `dsh-team-bots`），本机随 DSH 运行�
 - 每轮任务与群聊回复后自动进行记忆审查，值得留存的结论自动写入记忆（`memory_review` 关闭可停用；群聊审查用 `chat_memory_review` 单独关）。
 - 密钥管道：管理页登记的密钥 AES-256-GCM 加密落库、物化为项目 `.team/secrets.env`，Bot 侧 `set -a; . .team/secrets.env` 使用；密钥值在消息、记忆、运行输出、轨迹落库前一律掩码为 `$名称`（名称与 `.team/secrets.env` 里的变量名一致）；Bot 可用 `team_request_secret` 发起待审请求。
 - 微信通道（`DSH_TEAM_WECHAT=1` 开启）：设置页扫码绑定个人微信（腾讯 iLink 官方协议，协议实现 vendored 自 `vendor/wechat-ilink`，上游 Tencent/openclaw-weixin MIT），扫码授权成功后自动把授权者绑定为管理员；此后任务完成主动推送，微信内可回复 `状态`、`详情 key-N`、`验收 key-N [评语]`、`驳回 key-N 理由` 管理验收；未连接期间的消息落盘补发。
-- 共享技能池固定为 `<工作区>/.agents/skills`，技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）；技能池只列出技能根目录里当前存在的技能，文件被移除的技能在重新扫描后自动消失。
+- 共享技能池固定为本机 `~/.agents/skills`（与用户其他 agent 工具共用同一目录），技能变更需审批；技能可查看全文详情，并可按项目单独关闭（关闭后该项目的补全不再列出，Bot 系统提示会明确禁用清单）；技能池只列出技能根目录里当前存在的技能，文件被移除的技能在重新扫描后自动消失。
 - 项目技能池：自动扫描当前项目工作区的 `.agents/skills`、`.claude/skills`、`.codex/skills` 三个根，按 frontmatter `name` 去重（`.agents` > `.claude` > `.codex`）；这些技能只在当前项目可用，会进入该项目会话的补全与 Bot 系统提示，并优先于同名共享技能；发现结果不写入共享技能池。
 - token、调用次数、成本和运行时长按全局、项目、Bot 归集。
 
@@ -37,7 +37,7 @@ dsh --profile team-bots                         # 从启动日志读取 dsh web 
 
 已有 pnpm 管理的 profile（依赖钉在本地 tarball）时，用 `npm run profile:install` 一键刷新：打包到仓库 `.dist/` 并在 `~/.dsh/profiles/team-bots` 重装，完成后重启 DSH 生效。
 
-项目管理走工作区目录：`DSH_TEAM_WORKSPACE` 指定任意目录，项目、`_the_bots` 单聊区、共享技能池（`.agents`）与团队数据（`.data`）都落在它下面；不设置时默认 `~/.dsh/workspace/team-bots/`。数据目录还可用 `DSH_TEAM_DATA` 单独指定。常用变量的模板见 `.env.example`——本地按需导出即可，不要在仓库根目录放 `.env`：direnv、编辑器 dotenv 插件或手动 `set -a; . .env` 会把 `DSH_*` 带进本机进程，污染 `npm test` / `npm run dev`。
+项目管理走工作区目录：`DSH_TEAM_WORKSPACE` 指定任意目录，项目、`_the_bots` 单聊区与团队数据（`.data`）都落在它下面；不设置时默认 `~/.dsh/workspace/team-bots/`。共享技能池不随工作区走，固定为本机 `~/.agents/skills`。数据目录还可用 `DSH_TEAM_DATA` 单独指定。常用变量的模板见 `.env.example`——本地按需导出即可，不要在仓库根目录放 `.env`：direnv、编辑器 dotenv 插件或手动 `set -a; . .env` 会把 `DSH_*` 带进本机进程，污染 `npm test` / `npm run dev`。
 
 首次访问 `http://<host>:<port>/` 会自动完成登录并直接进入团队工作台：浏览器首次打开首页时，插件用当前启动 token 兑换一枚 30 天登录 Cookie，随后跳转到 `/api/dsh-team/ui`；此后打开首页同样直达工作台，无需任何手动步骤。禁用 Cookie 的浏览器会陷入重定向循环，此类客户端改用下面的手动 token 入口。
 
@@ -66,7 +66,7 @@ npm run dev        # http://127.0.0.1:4317
 npm run doctor
 ```
 
-输出 Node/DSH 版本、`DSH_HOME`、`workspace`、`.data`、`.agents` 的类型与实际路径，并标注是否可写；有问题时退出码 1。启动报错先跑它。它还会逐条报告 `~/.dsh/cordis.patch.yml` 里引用的宿主绝对路径是否解析得到（patch 注册的 MCP 能力按本机绝对路径生效，断链会让对应 bundle 每次启动失败）。
+输出 Node/DSH 版本、`DSH_HOME`、`workspace`、`.data`、共享技能池 `~/.agents` 的类型与实际路径，并标注是否可写；有问题时退出码 1。启动报错先跑它。它还会逐条报告 `~/.dsh/cordis.patch.yml` 里引用的宿主绝对路径是否解析得到（patch 注册的 MCP 能力按本机绝对路径生效，断链会让对应 bundle 每次启动失败）。
 
 ## 字体、主题与 DSH 能力
 
@@ -75,7 +75,7 @@ npm run doctor
 - 顶栏 `Aa` 或左侧「全局配置」可调整字号（100%–140%），保存在浏览器本地。
 - 每个 Bot 是 DSH 原生 Session；角色作为 system prompt section 注入，不替换 DSH prompt。
 - 模型、reasoning effort、Tools、插件、MCP、Skill 注册表、文件工具、流式事件和登录态全部继承 DSH。
-- 本插件只额外注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_propose_evolution`、`team_recall`，并将 `<工作区>/.agents` 注册为 Skill Provider。
+- 本插件只额外注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_propose_evolution`、`team_recall`，并将 `~/.agents` 注册为 Skill Provider。
 - 全局配置来自本机 `~/.dsh`，插件 profile 固定为 `~/.dsh/profiles/team-bots`。
 
 ## 目录
@@ -86,7 +86,6 @@ npm run doctor
   profiles/team-bots/        DSH Team Bots 插件的 DSH profile
   sessions/                  DSH 原生会话
   workspace/team-bots/       默认团队工作区（DSH_TEAM_WORKSPACE 可指向别处）
-    .agents/skills/          共享技能池
     .data/                   团队 SQLite、运行记录、记忆镜像
     _the_bots/{bot}/         各 Bot 的单聊专属工作区
     {project-slug}/          各项目管理目录（技能池等团队数据）
@@ -94,7 +93,7 @@ npm run doctor
 
 新建项目时可指定**生产目录**（绝对路径，可指向既有代码库等本机目录）：Bot 会话的工作目录、`.team/secrets.env` 物化与运行产物清单都跟随生产目录。界面上可手输路径，也可点「选择」逐级浏览本机目录。未指定时生产目录就是 `<工作区>/{project-slug}`，行为不变。
 
-所有可变团队数据都在工作区的 `.data`，不依赖仓库目录；DSH 全局配置与会话在本机 `~/.dsh`。备份必须同时包含 `~/.dsh`（profile、sessions）、整个工作区目录（含 `.data/secret.key`）以及各项目的外部生产目录。
+所有可变团队数据都在工作区的 `.data`，不依赖仓库目录；DSH 全局配置与会话在本机 `~/.dsh`。备份必须同时包含 `~/.dsh`（profile、sessions）、整个工作区目录（含 `.data/secret.key`）、共享技能池 `~/.agents` 以及各项目的外部生产目录。
 
 ## 群聊和任务
 
@@ -268,19 +267,19 @@ node scripts/dev-server.js
 
 ## 故障排查
 
-**`mkdir: cannot create directory '<工作区>/.agents': Too many levels of symbolic links`**
+**`mkdir: cannot create directory '~/.agents': Too many levels of symbolic links`**
 
-工作区里的 `.agents` 或 `.data` 是自引用/断链符号链接（同步盘、手工 `ln -s`、半恢复的备份都可能造成），`mkdir -p` 直接以 ELOOP 退出。插件启动时会先探测：
+本机 `~/.agents` 或工作区里的 `.data` 是自引用/断链符号链接（同步盘、手工 `ln -s`、半恢复的备份都可能造成），`mkdir -p` 直接以 ELOOP 退出。插件启动时会先探测：
 
-- 链接能解析到真实目录且在工作区内：保留，不动。
+- 链接能解析到真实目录：保留，不动。
 - 链接断链、自引用：打印一行说明后替换成真实目录。
 - 目标存在但不是目录：报错退出，不会静默覆盖。
 
-`ensureSkillRoot`（`src/paths.js`）同样处理，并拒绝指向工作区外的技能池链接。
+`ensureSkillRoot`（`src/paths.js`）同样处理；技能池固定在本机 `~/.agents`，指向别处的有效链接会原样保留并按解析后的目标使用。
 
 **工作区不可写**
 
-Bot 与服务以当前用户运行，工作区目录属主必须可写。用 `npm run doctor` 逐项检查 `workspace`、`.data`、`.agents` 的实际路径与可写性。
+Bot 与服务以当前用户运行，工作区目录属主必须可写。用 `npm run doctor` 逐项检查 `workspace`、`.data`、`~/.agents` 的实际路径与可写性。
 
 ## 基线
 

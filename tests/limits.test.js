@@ -48,7 +48,7 @@ async function setup(overrides = {}) {
   const dataDir = join(root, 'data')
   await mkdir(workspace, { recursive: true })
   const config = resolveConfig({
-    workspace, dataDir, modelCacheMs: 0, schedulerIntervalMs: 60_000, ...overrides,
+    workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 60_000, ...overrides,
   })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })

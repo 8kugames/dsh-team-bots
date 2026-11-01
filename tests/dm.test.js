@@ -45,7 +45,7 @@ async function setup() {
   const workspace = join(root, 'workspace')
   const dataDir = join(root, 'data')
   await mkdir(workspace, { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, modelCacheMs: 0, schedulerIntervalMs: 60_000 })
+  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 60_000 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   const runtime = new ManualRuntime()

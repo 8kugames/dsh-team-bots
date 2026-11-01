@@ -226,7 +226,7 @@ export async function publishSkill(config, { slug, name, description, content, v
   const cleanSlug = slugify(slug)
   if (!cleanSlug) throw new Error('技能 slug 无效')
   const cleanVersion = String(version || '1.0.0').replace(/[^0-9A-Za-z._-]/g, '') || '1.0.0'
-  const root = await ensureSkillRoot(config.workspace)
+  const root = await ensureSkillRoot(config.skillRoot)
   const body = String(content ?? '').trim()
   if (!body) throw new Error('技能内容不能为空')
   const directory = skillDir(root, cleanSlug)
@@ -246,7 +246,7 @@ export async function stageSkill(config, { slug, name, description, content, ver
   const cleanSlug = slugify(slug)
   if (!cleanSlug) throw new Error('技能 slug 无效')
   const cleanVersion = String(version || '1.0.0').replace(/[^0-9A-Za-z._-]/g, '') || '1.0.0'
-  const root = await ensureSkillRoot(config.workspace)
+  const root = await ensureSkillRoot(config.skillRoot)
   const body = String(content ?? '').trim()
   if (!body) throw new Error('技能内容不能为空')
   mkdirSync(versionDir(root, cleanSlug), { recursive: true })

@@ -41,7 +41,7 @@ async function soloSetup() {
   const workspace = join(root, 'workspace')
   const dataDir = join(root, 'data')
   await mkdir(workspace, { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, modelCacheMs: 0, schedulerIntervalMs: 60_000 })
+  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 60_000 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   const runtime = new ManualRuntime()
@@ -228,7 +228,7 @@ test('单聊会话：身份提示词、运行提示词与 recall', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-team-solo-prompt-'))
   const workspace = join(root, 'workspace')
   await mkdir(workspace, { recursive: true })
-  const config = resolveConfig({ workspace, dataDir: join(root, 'data'), modelCacheMs: 0 })
+  const config = resolveConfig({ workspace, dataDir: join(root, 'data'), skillRoot: join(workspace, '.agents'), modelCacheMs: 0 })
   const store = openDatabase(config.dbPath)
   try {
     const now = new Date().toISOString()

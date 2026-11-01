@@ -98,7 +98,7 @@ async function setup(options = {}) {
   await mkdir(workspace, { recursive: true })
   await mkdir(join(workspace, '.agents', 'skills', 'review'), { recursive: true })
   await writeFile(join(workspace, '.agents', 'skills', 'review', 'SKILL.md'), `---\nname: review\ndescription: Review code\nversion: 1.0.0\n---\n\nReview carefully.\n`)
-  const config = resolveConfig({ workspace, dataDir, modelCacheMs: 0, schedulerIntervalMs: 20 })
+  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   const runtime = new FakeRuntime(service, options)

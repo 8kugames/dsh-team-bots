@@ -30,7 +30,7 @@ export function safeSlug(value) {
  * Create `directory` unless it already exists as a directory.
  *
  * A broken or self-referencing symlink (ELOOP) makes `mkdir -p` fail, which is
- * how `<workspace>/.agents` can block startup after a bad manual `ln -s` or a
+ * how `~/.agents` can block startup after a bad manual `ln -s` or a
  * half-restored backup. Replace only symlinks that do not resolve to a real
  * directory; leave valid ones untouched.
  */
@@ -69,13 +69,9 @@ export async function ensureProjectWorkspace(workspaceRoot, slug) {
   return targetReal
 }
 
-export async function ensureSkillRoot(workspaceRoot) {
-  await ensureDirResilient(workspaceRoot)
-  const rootReal = await realpath(workspaceRoot)
-  const target = join(rootReal, '.agents')
-  await ensureDirResilient(target)
-  const real = await realpath(target)
-  if (!within(real, rootReal)) throw new PathError('共享技能池越界')
+export async function ensureSkillRoot(skillRoot) {
+  await ensureDirResilient(skillRoot)
+  const real = await realpath(skillRoot)
   await ensureDirResilient(join(real, 'skills'))
   return real
 }

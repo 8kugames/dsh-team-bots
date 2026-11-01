@@ -93,7 +93,7 @@ export class TeamService {
       await ensureDirResilient(this.config.dataDir)
       await ensureDirResilient(this.config.memoryDir)
       await ensureDirResilient(this.config.messageDir)
-      await ensureSkillRoot(this.config.workspace)
+      await ensureSkillRoot(this.config.skillRoot)
       // 密钥与数据库对不上就在启动时暴露，别等到第一次写密文才炸。
       this.ensureSecretBox()
       await this.ensureSoloWorkspaces()

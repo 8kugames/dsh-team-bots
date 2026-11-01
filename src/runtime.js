@@ -209,15 +209,16 @@ export class DshRuntime {
       project.id,
     )
     const ws = this.config.workspace
+    const sharedSkills = this.config.skillRoot
     const sharedRules = [
       disabledSkills.length === 0
-        ? `- The shared skill library is mounted at \`${ws}/.agents/skills\`; use installed skills when relevant.`
-        : `- The shared skill library is mounted at \`${ws}/.agents/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
+        ? `- The shared skill library is mounted at \`${sharedSkills}/skills\`; use installed skills when relevant.`
+        : `- The shared skill library is mounted at \`${sharedSkills}/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
       bindings.length > 0
         ? `- Pinned skill versions for this project: ${bindings.map(item => `\`${item.slug}\`@${item.version ?? 'latest'}`).join(', ')}.`
         : '- No skill version is pinned for this project; use the current published version.',
       '- Work only inside this project workspace unless the user explicitly authorizes another mounted path.',
-      `- The shared skill library at \`${ws}/.agents\` is read-only for you; publish skill changes through \`team_propose_evolution\` so the user can approve them.`,
+      `- The shared skill library at \`${sharedSkills}\` is read-only for you; publish skill changes through \`team_propose_evolution\` so the user can approve them.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
@@ -291,7 +292,7 @@ export class DshRuntime {
       `- Your workspace for this conversation is \`${workspace}\`; work inside it when the user asks you to produce or store files.`,
       '- Project tools (team_assign_task, team_review_task) do not apply here because there is no project context. If the user wants project work, suggest opening that project instead.',
       '- Use `team_remember` with scope bot or team for durable facts worth keeping; scope project is unavailable in this conversation. Never store secrets or credentials.',
-      `- The shared skill library is mounted at \`${this.config.workspace}/.agents/skills\`; use installed skills when relevant. The library at \`${this.config.workspace}/.agents\` is read-only for you; publish skill changes through \`team_propose_evolution\`.`,
+      `- The shared skill library is mounted at \`${this.config.skillRoot}/skills\`; use installed skills when relevant. The library at \`${this.config.skillRoot}\` is read-only for you; publish skill changes through \`team_propose_evolution\`.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',

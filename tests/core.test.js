@@ -96,7 +96,7 @@ async function setup() {
   await mkdir(workspace, { recursive: true })
   await mkdir(join(workspace, '.agents', 'skills', 'review'), { recursive: true })
   await writeFile(join(workspace, '.agents', 'skills', 'review', 'SKILL.md'), `---\nname: review\ndescription: Review code\nversion: 1.0.0\n---\n\nReview carefully.\n`)
-  const config = resolveConfig({ workspace, dataDir, modelCacheMs: 0, schedulerIntervalMs: 20 })
+  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   const runtime = new FakeRuntime(service)
@@ -306,12 +306,12 @@ test('blocked task goes to the owner bot and re-dispatch restarts it as owner-di
   }
 })
 
-test('team data defaults under /workspace/.data and skill pool is separate', async () => {
+test('team data defaults under the workspace and skill pool is the home agents dir', async () => {
   const { resolveConfig } = await import('../src/config.js')
   const config = resolveConfig({ workspace: '/tmp/example-workspace' })
   assert.equal(config.dataDir, '/tmp/example-workspace/.data')
   assert.equal(config.dbPath, '/tmp/example-workspace/.data/team.sqlite')
-  assert.equal(config.skillRoot, '/tmp/example-workspace/.agents')
+  assert.equal(config.skillRoot, resolve(join(homedir(), '.agents')))
 })
 
 test('workspace default resolves to ~/.dsh/workspace/team-bots unless configured', async () => {

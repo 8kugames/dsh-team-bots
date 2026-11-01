@@ -46,7 +46,7 @@ async function setup() {
   await writeSkill(join(workspace, '.agents', 'skills', 'review'), {
     name: 'review', description: 'Shared review', content: 'Shared body',
   })
-  const config = resolveConfig({ workspace, dataDir, modelCacheMs: 0, schedulerIntervalMs: 20 })
+  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   service.attachRuntime(new FakeRuntime())

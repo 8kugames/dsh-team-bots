@@ -42,7 +42,8 @@ export function resolveConfig(config = {}) {
     },
     memoryDir: join(dataDir, 'memory'),
     messageDir: join(dataDir, 'messages'),
-    skillRoot: join(workspace, '.agents'),
+    // 共享技能池固定在本机 ~/.agents，与用户其他 agent 工具共用同一目录；测试可注入临时目录。
+    skillRoot: resolve(config.skillRoot?.trim() || join(homedir(), '.agents')),
     maxConcurrentRuns: int(config.maxConcurrentRuns ?? process.env.DSH_TEAM_MAX_RUNS, 3, 1, 16),
     runTimeoutMs: int(config.runTimeoutMs ?? process.env.DSH_TEAM_RUN_TIMEOUT_MS, 15 * 60_000, 30_000, 6 * 60 * 60_000),
     // 0 关闭：单次运行的 token 上限，超出即中止，避免一个运行吃掉整月预算。
