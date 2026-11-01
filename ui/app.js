@@ -335,7 +335,12 @@
     const running = project?.stats?.running ?? 0
     const tokenTotal = usageTotals('project').totalTokens ?? 0
     const isGlobal = state.view === 'global'
-    const viewTitle = state.view === 'chat' ? (project?.name ?? '团队空间')
+    // 单聊是独立于项目的 1V1 对话窗口：标题显示对话对象，眉题不挂任何项目。
+    const isSolo = state.view === 'chat' && state.chatMode === 'solo'
+    const soloBot = isSolo ? botById(state.soloBotId) : null
+    const viewTitle = isSolo
+      ? (soloBot ? `@${soloBot.name}` : '单聊')
+      : state.view === 'chat' ? (project?.name ?? '团队空间')
       : state.view === 'tasks' ? '任务面板'
       : state.view === 'bots' ? '团队 Bots'
       : state.view === 'skills' ? '技能池'
@@ -344,7 +349,7 @@
       : state.view === 'usage' ? '资源用量'
       : state.view === 'global' ? '全局配置'
       : '项目设置'
-    const title = state.view === 'chat' ? (project?.name ?? '团队空间') : viewTitle
+    const title = viewTitle
     const spec = VIEW_ACTION[state.view]
     const cardOwnsPrimary = state.view === 'evolution' && pendingProposals() > 0
     const primary = !project || !spec ? '' : spec.submit
@@ -352,9 +357,11 @@
       : `<button class="btn ${cardOwnsPrimary ? '' : 'primary'}" data-action="${spec.action}"${spec.kind ? ` data-kind="${spec.kind}"` : ''}>${icon(spec.icon)}<span class="btn-label">${spec.label}</span></button>`
     const eyebrow = isGlobal
       ? ''
-      : project
-        ? `${project.key}<span class="sep"></span>${project.status === 'active' ? '进行中' : '已归档'}`
-        : '未选择项目'
+      : isSolo
+        ? '1V1 对话<span class="sep"></span>项目外'
+        : project
+          ? `${project.key}<span class="sep"></span>${project.status === 'active' ? '进行中' : '已归档'}`
+          : '未选择项目'
     const chats = data.projects
     const bots = data.bots ?? []
     const activeBots = bots.filter(bot => bot.status === 'active')
@@ -375,7 +382,7 @@
               </div>
               ${state.tree.chats ? `<div class="tree-list">
                 ${chats.length === 0 ? '<div class="side-empty">还没有群聊。</div>' : chats.map(item => `
-                  <button class="tree-item chat-item ${item.id === project?.id && !isGlobal ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
+                  <button class="tree-item chat-item ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
                     <span class="chat-hash">#</span>
                     <span class="tree-item-name">${esc(item.name)}</span>
                     ${item.status !== 'active' ? '<span class="tree-flag">已归档</span>' : ''}
@@ -393,7 +400,7 @@
               </div>
               ${state.tree.bots ? `<div class="tree-list">
                 ${bots.length === 0 ? '<div class="side-empty">还没有 Bot。</div>' : bots.map(bot => `
-                  <button class="tree-item bot-item" data-action="edit-bot" data-bot-id="${attr(bot.id)}" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(bot.modelRef ?? '未配置模型')}">
+                  <button class="tree-item bot-item ${state.view === 'chat' && state.chatMode === 'solo' && bot.id === state.soloBotId ? 'active' : ''}" data-action="${bot.status === 'active' ? 'solo-bot' : 'edit-bot'}" data-bot-id="${attr(bot.id)}" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(bot.modelRef ?? '未配置模型')}">
                     <span class="avatar sm ${attr(bot.color ?? 'gray')}">${esc(initials(bot.name))}</span>
                     <span class="tree-item-name">${esc(bot.name)}</span>
                     ${bot.openTasks > 0 ? `<span class="tree-open-count">${bot.openTasks}</span>` : ''}
@@ -523,17 +530,11 @@
               <div class="chat-head-title"><span class="chat-hash">#</span>群聊</div>
               <div class="chat-head-meta"><span>负责人 ${esc(owner?.name ?? '未设置')}</span><span class="sep"></span><span>${members.length} 个成员</span></div>
             </div>
-            <div class="chat-head-actions">
-              <div class="mode-switch" aria-label="会话模式">
-                <button type="button" class="active" data-action="chat-mode" data-mode="group">群聊</button>
-                <button type="button" data-action="chat-mode" data-mode="solo">单聊</button>
-              </div>
-              <div class="member-stack">
-                ${members.slice(0, 6).map(member => {
-                  const bot = botById(member.id)
-                  return bot ? avatar(bot, 'sm') : ''
-                }).join('')}
-              </div>
+            <div class="member-stack">
+              ${members.slice(0, 6).map(member => {
+                const bot = botById(member.id)
+                return bot ? avatar(bot, 'sm') : ''
+              }).join('')}
             </div>
           </div>
           <div class="chat-messages">
@@ -625,17 +626,6 @@
               <div class="chat-head-title">${avatar(bot, 'sm')}<span>@${esc(bot.name)}</span></div>
               <div class="chat-head-meta"><span>${esc(bot.role || '团队成员')}</span><span class="sep"></span><span>${esc(bot.modelRef ?? '未配置模型')}</span>${running > 0 ? `<span class="sep"></span><span class="run-dot"></span><span>${running} 个运行中</span>` : ''}</div>
             </div>
-            <div class="chat-head-actions">
-              <div class="mode-switch" aria-label="会话模式">
-                <button type="button" data-action="chat-mode" data-mode="group">群聊</button>
-                <button type="button" class="active" data-action="chat-mode" data-mode="solo">单聊</button>
-              </div>
-            </div>
-          </div>
-          <div class="solo-bot-strip" aria-label="切换单聊对象">
-            ${bots.map(item => `<button type="button" class="solo-pick${item.id === bot.id ? ' active' : ''}" data-action="pick-solo-bot" data-bot-id="${attr(item.id)}" title="${attr(item.name)}">
-              ${avatar(item, 'sm')}<span>${esc(item.name)}</span>
-            </button>`).join('')}
           </div>
           <div class="chat-messages">
             ${messages.length === 0 ? `<div class="chat-empty">
@@ -656,11 +646,20 @@
         </div>
         <aside class="chat-side">
           <div class="side-card">
-            <div class="side-card-head"><h3>单聊对象</h3></div>
-            <div class="owner-row">
-              ${avatar(bot, 'lg')}
-              <div class="owner-info"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || '团队成员')} · ${esc(bot.modelRef ?? '未配置模型')}</span></div>
-            </div>
+            <div class="side-card-head"><h3>配置</h3><button class="btn small" data-action="edit-bot" data-bot-id="${attr(bot.id)}" title="版本历史与完整配置">完整配置</button></div>
+            <div class="kv"><span>运行次数</span><strong>${bot.stats.runs}</strong></div>
+            <div class="kv"><span>成功 / 失败</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
+            <div class="kv"><span>长期记忆</span><strong>${bot.memoryCount}</strong></div>
+            <form data-form="update-bot">
+              <input type="hidden" name="botId" value="${attr(bot.id)}">
+              <div class="field"><label for="solo-bot-name">名称</label><input class="input" style="width:100%" id="solo-bot-name" name="name" value="${attr(bot.name)}" maxlength="24"></div>
+              <div class="field"><label for="solo-bot-role">角色标签</label><input class="input" style="width:100%" id="solo-bot-role" name="role" value="${attr(bot.role ?? '')}" maxlength="24"></div>
+              <div class="field"><label for="solo-bot-model">模型</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
+              <div class="field"><label for="solo-bot-effort">推理强度</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
+              <div class="field"><label for="solo-bot-color">外观颜色</label><select class="select" style="width:100%" id="solo-bot-color" name="color">${COLORS.map(color => `<option value="${color}" ${bot.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
+              <div class="field"><label for="solo-bot-instructions">角色指令</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="5" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot.instructions ?? '')}</textarea></div>
+              <div class="btn-row"><button class="btn primary small" type="submit">${icon('check')}保存新版本</button></div>
+            </form>
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>最近单聊运行</h3><span>${runs.length}</span></div>
@@ -2476,6 +2475,7 @@
         }
         case 'select-project':
           state.projectId = target.dataset.projectId
+          state.chatMode = 'group'
           state.view = 'chat'
           await refresh()
           break
@@ -2545,29 +2545,15 @@
         case 'send-message':
           await sendMessage()
           break
-        case 'chat-mode': {
-          const mode = target.dataset.mode === 'solo' ? 'solo' : 'group'
-          if (mode === 'solo' && !state.soloBotId) {
-            const first = (state.data?.bots ?? []).find(bot => bot.status === 'active')
-            if (first) state.soloBotId = first.id
-          }
-          state.chatMode = mode
-          render()
-          break
-        }
-        case 'pick-solo-bot':
-          if (target.dataset.botId) {
-            state.soloBotId = target.dataset.botId
-            state.draft = ''
-            closeAutocomplete()
-            await loadState(state.projectId, { quiet: true })
-            render()
-          }
-          break
         case 'solo-bot': {
           const botId = target.dataset.botId
           if (!botId) break
-          state.soloBotId = botId
+          // 从树上或 Bots 页打开 1V1 对话窗口；已在看同一个会话则不重复加载。
+          if (state.soloBotId !== botId) {
+            state.soloBotId = botId
+            state.draft = ''
+            closeAutocomplete()
+          }
           state.chatMode = 'solo'
           state.view = 'chat'
           await loadState(state.projectId, { quiet: true })
