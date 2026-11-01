@@ -542,6 +542,7 @@ a { color: var(--accent-text); text-decoration: none; }
 .member-stack { margin-left: auto; display: flex; padding-right: 2px; }
 .member-stack .avatar { margin-left: -5px; box-shadow: 0 0 0 2px var(--surface); }
 .member-stack .avatar:first-child { margin-left: 0; }
+.chat-head-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
 
 .chat-messages { flex: 1; overflow: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 16px; }
 .message-row { display: flex; gap: 10px; }
@@ -912,6 +913,7 @@ a { color: var(--accent-text); text-decoration: none; }
 .task-detail-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(240px, .8fr); gap: 22px; }
 .task-detail-main { min-width: 0; }
 .task-detail-side { border-left: 1px solid var(--line); padding-left: 20px; }
+.config-card { padding: 20px 22px; }
 .comment { display: flex; gap: 9px; margin-top: 12px; }
 .comment-main { min-width: 0; }
 .comment-head { color: var(--ink-3); font-size: var(--fs-caption); margin-bottom: 3px; display: flex; gap: 8px; }

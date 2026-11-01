@@ -9,10 +9,11 @@
   const UI_THEME_KEY = 'dshb:ui-theme'
   const state = {
     data: null,
-    view: ['chat', 'tasks', 'bots', 'skills', 'memory', 'evolution', 'usage', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
+    view: ['chat', 'solo-config', 'tasks', 'bots', 'skills', 'memory', 'evolution', 'usage', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
     projectId: params.get('project') || null,
     chatMode: 'group',
     soloBotId: null,
+    soloDetail: null,
     modal: null,
     draft: '',
     ac: null,
@@ -59,6 +60,7 @@
     memory: { label: '写入记忆', action: 'new-memory', icon: 'plus' },
     skills: { label: '新建提案', action: 'new-proposal', icon: 'plus', kind: 'skill' },
     settings: { label: '保存设置', icon: 'check', submit: 'project-settings-form' },
+    'solo-config': { label: '保存配置', icon: 'check', submit: 'solo-config-form' },
   }
   const NAV = [
     ['chat', '群聊', 'message'],
@@ -69,6 +71,11 @@
     ['evolution', '进化', 'branch'],
     ['usage', '用量', 'chart'],
     ['settings', '设置', 'settings'],
+  ]
+  // 1V1 单聊上下文的导航：对话窗口 + 集中配置页，与群聊的 tab 集合互不混用。
+  const SOLO_NAV = [
+    ['chat', '对话', 'message'],
+    ['solo-config', '配置', 'settings'],
   ]
 
   const icons = {
@@ -335,11 +342,13 @@
     const running = project?.stats?.running ?? 0
     const tokenTotal = usageTotals('project').totalTokens ?? 0
     const isGlobal = state.view === 'global'
-    // 单聊是独立于项目的 1V1 对话窗口：标题显示对话对象，眉题不挂任何项目。
+    // 单聊是独立于项目的 1V1 上下文：对话窗口 + 集中配置页共用一套导航。
     const isSolo = state.view === 'chat' && state.chatMode === 'solo'
-    const soloBot = isSolo ? botById(state.soloBotId) : null
+    const inSolo = isSolo || state.view === 'solo-config'
+    const soloBot = inSolo ? botById(state.soloBotId) : null
     const viewTitle = isSolo
       ? (soloBot ? `@${soloBot.name}` : '单聊')
+      : state.view === 'solo-config' ? (soloBot ? `配置 · @${soloBot.name}` : 'Bot 配置')
       : state.view === 'chat' ? (project?.name ?? '团队空间')
       : state.view === 'tasks' ? '任务面板'
       : state.view === 'bots' ? '团队 Bots'
@@ -352,12 +361,12 @@
     const title = viewTitle
     const spec = VIEW_ACTION[state.view]
     const cardOwnsPrimary = state.view === 'evolution' && pendingProposals() > 0
-    const primary = !project || !spec ? '' : spec.submit
+    const primary = (!project && !inSolo) || !spec ? '' : spec.submit
       ? `<button class="btn primary" type="submit" form="${spec.submit}">${icon(spec.icon)}<span class="btn-label">${spec.label}</span></button>`
       : `<button class="btn ${cardOwnsPrimary ? '' : 'primary'}" data-action="${spec.action}"${spec.kind ? ` data-kind="${spec.kind}"` : ''}>${icon(spec.icon)}<span class="btn-label">${spec.label}</span></button>`
     const eyebrow = isGlobal
       ? ''
-      : isSolo
+      : inSolo
         ? '1V1 对话<span class="sep"></span>项目外'
         : project
           ? `${project.key}<span class="sep"></span>${project.status === 'active' ? '进行中' : '已归档'}`
@@ -444,7 +453,7 @@
             </div>
           </header>
           ${isGlobal ? '' : `<div class="tabbar" role="tablist" aria-label="主导航">
-            ${NAV.map(([key, label]) => {
+            ${(inSolo ? SOLO_NAV : NAV).map(([key, label]) => {
               const dot = tabDot(key)
               const active = state.view === key
               return `<button class="tab ${active ? 'active' : ''}" role="tab" id="tab-${key}" aria-controls="main-content" aria-selected="${active}" tabindex="${active ? '0' : '-1'}" data-action="nav" data-view="${key}">${label}${dot ? '<span class="red-dot" title="有待人工处理事项"></span>' : ''}</button>`
@@ -499,6 +508,7 @@
         case 'usage': return renderUsage()
         case 'settings': return renderSettings()
         case 'global': return renderGlobal()
+        case 'solo-config': return renderSoloConfig()
         case 'chat':
         default: return renderChat()
       }
@@ -626,6 +636,9 @@
               <div class="chat-head-title">${avatar(bot, 'sm')}<span>@${esc(bot.name)}</span></div>
               <div class="chat-head-meta"><span>${esc(bot.role || '团队成员')}</span><span class="sep"></span><span>${esc(bot.modelRef ?? '未配置模型')}</span>${running > 0 ? `<span class="sep"></span><span class="run-dot"></span><span>${running} 个运行中</span>` : ''}</div>
             </div>
+            <div class="chat-head-actions">
+              <button class="btn small" data-action="nav" data-view="solo-config" title="打开集中配置页">${icon('settings')}配置</button>
+            </div>
           </div>
           <div class="chat-messages">
             ${messages.length === 0 ? `<div class="chat-empty">
@@ -646,20 +659,11 @@
         </div>
         <aside class="chat-side">
           <div class="side-card">
-            <div class="side-card-head"><h3>配置</h3><button class="btn small" data-action="edit-bot" data-bot-id="${attr(bot.id)}" title="版本历史与完整配置">完整配置</button></div>
-            <div class="kv"><span>运行次数</span><strong>${bot.stats.runs}</strong></div>
-            <div class="kv"><span>成功 / 失败</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
-            <div class="kv"><span>长期记忆</span><strong>${bot.memoryCount}</strong></div>
-            <form data-form="update-bot">
-              <input type="hidden" name="botId" value="${attr(bot.id)}">
-              <div class="field"><label for="solo-bot-name">名称</label><input class="input" style="width:100%" id="solo-bot-name" name="name" value="${attr(bot.name)}" maxlength="24"></div>
-              <div class="field"><label for="solo-bot-role">角色标签</label><input class="input" style="width:100%" id="solo-bot-role" name="role" value="${attr(bot.role ?? '')}" maxlength="24"></div>
-              <div class="field"><label for="solo-bot-model">模型</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
-              <div class="field"><label for="solo-bot-effort">推理强度</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
-              <div class="field"><label for="solo-bot-color">外观颜色</label><select class="select" style="width:100%" id="solo-bot-color" name="color">${COLORS.map(color => `<option value="${color}" ${bot.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
-              <div class="field"><label for="solo-bot-instructions">角色指令</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="5" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot.instructions ?? '')}</textarea></div>
-              <div class="btn-row"><button class="btn primary small" type="submit">${icon('check')}保存新版本</button></div>
-            </form>
+            <div class="side-card-head"><h3>单聊对象</h3><button class="btn small" data-action="nav" data-view="solo-config" title="打开集中配置页">配置</button></div>
+            <div class="owner-row">
+              ${avatar(bot, 'lg')}
+              <div class="owner-info"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || '团队成员')} · ${esc(bot.modelRef ?? '未配置模型')}</span></div>
+            </div>
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>最近单聊运行</h3><span>${runs.length}</span></div>
@@ -675,6 +679,73 @@
             <div class="side-card-head"><h3>专属工作区</h3></div>
             <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
           </div>
+        </aside>
+      </div>`
+  }
+
+  // 单聊 Bot 的集中配置页：身份、模型、指令、运行统计与版本历史在一页完成。
+  async function loadSoloDetail() {
+    const botId = state.soloBotId
+    if (!botId) return
+    state.soloDetail = null
+    try {
+      const detail = await api('bot_detail', { botId })
+      if (state.view === 'solo-config' && state.soloBotId === botId) {
+        state.soloDetail = detail
+        render()
+      }
+    } catch {}
+  }
+
+  function renderSoloConfig() {
+    const bot = botById(state.soloBotId)
+    if (!bot) {
+      return `<div class="empty-state">
+        <div class="empty-symbol">${icon('bot')}</div>
+        <h3>还没有选择单聊对象</h3>
+        <p>从左侧 Bots 树点一个 Bot 进入 1V1 对话，再点「配置」来到这里。</p>
+        <button class="btn primary" data-action="nav" data-view="chat">返回对话</button>
+      </div>`
+    }
+    const revisions = state.soloDetail?.revisions ?? []
+    return `
+      <div class="task-detail-grid">
+        <div class="card config-card">
+          <div class="owner-row" style="margin-bottom:16px">
+            ${avatar(bot, 'lg')}
+            <div class="owner-info"><strong style="font-size:var(--fs-title)">${esc(bot.name)}</strong><span>${esc(bot.role || '团队成员')} · ${esc(bot.modelRef ?? '未配置模型')} · ${esc(BOT_STATUS[bot.status] ?? bot.status)}</span></div>
+          </div>
+          <form data-form="update-bot" id="solo-config-form">
+            <input type="hidden" name="botId" value="${attr(bot.id)}">
+            <div class="field-row">
+              <div class="field"><label for="solo-bot-name">名称</label><input class="input" style="width:100%" id="solo-bot-name" name="name" value="${attr(bot.name)}" placeholder="例如：Builder" required maxlength="24"></div>
+              <div class="field"><label for="solo-bot-role">角色标签</label><input class="input" style="width:100%" id="solo-bot-role" name="role" value="${attr(bot.role ?? '')}" placeholder="例如：开发" maxlength="24"></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label for="solo-bot-model">模型</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
+              <div class="field"><label for="solo-bot-effort">推理强度</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
+            </div>
+            <div class="field"><label for="solo-bot-color">外观颜色</label><select class="select" style="width:100%" id="solo-bot-color" name="color">${COLORS.map(color => `<option value="${color}" ${bot.color === color ? 'selected' : ''}>${COLOR_NAMES[color] ?? color}</option>`).join('')}</select></div>
+            <div class="field"><label for="solo-bot-instructions">角色指令</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="12" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot.instructions ?? '')}</textarea></div>
+          </form>
+          <div class="divider"></div>
+          <div class="btn-row">
+            <button class="btn primary" type="submit" form="solo-config-form">${icon('check')}保存新版本</button>
+            ${bot.status === 'active' ? `<button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档 Bot</button>` : ''}
+          </div>
+        </div>
+        <aside class="task-detail-side">
+          <div class="eyebrow" style="margin-bottom:9px">运行统计</div>
+          <div class="kv"><span>运行次数</span><strong>${bot.stats.runs}</strong></div>
+          <div class="kv"><span>成功 / 失败</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
+          <div class="kv"><span>长期记忆</span><strong>${bot.memoryCount}</strong></div>
+          <div class="divider"></div>
+          <div class="eyebrow" style="margin-bottom:6px">专属工作区</div>
+          <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+          <div class="divider"></div>
+          <div class="eyebrow" style="margin-bottom:9px">版本历史</div>
+          ${revisions.length === 0 ? '<div class="faint">' + (state.soloDetail ? '暂无版本' : '加载中…') + '</div>' : revisions.map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span><button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}" ${revision.version === bot.current_revision ? 'disabled' : ''}>回滚</button></div>`).join('')}
+          <div class="usage-note">模型或强度变更会在下一次运行时生效，不会中断当前运行。</div>
         </aside>
       </div>`
   }
@@ -2374,6 +2445,7 @@
           break
         case 'nav':
           state.view = target.dataset.view || 'chat'
+          if (state.view === 'solo-config') void loadSoloDetail()
           render()
           break
         case 'toggle-tree': {
@@ -2597,6 +2669,10 @@
           await api('archive_bot', { botId })
           state.modal = null
           await refresh()
+          if (state.view === 'solo-config' && botById(botId)?.status !== 'active') {
+            state.view = 'chat'
+            state.chatMode = 'group'
+          }
           toast('Bot 已归档', 'success')
           break
         }
@@ -2605,7 +2681,11 @@
           if (!window.confirm('回滚到该版本？')) break
           await api('rollback_bot', { botId, revisionId: target.dataset.revisionId })
           await loadState(state.projectId, { quiet: true })
-          await openBot(botId)
+          if (state.view === 'solo-config') {
+            await loadSoloDetail()
+          } else {
+            await openBot(botId)
+          }
           toast('已回滚并生成新版本', 'success')
           break
         }
@@ -2788,6 +2868,7 @@
         }
         state.modal = null
         await refresh()
+        if (state.view === 'solo-config') await loadSoloDetail()
         return
       }
       if (type === 'create-task') {
@@ -3097,6 +3178,7 @@
       await loadState(state.projectId)
       if (!state.projectId) state.projectId = state.data.project?.id ?? null
       render()
+      if (state.view === 'solo-config') void loadSoloDetail()
       if (state.modal?.type === 'proposal') bindProposalForm()
     } catch (error) {
       state.data = null
