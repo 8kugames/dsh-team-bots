@@ -2616,10 +2616,13 @@
     const project = activeProject()
     const activeRun = (task.runs ?? []).find(run => ['queued', 'running'].includes(run.status))
     const latestFailed = (task.runs ?? []).find(run => ['failed', 'canceled'].includes(run.status))
+    // 终态时间小字（DSHBOTS-44）：与任务卡同口径——done 取 completed_at、canceled 取 canceled_at，缺列不造占位。
+    // 终态下 stageLabel 为 null（DSHBOTS-42 口径），badge 槽正好空出，用「完成于/取消于 + 时间」补位。
+    const endAt = task.status === 'done' ? task.completed_at : task.status === 'canceled' ? task.canceled_at : null
     return modalShell({
       title: `${task.identifier} · ${task.title}`,
       // 任务阶段徽标走 taskStage 查表口径（DSHBOTS-42）：ended → stageLabel 为 null → 不显示。
-      badge: task.stageLabel ? esc(task.stageLabel) : '',
+      badge: task.stageLabel ? esc(task.stageLabel) : endAt ? esc(`${task.status === 'done' ? '完成于' : '取消于'} ${formatTime(endAt)}`) : '',
       size: 'task',
       body: `<div class="task-detail-grid">
         <div class="task-detail-main">

@@ -91,8 +91,8 @@ test('任务卡接线：运行徽标以 stage/stageLabel 为准，不再从 late
   assert.doesNotMatch(appSource, /const runLabel = run \? \(\{/, '不得再用 latestRun.status 映射拼运行文案')
 })
 
-test('任务详情接线：modal 徽标走同一标签口径，ended 不显示', () => {
-  assert.match(appSource, /badge: task\.stageLabel \? esc\(task\.stageLabel\) : ''/)
+test('任务详情接线：modal 徽标走同一标签口径，ended 空槽由终态时间补位（DSHBOTS-44）', () => {
+  assert.match(appSource, /badge: task\.stageLabel \? esc\(task\.stageLabel\) : endAt \? esc\(/)
 })
 
 // ── 服务级管道回归锁：真库真 taskView，锁「数据 → 推导 → 下发」整条链 ──

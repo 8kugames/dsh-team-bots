@@ -56,6 +56,18 @@ test('任务卡终态时间：done/canceled 各取各的时间戳，非终态不
   assert.match(code, /\$\{endAt \? `<span class="task-end-time"/)
 })
 
+test('任务详情弹窗终态时间：badge 空槽补位显示完成/取消时间，缺列不造占位', () => {
+  const start = app.indexOf('function modalTask(task)')
+  const end = app.indexOf('\n  function ', start)
+  const code = app.slice(start, end).replace(/\/\/[^\n]*/g, '')
+  // 与任务卡同口径的字段分派：done→completed_at、canceled→canceled_at
+  assert.match(code, /const endAt = task\.status === 'done' \? task\.completed_at : task\.status === 'canceled' \? task\.canceled_at : null/)
+  // badge 三级回退：stageLabel 优先（非终态阶段徽标），终态空槽用「完成于/取消于 + formatTime」补位，缺列保持空串
+  assert.match(code, /badge: task\.stageLabel \? esc\(task\.stageLabel\) : endAt \? esc\(`/)
+  assert.match(code, /'完成于' : '取消于'/)
+  assert.match(code, /formatTime\(endAt\)/)
+})
+
 test('CSS：.task-end-time 规则存在且为弱化小字', () => {
   const rule = css.match(/\.task-end-time \{[^}]+\}/)?.[0] ?? ''
   assert.ok(rule, '.task-end-time 规则必须存在于 styles.css')
