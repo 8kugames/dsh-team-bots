@@ -144,6 +144,33 @@ test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
   }
 })
 
+test('出队顺序按任务优先级，紧急任务不被积压拖死', async () => {
+  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  try {
+    const project = await service.createProject({ name: 'Prio', key: 'PRI', ownerBotId: chief.id, memberIds: [dev.id] })
+    // 同项目只有一个写运行槽位：先入队的低优先级任务不应挡住后入队的紧急任务。
+    await service.createTask({ projectId: project.id, title: 'Backlog', priority: 'low', assigneeBotId: dev.id, autoStart: true })
+    const urgent = await service.createTask({ projectId: project.id, title: 'Hotfix', priority: 'urgent', assigneeBotId: dev.id, autoStart: true })
+
+    service.started = true
+    await service.tick()
+
+    const running = runningRuns(store).filter(run => run.kind === 'task')
+    assert.equal(running.length, 1)
+    assert.equal(running[0].task_id, urgent.id, '紧急任务应先于更早入队的低优先级任务领取')
+
+    // 紧急任务结束后，低优先级任务照旧被执行，队列不饿死。
+    await runtime.complete(running[0].id)
+    await service.tick()
+    const next = runningRuns(store).filter(run => run.kind === 'task')
+    assert.equal(next.length, 1)
+    assert.notEqual(next[0].task_id, urgent.id)
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('运行中的任务会把新评论直通到执行会话', async () => {
   const { root, store, service, runtime, chief, dev } = await manualSetup()
   try {

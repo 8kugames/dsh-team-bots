@@ -1850,7 +1850,21 @@ export class TeamService {
       const writingProjects = new Set(activeRows.filter(row => row.mode === 'write' && row.project_id).map(row => row.project_id))
       let activeTotal = activeRows.length
       if (activeTotal >= this.config.maxConcurrentRuns) return
-      const candidates = this.store.all("SELECT * FROM runs WHERE status = 'queued' ORDER BY queued_at LIMIT 50")
+      // 出队顺序：任务运行按任务优先级（urgent 先），其余运行视同 high——用户交互不能被任务积压拖死；
+      // 同优先级按入队时间，保证 FIFO 不饿死老运行。
+      const candidates = this.store.all(
+        `SELECT r.* FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+         WHERE r.status = 'queued'
+         ORDER BY CASE
+           WHEN r.kind <> 'task' OR t.priority IS NULL THEN 1
+           WHEN t.priority = 'urgent' THEN 0
+           WHEN t.priority = 'high' THEN 1
+           WHEN t.priority = 'medium' THEN 2
+           WHEN t.priority = 'low' THEN 3
+           ELSE 4
+         END, r.queued_at
+         LIMIT 50`,
+      )
       for (const run of candidates) {
         if (activeTotal >= this.config.maxConcurrentRuns) break
         const claimKey = this.claimKey(run)
