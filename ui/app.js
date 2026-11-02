@@ -277,6 +277,8 @@
   function runDotHtml(dot) {
     return `<span class="run-dot ${dot.cls}" data-status="${dot.status}" title="${esc(dot.text)}" aria-label="${esc(dot.text)}"></span>`
   }
+  // 卡片底部的状态短标签（完整说明仍在 run-dot 的 title 里）。
+  const MEMBER_STATUS_TEXT = { idle: '空闲', running: '运行中', queued: '排队中', plan_wait: '限流等待', failed: '运行失败' }
   function memorySource(source) {
     const value = String(source ?? '')
     if (!value) return '手动写入'
@@ -1621,6 +1623,8 @@
 
   // 项目成员管理页：状态与用量均按当前项目聚合（busy=本项目有排队/运行中运行；
   // usage 四项与 cost 为该项目全部运行的累计）。邀请走 add_member API，移除走 remove_member。
+  // DSHBOTS-52：成员行改卡片式网格——单卡宽高比锁定 0.618:1（CSS aspect-ratio: 0.618，
+  // 即宽:高 = 0.618:1），内容装不下时以卡片为准不撑破；上头像、中名称+角色、下状态点与用量。
   function renderMembers() {
     const project = activeProject()
     if (!project) return noProject()
@@ -1633,7 +1637,7 @@
           <button class="btn" data-action="nav" data-view="bots-overview" title="查看全部 Bot 或新建">${icon('bot')}总览bots</button>
         </div>
       </div>
-      <div class="card list-card">
+      <div class="members-grid">
         ${members.map(member => {
           const bot = botById(member.id)
           if (!bot) return ''
@@ -1642,20 +1646,21 @@
           const tokens = Number(member.usage_input ?? 0) + Number(member.usage_cache_read ?? 0) + Number(member.usage_cache_write ?? 0) + Number(member.usage_output ?? 0)
           const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
           const modelLine = modelRef ? String(modelRef) : '未配置模型'
+          const statusText = MEMBER_STATUS_TEXT[dot.status] ?? dot.text
+          const usageDetail = `输入 ${formatNumber(member.usage_input)} · 缓存读 ${formatNumber(member.usage_cache_read)} · 缓存写 ${formatNumber(member.usage_cache_write)} · 输出 ${formatNumber(member.usage_output)}`
           return `
-          <div class="list-row member-row" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
-            ${avatar(bot, 'sm')}
-            <div class="list-main">
-              <div class="list-title"><strong>${esc(bot.name)}</strong>${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}<span class="member-model">${esc(modelLine)}</span></div>
-              <div class="list-meta">
-                <span>输入 ${formatNumber(member.usage_input)} · 缓存读 ${formatNumber(member.usage_cache_read)} · 缓存写 ${formatNumber(member.usage_cache_write)} · 输出 ${formatNumber(member.usage_output)}</span>
-                <span>合计 <strong>${formatNumber(tokens)}</strong> tokens · <strong>${formatCost(Number(member.usage_cost ?? 0))}</strong></span>
-              </div>
+          <div class="member-card${isOwner ? ' is-owner' : ''}" data-member-card data-bot-id="${attr(member.id)}" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
+            ${isOwner ? '' : `<button class="member-card-remove" data-action="remove-member" data-bot-id="${attr(member.id)}" title="移出项目" aria-label="将 ${esc(bot.name)} 移出项目">${icon('close')}</button>`}
+            <div class="member-card-top">${avatar(bot, 'lg')}</div>
+            <div class="member-card-mid">
+              <div class="member-card-name"><strong>${esc(bot.name)}</strong></div>
+              <div class="member-card-tags">${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}<span class="member-model">${esc(modelLine)}</span></div>
             </div>
-            <div class="btn-row">
-              <span class="pill ${member.busy ? 'amber' : 'green'}">${member.busy ? '任务中' : '空闲中'}</span>
-              ${runDotHtml(dot)}
-              ${isOwner ? '' : `<button class="btn small" data-action="remove-member" data-bot-id="${attr(member.id)}">移除</button>`}
+            <div class="member-card-foot">
+              <span class="member-card-status">${runDotHtml(dot)}<span>${esc(statusText)}</span></span>
+              <span class="pill ${member.busy ? 'amber' : 'green'} member-card-busy">${member.busy ? '任务中' : '空闲中'}</span>
+              <span class="member-card-usage" title="${esc(usageDetail)}">合计 <strong>${formatNumber(tokens)}</strong> tokens</span>
+              <span class="member-card-cost"><strong>${formatCost(Number(member.usage_cost ?? 0))}</strong></span>
             </div>
           </div>`
         }).join('')}

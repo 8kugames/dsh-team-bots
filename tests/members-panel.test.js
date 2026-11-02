@@ -129,3 +129,88 @@ test('弹窗关闭/取消/遮罩/ESC 都是零变更', () => {
   // 关闭路径上不得有写操作。
   assert.ok(!/case 'close-modal'[\s\S]{0,200}add_member/.test(source), '关闭动作不触发 add_member')
 })
+
+// DSHBOTS-52：成员 tab 改卡片式（用户 m_fd1b36）——成员行列表改为卡片网格，单卡宽高比锁定
+// 0.618:1（宽:高，竖向黄金比），上头像 / 中名称+角色 / 下状态点与用量合计；总监卡保留 violet 标识；
+// busy 状态点沿用 run-dot 语义不变色；悬停/焦点给轻量描边；移除操作收进卡片角标（hover 显出）。
+const cardCss = /\.member-card \{([\s\S]*?)\n\}/.exec(css)?.[1]
+assert.ok(cardCss, '找不到 .member-card 样式块')
+const gridCss = /\.members-grid \{([\s\S]*?)\n\}/.exec(css)?.[1]
+assert.ok(gridCss, '找不到 .members-grid 样式块')
+
+test('成员列表改为卡片网格，不再是行列表', () => {
+  assert.match(membersFn, /<div class="members-grid">/, '成员区是卡片网格容器')
+  assert.match(membersFn, /<div class="member-card/, '每个成员一张卡片')
+  assert.ok(!membersFn.includes('list-row'), '成员页不再渲染 list-row 行列表')
+  assert.ok(!membersFn.includes('list-card'), '成员页不再用 list-card 包裹行列表')
+  assert.match(gridCss, /display:\s*grid/, '容器是 grid 布局')
+  assert.match(gridCss, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(/, '列宽自适应（auto-fill + minmax）')
+})
+
+test('单卡宽高比锁定 0.618:1，内容不足不撑破', () => {
+  assert.match(cardCss, /aspect-ratio:\s*0\.618/, '卡片 aspect-ratio: 0.618（宽:高 = 0.618:1）')
+  assert.match(cardCss, /overflow:\s*hidden/, '内容装不下时以卡片为准，不撑破卡片')
+})
+
+test('卡片信息布局：上头像、中名称+角色、下状态点与用量', () => {
+  const topIdx = membersFn.indexOf('member-card-top')
+  const midIdx = membersFn.indexOf('member-card-mid')
+  const footIdx = membersFn.indexOf('member-card-foot')
+  assert.ok(topIdx > 0 && midIdx > topIdx && footIdx > midIdx, '头像 → 名称/角色 → 状态与用量，三段从上到下')
+  assert.match(membersFn, /member-card-top">\$\{avatar\(bot, 'lg'\)\}/, '顶部是头像')
+  assert.match(membersFn, /member-card-name"><strong>\$\{esc\(bot\.name\)\}<\/strong>/, '中部是名称')
+  assert.match(membersFn, /class="member-role"/, '中部有角色标签')
+  assert.match(membersFn, /member-card-foot[\s\S]*?runDotHtml\(dot\)/, '底部有状态点')
+  assert.match(membersFn, /member-card-foot[\s\S]*?合计 <strong>\$\{formatNumber\(tokens\)\}<\/strong> tokens/, '底部有 token 合计')
+  assert.match(membersFn, /member-card-foot[\s\S]*?formatCost\(Number\(member\.usage_cost \?\? 0\)\)/, '底部有 cost 合计')
+})
+
+test('总监卡保留 violet 标识，且不渲染移除按钮', () => {
+  assert.match(membersFn, /isOwner \? '<span class="pill violet">总监<\/span>'/, '总监用 violet 标签')
+  assert.match(membersFn, /\$\{isOwner \? '' : `<button class="member-card-remove"/, '移除按钮只给非总监卡')
+})
+
+test('busy 状态点沿用 run-dot 语义且不改色', () => {
+  assert.match(membersFn, /memberRunDot\(member\)/, '状态点仍走 memberRunDot')
+  assert.match(membersFn, /runDotHtml\(dot\)/, '状态点仍用 runDotHtml 输出')
+  assert.match(source, /function runDotHtml\(dot\)[\s\S]*?<span class="run-dot \$\{dot\.cls\}" data-status="\$\{dot\.status\}"/, 'run-dot 的类与 data-status 语义未变')
+  // 颜色类只允许原有四类，成员页不新增状态点配色。
+  assert.ok(!/run-dot\s+(red|blue|green|yellow|violet|amber)/.test(membersFn), '卡片不新增状态点配色类')
+  assert.match(css, /\.run-dot\.running \{[\s\S]*?background: var\(--star\)|\.run-dot\.running \{[\s\S]*?background: var\(--amber\)/, '运行中仍用既有配色变量')
+})
+
+test('悬停/焦点态给轻量描边', () => {
+  const hoverRule = /\.member-card:hover,\s*\n\s*\.member-card:focus-within \{([\s\S]*?)\n\}/.exec(css)?.[1]
+  assert.ok(hoverRule, '找不到 .member-card:hover / :focus-within 规则')
+  assert.match(hoverRule, /border-color:/, '悬停/焦点改描边色')
+  assert.match(hoverRule, /box-shadow:/, '悬停/焦点有轻量外描边')
+})
+
+test('移除操作收进卡片角标，hover 才显出', () => {
+  const removeCss = /\.member-card-remove \{([\s\S]*?)\n\}/.exec(css)?.[1]
+  assert.ok(removeCss, '找不到 .member-card-remove 样式')
+  assert.match(removeCss, /position:\s*absolute/, '角标绝对定位在卡片角上')
+  assert.match(removeCss, /opacity:\s*0/, '默认隐藏')
+  assert.match(css, /\.member-card:hover \.member-card-remove,\s*\n\s*\.member-card:focus-within \.member-card-remove \{[\s\S]*?opacity:\s*1/, 'hover/聚焦时显出')
+})
+
+test('小屏少列：窄屏收成两列，超窄屏退到单列', () => {
+  assert.match(css, /@media \(max-width: 430px\) \{\s*\n\s*\.members-grid \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/, '≤430px 两列')
+  assert.match(css, /@media \(max-width: 340px\) \{\s*\n\s*\.members-grid \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/, '≤340px 单列')
+})
+
+test('卡片宽度有上限，宽屏下不被拉成巨型卡', () => {
+  assert.match(cardCss, /max-width:\s*236px/, '卡片最大宽度封顶')
+  assert.match(gridCss, /justify-items:\s*center/, '卡片在列内居中')
+})
+
+test('卡片样式只用主题变量，明暗两套都成立', () => {
+  const nameCss = /\.member-card-name \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
+  const footCss = /\.member-card-foot \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
+  const colorProps = [...cardCss, nameCss, footCss].join('\n').match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g) ?? []
+  assert.deepEqual(colorProps, [], '卡片样式不写死颜色，全部走主题变量')
+  assert.match(cardCss, /var\(--surface\)/, '卡片底色用主题 surface')
+  assert.match(cardCss, /var\(--line\)/, '卡片描边用主题 line')
+  assert.match(nameCss, /var\(--ink\)/, '名称文字色用主题 ink')
+  assert.match(footCss, /var\(--ink-3\)/, '底部小字用主题 ink-3')
+})
