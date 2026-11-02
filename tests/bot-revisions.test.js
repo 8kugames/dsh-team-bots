@@ -73,6 +73,10 @@ test('改一个字产生新版本：插行并 bump，审计不带 unchanged', as
     const rows = revisions(store, director.id)
     assert.equal(rows.length, Number(director.current_revision) + 1, '新增一行')
     assert.equal(rows.at(-1).instructions, next)
+    const inserted = store.get('SELECT * FROM bot_revisions WHERE bot_id = ? AND version = ?', director.id, Number(director.current_revision) + 1)
+    assert.equal(inserted.provider, null, '新版本行不再写模型列')
+    assert.equal(inserted.model, null)
+    assert.equal(inserted.effort, null)
     assert.equal(store.get('SELECT current_revision FROM bots WHERE id = ?', director.id).current_revision, Number(director.current_revision) + 1)
     assert.equal(lastAudit(store).unchanged, undefined)
   } finally { await rm(root, { recursive: true, force: true }) }

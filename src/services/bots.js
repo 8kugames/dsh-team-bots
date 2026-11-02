@@ -56,9 +56,9 @@ export const botsMethods = {
         fallbackProvider, fallbackModel, fallbackEffort, filePolicy, soloDir, createdAt, createdAt,
       )
       this.store.run(
-        `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, provider, model, effort, created_by, created_at)
-         VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
-        id('rev'), botId, role, instructions, provider, model, effort, `${actor.type}:${actor.id}`, createdAt,
+        `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, created_by, created_at)
+         VALUES (?, ?, 1, ?, ?, ?, ?)`,
+        id('rev'), botId, role, instructions, `${actor.type}:${actor.id}`, createdAt,
       )
       this.audit(actor, 'bot.create', 'bot', botId, {
         name, provider, model, effort,
@@ -155,8 +155,8 @@ export const botsMethods = {
     if (fallbackModel !== bot.fallback_model) changes.fallback_model = fallbackModel
     if (fallbackEffort !== bot.fallback_effort) changes.fallback_effort = fallbackEffort
     // 版本快照只覆盖角色+指令（DSHBOTS-51）：模型类字段（主/备 provider·model·effort）修改即生效，
-    // 仅落库+审计、不进版本历史。快照与最新版本行逐字段比对（等价于对拼接内容做 hash 校验，
-    // 逐字段比对无拼接歧义，取实现简单者）；无版本行的存量 bot 以当前 bot 行为基线。
+    // 仅落库+审计、不进版本历史；表里的 provider/model/effort 列只为存量行保留，新行不再写入。
+    // 快照与最新版本行逐字段比对（无版本行的存量 bot 以当前 bot 行为基线）；
     const effectiveRole = changes.role !== undefined ? changes.role : bot.role
     const effectiveInstructions = changes.instructions !== undefined ? changes.instructions : bot.instructions
     const latestRevision = this.store.get(
@@ -183,11 +183,10 @@ export const botsMethods = {
       if (!snapshotUnchanged) {
         const version = (Number(bot.current_revision) || 0) + 1
         this.store.run(
-          `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, provider, model, effort, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           id('rev'), botId, version,
           effectiveRole, effectiveInstructions,
-          provider, model, effort,
           `${actor.type}:${actor.id}`, nowIso(),
         )
         this.store.run('UPDATE bots SET current_revision = ? WHERE id = ?', version, botId)
