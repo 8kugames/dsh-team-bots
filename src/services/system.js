@@ -150,6 +150,38 @@ export const systemMethods = {
     return view
   },
 
+  /**
+   * 聊天历史游标分页（DSHBOTS-33）：state 只回最后 200 条，更早的历史用本接口手动加载。
+   * 游标 = 当前最旧一条消息的 created_at + id（id 兜底同毫秒排序，避免漏/重）。
+   * 群聊按 project_id、单聊按 bot_id 两路；limit 默认与上限均为 200。
+   * 返回 { messages: 升序数组, hasMore: 是否还有更早一页 }。
+   */
+  messagesPage({ projectId = null, soloBotId = null, beforeCreatedAt = null, beforeId = null, limit = null }) {
+    const isGroup = Boolean(projectId)
+    const isSolo = Boolean(soloBotId)
+    if (isGroup === isSolo) throw badRequest('projectId 与 soloBotId 必须二选一')
+    if (!beforeCreatedAt || !beforeId) throw badRequest('缺少游标：beforeCreatedAt 与 beforeId 必须同时提供')
+    const pageSize = Math.max(1, Math.min(200, Number.isFinite(Number(limit)) && limit ? Math.trunc(Number(limit)) : 200))
+    const table = isGroup ? 'messages' : 'solo_messages'
+    const scopeSql = isGroup ? 'project_id = ?' : 'bot_id = ?'
+    const scopeArg = isGroup ? projectId : soloBotId
+    // 游标口径：取「严格早于游标」的最近 pageSize 条（第 pageSize+1 条仅作 hasMore 探位，不进结果）。
+    // 先按 DESC 取回、slice 掉探位行、再翻回 ASC——顺序不能反，否则会丢掉紧邻游标的那条。
+    const rows = this.store.all(
+      `SELECT * FROM ${table}
+       WHERE ${scopeSql} AND (created_at < ? OR (created_at = ? AND id < ?))
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+      scopeArg, beforeCreatedAt, beforeCreatedAt, beforeId, pageSize + 1,
+    )
+    const hasMore = rows.length > pageSize
+    const page = rows.slice(0, pageSize).reverse()
+    return {
+      messages: page.map(row => (isGroup ? this.messageView(row) : this.soloMessageView(row))),
+      hasMore,
+    }
+  },
+
   /** 微信管理员指令：各项目未完结任务概览。 */
   stateView() {
     const projects = this.store.all("SELECT * FROM projects WHERE status = 'active' ORDER BY updated_at DESC")

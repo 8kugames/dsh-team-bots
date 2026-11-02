@@ -2,7 +2,7 @@ import { AppError } from './errors.js'
 import { exportUsageCsv } from './usage.js'
 
 const ACTIONS = new Set([
-  'health', 'state', 'models', 'bot_detail',
+  'health', 'state', 'messages_page', 'models', 'bot_detail',
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
   'add_member', 'remove_member',
@@ -26,6 +26,9 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.health()
     case 'state':
       return service.state(payload.projectId, payload.soloBotId ?? null)
+    case 'messages_page':
+      // 聊天历史游标分页：更早的消息按最旧一条 created_at+id 向前翻页。
+      return service.messagesPage(payload)
     case 'models':
       return service.models(Boolean(payload.force))
     case 'bot_detail':
