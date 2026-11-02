@@ -5,6 +5,7 @@ const ACTIONS = new Set([
   'health', 'state', 'models', 'bot_detail',
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
   'create_project', 'update_project', 'archive_project', 'browse_dirs',
+  'add_member', 'remove_member',
   'send_message', 'send_solo_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
   'retry_run', 'cancel_run', 'run_trajectory',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
@@ -43,6 +44,10 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.updateProject(required(payload.projectId, 'projectId'), payload.patch ?? payload, actor)
     case 'archive_project':
       return service.archiveProject(required(payload.projectId, 'projectId'), actor)
+    case 'add_member':
+      return service.addProjectMember(required(payload.projectId, 'projectId'), required(payload.botId, 'botId'), actor)
+    case 'remove_member':
+      return service.removeProjectMember(required(payload.projectId, 'projectId'), required(payload.botId, 'botId'), actor)
     case 'browse_dirs':
       return service.browseDirectories(payload)
     case 'send_message':

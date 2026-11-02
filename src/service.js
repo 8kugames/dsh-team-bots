@@ -323,6 +323,36 @@ export class TeamService {
     )
   }
 
+  // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，usage 四项与 cost 为本项目全部 run 的累计。
+  membersWithUsage(projectId) {
+    return this.store.all(
+      `SELECT pm.*, pm.member_id AS id, pm.member_role, b.name, b.role AS bot_role, b.provider, b.model, b.effort, b.status,
+         EXISTS(
+           SELECT 1 FROM runs r
+           WHERE r.project_id = pm.project_id AND r.bot_id = pm.member_id AND r.status IN ('queued', 'running')
+         ) AS busy,
+         COALESCE(u.usage_input, 0) AS usage_input,
+         COALESCE(u.usage_cache_read, 0) AS usage_cache_read,
+         COALESCE(u.usage_cache_write, 0) AS usage_cache_write,
+         COALESCE(u.usage_output, 0) AS usage_output,
+         COALESCE(u.usage_cost, 0) AS usage_cost
+       FROM project_members pm JOIN bots b ON b.id = pm.member_id
+       LEFT JOIN (
+         SELECT bot_id,
+                SUM(usage_input) AS usage_input,
+                SUM(usage_cache_read) AS usage_cache_read,
+                SUM(usage_cache_write) AS usage_cache_write,
+                SUM(usage_output) AS usage_output,
+                SUM(usage_cost) AS usage_cost
+         FROM runs WHERE project_id = ? GROUP BY bot_id
+       ) u ON u.bot_id = pm.member_id
+       WHERE pm.project_id = ? AND pm.member_type = 'bot'
+       ORDER BY CASE pm.member_role WHEN 'owner' THEN 0 ELSE 1 END, b.name`,
+      projectId,
+      projectId,
+    ).map(row => ({ ...row, busy: Boolean(row.busy) }))
+  }
+
   assertMember(projectId, botId) {
     const member = this.store.get(
       "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND member_type = 'bot' AND member_id = ?",
@@ -567,7 +597,7 @@ export class TeamService {
 
   projectView(project) {
     const group = this.groupOf(project.id)
-    const members = this.membersOf(project.id)
+    const members = this.membersWithUsage(project.id)
     const taskCounts = this.store.all(
       'SELECT status, COUNT(*) AS count FROM tasks WHERE project_id = ? GROUP BY status',
       project.id,
@@ -773,6 +803,48 @@ export class TeamService {
 
   archiveProject(projectId, actor = this.actor()) {
     return this.updateProject(projectId, { status: 'archived' }, actor)
+  }
+
+  // 邀请已有 bot 加入项目。与 updateProject 的 memberIds 全量替换不同，这里做增量并给出精确错误语义。
+  addProjectMember(projectId, botId, actor = this.actor()) {
+    const project = this.projectRow(projectId)
+    if (project.status !== 'active') throw badRequest('项目已归档，不能添加成员')
+    const bot = this.botRow(botId)
+    if (bot.status !== 'active') throw badRequest('Bot 已归档，不能加入项目')
+    const existing = this.store.get(
+      "SELECT 1 AS ok FROM project_members WHERE project_id = ? AND member_type = 'bot' AND member_id = ?",
+      projectId, botId,
+    )
+    if (existing) throw conflict('该 Bot 已是项目成员')
+    this.store.transaction(() => {
+      this.store.run(
+        "INSERT INTO project_members(project_id, member_type, member_id, member_role, joined_at) VALUES (?, 'bot', ?, 'member', ?)",
+        projectId, botId, nowIso(),
+      )
+      this.audit(actor, 'project.add_member', 'project', projectId, { botId, botName: bot.name })
+    })
+    return this.projectView(this.projectRow(projectId))
+  }
+
+  // 移除项目成员；负责人不可移除。移除后 membersOf 不再包含该 bot，本项目 mention 定向随之失效。
+  removeProjectMember(projectId, botId, actor = this.actor()) {
+    const project = this.projectRow(projectId)
+    if (project.status !== 'active') throw badRequest('项目已归档，不能移除成员')
+    const bot = this.botRow(botId)
+    const member = this.store.get(
+      "SELECT * FROM project_members WHERE project_id = ? AND member_type = 'bot' AND member_id = ?",
+      projectId, botId,
+    )
+    if (!member) throw notFound('该 Bot 不是项目成员')
+    if (member.member_role === 'owner') throw forbidden('负责人不可移除')
+    this.store.transaction(() => {
+      this.store.run(
+        "DELETE FROM project_members WHERE project_id = ? AND member_type = 'bot' AND member_id = ?",
+        projectId, botId,
+      )
+      this.audit(actor, 'project.remove_member', 'project', projectId, { botId, botName: bot.name })
+    })
+    return this.projectView(this.projectRow(projectId))
   }
 
   insertMessage({ projectId, senderType, senderId, body, mentions = [], taskId = null, runId = null, replyToId = null, createdAt = nowIso() }) {
