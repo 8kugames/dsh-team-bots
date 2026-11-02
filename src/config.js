@@ -94,7 +94,7 @@ export function resolveConfig(config = {}) {
     stallTimeoutMs: int(config.stallTimeoutMs ?? process.env.DSH_TEAM_STALL_TIMEOUT_MS, 30 * 60_000, 0, 6 * 60 * 60_000),
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
-    // 官方 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
+    // 原生 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
     agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, false),
     maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 3, 1, 8),
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。

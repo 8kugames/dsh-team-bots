@@ -7,9 +7,12 @@ import { handleAction } from './api.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const UI = join(HERE, '..', 'ui')
+const VENDOR = join(HERE, '..', 'vendor')
 const MAX_BODY = 2 * 1024 * 1024
 // 交付产物文件的单文件响应上限，超出返回 413。
 const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
+// 聊天图片通道的单文件上限，任务口径 10MB；MIME 白名单与防穿越在 service.chatFile。
+const MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024
 const ARTIFACT_TYPES = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -31,9 +34,9 @@ const SECURITY = {
   'Content-Security-Policy': "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
 }
 
-// 注入宿主官方 Web 界面（fallback SPA）的切换入口。官方界面没有指向本插件
+// 注入宿主原生 Web 界面（fallback SPA）的切换入口。原生界面没有指向本插件
 // 的链接，通过宿主的 `webserver/index-inject` 结构化注入机制补一个固定胶囊
-// 入口；与工作台侧栏里指向 /index.html（官方界面在 fallback seat 上的稳定
+// 入口；与工作台侧栏里指向 /index.html（原生界面在 fallback seat 上的稳定
 // 入口，/ 已被本插件占据）的返回链接构成双向自由切换。本项目自己的 UI
 // 不走宿主 renderIndex，不会看到这个入口。
 export const OFFICIAL_UI_SWITCH_ROWS = [
@@ -85,6 +88,11 @@ export function installHttp(ctx, service, logger = console) {
     await readFile(join(UI, 'fonts', `inter-${weight}.woff2`)),
     'font/woff2', 200, { 'cache-control': 'public, max-age=604800' },
   )
+  // 聊天 markdown 渲染依赖（vendor 拷贝自 npm 发布包，见各目录 NOTICE）：
+  // marked 负责 md→HTML，DOMPurify 负责消毒；app.js 侧二者缺一即回退纯文本，不裸渲染。
+  const vendorScript = (name) => async () => response(
+    await readFile(join(VENDOR, name)), 'text/javascript; charset=utf-8',
+  )
 
   // GET 必须保持默认 requestBody:'buffered'：bridge 对非 buffered 模式注入请求体流，
   // GET+body 会抛 TypeError 并被 webserver 兜底成 400。
@@ -95,6 +103,8 @@ export function installHttp(ctx, service, logger = console) {
   route('/api/dsh-team/fonts/inter-400.woff2', ['GET'], font('400'))
   route('/api/dsh-team/fonts/inter-500.woff2', ['GET'], font('500'))
   route('/api/dsh-team/fonts/inter-600.woff2', ['GET'], font('600'))
+  route('/api/dsh-team/vendor/marked.js', ['GET'], vendorScript(join('marked', 'marked.umd.js')))
+  route('/api/dsh-team/vendor/purify.min.js', ['GET'], vendorScript(join('dompurify', 'purify.min.js')))
 
   // 首页直达工作台：已登录（有效 cookie）302 进 UI；未登录 302 到携带当前
   // launch token 的 `/`，由宿主 authorizeIndex 完成 token→cookie 兑换（30 天）。
@@ -201,7 +211,28 @@ export function installHttp(ctx, service, logger = console) {
     }
   })
 
-  // 官方界面 → 工作台的入口（见 OFFICIAL_UI_SWITCH_ROWS 注释）。监听器随
+  // 聊天图片通道：只读项目工作区 / 单聊 Bot 工作区内的白名单图片（MIME 白名单、
+  // 10MB 上限、路径防穿越都在 service.chatFile 里做）。与 /api 同前缀注册，鉴权由
+  // 宿主路由层承担；失败走 AppError，不落含查询串的日志。
+  route('/api/dsh-team/file', ['GET'], async (request) => {
+    try {
+      const params = searchParams(request)
+      const projectId = String(params.get('projectId') ?? '').trim()
+      const soloBotId = String(params.get('soloBotId') ?? '').trim()
+      const relPath = String(params.get('path') ?? '')
+      if (!relPath) throw new AppError('BAD_REQUEST', '缺少参数 path', 400)
+      if (!projectId === !soloBotId) throw new AppError('BAD_REQUEST', 'projectId 与 soloBotId 必须二选一', 400)
+      const { absolutePath, size, contentType } = service.chatFile({ projectId, soloBotId, path: relPath })
+      if (size > MAX_CHAT_IMAGE_BYTES) throw new AppError('FILE_TOO_LARGE', '图片超过 10MB 上限', 413)
+      const body = await readFile(absolutePath)
+      if (body.byteLength > MAX_CHAT_IMAGE_BYTES) throw new AppError('FILE_TOO_LARGE', '图片超过 10MB 上限', 413)
+      return response(body, contentType)
+    } catch (error) {
+      return errorResponse(error)
+    }
+  })
+
+  // 原生界面 → 工作台的入口（见 OFFICIAL_UI_SWITCH_ROWS 注释）。监听器随
   // 插件 context 生命周期自动清理。
   ctx.on?.('webserver/index-inject', (table) => {
     table.push(...OFFICIAL_UI_SWITCH_ROWS)

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { installHttp, OFFICIAL_UI_SWITCH_ROWS } from '../src/http.js'
 
-// 官方界面 ⇄ 团队工作台双向切换的入口约束。宿主的 index 注入机制要求：
+// 原生界面 ⇄ 团队工作台双向切换的入口约束。宿主的 index 注入机制要求：
 // style 文本不得包含 `</style>`，script/html 文本不得包含 `</script>`，
 // 否则会提前闭合元素。这里只注入 style + html，两行都必须满足。
 test('official UI switch rows satisfy host injection constraints', () => {

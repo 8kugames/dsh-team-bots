@@ -633,7 +633,7 @@ a {
     color: var(--accent-text);
     opacity: 1;
 }
-/* 链接复用 global-config 按钮形态（DSH 官方界面切换入口） */
+/* 链接复用 global-config 按钮形态（DSH 原生界面切换入口） */
 a.global-config {
     text-decoration: none;
 }
@@ -1287,30 +1287,139 @@ a.global-config.dsh-official-link:hover {
 .message-row.user .message-meta strong {
     color: var(--ink-2);
 }
-.message-bubble p {
+/* 聊天 markdown 渲染：消息气泡与任务评论共用一套排版（richText 输出的 md HTML）。
+   只用既有 token，明暗主题各自成立；代码块走终端井（console）token。 */
+:is(.message-bubble, .comment-body) p {
     margin: 0 0 6px;
 }
-.message-bubble p:last-child {
+:is(.message-bubble, .comment-body) p:last-child {
     margin-bottom: 0;
 }
-.message-bubble code {
+:is(.message-bubble, .comment-body) code {
     font-family: var(--mono);
     font-size: 0.9em;
     background: var(--code-bg);
     border-radius: 5px;
     padding: 1px 5px;
 }
-.message-bubble pre {
+:is(.message-bubble, .comment-body) pre {
     font-family: var(--mono);
     font-size: var(--fs-small);
-    background: var(--code-bg);
+    /* 代码块复用终端井：双主题恒定的暗色面板，与工作台终端同一视觉语系。 */
+    background: var(--console-bg);
+    color: var(--console-ink);
     border-radius: 10px;
     padding: 10px 12px;
     overflow: auto;
+    margin: 0 0 6px;
 }
-.message-bubble a {
+:is(.message-bubble, .comment-body) pre:last-child {
+    margin-bottom: 0;
+}
+:is(.message-bubble, .comment-body) pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: 1em;
+    border-radius: 0;
+}
+:is(.message-bubble, .comment-body) a {
     text-decoration: underline;
     text-underline-offset: 2px;
+}
+:is(.message-bubble, .comment-body) h1,
+:is(.message-bubble, .comment-body) h2,
+:is(.message-bubble, .comment-body) h3,
+:is(.message-bubble, .comment-body) h4,
+:is(.message-bubble, .comment-body) h5,
+:is(.message-bubble, .comment-body) h6 {
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 10px 0 6px;
+}
+:is(.message-bubble, .comment-body) h1:first-child,
+:is(.message-bubble, .comment-body) h2:first-child,
+:is(.message-bubble, .comment-body) h3:first-child,
+:is(.message-bubble, .comment-body) h4:first-child {
+    margin-top: 0;
+}
+:is(.message-bubble, .comment-body) h1 { font-size: 1.16em; }
+:is(.message-bubble, .comment-body) h2 { font-size: 1.08em; }
+:is(.message-bubble, .comment-body) h3 { font-size: 1em; }
+:is(.message-bubble, .comment-body) h4,
+:is(.message-bubble, .comment-body) h5,
+:is(.message-bubble, .comment-body) h6 { font-size: 0.94em; color: var(--ink-2); }
+:is(.message-bubble, .comment-body) ul,
+:is(.message-bubble, .comment-body) ol {
+    margin: 0 0 6px;
+    padding-left: 1.35em;
+}
+:is(.message-bubble, .comment-body) li {
+    margin: 2px 0;
+}
+:is(.message-bubble, .comment-body) blockquote {
+    margin: 0 0 6px;
+    padding: 4px 10px;
+    border-left: 2px solid var(--accent);
+    background: var(--code-bg);
+    border-radius: 4px 8px 8px 4px;
+    color: var(--ink-2);
+    font-size: 0.95em;
+}
+:is(.message-bubble, .comment-body) blockquote p {
+    margin: 0 0 4px;
+}
+:is(.message-bubble, .comment-body) blockquote p:last-child {
+    margin-bottom: 0;
+}
+:is(.message-bubble, .comment-body) table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 0 0 6px;
+    font-size: 0.95em;
+}
+:is(.message-bubble, .comment-body) th,
+:is(.message-bubble, .comment-body) td {
+    border: 1px solid var(--line-2);
+    padding: 4px 9px;
+    text-align: left;
+    white-space: nowrap;
+}
+:is(.message-bubble, .comment-body) th {
+    background: var(--code-bg);
+    font-weight: 600;
+}
+:is(.message-bubble, .comment-body) hr {
+    border: none;
+    border-top: 1px solid var(--line-2);
+    margin: 8px 0;
+}
+/* 工作区图片：缩略展示（不撑爆气泡），加载失败由 JS 换成文件名 chip。 */
+:is(.message-bubble, .comment-body) img {
+    display: block;
+    max-width: min(100%, 340px);
+    max-height: 320px;
+    border-radius: 8px;
+    margin: 4px 0;
+}
+/* 图片加载失败占位 chip：显示文件名，danger 语义但保持轻量。 */
+.md-img-missing {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 2px 0;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--danger-wash);
+    color: var(--danger);
+    font-size: var(--fs-caption);
+    font-family: var(--mono);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 /* 引用块：气泡顶部的「❝ 名字：摘要」行，单行截断。颜色继承气泡正文，
    bot 气泡（surface-3）与用户气泡（accent）各自可读，明暗主题共用变量。 */
@@ -2986,7 +3095,8 @@ a.global-config.dsh-official-link:hover {
     color: var(--ink-2);
     font-size: var(--fs-small);
     line-height: 1.7;
-    white-space: pre-wrap;
+    /* 评论走 markdown 渲染（richText），换行由 <p>/<br> 承担。 */
+    white-space: normal;
     overflow-wrap: anywhere;
 }
 .run-row {

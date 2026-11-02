@@ -47,10 +47,10 @@ dsh --profile <名字>                             # 从启动日志读取 dsh w
 ```text
 http://<host>:<port>/                     自动登录，直达团队工作台
 http://<host>:<port>/api/dsh-team/ui      DSH Team Bots 团队工作台（直连）
-http://<host>:<port>/index.html           DSH 官方 Web 界面
+http://<host>:<port>/index.html           DSH 原生 Web 界面
 ```
 
-工作台与 DSH 官方界面可自由切换：官方界面右下角有「团队工作台」悬浮入口（本插件通过宿主 `webserver/index-inject` 机制注入），工作台侧栏底部与左上角 logo 都提供「DSH 官方界面」入口。
+工作台与 DSH 原生界面可自由切换：原生界面右下角有「团队工作台」悬浮入口（本插件通过宿主 `webserver/index-inject` 机制注入），工作台侧栏底部与左上角 logo 都提供「DSH 原生界面」入口。
 
 自动登录意味着**能连上这个端口的人即获得 owner 访问**。服务只应监听本机或受信任网络；需要对外提供时走 HTTPS 反向代理并正确转发 Host 与 WebSocket。Host 白名单栅栏（`DSH_TRUSTED_HOST`，DSH 核心 env）对伪造 Host 的请求仍然返回 403。
 
@@ -162,9 +162,9 @@ npm run doctor
 
 运行超时、超预算、卡住都会走同一条失败链路：运行标记失败、任务置 `blocked`、总监 Bot 接手。
 
-## 官方 Agent Teams 开关
+## 原生 Agent Teams 开关
 
-`DSH_TEAM_AGENT_TEAM`（默认 0）控制插件侧是否启用官方团队层。启用前需先给所用 profile 安装配套包 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 并挂入 profile bundle；插件侧只控制提示词与调度。要开团队层，启动前导出 `DSH_TEAM_AGENT_TEAM=1`。
+`DSH_TEAM_AGENT_TEAM`（默认 0）控制插件侧是否启用原生团队层。启用前需先给所用 profile 安装配套包 `@deepseek-ai/dsh-experimental-agent-team-profile@<DSH 版本>` 并挂入 profile bundle；插件侧只控制提示词与调度。要开团队层，启动前导出 `DSH_TEAM_AGENT_TEAM=1`。
 
 - `1`：每个任务会话可以把任务拆成具名 teammate 并行执行（共享项目工作区），最多 `DSH_TEAM_MAX_TEAMMATES` 个；群聊、验收仍由项目会话负责。
 - `0`（默认）：不加载团队层。

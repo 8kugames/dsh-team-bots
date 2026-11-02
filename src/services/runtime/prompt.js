@@ -154,7 +154,7 @@ export const promptMethods = {
     ].filter(Boolean).join('\n')
   },
 
-  // 把 bot.file_policy 写成宿主 session 的文件沙箱覆盖。宿主官方写路径
+  // 把 bot.file_policy 写成宿主 session 的文件沙箱覆盖。宿主原生写路径
   // setSandboxMode(session, mode) 就是 session.append('sandbox/mode', { mode })，
   // 这里等价直调（插件不依赖宿主包），事件 log-only、replay 持久、下次受限调用生效。
   // 会话已是目标档位就不重复追加；设置失败只告警不阻断会话（沙箱回落宿主默认）。
