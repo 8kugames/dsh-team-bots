@@ -593,16 +593,11 @@
               </div>
               ${state.tree.archived ? `<div class="tree-list">
                 ${archivedChats.length === 0 ? '<div class="side-empty">没有已归档项目。</div>' : archivedChats.map(item => `
-                  <div class="tree-item-wrap">
-                    <button class="tree-item chat-item archived ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
-                      <span class="chat-hash">#</span>
-                      <span class="tree-item-name">${esc(item.name)}</span>
-                    </button>
-                    <span class="tree-item-actions">
-                      <button class="tree-act" data-action="reopen-project" data-project-id="${attr(item.id)}" title="项目再开（恢复为进行中）">再开</button>
-                      <button class="tree-act danger" data-action="remove-tracking-open" data-project-id="${attr(item.id)}" data-project-name="${attr(item.name)}" title="移除追踪（清理本项目管理数据）">移除</button>
-                    </span>
-                  </div>
+                  <button class="tree-item chat-item archived ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)} · 再开与移除在项目设置 · 项目状态里">
+                    <span class="chat-hash">#</span>
+                    <span class="tree-item-name">${esc(item.name)}</span>
+                    <span class="tree-flag">已归档</span>
+                  </button>
                 `).join('')}
               </div>` : ''}
             </div>
@@ -2140,7 +2135,10 @@
               <div class="kv"><span>总监</span><strong>${esc(owner?.name ?? '未设置')}</strong></div>
               <div class="kv"><span>任务总数</span><strong>${project.stats.tasks}</strong></div>
               <div class="kv"><span>运行总数</span><strong>${project.stats.runs}</strong></div>
-              ${project.status === 'active' ? `<div class="btn-row settings-danger-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small danger" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>` : ''}
+              ${project.status === 'active'
+                ? `<div class="btn-row settings-danger-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small danger" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>`
+                : `<div class="hint" style="margin-top:10px">已归档项目停止新运行，工作区文件保留。项目再开会恢复为进行中；移除追踪会清理本项目的管理数据。</div>
+                  <div class="btn-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small" type="button" data-action="remove-tracking-open" data-project-id="${attr(project.id)}" data-project-name="${attr(project.name)}">移除追踪</button><button class="btn small primary" type="button" data-action="reopen-project" data-project-id="${attr(project.id)}">项目再开</button></div>`}
             </div>
           </div>
         </div>
@@ -3646,6 +3644,11 @@
           purgeWorkdir: payload.purge === '1',
         })
         state.modal = null
+        // 移除后若正停在该项目上，回到群聊并让 loadState 重新解析可用项目，避免引用已删除的数据。
+        if (state.projectId === payload.projectId) {
+          state.projectId = null
+          state.view = 'chat'
+        }
         await refresh()
         toast('已移除追踪，管理数据已清理', 'success')
         return

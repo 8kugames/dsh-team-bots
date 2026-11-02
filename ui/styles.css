@@ -571,35 +571,6 @@ a {
     flex: 1 1 auto;
     min-width: 0;
 }
-.tree-item-actions {
-    display: inline-flex;
-    flex: 0 0 auto;
-    gap: 2px;
-    opacity: 0;
-    transition: opacity .12s ease;
-}
-.tree-item-wrap:hover .tree-item-actions,
-.tree-item-wrap:focus-within .tree-item-actions {
-    opacity: 1;
-}
-.tree-act {
-    border: none;
-    background: transparent;
-    color: var(--ink-3);
-    font: 500 var(--fs-caption) var(--sans);
-    padding: 2px 4px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    line-height: 1.4;
-}
-.tree-act:hover {
-    background: var(--surface-2);
-    color: var(--ink-1);
-}
-.tree-act.danger:hover {
-    background: color-mix(in srgb, var(--danger) 12%, transparent);
-    color: var(--danger);
-}
 .remove-tracking-list {
     margin: 0 0 10px;
     padding-left: 18px;
