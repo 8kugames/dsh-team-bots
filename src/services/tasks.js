@@ -71,6 +71,15 @@ export function ensureTaskTimesSchema(store) {
   store.run('INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING', 'tasks_canceled_at', nowIso())
 }
 
+// 终态时间回填（DSHBOTS-69）：只补 status 对应终态列为空的存量行，值取 updated_at；
+// 幂等可重跑。canceled 侧与 tasks_canceled_at 重叠无害（同样只补空行），本迁移重点补 done 侧。
+export function ensureTaskTerminalTimeBackfill(store) {
+  if (store.get('SELECT 1 AS ok FROM schema_migrations WHERE name = ?', 'tasks_terminal_time_backfill')) return
+  store.run("UPDATE tasks SET completed_at = updated_at WHERE status = 'done' AND completed_at IS NULL")
+  store.run("UPDATE tasks SET canceled_at = updated_at WHERE status = 'canceled' AND canceled_at IS NULL")
+  store.run('INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING', 'tasks_terminal_time_backfill', nowIso())
+}
+
 export const tasksMethods = {
   async createTask(input, actor = this.actor()) {
     const project = this.projectRow(input.projectId)
@@ -87,6 +96,10 @@ export const tasksMethods = {
       : parseWriteScopes(input.writeScopes)
     const taskId = id('task')
     const createdAt = nowIso()
+    // 终态时间在创建时补齐（DSHBOTS-69）：以 done/canceled 建档的任务终态列取同一 createdAt，
+    // 非终态两列留 NULL；与 updateTask 的对称维护（进终态写、离开清）同口径。
+    const completedAt = status === 'done' ? createdAt : null
+    const canceledAt = status === 'canceled' ? createdAt : null
     // 父子/依赖关系（DSHBOTS-59）：camelCase 与 snake_case 都收；taskId 服务端生成，
     // 真自引用在公共 API 层面构造不出来，validateTaskRelations 仍显式拒（防直插库与未来 update 复用）。
     const parentTaskId = input.parentTaskId ?? input.parent_task_id ?? null
@@ -99,8 +112,8 @@ export const tasksMethods = {
       this.store.run(
         `INSERT INTO tasks(id, project_id, number, title, description, status, priority, assignee_bot_id,
           creator_type, creator_id, review_target, source_message_id, parent_id, parent_task_id, blocked_by, position, due_at, estimate,
-          write_scopes, version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          write_scopes, version, created_at, updated_at, completed_at, canceled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         taskId, project.id, number, title, text(input.description, 40_000), status, priority,
         assigneeId, actor.type, actor.id, actor.type === 'bot' ? 'owner_bot' : 'user',
         input.sourceMessageId ?? null, input.parentId ?? null,
@@ -108,6 +121,7 @@ export const tasksMethods = {
         Number.isFinite(Number(input.position)) ? Number(input.position) : number,
         input.dueAt ? new Date(input.dueAt).toISOString() : null,
         clampNumber(input.estimate, 0, 1000, null), JSON.stringify(writeScopes), createdAt, createdAt,
+        completedAt, canceledAt,
       )
       for (const label of Array.isArray(input.labels) ? input.labels.slice(0, 12) : []) {
         const clean = text(label, 40).toLowerCase()
