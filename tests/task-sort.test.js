@@ -86,11 +86,12 @@ test('比较器返回值的符号方向正确（负数表示 a 排在 b 前）',
   assert.equal(compareTasksByPriority({ priority: 'high', position: 1, number: 1 }, { priority: 'high', position: 1, number: 1 }), 0)
 })
 
-test('看板接线：filteredTasks 走排序，看板列沿用该顺序', () => {
+test('看板接线：filteredTasks 走排序，看板分组沿用该顺序', () => {
   assert.match(source, /return sortTasksByPriority\(\(state\.data\?\.tasks \?\? \[\]\)\.filter/)
-  // 列内顺序直接来自 filteredTasks 的结果，不再另行排序
-  assert.match(source, /const column = tasks\.filter\(task => task\.status === status\)/)
-  assert.match(source, /\$\{column\.map\(renderTaskCard\)\.join\(''\)\}/)
+  // 分组内顺序直接来自 filteredTasks 的结果，不再另行排序
+  // （DSHBOTS-58 起按状态分组渲染，列内容改由 renderTaskGroup 输出）
+  assert.match(source, /renderTaskGroup\(status, tasks\.filter\(task => task\.status === status\)\)/)
+  assert.match(source, /tasks\.map\(renderTaskCard\)\.join\(''\)/)
   // 卡片上的优先级标签也走归一化，旧数据不再显示空白
   assert.match(source, /PRIORITY\[taskPriorityKey\(task\.priority\)\]/)
 })

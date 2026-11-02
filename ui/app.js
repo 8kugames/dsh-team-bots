@@ -1476,17 +1476,28 @@
         <div class="empty-symbol">${icon('board')}</div>
         <h3>${filtering ? '没有匹配的任务' : '任务面板还是空的'}</h3>
         <button class="btn" data-action="new-task">${icon('plus')}新建任务</button>
-      </div>` : `<div class="board">
-        ${STATUS_ORDER.map(status => {
-          const column = tasks.filter(task => task.status === status)
-          return `<div class="column" data-drop-status="${status}">
-            <div class="column-head"><strong>${STATUS[status]}</strong><span class="column-count">${column.length}</span></div>
-            ${column.map(renderTaskCard).join('')}
-            ${column.length === 0 ? `<div class="board-empty">拖到这里</div>` : ''}
-          </div>`
-        }).join('')}
+      </div>` : `<div class="board board-list">
+        ${STATUS_ORDER.map(status => renderTaskGroup(status, tasks.filter(task => task.status === status))).join('')}
       </div>`}
     `
+  }
+
+  // 任务分组（DSHBOTS-58）：按状态分组、组头可折叠，组内是紧凑单行任务行。
+  // 组仍然带 data-drop-status —— 拖拽换状态的通道不变，拖到组头即改状态。
+  function renderTaskGroup(status, tasks) {
+    const collapsed = state.collapsedTaskGroups.has(status)
+    const body = tasks.length === 0
+      ? `<div class="board-empty">拖到这里</div>`
+      : tasks.map(renderTaskCard).join('')
+    return `<section class="column task-group${collapsed ? ' collapsed' : ''}" data-drop-status="${status}">
+      <div class="column-head task-group-head">
+        <button type="button" class="task-group-toggle" data-action="toggle-task-group" data-status="${attr(status)}" aria-expanded="${collapsed ? 'false' : 'true'}" title="${collapsed ? '展开' : '折叠'}${esc(STATUS[status])}分组">${icon('chevron', `chev${collapsed ? '' : ' open'}`)}</button>
+        <span class="column-dot ${status}"></span>
+        <strong>${STATUS[status]}</strong>
+        <span class="column-count">${tasks.length}</span>
+      </div>
+      ${collapsed ? '' : `<div class="task-group-body">${body}</div>`}
+    </section>`
   }
 
   // task-card:start —— 任务卡运行徽标（DSHBOTS-42）：文案来自后端 taskStage 纯函数查表的 stageLabel，
@@ -1507,11 +1518,11 @@
     return `<article class="task-card${isRunning ? ' running' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
       <div class="task-card-top">
         <span class="task-id">${esc(task.identifier)}</span>
-        <span class="task-priority">${esc(PRIORITY[taskPriorityKey(task.priority)])}</span>
       </div>
       <div class="task-card-title" title="${attr(task.title)}">${esc(task.title)}</div>
       ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
       <div class="task-card-foot">
+        <span class="task-priority" title="优先级：${esc(PRIORITY[taskPriorityKey(task.priority)])}">${esc(PRIORITY[taskPriorityKey(task.priority)])}</span>
         ${!ended && run ? runDot(run.status) : ''}
         <span class="task-run-label">${runLabel}</span>
         ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
@@ -1659,6 +1670,8 @@
   // usage 四项与 cost 为该项目全部运行的累计）。邀请走 add_member API，移除走 remove_member。
   // DSHBOTS-52：成员行改卡片式网格——单卡宽高比锁定 0.618:1（CSS aspect-ratio: 0.618，
   // 即宽:高 = 0.618:1），内容装不下时以卡片为准不撑破；上头像、中名称+角色、下状态点与用量。
+  // DSHBOTS-57：卡片放大（max-width 320px、头像 56px），中段改三行式——名称 / 角色标签 /
+  // provider·model 小字，模型不再收进 title 提示，关键信息全部在卡面可见。
   function renderMembers() {
     const project = activeProject()
     if (!project) return noProject()

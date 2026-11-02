@@ -2522,22 +2522,18 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-body);
 }
 
-/* Board: every column is a track, so empty lanes read as structure, not void */
+/* Board: 状态分组 + 紧凑单行任务行（DSHBOTS-58，参照 Linear 的分组列表） */
 .board {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(152px, 1fr);
-    gap: 8px;
-    overflow-x: auto;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
     padding-bottom: 10px;
 }
 .column {
-    display: flex;
-    flex-direction: column;
+    display: block;
     min-width: 0;
-    min-height: 116px;
-    padding: 0 2px 4px;
+    padding: 0 2px 2px;
     border-radius: 10px;
     background: transparent;
     border: 1px solid transparent;
@@ -2553,9 +2549,31 @@ a.global-config.dsh-official-link:hover {
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 4px 4px 9px;
-    margin-bottom: 9px;
+    padding: 4px 4px 6px;
+    margin-bottom: 2px;
     border-bottom: 1px solid var(--line);
+}
+/* 组头折叠按钮：chevron 默认朝右（折叠），展开时旋转朝下（.chev.open）。 */
+.task-group-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+}
+.task-group-toggle:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
+.task-group-body {
+    display: flex;
+    flex-direction: column;
 }
 .column-dot {
     width: 6px;
@@ -2602,24 +2620,25 @@ a.global-config.dsh-official-link:hover {
         inset 2px 0 0 var(--accent);
 }
 .task-card {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 10px 11px 9px;
-    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 8px;
+    margin-bottom: 0;
     min-width: 0;
     overflow: hidden;
     cursor: pointer;
-    box-shadow: var(--shadow-card);
     transition:
-        box-shadow 0.13s ease,
-        border-color 0.13s ease,
-        transform 0.13s ease;
+        background-color 0.12s ease,
+        box-shadow 0.12s ease;
 }
 .task-card:hover {
-    border-color: var(--line-2);
-    box-shadow: var(--shadow-2);
-    transform: translateY(-1px);
+    background: var(--surface-2);
+    box-shadow: none;
 }
 .task-card.dragging {
     opacity: 0.45;
@@ -2628,7 +2647,8 @@ a.global-config.dsh-official-link:hover {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 5px;
+    flex: 0 0 auto;
+    margin-bottom: 0;
 }
 .task-id {
     font: 500 var(--fs-caption) var(--mono);
@@ -2641,10 +2661,10 @@ a.global-config.dsh-official-link:hover {
     white-space: nowrap;
 }
 .task-priority {
-    margin-left: auto;
     color: var(--ink-3);
     font-size: var(--fs-caption);
     flex: 0 0 auto;
+    white-space: nowrap;
 }
 .priority-dot {
     width: 6px;
@@ -2669,27 +2689,28 @@ a.global-config.dsh-official-link:hover {
 .priority-dot.none {
     background: var(--line-2);
 }
+/* 紧凑单行标题：单行省略号，hover 用 title 看全文（DSHBOTS-58）。 */
 .task-card-title {
     font-size: var(--fs-body);
-    line-height: 1.55;
+    line-height: 1.5;
     color: var(--ink);
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
-    -webkit-box-orient: vertical;
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
     overflow: hidden;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    text-overflow: ellipsis;
 }
 .task-card-foot {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 9px;
+    flex: 0 1 auto;
+    margin-top: 0;
     color: var(--ink-3);
     font-size: var(--fs-caption);
     /* 允许收缩：长运行标签不把卡片底行撑宽。 */
     min-width: 0;
+    overflow: hidden;
 }
 /* 运行标签单行省略，避免长状态文案挤出卡片。 */
 .task-card-foot .task-run-label {
@@ -2704,8 +2725,11 @@ a.global-config.dsh-official-link:hover {
 .task-tags {
     display: flex;
     gap: 4px;
-    flex-wrap: wrap;
-    margin-top: 7px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    flex-wrap: nowrap;
+    margin-top: 0;
 }
 .tag {
     border-radius: 5px;
@@ -4042,7 +4066,7 @@ a.global-config.dsh-official-link:hover {
         padding-top: 16px;
     }
     .column {
-        min-height: 200px;
+        min-height: 0;
     }
     /* Touch floors: primary ≥48, secondary ≥44, rows ≥48 */
     .btn {

@@ -17,14 +17,12 @@ test('看板列与卡片允许收缩，长标题不再撑破列宽', () => {
   assert.match(block('.task-card'), /overflow:\s*hidden/, '卡片需 overflow:hidden，裁掉溢出内容')
 })
 
-test('任务卡标题限 3 行并允许任意位置断行', () => {
+test('任务卡标题单行省略（DSHBOTS-58 紧凑单行任务行）', () => {
   const title = block('.task-card-title')
-  assert.match(title, /display:\s*-webkit-box/, '需用 -webkit-box 才能配合 line-clamp')
-  assert.match(title, /-webkit-line-clamp:\s*3/, '标题限 3 行')
-  assert.match(title, /line-clamp:\s*3/, '同时写标准 line-clamp')
-  assert.match(title, /-webkit-box-orient:\s*vertical/, 'clamp 需要垂直方向')
-  assert.match(title, /overflow:\s*hidden/, '超出行数需裁掉')
-  assert.match(title, /overflow-wrap:\s*anywhere/, '不可断长串需 anywhere 断行')
+  assert.match(title, /white-space:\s*nowrap/, '紧凑单行标题不换行')
+  assert.match(title, /overflow:\s*hidden/, '超出宽度需裁掉')
+  assert.match(title, /text-overflow:\s*ellipsis/, '超出宽度需省略号')
+  assert.match(title, /min-width:\s*0/, '标题作为 flex 项需允许收缩')
 })
 
 test('任务号省略号、优先级不压缩', () => {
