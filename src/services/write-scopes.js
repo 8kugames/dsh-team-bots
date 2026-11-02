@@ -1,0 +1,70 @@
+// src/services/write-scopes.js —— 写范围（write scopes）纯函数
+// 任务可声明自己会写工作区里的哪些路径；调度器据此判断同项目两个写运行能否并行。
+// 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
+// 因此方法体内的 this 与拆分前完全一致。
+
+import { badRequest } from '../errors.js'
+import { jsonParse } from '../util.js'
+
+// ── 写范围（write scopes）────────────────────────────────────────────────
+// 任务可以声明自己会写工作区里的哪些路径（相对项目工作目录）。调度器据此判断同项目的
+// 两个写运行能否并行：两侧都声明且路径前缀互不重叠才放行；任一未声明（空集合）按保守
+// 串行处理——既有安全边界不因并行能力而削弱。
+export const WRITE_SCOPE_MAX = 50
+
+export const WRITE_SCOPE_MAX_LEN = 240
+
+// 归一化单条写范围路径：相对项目工作目录，去掉 ./ 与尾部 /，拒绝绝对路径与 ..。
+export function normalizeScopePath(raw) {
+  const value = String(raw ?? '').trim().replace(/\\/g, '/')
+  if (!value || value.startsWith('/')) return null
+  const parts = value.split('/').filter(part => part && part !== '.')
+  if (!parts.length || parts.some(part => part === '..')) return null
+  return parts.join('/')
+}
+
+// 解析外部输入（数组或 JSON 字符串）：非法条目直接报错，不静默降级。
+export function parseWriteScopes(input) {
+  if (input === undefined || input === null) return []
+  const list = typeof input === 'string' ? jsonParse(input, null) : input
+  if (!Array.isArray(list)) throw badRequest('写范围必须是路径数组')
+  if (list.length > WRITE_SCOPE_MAX) throw badRequest(`写范围最多 ${WRITE_SCOPE_MAX} 条`)
+  const scopes = []
+  for (const item of list) {
+    if (typeof item !== 'string') throw badRequest('写范围必须是路径数组')
+    const path = normalizeScopePath(item)
+    if (!path) throw badRequest(`写范围包含非法路径：${item}`)
+    if (path.length > WRITE_SCOPE_MAX_LEN) throw badRequest(`写范围路径过长（上限 ${WRITE_SCOPE_MAX_LEN} 字符）`)
+    if (!scopes.includes(path)) scopes.push(path)
+  }
+  return scopes
+}
+
+// 读取库里的写范围快照：坏数据一律降级成「未声明」，即保守串行。
+export function readWriteScopes(raw) {
+  if (raw === undefined || raw === null || raw === '') return []
+  const list = typeof raw === 'string' ? jsonParse(raw, null) : raw
+  if (!Array.isArray(list)) return []
+  const scopes = []
+  for (const item of list) {
+    if (typeof item !== 'string') return []
+    const path = normalizeScopePath(item)
+    if (!path || path.length > WRITE_SCOPE_MAX_LEN) return []
+    if (!scopes.includes(path)) scopes.push(path)
+  }
+  return scopes
+}
+
+// 两条写范围路径是否指向同一片区域：相等，或一方是另一方的目录前缀（按路径分段比较）。
+export function writeScopePathsOverlap(left, right) {
+  if (left === right) return true
+  return left.startsWith(`${right}/`) || right.startsWith(`${left}/`)
+}
+
+// 两个写范围集合是否冲突。空集合 = 未声明 = 冲突（保守串行）。
+export function writeScopesOverlap(a, b) {
+  const left = readWriteScopes(a)
+  const right = readWriteScopes(b)
+  if (!left.length || !right.length) return true
+  return left.some(x => right.some(y => writeScopePathsOverlap(x, y)))
+}
