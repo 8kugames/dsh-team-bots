@@ -11,6 +11,7 @@ import { syncSkills } from '../skills.js'
 import { backfillWorkspaceGroupBindings } from './workspace-groups.js'
 import { ensureApprovalSchema } from './approvals.js'
 import { ensureMessageImagesSchema } from './message-images.js'
+import { ensureTaskTimesSchema } from './tasks.js'
 import { id, nowIso } from '../util.js'
 
 
@@ -88,6 +89,8 @@ export const coreMethods = {
       ensureApprovalSchema(this.store)
       // 聊天附图表同样由消息域自管迁移（db.js 不加行）。
       ensureMessageImagesSchema(this.store)
+      // 任务取消时间列由任务域自管迁移：加 canceled_at 并回填老数据（db.js 不加行）。
+      ensureTaskTimesSchema(this.store)
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
       this.store.run(
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,

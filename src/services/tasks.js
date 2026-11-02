@@ -21,6 +21,18 @@ export const TRANSITIONS = {
   canceled: new Set(['todo']),
 }
 
+// tasks 表时间列迁移（外置自管：db.js 已贴 800 行红线不再加行，approvals/message-images 同款先例）。
+// canceled_at 与 completed_at 对称：进 canceled 写、离开清；老数据回填 canceled_at=updated_at，仅补空行。
+export function ensureTaskTimesSchema(store) {
+  if (store.get('SELECT 1 AS ok FROM schema_migrations WHERE name = ?', 'tasks_canceled_at')) return
+  const columns = store.all('PRAGMA table_info(tasks)').map(row => row.name)
+  if (!columns.includes('canceled_at')) {
+    store.exec('ALTER TABLE tasks ADD COLUMN canceled_at TEXT')
+  }
+  store.run("UPDATE tasks SET canceled_at = updated_at WHERE status = 'canceled' AND canceled_at IS NULL")
+  store.run('INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING', 'tasks_canceled_at', nowIso())
+}
+
 export const tasksMethods = {
   async createTask(input, actor = this.actor()) {
     const project = this.projectRow(input.projectId)
@@ -139,7 +151,9 @@ export const tasksMethods = {
       if (!TASK_STATUSES.has(patch.status)) throw badRequest('任务状态无效')
       this.assertTransition(task.status, patch.status)
       updates.status = patch.status
+      // 终态时间戳对称维护：进 done/canceled 各写对应列，离开任一终态即清空，两列互斥。
       updates.completed_at = patch.status === 'done' ? nowIso() : null
+      updates.canceled_at = patch.status === 'canceled' ? nowIso() : null
     }
     if (Object.keys(updates).length === 0) return this.taskView(task)
     this.store.transaction(() => {
