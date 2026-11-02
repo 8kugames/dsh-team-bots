@@ -119,9 +119,10 @@ test('复制按钮：消息 hover 出现，复用统一 copy handler，复制原
 test('思考过程 chip 渲染在任务 chip 之前，两者合并同一 .task-chip-line', () => {
   const fn = /function renderMessage\(message\) \{[\s\S]*?\n  \}/.exec(source)?.[0]
   assert.ok(fn, '找不到 renderMessage 函数体')
-  const nonsys = fn.slice(fn.indexOf('const isUser'))
+  const nonsys = fn.slice(fn.indexOf('const isUser')).replace(/\/\/[^\n]*/g, '') // 剔除行注释，防止注释文案满足顺序断言
   assert.equal((nonsys.match(/task-chip-line/g) ?? []).length, 1, '非系统消息只应有一个 task-chip-line 容器')
   assert.ok(nonsys.indexOf('思考过程') < nonsys.indexOf('message.taskIdentifier'), '顺序固定：思考过程 → 任务')
+  assert.match(nonsys, /const chipsLine = trajChip \|\| taskChip \? `<div class="task-chip-line">\$\{trajChip\}\$\{taskChip\}<\/div>` : ''/, '插值顺序锁定 trajChip 在 taskChip 之前')
   assert.match(css, /\.task-chip-line \{[\s\S]*?gap: 8px/, '两个 chip 之间留 8px 呼吸距离')
   const chipCss = /\.task-chip \{[\s\S]*?\n\}/.exec(css)?.[0]
   assert.match(chipCss, /line-height: 1\.2/, 'task-chip 行高显式固定')
