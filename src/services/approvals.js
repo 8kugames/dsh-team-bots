@@ -1,6 +1,6 @@
 // DSHBOTS-32 群聊审批：宿主 approval/request waterfall 的插件侧应答器。
 // 只认领 session_bindings 命中且绑定到项目的 bot 会话；其余 next() 透传（人类会话审批继续走 Web UI）。
-// 决策模型沿用 decide_proposal 惯例：默认 this.actor()、pending 之外拒绝重复应答、动作写审计。
+// 决策权仅项目负责人（type=user）持有，bot 一律 forbidden 不能自批；pending 之外拒绝重复应答，动作写审计。
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 db.js 的 addColumn/recordMigration 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, nowIso } from '../util.js'

@@ -1177,7 +1177,36 @@
       </div>`
   }
 
+  // ===== approval-card:start 审批卡片（DSHBOTS-32 UI）=====
+  const APPROVAL_STATUS = { pending: '等待审批', allowed: '已允许一次', rejected: '已拒绝', timeout: '已超时', cancelled: '已取消' }
+
+  // 审批卡片：消息行只是锚点，状态以 state.data.approvals 为准（渲染时查表，轮询自然刷新）。
+  // 查不到该条（超出 30 条窗口）时退化为 system 纯文本，不留假状态。
+  function renderApprovalCard(message) {
+    const approval = (state.data?.approvals ?? []).find(item => item.id === message.approval_id)
+    if (!approval) return `<div class="message-system"><span>${esc(message.body)}</span></div>`
+    const pending = approval.status === 'pending'
+    const remainMin = Math.max(1, Math.round((approval.remainingMs ?? 0) / 60000))
+    const summary = approval.display_reason || approval.reason || '（无说明）'
+    return `<div class="message-row">
+      <div class="message-body-wrap approval-card" data-approval-status="${attr(approval.status)}">
+        <div class="message-meta"><strong>${esc(approval.botName)} 请求审批</strong><span>${esc(formatTime(approval.created_at))}</span></div>
+        <div class="approval-tool mono">${esc(approval.tool_name)}</div>
+        <div class="approval-summary">${esc(summary)}</div>
+        ${pending
+          ? `<div class="approval-foot faint">约 ${remainMin} 分钟内有效</div>
+        <div class="approval-actions">
+          <button class="btn small" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="allow">允许一次</button>
+          <button class="btn small danger" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="reject">拒绝</button>
+        </div>`
+          : `<div class="approval-foot"><span class="pill">${esc(APPROVAL_STATUS[approval.status] ?? approval.status)}</span>${approval.decided_at ? `<span class="faint">${esc(formatTime(approval.decided_at))}</span>` : ''}</div>`}
+      </div>
+    </div>`
+  }
+  // ===== approval-card:end =====
+
   function renderMessage(message) {
+    if (message.kind === 'approval') return renderApprovalCard(message)
     if (message.sender_type === 'system') {
       return `<div class="message-system">
         <span>${esc(message.body)}</span>
@@ -3278,6 +3307,15 @@
         case 'load-older':
           await loadOlderMessages()
           break
+        case 'approval-decide': {
+          // 群聊审批卡片按钮：allow/reject 后刷新状态表，卡片按新状态回显。
+          const approvalId = target.dataset.approvalId
+          const decision = target.dataset.decision
+          if (!approvalId || !['allow', 'reject'].includes(decision)) break
+          await api('approval_decide', { approvalId, decision })
+          await loadState(state.projectId, { quiet: true })
+          break
+        }
         case 'quote-message': {
           // 引用回复：把目标消息挂到 composer 上方的引用条；再点同一条则取消。
           const messageId = target.dataset.messageId

@@ -1546,6 +1546,26 @@ a.global-config.dsh-official-link:hover {
     color: var(--ink-3);
     font-size: var(--fs-caption);
 }
+/* 审批卡片：群聊气泡流内的待审批/已决条目（DSHBOTS-32） */
+.approval-card {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--c-violet);
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 240px;
+    max-width: 480px;
+}
+.approval-card[data-approval-status='allowed'] { border-left-color: var(--c-green); }
+.approval-card[data-approval-status='rejected'],
+.approval-card[data-approval-status='timeout'],
+.approval-card[data-approval-status='cancelled'] { border-left-color: var(--c-coral); }
+.approval-tool { font-weight: 600; }
+.approval-summary { white-space: pre-wrap; word-break: break-word; }
+.approval-actions { display: flex; gap: 8px; margin-top: 2px; }
+.approval-foot { display: flex; align-items: center; gap: 8px; }
 .task-chip-line {
     margin-top: 7px;
     display: flex;
