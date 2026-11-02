@@ -39,3 +39,45 @@ test('① 群聊侧栏与设置页的项目成员面板已移除', () => {
   const saveProject = /if \(type === 'save-project'\) \{[\s\S]*?\n {6}\}/.exec(source)?.[0] ?? ''
   assert.ok(saveProject && !saveProject.includes('memberIds'), 'save-project 不再提交 memberIds（增量 add/remove_member 替代）')
 })
+
+// ② 总览bots 挂侧栏全局配置上方、进化从项目 NAV 移除、记忆随上下文收敛。
+test('② 项目 NAV 无进化；单聊 NAV 保留进化', () => {
+  assert.ok(!/\['evolution',/.test(NAV), '项目 NAV 不应再有进化 tab')
+  assert.match(SOLO_NAV, /\['evolution', '进化', 'branch'\]/, '单聊 NAV 保留进化（逐个审批）')
+})
+
+test('② 侧栏「总览bots」入口在全局配置上方，带待审红点', () => {
+  const idxOverview = source.indexOf('data-view="bots-overview"')
+  const idxGlobal = source.indexOf('<span>全局配置</span>')
+  assert.ok(idxOverview >= 0, '侧栏应有总览bots按钮')
+  assert.ok(idxGlobal >= 0 && idxOverview < idxGlobal, '总览bots在全局配置上方')
+  assert.match(source, /case 'bots-overview': return renderBotsOverview\(\)/, 'render 路由 bots-overview')
+  assert.match(source, /pendingProposals\(\) > 0 \? '<span class="red-dot"/, '有待审提案时红点')
+  assert.match(source, /case 'batch-decide-proposals':/, '批量审批 handler 存在')
+})
+
+test('② 单聊进化只显示该 bot 提案', () => {
+  assert.match(source, /inSoloContext\(\) \? proposals\.filter\(item => item\.bot_id === state\.soloBotId\) : proposals/, '单聊按 bot_id 过滤')
+})
+
+test('② 记忆随上下文收敛：无作用域筛选、无团队记忆', () => {
+  assert.ok(!source.includes('id="memory-filter"'), '记忆页不再有作用域筛选下拉')
+  assert.ok(!/value="team"[^>]*>团队记忆/.test(source), '不再有「团队记忆」选项')
+  assert.ok(!source.includes("'团队记忆'"), '不再有团队记忆标题字面量')
+  assert.ok(!source.includes('memoryFilter'), 'memoryFilter 状态与监听一并移除')
+  const memoryFn = /function renderMemory\(\) \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? ''
+  assert.match(memoryFn, /const memories = state\.data\?\.memories \?\? \[\]/, '直接使用服务端按上下文收敛后的列表')
+})
+
+test('② system.js：记忆查询按上下文收敛、提案全量', () => {
+  const sysSource = readFileSync(fileURLToPath(new URL('../src/services/system.js', import.meta.url)), 'utf8')
+  const projectCtx = /if \(project\) \{[\s\S]*?\n {4}\}/.exec(sysSource)?.[0] ?? ''
+  assert.ok(projectCtx, '找不到项目上下文块')
+  assert.ok(!projectCtx.includes("scope_type = 'team'"), '项目上下文记忆不再并入团队 scope')
+  assert.ok(!projectCtx.includes('botFilter'), '项目上下文记忆不再并入成员 bot scope')
+  assert.match(projectCtx, /SELECT \* FROM proposals ORDER BY created_at DESC LIMIT 100/, '项目上下文提案改为全量')
+  const soloCtx = /if \(soloBot\) \{[\s\S]*?\n {6}\}/.exec(sysSource)?.[0] ?? ''
+  assert.ok(soloCtx, '找不到单聊上下文块')
+  assert.ok(!soloCtx.includes("scope_type = 'team'"), '单聊记忆不再并入团队 scope')
+  assert.match(soloCtx, /scope_type = 'bot' AND scope_id = \?/, '单聊记忆仅该 bot scope')
+})

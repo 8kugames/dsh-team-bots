@@ -9,7 +9,7 @@
   const UI_THEME_KEY = 'dshb:ui-theme'
   const state = {
     data: null,
-    view: ['chat', 'solo-config', 'tasks', 'bots', 'skills', 'memory', 'evolution', 'usage', 'terminal', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
+    view: ['chat', 'solo-config', 'tasks', 'bots-overview', 'members', 'skills', 'memory', 'evolution', 'usage', 'terminal', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
     projectId: params.get('project') || null,
     chatMode: 'group',
     soloBotId: null,
@@ -30,7 +30,6 @@
     busy: 0,
     chatAtBottom: true,
     taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
-    memoryFilter: 'all',
     usageScope: 'global',
     usageBot: null,
     memoryQuery: '',
@@ -96,13 +95,13 @@
     settings: { label: '保存设置', icon: 'check', submit: 'project-settings-form' },
     'solo-config': { label: '保存配置', icon: 'check', submit: 'solo-config-form' },
   }
+  // 项目导航：进化只挂在单聊 bot tab（逐个审批）与「总览bots」（批量审批），项目 NAV 不再出现。
   const NAV = [
     ['chat', '群聊', 'message'],
     ['tasks', '任务', 'board'],
     ['members', '成员', 'users'],
     ['skills', '技能', 'spark'],
     ['memory', '记忆', 'memory'],
-    ['evolution', '进化', 'branch'],
     ['usage', '用量', 'chart'],
     ['terminal', '终端', 'terminal'],
     ['settings', '设置', 'settings'],
@@ -531,7 +530,7 @@
       ? soloRuns.filter(run => run.status === 'running' || run.status === 'queued').length
       : (project?.stats?.running ?? 0)
     const tokenTotal = usageTotals('project').totalTokens ?? 0
-    const isGlobal = state.view === 'global'
+    const isGlobal = state.view === 'global' || state.view === 'bots-overview'
     // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
     const isSolo = state.view === 'chat' && state.chatMode === 'solo'
     const inSolo = inSoloContext()
@@ -542,9 +541,9 @@
       : state.view === 'chat' ? (project?.name ?? '团队空间')
       : state.view === 'tasks' ? '任务面板'
       : state.view === 'members' ? '项目成员'
-      : state.view === 'bots' ? '全部 Bots'
+      : state.view === 'bots-overview' ? '总览 Bots'
       : state.view === 'skills' ? '技能池'
-      : state.view === 'memory' ? '团队记忆'
+      : state.view === 'memory' ? '记忆'
       : state.view === 'evolution' ? '进化提案'
       : state.view === 'usage' ? '资源用量'
       : state.view === 'terminal' ? (project ? `终端 · ${project.name}` : '项目终端')
@@ -637,7 +636,10 @@
             </div>
           </div>
           <div class="sidebar-bottom">
-            <button class="global-config ${isGlobal ? 'active' : ''}" data-action="nav" data-view="global">
+            <button class="global-config ${state.view === 'bots-overview' ? 'active' : ''}" data-action="nav" data-view="bots-overview">
+              ${icon('bot')}<span>总览bots</span>${pendingProposals() > 0 ? '<span class="red-dot" title="有待审批提案"></span>' : ''}
+            </button>
+            <button class="global-config ${state.view === 'global' ? 'active' : ''}" data-action="nav" data-view="global">
               ${icon('settings')}<span>全局配置</span>
             </button>
             <a class="global-config dsh-official-link" href="/index.html" title="切换到 DSH 原生 Web 界面">
@@ -680,7 +682,7 @@
             }).join('')}
           </div>`}
           </div>
-          <section class="content" id="main-content" role="tabpanel" tabindex="-1"${state.view === 'global' ? '' : ` aria-labelledby="tab-${state.view}"`}>
+          <section class="content" id="main-content" role="tabpanel" tabindex="-1"${isGlobal ? '' : ` aria-labelledby="tab-${state.view}"`}>
             ${renderView()}
           </section>
         </main>
@@ -801,7 +803,7 @@
     const body = (() => {
       switch (state.view) {
         case 'tasks': return renderTasks()
-        case 'bots': return renderBots()
+        case 'bots-overview': return renderBotsOverview()
         case 'members': return renderMembers()
         case 'skills': return renderSkills()
         case 'memory': return renderMemory()
@@ -1518,6 +1520,52 @@
     `
   }
 
+  // 总览bots：全部 Bot 管理（复用 renderBots）+ 按 bot 分组的待审提案批量审批。
+  // 进化审批从项目 NAV 移到这里（批量）与单聊 bot tab（逐个），项目群聊不再有进化入口。
+  function renderBotsOverview() {
+    const pending = (state.data?.proposals ?? []).filter(item => item.status === 'pending')
+    const groups = new Map()
+    for (const item of pending) {
+      const key = item.bot_id ?? ''
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(item)
+    }
+    const proposalsSection = pending.length === 0 ? '' : `
+      <section class="section">
+        <div class="section-head"><h3>待审批提案</h3><span>${pending.length} 条待审</span></div>
+        ${[...groups.entries()].map(([botId, items]) => {
+          const bot = botById(botId)
+          const label = bot ? `${bot.name}（${bot.role || '成员'}）` : '未归属 Bot'
+          return `
+          <div class="card" style="margin-bottom: 10px;">
+            <div class="bot-card-head">
+              ${botId ? avatar(bot, 'sm') : `<div class="avatar sm">${icon('bot')}</div>`}
+              <div class="bot-card-title"><strong>${esc(label)}</strong><span>${items.length} 条待审提案</span></div>
+              <div class="bot-card-actions">
+                <button class="btn small" data-action="batch-decide-proposals" data-bot-id="${attr(botId)}" data-decision="approved">${icon('check')}全部通过并应用</button>
+                <button class="btn small" data-action="batch-decide-proposals" data-bot-id="${attr(botId)}" data-decision="rejected">全部拒绝</button>
+              </div>
+            </div>
+            <div class="list">
+              ${items.map(item => `
+                <div class="list-row" title="${esc(item.title ?? '')}">
+                  ${avatar({ name: label, color: 'gray' }, 'sm')}
+                  <div class="list-main">
+                    <div class="list-title"><strong>${esc(item.title ?? '未命名提案')}</strong><span class="member-role">${esc(PROPOSAL_KIND[item.kind] ?? item.kind)}</span></div>
+                    <div class="list-meta"><span>${esc(item.created_at ?? '')}</span></div>
+                  </div>
+                </div>`).join('')}
+            </div>
+          </div>`
+        }).join('')}
+      </section>`
+    return `
+      ${proposalsSection}
+      <div class="section-head"><h3>全部 Bots</h3><button class="btn" data-action="new-bot">${icon('plus')}新建 Bot</button></div>
+      ${renderBots()}
+    `
+  }
+
   // 项目成员管理页：状态与用量均按当前项目聚合（busy=本项目有排队/运行中运行；
   // usage 四项与 cost 为该项目全部运行的累计）。邀请走 add_member API，移除走 remove_member。
   function renderMembers() {
@@ -1534,7 +1582,7 @@
             ${candidates.length === 0 ? '<option value="">没有可邀请的 Bot</option>' : candidates.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}
           </select>
           <button class="btn" data-action="add-member" ${candidates.length === 0 ? 'disabled' : ''}>${icon('plus')}邀请加入</button>
-          <button class="btn" data-action="nav" data-view="bots" title="查看全部 Bot 或新建">${icon('bot')}全部 Bots</button>
+          <button class="btn" data-action="nav" data-view="bots-overview" title="查看全部 Bot 或新建">${icon('bot')}总览bots</button>
         </div>
       </div>
       <div class="card list-card">
@@ -1664,20 +1712,13 @@
 
   function renderMemory() {
     const project = pageProject()
-    const all = state.data?.memories ?? []
-    // 单聊上下文没有项目记忆：把群聊遗留的「项目记忆」筛选回退为全部作用域。
-    const filter = inSoloContext() && state.memoryFilter === 'project' ? 'all' : state.memoryFilter
-    const memories = all.filter(memory => filter === 'all' || memory.scope_type === filter)
+    // 记忆随上下文收敛（DSHBOTS-5）：群聊=当前项目 scope、单聊=该 bot scope，服务端已按上下文过滤，
+    // 客户端不再有作用域筛选与「团队记忆」概念。
+    const memories = state.data?.memories ?? []
     const pending = pendingMemoryCount()
     const results = state.memoryResults
     return `
-      ${(state.data?.memories ?? []).length === 0 ? '' : `<div class="board-toolbar">
-        <select class="select" id="memory-filter" aria-label="按作用域筛选记忆">
-          <option value="all" ${filter === 'all' ? 'selected' : ''}>全部作用域</option>
-          ${inSoloContext() ? '' : `<option value="project" ${filter === 'project' ? 'selected' : ''}>项目记忆</option>`}
-          <option value="bot" ${filter === 'bot' ? 'selected' : ''}>Bot 记忆</option>
-          <option value="team" ${filter === 'team' ? 'selected' : ''}>团队记忆</option>
-        </select>
+      ${memories.length === 0 ? '' : `<div class="board-toolbar">
         <input class="input search" id="memory-search" placeholder="搜索记忆主题或内容" aria-label="搜索记忆主题或内容" value="${attr(state.memoryQuery)}">
         <button class="btn" data-action="search-memories">${icon('search')}搜索</button>
         ${pending ? `<span class="pill amber">${pending} 条待审</span>` : ''}
@@ -1776,7 +1817,9 @@
 
   function renderEvolution() {
     const proposals = state.data?.proposals ?? []
-    const pending = proposals.filter(item => item.status === 'pending')
+    // 单聊进化 tab 只看该 bot 自己的提案（逐个审批）；项目群聊不再挂进化入口（批量审批在「总览bots」）。
+    const scoped = inSoloContext() ? proposals.filter(item => item.bot_id === state.soloBotId) : proposals
+    const pending = scoped.filter(item => item.status === 'pending')
     const proposalDiff = (proposal) => {
       const payload = proposal.payload ?? {}
       const bot = proposal.bot_id ? botById(proposal.bot_id) : null
@@ -1820,8 +1863,8 @@
           <button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button>
         </div>
       </div>
-      ${proposals.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('branch')}</div><h3>还没有进化提案</h3><p>Bot 可以提交自我改进建议，但无法自行批准。</p><button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button></div>` : `<div class="grid" style="gap:16px">
-        ${proposals.map(proposal => {
+      ${scoped.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('branch')}</div><h3>还没有进化提案</h3><p>Bot 可以提交自我改进建议，但无法自行批准。</p><button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button></div>` : `<div class="grid" style="gap:16px">
+        ${scoped.map(proposal => {
           const tone = proposal.status === 'approved' ? 'green' : proposal.status === 'rejected' ? 'red' : ''
           return `<article class="card proposal-card">
             <div class="card-head">
@@ -2693,11 +2736,13 @@
   }
 
   function modalMemory(memory) {
+    // 写作入口随上下文收敛（DSHBOTS-5）：群聊只写当前项目记忆，单聊只写该 bot 记忆，不再可选 Bot 列表。
     const project = pageProject()
-    const choices = [
-      ...(project ? [`<option value="project:${attr(project.id)}" ${memory?.scope_type === 'project' ? 'selected' : ''}>项目 · ${esc(project.name)}</option>`] : []),
-      ...activeBots().map(bot => `<option value="bot:${attr(bot.id)}" ${memory?.scope_type === 'bot' && memory?.scope_id === bot.id ? 'selected' : ''}>Bot · ${esc(bot.name)}</option>`),
-    ]
+    const soloBot = inSoloContext() ? botById(state.soloBotId) : null
+    const scope = soloBot
+      ? `bot:${attr(soloBot.id)}`
+      : project ? `project:${attr(project.id)}` : ''
+    const disabledText = soloBot ? `Bot · ${esc(soloBot.name)}` : '项目记忆'
     return modalShell({
       title: memory ? '编辑记忆' : '写入记忆',
       badge: '',
@@ -2705,7 +2750,7 @@
         <input type="hidden" name="memoryId" value="${attr(memory?.id ?? '')}">
         <div class="field"><label id="memory-scope-label" for="memory-scope">作用域</label>${memory
           ? `<input class="input" style="width:100%" id="memory-scope" value="${esc(memory.scope_type === 'project' ? '项目记忆' : `Bot · ${botById(memory.scope_id)?.name ?? ''}`)}" disabled>`
-          : `<select class="select" style="width:100%" id="memory-scope" name="scope">${choices.join('')}</select>`}</div>
+          : `<input class="input" style="width:100%" id="memory-scope" value="${esc(disabledText)}" disabled>${scope ? `<input type="hidden" name="scope" value="${attr(scope)}">` : ''}`}</div>
         <div class="field"><label id="memory-topic-label" for="memory-topic">主题</label><input class="input" style="width:100%" id="memory-topic" name="topic" value="${attr(memory?.topic ?? '')}" maxlength="120" placeholder="例如：发布流程约束" required></div>
         <div class="field"><label id="memory-content-label" for="memory-content">内容</label><textarea class="textarea" id="memory-content" name="content" rows="9" required placeholder="写清楚背景、结论和适用范围">${esc(memory?.content ?? '')}</textarea><div class="hint">密钥、密码和 token 会被自动过滤为 [REDACTED]。</div></div>
       </form>`,
@@ -3655,6 +3700,22 @@
           toast('已移出项目', 'success')
           break
         }
+        case 'batch-decide-proposals': {
+          const decision = target.dataset.decision
+          const botId = target.dataset.botId
+          const items = (state.data?.proposals ?? [])
+            .filter(item => item.status === 'pending' && (item.bot_id ?? '') === botId)
+          if (items.length === 0) break
+          const bot = botById(botId)
+          const label = decision === 'approved' ? '通过并应用' : '拒绝'
+          if (!window.confirm(`确认${label} ${bot?.name ?? '未归属 Bot'} 的全部 ${items.length} 条待审提案？`)) break
+          for (const item of items) {
+            await api('decide_proposal', { proposalId: item.id, decision })
+          }
+          await refresh()
+          toast(`已批量${label} ${items.length} 条提案`, 'success')
+          break
+        }
         case 'decide-proposal': {
           const decision = target.dataset.decision
           const label = decision === 'approved' ? '通过并应用' : '拒绝'
@@ -4082,10 +4143,6 @@
     const el = event.target
     if (el.matches('[data-task-filter]')) {
       state.taskFilter[el.dataset.taskFilter] = el.value
-      render()
-    }
-    if (el.id === 'memory-filter') {
-      state.memoryFilter = el.value
       render()
     }
     if (el.matches('[data-model-select]')) updateEffortOptions(el)

@@ -93,24 +93,20 @@ export const systemMethods = {
         'SELECT * FROM runs WHERE project_id = ? ORDER BY queued_at DESC LIMIT 60',
         project.id,
       ).map(run => this.runView(run))
-      const botIds = this.membersOf(project.id).map(bot => bot.id)
-      const botFilter = botIds.length > 0 ? `OR (scope_type = 'bot' AND scope_id IN (${botIds.map(() => '?').join(',')}))` : ''
+      // 记忆随上下文收敛（DSHBOTS-5）：群聊只看当前项目 scope，不再并集成员 bot 与团队记忆。
       view.memories = this.store.all(
-        `SELECT * FROM memories WHERE status = 'active' AND ((scope_type = 'project' AND scope_id = ?) ${botFilter}
-          OR (scope_type = 'team' AND scope_id = 'team'))
+        `SELECT * FROM memories WHERE status = 'active' AND scope_type = 'project' AND scope_id = ?
          ORDER BY updated_at DESC LIMIT 100`,
-        project.id, ...botIds,
+        project.id,
       ).map(item => this.memoryView(item))
       view.pendingMemories = this.store.all(
-        `SELECT * FROM memories WHERE status = 'pending' AND ((scope_type = 'project' AND scope_id = ?) ${botFilter}
-          OR (scope_type = 'team' AND scope_id = 'team'))
+        `SELECT * FROM memories WHERE status = 'pending' AND scope_type = 'project' AND scope_id = ?
          ORDER BY updated_at DESC LIMIT 100`,
-        project.id, ...botIds,
-      ).map(item => this.memoryView(item))
-      view.proposals = this.store.all(
-        'SELECT * FROM proposals WHERE project_id = ? OR bot_id IN (SELECT id FROM bots) ORDER BY created_at DESC LIMIT 100',
         project.id,
-      ).map(item => this.proposalView(item))
+      ).map(item => this.memoryView(item))
+      // 提案全量口径（与单聊对齐）：审批入口收敛到「总览bots」批量与单聊逐个，项目不再按 bot 并集过滤。
+      view.proposals = this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100')
+        .map(item => this.proposalView(item))
       view.prices = this.latestPrices()
       view.skillBindings = this.skillBindings(project.id)
       view.directMessages = this.botMessagesView(project.id)
@@ -132,16 +128,16 @@ export const systemMethods = {
             soloBot.id,
           ).map(run => this.runView(run)),
         }
-        // 单聊上下文的团队页口径：记忆只看 团队 + 该 bot 自己的；运行只看该 bot 的项目外运行；
-        // 提案保持全团队（提案本身不挂项目）。
+        // 单聊上下文口径（DSHBOTS-5 收敛）：记忆只看该 bot 自己的（不含团队）；运行只看该 bot 的项目外运行；
+        // 提案保持全量（渲染层按 bot 过滤，逐个审批）。
         view.proposals = this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item))
         view.memories = this.store.all(
-          `SELECT * FROM memories WHERE status = 'active' AND ((scope_type = 'bot' AND scope_id = ?) OR (scope_type = 'team' AND scope_id = 'team'))
+          `SELECT * FROM memories WHERE status = 'active' AND scope_type = 'bot' AND scope_id = ?
            ORDER BY updated_at DESC LIMIT 100`,
           soloBot.id,
         ).map(item => this.memoryView(item))
         view.pendingMemories = this.store.all(
-          `SELECT * FROM memories WHERE status = 'pending' AND ((scope_type = 'bot' AND scope_id = ?) OR (scope_type = 'team' AND scope_id = 'team'))
+          `SELECT * FROM memories WHERE status = 'pending' AND scope_type = 'bot' AND scope_id = ?
            ORDER BY updated_at DESC LIMIT 100`,
           soloBot.id,
         ).map(item => this.memoryView(item))
