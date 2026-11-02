@@ -69,3 +69,63 @@ test('概览卡样式对齐现有 side-card 视觉规格', () => {
   assert.match(css, /\.side-card-foot\s*\{/, '底部提示行有样式')
   assert.match(css, /\.side-link\s*\{/, '底部链接有样式')
 })
+
+// DSHBOTS-50：成员邀请改为弹窗选人（用户 m_6b76a2 要求去掉下拉默认填充）。
+// 锁定五件事：①成员页只剩一个「邀请加入」按钮，没有内联下拉；
+// ②弹窗只列未入项目且 status=active 的 bot，单选（radio）后确认提交 add_member；
+// ③无可选 bot 时给空态文案，不给提交动作；④未选人时提交零变更；
+// ⑤弹窗复用现有 modal 骨架（close-modal / 遮罩 / ESC），关闭即零变更。
+const membersFn = /function renderMembers\(\)\s*\{[\s\S]*?\n {2}\}/.exec(source)?.[0]
+assert.ok(membersFn, '找不到 renderMembers()')
+const inviteModalFn = /function modalInviteMember\(\)\s*\{[\s\S]*?\n {2}\}/.exec(source)?.[0]
+assert.ok(inviteModalFn, '找不到 modalInviteMember()')
+const inviteSubmit = /if \(type === 'invite-member'\) \{[\s\S]*?\n {6}\}/.exec(source)?.[0]
+assert.ok(inviteSubmit, '找不到 invite-member 表单提交分支')
+
+test('成员页只有「邀请加入」按钮，没有内联下拉', () => {
+  assert.match(membersFn, /data-action="open-invite-member"/, '成员页有「邀请加入」按钮')
+  assert.ok(!membersFn.includes('<select'), '成员页不再有内联下拉')
+  assert.ok(!membersFn.includes('invite-bot'), '成员页不再有 invite-bot 下拉')
+  assert.ok(!source.includes('data-action="add-member"'), '旧的 add-member 直提动作已移除')
+})
+
+test('邀请按钮打开选人弹窗，弹窗挂在现有 modal 通道上', () => {
+  assert.match(source, /case 'open-invite-member':[\s\S]{0,80}?openModal\(\{ type: 'invite-member'/, '点击按钮打开 invite-member 弹窗')
+  assert.match(source, /case 'invite-member': return modalInviteMember\(\)/, 'renderModal 分支渲染 invite-member')
+  assert.match(inviteModalFn, /modalShell\(\{/, '弹窗复用 modalShell 骨架')
+})
+
+test('候选只含未入本项目且 status 正常的 bot', () => {
+  assert.match(inviteModalFn, /bot\.status === 'active' && !memberIds\.has\(bot\.id\)/, '候选过滤条件：active 且不在项目里')
+  assert.match(inviteModalFn, /memberIds = new Set\(\(project\.members \?\? \[\]\)\.map\(member => member\.id\)\)/, '项目成员集合来自 project.members')
+})
+
+test('弹窗内是头像+名称+角色的单选列表', () => {
+  assert.match(inviteModalFn, /<input type="radio" name="botId"/, '用 radio 做单选')
+  assert.match(inviteModalFn, /avatar\(bot, 'sm'\)/, '每个候选带头像')
+  assert.match(inviteModalFn, /<strong>\$\{esc\(bot\.name\)\}<\/strong>/, '每个候选有名称')
+  assert.match(inviteModalFn, /class="member-role"/, '每个候选有角色标签')
+})
+
+test('确认按钮走 add_member；未选人时零变更', () => {
+  assert.match(inviteModalFn, /data-form="invite-member"/, '弹窗表单声明 invite-member')
+  assert.match(inviteModalFn, /type="submit" form="modal-form" id="invite-member-submit"/, '确认按钮提交 modal-form')
+  assert.match(inviteSubmit, /if \(!botId\) \{[\s\S]*?return\n/, '未选人不提交')
+  assert.match(inviteSubmit, /await api\('add_member', \{ projectId: activeProject\(\)\?\.id, botId \}\)/, '确认后调用 add_member')
+})
+
+test('无可选 bot 时给空态文案且没有提交动作', () => {
+  assert.match(inviteModalFn, /所有可用 Bot 都已在项目中/, '空态文案')
+  const emptyBranch = /if \(candidates\.length === 0\) \{[\s\S]*?\n {4}\}/.exec(inviteModalFn)?.[0]
+  assert.ok(emptyBranch, '找不到空态分支')
+  assert.ok(!emptyBranch.includes('type="submit"'), '空态不给提交按钮')
+  assert.ok(!emptyBranch.includes('add_member'), '空态不发 add_member')
+})
+
+test('弹窗关闭/取消/遮罩/ESC 都是零变更', () => {
+  assert.match(inviteModalFn, /data-action="close-modal"/, '取消按钮复用 close-modal')
+  assert.match(source, /function modalShell\([\s\S]*?data-action="modal-backdrop"/, '遮罩点击复用 modal-backdrop')
+  assert.match(source, /if \(event\.key === 'Escape' && state\.modal\) \{\s*\n\s*closeModal\(\)/, 'ESC 走现有 closeModal')
+  // 关闭路径上不得有写操作。
+  assert.ok(!/case 'close-modal'[\s\S]{0,200}add_member/.test(source), '关闭动作不触发 add_member')
+})

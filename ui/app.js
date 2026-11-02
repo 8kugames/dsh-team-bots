@@ -1625,16 +1625,11 @@
     const project = activeProject()
     if (!project) return noProject()
     const members = project.members ?? []
-    const memberIds = new Set(members.map(member => member.id))
-    const candidates = (state.data?.bots ?? []).filter(bot => bot.status === 'active' && !memberIds.has(bot.id))
     return `
       <div class="section-head">
         <p>成员状态与用量按本项目口径聚合；移除后该 Bot 不再接收本项目的提及与新任务。</p>
         <div class="btn-row">
-          <select class="select" id="invite-bot" aria-label="选择要邀请的 Bot">
-            ${candidates.length === 0 ? '<option value="">没有可邀请的 Bot</option>' : candidates.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}
-          </select>
-          <button class="btn" data-action="add-member" ${candidates.length === 0 ? 'disabled' : ''}>${icon('plus')}邀请加入</button>
+          <button class="btn" data-action="open-invite-member">${icon('plus')}邀请加入</button>
           <button class="btn" data-action="nav" data-view="bots-overview" title="查看全部 Bot 或新建">${icon('bot')}总览bots</button>
         </div>
       </div>
@@ -2470,6 +2465,7 @@
       case 'new-project': return modalNewProject()
       case 'remove-tracking': return modalRemoveTracking()
       case 'new-bot': return modalBot(null)
+      case 'invite-member': return modalInviteMember()
       case 'edit-bot': return modalBot(modal.detail)
       case 'new-task': return modalNewTask()
       case 'task': return modalTask(modal.detail)
@@ -2588,6 +2584,48 @@
       : dirs.map(name => `
         <button class="btn small" type="button" style="display:block;width:100%;text-align:left;margin-bottom:4px" data-action="pick-dir-nav" data-picker-for="${attr(inputId)}" data-path="${attr(`${current.replace(/\/+$/, '')}/${name}`)}">${icon('folder')} ${esc(name)}</button>`).join('')
     box.innerHTML = `${head}<div style="max-height:220px;overflow:auto">${list}</div>`
+  }
+
+  // 邀请选人弹窗：只列未入本项目且 status 为 active 的 bot，单选后确认提交 add_member。
+  // 关闭 / 取消 / 遮罩 / ESC 均为零变更（复用 modalShell 骨架）。
+  function modalInviteMember() {
+    const project = activeProject()
+    if (!project) {
+      return modalShell({
+        title: '邀请加入',
+        body: `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('bot')}</div><h3>请先进入一个项目</h3><p>进入项目后才能邀请成员。</p></div>`,
+        footer: '<button class="btn" data-action="close-modal">关闭</button>',
+        size: 'small',
+      })
+    }
+    const memberIds = new Set((project.members ?? []).map(member => member.id))
+    const candidates = (state.data?.bots ?? []).filter(bot => bot.status === 'active' && !memberIds.has(bot.id))
+    if (candidates.length === 0) {
+      return modalShell({
+        title: '邀请加入',
+        subtitle: `项目：${project.name}`,
+        body: `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('bot')}</div><h3>所有可用 Bot 都已在项目中</h3><p>先新建一个 Bot，再回来邀请它加入。</p></div>`,
+        footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn" data-action="new-bot">${icon('plus')}新建 Bot</button>`,
+      })
+    }
+    const selected = state.modal?.botId ?? ''
+    return modalShell({
+      title: '邀请加入',
+      subtitle: `项目：${project.name}，选择一个 Bot。`,
+      body: `<form data-form="invite-member" id="modal-form">
+        <div class="list">
+          ${candidates.map(bot => `
+            <label class="list-row" title="${esc(bot.name)} · ${esc(bot.role || '成员')}">
+              <input type="radio" name="botId" value="${attr(bot.id)}" ${bot.id === selected ? 'checked' : ''}>
+              ${avatar(bot, 'sm')}
+              <div class="list-main">
+                <div class="list-title"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(bot.role || '成员')}</span></div>
+              </div>
+            </label>`).join('')}
+        </div>
+      </form>`,
+      footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form" id="invite-member-submit" ${selected ? '' : 'disabled'}>${icon('check')}确认邀请</button>`,
+    })
   }
 
   function modalBot(detail) {
@@ -3760,13 +3798,8 @@
           if (memory) openModal({ type: 'memory', memory })
           break
         }
-        case 'add-member': {
-          const select = document.getElementById('invite-bot')
-          const botId = select?.value
-          if (!botId) break
-          await api('add_member', { projectId: activeProject()?.id, botId })
-          await refresh()
-          toast('已邀请加入项目', 'success')
+        case 'open-invite-member': {
+          openModal({ type: 'invite-member', botId: '' })
           break
         }
         case 'remove-member': {
@@ -3945,6 +3978,19 @@
         state.modal = null
         await refresh()
         if (state.view === 'solo-config') await loadSoloDetail()
+        return
+      }
+      if (type === 'invite-member') {
+        const botId = String(payload.botId || '')
+        // 未选人时不提交，弹窗保持打开（零变更）。
+        if (!botId) {
+          toast('请先选择一个 Bot', 'error')
+          return
+        }
+        await api('add_member', { projectId: activeProject()?.id, botId })
+        state.modal = null
+        await refresh()
+        toast('已邀请加入项目', 'success')
         return
       }
       if (type === 'create-task') {
@@ -4134,6 +4180,12 @@
   // select / checkbox 只发 change 不发 input，同样要计入未保存修改。
   document.addEventListener('change', (event) => {
     event.target.closest?.('form')?.setAttribute('data-dirty', '1')
+    // 邀请弹窗：单选后放开「确认邀请」按钮，并把选择记在 state.modal 上（重渲染后仍保持）。
+    if (state.modal?.type === 'invite-member' && event.target?.name === 'botId') {
+      state.modal.botId = String(event.target.value || '')
+      const submit = document.getElementById('invite-member-submit')
+      if (submit) submit.disabled = !state.modal.botId
+    }
   })
 
   document.addEventListener('keydown', (event) => {
