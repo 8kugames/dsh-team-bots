@@ -6,7 +6,5 @@ workspace
 *.log
 .DS_Store
 .env
-docs/
 package-lock.json
-.art-check/
-.stage-mine.mjs
+.artifacts/
