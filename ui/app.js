@@ -1431,6 +1431,16 @@
     const cutoff = timeRange === '1d' ? new Date().setHours(0, 0, 0, 0) : Date.now() - (TASK_TIME_RANGES[timeRange] ?? 0)
     return !(Number.isFinite(endedAt) && endedAt >= cutoff)
   }
+  // 终态时间戳取值口径（DSHBOTS-62）：done → completed_at，canceled → canceled_at；非终态没有终态时间。
+  // 缺终态时间戳的终态任务没有可比的时间基准（老数据，或直接以终态状态建的任务），
+  // 这类任务不参与时间筛选、始终可见——按窗口外处理会把整个「已完成」分组静默清空
+  // （库里 1 条 done、面板 0 条的成因）。筛选入口用 taskTerminalTime 做这道门。
+  function taskTerminalTime(task) {
+    if (!task) return null
+    if (task.status === 'done') return task.completed_at ?? null
+    if (task.status === 'canceled') return task.canceled_at ?? null
+    return null
+  }
   // task-time-range:end
 
   function filteredTasks() {
@@ -1438,7 +1448,9 @@
     return sortTasksByPriority((state.data?.tasks ?? []).filter(task => {
       if (filter.status !== 'all' && task.status !== filter.status) return false
       if (filter.assignee !== 'all' && task.assignee_bot_id !== filter.assignee) return false
-      if (taskEndsOutsideRange(task, filter.timeRange)) return false
+      // 时间筛选只对「有终态时间戳」的终态任务生效（DSHBOTS-62）：缺时间戳的终态任务没有时间基准，
+      // 参与筛选会被整组清空（库里 done、面板「已完成」0 条的成因）；其余状态照常显示（D-34 口径）。
+      if (taskTerminalTime(task) && taskEndsOutsideRange(task, filter.timeRange)) return false
       if (filter.search) {
         const haystack = `${task.identifier} ${task.title} ${task.description} ${task.labels?.join(' ') ?? ''}`.toLowerCase()
         if (!haystack.includes(filter.search.toLowerCase())) return false
@@ -1453,6 +1465,13 @@
     const tasks = filteredTasks()
     const members = project.members ?? []
     const filtering = Boolean(state.taskFilter.search) || state.taskFilter.status !== 'all' || state.taskFilter.assignee !== 'all' || state.taskFilter.timeRange !== 'all'
+    // 头部计数口径（DSHBOTS-62）：与各分组计数同源，取「各组计数之和」——
+    // 头部数字必须等于面板上真正看到的行数之和，不能各算各的（口径不一致就会出现头部与分组对不上）。
+    // 与项目总数（设置页「任务总数」同源）的差额单独提示，不混进主计数。
+    const groupCounts = STATUS_ORDER.map(status => tasks.filter(task => task.status === status).length)
+    const shownCount = groupCounts.reduce((sum, count) => sum + count, 0)
+    const totalCount = Number(project.stats?.tasks ?? state.data?.tasks?.length ?? shownCount)
+    const hiddenCount = Math.max(0, totalCount - shownCount)
     return `
       <div class="section-head">
         <p>拖拽任务行切换状态，点组头可折叠分组。</p>
@@ -1472,7 +1491,8 @@
             <option value="30d" ${state.taskFilter.timeRange === '30d' ? 'selected' : ''}>近 30 天</option>
             <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>全部时间</option>
           </select>
-          <span class="tag">${tasks.length} 个任务</span>
+          <span class="tag">${shownCount} 个任务</span>
+          ${hiddenCount > 0 ? `<span class="faint" title="项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>` : ''}
         </div>
       </div>
       ${tasks.length === 0 ? `<div class="empty-state">
@@ -1495,9 +1515,9 @@
   function renderTaskGroup(status, tasks) {
     const key = taskGroupKey(status)
     const expanded = state.openPanels.has(key)
-    const body = tasks.length === 0
-      ? `<div class="board-empty">拖到这里</div>`
-      : renderTaskRows(tasks)
+    // 空组不渲染组体（DSHBOTS-62 P1-4）：只留一行组头，去掉「拖到这里」占位留下的大块竖向空白；
+    // 组 section 仍带 data-drop-status，拖到组头照样能改状态，拖放通道不变。
+    const body = tasks.length === 0 ? '' : renderTaskRows(tasks)
     return `<section class="column task-group${expanded ? '' : ' collapsed'}" data-drop-status="${status}">
       <div class="column-head task-group-head">
         <button type="button" class="task-group-toggle" data-action="toggle-task-group" data-status="${attr(status)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? '折叠' : '展开'}${esc(STATUS[status])}分组">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>
@@ -1505,7 +1525,7 @@
         <strong>${STATUS[status]}</strong>
         <span class="column-count">${tasks.length}</span>
       </div>
-      ${expanded ? `<div class="task-group-body" data-panel="${attr(key)}">${body}</div>` : ''}
+      ${expanded && body ? `<div class="task-group-body" data-panel="${attr(key)}">${body}</div>` : ''}
     </section>`
   }
 
