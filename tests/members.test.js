@@ -189,6 +189,7 @@ test('membersWithUsage run_status 三态判定：bot 全局口径，busy 仍项�
 
     // 1) 无 run → idle；模型未配置 → modelRef null；配了 → provider/model 组合
     assert.equal((await statusOf(watcher.id)).run_status, 'idle')
+    assert.equal((await statusOf(watcher.id)).run_phase, null)
     assert.equal((await statusOf(watcher.id)).modelRef, null)
     assert.equal((await statusOf(builder.id)).modelRef, 'fake/model-a')
 
@@ -196,6 +197,7 @@ test('membersWithUsage run_status 三态判定：bot 全局口径，busy 仍项�
     run('solo-r1', 1, null, builder.id, 'running')
     let row = await statusOf(builder.id)
     assert.equal(row.run_status, 'running')
+    assert.equal(row.run_phase, 'running')
     assert.equal(row.busy, false)
 
     // 3) 单聊 run 以失败收场 → failed；busy 仍 false
@@ -217,6 +219,7 @@ test('membersWithUsage run_status 三态判定：bot 全局口径，busy 仍项�
     run('proj-q1', 5, project.id, builder.id, 'queued')
     row = await statusOf(builder.id)
     assert.equal(row.run_status, 'running')
+    assert.equal(row.run_phase, 'queued')
     assert.equal(row.busy, true)
 
     // 7) director 无 run → idle

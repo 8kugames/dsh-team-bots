@@ -242,6 +242,24 @@
   function runDot(status) {
     return `<span class="run-dot ${attr(status ?? '')}" title="${attr(RUN_STATUS[status] ?? '未运行')}"></span>`
   }
+  // 成员/总监状态点：红黄绿三色——空闲绿、运行中黄（且仅此态闪烁）、失败红（含限流等待）。
+  // 排队中按空闲处理（绿、不闪），只有真正 running 才闪。
+  function memberRunDot(member) {
+    const status = member?.run_status ?? 'idle'
+    const phase = member?.run_phase ?? null
+    const waitMin = member?.retry_wait_seconds ? Math.max(1, Math.round(member.retry_wait_seconds / 60)) : null
+    if (status === 'running') {
+      return phase === 'running'
+        ? { cls: 'running', status: 'running', text: '运行中' }
+        : { cls: 'idle', status: 'queued', text: '排队中（按空闲计）' }
+    }
+    if (status === 'plan_wait') return { cls: 'plan-wait', status: 'plan_wait', text: `限流等待，约 ${waitMin} 分钟后自动重试` }
+    if (status === 'failed') return { cls: 'failed', status: 'failed', text: '最近运行失败' }
+    return { cls: 'idle', status: 'idle', text: '空闲' }
+  }
+  function runDotHtml(dot) {
+    return `<span class="run-dot ${dot.cls}" data-status="${dot.status}" title="${esc(dot.text)}" aria-label="${esc(dot.text)}"></span>`
+  }
   function memorySource(source) {
     const value = String(source ?? '')
     if (!value) return '手动写入'
@@ -633,7 +651,7 @@
   }
 
   // panel-state:start —— 折叠面板（<details data-panel>）展开态纯逻辑，tests/panel-state.test.js 按本标记块抽取断言。
-  // key 约定：Bot 私信 dm；技能版本 skill-versions:<slug>；提案差异 proposal:<id>；轨迹条目 traj:<runId>:<index>；运行输出 run-output:<runId>。
+  // key 约定：Bot 私信 dm；技能版本 skill-versions:<slug>；提案差异 proposal:<id>；轨迹条目 traj:<runId>:<index>；运行输出 run-output:<runId>；交付产物 run-artifacts:<runId>。
   function panelKey(el) {
     return el?.getAttribute?.('data-panel') || null
   }
@@ -838,6 +856,9 @@
     // modelRef 本身已是 provider/model（如 deepseek/deepseek-chat），不再单独拼 provider，避免重复。
     const ownerModelRef = owner ? (owner.modelRef ?? owner.model ?? null) : null
     const ownerModelLine = ownerModelRef ? String(ownerModelRef) : '未配置模型'
+    // 总监也是 bot，状态点取同一成员表口径（bot 全局）。
+    const ownerMember = members.find(m => m.id === project.owner_bot_id) ?? null
+    const ownerDot = ownerMember ? memberRunDot(ownerMember) : null
     const open = (state.data.tasks ?? []).filter(task => !['done', 'canceled'].includes(task.status)).slice(0, 5)
     return `
       <div class="chat-layout">
@@ -890,6 +911,7 @@
                 <span class="member-name-line"><strong>${esc(owner.name)}</strong><span class="member-role">总监</span></span>
                 <span class="member-model">${esc(ownerModelLine)}</span>
               </div>
+              ${ownerDot ? runDotHtml(ownerDot) : ''}
             </div>` : '<div class="faint">未设置总监</div>'}
           </div>
           <div class="side-card">
@@ -898,26 +920,18 @@
               ${memberList.map(member => {
                 const bot = botById(member.id)
                 if (!bot) return ''
-                const waitMin = member.retry_wait_seconds ? Math.max(1, Math.round(member.retry_wait_seconds / 60)) : null
-                const dotClass = member.run_status === 'running' ? 'running'
-                  : member.run_status === 'failed' ? 'failed'
-                  : member.run_status === 'plan_wait' ? 'plan-wait'
-                  : 'idle'
-                const dotText = member.run_status === 'running' ? '运行中'
-                  : member.run_status === 'failed' ? '最近运行失败'
-                  : member.run_status === 'plan_wait' ? `限流等待，约 ${waitMin} 分钟后自动重试`
-                  : '空闲'
+                const dot = memberRunDot(member)
                 const roleLabel = bot.role || '成员'
-                const modelRef = member.modelRef ?? bot.modelRef
-                // 两行式成员行（对齐 .owner-info）：第一行 名字+角色标签，第二行 provider·模型；缺任一项给可读兜底，不拼 undefined。
-                const modelLine = bot.provider && modelRef ? `${bot.provider} · ${modelRef}` : '未配置模型'
-                return `<div class="side-row member-row" title="${esc(bot.name)} · ${esc(roleLabel)} · ${esc(modelLine)} · ${dotText}">
+                // modelRef 已是 provider/model 形式，provider 不再单独显示（否则同一信息出现两次）。
+                const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
+                const modelLine = modelRef ? String(modelRef) : '未配置模型'
+                return `<div class="side-row member-row" title="${esc(bot.name)} · ${esc(roleLabel)} · ${esc(modelLine)} · ${esc(dot.text)}">
                   ${avatar(bot, 'sm')}
                   <div class="member-info">
                     <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(roleLabel)}</span></span>
                     <span class="member-model">${esc(modelLine)}</span>
                   </div>
-                  <span class="run-dot ${dotClass}" data-status="${member.run_status ?? 'idle'}" title="${esc(dotText)}" aria-label="${esc(dotText)}"></span>
+                  ${runDotHtml(dot)}
                 </div>`
               }).join('')}
             </div>`}

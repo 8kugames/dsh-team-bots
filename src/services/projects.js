@@ -49,6 +49,16 @@ export const projectsMethods = {
            ELSE 'idle'
          END AS run_status,
          CASE
+            WHEN EXISTS(
+              SELECT 1 FROM runs r
+              WHERE r.bot_id = pm.member_id AND r.status = 'running'
+            ) THEN 'running'
+            WHEN EXISTS(
+              SELECT 1 FROM runs r
+              WHERE r.bot_id = pm.member_id AND r.status = 'queued'
+            ) THEN 'queued'
+          END AS run_phase,
+         CASE
            WHEN lst.status = 'failed'
                 AND lst.error_code IN ('RATE_LIMIT', 'QUOTA')
                 AND lst.retry_after_ms IS NOT NULL
