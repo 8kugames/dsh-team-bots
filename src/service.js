@@ -29,18 +29,10 @@ import { proposalsMethods } from './services/proposals.js'
 import { terminalMethods } from './services/terminal.js'
 import { usageMethods } from './services/usage.js'
 import { systemMethods } from './services/system.js'
+import { wechatMethods } from './services/wechat.js'
 
 export { WRITE_SCOPE_MAX, WRITE_SCOPE_MAX_LEN, parseWriteScopes, readWriteScopes, writeScopePathsOverlap, writeScopesOverlap } from './services/write-scopes.js'
 export { FILE_POLICIES, FILE_POLICY_LABELS } from './services/file-policy.js'
-// 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
-// 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
-function wechatQrSvg(url) {
-  const makeQr = createRequire(import.meta.url)('../vendor/qrcode/qrcode.js')
-  const qr = makeQr(0, 'M')
-  qr.addData(url)
-  qr.make()
-  return qr.createSvgTag({ cellSize: 4, margin: 2 })
-}
 
 export class TeamService {
   constructor({ store, config, logger = console }) {
@@ -306,34 +298,6 @@ export class TeamService {
       ? `任务 ${identifier}《${view.title}》已验收通过。`
       : `任务 ${identifier}《${view.title}》已退回重做。`
   }
-
-  // 微信状态会进 UI state：凭据类字段一律剥掉，只留 phase/是否登录/管理员等展示信息。
-  wechatStatus() {
-    const status = this.wechat?.status()
-      ?? { phase: 'disabled', enabled: false, error: null, adminPeerId: null, auth: null }
-    const auth = status?.auth && typeof status.auth === 'object'
-      ? Object.fromEntries(Object.entries(status.auth).filter(([key]) => !/token|secret|cookie|credential/i.test(key)))
-      : status?.auth ?? null
-    return { ...status, auth }
-  }
-
-  async wechatBeginLogin() {
-    await this.initialize()
-    if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
-    const challenge = await this.wechat.beginLogin()
-    return { qrCodeUrl: challenge.qrCodeUrl, qrSvg: wechatQrSvg(challenge.qrCodeUrl) }
-  }
-
-  wechatSubmitCode(code) {
-    if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
-    return this.wechat.submitVerificationCode(code)
-  }
-
-  async wechatLogout() {
-    if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
-    await this.wechat.logout()
-    return { phase: this.wechat.status().phase }
-  }
 }
 
 // 业务域方法按域拆到 src/services/*.js，这里挂回 TeamService 原型：
@@ -351,4 +315,5 @@ defineMethods(TeamService.prototype, [
   terminalMethods,
   usageMethods,
   systemMethods,
+  wechatMethods,
 ])
