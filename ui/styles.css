@@ -2191,8 +2191,11 @@ a.global-config.dsh-official-link:hover {
     background: var(--ink-3);
     flex: 0 0 auto;
 }
+.run-dot.idle {
+    background: var(--green);
+}
 .run-dot.running {
-    background: var(--accent);
+    background: var(--star);
     animation: pulse 1.4s infinite;
 }
 .run-clock {

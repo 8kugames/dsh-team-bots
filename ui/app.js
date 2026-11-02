@@ -819,7 +819,7 @@
                 const dotClass = member.run_status === 'running' ? 'running'
                   : member.run_status === 'failed' ? 'failed'
                   : member.run_status === 'plan_wait' ? 'plan-wait'
-                  : ''
+                  : 'idle'
                 const dotText = member.run_status === 'running' ? '运行中'
                   : member.run_status === 'failed' ? '最近运行失败'
                   : member.run_status === 'plan_wait' ? `限流等待，约 ${waitMin} 分钟后自动重试`
@@ -834,7 +834,7 @@
                     <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(roleLabel)}</span></span>
                     <span class="member-model">${esc(modelLine)}</span>
                   </div>
-                  <span class="run-dot ${dotClass}" aria-label="${dotText}"></span>
+                  <span class="run-dot ${dotClass}" data-status="${member.run_status ?? 'idle'}" title="${esc(dotText)}" aria-label="${esc(dotText)}"></span>
                 </div>`
               }).join('')}
             </div>
