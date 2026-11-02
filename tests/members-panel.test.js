@@ -73,20 +73,22 @@ test('概览卡是只读的：没有任何写操作控件', () => {
   for (const token of forbidden) {
     assert.ok(!cardBody.includes(token), `概览卡不应出现写操作控件：${token}`)
   }
-  // 唯一的交互是跳转到「成员」tab，不是保存。
+  // 概览卡整体只读：连跳转「成员」tab 的提示行都去掉了（用户 m_6f8d93），因此没有任何交互动作。
   const actions = [...cardBody.matchAll(/data-action="([^"]+)"/g)].map(m => m[1])
-  assert.deepEqual([...new Set(actions)], ['nav'], '概览卡内只允许导航动作')
+  assert.deepEqual([...new Set(actions)], [], '概览卡内不再有任何交互动作')
 })
 
-test('概览卡底部提示管理入口在「成员」标签页', () => {
-  assert.match(cardBody, /管理成员请前往/, '底部有一行提示文案')
-  assert.match(cardBody, /data-action="nav" data-view="members"/, '提示可直接链到 members 视图')
+test('概览卡不再渲染指向「成员」tab 的提示行（用户 m_6f8d93）', () => {
+  assert.ok(!cardBody.includes('管理成员请前往'), '底部提示行整行删掉')
+  assert.ok(!cardBody.includes('side-card-foot'), '不再带底部提示行容器')
+  assert.ok(!cardBody.includes('side-link'), '不再带跳转链接')
+  assert.match(cardBody, /<span>\$\{memberList\.length\}<\/span>/, '只留成员计数')
 })
 
 test('概览卡样式对齐现有 side-card 视觉规格', () => {
   assert.match(css, /\.members-overview \.side-row\s*\{/, '成员行有专属样式')
-  assert.match(css, /\.side-card-foot\s*\{/, '底部提示行有样式')
-  assert.match(css, /\.side-link\s*\{/, '底部链接有样式')
+  assert.ok(!/\.side-card-foot\s*\{/.test(css), '提示行样式已随提示行一并移除')
+  assert.ok(!/\.side-link\s*\{/.test(css), '跳转链接样式已随提示行一并移除')
 })
 
 // DSHBOTS-50：成员邀请改为弹窗选人（用户 m_6b76a2 要求去掉下拉默认填充）。
@@ -184,6 +186,37 @@ test('卡片信息布局：上头像、中名称+角色、下状态点与用量'
   assert.match(membersFn, /member-card-foot[\s\S]*?formatCost\(Number\(member\.usage_cost \?\? 0\)\)/, '底部有 cost 合计')
 })
 
+// DSHBOTS-57：卡片放大（max-width 320px / 头像 56px），角色标签与模型分两行——
+// 名称 / 角色标签 / provider·model 小字三行式，模型不再收进 title 提示。
+test('卡片放大：max-width 320px、头像 56px、网格列宽同步放大', () => {
+  assert.match(cardCss, /max-width:\s*320px/, '卡片最大宽度提到 320px')
+  assert.match(gridCss, /minmax\(260px, 1fr\)/, '网格列宽基准同步放大到 260px')
+  const avatarCss = /\.member-card-top \.avatar\.lg \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
+  assert.match(avatarCss, /width:\s*56px/, '头像 56px')
+  assert.match(avatarCss, /height:\s*56px/, '头像 56px')
+  assert.match(cardCss, /aspect-ratio:\s*0\.618/, '宽高比 0.618:1 保持不变')
+})
+
+test('中段三行式：名称 / 角色标签 / 模型小字各自独立成行', () => {
+  const nameIdx = membersFn.indexOf('member-card-name')
+  const roleIdx = membersFn.indexOf('member-card-role')
+  const modelIdx = membersFn.indexOf('member-card-model')
+  assert.ok(nameIdx > 0 && roleIdx > nameIdx && modelIdx > roleIdx, '名称 → 角色标签 → 模型，顺序自上而下')
+  assert.match(membersFn, /<div class="member-card-role">\$\{isOwner \? '<span class="pill violet">总监<\/span>'/, '第二行是角色标签行')
+  assert.match(membersFn, /<div class="member-card-model" title="\$\{esc\(modelLine\)\}">\$\{esc\(modelLine\)\}<\/div>/, '第三行是模型小字行')
+  assert.ok(!membersFn.includes('member-card-tags'), '旧的同行容器已废弃')
+  assert.match(membersFn, /const modelLine = modelRef \? String\(modelRef\) : '未配置'/, '缺配置兜底「未配置」')
+  const modelCss = /\.member-card-model \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
+  assert.match(modelCss, /text-overflow:\s*ellipsis/, '模型行过长省略号')
+  assert.match(modelCss, /font-size:\s*var\(--fs-caption\)/, '模型行是小字')
+})
+
+test('模型不再只藏在 title 提示里，卡面可见', () => {
+  const cardTag = /<div class="member-card[^>]*>/.exec(membersFn)?.[0] ?? ''
+  assert.ok(cardTag.includes('title='), '卡片仍保留 title 提示（名称·角色·状态）')
+  assert.ok(!cardTag.includes('modelLine'), '卡片 title 不再承载模型信息')
+})
+
 test('总监卡保留 violet 标识，且不渲染移除按钮', () => {
   assert.match(membersFn, /isOwner \? '<span class="pill violet">总监<\/span>'/, '总监用 violet 标签')
   assert.match(membersFn, /\$\{isOwner \? '' : `<button class="member-card-remove"/, '移除按钮只给非总监卡')
@@ -219,7 +252,7 @@ test('小屏少列：窄屏收成两列，超窄屏退到单列', () => {
 })
 
 test('卡片宽度有上限，宽屏下不被拉成巨型卡', () => {
-  assert.match(cardCss, /max-width:\s*236px/, '卡片最大宽度封顶')
+  assert.match(cardCss, /max-width:\s*320px/, '卡片最大宽度封顶（DSHBOTS-57 放大）')
   assert.match(gridCss, /justify-items:\s*center/, '卡片在列内居中')
 })
 

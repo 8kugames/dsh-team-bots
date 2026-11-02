@@ -2292,44 +2292,19 @@ a.global-config.dsh-official-link:hover {
     text-overflow: ellipsis;
 }
 
-/* 群聊右栏「项目成员」概览卡（只读）：行高与 .side-row 对齐，
-   底部一行小字把管理入口指向「成员」tab，卡内不放任何写操作控件。 */
+/* 群聊右栏「项目成员」概览卡（只读）：行高与 .side-row 对齐，卡内不放任何写操作控件，
+   也不再渲染指向「成员」tab 的提示行（用户 m_6f8d93 去掉冗余跳转提示）。 */
 .members-overview .side-row {
     min-height: 36px;
 }
-.side-card-foot {
-    margin-top: 10px;
-    padding-top: 9px;
-    border-top: 1px solid var(--line);
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: wrap;
-    font-size: var(--fs-caption);
-    color: var(--ink-3);
-}
-.side-link {
-    appearance: none;
-    border: 0;
-    padding: 0;
-    background: none;
-    color: var(--accent-text);
-    font: inherit;
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-.side-link:hover {
-    color: var(--accent);
-}
 
-/* 「成员」tab 卡片式成员网格（DSHBOTS-52）：
+/* 「成员」tab 卡片式成员网格（DSHBOTS-52；DSHBOTS-57 放大卡片并把角色标签/模型分行）：
    单卡宽高比锁定 0.618:1（竖向黄金比）——CSS aspect-ratio 的值即 宽/高。
    内容装不下时以卡片为准（overflow:hidden 不撑破），列宽自适应，小屏少列。 */
 .members-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
     align-items: stretch;
     /* 卡片居中于列内，避免宽屏下被拉成过高的巨型卡 */
     justify-items: center;
@@ -2338,15 +2313,15 @@ a.global-config.dsh-official-link:hover {
     position: relative;
     aspect-ratio: 0.618;
     width: 100%;
-    max-width: 236px;
+    max-width: 320px;
     min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 14px 12px 12px;
+    gap: 10px;
+    padding: 18px 18px 16px;
     border: 1px solid var(--line);
-    border-radius: 14px;
+    border-radius: 16px;
     background: var(--surface);
     overflow: hidden;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -2364,43 +2339,52 @@ a.global-config.dsh-official-link:hover {
     justify-content: center;
 }
 .member-card-top .avatar.lg {
-    width: 44px;
-    height: 44px;
-    font-size: var(--fs-body);
-    border-radius: 13px;
+    width: 56px;
+    height: 56px;
+    font-size: var(--fs-title);
+    border-radius: 16px;
 }
 .member-card-mid {
     width: 100%;
     min-width: 0;
     margin: auto 0;
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
 }
 .member-card-name {
     font-size: var(--fs-body);
     font-weight: 600;
     color: var(--ink);
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-.member-card-tags {
-    margin-top: 3px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    min-width: 0;
-}
-.member-card-tags .member-role,
-.member-card-tags .member-model {
     max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
-.member-card-tags .member-model {
+/* 第二行：角色标签（总监 violet pill / 普通成员角色名） */
+.member-card-role {
+    max-width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+.member-card-role .member-role {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+/* 第三行：provider/model 小字，缺配置兜底「未配置」，过长省略号 */
+.member-card-model {
+    max-width: 100%;
     font-size: var(--fs-caption);
+    color: var(--ink-3);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 .member-card-foot {
     margin-top: auto;

@@ -48,3 +48,13 @@ test('活跃任务标题右侧计数仍显示项目在办任务总数', () => {
 test('超出上限时提示剩余条数', () => {
   assert.match(source, /openTasks\.length > CHAT_ACTIVE_TASK_LIMIT \? `<div class="faint">还有 \$\{openTasks\.length - CHAT_ACTIVE_TASK_LIMIT\} 条<\/div>` : ''/, '超出部分用「还有 N 条」提示')
 })
+
+test('项目成员概览卡不再有「管理成员请前往…」提示行', () => {
+  // 用户 m_6f8d93：概览卡只留成员列表与计数，冗余的跳转提示整行删掉。
+  const card = /function renderChatMembersCard\(\)\s*\{[\s\S]*?\n  \}/.exec(source)?.[0]
+  assert.ok(card, '找不到 renderChatMembersCard')
+  assert.ok(!/管理成员请前往/.test(card), '概览卡不再渲染跳转提示行')
+  assert.ok(!/side-card-foot/.test(card), '概览卡不再带 side-card-foot 提示行')
+  assert.match(card, /<span>\$\{memberList\.length\}<\/span>/, '成员计数保留')
+  assert.match(card, /class="side-list"/, '成员列表保留')
+})

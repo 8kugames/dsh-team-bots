@@ -998,7 +998,6 @@
             </div>`
           }).join('')}
         </div>`}
-        <div class="side-card-foot faint">管理成员请前往<button class="side-link" data-action="nav" data-view="members">「成员」标签页</button></div>
       </div>`
   }
 
@@ -1692,7 +1691,7 @@
           const isOwner = member.member_role === 'owner' || member.id === project.owner_bot_id
           const tokens = Number(member.usage_input ?? 0) + Number(member.usage_cache_read ?? 0) + Number(member.usage_cache_write ?? 0) + Number(member.usage_output ?? 0)
           const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
-          const modelLine = modelRef ? String(modelRef) : '未配置模型'
+          const modelLine = modelRef ? String(modelRef) : '未配置'
           const statusText = MEMBER_STATUS_TEXT[dot.status] ?? dot.text
           const usageDetail = `输入 ${formatNumber(member.usage_input)} · 缓存读 ${formatNumber(member.usage_cache_read)} · 缓存写 ${formatNumber(member.usage_cache_write)} · 输出 ${formatNumber(member.usage_output)}`
           return `
@@ -1701,7 +1700,8 @@
             <div class="member-card-top">${avatar(bot, 'lg')}</div>
             <div class="member-card-mid">
               <div class="member-card-name"><strong>${esc(bot.name)}</strong></div>
-              <div class="member-card-tags">${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}<span class="member-model">${esc(modelLine)}</span></div>
+              <div class="member-card-role">${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}</div>
+              <div class="member-card-model" title="${esc(modelLine)}">${esc(modelLine)}</div>
             </div>
             <div class="member-card-foot">
               <span class="member-card-status">${runDotHtml(dot)}<span>${esc(statusText)}</span></span>
