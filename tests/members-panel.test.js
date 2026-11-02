@@ -190,7 +190,7 @@ test('卡片信息布局：上头像、中名称+角色、下状态点与用量'
 // 名称 / 角色标签 / provider·model 小字三行式，模型不再收进 title 提示。
 test('卡片放大：max-width 320px、头像 56px、网格列宽同步放大', () => {
   assert.match(cardCss, /max-width:\s*320px/, '卡片最大宽度提到 320px')
-  assert.match(gridCss, /minmax\(260px, 1fr\)/, '网格列宽基准同步放大到 260px')
+  assert.match(gridCss, /minmax\(320px, 1fr\)/, '网格列宽基准同步放大到 320px')
   const avatarCss = /\.member-card-top \.avatar\.lg \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
   assert.match(avatarCss, /width:\s*56px/, '头像 56px')
   assert.match(avatarCss, /height:\s*56px/, '头像 56px')
