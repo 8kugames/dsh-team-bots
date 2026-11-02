@@ -183,6 +183,23 @@
   }
   const clamp = (value, max, fallback = '') => String(value ?? fallback).slice(0, max)
   const botById = (id) => state.data?.bots.find(bot => bot.id === id)
+  // 审批人/决定人标识形如 `bot:<id>`、`user:<id>`：bot 显示「名称·角色标签」，user 显示本地用户名；
+  // bot 已删除时回退短 id（对齐 team_recall 的 m_短id 口径，只取末 6 位），不暴露完整原始 id。
+  const shortRefId = (id) => String(id ?? '').slice(-6)
+  function actorLabel(raw) {
+    const value = String(raw ?? '').trim()
+    if (!value) return ''
+    const sep = value.indexOf(':')
+    const type = sep >= 0 ? value.slice(0, sep) : ''
+    const id = sep >= 0 ? value.slice(sep + 1) : value
+    if (type === 'user' || (!type && (id === 'user' || id === 'owner'))) return state.data?.me?.name || '用户'
+    if (type === 'bot' || (!type && id.startsWith('bot_'))) {
+      const bot = botById(id)
+      if (bot) return `${bot.name}·${bot.role || '成员'}`
+      return `已删除 Bot · ${shortRefId(id)}`
+    }
+    return value
+  }
   const taskById = (id) => state.data?.tasks.find(task => task.id === id)
   const activeProject = () => state.data?.project
   // 1V1 单聊上下文（对话/配置/技能/记忆/进化/用量）不携带任何项目，页面呈现团队全局口径。
@@ -1754,7 +1771,7 @@
                 <div class="list-desc">${esc(memory.content)}</div>
                 <div class="list-meta" style="justify-content:space-between">
                   <span>${esc(memorySource(memory.source))}</span>
-                  <span>${esc(timeAgo(memory.updated_at))} · 置信度 ${Number(memory.confidence ?? 0).toFixed(2)}${memory.approved_by ? ` · 审批人 ${esc(memory.approved_by)}` : ''}</span>
+                  <span>${esc(timeAgo(memory.updated_at))} · 置信度 ${Number(memory.confidence ?? 0).toFixed(2)}${memory.approved_by ? ` · 审批人 ${esc(actorLabel(memory.approved_by))}` : ''}</span>
                 </div>
               </div>
             </div>
@@ -1880,7 +1897,7 @@
             </div>
             ${proposal.kind === 'workflow' ? '<div class="note">工作流提案尚未支持执行。</div>' : ''}
             <div class="proposal-body" style="margin-top:0">${esc(proposalPreview(proposal).slice(0, 6000))}</div>
-            <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>由 ${esc(proposal.decided_by)} 决定</span>` : ''}${proposal.approvedBy ? `<span>审批人 ${esc(proposal.approvedBy)}</span>` : ''}${proposal.appliedAt ? `<span>已生效 ${esc(formatTime(proposal.appliedAt))}</span>` : ''}${proposal.canary ? `<span>灰度 ${esc(canaryText(proposal.canary))}</span>` : ''}</div>
+            <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>由 ${esc(actorLabel(proposal.decided_by))} 决定</span>` : ''}${proposal.approvedBy ? `<span>审批人 ${esc(actorLabel(proposal.approvedBy))}</span>` : ''}${proposal.appliedAt ? `<span>已生效 ${esc(formatTime(proposal.appliedAt))}</span>` : ''}${proposal.canary ? `<span>灰度 ${esc(canaryText(proposal.canary))}</span>` : ''}</div>
             ${proposal.evaluation ? `<div class="list-desc">评估 · ${esc(evaluationText(proposal.evaluation))}</div>` : ''}
             ${proposal.status === 'pending' ? `<details class="proposal-diff"${panelAttrs(state, `proposal:${proposal.id}`)}>
               <summary class="btn small">${icon('chevron', 'chev')}查看差异</summary>
