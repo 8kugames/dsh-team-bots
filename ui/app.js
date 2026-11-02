@@ -72,6 +72,8 @@
   }
   // 聊天历史分片大小：与后端 messagesPage 的默认/上限一致（state 轮询同口径）。
   const CHAT_PAGE_SIZE = 200
+  // 群聊右栏「活跃任务」列表显示上限：标题右侧计数仍显示项目在办任务总数，超出部分用「还有 N 条」提示。
+  const CHAT_ACTIVE_TASK_LIMIT = 9
   const SKILL_STATUS = { active: '启用中', missing: '已失效' }
   const MEMORY_STATUS = { active: '已生效', pending: '待审', frozen: '已冻结', rejected: '已拒绝', archived: '已归档' }
   const PROPOSAL_KIND = { bot_update: 'Bot 更新', skill: '技能更新', workflow: '流程更新' }
@@ -881,7 +883,8 @@
     // 总监也是 bot，状态点取同一成员表口径（bot 全局）。
     const ownerMember = members.find(m => m.id === project.owner_bot_id) ?? null
     const ownerDot = ownerMember ? memberRunDot(ownerMember) : null
-    const open = (state.data.tasks ?? []).filter(task => !['done', 'canceled'].includes(task.status)).slice(0, 5)
+    const openTasks = (state.data.tasks ?? []).filter(task => !['done', 'canceled'].includes(task.status))
+    const open = openTasks.slice(0, CHAT_ACTIVE_TASK_LIMIT)
     return `
       <div class="chat-layout">
         <div class="card chat-panel">
@@ -925,6 +928,10 @@
           </div>
         </div>
         <aside class="chat-side">
+          <div class="side-card">
+            <div class="side-card-head"><h3>工作区</h3></div>
+            <div class="path-row">${pathCode(project.workspace_path)}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+          </div>
           <div class="side-card">
             <div class="side-card-head"><h3>项目总监</h3></div>
             ${owner ? `<div class="side-row owner-row">
@@ -970,11 +977,7 @@
                   ${bot ? avatar(bot, 'sm') : ''}
                 </div>`
               }).join('')}
-            </div>`}
-          </div>
-          <div class="side-card">
-            <div class="side-card-head"><h3>工作区</h3></div>
-            <div class="path-row">${pathCode(project.workspace_path)}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+            </div>${openTasks.length > CHAT_ACTIVE_TASK_LIMIT ? `<div class="faint">还有 ${openTasks.length - CHAT_ACTIVE_TASK_LIMIT} 条</div>` : ''}`}
           </div>
         </aside>
       </div>`
