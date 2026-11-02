@@ -105,8 +105,9 @@ export const tasksMethods = {
   },
   taskView(task) {
     const labels = this.store.all('SELECT label FROM task_labels WHERE task_id = ? ORDER BY label', task.id).map(row => row.label)
+    // error_code='SUPERSEDED' 是管理清理冗余运行的标记，不是真实执行历史；latestRun 与 runs 历史同口径排除。
     const runs = this.store.all(
-      'SELECT id, status, attempt, started_at, ended_at, error_code, error_message FROM runs WHERE task_id = ? ORDER BY queued_at DESC LIMIT 10',
+      "SELECT id, status, attempt, started_at, ended_at, error_code, error_message FROM runs WHERE task_id = ? AND COALESCE(error_code, '') <> 'SUPERSEDED' ORDER BY queued_at DESC LIMIT 10",
       task.id,
     )
     const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
@@ -442,7 +443,7 @@ export const tasksMethods = {
     const project = this.projectRow(task.project_id)
     const comments = this.store.all('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at', taskId)
     const events = this.store.all('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at', taskId)
-    const runs = this.store.all('SELECT * FROM runs WHERE task_id = ? ORDER BY queued_at DESC', taskId)
+    const runs = this.store.all("SELECT * FROM runs WHERE task_id = ? AND COALESCE(error_code, '') <> 'SUPERSEDED' ORDER BY queued_at DESC", taskId)
     const dependencies = this.store.all(
       'SELECT t.id, t.number, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id WHERE d.task_id = ?',
       taskId,
