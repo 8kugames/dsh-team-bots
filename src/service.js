@@ -18,8 +18,10 @@ import {
   sha256, slugify, TASK_ID_PATTERN, text, sanitizeFilename, writeIfChanged,
 } from './util.js'
 import { parseWriteScopes, readWriteScopes, writeScopesOverlap } from './services/write-scopes.js'
+import { normalizeFilePolicy } from './services/file-policy.js'
 
 export { WRITE_SCOPE_MAX, WRITE_SCOPE_MAX_LEN, parseWriteScopes, readWriteScopes, writeScopePathsOverlap, writeScopesOverlap } from './services/write-scopes.js'
+export { FILE_POLICIES, FILE_POLICY_LABELS } from './services/file-policy.js'
 const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 const TASK_PRIORITIES = new Set(['urgent', 'high', 'medium', 'low', 'none'])
 const TRANSITIONS = {
@@ -32,19 +34,6 @@ const TRANSITIONS = {
   canceled: new Set(['todo']),
 }
 const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
-
-// bot 文件权限档位，与 DSH 宿主 SANDBOX_MODES 一一对应；默认工作区内修改。
-export const FILE_POLICIES = ['read-only', 'workspace-write', 'danger-full-access']
-export const FILE_POLICY_LABELS = {
-  'read-only': '只读',
-  'workspace-write': '工作区内修改',
-  'danger-full-access': '完全访问',
-}
-function normalizeFilePolicy(value) {
-  if (value === undefined || value === null || value === '') return 'workspace-write'
-  if (!FILE_POLICIES.includes(value)) throw badRequest(`文件权限无效，允许值：${FILE_POLICIES.join(' / ')}`)
-  return value
-}
 
 // 工作台「终端」的硬限制：命令长度、输出封顶（只留末尾）、每项目历史条数。
 // 硬超时走 config.terminalTimeoutMs（默认 120s，测试可注入短值）。
@@ -4145,4 +4134,6 @@ if (run.kind === 'dm_reply') {
     }
   }
 }
+
+
 
