@@ -1132,9 +1132,35 @@
     </details>`
   }
 
+  // task-sort:start —— 任务面板排序的纯逻辑（tests/task-sort.test.js 按本标记块抽取断言）。
+  // 权重表把优先级文案映射成「越小越靠前」：紧急(0) → 高(1) → 中(2) → 低(3) → 无(4)。
+  // 未知或缺失的优先级按 medium（中）处理，旧数据没有 priority 时同样落在中档。
+  const TASK_PRIORITY_WEIGHT = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 }
+  const TASK_PRIORITY_DEFAULT = 'medium'
+  // 归一化优先级取值：表内值原样返回（大小写不敏感），表外值与缺失一律落到默认档 medium。
+  function taskPriorityKey(priority) {
+    const key = String(priority ?? '').trim().toLowerCase()
+    return Object.prototype.hasOwnProperty.call(TASK_PRIORITY_WEIGHT, key) ? key : TASK_PRIORITY_DEFAULT
+  }
+  function taskPriorityWeight(priority) {
+    return TASK_PRIORITY_WEIGHT[taskPriorityKey(priority)]
+  }
+  // 同优先级按 position（看板列内手动顺序）回退，再按 number（任务编号）回退，保证结果稳定。
+  function compareTasksByPriority(a, b) {
+    const byPriority = taskPriorityWeight(a?.priority) - taskPriorityWeight(b?.priority)
+    if (byPriority !== 0) return byPriority
+    const byPosition = (Number(a?.position) || 0) - (Number(b?.position) || 0)
+    if (byPosition !== 0) return byPosition
+    return (Number(a?.number) || 0) - (Number(b?.number) || 0)
+  }
+  function sortTasksByPriority(tasks) {
+    return [...(tasks ?? [])].sort(compareTasksByPriority)
+  }
+  // task-sort:end
+
   function filteredTasks() {
     const filter = state.taskFilter
-    return (state.data?.tasks ?? []).filter(task => {
+    return sortTasksByPriority((state.data?.tasks ?? []).filter(task => {
       if (filter.status !== 'all' && task.status !== filter.status) return false
       if (filter.assignee !== 'all' && task.assignee_bot_id !== filter.assignee) return false
       if (filter.search) {
@@ -1142,7 +1168,7 @@
         if (!haystack.includes(filter.search.toLowerCase())) return false
       }
       return true
-    })
+    }))
   }
 
   function renderTasks() {
@@ -1201,7 +1227,7 @@
     return `<article class="task-card${isRunning ? ' running' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
       <div class="task-card-top">
         <span class="task-id">${esc(task.identifier)}</span>
-        <span class="task-priority">${esc(PRIORITY[task.priority] ?? task.priority)}</span>
+        <span class="task-priority">${esc(PRIORITY[taskPriorityKey(task.priority)])}</span>
       </div>
       <div class="task-card-title">${esc(task.title)}</div>
       ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
