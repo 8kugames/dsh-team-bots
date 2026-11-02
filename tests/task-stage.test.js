@@ -79,7 +79,9 @@ test('taskStageLabel 按 stage/action 组合键查表，未知组合返回 null'
 })
 
 test('taskView 接线：视图下发结构化 stage 与查表后的 stageLabel', () => {
-  assert.match(tasksSource, /const stage = taskStage\(task, runs\[0\] \?\? null, null\)/)
+  // DSHBOTS-43：结构化提问数据源已落地，attention 取最近运行的 attention_json 传入推导。
+  assert.match(tasksSource, /const attention = runs\[0\] \? parseAttention\(runs\[0\]\.attention_json\) : null/)
+  assert.match(tasksSource, /const stage = taskStage\(task, runs\[0\] \?\? null, attention\)/)
   assert.match(tasksSource, /stageLabel: taskStageLabel\(stage\)/)
 })
 

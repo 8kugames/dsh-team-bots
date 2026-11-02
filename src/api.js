@@ -8,7 +8,7 @@ const ACTIONS = new Set([
   'mark_chat_read',
   'add_member', 'remove_member',
   'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
-  'retry_run', 'cancel_run', 'run_trajectory',
+  'retry_run', 'cancel_run', 'run_trajectory', 'answer_attention',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
   'approval_decide',
@@ -92,6 +92,8 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.cancelRun(required(payload.runId, 'runId'), actor)
     case 'run_trajectory':
       return service.runTrajectory(required(payload.runId, 'runId'))
+    case 'answer_attention':
+      return service.answerAttention(required(payload.runId, 'runId'), required(payload.answer, 'answer'), actor)
     // 终端的安全口径与 Bot 相同：命令以当前用户执行、权限与服务进程一致；
     // HTTP 入口由宿主的 owner 路由鉴权兜底，此处不重复校验。
     case 'run_command':

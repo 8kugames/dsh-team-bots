@@ -14,6 +14,7 @@ import { id, jsonParse, nowIso, text } from '../util.js'
 import { readWriteScopes } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
 import { isRateLimitError, MAX_RATE_LIMIT_RETRIES, needsSynthesizedBackoff, rateLimitBackoffMs } from './backoff.js'
+import { ensureAttentionSchema, normalizeAttention, parseAttention } from './attention-schema.js'
 
 
 
@@ -402,9 +403,10 @@ if (run.kind === 'dm_reply') {
     })
     this.logger.warn?.('dsh-team: read-only run %s changed the workspace', run.id)
   },
-  async finishRun({ runId, status, output, error }) {
+  async finishRun({ runId, status, output, error, attention }) {
     const run = this.runRow(runId)
     if (!['running', 'queued'].includes(run.status)) return
+    ensureAttentionSchema(this.store)
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
     const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
     this.auditReadRunWrites(run, project)
@@ -438,6 +440,14 @@ if (run.kind === 'dm_reply') {
         'rate_limit_backoff',
         `上游限流（${error?.code}）未返回 Retry-After，第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`,
       )
+    }
+    // 结构化提问（attention）：只在 bot 显式给出时落库，规范超长/超量后写入；
+    // 不从 output 自由文本做任何推断（正则猜问号被明确禁止）。
+    const attentionJson = JSON.stringify(normalizeAttention(attention) ?? null) === 'null'
+      ? null
+      : JSON.stringify(normalizeAttention(attention))
+    if (attentionJson) {
+      this.store.run('UPDATE runs SET attention_json = ? WHERE id = ?', attentionJson, runId)
     }
     const refreshed = this.runRow(runId)
     if (run.kind === 'dm') {
@@ -673,12 +683,13 @@ if (run.kind === 'dm_reply') {
     const bot = this.store.get('SELECT name, provider, model, fallback_provider, fallback_model FROM bots WHERE id = ?', run.bot_id)
     const task = run.task_id ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', run.task_id) : undefined
     const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
-    const { write_scopes: rawScopes, ...rest } = run
+    const { write_scopes: rawScopes, attention_json: attentionJson, ...rest } = run
     const fallbackRef = bot?.fallback_provider && bot?.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null
     const usedRef = run.model_provider && run.model_model ? `${run.model_provider}/${run.model_model}` : null
     return {
       ...rest,
       artifacts: jsonParse(run.artifacts, []),
+      attention: parseAttention(attentionJson),
       botName: bot?.name ?? 'Bot',
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,
@@ -693,6 +704,62 @@ if (run.kind === 'dm_reply') {
         degraded: Boolean(fallbackRef) && !usedRef && isProviderUnavailableCode(run.error_code),
       },
     }
+  },
+
+  // 回答结构化提问（DSHBOTS-43）：仅负责人（owner）可调。
+  // 回答作为一条 @该 bot 的群聊消息投回原会话（复用既有 chat 投递通道，触发 chat_run），
+  // 单聊运行走 solo 通道；同时清空 attention_json 并记 run_events 'attention_answered'。
+  async answerAttention(runId, answer, actor = this.actor()) {
+    if (actor?.type !== 'user') throw forbidden('只有项目负责人可以回答结构化提问')
+    const cleanAnswer = text(answer, 20_000)
+    if (!cleanAnswer) throw badRequest('回答不能为空')
+    ensureAttentionSchema(this.store)
+    const run = this.runRow(runId)
+    const attention = parseAttention(run.attention_json)
+    if (!attention) throw conflict('该运行没有待回答的结构化提问')
+    const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
+    if (!bot) throw notFound('运行的 Bot 已不存在')
+    if (run.project_id) {
+      const messageId = this.insertMessage({
+        projectId: run.project_id,
+        senderType: 'user',
+        senderId: actor?.id ?? this.localUserId,
+        body: `回复提问「${attention.question}」：${cleanAnswer}`,
+        mentions: [bot.id],
+        runId,
+      })
+      if (messageId) {
+        this.enqueueOutbox({
+          kind: 'chat_run',
+          payload: { projectId: run.project_id, botId: bot.id, messageId },
+          projectId: run.project_id,
+          sourceId: messageId,
+          idempotencyKey: `chat:${messageId}:${bot.id}`,
+        })
+      }
+    } else {
+      const messageId = this.insertSoloMessage({
+        botId: bot.id,
+        senderType: 'user',
+        senderId: actor?.id ?? this.localUserId,
+        body: `回复提问「${attention.question}」：${cleanAnswer}`,
+        runId,
+      })
+      if (messageId) {
+        this.enqueueOutbox({
+          kind: 'solo_chat_run',
+          payload: { botId: bot.id, messageId },
+          projectId: null,
+          sourceId: messageId,
+          idempotencyKey: `solo:${messageId}`,
+        })
+      }
+    }
+    this.store.run('UPDATE runs SET attention_json = NULL WHERE id = ?', runId)
+    this.insertRunEvent(runId, 'attention_answered', `负责人已回答提问：${attention.question}`)
+    this.audit(actor, 'attention.answer', 'run', runId, { question: attention.question })
+    void this.tick()
+    return this.runView(this.runRow(runId))
   },
 
   // 产物清单视图：HTTP 端点与运行详情面板共用。
