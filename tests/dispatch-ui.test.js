@@ -51,9 +51,10 @@ test('⑤ 运行行复用 run-clock 与 duration，且调度视图不新增定�
   assert.match(source, /setInterval\(\(\) => \{ void poll\(\) \}, 2800\)/, '仍沿用既有 2.8s 轮询')
 })
 
-test('⑥ 子智能体只做空态占位，不造假数据', () => {
-  assert.match(source, /子智能体能力待接入（依赖 DSHBOTS-27）。/, '子智能体卡应给出明确的待接入文案与依赖号')
-  const card = /<h3>子智能体<\/h3><\/div>\s*<div class="faint">子智能体能力待接入（依赖 DSHBOTS-27）。<\/div>/.exec(source)
-  assert.ok(card, '子智能体卡应是纯占位：标题 + 一行说明，没有列表')
-  assert.doesNotMatch(source, /subagent/i, '不得出现编造的子智能体数据字段')
+test('⑥ 子智能体卡如实描述内置能力，不造假数据', () => {
+  assert.match(source, /bot 会话已内置 subagent \/ subagent_fork \/ workflow 工具/, '子智能体卡应如实描述已内置的子智能体工具')
+  const card = /<h3>子智能体<\/h3><\/div>\s*<div class="faint">bot 会话已内置 subagent \/ subagent_fork \/ workflow 工具[^<]*<\/div>/.exec(source)
+  assert.ok(card, '子智能体卡应保持标题 + 一行说明的结构，没有列表')
+  assert.doesNotMatch(source, /待接入/, '不得再出现「待接入」占位文案')
+  assert.doesNotMatch(source, /依赖 DSHBOTS-27/, '不得再出现依赖号占位文案')
 })

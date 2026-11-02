@@ -1152,7 +1152,7 @@
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>子智能体</h3></div>
-            <div class="faint">子智能体能力待接入（依赖 DSHBOTS-27）。</div>
+            <div class="faint">bot 会话已内置 subagent / subagent_fork / workflow 工具，可在执行中自行派生子智能体并行加速；无需工作台额外编排。</div>
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>最近调度运行</h3><span>${runs.length}</span></div>

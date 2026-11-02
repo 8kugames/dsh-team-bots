@@ -95,6 +95,7 @@ export const promptMethods = {
           '- Use `team_message_bot` for a quick direct question or coordination with one project bot; the reply arrives in your own session as a later message. It does not create a task and is not visible in the group.',
           '- Tasks you dispatch are reviewed by you: when a delivery arrives, `team_review_task` accepts it or returns it with a rework reason.',
           '- Use `team_remember` for durable facts, preferences, decisions or lessons worth keeping. Never store secrets or credentials.',
+          '- When a task can be split, use `subagent` / `subagent_fork` to spawn child agents for parallel acceleration. Child-agent file writes are not governed by tasks.write_scopes dispatch gates (they inherit the parent session sandbox); before dispatching, check for write-scope conflicts with other members, and review child-agent output yourself before delivering it.',
           '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
           '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
         ]
