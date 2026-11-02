@@ -7,3 +7,4 @@ workspace
 .DS_Store
 .env
 docs/
+package-lock.json
