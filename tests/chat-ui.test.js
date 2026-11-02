@@ -142,7 +142,7 @@ test('成员两行式：member-info 结构存在，模型行有可读兜底', ()
   assert.match(source, /ownerDot \? runDotHtml\(ownerDot\) : ''/, '项目总监同样带状态点')
   assert.match(css, /\.run-dot\.idle \{[\s\S]*?background: var\(--green\)/, '空闲绿点')
   assert.match(css, /\.run-dot\.running \{[\s\S]*?background: var\(--star\)[\s\S]*?animation: pulse/, '运行中黄点加 pulse 闪烁（配色对齐 .column-dot.in_progress）')
-  assert.match(css, /\.run-dot\.plan-wait \{[\s\S]*?background: var\(--danger\)/, '限流等待归入红（红黄绿三色）')
+  assert.match(css, /\.run-dot\.plan-wait \{[\s\S]*?background: var\(--c-violet\)/, '限流等待紫点（可自愈等待态，区别于失败红）')
   const idleDotCss = /\.run-dot\.idle \{[\s\S]*?\n\}/.exec(css)?.[0] ?? ''
   assert.ok(!idleDotCss.includes('animation'), '空闲/排队点不闪烁')
   const failedDotCss = /\.run-dot\.failed \{[\s\S]*?\n\}/.exec(css)?.[0] ?? ''

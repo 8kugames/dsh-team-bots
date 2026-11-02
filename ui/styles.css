@@ -2364,7 +2364,7 @@ a.global-config.dsh-official-link:hover {
     background: var(--danger);
 }
 .run-dot.plan-wait {
-    background: var(--danger);
+    background: var(--c-violet);
 }
 .run-dot.succeeded {
     background: var(--green);
