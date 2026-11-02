@@ -45,11 +45,11 @@ async function setup() {
   service.attachRuntime(new ManualRuntime())
   await service.initialize()
   service.started = false
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const builder = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  const project = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: chief.id, memberIds: [builder.id] })
+  const project = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [builder.id] })
   const task = await service.createTask(
     { projectId: project.id, title: '做登录页', description: 'x', assigneeBotId: builder.id },
     { type: 'user', id: 'u' },
@@ -60,7 +60,7 @@ async function setup() {
      VALUES (?, ?, ?, 'task', ?, ?)`,
     originSession, builder.id, project.id, task.id, nowIso(),
   )
-  return { root, store, service, config, workspace, dataDir, chief, builder, project, task, originSession }
+  return { root, store, service, config, workspace, dataDir, director, builder, project, task, originSession }
 }
 
 async function closeQuietly(store) {
@@ -161,7 +161,7 @@ test('Bot 私信落库前掩码密钥值', async () => {
     await service.upsertSecret({ scope: 'team', name: 'github token', purpose: 'CI', value: 'ghp_abcdefghijklmnop' })
     service.messageFromBot({
       sessionId: originSession,
-      toName: 'chief',
+      toName: 'director',
       requestId: 'ask-secret',
       textBody: '我的 token 是 ghp_abcdefghijklmnop 帮我看看',
     })
@@ -174,13 +174,13 @@ test('Bot 私信落库前掩码密钥值', async () => {
 })
 
 test('私信卡住时维护流程把它补进出站队列', async () => {
-  const { root, store, service, project, builder, chief } = await setup()
+  const { root, store, service, project, builder, director } = await setup()
   try {
     store.run(
       `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id,
         origin_kind, origin_task_id, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      'msg-stuck-1', project.id, builder.id, chief.id, 'stuck-1', '在吗', 'sess-x', 'task', null,
+      'msg-stuck-1', project.id, builder.id, director.id, 'stuck-1', '在吗', 'sess-x', 'task', null,
       new Date(Date.now() - 10 * 60_000).toISOString(),
     )
     assert.equal(store.get('SELECT COUNT(*) AS n FROM outbox').n, 0)
@@ -231,13 +231,13 @@ test('单聊目录名冲突时既唯一又不超长', async () => {
 })
 
 test('同一条私信只排一次回信运行', async () => {
-  const { root, store, service, project, builder, chief } = await setup()
+  const { root, store, service, project, builder, director } = await setup()
   try {
     store.run(
       `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id,
         origin_kind, origin_task_id, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'replied', ?)`,
-      'msg-dm-1', project.id, chief.id, builder.id, 'dm-1', '问题', 'sess-x', 'task', null, nowIso(),
+      'msg-dm-1', project.id, director.id, builder.id, 'dm-1', '问题', 'sess-x', 'task', null, nowIso(),
     )
     const message = store.get('SELECT * FROM bot_messages WHERE id = ?', 'msg-dm-1')
     const first = service.deliverBotReply(message)

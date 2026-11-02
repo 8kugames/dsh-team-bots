@@ -106,12 +106,12 @@ async function setup() {
   return { root, workspace, dataDir, config, store, service, runtime }
 }
 
-test('boot seeds owner chief, default companions and shared skills', async () => {
+test('boot seeds owner director, default companions and shared skills', async () => {
   const { store, service, root } = await setup()
   try {
     const bots = store.all('SELECT * FROM bots ORDER BY created_at')
     assert.equal(bots.length, 6)
-    assert.equal(bots[0].name, 'chief')
+    assert.equal(bots[0].name, 'director')
     assert.equal(bots[0].provider, 'fake')
     for (const name of ['designer', 'programmer', 'graphics', 'devops', 'artist']) {
       assert.ok(bots.some(bot => bot.name === name), `missing seed bot ${name}`)
@@ -129,12 +129,12 @@ test('boot seeds owner chief, default companions and shared skills', async () =>
 test('project, group task assignment and completion form a closed loop', async () => {
   const { root, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const dev = await service.createBot({
       name: 'Builder', role: '开发', instructions: 'Build things.', provider: 'fake', model: 'model-a', effort: 'high',
     })
     const project = await service.createProject({
-      name: 'Demo Project', key: 'DEMO', ownerBotId: chief.id, memberIds: [dev.id],
+      name: 'Demo Project', key: 'DEMO', ownerBotId: director.id, memberIds: [dev.id],
     })
     assert.equal(project.members.length, 2)
     const first = await service.sendMessage(project.id, '/task @Builder Build the demo page')
@@ -164,11 +164,11 @@ test('project, group task assignment and completion form a closed loop', async (
 test('plain mention runs a chat reply while an empty mention goes to owner', async () => {
   const { root, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const project = await service.createProject({ name: 'Chat Project', key: 'CHAT', ownerBotId: chief.id })
-    await service.sendMessage(project.id, '你好，负责人')
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Chat Project', key: 'CHAT', ownerBotId: director.id })
+    await service.sendMessage(project.id, '你好，总监')
     await waitFor(() => service.store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 1)
-    await service.sendMessage(project.id, ' @chief 请回复')
+    await service.sendMessage(project.id, ' @director 请回复')
     await waitFor(() => service.store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 2)
     const botMessages = service.store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)
     assert.equal(botMessages.length, 2)
@@ -205,18 +205,18 @@ test('API exposes state and rejects unknown actions', async () => {
 async function ownerSetup(projectKey) {
   const env = await setup()
   const { store, service } = env
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build things.', provider: 'fake', model: 'model-a', effort: 'high',
   })
   const project = await service.createProject({
-    name: `${projectKey} Project`, key: projectKey, ownerBotId: chief.id, memberIds: [dev.id],
+    name: `${projectKey} Project`, key: projectKey, ownerBotId: director.id, memberIds: [dev.id],
   })
   store.run(
     'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, created_at) VALUES (?, ?, ?, ?, ?)',
-    `sess-${projectKey}`, chief.id, project.id, 'project', new Date().toISOString(),
+    `sess-${projectKey}`, director.id, project.id, 'project', new Date().toISOString(),
   )
-  return { ...env, chief, dev, project, sessionId: `sess-${projectKey}` }
+  return { ...env, director, dev, project, sessionId: `sess-${projectKey}` }
 }
 
 test('owner-dispatched delivery routes review to the owner bot, not the user', async () => {
@@ -229,20 +229,20 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status === 'in_review')
     await waitFor(() => store.get(
       "SELECT status FROM runs WHERE task_id = ? AND kind = 'review' AND bot_id = ?",
-      task.id, store.get("SELECT id FROM bots WHERE name = 'chief'").id,
+      task.id, store.get("SELECT id FROM bots WHERE name = 'director'").id,
     )?.status === 'succeeded')
     // 验收运行不翻转任务状态，也不产生新的执行运行
     assert.equal(store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status, 'in_review')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND kind = 'task'", task.id)?.n, 1)
-    // 红点只计用户待验收；负责人待验收单独计数
+    // 红点只计用户待验收；总监待验收单独计数
     const state = await service.state(project.id)
     assert.equal(state.project.stats.inReview, 0)
     assert.equal(state.project.stats.ownerReview, 1)
     assert.equal(state.projects.find(item => item.id === project.id).reviewTasks, 0)
     assert.equal(state.projects.find(item => item.id === project.id).ownerReviewTasks, 1)
     assert.ok(store.all('SELECT body FROM messages WHERE project_id = ?', project.id)
-      .some(message => message.body.includes('等待负责人验收')))
-    // 负责人验收通过 → done
+      .some(message => message.body.includes('等待总监验收')))
+    // 总监验收通过 → done
     const done = await service.reviewFromBot(sessionId, { task: 'OWN-1', decision: 'accept' })
     assert.equal(done.status, 'done')
     const after = await service.state(project.id)
@@ -285,14 +285,14 @@ test('blocked task goes to the owner bot and re-dispatch restarts it as owner-di
     runtime.failNextTaskRun = true
     const first = await service.sendMessage(project.id, '/task @Builder Build the demo page')
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status === 'blocked')
-    // 受阻自动转负责人处理；处理运行不翻转任务状态，也不会自动重跑
+    // 受阻自动转总监处理；处理运行不翻转任务状态，也不会自动重跑
     await waitFor(() => store.get(
       "SELECT status FROM runs WHERE task_id = ? AND kind = 'handle' AND bot_id = ?",
-      first.taskId, store.get("SELECT id FROM bots WHERE name = 'chief'").id,
+      first.taskId, store.get("SELECT id FROM bots WHERE name = 'director'").id,
     )?.status === 'succeeded')
     assert.equal(store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status, 'blocked')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND kind = 'task'", first.taskId)?.n, 1)
-    // 负责人重派同一任务 → 重新执行并按派单人转负责人验收
+    // 总监重派同一任务 → 重新执行并按派单人转总监验收
     const updated = await service.assignFromBot(sessionId, { assignee: 'Builder', task: 'BLK-1' })
     assert.equal(updated.review_target, 'owner_bot')
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status === 'in_review')
@@ -332,17 +332,17 @@ test('workspace default resolves to ~/.dsh/workspace/team-bots unless configured
 test('项目生产目录：可选绝对路径，默认与管理目录一致，可更新可清空', async () => {
   const { root, workspace, store, service } = await setup()
   try {
-    const chief = store.get("SELECT id FROM bots WHERE name = 'chief'").id
+    const director = store.get("SELECT id FROM bots WHERE name = 'director'").id
     const prod = join(root, 'prod-repo')
-    const project = await service.createProject({ name: 'External', key: 'EXT', ownerBotId: chief, productionDir: prod })
+    const project = await service.createProject({ name: 'External', key: 'EXT', ownerBotId: director, productionDir: prod })
     // macOS 上 /var 是 /private/var 的符号链接，服务端会 realpath 后落库
     assert.equal(project.workspace_path, await realpath(prod))
     assert.equal(project.data_path, join(workspace, 'ext'))
     await assert.rejects(
-      () => service.createProject({ name: 'Bad', key: 'BAD', ownerBotId: chief, productionDir: 'relative/dir' }),
+      () => service.createProject({ name: 'Bad', key: 'BAD', ownerBotId: director, productionDir: 'relative/dir' }),
       /绝对路径/,
     )
-    const plain = await service.createProject({ name: 'Plain', key: 'PLN', ownerBotId: chief })
+    const plain = await service.createProject({ name: 'Plain', key: 'PLN', ownerBotId: director })
     assert.equal(plain.workspace_path, join(workspace, 'pln'))
     assert.equal(plain.data_path, join(workspace, 'pln'))
     const updated = await service.updateProject(project.id, { productionDir: join(root, 'prod-2') })
@@ -387,7 +387,7 @@ test('skill proposal approval publishes into shared skill pool', async () => {
   const { root, workspace, store, service } = await setup()
   try {
     const actor = { type: 'user', id: service.localUserId }
-    const project = await service.createProject({ name: 'Skills', key: 'SKL', ownerBotId: store.get("SELECT id FROM bots WHERE name = 'chief'").id })
+    const project = await service.createProject({ name: 'Skills', key: 'SKL', ownerBotId: store.get("SELECT id FROM bots WHERE name = 'director'").id })
     const proposal = await service.createProposal({
       kind: 'skill', projectId: project.id, title: 'Add deploy skill', rationale: 'Repeated deploy work',
       payload: { slug: 'deploy-check', name: 'Deploy check', description: 'Check deployment', version: '1.0.0', content: '# Deploy check\n\nRun smoke tests.' },
@@ -409,8 +409,8 @@ test('skill proposal approval publishes into shared skill pool', async () => {
 test('/clear empties group chat history without touching tasks or memories', async () => {
   const { root, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const project = await service.createProject({ name: 'Clear', key: 'CLR', ownerBotId: chief.id })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Clear', key: 'CLR', ownerBotId: director.id })
     await service.sendMessage(project.id, '/remember 先写测试再上线', { type: 'user', id: 'u1' })
     await service.sendMessage(project.id, '你好，请看一下这个问题', { type: 'user', id: 'u1' })
     await waitFor(() => store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued','running')")?.n === 0)

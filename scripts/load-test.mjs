@@ -130,7 +130,7 @@ async function main() {
   service.attachRuntime(runtime)
   await service.initialize()
 
-  const chief = store.get("SELECT * FROM bots WHERE name = ?", config.seedOwnerName)
+  const director = store.get("SELECT * FROM bots WHERE name = ?", config.seedOwnerName)
   const workers = []
   for (let index = 0; index < projectCount; index += 1) {
     workers.push(await service.createBot({
@@ -147,7 +147,7 @@ async function main() {
     projects.push(await service.createProject({
       name: `压测项目 ${index + 1}`,
       key: `LT${index + 1}`,
-      ownerBotId: chief.id,
+      ownerBotId: director.id,
       memberIds: [workers[index].id],
     }))
   }

@@ -78,14 +78,14 @@ async function setup() {
 async function replySetup() {
   const env = await setup()
   const { store, service } = env
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const builder = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build things.', provider: 'fake', model: 'model-a', effort: 'high',
   })
   const project = await service.createProject({
-    name: 'Reply Project', key: 'REPLY', ownerBotId: chief.id, memberIds: [builder.id],
+    name: 'Reply Project', key: 'REPLY', ownerBotId: director.id, memberIds: [builder.id],
   })
-  return { ...env, chief, builder, project }
+  return { ...env, director, builder, project }
 }
 
 test('replyTo 落库并出现在消息视图的 reply_to 字段', async () => {
@@ -118,8 +118,8 @@ test('replyTo 指向不存在或跨项目的消息时返回 400，命令路径�
     )
 
     // 跨项目：另一个项目的消息 id 同样拒绝。
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const other = await service.createProject({ name: 'Other', key: 'OTHER', ownerBotId: chief.id })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const other = await service.createProject({ name: 'Other', key: 'OTHER', ownerBotId: director.id })
     const otherMessageId = service.insertMessage({ projectId: other.id, senderType: 'bot', senderId: builder.id, body: '别的项目的消息' })
     await assert.rejects(
       () => service.sendMessage(project.id, '跨项目引用', actor, otherMessageId),
@@ -136,7 +136,7 @@ test('replyTo 指向不存在或跨项目的消息时返回 400，命令路径�
   }
 })
 
-test('无显式 @mention 回复 bot 消息时定向到该 bot 而非负责人', async () => {
+test('无显式 @mention 回复 bot 消息时定向到该 bot 而非总监', async () => {
   const { root, store, service, builder, project } = await replySetup()
   try {
     const botMessageId = service.insertMessage({ projectId: project.id, senderType: 'bot', senderId: builder.id, body: 'Bot 的上一轮回答' })
@@ -144,8 +144,8 @@ test('无显式 @mention 回复 bot 消息时定向到该 bot 而非负责人', 
     const result = await service.sendMessage(project.id, '这条再展开讲讲', actor, botMessageId)
     assert.deepEqual(result.runBots, [builder.id])
 
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    assert.notEqual(result.runBots[0], chief.id)
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    assert.notEqual(result.runBots[0], director.id)
 
     const row = store.get('SELECT * FROM messages WHERE id = ?', result.messageId)
     assert.equal(row.reply_to_id, botMessageId)
@@ -156,12 +156,12 @@ test('无显式 @mention 回复 bot 消息时定向到该 bot 而非负责人', 
 })
 
 test('显式 @mention 优先于引用定向，引用仍落库作上下文', async () => {
-  const { root, store, service, chief, builder, project } = await replySetup()
+  const { root, store, service, director, builder, project } = await replySetup()
   try {
     const botMessageId = service.insertMessage({ projectId: project.id, senderType: 'bot', senderId: builder.id, body: 'Bot 的上一轮回答' })
     const actor = { type: 'user', id: 'u1' }
-    const result = await service.sendMessage(project.id, '@chief 帮忙看看这个回答', actor, botMessageId)
-    assert.deepEqual(result.runBots, [chief.id])
+    const result = await service.sendMessage(project.id, '@director 帮忙看看这个回答', actor, botMessageId)
+    assert.deepEqual(result.runBots, [director.id])
 
     const row = store.get('SELECT * FROM messages WHERE id = ?', result.messageId)
     assert.equal(row.reply_to_id, botMessageId)

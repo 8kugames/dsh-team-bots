@@ -7,13 +7,13 @@ DSH Web + 团队 Bots 插件（包名 `dsh-team-bots`），本机随 DSH 运行�
 ## 功能
 
 - 每个 Bot 独立配置角色、模型、reasoning effort 和长期记忆。
-- 首次启动默认出场负责人「chief」与五个游戏团队伙伴：designer（策划）、programmer（程序）、graphics（图形渲染）、devops（工具链与运维）、artist（美术）（定义见 `src/seed-bots.js`）。
-- 每个项目自动创建群聊、负责人 Bot、任务编号和独立工作区。
+- 首次启动默认出场总监「director」与五个游戏团队伙伴：designer（策划）、programmer（程序）、graphics（图形渲染）、devops（工具链与运维）、artist（美术）（定义见 `src/seed-bots.js`）。
+- 每个项目自动创建群聊、总监 Bot、任务编号和独立工作区。
 - 群聊支持普通消息、`@Bot`、`/task @Bot 标题`、`/remember 内容` 和 `/clear`（清空本群聊天记录，任务与记忆保留）；输入 `/` 或 `@` 会弹出命令、共享技能与成员的自动补全。
 - 任务运行使用独立会话，长任务不会阻塞同一个 Bot 的群聊回复。
 - Linear 风格任务面板：状态、优先级、负责人、评论、运行记录、拖拽流转。
 - 任务详情面板显示交付产物清单：图片（png/jpg/gif/webp）内联预览、点击新窗口查看，其余文件按路径列出；产物在成功的写运行结束时由项目工作区 `git status` 采集（最多 200 条），SVG 一律以附件下载防脚本注入。
-- 负责人 Bot 可用 `team_assign_task` 向成员分派或重派任务，用 `team_review_task` 验收交付。
+- 总监 Bot 可用 `team_assign_task` 向成员分派或重派任务，用 `team_review_task` 验收交付。
 - Bot 可用 `team_remember` 写入记忆，用 `team_propose_evolution` 提交角色/技能提案。
 - Bot 之间可用 `team_message_bot` 直接私信协作，回信自动送回发起会话（忙时注入、闲时新轮投递）。
 - 每轮任务与群聊回复后自动进行记忆审查，值得留存的结论自动写入记忆（`memory_review` 关闭可停用；群聊审查用 `chat_memory_review` 单独关）。
@@ -101,15 +101,15 @@ npm run doctor
 
 ## 群聊和任务
 
-- 普通消息由项目负责人 Bot 响应。
-- `@Builder 看一下这个问题` 直接调用 Builder，不额外唤醒负责人。
+- 普通消息由项目总监 Bot 响应。
+- `@Builder 看一下这个问题` 直接调用 Builder，不额外唤醒总监。
 - `/task @Builder 实现登录页` 创建 `KEY-1` 任务并立即排队。
 - `/remember 发布必须先通过回归测试` 写入项目记忆。
 - `/clear` 清空本群聊天记录（发送前会弹确认；任务、记忆不受影响，操作进审计日志）。
 - 输入框补全：输入 `/` 列出命令与共享技能（全量展示、弹层内滚动），输入 `@` 列出项目成员；↑↓ 选择、Enter 或 Tab 插入，Esc 关闭。项目内已关闭的技能不会出现在补全里。
-- 任务完成后进入 `in_review`。用户派单的任务由用户验收；负责人 Bot 通过 `team_assign_task` 派单的任务自动转负责人 Bot 用 `team_review_task` 验收，验收不通过可退回重做。
-- 任务执行失败置 `blocked`，自动转负责人 Bot 处理：可用 `team_assign_task` 重派（含换人），需要用户决策时提请用户介入。
-- 负责人 Bot 通过 `team_assign_task` 分派，任务和运行都可在面板追踪。
+- 任务完成后进入 `in_review`。用户派单的任务由用户验收；总监 Bot 通过 `team_assign_task` 派单的任务自动转总监 Bot 用 `team_review_task` 验收，验收不通过可退回重做。
+- 任务执行失败置 `blocked`，自动转总监 Bot 处理：可用 `team_assign_task` 重派（含换人），需要用户决策时提请用户介入。
+- 总监 Bot 通过 `team_assign_task` 分派，任务和运行都可在面板追踪。
 - 任务运行期间在面板追加的评论会直投给正在执行的会话，Bot 在当轮按新信息调整；没有运行中的任务时，评论只落库并进入下一次运行的上下文。
 
 ## 单聊（项目外）
@@ -160,7 +160,7 @@ npm run doctor
 | `DSH_TEAM_STALL_TIMEOUT_MS` | 600000 | 运行多久没有新事件就判定卡住并回收      |
 | `DSH_TEAM_CHAT_MAX_CHARS`   | 800    | 群聊消息保留的结论长度                  |
 
-运行超时、超预算、卡住都会走同一条失败链路：运行标记失败、任务置 `blocked`、负责人 Bot 接手。
+运行超时、超预算、卡住都会走同一条失败链路：运行标记失败、任务置 `blocked`、总监 Bot 接手。
 
 ## 官方 Agent Teams 开关
 

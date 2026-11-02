@@ -55,12 +55,12 @@ async function manualSetup() {
   await service.initialize()
   // 关闭自动调度，由测试显式驱动 tick。
   service.started = false
-  // 种子负责人 Bot：名字可能被改名（Chief/Director），按 id 取第一条种子 Bot，避免耦合具体名字。
-  const chief = store.get("SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)")
+  // 种子总监 Bot：名字可能被改名（Chief/director），按 id 取第一条种子 Bot，避免耦合具体名字。
+  const director = store.get("SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)")
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  return { root, store, service, runtime, chief, dev }
+  return { root, store, service, runtime, director, dev }
 }
 
 function runningRuns(store) {
@@ -86,10 +86,10 @@ async function closeQuietly(store, timeout = 2000) {
 }
 
 test('同项目写运行串行，跨项目与只读运行可并行', async () => {
-  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
-    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: chief.id, memberIds: [dev.id] })
-    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: chief.id, memberIds: [dev.id] })
+    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
+    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id] })
     const first = await service.createTask({ projectId: alpha.id, title: 'A1', assigneeBotId: dev.id, autoStart: true })
     await service.createTask({ projectId: alpha.id, title: 'A2', assigneeBotId: dev.id, autoStart: true })
     await service.createTask({ projectId: beta.id, title: 'B1', assigneeBotId: dev.id, autoStart: true })
@@ -117,9 +117,9 @@ test('同项目写运行串行，跨项目与只读运行可并行', async () =>
 })
 
 test('同项目写运行：声明的写范围不重叠时并行放行', async () => {
-  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Scopes', key: 'SCP', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Scopes', key: 'SCP', ownerBotId: director.id, memberIds: [dev.id] })
     const first = await service.createTask({
       projectId: project.id, title: '改聊天模块', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
@@ -150,9 +150,9 @@ test('同项目写运行：声明的写范围不重叠时并行放行', async ()
 })
 
 test('同项目写运行：写范围重叠时仍然串行', async () => {
-  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Overlap', key: 'OVL', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Overlap', key: 'OVL', ownerBotId: director.id, memberIds: [dev.id] })
     await service.createTask({
       projectId: project.id, title: '改聊天模块', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
@@ -174,9 +174,9 @@ test('同项目写运行：写范围重叠时仍然串行', async () => {
 })
 
 test('同项目写运行：任一侧未声明写范围时保守串行', async () => {
-  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Undeclared', key: 'UND', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Undeclared', key: 'UND', ownerBotId: director.id, memberIds: [dev.id] })
     await service.createTask({
       projectId: project.id, title: '声明了范围', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
@@ -197,9 +197,9 @@ test('同项目写运行：任一侧未声明写范围时保守串行', async ()
 })
 
 test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
-  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id] })
     await service.createTask({ projectId: project.id, title: 'Long task', assigneeBotId: dev.id, autoStart: true })
     service.started = true
     await service.tick()
@@ -214,7 +214,7 @@ test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
     assert.ok(chatRun, '群聊回复应在任务运行期间被调度')
     assert.ok(taskRun, '任务运行不应被群聊回复打断')
     assert.equal(chatRun.bot_id, dev.id)
-    // 同一条会话上的运行仍然串行：负责人会话的群聊与验收不会并发。
+    // 同一条会话上的运行仍然串行：总监会话的群聊与验收不会并发。
     assert.equal(service.claimKey(chatRun), `bot:${dev.id}`)
     assert.equal(service.claimKey(taskRun), `task:${taskRun.task_id}`)
     await runtime.complete(chatRun.id)
@@ -226,9 +226,9 @@ test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
 })
 
 test('出队顺序按任务优先级，紧急任务不被积压拖死', async () => {
-  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Prio', key: 'PRI', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Prio', key: 'PRI', ownerBotId: director.id, memberIds: [dev.id] })
     // 同项目只有一个写运行槽位：先入队的低优先级任务不应挡住后入队的紧急任务。
     await service.createTask({ projectId: project.id, title: 'Backlog', priority: 'low', assigneeBotId: dev.id, autoStart: true })
     const urgent = await service.createTask({ projectId: project.id, title: 'Hotfix', priority: 'urgent', assigneeBotId: dev.id, autoStart: true })
@@ -253,9 +253,9 @@ test('出队顺序按任务优先级，紧急任务不被积压拖死', async ()
 })
 
 test('运行中的任务会把新评论直通到执行会话', async () => {
-  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Steer', key: 'STR', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Steer', key: 'STR', ownerBotId: director.id, memberIds: [dev.id] })
     const task = await service.createTask({ projectId: project.id, title: 'Build', assigneeBotId: dev.id, autoStart: true })
     service.started = true
     await service.tick()

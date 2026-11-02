@@ -52,9 +52,9 @@ test('add_member / remove_member manage membership with precise error semantics'
   const { root, store, service } = await setup()
   try {
     const actor = { type: 'user', id: 'owner' }
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const builder = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build things.' })
-    const project = await service.createProject({ name: 'Demo Project', key: 'DEMO', ownerBotId: chief.id })
+    const project = await service.createProject({ name: 'Demo Project', key: 'DEMO', ownerBotId: director.id })
 
     // 邀请新成员：零值起步，busy=false、usage 全 0（含 0 值成员不缺行）
     const added = await handleAction(service, 'add_member', { projectId: project.id, botId: builder.id }, actor)
@@ -83,13 +83,13 @@ test('add_member / remove_member manage membership with precise error semantics'
       () => handleAction(service, 'add_member', { projectId: project.id, botId: archived.id }, actor),
       err => err.code === 'BAD_REQUEST',
     )
-    // 移除非成员 → 404；负责人不可移除 → 403
+    // 移除非成员 → 404；总监不可移除 → 403
     await assert.rejects(
       () => handleAction(service, 'remove_member', { projectId: project.id, botId: archived.id }, actor),
       err => err.code === 'NOT_FOUND',
     )
     await assert.rejects(
-      () => handleAction(service, 'remove_member', { projectId: project.id, botId: chief.id }, actor),
+      () => handleAction(service, 'remove_member', { projectId: project.id, botId: director.id }, actor),
       err => err.code === 'FORBIDDEN',
     )
 
@@ -105,7 +105,7 @@ test('add_member / remove_member manage membership with precise error semantics'
       err => err.code === 'BAD_REQUEST',
     )
     await assert.rejects(
-      () => handleAction(service, 'remove_member', { projectId: project.id, botId: chief.id }, actor),
+      () => handleAction(service, 'remove_member', { projectId: project.id, botId: director.id }, actor),
       err => err.code === 'BAD_REQUEST',
     )
   } finally {
@@ -117,25 +117,25 @@ test('add_member / remove_member manage membership with precise error semantics'
 test('membersWithUsage aggregates busy state and per-project usage totals', async () => {
   const { root, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const builder = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build things.' })
     const idle = await service.createBot({ name: 'Watcher', role: '测试', instructions: 'Watch.' })
     const project = await service.createProject({
-      name: 'Usage Project', key: 'USAGE', ownerBotId: chief.id, memberIds: [builder.id, idle.id],
+      name: 'Usage Project', key: 'USAGE', ownerBotId: director.id, memberIds: [builder.id, idle.id],
     })
-    const other = await service.createProject({ name: 'Other Project', key: 'OTHER', ownerBotId: chief.id })
+    const other = await service.createProject({ name: 'Other Project', key: 'OTHER', ownerBotId: director.id })
     await service.addProjectMember(other.id, builder.id, { type: 'user', id: 'owner' })
 
     // builder 在本项目两条成功 run（各 input=100/output=50/cacheRead=10/cost=0.01），另有一条属于其他项目的 run
     insertRun(store, { id: 'run-u1', projectId: project.id, botId: builder.id, usage: { input: 100, output: 50, cacheRead: 10, cacheWrite: 5, cost: 0.01 } })
     insertRun(store, { id: 'run-u2', projectId: project.id, botId: builder.id, usage: { input: 100, output: 50, cacheRead: 10, cacheWrite: 5, cost: 0.01 } })
     insertRun(store, { id: 'run-x1', projectId: other.id, botId: builder.id, usage: { input: 999, output: 999, cost: 9 } })
-    // chief 有一条排队中的 run → busy
-    insertRun(store, { id: 'run-q1', projectId: project.id, botId: chief.id, status: 'queued' })
+    // director 有一条排队中的 run → busy
+    insertRun(store, { id: 'run-q1', projectId: project.id, botId: director.id, status: 'queued' })
 
     const members = service.projectView(service.projectRow(project.id)).members
     const builderRow = members.find(row => row.id === builder.id)
-    const chiefRow = members.find(row => row.id === chief.id)
+    const directorRow = members.find(row => row.id === director.id)
     const idleRow = members.find(row => row.id === idle.id)
 
     // 只聚合本项目：两条 run 的和，其他项目的不算
@@ -147,8 +147,8 @@ test('membersWithUsage aggregates busy state and per-project usage totals', asyn
     assert.equal(builderRow.busy, false)
 
     // 排队中 → 任务中
-    assert.equal(chiefRow.busy, true)
-    assert.equal(chiefRow.usage_input, 0)
+    assert.equal(directorRow.busy, true)
+    assert.equal(directorRow.usage_input, 0)
 
     // 无 run 的成员照常出现且全 0
     assert.ok(idleRow)
@@ -157,7 +157,7 @@ test('membersWithUsage aggregates busy state and per-project usage totals', asyn
     assert.equal(idleRow.busy, false)
 
     // owner 排在成员列表最前
-    assert.equal(members[0].id, chief.id)
+    assert.equal(members[0].id, director.id)
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })

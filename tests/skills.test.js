@@ -122,8 +122,8 @@ test('skill pool only lists skills that still exist in the skill root', async ()
 test('project-level skill toggle flows through service, api and system prompt', async () => {
   const { root, store, service, config } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const project = await service.createProject({ name: 'Demo', key: 'DEMO', ownerBotId: chief.id })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Demo', key: 'DEMO', ownerBotId: director.id })
     assert.deepEqual(project.disabledSkills, [])
 
     // 关闭：API 层进、projectView 出
@@ -135,7 +135,7 @@ test('project-level skill toggle flows through service, api and system prompt', 
 
     // 系统提示带上禁用清单
     const runtime = new DshRuntime({ ctx: {}, config, store, logger: { info() {}, warn() {}, error() {} } })
-    const sessionId = bindSession(store, chief.id, project.id)
+    const sessionId = bindSession(store, director.id, project.id)
     const prompt = runtime.systemPromptFor({ agent: { id: sessionId } })
     assert.ok(prompt.includes('disabled for this project'), 'prompt 应包含禁用声明')
     assert.ok(prompt.includes('`review`'), 'prompt 应包含被禁技能 slug')

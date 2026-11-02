@@ -105,18 +105,18 @@ async function setup(options = {}) {
   service.attachRuntime(runtime)
   await service.initialize()
   service.started = true
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build things.', provider: 'fake', model: 'model-a', effort: 'high',
   })
-  return { root, workspace, config, store, service, runtime, chief, dev }
+  return { root, workspace, config, store, service, runtime, director, dev }
 }
 
 test('归档项目会冻结记忆并拒绝新写入', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
     const actor = { type: 'user', id: service.localUserId }
-    const project = await service.createProject({ name: 'Frozen', key: 'FRZ', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Frozen', key: 'FRZ', ownerBotId: director.id, memberIds: [dev.id] })
     await service.createMemory({
       scopeType: 'project', scopeId: project.id, topic: '约定', content: '发布前跑测试。', actor,
     })
@@ -135,16 +135,16 @@ test('归档项目会冻结记忆并拒绝新写入', async () => {
   }
 })
 
-test('团队记忆只有负责人能写，成员 Bot 被拒绝', async () => {
-  const { root, store, service, chief, dev } = await setup()
+test('团队记忆只有总监能写，成员 Bot 被拒绝', async () => {
+  const { root, store, service, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'Team', key: 'TEM', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Team', key: 'TEM', ownerBotId: director.id, memberIds: [dev.id] })
     assert.throws(
       () => service.createMemory({ scopeType: 'team', scopeId: 'team', topic: '规则', content: '内容', actor: { type: 'bot', id: dev.id } }),
-      /负责人/,
+      /总监/,
     )
     const memory = await service.createMemory({
-      scopeType: 'team', scopeId: 'team', topic: '规则', content: '先跑测试再上线。', actor: { type: 'bot', id: chief.id },
+      scopeType: 'team', scopeId: 'team', topic: '规则', content: '先跑测试再上线。', actor: { type: 'bot', id: director.id },
     })
     assert.equal(memory.scope_type, 'team')
   } finally {
@@ -154,10 +154,10 @@ test('团队记忆只有负责人能写，成员 Bot 被拒绝', async () => {
 })
 
 test('记忆检索按项目隔离并命中全文索引', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: chief.id, memberIds: [dev.id] })
-    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: chief.id, memberIds: [dev.id] })
+    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
+    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id] })
     const actor = { type: 'user', id: service.localUserId }
     await service.createMemory({
       scopeType: 'project', scopeId: alpha.id, topic: '发布流程', content: '发布前必须执行 npm test。', actor,
@@ -177,11 +177,11 @@ test('记忆检索按项目隔离并命中全文索引', async () => {
 })
 
 test('低置信度记忆进入待审队列，批准后生效', async () => {
-  const { root, store, service, chief, dev } = await setup({
+  const { root, store, service, director, dev } = await setup({
     memoryItems: [{ scope: 'bot', topic: '推测', content: '可能需要先跑迁移。', confidence: 0.6 }],
   })
   try {
-    const project = await service.createProject({ name: 'Review', key: 'REV', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Review', key: 'REV', ownerBotId: director.id, memberIds: [dev.id] })
     await service.sendMessage(project.id, '/task @Builder 跑一次校验', { type: 'user', id: 'u1' })
     await waitFor(() => Number(store.get("SELECT COUNT(*) AS n FROM memories WHERE status = 'pending'").n) >= 1)
     const pending = store.get("SELECT * FROM memories WHERE status = 'pending'")
@@ -197,10 +197,10 @@ test('低置信度记忆进入待审队列，批准后生效', async () => {
 })
 
 test('提案必须先有通过的评估才能批准', async () => {
-  const { root, store, service, chief } = await setup()
+  const { root, store, service, director } = await setup()
   try {
     const actor = { type: 'user', id: service.localUserId }
-    const project = await service.createProject({ name: 'Prop', key: 'PRP', ownerBotId: chief.id })
+    const project = await service.createProject({ name: 'Prop', key: 'PRP', ownerBotId: director.id })
     const proposal = await service.createProposal({
       kind: 'skill', projectId: project.id, title: '新增技能', rationale: '重复劳动',
       payload: { slug: 'gate-skill', name: 'Gate', description: 'Gate skill', version: '1.0.0', content: '# Gate' },
@@ -220,11 +220,11 @@ test('提案必须先有通过的评估才能批准', async () => {
 })
 
 test('技能提案可灰度到项目并转正为全量', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
     const actor = { type: 'user', id: service.localUserId }
-    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: chief.id, memberIds: [dev.id] })
-    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: chief.id, memberIds: [dev.id] })
+    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
+    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id] })
     const proposal = await service.createProposal({
       kind: 'skill', projectId: alpha.id, title: '灰度技能', rationale: '先小范围验证',
       canary: { projectIds: [alpha.id] },
@@ -248,7 +248,7 @@ test('技能提案可灰度到项目并转正为全量', async () => {
 })
 
 test('技能可以回滚到历史版本', async () => {
-  const { root, store, service, config, chief } = await setup()
+  const { root, store, service, config, director } = await setup()
   try {
     await publishSkill(config, { slug: 'rb-skill', name: 'RB', description: '版本回滚', content: '# v1', version: '1.0.0' })
     await publishSkill(config, { slug: 'rb-skill', name: 'RB', description: '版本回滚', content: '# v2', version: '1.1.0' })
@@ -266,18 +266,18 @@ test('技能可以回滚到历史版本', async () => {
 })
 
 test('用量三档口径一致，按项目过滤，币种分列', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: chief.id, memberIds: [dev.id] })
-    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: chief.id, memberIds: [dev.id] })
+    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
+    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id] })
     insertRun(store, { id: 'run_a', projectId: alpha.id, botId: dev.id })
-    insertRun(store, { id: 'run_b', projectId: beta.id, botId: chief.id })
+    insertRun(store, { id: 'run_b', projectId: beta.id, botId: director.id })
     recordUsage(store, {
       sourceKey: 'u:alpha', run: { id: 'run_a', project_id: alpha.id, bot_id: dev.id },
       provider: 'fake', model: 'model-a', usage: { inputTokens: 100, outputTokens: 10 },
     })
     recordUsage(store, {
-      sourceKey: 'u:beta', run: { id: 'run_b', project_id: beta.id, bot_id: chief.id },
+      sourceKey: 'u:beta', run: { id: 'run_b', project_id: beta.id, bot_id: director.id },
       provider: 'fake', model: 'model-a', usage: { inputTokens: 200, outputTokens: 20 },
     })
     const state = await service.state(alpha.id)
@@ -302,9 +302,9 @@ test('用量三档口径一致，按项目过滤，币种分列', async () => {
 })
 
 test('CSV 导出行数与用量事件一致', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'Csv', key: 'CSV', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Csv', key: 'CSV', ownerBotId: director.id, memberIds: [dev.id] })
     insertRun(store, { id: 'run_c', projectId: project.id, botId: dev.id })
     recordUsage(store, {
       sourceKey: 'u:csv:1', run: { id: 'run_c', project_id: project.id, bot_id: dev.id },
@@ -322,9 +322,9 @@ test('CSV 导出行数与用量事件一致', async () => {
 })
 
 test('对账把运行级用量修正到明细口径', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'Recon', key: 'RCN', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Recon', key: 'RCN', ownerBotId: director.id, memberIds: [dev.id] })
     const runId = 'run_recon'
     insertRun(store, { id: runId, projectId: project.id, botId: dev.id })
     store.run(
@@ -349,9 +349,9 @@ test('对账把运行级用量修正到明细口径', async () => {
 })
 
 test('数据保留按设置清理过期数据', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'Keep', key: 'KEE', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Keep', key: 'KEE', ownerBotId: director.id, memberIds: [dev.id] })
     const old = new Date(Date.now() - 90 * 86_400_000).toISOString()
     store.run(
       `INSERT INTO usage_events(id, source_key, run_id, project_id, bot_id, provider, model, purpose, currency,
@@ -375,9 +375,9 @@ test('数据保留按设置清理过期数据', async () => {
 })
 
 test('outbox 可靠交接：消息入库后必定产生回复运行', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'Outbox', key: 'OBX', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Outbox', key: 'OBX', ownerBotId: director.id, memberIds: [dev.id] })
     await service.sendMessage(project.id, '汇报一下当前进度', { type: 'user', id: 'u1' })
     const rows = store.all("SELECT * FROM outbox WHERE kind = 'chat_run'")
     assert.equal(rows.length, 1)
@@ -392,9 +392,9 @@ test('outbox 可靠交接：消息入库后必定产生回复运行', async () =
 })
 
 test('outbox 投递失败会记录错误并标记 failed', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'OutboxFail', key: 'OBF', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'OutboxFail', key: 'OBF', ownerBotId: director.id, memberIds: [dev.id] })
     const task = await service.createTask({ projectId: project.id, title: '无人认领' })
     service.enqueueOutbox({
       kind: 'task_run',
@@ -415,9 +415,9 @@ test('outbox 投递失败会记录错误并标记 failed', async () => {
 })
 
 test('重启后调度器补投未投递的 outbox 记录', async () => {
-  const { root, store, service, chief, dev } = await setup()
+  const { root, store, service, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'OutboxRedeliver', key: 'OBR', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'OutboxRedeliver', key: 'OBR', ownerBotId: director.id, memberIds: [dev.id] })
     const messageId = service.insertMessage({
       projectId: project.id, senderType: 'user', senderId: 'u1', body: '补投这条消息',
     })

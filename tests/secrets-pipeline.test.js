@@ -40,12 +40,12 @@ async function pipelineSetup() {
   service.attachRuntime(new ManualRuntime())
   await service.initialize()
   service.started = false
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: chief.id, memberIds: [dev.id] })
-  const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: chief.id, memberIds: [dev.id] })
+  const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
+  const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id] })
   const slugOf = projectId => store.get('SELECT slug FROM projects WHERE id = ?', projectId).slug
   const envPathOf = projectId => join(workspace, slugOf(projectId), '.team', 'secrets.env')
   const readEnv = async (projectId) => {
@@ -53,7 +53,7 @@ async function pipelineSetup() {
     const contents = await readFile(join(workspace, slug, '.team', 'secrets.env'), 'utf8')
     return { contents, gitignore: await readFile(join(workspace, slug, '.gitignore'), 'utf8') }
   }
-  return { root, store, service, chief, dev, alpha, beta, workspace, dataDir, envPathOf, readEnv }
+  return { root, store, service, director, dev, alpha, beta, workspace, dataDir, envPathOf, readEnv }
 }
 
 // 不产生运行，但保持与其它测试相同的关闭顺序。
@@ -158,7 +158,7 @@ test('群消息持久化前把密钥值掩码为标签', async () => {
 })
 
 test('Bot 密钥请求规范化名称，批准物化到项目，拒绝不留密钥', async () => {
-  const { root, store, service, chief, dev, alpha, beta, envPathOf, readEnv } = await pipelineSetup()
+  const { root, store, service, director, dev, alpha, beta, envPathOf, readEnv } = await pipelineSetup()
   try {
     const sessionId = 'sess-secrets-1'
     store.run(
@@ -205,12 +205,12 @@ test('Bot 密钥请求规范化名称，批准物化到项目，拒绝不留密�
 })
 
 test('生产目录切换：secrets.env 物化到生产目录，切换后旧目录清理、新目录重新物化', async () => {
-  const { root, store, service, chief, workspace } = await pipelineSetup()
+  const { root, store, service, director, workspace } = await pipelineSetup()
   try {
     await service.upsertSecret({ scope: 'team', name: 'github token', purpose: 'CI', value: 'ghp_abcdefghijklmnop' })
     const prod1 = join(root, 'repo-one')
     const prod2 = join(root, 'repo-two')
-    const project = await service.createProject({ name: 'Ext', key: 'EXT', ownerBotId: chief.id, productionDir: prod1 })
+    const project = await service.createProject({ name: 'Ext', key: 'EXT', ownerBotId: director.id, productionDir: prod1 })
     assert.ok((await readFile(join(prod1, '.team', 'secrets.env'), 'utf8')).includes('GITHUB_TOKEN'))
     assert.equal(existsSync(join(workspace, project.slug, '.team', 'secrets.env')), false, '管理目录不应有明文密钥')
 

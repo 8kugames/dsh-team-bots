@@ -125,8 +125,8 @@ test('迁移：旧库与新建库的 runs 表都有 artifacts 列', async () => 
 test('成功的写运行在 git 项目里记录产物清单，只读运行不记录', async () => {
   const { root, workspace, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const project = await service.createProject({ name: 'Artifacts', key: 'ART', ownerBotId: chief.id })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Artifacts', key: 'ART', ownerBotId: director.id })
     const dir = join(workspace, project.slug)
     git(dir, 'init', '-q')
     await writeFile(join(dir, 'README.md'), 'base\n')
@@ -142,7 +142,7 @@ test('成功的写运行在 git 项目里记录产物清单，只读运行不记
     git(dir, 'commit', '-q', '-m', 'add gone')
     await rm(join(dir, 'gone.txt'))
 
-    const writeRunId = insertRun(store, { projectId: project.id, botId: chief.id })
+    const writeRunId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId: writeRunId, status: 'succeeded', output: 'done' })
     const writeRun = store.get('SELECT * FROM runs WHERE id = ?', writeRunId)
     const list = JSON.parse(writeRun.artifacts)
@@ -154,7 +154,7 @@ test('成功的写运行在 git 项目里记录产物清单，只读运行不记
     assert.ok(paths.includes('notes.md'))
     assert.ok(!paths.includes('gone.txt'), '删除的文件不进产物清单')
 
-    const readRunId = insertRun(store, { projectId: project.id, botId: chief.id, mode: 'read', kind: 'review' })
+    const readRunId = insertRun(store, { projectId: project.id, botId: director.id, mode: 'read', kind: 'review' })
     await service.finishRun({ runId: readRunId, status: 'succeeded', output: 'ok' })
     assert.equal(store.get('SELECT artifacts FROM runs WHERE id = ?', readRunId).artifacts, null)
 
@@ -170,8 +170,8 @@ test('成功的写运行在 git 项目里记录产物清单，只读运行不记
 test('产物清单收下 git 的组合状态：AM、MM 与重命名', async () => {
   const { root, workspace, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const project = await service.createProject({ name: 'Status', key: 'STS', ownerBotId: chief.id })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Status', key: 'STS', ownerBotId: director.id })
     const dir = join(workspace, project.slug)
     git(dir, 'init', '-q')
     await writeFile(join(dir, 'README.md'), 'base\n')
@@ -190,7 +190,7 @@ test('产物清单收下 git 的组合状态：AM、MM 与重命名', async () =
     // 重命名：清单只认新路径。
     git(dir, 'mv', 'old.txt', 'new.txt')
 
-    const runId = insertRun(store, { projectId: project.id, botId: chief.id })
+    const runId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId, status: 'succeeded', output: 'done' })
     const list = JSON.parse(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts)
     const statusOf = path => list.find(item => item.path === path)?.status
@@ -208,9 +208,9 @@ test('产物清单收下 git 的组合状态：AM、MM 与重命名', async () =
 test('非 git 项目跳过产物记录并写入 run_event', async () => {
   const { root, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const project = await service.createProject({ name: 'No Git', key: 'NOGIT', ownerBotId: chief.id })
-    const runId = insertRun(store, { projectId: project.id, botId: chief.id })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'No Git', key: 'NOGIT', ownerBotId: director.id })
+    const runId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId, status: 'succeeded', output: 'done' })
     assert.equal(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts, null)
     const events = store.all('SELECT * FROM run_events WHERE run_id = ? AND type = ?', runId, 'artifacts_skipped')
@@ -224,8 +224,8 @@ test('非 git 项目跳过产物记录并写入 run_event', async () => {
 test('产物 HTTP 端点：清单、文件类型、越界与限额', async () => {
   const { root, workspace, store, service } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const project = await service.createProject({ name: 'HTTP', key: 'HTTPX', ownerBotId: chief.id })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'HTTP', key: 'HTTPX', ownerBotId: director.id })
     const dir = join(workspace, project.slug)
     git(dir, 'init', '-q')
     await writeFile(join(dir, 'README.md'), 'base\n')
@@ -236,7 +236,7 @@ test('产物 HTTP 端点：清单、文件类型、越界与限额', async () =>
     await writeFile(join(dir, 'notes.md'), '说明\n')
     await writeFile(join(dir, 'big.bin'), Buffer.alloc(5 * 1024 * 1024 + 1, 7))
 
-    const runId = insertRun(store, { projectId: project.id, botId: chief.id })
+    const runId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId, status: 'succeeded', output: 'done' })
     const fetchRoute = fakeHttp(service)
 

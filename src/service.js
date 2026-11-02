@@ -582,7 +582,7 @@ export class TeamService {
       || (changes.instructions !== undefined && changes.instructions !== bot.instructions)
     if (changes.status === 'archived') {
       const owned = this.store.get("SELECT id FROM projects WHERE owner_bot_id = ? AND status = 'active'", botId)
-      if (owned) throw conflict('该 Bot 仍是活动项目负责人，请先更换负责人')
+      if (owned) throw conflict('该 Bot 仍是活动项目总监，请先更换总监')
     }
     this.store.transaction(() => {
       const fields = []
@@ -754,7 +754,7 @@ export class TeamService {
     if (this.store.get('SELECT id FROM projects WHERE slug = ?', slug)) throw conflict('项目工作区目录已存在')
     let owner = input.ownerBotId ? this.botRow(input.ownerBotId) : this.store.get("SELECT * FROM bots WHERE status = 'active' ORDER BY created_at LIMIT 1")
     if (!owner) throw badRequest('请先创建至少一个 Bot')
-    if (owner.status !== 'active') throw badRequest('负责人 Bot 不可用')
+    if (owner.status !== 'active') throw badRequest('总监 Bot 不可用')
     const projectId = id('prj')
     const groupId = id('grp')
     const createdAt = nowIso()
@@ -805,7 +805,7 @@ export class TeamService {
     if (patch.description !== undefined) updates.description = text(patch.description, 20_000)
     if (patch.ownerBotId !== undefined) {
       const owner = this.botRow(patch.ownerBotId)
-      if (owner.status !== 'active') throw badRequest('负责人 Bot 不可用')
+      if (owner.status !== 'active') throw badRequest('总监 Bot 不可用')
       updates.owner_bot_id = owner.id
     }
     if (patch.tokenBudget !== undefined) updates.token_budget = clampNumber(patch.tokenBudget, 0, 1e15, null)
@@ -935,7 +935,7 @@ export class TeamService {
     return this.projectView(this.projectRow(projectId))
   }
 
-  // 移除项目成员；负责人不可移除。移除后 membersOf 不再包含该 bot，本项目 mention 定向随之失效。
+  // 移除项目成员；总监不可移除。移除后 membersOf 不再包含该 bot，本项目 mention 定向随之失效。
   removeProjectMember(projectId, botId, actor = this.actor()) {
     const project = this.projectRow(projectId)
     if (project.status !== 'active') throw badRequest('项目已归档，不能移除成员')
@@ -945,7 +945,7 @@ export class TeamService {
       projectId, botId,
     )
     if (!member) throw notFound('该 Bot 不是项目成员')
-    if (member.member_role === 'owner') throw forbidden('负责人不可移除')
+    if (member.member_role === 'owner') throw forbidden('总监不可移除')
     this.store.transaction(() => {
       this.store.run(
         "DELETE FROM project_members WHERE project_id = ? AND member_type = 'bot' AND member_id = ?",
@@ -1355,7 +1355,7 @@ export class TeamService {
       this.addTaskEvent(taskId, 'assigned', actor, { botId })
       this.audit(actor, 'task.assign', 'task', taskId, { botId })
     })
-    // 负责人bot的验收/受阻处理运行本身占用任务的唯一活动运行名额，
+    // 总监bot的验收/受阻处理运行本身占用任务的唯一活动运行名额，
     // 此时由 finishRun 的收尾逻辑负责重新排队执行，这里跳过。
     if (!active) {
       this.enqueueOutbox({
@@ -1467,7 +1467,7 @@ export class TeamService {
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
-      kind === 'review' ? '任务交付，转负责人验收' : '任务受阻，转负责人处理',
+      kind === 'review' ? '任务交付，转总监验收' : '任务受阻，转总监处理',
       createdAt,
     )
     void this.tick()
@@ -1495,7 +1495,7 @@ export class TeamService {
     if (!binding) throw forbidden('只有项目群中的 Bot 可以执行该操作')
     if (!binding.project_id) throw forbidden('单聊会话不在项目中，无法管理任务')
     const project = this.projectRow(binding.project_id)
-    if (project.owner_bot_id !== binding.bot_id) throw forbidden('只有项目负责人 Bot 可以执行该操作')
+    if (project.owner_bot_id !== binding.bot_id) throw forbidden('只有项目总监 Bot 可以执行该操作')
     return { binding, project, actor: { type: 'bot', id: binding.bot_id } }
   }
 
@@ -2391,8 +2391,8 @@ if (run.kind === 'dm_reply') {
           senderType: 'bot',
           senderId: bot.id,
           body: status === 'succeeded'
-            ? (cleanOutput || `负责人已完成${label}。`)
-            : `负责人${label}运行失败：${error?.message ?? '未知错误'}`,
+            ? (cleanOutput || `总监已完成${label}。`)
+            : `总监${label}运行失败：${error?.message ?? '未知错误'}`,
           taskId: run.task_id,
           runId,
         })
@@ -2414,7 +2414,7 @@ if (run.kind === 'dm_reply') {
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `负责人${label}运行失败：${error?.message ?? '未知错误'}`,
+          body: `总监${label}运行失败：${error?.message ?? '未知错误'}`,
           runId,
         })
       }
@@ -2440,12 +2440,12 @@ if (run.kind === 'dm_reply') {
           senderType: 'bot',
           senderId: bot.id,
           body: ownerReview
-            ? `任务 ${project.key}-${task.number} 已交付，等待负责人验收。\n\n${summary}\n\n完整交付与验证记录见该任务评论。`
+            ? `任务 ${project.key}-${task.number} 已交付，等待总监验收。\n\n${summary}\n\n完整交付与验证记录见该任务评论。`
             : `任务 ${project.key}-${task.number} 已完成，待您验收。\n\n${summary}\n\n完整交付与验证记录见该任务评论。`,
           taskId: task.id,
           runId,
         })
-        this.wechat?.notify(`任务 ${project.key}-${task.number}《${task.title}》${ownerReview ? '已交付，等待负责人验收' : '已完成，待您验收'}。回复「详情 ${project.key}-${task.number}」查看，回复「验收 ${project.key}-${task.number}」通过。`)
+        this.wechat?.notify(`任务 ${project.key}-${task.number}《${task.title}》${ownerReview ? '已交付，等待总监验收' : '已完成，待您验收'}。回复「详情 ${project.key}-${task.number}」查看，回复「验收 ${project.key}-${task.number}」通过。`)
         this.enqueueOutbox({
           kind: 'memory_review',
           payload: { taskId: task.id, sourceRunId: runId },
@@ -2471,7 +2471,7 @@ if (run.kind === 'dm_reply') {
               projectId: project.id,
               senderType: 'system',
               senderId: 'system',
-              body: `项目未配置可用的负责人 Bot，任务 ${project.key}-${task.number} 请用户直接验收。`,
+              body: `项目未配置可用的总监 Bot，任务 ${project.key}-${task.number} 请用户直接验收。`,
               taskId: task.id,
             })
           }
@@ -3001,7 +3001,7 @@ if (run.kind === 'dm_reply') {
   }
 
   // 记忆写入权限：用户可写任意作用域；Bot 只能写自己的记忆、是成员的项目记忆，
-  // 团队级记忆仅团队负责人（任一项目 owner Bot）可写。
+  // 团队级记忆仅团队总监（任一项目 owner Bot）可写。
   assertMemoryWriteScope(scopeType, scopeId, actor) {
     if (actor?.type === 'user') return
     if (actor?.type !== 'bot') throw forbidden('当前身份不能写入记忆')
@@ -3017,7 +3017,7 @@ if (run.kind === 'dm_reply') {
     }
     if (scopeType === 'team') {
       if (this.isTeamOwner(actor.id)) return
-      throw forbidden('仅团队负责人可以写入团队级记忆')
+      throw forbidden('仅团队总监可以写入团队级记忆')
     }
     throw badRequest('记忆作用域无效')
   }
@@ -3473,7 +3473,7 @@ if (run.kind === 'dm_reply') {
       if (!task.assignee_bot_id) throw conflict(`任务 ${identifier} 没有负责人，无法退回重做`)
       await this.updateTask(task.id, { status: 'in_progress' }, actor)
       await this.addComment(task.id, `退回重做：${reason}`, actor)
-      // 若负责人验收运行仍在进行，由其结束时的收尾逻辑补排；否则立即重排执行。
+      // 若总监验收运行仍在进行，由其结束时的收尾逻辑补排；否则立即重排执行。
       const active = this.store.get(
         "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
         task.id,
@@ -3492,7 +3492,7 @@ if (run.kind === 'dm_reply') {
         projectId: project.id,
         senderType: 'system',
         senderId: 'system',
-        body: `任务 ${identifier} 被负责人退回重做。`,
+        body: `任务 ${identifier} 被总监退回重做。`,
         taskId: task.id,
       })
     }
@@ -3687,6 +3687,51 @@ if (run.kind === 'dm_reply') {
     const realDir = realpathSync(dir)
     if (realFile === realDir || !realFile.startsWith(realDir + sep)) throw forbidden('产物路径越界')
     return { absolutePath, size: info.size }
+  }
+
+  // ── 聊天图片通道（GET /api/dsh-team/file）──────────────────────────────
+  // 定位聊天消息里 markdown 图片引用的工作区文件：只认项目工作目录或单聊 Bot
+  // 工作区内的白名单图片，路径解析 + realpath 双重防穿越（与 artifactFile 同口径）。
+  // SVG 可执行脚本，永不放行；尺寸上限由 HTTP 层把关（MAX_CHAT_IMAGE_BYTES）。
+  chatFile({ projectId, soloBotId, path } = {}) {
+    const CHAT_IMAGE_TYPES = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+    }
+    const relPath = String(path ?? '').trim()
+    if (!relPath) throw badRequest('缺少参数 path')
+    let dir
+    if (projectId) {
+      dir = this.projectWorkDir(this.projectRow(String(projectId)))
+    } else if (soloBotId) {
+      const bot = this.botRow(String(soloBotId))
+      if (!bot?.solo_dir) throw notFound('该 Bot 没有单聊工作区')
+      dir = join(this.config.workspace, '_the_bots', bot.solo_dir)
+    } else {
+      throw badRequest('缺少参数 projectId 或 soloBotId')
+    }
+    const contentType = CHAT_IMAGE_TYPES[extname(relPath).toLowerCase()]
+    if (!contentType) throw badRequest('仅支持 png / jpg / jpeg / gif / webp 图片')
+    let absolutePath
+    try {
+      absolutePath = assertInside(dir, join(dir, relPath))
+    } catch {
+      throw forbidden('图片路径越界')
+    }
+    let info
+    try {
+      info = statSync(absolutePath)
+    } catch {
+      throw notFound('图片文件不存在')
+    }
+    if (!info.isFile()) throw notFound('图片不是常规文件')
+    const realFile = realpathSync(absolutePath)
+    const realDir = realpathSync(dir)
+    if (realFile === realDir || !realFile.startsWith(realDir + sep)) throw forbidden('图片路径越界')
+    return { absolutePath, size: info.size, contentType }
   }
 
   // ── 工作台终端（非交互式命令台）───────────────────────────────────────────

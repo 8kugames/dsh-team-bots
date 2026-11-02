@@ -36,8 +36,8 @@ async function terminalSetup({ terminalTimeoutMs } = {}) {
   const service = makeService()
   await service.initialize()
   service.started = false
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-  const project = await service.createProject({ name: 'Terminal', key: 'TERM', ownerBotId: chief.id })
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+  const project = await service.createProject({ name: 'Terminal', key: 'TERM', ownerBotId: director.id })
   return { root, workspace, store, config, service, makeService, project }
 }
 

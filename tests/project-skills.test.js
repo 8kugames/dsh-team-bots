@@ -52,8 +52,8 @@ async function setup() {
   service.attachRuntime(new FakeRuntime())
   await service.initialize()
   service.started = true
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-  const project = await service.createProject({ name: 'Demo', key: 'DEMO', ownerBotId: chief.id })
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+  const project = await service.createProject({ name: 'Demo', key: 'DEMO', ownerBotId: director.id })
   return { root, workspace, dataDir, config, store, service, project }
 }
 
@@ -113,7 +113,7 @@ test('resolveProjectSkillDir only accepts a direct project directory of the work
   const { root, workspace, store, service } = await setup()
   try {
     assert.equal(resolveProjectSkillDir(workspace, join(workspace, 'demo')), join(workspace, 'demo'))
-    assert.equal(resolveProjectSkillDir(workspace, join(workspace, '_the_bots', 'chief')), null)
+    assert.equal(resolveProjectSkillDir(workspace, join(workspace, '_the_bots', 'director')), null)
     assert.equal(resolveProjectSkillDir(workspace, join(workspace, '.agents')), null)
     assert.equal(resolveProjectSkillDir(workspace, join(workspace, 'demo', 'nested')), null)
     assert.equal(resolveProjectSkillDir(workspace, '/tmp/elsewhere'), null)
@@ -159,7 +159,7 @@ test('skill provider lists project skills by cwd and prefers them over shared sk
       resolveProjectDir: cwd => resolveProjectSkillDir(config.workspace, cwd),
     })
 
-    const withoutProject = await provider.list({ cwd: join(workspace, '_the_bots', 'chief') })
+    const withoutProject = await provider.list({ cwd: join(workspace, '_the_bots', 'director') })
     assert.deepEqual(withoutProject.map(item => item.name), ['review'])
     assert.equal(withoutProject[0].source, 'workspace')
 
@@ -187,11 +187,11 @@ test('project session prompt tells the bot about the project skill pool', async 
     await writeSkill(join(workspace, project.slug, '.claude', 'skills', 'deploy'), {
       name: 'deploy', description: 'Deploy helper',
     })
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const sessionId = id('sess')
     store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, created_at) VALUES (?, ?, ?, 'project', ?)",
-      sessionId, chief.id, project.id, nowIso(),
+      sessionId, director.id, project.id, nowIso(),
     )
     const runtime = new DshRuntime({ ctx: {}, config, store, logger: { info() {}, warn() {}, error() {} } })
     const prompt = runtime.systemPromptFor({ agent: { id: sessionId } })
@@ -207,7 +207,7 @@ test('project session prompt tells the bot about the project skill pool', async 
 test('生产目录：会话 cwd、prompt 与项目技能池都以生产目录为准', async () => {
   const { root, workspace, config, store, service, project } = await setup()
   try {
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const prod = join(root, 'existing-repo')
     await mkdir(prod, { recursive: true })
     // 技能池以生产目录为准：deploy 放生产目录；管理目录只放一个旧技能，证明不再进池
@@ -232,11 +232,11 @@ test('生产目录：会话 cwd、prompt 与项目技能池都以生产目录为
       config, store, logger: { info() {}, warn() {}, error() {} },
     })
     const row = store.get('SELECT * FROM projects WHERE id = ?', project.id)
-    await runtime.ensureSession(chief, row, { sessionKind: 'project' })
+    await runtime.ensureSession(director, row, { sessionKind: 'project' })
     assert.equal(created.length, 1)
     assert.equal(created[0].cwd, prodReal, '会话 cwd 应是生产目录')
 
-    const prompt = runtime.promptFor({ run: { kind: 'task' }, project: row, bot: chief })
+    const prompt = runtime.promptFor({ run: { kind: 'task' }, project: row, bot: director })
     assert.ok(prompt.includes(`Workspace: ${prodReal}`), '运行 prompt 应带生产目录')
     const system = runtime.systemPromptFor({ agent: { id: 'sess-prod' } })
     assert.ok(system.includes(`- Workspace: ${prodReal}`), '身份 prompt 应带生产目录')

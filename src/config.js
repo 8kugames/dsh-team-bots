@@ -107,7 +107,7 @@ export function resolveConfig(config = {}) {
     seedOwnerName: String(config.seedOwnerName ?? SEED_OWNER.name).slice(0, 40),
     seedOwnerRole: String(config.seedOwnerRole ?? SEED_OWNER.role).slice(0, 24),
     seedOwnerInstructions: String(config.seedOwnerInstructions ?? SEED_OWNER.instructions),
-    // 首次启动时随负责人一起出场的默认伙伴；传 [] 可禁用。
+    // 首次启动时随总监一起出场的默认伙伴；传 [] 可禁用。
     seedBots: Array.isArray(config.seedBots) ? config.seedBots : SEED_BOTS,
     allowDevSeed: bool(config.allowDevSeed ?? process.env.DSH_TEAM_DEV_SEED, false),
     modelPrices: resolveModelPrices(config),

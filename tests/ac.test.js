@@ -32,7 +32,7 @@ test('buildAcItems 过滤命令、技能与成员，清单不截断', () => {
       { slug: 'art-review', name: '美术评审', description: '' },
     ],
     members: [
-      { id: 'b1', name: 'Chief', role: '架构', color: 'teal', owner: true },
+      { id: 'b1', name: 'director', role: '架构', color: 'teal', owner: true },
       { id: 'b2', name: 'Artist', role: '美术', color: 'pink', owner: false },
     ],
   }
@@ -43,8 +43,8 @@ test('buildAcItems 过滤命令、技能与成员，清单不截断', () => {
   const mention = buildAcItems('mention', 'ar', sources)
   assert.deepEqual(mention.map(item => item.label), ['@Artist'])
   assert.ok(mention[0].insert.endsWith(' ')) // 尾随空格满足 parseMentions 边界
-  const ownerItem = buildAcItems('mention', 'ch', sources)[0]
-  assert.equal(ownerItem.desc, '负责人 · 架构')
+  const ownerItem = buildAcItems('mention', 'di', sources)[0]
+  assert.equal(ownerItem.desc, '总监 · 架构')
   const full = buildAcItems('slash', '', {
     skills: Array.from({ length: 12 }, (_, i) => ({ slug: `s${i}`, name: `技能${i}` })),
     members: [],

@@ -56,11 +56,11 @@ async function setup(overrides = {}) {
   service.attachRuntime(runtime)
   await service.initialize()
   service.started = false
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  return { root, workspace, config, store, service, runtime, chief, dev }
+  return { root, workspace, config, store, service, runtime, director, dev }
 }
 
 async function closeQuietly(store) {
@@ -69,10 +69,10 @@ async function closeQuietly(store) {
   } catch {}
 }
 
-test('单运行 token 上限触发中止并把降级交给负责人', async () => {
-  const { root, store, service, runtime, chief, dev } = await setup({ maxRunTokens: 100 })
+test('单运行 token 上限触发中止并把降级交给总监', async () => {
+  const { root, store, service, runtime, director, dev } = await setup({ maxRunTokens: 100 })
   try {
-    const project = await service.createProject({ name: 'Budget', key: 'BUD', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Budget', key: 'BUD', ownerBotId: director.id, memberIds: [dev.id] })
     const task = await service.createTask({ projectId: project.id, title: 'Runaway', assigneeBotId: dev.id, autoStart: true })
     service.started = true
     await service.tick()
@@ -111,7 +111,7 @@ test('单运行 token 上限触发中止并把降级交给负责人', async () =
     assert.equal(cancelled.length, 1)
     assert.equal(runtimeWithContext.pending.has('sess'), false)
 
-    // 收尾照常走 blocked → 负责人处理链路
+    // 收尾照常走 blocked → 总监处理链路
     await service.finishRun(completions[0])
     assert.equal(store.get("SELECT status FROM tasks WHERE id = ?", task.id).status, 'blocked')
     assert.ok(store.get("SELECT id FROM runs WHERE task_id = ? AND kind = 'handle'", task.id))
@@ -123,9 +123,9 @@ test('单运行 token 上限触发中止并把降级交给负责人', async () =
 })
 
 test('长时间没有进展的运行被看门狗回收', async () => {
-  const { root, store, service, runtime, chief, dev } = await setup({ stallTimeoutMs: 30_000 })
+  const { root, store, service, runtime, director, dev } = await setup({ stallTimeoutMs: 30_000 })
   try {
-    const project = await service.createProject({ name: 'Stall', key: 'STL', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Stall', key: 'STL', ownerBotId: director.id, memberIds: [dev.id] })
     const task = await service.createTask({ projectId: project.id, title: 'Hang', assigneeBotId: dev.id, autoStart: true })
     service.started = true
     await service.tick()
@@ -148,9 +148,9 @@ test('长时间没有进展的运行被看门狗回收', async () => {
 })
 
 test('群聊只放结论，完整交付留在任务评论', async () => {
-  const { root, store, service, runtime, chief, dev } = await setup({ chatReplyMaxChars: 120 })
+  const { root, store, service, runtime, director, dev } = await setup({ chatReplyMaxChars: 120 })
   try {
-    const project = await service.createProject({ name: 'Split', key: 'SPL', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Split', key: 'SPL', ownerBotId: director.id, memberIds: [dev.id] })
     const task = await service.createTask({ projectId: project.id, title: 'Long report', assigneeBotId: dev.id, autoStart: true })
     service.started = true
     await service.tick()
@@ -171,9 +171,9 @@ test('群聊只放结论，完整交付留在任务评论', async () => {
 })
 
 test('team_recall 能按短 id 展开消息、评论、运行和任务', async () => {
-  const { root, store, service, runtime, chief, dev } = await setup()
+  const { root, store, service, runtime, director, dev } = await setup()
   try {
-    const project = await service.createProject({ name: 'Recall', key: 'RCL', ownerBotId: chief.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Recall', key: 'RCL', ownerBotId: director.id, memberIds: [dev.id] })
     const sent = await service.sendMessage(project.id, '这是一条很长很长的消息内容，需要能按需展开')
     const task = await service.createTask({
       projectId: project.id, title: 'Recall target', description: 'Full description here.', assigneeBotId: dev.id, autoStart: true,
@@ -186,7 +186,7 @@ test('team_recall 能按短 id 展开消息、评论、运行和任务', async (
 
     store.run(
       'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',
-      'sess-recall', chief.id, project.id, 'project', null, new Date().toISOString(),
+      'sess-recall', director.id, project.id, 'project', null, new Date().toISOString(),
     )
 
     assert.match(service.recall('sess-recall', `m_${sent.messageId.slice(-6)}`), /很长很长的消息/)
@@ -202,9 +202,9 @@ test('team_recall 能按短 id 展开消息、评论、运行和任务', async (
 })
 
 test('只读运行改动了工作区会在群聊里点名', async () => {
-  const { root, workspace, store, service, runtime, chief } = await setup()
+  const { root, workspace, store, service, runtime, director } = await setup()
   try {
-    const project = await service.createProject({ name: 'Audit', key: 'AUD', ownerBotId: chief.id })
+    const project = await service.createProject({ name: 'Audit', key: 'AUD', ownerBotId: director.id })
     const dir = join(workspace, project.slug)
     execFileSync('git', ['init', '--quiet'], { cwd: dir, stdio: 'ignore' })
     await service.sendMessage(project.id, '随便聊聊，不要改文件')

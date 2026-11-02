@@ -410,7 +410,7 @@ export class DshRuntime {
   }
 
   async ensureSession(bot, project, { run, task, sessionKind } = {}) {
-    // 任务运行使用独立会话，与该项目负责人会话互不阻塞；dm 运行用独立私信会话；
+    // 任务运行使用独立会话，与该项目总监会话互不阻塞；dm 运行用独立私信会话；
     // 单聊运行（solo_chat）没有项目，落在 bot 自己的 _the_bots/<dir> 专属会话；其余运行共用项目会话。
     // sessionKind 由调用方显式指定（dm_reply 投递回任务会话等跨类别场景）。
     const kind0 = sessionKind
@@ -678,7 +678,8 @@ Status: ${task.status}
 Description:
 ${task.description || '(no description)'}${threads}${parallel}
 
-Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.`
+Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
+When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`
     }
     const recent = this.store.all(
       'SELECT id, sender_type, sender_id, body, task_id FROM messages WHERE project_id = ? ORDER BY created_at DESC LIMIT 12',

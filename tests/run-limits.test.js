@@ -105,7 +105,7 @@ test('保存值越界或非法按未保存回退默认', async () => {
 test('updateSettings 校验运行时效范围并落库生效', async () => {
   const ctx = await setup()
   try {
-    const actor = { type: 'chief', id: 'chief' }
+    const actor = { type: 'director', id: 'director' }
     await ctx.service.updateSettings({ [RUN_TIMEOUT_KEY]: '45', [STALL_WATCHDOG_KEY]: '15' })
     assert.equal(ctx.store.setting(RUN_TIMEOUT_KEY, ''), '45')
     assert.equal(ctx.store.setting(STALL_WATCHDOG_KEY, ''), '15')

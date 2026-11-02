@@ -83,17 +83,17 @@ test('messageFromBot 建立幂等私信并驱动 dm 运行与空闲投递', asyn
   globalThis.DM_ROOT = state.root
   try {
     const { store, service, runtime, builder, originSession, task } = state
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    const first = service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'ask-auth', textBody: '登录接口返回结构是什么？' })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const first = service.messageFromBot({ sessionId: originSession, toName: 'director', requestId: 'ask-auth', textBody: '登录接口返回结构是什么？' })
     assert.equal(first.created, true)
     assert.equal(first.status, 'delivered')
-    const again = service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'ask-auth', textBody: '登录接口返回结构是什么？' })
+    const again = service.messageFromBot({ sessionId: originSession, toName: 'director', requestId: 'ask-auth', textBody: '登录接口返回结构是什么？' })
     assert.equal(again.created, false)
     assert.equal(again.status, 'delivered')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM bot_messages').n, 1)
     // 同一 request_id 换内容是语义碰撞：直接报冲突，避免新问题被旧请求静默吞掉。
     assert.throws(
-      () => service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'ask-auth', textBody: '再问一次' }),
+      () => service.messageFromBot({ sessionId: originSession, toName: 'director', requestId: 'ask-auth', textBody: '再问一次' }),
       error => error?.status === 409 && /ask-auth/.test(error?.message ?? ''),
     )
 
@@ -101,7 +101,7 @@ test('messageFromBot 建立幂等私信并驱动 dm 运行与空闲投递', asyn
     const dmRun = store.get("SELECT * FROM runs WHERE kind = 'dm'")
     assert.ok(dmRun, 'dm run 应已入队')
     assert.equal(dmRun.trigger_ref, store.get('SELECT id FROM bot_messages').id)
-    assert.equal(dmRun.bot_id, chief.id)
+    assert.equal(dmRun.bot_id, director.id)
     // dm/dm_reply 运行不携带 task_id（one_active_run_per_task 不限 kind）。
     assert.equal(dmRun.task_id, null)
 
@@ -128,14 +128,14 @@ test('发起会话正忙时回信走 steer 注入', async () => {
   globalThis.DM_ROOT = state.root
   try {
     const { store, service, runtime, originSession } = state
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
-    service.messageFromBot({ sessionId: originSession, toName: 'chief', requestId: 'busy-ask', textBody: '在吗' })
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    service.messageFromBot({ sessionId: originSession, toName: 'director', requestId: 'busy-ask', textBody: '在吗' })
     await service.tick()
     const dmRun = store.get("SELECT * FROM runs WHERE kind = 'dm'")
     runtime.busySessions.add(originSession)
     await runtime.complete(dmRun.id, 'succeeded', '在的')
     assert.equal(runtime.steers.length, 1, '忙时应 steer 而不是排运行')
-    assert.match(runtime.steers[0].text, /Reply from chief/)
+    assert.match(runtime.steers[0].text, /Reply from director/)
     assert.match(runtime.steers[0].text, /在的/)
     assert.equal(runtime.steers[0].sessionId, originSession)
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'dm_reply'")?.n, 0)
@@ -153,13 +153,13 @@ test('自私信与非成员被拒，目标不可用时私信失败留痕', async
     assert.throws(() => service.messageFromBot({ sessionId: originSession, toName: 'nobody', requestId: 'x', textBody: '你是谁' }), /没有叫 nobody 的成员/)
     // 重试路径：直接落一条 pending 私信与 pending outbox（模拟投递失败后待重试），
     // 目标已被归档 → applyOutboxRow 应把私信置 failed 并留痕，而不是排运行。
-    const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     store.run(
       `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id, origin_kind, status, created_at)
        VALUES ('botm_dead1', ?, ?, ?, 'dead-ask', '在吗', ?, 'task', 'pending', ?)`,
-      project.id, builder.id, chief.id, originSession, new Date().toISOString(),
+      project.id, builder.id, director.id, originSession, new Date().toISOString(),
     )
-    store.run("UPDATE bots SET status = 'archived' WHERE id = ?", chief.id)
+    store.run("UPDATE bots SET status = 'archived' WHERE id = ?", director.id)
     store.run(
       `INSERT INTO outbox(id, kind, project_id, idempotency_key, payload_json, status, attempts, available_at, created_at)
        VALUES ('out_dead1', 'dm_run', ?, 'dm_run:botm_dead1', ?, 'pending', 0, ?, ?)`,

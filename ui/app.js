@@ -233,17 +233,71 @@
     return '自动沉淀'
   }
 
-  function richText(value) {
-    let text = esc(value)
-    const blocks = []
-    text = text.replace(/```([\s\S]*?)```/g, (_, code) => {
-      blocks.push(`<pre>${code.replace(/^\n|\n$/g, '')}</pre>`)
-      return `@@CODE${blocks.length - 1}@@`
+  // markdown-render:start —— 聊天 markdown 渲染纯逻辑（tests/markdown.test.js 抽取此块断言）。
+  // 管线固定：md → mdRewriteImageSources → marked.parse → DOMPurify.sanitize → innerHTML。
+  // 消毒不可绕：marked 或 DOMPurify 缺席、或 DOMPurify.isSupported=false（node/损坏安装）时
+  // mdCreateRenderer 返回 null，调用方回退 esc 纯文本，绝不裸插 HTML。
+  // 工作区图片路径改写成 GET /api/dsh-team/file（服务端再做 MIME 白名单与防穿越）。
+  const MD_SCHEME = /^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/i
+  function mdImageFileUrl(href, scope) {
+    if (!scope || !href) return null
+    const raw = String(href)
+    // 只改写本地路径形态；http(s)/data:/锚点等协议引用原样交给消毒层。
+    if (MD_SCHEME.test(raw)) return null
+    let rel = raw
+    const root = scope.root ? String(scope.root).replace(/\/+$/, '') : ''
+    if (root && raw.startsWith(`${root}/`)) rel = raw.slice(root.length + 1)
+    else if (raw.startsWith('/')) rel = raw.replace(/^\/+/, '')
+    // 只剥前导 "./"，不剥 "../"——越界段留给下面统一拒绝。
+    else rel = raw.replace(/^(?:\.\/)+/, '')
+    if (!rel || rel.split('/').includes('..')) return null
+    const params = new URLSearchParams()
+    if (scope.projectId) params.set('projectId', scope.projectId)
+    else if (scope.soloBotId) params.set('soloBotId', scope.soloBotId)
+    else return null
+    params.set('path', rel)
+    return `/api/dsh-team/file?${params.toString()}`
+  }
+  function mdRewriteImageSources(source, scope) {
+    return String(source ?? '').replace(/(!\[[^\]]*\]\()\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\)/g, (whole, lead, href) => {
+      const url = mdImageFileUrl(href, scope)
+      return url ? `${lead}${url})` : whole
     })
-    text = text.replace(/`([^`\n]+)`/g, '<code>$1</code>')
-    text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    const paragraphs = text.split(/\n{2,}/).map(part => `<p>${part.replace(/\n/g, '<br>')}</p>`).join('')
-    return paragraphs.replace(/@@CODE(\d+)@@/g, (_, index) => blocks[Number(index)] ?? '')
+  }
+  function mdCreateRenderer(deps) {
+    const { marked, DOMPurify } = deps ?? {}
+    if (typeof marked?.parse !== 'function') return null
+    if (typeof DOMPurify?.sanitize !== 'function' || DOMPurify.isSupported === false) return null
+    // 外链统一新窗口 + noopener：afterSanitizeAttributes 官方配方，随消毒管线走，不经手拼 HTML。
+    if (typeof DOMPurify.addHook === 'function') {
+      DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+        if (node?.tagName !== 'A' || typeof node.getAttribute !== 'function' || !node.getAttribute('href')) return
+        node.setAttribute('target', '_blank')
+        node.setAttribute('rel', 'noopener noreferrer')
+      })
+    }
+    return function renderMarkdown(body, scope) {
+      const html = marked.parse(mdRewriteImageSources(body, scope), { gfm: true, breaks: true })
+      return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+    }
+  }
+  // markdown-render:end
+
+  // 真实依赖来自 vendor 脚本（见 index.html）；缺席时 mdRender 为 null，richText 走纯文本兜底。
+  const mdRender = mdCreateRenderer({ marked: window.marked, DOMPurify: window.DOMPurify })
+  function richText(value, scope) {
+    if (mdRender) return mdRender(value, scope)
+    return `<p>${esc(value).replaceAll('\n', '<br>')}</p>`
+  }
+
+  // 聊天图片的工作区指向：群聊=当前项目工作区，单聊=Bot 专属工作区；root 供绝对路径归一。
+  function mdChatScope() {
+    if (inSoloContext()) {
+      const bot = botById(state.soloBotId)
+      return bot?.soloWorkspace ? { soloBotId: bot.id, root: bot.soloWorkspace } : null
+    }
+    const project = pageProject()
+    return project ? { projectId: project.id, root: project.workspace_path } : null
   }
 
   function toast(message, type = '') {
@@ -669,7 +723,7 @@
           <div class="chat-head">
             <div>
               <div class="chat-head-title"><span class="chat-hash">#</span>群聊</div>
-              <div class="chat-head-meta"><span>负责人 ${esc(owner?.name ?? '未设置')}</span><span class="sep"></span><span>${members.length} 个成员</span></div>
+              <div class="chat-head-meta"><span>总监 ${esc(owner?.name ?? '未设置')}</span><span class="sep"></span><span>${members.length} 个成员</span></div>
             </div>
             <div class="member-stack">
               ${members.slice(0, 6).map(member => {
@@ -682,7 +736,7 @@
             ${messages.length === 0 ? `<div class="chat-empty">
               <div class="empty-symbol">${icon('message')}</div>
               <h3>还没有人说话</h3>
-              <p>直接发言会交给负责人 Bot；用 <strong>@Bot</strong> 点名成员，或输入 <strong>/task @Bot 任务标题</strong> 直接创建任务。</p>
+              <p>直接发言会交给总监 Bot；用 <strong>@Bot</strong> 点名成员，或输入 <strong>/task @Bot 任务标题</strong> 直接创建任务。</p>
             </div>` : messages.map(renderMessage).join('')}
             ${typingRows(state.data.runs, 'chat')}
           </div>
@@ -706,11 +760,11 @@
         </div>
         <aside class="chat-side">
           <div class="side-card">
-            <div class="side-card-head"><h3>项目负责人</h3></div>
+            <div class="side-card-head"><h3>项目总监</h3></div>
             ${owner ? `<div class="owner-row">
               ${avatar(owner, 'lg')}
-              <div class="owner-info"><strong>${esc(owner.name)}</strong><span>${esc(owner.role || '项目负责人')} · ${esc(owner.model ?? '未配置模型')}</span></div>
-            </div>` : '<div class="faint">未设置负责人</div>'}
+              <div class="owner-info"><strong>${esc(owner.name)}</strong><span>${esc(owner.role || '项目总监')} · ${esc(owner.model ?? '未配置模型')}</span></div>
+            </div>` : '<div class="faint">未设置总监</div>'}
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>活跃任务</h3><span>${project.stats.openTasks}</span></div>
@@ -735,7 +789,7 @@
                 return `<div class="side-row">
                   ${avatar(bot, 'sm')}
                   <span class="side-row-title">${esc(bot.name)}</span>
-                  <span class="faint">${member.member_role === 'owner' ? '负责人' : esc(bot.role || '成员')}</span>
+                  <span class="faint">${member.member_role === 'owner' ? '总监' : esc(bot.role || '成员')}</span>
                 </div>`
               }).join('')}
             </div>
@@ -907,7 +961,7 @@
       ${isUser ? '' : avatar(bot ?? { name: message.senderName, color: 'gray' })}
       <div class="message-body-wrap">
         <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}</div>
-        <div class="message-bubble">${quoteBlock}${richText(message.body)}</div>
+        <div class="message-bubble">${quoteBlock}${richText(message.body, mdChatScope())}</div>
         ${message.taskIdentifier ? `<div class="task-chip-line"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button></div>` : ''}
         ${message.run_id && !isUser ? `<div class="task-chip-line"><button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button></div>` : ''}
       </div>
@@ -1004,7 +1058,7 @@
       canceled: '已取消',
     }[run.status] ?? '') : ''
     const tags = []
-    if (task.status === 'in_review') tags.push(task.review_target === 'owner_bot' ? '负责人验收中' : '待您验收')
+    if (task.status === 'in_review') tags.push(task.review_target === 'owner_bot' ? '总监验收中' : '待您验收')
     for (const label of task.labels ?? []) tags.push(label)
     const isRunning = run?.status === 'running'
     return `<article class="task-card${isRunning ? ' running' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
@@ -1754,14 +1808,14 @@
               <div class="field"><label id="settings-name-label" for="settings-name">项目名称</label><input class="input" id="settings-name" name="name" value="${attr(project.name)}" maxlength="80"></div>
               <div class="field"><label id="settings-description-label" for="settings-description">项目描述</label><textarea class="textarea" id="settings-description" name="description">${esc(project.description || '')}</textarea></div>
               <div class="field-row">
-                <div class="field"><label id="settings-owner-label" for="settings-owner">负责人 Bot</label><select class="select" id="settings-owner" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
-                <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">群聊回复模式</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>负责人优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
+                <div class="field"><label id="settings-owner-label" for="settings-owner">总监 Bot</label><select class="select" id="settings-owner" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
+                <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">群聊回复模式</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>总监优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
               </div>
             </div>
             <div class="card form-card" style="margin-top:12px">
               <div class="card-head"><h3>项目成员</h3><span class="meta">${project.members.length} 位</span></div>
               <div class="check-list">${members.map(bot => `<div class="check-row"><input type="checkbox" id="member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}" ${memberIds.has(bot.id) ? 'checked' : ''} ${bot.id === project.owner_bot_id ? 'disabled' : ''}>${avatar(bot, 'sm')}<label for="member-${attr(bot.id)}">${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div>
-              <div class="hint">负责人始终是成员，取消勾选即可调整其他成员的参与范围。</div>
+              <div class="hint">总监始终是成员，取消勾选即可调整其他成员的参与范围。</div>
             </div>
             <div class="card form-card" style="margin-top:12px">
               <div class="card-head"><h3>月度预算</h3></div>
@@ -1786,7 +1840,7 @@
             </div>
             <div class="card form-card" style="margin-top:12px">
               <div class="card-head"><h3>项目状态</h3>${project.status === 'active' ? '<span class="pill green">运行中</span>' : '<span class="pill amber">已归档</span>'}</div>
-              <div class="kv"><span>负责人</span><strong>${esc(owner?.name ?? '未设置')}</strong></div>
+              <div class="kv"><span>总监</span><strong>${esc(owner?.name ?? '未设置')}</strong></div>
               <div class="kv"><span>任务总数</span><strong>${project.stats.tasks}</strong></div>
               <div class="kv"><span>运行总数</span><strong>${project.stats.runs}</strong></div>
               ${project.status === 'active' ? `<div class="btn-row" style="margin-top:12px"><button class="btn small" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>` : ''}
@@ -1934,7 +1988,7 @@
         <div class="field"><label id="new-project-name-label" for="new-project-name">项目名称</label><input class="input" style="width:100%" id="new-project-name" name="name" placeholder="例如：官网重构" required maxlength="80" autofocus></div>
         <div class="field-row">
           <div class="field"><label id="new-project-key-label" for="new-project-key">项目 Key</label><input class="input mono" style="width:100%" id="new-project-key" name="key" placeholder="WEB" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{0,9}"><div class="hint">任务的编号前缀。</div></div>
-          <div class="field"><label id="new-project-owner-label" for="new-project-owner">负责人 Bot</label><select class="select" style="width:100%" id="new-project-owner" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}</select></div>
+          <div class="field"><label id="new-project-owner-label" for="new-project-owner">总监 Bot</label><select class="select" style="width:100%" id="new-project-owner" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label id="new-project-description-label" for="new-project-description">项目说明</label><textarea class="textarea" id="new-project-description" name="description" placeholder="项目目标、边界和验收标准"></textarea></div>
         <div class="field"><label id="new-project-production-label" for="new-project-production">生产目录</label><div style="display:flex;gap:8px"><input class="input mono" style="flex:1" id="new-project-production" name="productionDir" placeholder="/Users/you/repos/my-game（可选）"><button class="btn" type="button" data-action="pick-dir-open" data-picker-for="new-project-production">${icon('folder')}选择</button></div><div class="hint">Bots 的工作目录，可指向既有代码库等本机目录；留空则用默认管理目录。</div><div class="dir-picker" id="dir-picker-new-project-production" hidden></div></div>
@@ -2167,7 +2221,7 @@
           <div class="eyebrow" style="margin-bottom:6px">评论</div>
           ${(task.comments ?? []).length === 0 ? '<div class="note">还没有评论。</div>' : task.comments.map(comment => `<div class="comment">
             ${avatar(comment.author_type === 'bot' ? (botById(comment.author_id) ?? { name: comment.authorName, color: 'gray' }) : { name: '我', color: 'teal' }, 'sm')}
-            <div class="comment-main"><div class="comment-head"><strong>${esc(comment.authorName)}</strong><span>${esc(timeAgo(comment.created_at))}</span></div><div class="comment-body">${richText(comment.body)}</div></div>
+            <div class="comment-main"><div class="comment-head"><strong>${esc(comment.authorName)}</strong><span>${esc(timeAgo(comment.created_at))}</span></div><div class="comment-body">${richText(comment.body, mdChatScope())}</div></div>
           </div>`).join('')}
           <form data-form="add-comment" style="margin-top:14px">
             <input type="hidden" name="taskId" value="${attr(task.id)}">
@@ -2529,7 +2583,7 @@
       for (const member of sources.members ?? []) {
         if (hit(member.name) || hit(member.role)) items.push({
           kind: 'member', label: `@${member.name}`, title: member.name, color: member.color,
-          desc: member.owner ? `负责人 · ${member.role || '成员'}` : (member.role || '成员'),
+          desc: member.owner ? `总监 · ${member.role || '成员'}` : (member.role || '成员'),
           insert: `@${member.name} `,
         })
       }
@@ -3008,7 +3062,7 @@
         case 'archive-bot': {
           const botId = target.dataset.botId
           const bot = botById(botId)
-          if (!bot || !window.confirm(`归档 ${bot.name}？负责人关系必须先解除。`)) break
+          if (!bot || !window.confirm(`归档 ${bot.name}？总监关系必须先解除。`)) break
           await api('archive_bot', { botId })
           state.modal = null
           await refresh()
@@ -3620,6 +3674,25 @@
     const composerInput = document.getElementById('composer-input')
     if (composerInput) applyComposerHeight(composerInput)
   })
+
+  // 聊天图片加载失败占位 chip：error 不冒泡，用捕获阶段全局监听；只处理消息气泡/评论里的
+  // markdown 图片。chip 只显示文件名（路径查参或 alt 兜底），不复制错误页内容进 DOM。
+  window.addEventListener('error', (event) => {
+    const img = event.target
+    if (!(img instanceof HTMLImageElement)) return
+    if (!img.closest('.message-bubble, .comment-body')) return
+    let name = ''
+    try {
+      const url = new URL(img.getAttribute('src') ?? '', location.href)
+      name = url.searchParams.get('path')?.split('/').pop() ?? url.pathname.split('/').pop() ?? ''
+    } catch { name = '' }
+    if (!name) name = img.alt?.trim() || '图片'
+    const chip = document.createElement('span')
+    chip.className = 'md-img-missing'
+    chip.textContent = `${name}（图片未能加载）`
+    chip.title = '工作区里找不到该图片，或类型/大小不在白名单内'
+    img.replaceWith(chip)
+  }, true)
 
   const observer = new MutationObserver(() => {
     if (state.modal?.type === 'proposal') bindProposalForm()

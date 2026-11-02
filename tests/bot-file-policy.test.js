@@ -118,7 +118,7 @@ async function runtimeOf(ctx, store, config) {
 test('ensureSession writes sandbox/mode with the bot file policy on both paths', async () => {
   const { root, store, service, config } = await setup()
   try {
-    const project = await service.createProject({ name: 'Alpha', ownerBotId: (await service.createBot({ name: 'Chief2', role: '头', instructions: 'x', provider: 'fake', model: 'model-a' })).id })
+    const project = await service.createProject({ name: 'Alpha', ownerBotId: (await service.createBot({ name: 'director2', role: '头', instructions: 'x', provider: 'fake', model: 'model-a' })).id })
     const bot = service.botRow((await service.createBot({ name: 'Worker', role: '干', instructions: 'x', provider: 'fake', model: 'model-a', filePolicy: 'read-only' })).id)
     const ctx = fakeCtx()
     const runtime = await runtimeOf(ctx, store, config)

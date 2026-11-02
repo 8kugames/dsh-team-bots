@@ -97,7 +97,7 @@ async function createEnvironment({ stallTimeoutMs = 0 } = {}) {
 }
 
 async function seedWorkload(service, store, { key = 'FLT' } = {}) {
-  const chief = store.get('SELECT * FROM bots WHERE name = ?', service.config.seedOwnerName)
+  const director = store.get('SELECT * FROM bots WHERE name = ?', service.config.seedOwnerName)
   const worker = await service.createBot({
     name: 'Worker1',
     role: '开发',
@@ -108,7 +108,7 @@ async function seedWorkload(service, store, { key = 'FLT' } = {}) {
   const project = await service.createProject({
     name: '故障演练项目',
     key,
-    ownerBotId: chief.id,
+    ownerBotId: director.id,
     memberIds: [worker.id],
   })
   const task = await service.createTask({
@@ -118,7 +118,7 @@ async function seedWorkload(service, store, { key = 'FLT' } = {}) {
     autoStart: true,
     postCard: false,
   })
-  return { chief, worker, project, task }
+  return { director, worker, project, task }
 }
 
 // 场景一：进程崩溃留下 running 运行，重启后应重新排队，且重复初始化不产生重复运行。
