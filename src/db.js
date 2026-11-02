@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS bots (
   provider TEXT,
   model TEXT,
   effort TEXT,
+  file_policy TEXT NOT NULL DEFAULT 'workspace-write',
   solo_dir TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'active',
   current_revision INTEGER NOT NULL DEFAULT 0,
@@ -527,6 +528,7 @@ export function openDatabase(path) {
     db.exec("UPDATE tasks SET review_target = CASE WHEN creator_type = 'bot' THEN 'owner_bot' ELSE 'user' END")
   }
   migrateRuns(db)
+  migrateBots(db)
   migrateSessionBindings(db)
   migrateProjects(db)
   migrateMemories(db)
@@ -550,6 +552,7 @@ export function openDatabase(path) {
   recordMigration(db, 'projects_production_dir')
   recordMigration(db, 'terminal_commands')
   recordMigration(db, 'messages_reply_to')
+  recordMigration(db, 'bots_file_policy')
   return new Store(db, { ftsEnabled })
 }
 
@@ -562,6 +565,11 @@ function addColumn(db, table, column, definition) {
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
 }
 
+
+// bots.file_policy：宿主文件沙箱档位（read-only / workspace-write / danger-full-access），默认工作区内修改。
+function migrateBots(db) {
+  addColumn(db, 'bots', 'file_policy', "TEXT NOT NULL DEFAULT 'workspace-write'")
+}
 
 // run.mode 区分写入型与只读型运行：同一项目同时只允许一个写运行，只读运行可并行。
 function migrateRuns(db) {

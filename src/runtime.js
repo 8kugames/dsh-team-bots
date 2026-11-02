@@ -9,6 +9,9 @@ import { dmPrompt, replyDeliveryPrompt } from './botmsg.js'
 
 const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
+// 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
+const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
+
 // teammate 等子会话的父指向在不同 DSH 版本里字段不一，逐个探测。
 const PARENT_ACCESSORS = [
   session => session?.parentSessionId,
@@ -437,6 +440,7 @@ export class DshRuntime {
     if (existing) {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
+        this.applyFilePolicy(resolved, bot)
         await this.selectModel(existing.session_id, bot)
         return existing.session_id
       }
@@ -473,6 +477,7 @@ export class DshRuntime {
           try { this.ctx.sessionTitle.rename(liveSession, title) } catch {}
         }
       }
+      this.applyFilePolicy(agent, bot)
       this.store.run(
         `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -492,6 +497,24 @@ export class DshRuntime {
       return await creating
     } finally {
       this.sessionCreates.delete(key)
+    }
+  }
+
+  // 把 bot.file_policy 写成宿主 session 的文件沙箱覆盖。宿主官方写路径
+  // setSandboxMode(session, mode) 就是 session.append('sandbox/mode', { mode })，
+  // 这里等价直调（插件不依赖宿主包），事件 log-only、replay 持久、下次受限调用生效。
+  // 会话已是目标档位就不重复追加；设置失败只告警不阻断会话（沙箱回落宿主默认）。
+  applyFilePolicy(agent, bot) {
+    const mode = bot?.file_policy
+    if (!SANDBOX_MODES.includes(mode)) return
+    const liveSession = agent?.agent?.session ?? agent?.session
+    if (!liveSession?.append) return
+    try {
+      const current = this.ctx.sandboxPolicy?.overrideOf?.(liveSession)
+      if (current === mode) return
+      liveSession.append('sandbox/mode', { mode })
+    } catch (error) {
+      this.logger.warn?.(`应用文件权限 ${mode} 失败（${bot?.name ?? bot?.id}）：${error?.message ?? error}`)
     }
   }
 

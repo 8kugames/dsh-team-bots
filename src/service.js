@@ -30,6 +30,19 @@ const TRANSITIONS = {
 }
 const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
 
+// bot 文件权限档位，与 DSH 宿主 SANDBOX_MODES 一一对应；默认工作区内修改。
+export const FILE_POLICIES = ['read-only', 'workspace-write', 'danger-full-access']
+export const FILE_POLICY_LABELS = {
+  'read-only': '只读',
+  'workspace-write': '工作区内修改',
+  'danger-full-access': '完全访问',
+}
+function normalizeFilePolicy(value) {
+  if (value === undefined || value === null || value === '') return 'workspace-write'
+  if (!FILE_POLICIES.includes(value)) throw badRequest(`文件权限无效，允许值：${FILE_POLICIES.join(' / ')}`)
+  return value
+}
+
 // 工作台「终端」的硬限制：命令长度、输出封顶（只留末尾）、每项目历史条数。
 // 硬超时走 config.terminalTimeoutMs（默认 120s，测试可注入短值）。
 const TERMINAL_COMMAND_MAX = 4000
@@ -379,6 +392,7 @@ export class TeamService {
     const role = text(input.role, 24)
     const instructions = text(input.instructions, 12_000)
     const color = COLORS.includes(input.color) ? input.color : 'blue'
+    const filePolicy = normalizeFilePolicy(input.filePolicy)
     const soloDir = this.soloDirFor(name, botId)
     // 先建目录再建号：目录建不出来就别留下一个单聊必然失败的 bot 行。
     try {
@@ -388,17 +402,17 @@ export class TeamService {
     }
     this.store.transaction(() => {
       this.store.run(
-        `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort, solo_dir,
+        `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort, file_policy, solo_dir,
           status, current_revision, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
-        botId, name, role, instructions, color, provider, model, effort, soloDir, createdAt, createdAt,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
+        botId, name, role, instructions, color, provider, model, effort, filePolicy, soloDir, createdAt, createdAt,
       )
       this.store.run(
         `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, provider, model, effort, created_by, created_at)
          VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
         id('rev'), botId, role, instructions, provider, model, effort, `${actor.type}:${actor.id}`, createdAt,
       )
-      this.audit(actor, 'bot.create', 'bot', botId, { name, provider, model, effort })
+      this.audit(actor, 'bot.create', 'bot', botId, { name, provider, model, effort, file_policy: filePolicy })
     })
     return this.botView(this.botRow(botId))
   }
@@ -455,6 +469,10 @@ export class TeamService {
     if (patch.role !== undefined) changes.role = text(patch.role, 24)
     if (patch.instructions !== undefined) changes.instructions = text(patch.instructions, 12_000)
     if (patch.color !== undefined && COLORS.includes(patch.color)) changes.color = patch.color
+    if (patch.filePolicy !== undefined) {
+      const filePolicy = normalizeFilePolicy(patch.filePolicy)
+      if (filePolicy !== bot.file_policy) changes.file_policy = filePolicy
+    }
     if (patch.status !== undefined) {
       if (!['active', 'paused', 'archived'].includes(patch.status)) throw badRequest('Bot 状态无效')
       changes.status = patch.status

@@ -61,6 +61,12 @@
   const TERMINAL_STATUS = { running: '运行中', succeeded: '已完成', failed: '失败', timeout: '超时', canceled: '已停止', interrupted: '已中断' }
   const CREATOR_TYPE = { bot: 'Bot', user: '用户' }
   const EFFORT = { minimal: '最低', low: '低', medium: '中', high: '高', max: '最高' }
+  const FILE_POLICY = { 'read-only': '只读', 'workspace-write': '工作区内修改', 'danger-full-access': '完全访问' }
+  const DEFAULT_FILE_POLICY = 'workspace-write'
+  function filePolicyOptions(current) {
+    const value = FILE_POLICY[current] ? current : DEFAULT_FILE_POLICY
+    return Object.entries(FILE_POLICY).map(([id, label]) => `<option value="${attr(id)}" ${value === id ? 'selected' : ''}>${esc(label)}</option>`).join('')
+  }
   // The one action in the top-right belongs to the page you are on.
   const VIEW_ACTION = {
     tasks: { label: '新建任务', action: 'new-task', icon: 'plus' },
@@ -857,6 +863,7 @@
             <div class="field-row">
               <div class="field"><label for="solo-bot-model">模型</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
               <div class="field"><label for="solo-bot-effort">推理强度</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
+              <div class="field"><label for="solo-bot-file-policy">文件权限</label><select class="select" style="width:100%" id="solo-bot-file-policy" name="filePolicy" title="Bot 会话内文件操作的沙箱边界，下次运行生效">${filePolicyOptions(bot.file_policy)}</select></div>
             </div>
             <div class="field"><span class="field-label" id="solo-bot-color-label">外观颜色</span><div class="swatch-row" role="radiogroup" aria-labelledby="solo-bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div></div>
             <div class="field"><label for="solo-bot-instructions">角色指令</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="12" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot.instructions ?? '')}</textarea></div>
@@ -1965,6 +1972,7 @@
           <div class="field-row">
             <div class="field"><label id="bot-model-label" for="bot-model">模型</label><select class="select" style="width:100%" id="bot-model" name="modelRef" data-model-select>${modelOptions(bot?.provider, bot?.model)}</select></div>
             <div class="field"><label id="bot-effort-label" for="bot-effort">推理强度</label><select class="select" style="width:100%" id="bot-effort" name="effort" data-effort-select>${effortOptions(modelRef, bot?.effort)}</select></div>
+            <div class="field"><label id="bot-file-policy-label" for="bot-file-policy">文件权限</label><select class="select" style="width:100%" id="bot-file-policy" name="filePolicy" title="Bot 会话内文件操作的沙箱边界，下次运行生效">${filePolicyOptions(bot?.file_policy)}</select></div>
           </div>
           <div class="field"><span class="field-label" id="bot-color-label">外观颜色</span><div class="swatch-row" role="radiogroup" aria-labelledby="bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot?.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div></div>
           <div class="field"><label id="bot-instructions-label" for="bot-instructions">角色指令</label><textarea class="textarea" id="bot-instructions" name="instructions" rows="10" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot?.instructions ?? '')}</textarea></div>
@@ -3166,6 +3174,7 @@
           provider,
           model,
           effort: payload.effort || null,
+          filePolicy: payload.filePolicy || undefined,
         }
         if (type === 'create-bot') {
           await api('create_bot', common)
