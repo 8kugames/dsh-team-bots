@@ -87,22 +87,27 @@ test('updating file policy persists, audits and does not bump revisions', async 
 })
 
 // ensureSession 派发断言：fake ctx 捕获 append('sandbox/mode') 参数。
+// 宿主 cordis 上下文里未声明 inject 的服务不能被直接读取（读即抛错），可选服务
+// 一律经 ctx.get(name) 取——fake ctx 按同一口径提供，并保留 services 便于改桩。
 function fakeCtx({ sandboxPolicy = true } = {}) {
   const appended = []
   const session = {
     append(type, data) { appended.push({ type, data }) },
   }
   const agent = { agent: { session } }
+  const services = new Map()
+  if (sandboxPolicy) services.set('sandboxPolicy', { overrideOf: () => undefined })
   return {
     appended,
     session,
+    services,
+    get(name) { return services.get(name) },
     sessionController: {
       async resolveAgent() { return agent },
       async create() { return { sessionId: 'sess-1' } },
       async selectModel() { return { selected: {} } },
     },
     sessionTitle: { rename() {} },
-    ...(sandboxPolicy ? { sandboxPolicy: { overrideOf: () => undefined } } : {}),
   }
 }
 
@@ -154,10 +159,31 @@ test('applyFilePolicy skips duplicate writes and tolerates missing host service'
     assert.equal(ctx.appended.length, 2)
     // overrideOf 报告已是目标值 → 不重复追加。
     const ctx2 = fakeCtx()
-    ctx2.sandboxPolicy.overrideOf = () => 'workspace-write'
+    ctx2.services.get('sandboxPolicy').overrideOf = () => 'workspace-write'
     const runtime2 = await runtimeOf(ctx2, store, config)
     runtime2.applyFilePolicy({ agent: { session: ctx2.session } }, { name: 'A', file_policy: 'workspace-write' })
     assert.equal(ctx2.appended.length, 0, '已是目标档位不应重复追加')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('applyFilePolicy reads the optional service through ctx.get, never as a property', async () => {
+  const { root, store, config } = await setup()
+  try {
+    // 复刻宿主 cordis 上下文：未声明 inject 的服务属性读取直接抛错。
+    const ctx = fakeCtx()
+    const realGet = ctx.get.bind(ctx)
+    Object.defineProperty(ctx, 'sandboxPolicy', {
+      get() { throw new Error('cannot get property "sandboxPolicy" without inject') },
+    })
+    ctx.get = name => realGet(name)
+    const runtime = await runtimeOf(ctx, store, config)
+    runtime.applyFilePolicy({ agent: { session: ctx.session } }, { name: 'A', file_policy: 'read-only' })
+    const modes = ctx.appended.filter(call => call.type === 'sandbox/mode')
+    assert.equal(modes.length, 1, '上下文未 inject 时也必须成功写入 sandbox/mode')
+    assert.deepEqual(modes[0].data, { mode: 'read-only' })
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

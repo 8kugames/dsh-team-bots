@@ -510,7 +510,11 @@ export class DshRuntime {
     const liveSession = agent?.agent?.session ?? agent?.session
     if (!liveSession?.append) return
     try {
-      const current = this.ctx.sandboxPolicy?.overrideOf?.(liveSession)
+      // 必须走 ctx.get()：宿主服务未在本插件 inject 声明时，直接读 ctx.sandboxPolicy
+      // 会被 cordis 代理抛 "cannot get property \"sandboxPolicy\" without inject"，
+      // 导致每次应用权限都失败、静默回落宿主默认档位。
+      const policy = this.ctx.get?.('sandboxPolicy')
+      const current = policy?.overrideOf?.(liveSession)
       if (current === mode) return
       liveSession.append('sandbox/mode', { mode })
     } catch (error) {
