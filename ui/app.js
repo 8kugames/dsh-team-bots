@@ -818,7 +818,7 @@
                 const dotClass = member.run_status === 'running' ? 'running' : member.run_status === 'failed' ? 'failed' : ''
                 const dotText = member.run_status === 'running' ? '运行中' : member.run_status === 'failed' ? '最近运行失败' : '空闲'
                 const model = member.modelRef ?? bot.modelRef ?? '未配置模型'
-                return `<div class="side-row" title="${esc(bot.name)} · ${esc(model)} · ${dotText}">
+                return `<div class="side-row" title="${esc(bot.name)} · ${esc(member.member_role === 'owner' ? '总监' : bot.role || '成员')} · ${esc(model)} · ${dotText}">
                   ${avatar(bot, 'sm')}
                   <span class="side-row-title">${esc(bot.name)}</span>
                   <span class="side-row-status">${esc(model)}</span>

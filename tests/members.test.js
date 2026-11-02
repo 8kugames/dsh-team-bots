@@ -163,3 +163,66 @@ test('membersWithUsage aggregates busy state and per-project usage totals', asyn
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('membersWithUsage run_status 三态判定：bot 全局口径，busy 仍项目口径', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const builder = await service.createBot({ name: 'Runner', role: '开发', instructions: 'Build things.', provider: 'fake', model: 'model-a' })
+    const watcher = await service.createBot({ name: 'Watcher', role: '测试', instructions: 'Watch.' })
+    const project = await service.createProject({
+      name: 'Status Project', key: 'STATUS', ownerBotId: director.id, memberIds: [builder.id, watcher.id],
+    })
+    const other = await service.createProject({ name: 'Elsewhere', key: 'ELSE', ownerBotId: director.id })
+
+    // 时间戳递增的 run：run_status 取「最近一条已终结 run」，同刻时间戳会让排序退化到 rowid，显式错开。
+    const at = n => new Date(Date.parse('2026-01-01T00:00:00Z') + n * 60_000).toISOString()
+    const run = (id, n, projectId, botId, status) => store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, trigger_type, status, idempotency_key, queued_at, started_at, ended_at)
+       VALUES (?, ?, ?, 'task', 'manual', ?, ?, ?, ?, ?)`,
+      id, projectId, botId, status, `idem-${id}`, at(n), at(n), status === 'queued' || status === 'running' ? null : at(n),
+    )
+    const statusOf = async botId => {
+      const members = service.projectView(service.projectRow(project.id)).members
+      return members.find(row => row.id === botId)
+    }
+
+    // 1) 无 run → idle；模型未配置 → modelRef null；配了 → provider/model 组合
+    assert.equal((await statusOf(watcher.id)).run_status, 'idle')
+    assert.equal((await statusOf(watcher.id)).modelRef, null)
+    assert.equal((await statusOf(builder.id)).modelRef, 'fake/model-a')
+
+    // 2) 单聊 run（project_id NULL）运行中：run_status=running（bot 全局口径），busy=false（项目口径不含单聊）
+    run('solo-r1', 1, null, builder.id, 'running')
+    let row = await statusOf(builder.id)
+    assert.equal(row.run_status, 'running')
+    assert.equal(row.busy, false)
+
+    // 3) 单聊 run 以失败收场 → failed；busy 仍 false
+    store.run("UPDATE runs SET status = 'failed', ended_at = ? WHERE id = 'solo-r1'", at(2))
+    row = await statusOf(builder.id)
+    assert.equal(row.run_status, 'failed')
+    assert.equal(row.busy, false)
+
+    // 4) 跨项目（builder 非成员）成功 run 更晚 → 回落 idle：失败不粘死，成功即翻篇
+    run('other-r1', 3, other.id, builder.id, 'succeeded')
+    assert.equal((await statusOf(builder.id)).run_status, 'idle')
+
+    // 5) 最近一条是 canceled → 不算失败，仍 idle
+    run('cancel-r1', 4, project.id, builder.id, 'canceled')
+    assert.equal((await statusOf(builder.id)).run_status, 'idle')
+    assert.equal((await statusOf(builder.id)).busy, false)
+
+    // 6) 本项目排队 → busy=true 且 run_status=running（两个口径同时为真）
+    run('proj-q1', 5, project.id, builder.id, 'queued')
+    row = await statusOf(builder.id)
+    assert.equal(row.run_status, 'running')
+    assert.equal(row.busy, true)
+
+    // 7) director 无 run → idle
+    assert.equal((await statusOf(director.id)).run_status, 'idle')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

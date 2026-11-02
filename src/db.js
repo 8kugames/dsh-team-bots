@@ -43,6 +43,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_task
   WHERE task_id IS NOT NULL AND status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS runs_queue_idx ON runs(status, queued_at);
 CREATE INDEX IF NOT EXISTS runs_project_idx ON runs(project_id, queued_at DESC);
+CREATE INDEX IF NOT EXISTS runs_bot_status_idx
+  ON runs(bot_id, COALESCE(ended_at, queued_at) DESC);
 `
 
 const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, error_code, error_message, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'

@@ -27,6 +27,8 @@ export const projectsMethods = {
   },
 
   // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，usage 四项与 cost 为本项目全部 run 的累计。
+  // run_status 用 bot 全局口径（不限本项目）：failed 根因（模型/AUTH）是 bot 级，单聊 run 的 project_id 为 NULL，
+  // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 维持项目口径不动。
   membersWithUsage(projectId) {
     return this.store.all(
       `SELECT pm.*, pm.member_id AS id, pm.member_role, b.name, b.role AS bot_role, b.provider, b.model, b.effort, b.status,
@@ -34,6 +36,19 @@ export const projectsMethods = {
            SELECT 1 FROM runs r
            WHERE r.project_id = pm.project_id AND r.bot_id = pm.member_id AND r.status IN ('queued', 'running')
          ) AS busy,
+         CASE
+           WHEN EXISTS(
+             SELECT 1 FROM runs r
+             WHERE r.bot_id = pm.member_id AND r.status IN ('queued', 'running')
+           ) THEN 'running'
+           WHEN COALESCE((
+             SELECT r.status FROM runs r
+             WHERE r.bot_id = pm.member_id
+             ORDER BY COALESCE(r.ended_at, r.queued_at) DESC
+             LIMIT 1
+           ), '') = 'failed' THEN 'failed'
+           ELSE 'idle'
+         END AS run_status,
          COALESCE(u.usage_input, 0) AS usage_input,
          COALESCE(u.usage_cache_read, 0) AS usage_cache_read,
          COALESCE(u.usage_cache_write, 0) AS usage_cache_write,
@@ -53,7 +68,11 @@ export const projectsMethods = {
        ORDER BY CASE pm.member_role WHEN 'owner' THEN 0 ELSE 1 END, b.name`,
       projectId,
       projectId,
-    ).map(row => ({ ...row, busy: Boolean(row.busy) }))
+    ).map(row => ({
+      ...row,
+      busy: Boolean(row.busy),
+      modelRef: row.provider && row.model ? `${row.provider}/${row.model}` : null,
+    }))
   },
   assertMember(projectId, botId) {
     const member = this.store.get(
