@@ -229,3 +229,36 @@ test('membersWithUsage run_status 三态判定：bot 全局口径，busy 仍项�
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('update_project 不带 memberIds 时不动成员表；换总监自动补齐成员归属', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const actor = { type: 'user', id: 'owner' }
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const builder = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build things.' })
+    const project = await service.createProject({ name: 'Demo Project', key: 'DEMO', ownerBotId: director.id })
+    await handleAction(service, 'add_member', { projectId: project.id, botId: builder.id }, actor)
+
+    // 设置页已不再全量提交 memberIds：纯信息更新（如改描述）不得触碰成员表
+    await handleAction(service, 'update_project', { projectId: project.id, patch: { description: 'changed' } }, actor)
+    let roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
+    assert.equal(roles.length, 2, '纯信息更新后成员数不变')
+    assert.equal(roles.find(row => row.member_id === builder.id)?.member_role, 'member')
+
+    // 换总监（不带 memberIds）：新总监须自动进成员表且角色为 owner，原总监降为普通成员
+    await handleAction(service, 'update_project', { projectId: project.id, patch: { ownerBotId: builder.id } }, actor)
+    roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
+    assert.equal(roles.length, 2, '换总监不增不减成员')
+    assert.equal(roles.find(row => row.member_id === builder.id)?.member_role, 'owner', '新总监角色为 owner')
+    assert.equal(roles.find(row => row.member_id === director.id)?.member_role, 'member', '原总监降为普通成员')
+
+    // 幂等：同一总监再保存一次仍是 owner，成员数不变
+    await handleAction(service, 'update_project', { projectId: project.id, patch: { ownerBotId: builder.id } }, actor)
+    roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
+    assert.equal(roles.length, 2)
+    assert.equal(roles.find(row => row.member_id === builder.id)?.member_role, 'owner')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

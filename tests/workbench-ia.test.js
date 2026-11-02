@@ -1,0 +1,41 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+// DSHBOTS-5 工作台信息架构改造：读源码断言（与 terminal-ui.test.js 同模式）。
+const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+
+const NAV = /const NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1] ?? ''
+const SOLO_NAV = /const SOLO_NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1] ?? ''
+
+// ① 项目导航：bots 改「成员」members，群聊侧栏「项目成员」面板移除，设置页成员 checkbox 移除。
+test('① 项目导航 bots → members 成员 tab', () => {
+  assert.match(NAV, /\['members', '成员', 'users'\]/, 'NAV 应有成员 tab')
+  assert.ok(!/\['bots',/.test(NAV), 'NAV 不应再有 bots tab')
+  assert.match(source, /case 'members':\s*\n?\s*return renderMembers\(\)/, 'render 路由 case members → renderMembers')
+  assert.match(source, /function renderMembers\(\)/, 'renderMembers 函数存在')
+})
+
+test('① 成员 tab：邀请下拉 + 邀请/移除动作 + busy 徽标 + 用量合计', () => {
+  assert.match(source, /id="invite-bot"/, '邀请下拉 select#invite-bot')
+  assert.match(source, /data-action="add-member"/, '邀请按钮 add-member')
+  assert.match(source, /data-action="remove-member"/, '移除按钮 remove-member')
+  assert.match(source, /member\.member_role === 'owner' \|\| member\.id === project\.owner_bot_id[\s\S]*?<span class="pill violet">总监<\/span>/, '总监行 violet pill')
+  assert.match(source, /member\.busy \? '任务中' : '空闲中'|member\.busy \? "任务中" : "空闲中"|busy \? '任务中' : '空闲中'/, '任务中/空闲中徽标')
+  assert.match(source, /formatCost\(Number\(member\.usage_cost \?\? 0\)\)/, 'cost 合计用 formatCost')
+})
+
+test('① 群聊侧栏与设置页的项目成员面板已移除', () => {
+  const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/aside>/g)]
+    .map(m => m[1])
+    .find(block => block.includes('活跃任务'))
+  assert.ok(chatSide, '找不到群聊右栏')
+  assert.ok(!chatSide.includes('<h3>项目成员</h3>'), '群聊右栏不再有项目成员卡')
+  // 设置表单：成员 checkbox 与全量提交一并移除，防空数组清空成员（新建项目弹窗保留全量语义，不在此列）
+  const settingsForm = /<form id="project-settings-form"[\s\S]*?<\/form>/.exec(source)?.[0] ?? ''
+  assert.ok(settingsForm, '找不到设置表单')
+  assert.ok(!settingsForm.includes('memberIds'), '设置表单不再有成员 checkbox')
+  const saveProject = /if \(type === 'save-project'\) \{[\s\S]*?\n {6}\}/.exec(source)?.[0] ?? ''
+  assert.ok(saveProject && !saveProject.includes('memberIds'), 'save-project 不再提交 memberIds（增量 add/remove_member 替代）')
+})

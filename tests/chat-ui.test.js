@@ -129,7 +129,8 @@ test('思考过程 chip 渲染在任务 chip 之前，两者合并同一 .task-c
 })
 
 test('成员两行式：member-info 结构存在，模型行有可读兜底', () => {
-  assert.match(source, /<div class="side-row member-row"/)
+  // DSHBOTS-5：群聊侧栏成员面板移入「成员」tab，行结构从 side-row 迁到 list-row（两行式与状态点语义不变）。
+  assert.match(source, /<div class="list-row member-row"/)
   assert.match(source, /<span class="member-name-line"><strong>/, '第一行：名字 + 角色标签')
   assert.match(source, /class="member-role"/)
   assert.match(source, /class="member-model"/)

@@ -12,14 +12,14 @@ const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/asid
 assert.ok(chatSide, '找不到群聊右栏 aside.chat-side')
 
 test('群聊右栏顺序：工作区前置到项目总监上方', () => {
+  // DSHBOTS-5：项目成员面板移入「成员」tab，右栏收敛为三张卡（工作区/项目总监/活跃任务）。
   const idxWorkspace = chatSide.indexOf('<h3>工作区</h3>')
   const idxOwner = chatSide.indexOf('<h3>项目总监</h3>')
-  const idxMembers = chatSide.indexOf('<h3>项目成员</h3>')
   const idxTasks = chatSide.indexOf('<h3>活跃任务</h3>')
-  assert.ok(idxWorkspace >= 0 && idxOwner >= 0 && idxMembers >= 0 && idxTasks >= 0, '右栏四张卡都要在')
-  assert.ok(idxWorkspace < idxOwner, '工作区必须在项目总监之前')
-  assert.ok(idxOwner < idxMembers, '项目总监在项目成员之前')
-  assert.ok(idxMembers < idxTasks, '项目成员在活跃任务之前')
+  assert.ok(idxWorkspace >= 0 && idxOwner >= 0 && idxTasks >= 0, '右栏三张卡都要在')
+  assert.ok(idxOwner < 0 || idxWorkspace < idxOwner, '工作区必须在项目总监之前')
+  assert.ok(idxOwner < idxTasks, '项目总监在活跃任务之前')
+  assert.ok(!chatSide.includes('<h3>项目成员</h3>'), '项目成员卡已移入「成员」tab，右栏不再出现')
   assert.equal(chatSide.match(/<h3>工作区<\/h3>/g).length, 1, '工作区卡只有一张，不能重复出现')
 })
 

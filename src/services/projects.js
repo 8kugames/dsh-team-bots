@@ -311,6 +311,19 @@ export const projectsMethods = {
       : [...new Set([ownerId, ...(Array.isArray(patch.memberIds) ? patch.memberIds : [])])]
     if (memberIds) {
       for (const botId of memberIds) this.botRow(botId)
+    } else if (updates.owner_bot_id) {
+      // 不带 memberIds 的增量更新（设置页已不再全量提交成员）：换总监时补齐成员表，
+      // 维持「总监恒为成员」不变量；角色同步为 owner，原总监降为普通成员。
+      this.botRow(updates.owner_bot_id)
+      this.store.run(
+        "UPDATE project_members SET member_role = 'member' WHERE project_id = ? AND member_role = 'owner'",
+        projectId,
+      )
+      this.store.run(
+        'INSERT INTO project_members(project_id, member_type, member_id, member_role, joined_at) VALUES (?, ?, ?, ?, ?) '
+          + 'ON CONFLICT(project_id, member_type, member_id) DO UPDATE SET member_role = ?',
+        projectId, 'bot', updates.owner_bot_id, 'owner', nowIso(), 'owner',
+      )
     }
     if (updates.status === 'archived') {
       const active = this.store.all("SELECT id FROM runs WHERE project_id = ? AND status IN ('queued', 'running')", projectId)

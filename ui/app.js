@@ -91,7 +91,6 @@
   // The one action in the top-right belongs to the page you are on.
   const VIEW_ACTION = {
     tasks: { label: '新建任务', action: 'new-task', icon: 'plus' },
-    bots: { label: '新建 Bot', action: 'new-bot', icon: 'plus' },
     memory: { label: '写入记忆', action: 'new-memory', icon: 'plus' },
     skills: { label: '新建提案', action: 'new-proposal', icon: 'plus', kind: 'skill' },
     settings: { label: '保存设置', icon: 'check', submit: 'project-settings-form' },
@@ -100,7 +99,7 @@
   const NAV = [
     ['chat', '群聊', 'message'],
     ['tasks', '任务', 'board'],
-    ['bots', 'Bots', 'bot'],
+    ['members', '成员', 'users'],
     ['skills', '技能', 'spark'],
     ['memory', '记忆', 'memory'],
     ['evolution', '进化', 'branch'],
@@ -542,7 +541,8 @@
       : state.view === 'solo-config' ? (soloBot ? `配置 · @${soloBot.name}` : 'Bot 配置')
       : state.view === 'chat' ? (project?.name ?? '团队空间')
       : state.view === 'tasks' ? '任务面板'
-      : state.view === 'bots' ? '团队 Bots'
+      : state.view === 'members' ? '项目成员'
+      : state.view === 'bots' ? '全部 Bots'
       : state.view === 'skills' ? '技能池'
       : state.view === 'memory' ? '团队记忆'
       : state.view === 'evolution' ? '进化提案'
@@ -802,6 +802,7 @@
       switch (state.view) {
         case 'tasks': return renderTasks()
         case 'bots': return renderBots()
+        case 'members': return renderMembers()
         case 'skills': return renderSkills()
         case 'memory': return renderMemory()
         case 'evolution': return renderEvolution()
@@ -935,8 +936,6 @@
     const messages = mergedChatMessages(state.data.messages ?? [])
     const owner = botById(project.owner_bot_id)
     const members = project.members ?? []
-    // 总监独占一张卡，成员卡里不再重复展示总监；成员行按 id 去重总监。
-    const memberList = members.filter(m => m.id !== project.owner_bot_id && m.member_role !== 'owner')
     // modelRef 本身已是 provider/model（如 deepseek/deepseek-chat），不再单独拼 provider，避免重复。
     const ownerModelRef = owner ? (owner.modelRef ?? owner.model ?? null) : null
     const ownerModelLine = ownerModelRef ? String(ownerModelRef) : '未配置模型'
@@ -1002,28 +1001,6 @@
               </div>
               ${ownerDot ? runDotHtml(ownerDot) : ''}
             </div>` : '<div class="faint">未设置总监</div>'}
-          </div>
-          <div class="side-card">
-            <div class="side-card-head"><h3>项目成员</h3><span>${memberList.length}</span></div>
-            ${memberList.length === 0 ? '<div class="faint">没有其他成员。</div>' : `<div class="side-list">
-              ${memberList.map(member => {
-                const bot = botById(member.id)
-                if (!bot) return ''
-                const dot = memberRunDot(member)
-                const roleLabel = bot.role || '成员'
-                // modelRef 已是 provider/model 形式，provider 不再单独显示（否则同一信息出现两次）。
-                const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
-                const modelLine = modelRef ? String(modelRef) : '未配置模型'
-                return `<div class="side-row member-row" title="${esc(bot.name)} · ${esc(roleLabel)} · ${esc(modelLine)} · ${esc(dot.text)}">
-                  ${avatar(bot, 'sm')}
-                  <div class="member-info">
-                    <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(roleLabel)}</span></span>
-                    <span class="member-model">${esc(modelLine)}</span>
-                  </div>
-                  ${runDotHtml(dot)}
-                </div>`
-              }).join('')}
-            </div>`}
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>活跃任务</h3><span>${project.stats.openTasks}</span></div>
@@ -1538,6 +1515,55 @@
           </div>
         </article>`).join('')}
       </div>`}
+    `
+  }
+
+  // 项目成员管理页：状态与用量均按当前项目聚合（busy=本项目有排队/运行中运行；
+  // usage 四项与 cost 为该项目全部运行的累计）。邀请走 add_member API，移除走 remove_member。
+  function renderMembers() {
+    const project = activeProject()
+    if (!project) return noProject()
+    const members = project.members ?? []
+    const memberIds = new Set(members.map(member => member.id))
+    const candidates = (state.data?.bots ?? []).filter(bot => bot.status === 'active' && !memberIds.has(bot.id))
+    return `
+      <div class="section-head">
+        <p>成员状态与用量按本项目口径聚合；移除后该 Bot 不再接收本项目的提及与新任务。</p>
+        <div class="btn-row">
+          <select class="select" id="invite-bot" aria-label="选择要邀请的 Bot">
+            ${candidates.length === 0 ? '<option value="">没有可邀请的 Bot</option>' : candidates.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || '成员')}</option>`).join('')}
+          </select>
+          <button class="btn" data-action="add-member" ${candidates.length === 0 ? 'disabled' : ''}>${icon('plus')}邀请加入</button>
+          <button class="btn" data-action="nav" data-view="bots" title="查看全部 Bot 或新建">${icon('bot')}全部 Bots</button>
+        </div>
+      </div>
+      <div class="card list-card">
+        ${members.map(member => {
+          const bot = botById(member.id)
+          if (!bot) return ''
+          const dot = memberRunDot(member)
+          const isOwner = member.member_role === 'owner' || member.id === project.owner_bot_id
+          const tokens = Number(member.usage_input ?? 0) + Number(member.usage_cache_read ?? 0) + Number(member.usage_cache_write ?? 0) + Number(member.usage_output ?? 0)
+          const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
+          const modelLine = modelRef ? String(modelRef) : '未配置模型'
+          return `
+          <div class="list-row member-row" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
+            ${avatar(bot, 'sm')}
+            <div class="list-main">
+              <div class="list-title"><strong>${esc(bot.name)}</strong>${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}<span class="member-model">${esc(modelLine)}</span></div>
+              <div class="list-meta">
+                <span>输入 ${formatNumber(member.usage_input)} · 缓存读 ${formatNumber(member.usage_cache_read)} · 缓存写 ${formatNumber(member.usage_cache_write)} · 输出 ${formatNumber(member.usage_output)}</span>
+                <span>合计 <strong>${formatNumber(tokens)}</strong> tokens · <strong>${formatCost(Number(member.usage_cost ?? 0))}</strong></span>
+              </div>
+            </div>
+            <div class="btn-row">
+              <span class="pill ${member.busy ? 'amber' : 'green'}">${member.busy ? '任务中' : '空闲中'}</span>
+              ${runDotHtml(dot)}
+              ${isOwner ? '' : `<button class="btn small" data-action="remove-member" data-bot-id="${attr(member.id)}">移除</button>`}
+            </div>
+          </div>`
+        }).join('')}
+      </div>
     `
   }
 
@@ -2175,7 +2201,6 @@
     if (!project) return noProject()
     const members = activeBots()
     const owner = botById(project.owner_bot_id)
-    const memberIds = new Set(project.members.map(member => member.id))
     return `
       <form id="project-settings-form" data-form="save-project">
         <div class="settings-grid">
@@ -2189,11 +2214,6 @@
                 <div class="field"><label id="settings-owner-label" for="settings-owner">总监 Bot</label><select class="select" id="settings-owner" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
                 <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">群聊回复模式</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>总监优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
               </div>
-            </div>
-            <div class="card form-card" style="margin-top:12px">
-              <div class="card-head"><h3>项目成员</h3><span class="meta">${project.members.length} 位</span></div>
-              <div class="check-list">${members.map(bot => `<div class="check-row"><input type="checkbox" id="member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}" ${memberIds.has(bot.id) ? 'checked' : ''} ${bot.id === project.owner_bot_id ? 'disabled' : ''}>${avatar(bot, 'sm')}<label for="member-${attr(bot.id)}">${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div>
-              <div class="hint">总监始终是成员，取消勾选即可调整其他成员的参与范围。</div>
             </div>
             <div class="card form-card" style="margin-top:12px">
               <div class="card-head"><h3>月度预算</h3></div>
@@ -3617,6 +3637,24 @@
           if (memory) openModal({ type: 'memory', memory })
           break
         }
+        case 'add-member': {
+          const select = document.getElementById('invite-bot')
+          const botId = select?.value
+          if (!botId) break
+          await api('add_member', { projectId: activeProject()?.id, botId })
+          await refresh()
+          toast('已邀请加入项目', 'success')
+          break
+        }
+        case 'remove-member': {
+          const botId = target.dataset.botId
+          const name = botById(botId)?.name ?? '该成员'
+          if (!window.confirm(`确认将 ${name} 移出本项目？移除后不再接收本项目的提及与新任务。`)) break
+          await api('remove_member', { projectId: activeProject()?.id, botId })
+          await refresh()
+          toast('已移出项目', 'success')
+          break
+        }
         case 'decide-proposal': {
           const decision = target.dataset.decision
           const label = decision === 'approved' ? '通过并应用' : '拒绝'
@@ -3869,7 +3907,7 @@
         return
       }
       if (type === 'save-project') {
-        const memberIds = new FormData(form).getAll('memberIds')
+        // 成员改在「成员」tab 用邀请/移除管理（增量 API）；设置页不再全量提交成员表。
         await api('update_project', {
           projectId: payload.projectId,
           patch: {
@@ -3877,7 +3915,6 @@
             description: payload.description,
             ownerBotId: payload.ownerBotId,
             replyMode: payload.replyMode,
-            memberIds,
             tokenBudget: payload.tokenBudget === '' ? null : Number(payload.tokenBudget),
             costBudget: payload.costBudget === '' ? null : Number(payload.costBudget),
             productionDir: String(payload.productionDir ?? ''),
