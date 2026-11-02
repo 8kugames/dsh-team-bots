@@ -29,7 +29,7 @@
     ac: null,
     busy: 0,
     chatAtBottom: true,
-    taskFilter: { status: 'all', assignee: 'all', search: '' },
+    taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
     memoryFilter: 'all',
     usageScope: 'global',
     usageBot: null,
@@ -1351,11 +1351,25 @@
   }
   // task-sort:end
 
+  // task-time-range:start —— 终态时间筛选（DSHBOTS-44）：只作用于终态任务（done/canceled），
+  // 按各自终态时间戳（completed_at / canceled_at）与窗口下限比较；非终态任务不受影响照常显示。
+  // 终态但缺时间戳（极老数据）在窗口模式下视为窗口外——无法证明在窗口内就不默认放行。
+  const TASK_TIME_RANGES = { '7d': 7 * 86_400_000, all: 0 }
+  function taskEndsOutsideRange(task, timeRange) {
+    if (timeRange === 'all') return false
+    if (task.status !== 'done' && task.status !== 'canceled') return false
+    const field = task.status === 'done' ? 'completed_at' : 'canceled_at'
+    const endedAt = task[field] ? new Date(task[field]).getTime() : NaN
+    return !(Number.isFinite(endedAt) && endedAt >= Date.now() - (TASK_TIME_RANGES[timeRange] ?? 0))
+  }
+  // task-time-range:end
+
   function filteredTasks() {
     const filter = state.taskFilter
     return sortTasksByPriority((state.data?.tasks ?? []).filter(task => {
       if (filter.status !== 'all' && task.status !== filter.status) return false
       if (filter.assignee !== 'all' && task.assignee_bot_id !== filter.assignee) return false
+      if (taskEndsOutsideRange(task, filter.timeRange)) return false
       if (filter.search) {
         const haystack = `${task.identifier} ${task.title} ${task.description} ${task.labels?.join(' ') ?? ''}`.toLowerCase()
         if (!haystack.includes(filter.search.toLowerCase())) return false
@@ -1369,7 +1383,7 @@
     if (!project) return noProject()
     const tasks = filteredTasks()
     const members = project.members ?? []
-    const filtering = Boolean(state.taskFilter.search) || state.taskFilter.status !== 'all' || state.taskFilter.assignee !== 'all'
+    const filtering = Boolean(state.taskFilter.search) || state.taskFilter.status !== 'all' || state.taskFilter.assignee !== 'all' || state.taskFilter.timeRange !== 'all'
     return `
       <div class="section-head">
         <p>拖拽卡片切换状态。</p>
@@ -1382,6 +1396,10 @@
           <select class="select" data-task-filter="assignee">
             <option value="all">全部成员</option>
             ${members.map(member => `<option value="${attr(member.id)}" ${state.taskFilter.assignee === member.id ? 'selected' : ''}>${esc(member.name)}</option>`).join('')}
+          </select>
+          <select class="select" data-task-filter="timeRange" aria-label="按终态时间筛选">
+            <option value="7d" ${state.taskFilter.timeRange !== 'all' ? 'selected' : ''}>近 7 天</option>
+            <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>全部时间</option>
           </select>
           <span class="tag">${tasks.length} 个任务</span>
         </div>
@@ -1416,6 +1434,8 @@
     if (task.status === 'in_review') tags.push(task.review_target === 'owner_bot' ? '总监验收中' : '待您验收')
     for (const label of task.labels ?? []) tags.push(label)
     const isRunning = stage.stage === 'working' && !stage.action
+    // 终态时间小字（DSHBOTS-44）：done 取 completed_at、canceled 取 canceled_at，缺列或非终态不显示。
+    const endAt = task.status === 'done' ? task.completed_at : task.status === 'canceled' ? task.canceled_at : null
     return `<article class="task-card${isRunning ? ' running' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
       <div class="task-card-top">
         <span class="task-id">${esc(task.identifier)}</span>
@@ -1427,6 +1447,7 @@
         ${!ended && run ? runDot(run.status) : ''}
         <span class="task-run-label">${runLabel}</span>
         ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
+        ${endAt ? `<span class="task-end-time" title="${attr(endAt)}">${icon('check')} ${formatTime(endAt)}</span>` : ''}
         ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}
       </div>
     </article>`

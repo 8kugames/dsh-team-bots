@@ -2348,6 +2348,18 @@ a.global-config.dsh-official-link:hover {
     font: var(--fs-caption) var(--mono);
     font-variant-numeric: tabular-nums;
 }
+/* 终态时间小字（DSHBOTS-44）：done/canceled 卡片脚部的完成/取消时间，仅终态渲染。 */
+.task-end-time {
+    color: var(--ink-3);
+    font: var(--fs-caption) var(--mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.task-end-time svg {
+    width: 12px;
+    height: 12px;
+    vertical-align: -1.5px;
+}
 .run-dot.failed {
     background: var(--danger);
 }
