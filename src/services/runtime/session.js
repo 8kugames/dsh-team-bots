@@ -5,8 +5,8 @@
 
 import { randomUUID } from 'node:crypto'
 import { AppError } from '../../errors.js'
-import { botWorkspaceDir, ensureExternalDir, ensureProjectWorkspace } from '../../paths.js'
 import { id } from '../../util.js'
+import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
 import { effectiveRunLimits } from '../../config.js'
 
 export const EFFORT_FALLBACK = (bot) => bot.effort || undefined
@@ -167,11 +167,7 @@ export const sessionMethods = {
     const key = `${bot.id}:${solo ? 'solo' : project.id}:${kind}:${taskId ?? ''}`
     if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
     const creating = (async () => {
-      const cwd = solo
-        ? await botWorkspaceDir(this.config.workspace, bot.solo_dir)
-        : project.production_dir
-          ? await ensureExternalDir(project.production_dir)
-          : await ensureProjectWorkspace(this.config.workspace, project.slug)
+      const cwd = await resolveSessionCwd(this.config, { solo, bot, project })
       const created = await this.ctx.sessionController.create({
         cwd,
         ...(await this.defaultAgentPreset(kind)),
@@ -208,6 +204,16 @@ export const sessionMethods = {
         new Date().toISOString(),
       )
       await this.selectModel(sessionId, bot, modelOverride)
+      // 挂到 DSH 原生工作区分组（可选增强）：registry 经 ctx.get 读取，宿主未装就整体跳过；
+      // 挂载失败只在 workspace-groups 内 warn，绝不影响会话返回与运行。
+      const registry = this.ctx.get?.('workspaceRegistry')
+      if (registry) {
+        await attachSessionToWorkspace(registry, {
+          cwd,
+          title: workspaceGroupTitle({ kind, project, bot }),
+          sessionId,
+        }, this.logger)
+      }
       return sessionId
     })()
     this.sessionCreates.set(key, creating)

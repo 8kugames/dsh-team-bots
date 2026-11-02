@@ -8,6 +8,7 @@ import { badRequest, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
 import { syncSkills } from '../skills.js'
+import { backfillWorkspaceGroupBindings } from './workspace-groups.js'
 import { ensureApprovalSchema } from './approvals.js'
 import { id, nowIso } from '../util.js'
 
@@ -105,6 +106,17 @@ export const coreMethods = {
           this.logger.warn?.(`[wechat] 通道加载失败，已跳过: ${error?.message ?? error}`)
         }
       }
+      // 历史会话挂工作区分组：后台一次性回填，不阻塞启动（void 不 await）。
+      // 宿主上下文在 runtime 上（TeamService 自身无 ctx），测试桩无 ctx 时静默跳过；
+      // registry 缺失时跳过且不写标记，下次启动再试。
+      void backfillWorkspaceGroupBindings({
+        store: this.store,
+        config: this.config,
+        logger: this.logger,
+        ctx: this.runtime?.ctx,
+      }).catch(error => {
+        this.logger.warn?.(`dsh-team: 工作区分组回填失败（不影响启动）: ${error?.message ?? error}`)
+      })
     })()
     return this.ready
   },
