@@ -745,6 +745,10 @@
     const messages = state.data.messages ?? []
     const owner = botById(project.owner_bot_id)
     const members = project.members ?? []
+    // 总监独占一张卡，成员卡里不再重复展示总监；成员行按 id 去重总监。
+    const memberList = members.filter(m => m.id !== project.owner_bot_id && m.member_role !== 'owner')
+    const ownerModelRef = owner ? (owner.modelRef ?? owner.model) : null
+    const ownerModelLine = owner ? (owner.provider && ownerModelRef ? `${owner.provider} · ${ownerModelRef}` : '未配置模型') : ''
     const open = (state.data.tasks ?? []).filter(task => !['done', 'canceled'].includes(task.status)).slice(0, 5)
     return `
       <div class="chat-layout">
@@ -790,10 +794,43 @@
         <aside class="chat-side">
           <div class="side-card">
             <div class="side-card-head"><h3>项目总监</h3></div>
-            ${owner ? `<div class="owner-row">
-              ${avatar(owner, 'lg')}
-              <div class="owner-info"><strong>${esc(owner.name)}</strong><span>${esc(owner.role || '项目总监')} · ${esc(owner.model ?? '未配置模型')}</span></div>
+            ${owner ? `<div class="side-row owner-row">
+              ${avatar(owner, 'sm')}
+              <div class="member-info">
+                <span class="member-name-line"><strong>${esc(owner.name)}</strong><span class="member-role">总监</span></span>
+                <span class="member-model">${esc(ownerModelLine)}</span>
+              </div>
             </div>` : '<div class="faint">未设置总监</div>'}
+          </div>
+          <div class="side-card">
+            <div class="side-card-head"><h3>项目成员</h3><span>${memberList.length}</span></div>
+            ${memberList.length === 0 ? '<div class="faint">没有其他成员。</div>' : `<div class="side-list">
+              ${memberList.map(member => {
+                const bot = botById(member.id)
+                if (!bot) return ''
+                const waitMin = member.retry_wait_seconds ? Math.max(1, Math.round(member.retry_wait_seconds / 60)) : null
+                const dotClass = member.run_status === 'running' ? 'running'
+                  : member.run_status === 'failed' ? 'failed'
+                  : member.run_status === 'plan_wait' ? 'plan-wait'
+                  : 'idle'
+                const dotText = member.run_status === 'running' ? '运行中'
+                  : member.run_status === 'failed' ? '最近运行失败'
+                  : member.run_status === 'plan_wait' ? `限流等待，约 ${waitMin} 分钟后自动重试`
+                  : '空闲'
+                const roleLabel = bot.role || '成员'
+                const modelRef = member.modelRef ?? bot.modelRef
+                // 两行式成员行（对齐 .owner-info）：第一行 名字+角色标签，第二行 provider·模型；缺任一项给可读兜底，不拼 undefined。
+                const modelLine = bot.provider && modelRef ? `${bot.provider} · ${modelRef}` : '未配置模型'
+                return `<div class="side-row member-row" title="${esc(bot.name)} · ${esc(roleLabel)} · ${esc(modelLine)} · ${dotText}">
+                  ${avatar(bot, 'sm')}
+                  <div class="member-info">
+                    <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(roleLabel)}</span></span>
+                    <span class="member-model">${esc(modelLine)}</span>
+                  </div>
+                  <span class="run-dot ${dotClass}" data-status="${member.run_status ?? 'idle'}" title="${esc(dotText)}" aria-label="${esc(dotText)}"></span>
+                </div>`
+              }).join('')}
+            </div>`}
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>活跃任务</h3><span>${project.stats.openTasks}</span></div>
@@ -808,36 +845,6 @@
                 </div>`
               }).join('')}
             </div>`}
-          </div>
-          <div class="side-card">
-            <div class="side-card-head"><h3>项目成员</h3><span>${members.length}</span></div>
-            <div class="side-list">
-              ${members.map(member => {
-                const bot = botById(member.id)
-                if (!bot) return ''
-                const waitMin = member.retry_wait_seconds ? Math.max(1, Math.round(member.retry_wait_seconds / 60)) : null
-                const dotClass = member.run_status === 'running' ? 'running'
-                  : member.run_status === 'failed' ? 'failed'
-                  : member.run_status === 'plan_wait' ? 'plan-wait'
-                  : 'idle'
-                const dotText = member.run_status === 'running' ? '运行中'
-                  : member.run_status === 'failed' ? '最近运行失败'
-                  : member.run_status === 'plan_wait' ? `限流等待，约 ${waitMin} 分钟后自动重试`
-                  : '空闲'
-                const roleLabel = member.member_role === 'owner' ? '总监' : (bot.role || '成员')
-                const modelRef = member.modelRef ?? bot.modelRef
-                // 两行式成员行（对齐 .owner-info）：第一行 名字+角色标签，第二行 provider·模型；缺任一项给可读兜底，不拼 undefined。
-                const modelLine = bot.provider && modelRef ? `${bot.provider} · ${modelRef}` : '未配置模型'
-                return `<div class="side-row member-row" title="${esc(bot.name)} · ${esc(roleLabel)} · ${esc(modelLine)} · ${dotText}">
-                  ${avatar(bot, 'sm')}
-                  <div class="member-info">
-                    <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(roleLabel)}</span></span>
-                    <span class="member-model">${esc(modelLine)}</span>
-                  </div>
-                  <span class="run-dot ${dotClass}" data-status="${member.run_status ?? 'idle'}" title="${esc(dotText)}" aria-label="${esc(dotText)}"></span>
-                </div>`
-              }).join('')}
-            </div>
           </div>
           <div class="side-card">
             <div class="side-card-head"><h3>工作区</h3></div>
