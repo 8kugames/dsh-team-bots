@@ -60,6 +60,16 @@
   const COLOR_NAMES = { teal: '青', blue: '蓝', violet: '紫', amber: '琥珀', coral: '珊瑚', pink: '粉', green: '绿', gray: '灰' }
   const BOT_STATUS = { active: '运行中', paused: '已暂停', archived: '已归档' }
   const RUN_STATUS = { queued: '排队中', running: '运行中', succeeded: '已完成', failed: '失败', canceled: '已取消' }
+  // 调度页「正在调度」列表用的运行类型名；未知 kind 直接显示原值，不静默吞掉。
+  const RUN_KIND = {
+    task_run: '任务运行',
+    owner_task_run: '总监任务',
+    solo_chat_run: '单聊回复',
+    chat_run: '群聊运行',
+    dm_run: '私信运行',
+    dm_reply: '私信回复',
+    memory_review: '记忆复核',
+  }
   // 聊天历史分片大小：与后端 messagesPage 的默认/上限一致（state 轮询同口径）。
   const CHAT_PAGE_SIZE = 200
   const SKILL_STATUS = { active: '启用中', missing: '已失效' }
@@ -94,9 +104,10 @@
     ['terminal', '终端', 'terminal'],
     ['settings', '设置', 'settings'],
   ]
-  // 1V1 单聊上下文的导航：对话窗口 + 集中配置页 + 团队级页面（技能/记忆/进化/用量）。
+  // 1V1 上下文的导航：调度窗口 + 集中配置页 + 团队级页面（技能/记忆/进化/用量）。
+  // 首个 tab 展示名是「调度」——单聊页已升级为调度页（对话 + 任务 + 运行一览）。
   const SOLO_NAV = [
-    ['chat', '对话', 'message'],
+    ['chat', '调度', 'message'],
     ['solo-config', '配置', 'settings'],
     ['skills', '技能', 'spark'],
     ['memory', '记忆', 'memory'],
@@ -481,7 +492,7 @@
     const inSolo = inSoloContext()
     const soloBot = inSolo ? botById(state.soloBotId) : null
     const viewTitle = isSolo
-      ? (soloBot ? `@${soloBot.name}` : '单聊')
+      ? (soloBot ? `调度 · @${soloBot.name}` : '调度')
       : state.view === 'solo-config' ? (soloBot ? `配置 · @${soloBot.name}` : 'Bot 配置')
       : state.view === 'chat' ? (project?.name ?? '团队空间')
       : state.view === 'tasks' ? '任务面板'
@@ -502,7 +513,7 @@
     const eyebrow = isGlobal
       ? ''
       : inSolo
-        ? '1V1 对话<span class="sep"></span>项目外'
+        ? 'Bot 调度<span class="sep"></span>项目外'
         : project
           ? `${project.key}<span class="sep"></span>${project.status === 'active' ? '进行中' : '已归档'}`
           : '未选择项目'
@@ -933,14 +944,41 @@
       </div>`
   }
 
-  // 项目外单聊：每个 Bot 一条独立会话，运行目录在 _the_bots/<bot> 下。
+  // 调度页侧栏列表的显示上限：后端已按 50 条封顶，侧栏再截断并给出剩余条数提示。
+  const DISPATCH_LIST_LIMIT = 10
+  function dispatchListNote(total) {
+    return total > DISPATCH_LIST_LIMIT ? `<div class="faint">还有 ${total - DISPATCH_LIST_LIMIT} 条</div>` : ''
+  }
+
+  // 调度页任务行：编号 + 标题 + 状态 + 项目名；点击跳到该项目的任务页。
+  function dispatchTaskRow(task) {
+    return `<div class="side-row" data-action="nav" data-view="tasks" data-project-id="${attr(task.project_id ?? '')}" style="cursor:pointer" title="${esc(`${task.identifier ?? ''} · ${task.title ?? ''} · ${task.projectName ?? ''}`)}">
+      <span class="side-row-status">${esc(STATUS[task.status] ?? task.status)}</span>
+      <strong>${esc(task.identifier ?? '')}</strong>
+      <span class="side-row-title">${esc(task.title ?? '')}</span>
+      <span class="faint">${esc(task.projectName ?? '')}</span>
+    </div>`
+  }
+
+  // 调度页运行行：类型 + 状态点 + 项目 + 已运行时长（run-clock 每秒自刷新）。
+  function dispatchRunRow(run) {
+    const started = run.started_at ?? run.queued_at ?? ''
+    return `<div class="side-row" title="${esc(`${RUN_KIND[run.kind] ?? run.kind} · ${RUN_STATUS[run.status] ?? run.status}`)}">
+      <span class="run-dot ${attr(run.status ?? '')}"></span>
+      <strong>${esc(RUN_KIND[run.kind] ?? run.kind ?? '')}</strong>
+      <span class="side-row-title">${esc(run.projectKey ?? '单聊')}</span>
+      <span class="run-clock" data-started="${attr(started)}">${duration(started)}</span>
+    </div>`
+  }
+
+  // 项目外单聊（已升级为「调度页」）：每个 Bot 一条独立会话，运行目录在 _the_bots/<bot> 下。
   function renderSoloChat() {
     const bots = (state.data?.bots ?? []).filter(bot => bot.status === 'active')
     if (bots.length === 0) {
       return `<div class="empty-state">
         <div class="empty-symbol">${icon('bot')}</div>
-        <h3>还没有可单聊的 Bot</h3>
-        <p>先创建一个 Bot，就可以和它一对一对话。</p>
+        <h3>还没有可调度的 Bot</h3>
+        <p>先创建一个 Bot，就可以和它一对一对话，并查看它的调度。</p>
         <button class="btn primary" data-action="new-bot">${icon('plus')}新建 Bot</button>
       </div>`
     }
@@ -950,6 +988,11 @@
     const messages = mergedChatMessages(solo?.messages ?? [])
     const runs = solo?.runs ?? []
     const running = runs.filter(run => run.status === 'running' || run.status === 'queued').length
+    // 调度数据只认当前 bot 的那一段：切 bot 后旧数据不得串台。
+    const dispatch = state.data?.dispatch?.botId === bot.id ? state.data.dispatch : null
+    const dispatchActive = dispatch?.tasks?.active ?? []
+    const dispatchPending = dispatch?.tasks?.pending ?? []
+    const dispatchRuns = dispatch?.runs ?? []
     return `
       <div class="chat-layout">
         <div class="card chat-panel">
@@ -974,7 +1017,7 @@
           <div class="composer">
             <div class="composer-box">
               <div class="composer-resizer" id="composer-resizer" title="拖动调整输入框高度，双击恢复自动高度" role="separator" aria-orientation="horizontal" aria-label="拖动调整输入框高度，双击恢复自动高度"></div>
-              <textarea id="composer-input" rows="2" placeholder="和 ${esc(bot.name)} 单聊，/clear 清空本会话，/remember 内容 写入 Bot 记忆">${esc(currentDraft(state))}</textarea>
+              <textarea id="composer-input" rows="2" placeholder="和 ${esc(bot.name)} 对话，/clear 清空本会话，/remember 内容 写入 Bot 记忆">${esc(currentDraft(state))}</textarea>
               <div class="composer-bottom">
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
                 <button class="send-btn" data-action="send-message" ${currentDraft(state).trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
@@ -984,15 +1027,37 @@
         </div>
         <aside class="chat-side">
           <div class="side-card">
-            <div class="side-card-head"><h3>单聊对象</h3><button class="btn small" data-action="nav" data-view="solo-config" title="打开集中配置页">配置</button></div>
+            <div class="side-card-head"><h3>调度对象</h3><button class="btn small" data-action="nav" data-view="solo-config" title="打开集中配置页">配置</button></div>
             <div class="owner-row">
               ${avatar(bot, 'lg')}
               <div class="owner-info"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || '团队成员')} · ${esc(bot.modelRef ?? '未配置模型')}</span></div>
             </div>
           </div>
           <div class="side-card">
-            <div class="side-card-head"><h3>最近单聊运行</h3><span>${runs.length}</span></div>
-            ${runs.length === 0 ? '<div class="faint">还没有单聊运行。</div>' : `<div class="side-list">
+            <div class="side-card-head"><h3>在办任务</h3><span>${dispatchActive.length}</span></div>
+            ${dispatchActive.length === 0 ? '<div class="faint">没有在办任务。</div>' : `<div class="side-list">
+              ${dispatchActive.slice(0, DISPATCH_LIST_LIMIT).map(dispatchTaskRow).join('')}
+            </div>${dispatchListNote(dispatchActive.length)}`}
+          </div>
+          <div class="side-card">
+            <div class="side-card-head"><h3>待办任务</h3><span>${dispatchPending.length}</span></div>
+            ${dispatchPending.length === 0 ? '<div class="faint">没有待办任务。</div>' : `<div class="side-list">
+              ${dispatchPending.slice(0, DISPATCH_LIST_LIMIT).map(dispatchTaskRow).join('')}
+            </div>${dispatchListNote(dispatchPending.length)}`}
+          </div>
+          <div class="side-card">
+            <div class="side-card-head"><h3>正在调度</h3><span>${dispatchRuns.length}</span></div>
+            ${dispatchRuns.length === 0 ? '<div class="faint">当前没有运行中的调度。</div>' : `<div class="side-list">
+              ${dispatchRuns.slice(0, DISPATCH_LIST_LIMIT).map(dispatchRunRow).join('')}
+            </div>${dispatchListNote(dispatchRuns.length)}`}
+          </div>
+          <div class="side-card">
+            <div class="side-card-head"><h3>子智能体</h3></div>
+            <div class="faint">子智能体能力待接入（依赖 DSHBOTS-27）。</div>
+          </div>
+          <div class="side-card">
+            <div class="side-card-head"><h3>最近调度运行</h3><span>${runs.length}</span></div>
+            ${runs.length === 0 ? '<div class="faint">还没有调度运行。</div>' : `<div class="side-list">
               ${runs.slice(0, 5).map(run => `<div class="side-row">
                 <span class="run-dot ${attr(run.status)}"></span>
                 <strong>${esc(RUN_STATUS[run.status] ?? run.status)}</strong>
@@ -1027,8 +1092,8 @@
     if (!bot) {
       return `<div class="empty-state">
         <div class="empty-symbol">${icon('bot')}</div>
-        <h3>还没有选择单聊对象</h3>
-        <p>从左侧 Bots 树点一个 Bot 进入 1V1 对话，再点「配置」来到这里。</p>
+        <h3>还没有选择 Bot</h3>
+        <p>从左侧 Bots 树点一个 Bot 进入调度页，再点「配置」来到这里。</p>
         <button class="btn primary" data-action="nav" data-view="chat">返回对话</button>
       </div>`
     }
@@ -1320,7 +1385,7 @@
           <div class="bot-metrics"><span><strong>${bot.openTasks}</strong> 任务</span><span class="dot-sep"></span><span><strong>${bot.memoryCount}</strong> 记忆</span><span class="dot-sep"></span><span><strong>${bot.stats.succeeded}</strong> 次成功</span></div>
           <div class="bot-card-actions">
             <button class="btn small" data-action="edit-bot" data-bot-id="${attr(bot.id)}">${icon('edit')}配置</button>
-            ${bot.status === 'active' ? `<button class="btn small" data-action="solo-bot" data-bot-id="${attr(bot.id)}">单聊</button><button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档</button>` : ''}
+            ${bot.status === 'active' ? `<button class="btn small" data-action="solo-bot" data-bot-id="${attr(bot.id)}" title="打开该 Bot 的调度页">调度</button><button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档</button>` : ''}
           </div>
         </article>`).join('')}
       </div>`}
@@ -2885,7 +2950,7 @@
       if (state.chatMode === 'solo') {
         const bot = botById(state.soloBotId)
         if (!bot) return
-        if (body === '/clear' && !window.confirm(`清空和 ${bot.name} 的全部单聊记录？清除后不可恢复（记忆保留）。`)) return
+        if (body === '/clear' && !window.confirm(`清空和 ${bot.name} 的全部对话记录？清除后不可恢复（记忆保留）。`)) return
         result = await api('send_solo_message', { botId: bot.id, body })
       } else {
         const project = activeProject()
@@ -2944,11 +3009,21 @@
           state.bootError = null
           await init()
           break
-        case 'nav':
+        case 'nav': {
+          // 带 data-project-id 的导航：从调度页的任务行跳到该项目的任务页（顺带切回群聊上下文）。
+          const navProjectId = target.dataset.projectId
           state.view = target.dataset.view || 'chat'
+          if (navProjectId) {
+            state.projectId = navProjectId
+            state.chatMode = 'group'
+            state.replyTo = null
+            await refresh()
+            break
+          }
           if (state.view === 'solo-config') void loadSoloDetail()
           render()
           break
+        }
         case 'toggle-tree': {
           const key = target.dataset.tree
           if (key && key in state.tree) {
