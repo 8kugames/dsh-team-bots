@@ -1351,13 +1351,15 @@
   // task-time-range:start —— 终态时间筛选（DSHBOTS-44）：只作用于终态任务（done/canceled），
   // 按各自终态时间戳（completed_at / canceled_at）与窗口下限比较；非终态任务不受影响照常显示。
   // 终态但缺时间戳（极老数据）在窗口模式下视为窗口外——无法证明在窗口内就不默认放行。
-  const TASK_TIME_RANGES = { '7d': 7 * 86_400_000, all: 0 }
+  // 窗口口径：「今天」按自然日当天 00:00 起（非 24 小时滚动窗），其余为自当前时刻回溯的滚动窗口。
+  const TASK_TIME_RANGES = { '7d': 7 * 86_400_000, '30d': 30 * 86_400_000, all: 0 }
   function taskEndsOutsideRange(task, timeRange) {
     if (timeRange === 'all') return false
     if (task.status !== 'done' && task.status !== 'canceled') return false
     const field = task.status === 'done' ? 'completed_at' : 'canceled_at'
     const endedAt = task[field] ? new Date(task[field]).getTime() : NaN
-    return !(Number.isFinite(endedAt) && endedAt >= Date.now() - (TASK_TIME_RANGES[timeRange] ?? 0))
+    const cutoff = timeRange === '1d' ? new Date().setHours(0, 0, 0, 0) : Date.now() - (TASK_TIME_RANGES[timeRange] ?? 0)
+    return !(Number.isFinite(endedAt) && endedAt >= cutoff)
   }
   // task-time-range:end
 
@@ -1395,7 +1397,9 @@
             ${members.map(member => `<option value="${attr(member.id)}" ${state.taskFilter.assignee === member.id ? 'selected' : ''}>${esc(member.name)}</option>`).join('')}
           </select>
           <select class="select" data-task-filter="timeRange" aria-label="按终态时间筛选">
-            <option value="7d" ${state.taskFilter.timeRange !== 'all' ? 'selected' : ''}>近 7 天</option>
+            <option value="1d" ${state.taskFilter.timeRange === '1d' ? 'selected' : ''}>今天</option>
+            <option value="7d" ${state.taskFilter.timeRange === '7d' ? 'selected' : ''}>近 7 天</option>
+            <option value="30d" ${state.taskFilter.timeRange === '30d' ? 'selected' : ''}>近 30 天</option>
             <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>全部时间</option>
           </select>
           <span class="tag">${tasks.length} 个任务</span>

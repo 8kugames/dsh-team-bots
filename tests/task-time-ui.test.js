@@ -19,13 +19,24 @@ function block(marker) {
 
 test('task-time-range 标记块：窗口常量与纯函数语义', () => {
   const code = block('task-time-range')
-  assert.match(code, /const TASK_TIME_RANGES = \{ '7d': 7 \* 86_400_000, all: 0 \}/)
+  assert.match(code, /const TASK_TIME_RANGES = \{ '7d': 7 \* 86_400_000, '30d': 30 \* 86_400_000, all: 0 \}/)
   // all 短路、非终态短路、done→completed_at / canceled→canceled_at 字段映射
   assert.match(code, /if \(timeRange === 'all'\) return false/)
   assert.match(code, /if \(task\.status !== 'done' && task\.status !== 'canceled'\) return false/)
   assert.match(code, /task\.status === 'done' \? 'completed_at' : 'canceled_at'/)
   // 缺时间戳视为窗口外：Number.isFinite 否定后才放行
-  assert.match(code, /Number\.isFinite\(endedAt\) && endedAt >= Date\.now\(\) - /)
+  assert.match(code, /Number\.isFinite\(endedAt\) && endedAt >= cutoff/)
+})
+
+test('新增枚举「今天」与「近 30 天」：1d 按自然日 00:00 起算，30d 走滚动窗口', () => {
+  const code = block('task-time-range')
+  // 「今天」不是 24 小时滚动窗：cutoff 取本地当天 00:00（setHours 归零），与 Date.now() 回溯差区分
+  assert.match(code, /const cutoff = timeRange === '1d' \? new Date\(\)\.setHours\(0, 0, 0, 0\) : Date\.now\(\) - \(TASK_TIME_RANGES\[timeRange\] \?\? 0\)/)
+  // 近 30 天沿用滚动窗口口径，窗口常量进表
+  assert.match(code, /'30d': 30 \* 86_400_000/)
+  // 两个新枚举进入下拉，选中态按值精确匹配——不允许再出现 !== 'all' 兜底（1d/30d 会误显近 7 天）
+  assert.match(app, /<option value="1d" \$\{state\.taskFilter\.timeRange === '1d' \? 'selected' : ''\}>今天<\/option>/)
+  assert.match(app, /<option value="30d" \$\{state\.taskFilter\.timeRange === '30d' \? 'selected' : ''\}>近 30 天<\/option>/)
 })
 
 test('filteredTasks：timeRange 条件已接入且在 search 之前', () => {
@@ -42,7 +53,7 @@ test('筛选器 UI：timeRange select 存在、默认近 7 天、有全部出口
   assert.match(app, /data-task-filter="timeRange"/)
   assert.match(app, /<option value="7d"/)
   assert.match(app, /<option value="all"/)
-  assert.match(app, /state\.taskFilter\.timeRange !== 'all' \? 'selected' : ''/)
+  assert.match(app, /<option value="7d" \$\{state\.taskFilter\.timeRange === '7d' \? 'selected' : ''\}>近 7 天<\/option>/)
   assert.match(app, /taskFilter: \{ status: 'all', assignee: 'all', search: '', timeRange: '7d' \}/)
   // filtering 标志要感知 timeRange：默认 7d 未收窄时不误报「筛选中」之外的空态文案
   assert.match(app, /state\.taskFilter\.timeRange !== 'all'/)
