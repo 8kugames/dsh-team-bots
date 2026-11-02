@@ -2251,7 +2251,8 @@ a.global-config.dsh-official-link:hover {
     color: var(--ink-2);
 }
 
-/* 成员两行式（对齐 .owner-info）：第一行 名字+角色标签，第二行 provider·模型，状态点行尾垂直居中。 */
+/* 成员两行式（对齐 .owner-info）：第一行 名字+角色标签，第二行 模型小字（modelRef 已含 provider），
+   状态点行尾垂直居中。群聊右栏「项目总监」卡与「项目成员」概览卡共用这套结构。 */
 .member-info {
     flex: 1;
     min-width: 0;

@@ -956,27 +956,33 @@
   }
   // chat-pagination:end
 
-  // 群聊右栏「项目成员」概览卡（只读）：DSHBOTS-49 恢复 D-5 信息架构收敛时删掉的面板。
-  // 数据源与「成员」tab 同一张表（project.members），每行只给头像、名称、角色标签与状态点；
-  // 状态点走 memberRunDot（排队按空闲计绿、运行中黄闪、失败红、限流等待紫），
-  // 与「成员」tab 的口径一致。卡内不含任何管理操作——邀请与移除留在「成员」tab，
-  // 避免旧版「复选框全量提交」式的误清空成员。
+  // 群聊右栏「项目成员」概览卡（只读）：DSHBOTS-49 恢复 D-5 信息架构收敛时删掉的面板，
+  // DSHBOTS-55 按 232f1c8 的双行方案修正——①位置在「项目总监」卡正下方（活跃任务之前）；
+  // ②成员行剔除总监（总监独占上方自己的 panel），计数同口径；
+  // ③行样式回到成员两行式 .member-info：第一行 名称+角色标签，第二行 模型小字，状态点留在行尾。
+  // 数据源与「成员」tab 同一张表（project.members）；状态点走 memberRunDot，与「成员」tab 一致。
+  // 卡内不含任何管理操作——邀请与移除留在「成员」tab，避免旧版「复选框全量提交」式的误清空成员。
   function renderChatMembersCard() {
     const project = activeProject()
     const members = project?.members ?? []
+    // 总监独占一张卡，成员卡里不再重复展示总监。
+    const memberList = members.filter(member => member.id !== project?.owner_bot_id && member.member_role !== 'owner')
     return `
       <div class="side-card members-overview" data-members-overview>
-        <div class="side-card-head"><h3>项目成员</h3><span>${members.length}</span></div>
-        ${members.length === 0 ? '<div class="faint">本项目还没有成员。</div>' : `<div class="side-list">
-          ${members.map(member => {
+        <div class="side-card-head"><h3>项目成员</h3><span>${memberList.length}</span></div>
+        ${memberList.length === 0 ? '<div class="faint">没有其他成员。</div>' : `<div class="side-list">
+          ${memberList.map(member => {
             const bot = botById(member.id)
             if (!bot) return ''
             const dot = memberRunDot(member)
-            const isOwner = member.member_role === 'owner' || member.id === project.owner_bot_id
+            // modelRef 已是 provider/model 形态（如 deepseek/deepseek-chat），不再拼 provider；缺配置给兜底文案。
+            const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
+            const modelLine = modelRef ? String(modelRef) : '未配置模型'
             return `<div class="side-row" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
               ${avatar(bot, 'sm')}
               <div class="member-info">
-                <span class="member-name-line"><strong>${esc(bot.name)}</strong>${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}</span>
+                <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(bot.role || '成员')}</span></span>
+                <span class="member-model">${esc(modelLine)}</span>
               </div>
               ${runDotHtml(dot)}
             </div>`
@@ -1062,6 +1068,7 @@
               ${ownerDot ? runDotHtml(ownerDot) : ''}
             </div>` : '<div class="faint">未设置总监</div>'}
           </div>
+          ${renderChatMembersCard()}
           <div class="side-card">
             <div class="side-card-head"><h3>活跃任务</h3><span>${project.stats.openTasks}</span></div>
             ${open.length === 0 ? '<div class="faint">没有进行中的任务。</div>' : `<div class="side-list">
@@ -1076,7 +1083,6 @@
               }).join('')}
             </div>${openTasks.length > CHAT_ACTIVE_TASK_LIMIT ? `<div class="faint">还有 ${openTasks.length - CHAT_ACTIVE_TASK_LIMIT} 条</div>` : ''}`}
           </div>
-          ${renderChatMembersCard()}
         </aside>
       </div>`
   }

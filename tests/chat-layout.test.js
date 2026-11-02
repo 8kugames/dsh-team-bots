@@ -11,9 +11,10 @@ const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/asid
   .find(block => block.includes('活跃任务'))
 assert.ok(chatSide, '找不到群聊右栏 aside.chat-side')
 
-test('群聊右栏顺序：工作区前置到项目总监上方', () => {
+test('群聊右栏顺序：工作区 → 项目总监 → 项目成员 → 活跃任务', () => {
   // DSHBOTS-5：项目成员面板移入「成员」tab，右栏收敛为三张卡（工作区/项目总监/活跃任务）。
   // DSHBOTS-49：项目成员以只读概览卡回归右栏（活跃任务卡之后），管理操作仍在「成员」tab。
+  // DSHBOTS-55：概览卡按 232f1c8 的双行方案恢复到「项目总监」卡正下方（活跃任务之前）。
   const idxWorkspace = chatSide.indexOf('<h3>工作区</h3>')
   const idxOwner = chatSide.indexOf('<h3>项目总监</h3>')
   const idxTasks = chatSide.indexOf('<h3>活跃任务</h3>')
@@ -21,7 +22,8 @@ test('群聊右栏顺序：工作区前置到项目总监上方', () => {
   assert.ok(idxWorkspace >= 0 && idxOwner >= 0 && idxTasks >= 0, '右栏三张卡都要在')
   assert.ok(idxOwner < 0 || idxWorkspace < idxOwner, '工作区必须在项目总监之前')
   assert.ok(idxOwner < idxTasks, '项目总监在活跃任务之前')
-  assert.ok(idxMembers > idxTasks, '项目成员概览卡在活跃任务卡之后')
+  assert.ok(idxMembers > idxOwner, '项目成员概览卡在项目总监卡之后')
+  assert.ok(idxMembers < idxTasks, '项目成员概览卡在活跃任务卡之前')
   assert.equal(chatSide.match(/<h3>工作区<\/h3>/g).length, 1, '工作区卡只有一张，不能重复出现')
   assert.equal(chatSide.match(/renderChatMembersCard\(\)/g).length, 1, '项目成员概览卡只有一张，不能重复出现')
 })

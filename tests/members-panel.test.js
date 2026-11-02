@@ -26,17 +26,33 @@ test('群聊右栏渲染「项目成员」概览卡', () => {
   assert.match(chatSide, /\$\{renderChatMembersCard\(\)\}/, '右栏要渲染成员概览卡')
 })
 
+test('概览卡位置在「项目总监」panel 正下方、「活跃任务」之前', () => {
+  const idxOwner = chatSide.indexOf('<h3>项目总监</h3>')
+  const idxMembers = chatSide.indexOf('${renderChatMembersCard()}')
+  const idxTasks = chatSide.indexOf('<h3>活跃任务</h3>')
+  assert.ok(idxOwner >= 0 && idxMembers >= 0 && idxTasks >= 0, '右栏三处都要在')
+  assert.ok(idxOwner < idxMembers, '成员卡在项目总监卡之后')
+  assert.ok(idxMembers < idxTasks, '成员卡在活跃任务卡之前')
+  assert.equal(chatSide.match(/renderChatMembersCard\(\)/g).length, 1, '成员卡只有一张')
+})
+
 test('概览卡有标题、成员计数与稳定标记', () => {
   assert.match(cardBody, /<div class="side-card members-overview" data-members-overview>/, '卡片带 side-card 类与 data-members-overview 标记')
-  assert.match(cardBody, /<div class="side-card-head"><h3>项目成员<\/h3><span>\$\{members\.length\}<\/span><\/div>/, '标题「项目成员」+ 成员计数')
+  assert.match(cardBody, /<div class="side-card-head"><h3>项目成员<\/h3><span>\$\{memberList\.length\}<\/span><\/div>/, '标题「项目成员」+ 成员计数（剔除总监后的口径）')
 })
 
 test('概览卡数据源与「成员」tab 同一张成员表', () => {
   assert.match(cardFn, /project\?\.members \?\? \[\]/, '成员来自当前项目成员表')
-  assert.match(cardFn, /members\.map\(member =>/, '按成员逐行渲染')
+  assert.match(cardFn, /memberList\.map\(member =>/, '按成员逐行渲染')
 })
 
-test('每行是头像 + 名称 + 角色标签 + 状态点', () => {
+test('成员行剔除总监：总监只在「项目总监」panel 出现一次', () => {
+  assert.match(cardFn, /members\.filter\(member => member\.id !== project\?\.owner_bot_id && member\.member_role !== 'owner'\)/, '成员行过滤掉总监')
+  assert.ok(!cardBody.includes('pill violet'), '成员卡内不再出现「总监」标签')
+  assert.ok(!cardFn.includes('isOwner'), '成员卡不再自行判定并渲染总监行')
+})
+
+test('每行是头像 + 两行式信息 + 状态点', () => {
   assert.match(cardBody, /avatar\(bot, 'sm'\)/, '每行带头像')
   assert.match(cardBody, /<strong>\$\{esc\(bot\.name\)\}<\/strong>/, '每行有名称')
   assert.match(cardBody, /class="member-role"/, '每行有角色标签')
@@ -44,9 +60,12 @@ test('每行是头像 + 名称 + 角色标签 + 状态点', () => {
   assert.match(cardFn, /memberRunDot\(member\)/, '状态点与「成员」tab 同一口径')
 })
 
-test('总监行保留 violet 标识', () => {
-  assert.match(cardBody, /isOwner \? '<span class="pill violet">总监<\/span>'/, '总监用 violet 标签')
-  assert.match(cardFn, /member\.member_role === 'owner' \|\| member\.id === project\.owner_bot_id/, '总监判定与「成员」tab 一致')
+test('行样式是成员两行式 .member-info：名称+角色 / 模型小字', () => {
+  assert.match(cardBody, /<div class="member-info">/, '复用成员两行式容器')
+  assert.match(cardBody, /<span class="member-name-line">[\s\S]*?class="member-role"/, '第一行：名称 + 角色标签')
+  assert.match(cardBody, /<span class="member-model">\$\{esc\(modelLine\)\}<\/span>/, '第二行：模型小字')
+  assert.match(cardFn, /const modelRef = member\.modelRef \?\? bot\.modelRef \?\? bot\.model \?\? null/, '模型取成员/Bot 的 modelRef')
+  assert.match(cardFn, /const modelLine = modelRef \? String\(modelRef\) : '未配置模型'/, '缺配置时兜底「未配置模型」')
 })
 
 test('概览卡是只读的：没有任何写操作控件', () => {
