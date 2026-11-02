@@ -69,7 +69,8 @@ test('RATE_LIMIT 无 Retry-After：finishRun 合成 retry_after_ms 并写 rate_l
     const evt = store.get("SELECT * FROM run_events WHERE run_id = 'sb1' AND type = 'rate_limit_backoff'")
     assert.ok(evt, '应写 rate_limit_backoff 事件')
     assert.match(evt.message, /第 1 次退避/)
-    const msg = store.get('SELECT body FROM messages WHERE task_id = ? ORDER BY created_at DESC', task.id)
+    // 用 run_id + 正文前缀定位：失败消息每 run 恰一条；ORDER BY created_at 在毫秒并列时会拿错行。
+    const msg = store.get("SELECT body FROM messages WHERE run_id = 'sb1' AND body LIKE '任务执行失败%'")
     assert.ok(msg, '任务失败消息应存在')
     assert.match(msg.body, /指数退避/)
   } finally {
@@ -111,7 +112,8 @@ test('禁止立刻重打：attempt<上限不排总监处理运行；链耗尽才
     assert.ok(row.available_at > nowIsoStrict(), `available_at 应在未来，实际 ${row.available_at}`)
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND status = 'queued'", task3.id).n, 0,
       'handle 运行不应在退避期内生成')
-    const msg = store.get('SELECT body FROM messages WHERE task_id = ? ORDER BY created_at DESC', task3.id)
+    // 同上：run_id 定位，避免毫秒并列的排序假红。
+    const msg = store.get("SELECT body FROM messages WHERE run_id = 'nh3' AND body LIKE '任务执行失败%'")
     assert.match(msg.body, /已达自动重试上限/)
   } finally {
     store.close()
