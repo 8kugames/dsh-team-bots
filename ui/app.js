@@ -1338,20 +1338,19 @@
     `
   }
 
+  // task-card:start —— 任务卡运行徽标（DSHBOTS-42）：文案来自后端 taskStage 纯函数查表的 stageLabel，
+  // 不再从 latestRun.status 拼映射。终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：
+  // 状态点、运行文案、计时与 running 高亮全部隐藏，已完成/已取消任务上挂着的遗留运行不再误导看板。
   function renderTaskCard(task) {
     const bot = botById(task.assignee_bot_id)
     const run = task.latestRun
-    const runLabel = run ? ({
-      running: '运行中',
-      failed: '失败',
-      queued: '排队',
-      succeeded: '已完成',
-      canceled: '已取消',
-    }[run.status] ?? '') : ''
+    const stage = task.stage ?? { stage: 'idle' }
+    const ended = stage.stage === 'ended'
+    const runLabel = ended ? '' : task.stageLabel ?? ''
     const tags = []
     if (task.status === 'in_review') tags.push(task.review_target === 'owner_bot' ? '总监验收中' : '待您验收')
     for (const label of task.labels ?? []) tags.push(label)
-    const isRunning = run?.status === 'running'
+    const isRunning = stage.stage === 'working' && !stage.action
     return `<article class="task-card${isRunning ? ' running' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
       <div class="task-card-top">
         <span class="task-id">${esc(task.identifier)}</span>
@@ -1360,13 +1359,14 @@
       <div class="task-card-title" title="${attr(task.title)}">${esc(task.title)}</div>
       ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
       <div class="task-card-foot">
-        ${run ? runDot(run.status) : ''}
+        ${!ended && run ? runDot(run.status) : ''}
         <span class="task-run-label">${runLabel}</span>
         ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
         ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}
       </div>
     </article>`
   }
+  // task-card:end
 
   // ── 项目「终端」tab：非交互式命令台（无 PTY/xterm），输入命令 → 项目工作目录执行 → 实时输出 ──
   // 实时 tail 由 1s 轮询直更输出区（startTerminalPoll），常规状态走 2.8s poll 的 view.terminal。
@@ -2532,7 +2532,8 @@
     const latestFailed = (task.runs ?? []).find(run => ['failed', 'canceled'].includes(run.status))
     return modalShell({
       title: `${task.identifier} · ${task.title}`,
-      badge: '',
+      // 任务阶段徽标走 taskStage 查表口径（DSHBOTS-42）：ended → stageLabel 为 null → 不显示。
+      badge: task.stageLabel ? esc(task.stageLabel) : '',
       size: 'task',
       body: `<div class="task-detail-grid">
         <div class="task-detail-main">
