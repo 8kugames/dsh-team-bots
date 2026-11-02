@@ -91,7 +91,9 @@ test('看板接线：filteredTasks 走排序，看板分组沿用该顺序', () 
   // 分组内顺序直接来自 filteredTasks 的结果，不再另行排序
   // （DSHBOTS-58 起按状态分组渲染，列内容改由 renderTaskGroup 输出）
   assert.match(source, /renderTaskGroup\(status, tasks\.filter\(task => task\.status === status\)\)/)
-  assert.match(source, /tasks\.map\(renderTaskCard\)\.join\(''\)/)
+  // 组内行由 renderTaskRows 输出（DSHBOTS-58 第二笔起按 parent_task_id 组树，顺序仍取分组过滤结果）
+  assert.match(source, /renderTaskRows\(tasks\)/)
+  assert.match(source, /renderTaskCard\(task, \{ depth, childCount: children\.length, expanded \}\)/)
   // 卡片上的优先级标签也走归一化，旧数据不再显示空白
   assert.match(source, /PRIORITY\[taskPriorityKey\(task\.priority\)\]/)
 })

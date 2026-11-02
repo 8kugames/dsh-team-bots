@@ -2564,6 +2564,50 @@ a.global-config.dsh-official-link:hover {
     display: flex;
     flex-direction: column;
 }
+/* 父子层级（DSHBOTS-58）：子任务挂在一级缩进的容器里，容器左侧一条导线连到父行。 */
+.task-children {
+    display: flex;
+    flex-direction: column;
+    margin-left: 18px;
+    border-left: 1px solid var(--line);
+}
+/* 父行上的子任务折叠按钮：chevron 朝右=收起，朝下=展开。 */
+.task-children-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+.task-children-toggle:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
+/* 依赖徽标：被未完成的任务挡住时出现在卡片底行。 */
+.task-deps-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--danger-wash);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-size: var(--fs-caption);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+.task-deps-badge svg {
+    width: 11px;
+    height: 11px;
+}
 .column-dot {
     width: 6px;
     height: 6px;

@@ -1487,7 +1487,7 @@
     const collapsed = state.collapsedTaskGroups.has(status)
     const body = tasks.length === 0
       ? `<div class="board-empty">拖到这里</div>`
-      : tasks.map(renderTaskCard).join('')
+      : renderTaskRows(tasks)
     return `<section class="column task-group${collapsed ? ' collapsed' : ''}" data-drop-status="${status}">
       <div class="column-head task-group-head">
         <button type="button" class="task-group-toggle" data-action="toggle-task-group" data-status="${attr(status)}" aria-expanded="${collapsed ? 'false' : 'true'}" title="${collapsed ? '展开' : '折叠'}${esc(STATUS[status])}分组">${icon('chevron', `chev${collapsed ? '' : ' open'}`)}</button>
@@ -1502,7 +1502,10 @@
   // task-card:start —— 任务卡运行徽标（DSHBOTS-42）：文案来自后端 taskStage 纯函数查表的 stageLabel，
   // 不再从 latestRun.status 拼映射。终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：
   // 状态点、运行文案、计时与 running 高亮全部隐藏，已完成/已取消任务上挂着的遗留运行不再误导看板。
-  function renderTaskCard(task) {
+  function renderTaskCard(task, options = {}) {
+    const depth = Number(options.depth ?? 0)
+    const childCount = Number(options.childCount ?? 0)
+    const expanded = options.expanded === true
     const bot = botById(task.assignee_bot_id)
     const run = task.latestRun
     const stage = task.stage ?? { stage: 'idle' }
@@ -1514,14 +1517,20 @@
     const isRunning = stage.stage === 'working' && !stage.action
     // 终态时间小字（DSHBOTS-44）：done 取 completed_at、canceled 取 canceled_at，缺列或非终态不显示。
     const endAt = task.status === 'done' ? task.completed_at : task.status === 'canceled' ? task.canceled_at : null
-    return `<article class="task-card${isRunning ? ' running' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
+    // 依赖徽标（DSHBOTS-58）：depsSatisfied=false 即被未完成的任务挡住；blockedByNames 只列未满足项。
+    const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
+    const depsBlocked = task.depsSatisfied === false && blockedNames.length > 0
+    const depsTitle = `被 ${blockedNames.length} 个任务阻塞：${blockedNames.join('、')}`
+    return `<article class="task-card${isRunning ? ' running' : ''}${depth > 0 ? ' task-child' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
       <div class="task-card-top">
+        ${childCount > 0 ? `<button type="button" class="task-children-toggle" data-action="toggle-task-children" data-task-id="${attr(task.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? '折叠' : '展开'}${childCount} 个子任务">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>` : ''}
         <span class="task-id">${esc(task.identifier)}</span>
       </div>
       <div class="task-card-title" title="${attr(task.title)}">${esc(task.title)}</div>
       ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
       <div class="task-card-foot">
         <span class="task-priority" title="优先级：${esc(PRIORITY[taskPriorityKey(task.priority)])}">${esc(PRIORITY[taskPriorityKey(task.priority)])}</span>
+        ${depsBlocked ? `<span class="task-deps-badge" title="${attr(depsTitle)}">${icon('alert')}被 ${blockedNames.length} 个任务阻塞</span>` : ''}
         ${!ended && run ? runDot(run.status) : ''}
         <span class="task-run-label">${runLabel}</span>
         ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
@@ -1531,6 +1540,43 @@
     </article>`
   }
   // task-card:end
+
+  // 任务父子层级（DSHBOTS-58 第二笔，依赖后端 D-59 落库的 parent_task_id）：
+  // 分组内按 parent_task_id 组树——子任务挂到父行下方、容器左缩进一级，父行可折叠子行；
+  // 展开态记在 state.openPanels，key 形如 task-children:<taskId>（与 <details data-panel> 同一套 key 口径）。
+  // 只有父任务也在本组可见时才挂成子级：父被搜索/筛选掉、或父在别的状态分组时，
+  // 子任务回到本组顶层，避免任务因为层级关系在看板上凭空消失。
+  function taskChildrenKey(taskId) {
+    return `task-children:${taskId}`
+  }
+
+  function taskParentId(task) {
+    return task?.parent_task_id ?? task?.parentTaskId ?? null
+  }
+
+  function renderTaskRows(tasks) {
+    const visible = new Set(tasks.map(task => task.id))
+    const childrenOf = new Map()
+    const roots = []
+    for (const task of tasks) {
+      const parentId = taskParentId(task)
+      if (parentId && visible.has(parentId)) {
+        if (!childrenOf.has(parentId)) childrenOf.set(parentId, [])
+        childrenOf.get(parentId).push(task)
+      } else {
+        roots.push(task)
+      }
+    }
+    const renderSubtree = (task, depth) => {
+      const children = childrenOf.get(task.id) ?? []
+      const key = taskChildrenKey(task.id)
+      const expanded = children.length > 0 && state.openPanels.has(key)
+      const row = renderTaskCard(task, { depth, childCount: children.length, expanded })
+      if (!children.length || !expanded) return row
+      return `${row}<div class="task-children" data-panel="${attr(key)}">${children.map(child => renderSubtree(child, depth + 1)).join('')}</div>`
+    }
+    return roots.map(task => renderSubtree(task, 0)).join('')
+  }
 
   // ── 项目「终端」tab：非交互式命令台（无 PTY/xterm），输入命令 → 项目工作目录执行 → 实时输出 ──
   // 实时 tail 由 1s 轮询直更输出区（startTerminalPoll），常规状态走 2.8s poll 的 view.terminal。
@@ -2849,6 +2895,13 @@
     })
   }
 
+  // 任务关系选项（DSHBOTS-58）：父任务与依赖任务都只从本项目已有任务里选——
+  // 后端只接受同项目内引用，跨项目与自引用会被直接拒绝，列表因此不给别的项目的任务。
+  function taskRelationOptions() {
+    const tasks = state.data?.tasks ?? []
+    return tasks.map(task => `<option value="${attr(task.id)}">${esc(task.identifier)} · ${esc(task.title)}</option>`).join('')
+  }
+
   function modalNewTask() {
     const project = activeProject()
     if (!project) return ''
@@ -2864,6 +2917,11 @@
           <div class="field"><label id="new-task-assignee-label" for="new-task-assignee">指派给</label><select class="select" style="width:100%" id="new-task-assignee" name="assigneeBotId">${project.members.map(member => `<option value="${attr(member.id)}">${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
           <div class="field"><label id="new-task-priority-label" for="new-task-priority">优先级</label><select class="select" style="width:100%" id="new-task-priority" name="priority"><option value="medium">中</option><option value="high">高</option><option value="urgent">紧急</option><option value="low">低</option><option value="none">无</option></select></div>
         </div>
+        <div class="field-row">
+          <div class="field"><label id="new-task-parent-label" for="new-task-parent">父任务</label><select class="select" style="width:100%" id="new-task-parent" name="parentTaskId"><option value="">无（顶层任务）</option>${taskRelationOptions()}</select></div>
+          <div class="field"><label id="new-task-blocked-label" for="new-task-blocked">依赖任务</label><select class="select" style="width:100%" id="new-task-blocked" name="blockedBy" multiple size="4">${taskRelationOptions()}</select></div>
+        </div>
+        <div class="usage-note">父任务只影响看板上的层级缩进；依赖任务未完成前，本任务不会被调度执行。</div>
         <div class="check-row"><input type="checkbox" id="new-task-autostart" name="autoStart" checked><label for="new-task-autostart">创建后立即进入执行队列</label></div>
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建任务</button>`,
@@ -2973,6 +3031,9 @@
     // 终态时间小字（DSHBOTS-44）：与任务卡同口径——done 取 completed_at、canceled 取 canceled_at，缺列不造占位。
     // 终态下 stageLabel 为 null（DSHBOTS-42 口径），badge 槽正好空出，用「完成于/取消于 + 时间」补位。
     const endAt = task.status === 'done' ? task.completed_at : task.status === 'canceled' ? task.canceled_at : null
+    // 任务关系（DSHBOTS-58）：父任务取本项目任务表里的那条，依赖只列未满足项（blockedByNames）。
+    const parentTask = (state.data?.tasks ?? []).find(item => item.id === (task.parent_task_id ?? task.parentTaskId ?? null)) ?? null
+    const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
     return modalShell({
       title: `${task.identifier} · ${task.title}`,
       // 任务阶段徽标走 taskStage 查表口径（DSHBOTS-42）：ended → stageLabel 为 null → 不显示。
@@ -2991,6 +3052,7 @@
             </div>
             <div class="field"><label id="task-assignee-label" for="task-assignee">负责人</label><select class="select" style="width:100%" id="task-assignee" name="assigneeBotId"><option value="">未指派</option>${project.members.map(member => `<option value="${attr(member.id)}" ${task.assignee_bot_id === member.id ? 'selected' : ''}>${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
           </form>
+          ${(parentTask || blockedNames.length) ? `<div class="note">${parentTask ? `父任务：${esc(parentTask.identifier)} · ${esc(parentTask.title)}` : ''}${parentTask && blockedNames.length ? ' · ' : ''}${blockedNames.length ? `被 ${blockedNames.length} 个任务阻塞：${esc(blockedNames.join('、'))}` : ''}</div>` : ''}
           <div class="divider"></div>
           <div class="eyebrow" style="margin-bottom:6px">评论</div>
           ${(task.comments ?? []).length === 0 ? '<div class="note">还没有评论。</div>' : task.comments.map(comment => `<div class="comment">
@@ -3835,6 +3897,16 @@
           render()
           break
         }
+        case 'toggle-task-children': {
+          // 子任务折叠（DSHBOTS-58）：展开态记在 state.openPanels（key: task-children:<taskId>），默认收起。
+          const taskId = target.dataset.taskId
+          if (!taskId) break
+          const key = taskChildrenKey(taskId)
+          if (state.openPanels.has(key)) state.openPanels.delete(key)
+          else state.openPanels.add(key)
+          render()
+          break
+        }
         case 'reset-scale': {
           const scale = applyUiScale(1)
           try { localStorage.setItem(UI_SCALE_KEY, String(scale)) } catch {}
@@ -4444,12 +4516,16 @@
         return
       }
       if (type === 'create-task') {
+        // 父任务与依赖任务（DSHBOTS-58）：多选字段用 getAll 取全部选中项；空值即不建关系。
+        const blockedBy = new FormData(form).getAll('blockedBy').map(String).filter(Boolean)
         const task = await api('create_task', {
           projectId: payload.projectId,
           title: payload.title,
           description: payload.description,
           assigneeBotId: payload.assigneeBotId || null,
           priority: payload.priority,
+          parentTaskId: payload.parentTaskId || null,
+          blockedBy,
           autoStart: form.querySelector('[name="autoStart"]')?.checked === true,
         })
         state.modal = null
