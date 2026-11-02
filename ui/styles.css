@@ -2080,6 +2080,37 @@ a.global-config.dsh-official-link:hover {
     text-overflow: ellipsis;
 }
 
+/* 群聊右栏「项目成员」概览卡（只读）：行高与 .side-row 对齐，
+   底部一行小字把管理入口指向「成员」tab，卡内不放任何写操作控件。 */
+.members-overview .side-row {
+    min-height: 36px;
+}
+.side-card-foot {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    font-size: var(--fs-caption);
+    color: var(--ink-3);
+}
+.side-link {
+    appearance: none;
+    border: 0;
+    padding: 0;
+    background: none;
+    color: var(--accent-text);
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.side-link:hover {
+    color: var(--accent);
+}
+
 /* ---------------------------------------------------------------- Tasks */
 .board-toolbar {
     display: flex;

@@ -949,6 +949,36 @@
   }
   // chat-pagination:end
 
+  // 群聊右栏「项目成员」概览卡（只读）：DSHBOTS-49 恢复 D-5 信息架构收敛时删掉的面板。
+  // 数据源与「成员」tab 同一张表（project.members），每行只给头像、名称、角色标签与状态点；
+  // 状态点走 memberRunDot（排队按空闲计绿、运行中黄闪、失败红、限流等待紫），
+  // 与「成员」tab 的口径一致。卡内不含任何管理操作——邀请与移除留在「成员」tab，
+  // 避免旧版「复选框全量提交」式的误清空成员。
+  function renderChatMembersCard() {
+    const project = activeProject()
+    const members = project?.members ?? []
+    return `
+      <div class="side-card members-overview" data-members-overview>
+        <div class="side-card-head"><h3>项目成员</h3><span>${members.length}</span></div>
+        ${members.length === 0 ? '<div class="faint">本项目还没有成员。</div>' : `<div class="side-list">
+          ${members.map(member => {
+            const bot = botById(member.id)
+            if (!bot) return ''
+            const dot = memberRunDot(member)
+            const isOwner = member.member_role === 'owner' || member.id === project.owner_bot_id
+            return `<div class="side-row" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
+              ${avatar(bot, 'sm')}
+              <div class="member-info">
+                <span class="member-name-line"><strong>${esc(bot.name)}</strong>${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}</span>
+              </div>
+              ${runDotHtml(dot)}
+            </div>`
+          }).join('')}
+        </div>`}
+        <div class="side-card-foot faint">管理成员请前往<button class="side-link" data-action="nav" data-view="members">「成员」标签页</button></div>
+      </div>`
+  }
+
   function renderChat() {
     if (state.chatMode === 'solo') return renderSoloChat()
     const project = activeProject()
@@ -1036,6 +1066,7 @@
               }).join('')}
             </div>${openTasks.length > CHAT_ACTIVE_TASK_LIMIT ? `<div class="faint">还有 ${openTasks.length - CHAT_ACTIVE_TASK_LIMIT} 条</div>` : ''}`}
           </div>
+          ${renderChatMembersCard()}
         </aside>
       </div>`
   }
