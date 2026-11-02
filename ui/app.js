@@ -824,11 +824,16 @@
                   : member.run_status === 'failed' ? '最近运行失败'
                   : member.run_status === 'plan_wait' ? `限流等待，约 ${waitMin} 分钟后自动重试`
                   : '空闲'
-                const model = member.modelRef ?? bot.modelRef ?? '未配置模型'
-                return `<div class="side-row" title="${esc(bot.name)} · ${esc(member.member_role === 'owner' ? '总监' : bot.role || '成员')} · ${esc(model)} · ${dotText}">
+                const roleLabel = member.member_role === 'owner' ? '总监' : (bot.role || '成员')
+                const modelRef = member.modelRef ?? bot.modelRef
+                // 两行式成员行（对齐 .owner-info）：第一行 名字+角色标签，第二行 provider·模型；缺任一项给可读兜底，不拼 undefined。
+                const modelLine = bot.provider && modelRef ? `${bot.provider} · ${modelRef}` : '未配置模型'
+                return `<div class="side-row member-row" title="${esc(bot.name)} · ${esc(roleLabel)} · ${esc(modelLine)} · ${dotText}">
                   ${avatar(bot, 'sm')}
-                  <span class="side-row-title">${esc(bot.name)}</span>
-                  <span class="side-row-status">${esc(model)}</span>
+                  <div class="member-info">
+                    <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(roleLabel)}</span></span>
+                    <span class="member-model">${esc(modelLine)}</span>
+                  </div>
                   <span class="run-dot ${dotClass}" aria-label="${dotText}"></span>
                 </div>`
               }).join('')}
@@ -997,13 +1002,18 @@
     const quoteBlock = message.reply_to ? `<div class="msg-quote" title="引用自 ${attr(message.reply_to.sender_name)}">${icon('quote')}<span>${esc(message.reply_to.sender_name)}：${esc(message.reply_to.excerpt)}</span></div>` : ''
     // hover 引用按钮：仅群聊；点击进入引用回复（选中该消息作为回复目标）。
     const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(message.body.slice(0, 120))}" title="引用回复" aria-label="引用回复这条消息">${icon('quote')}</button>` : ''
+    // hover 复制按钮：群聊/单聊都有，紧邻引用按钮右侧；复制消息原文 message.body（非渲染后 HTML），走统一 copy handler。
+    const copyBtn = `<button class="msg-copy-btn" data-action="copy" data-copy="${attr(message.body)}" title="复制消息" aria-label="复制这条消息的原文">${icon('copy')}</button>`
+    // 任务/思考过程 chip 合并同一行：固定顺序「思考过程 → 任务」，缺哪个不留空位。
+    const trajChip = message.run_id && !isUser ? `<button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button>` : ''
+    const taskChip = message.taskIdentifier ? `<button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button>` : ''
+    const chipsLine = trajChip || taskChip ? `<div class="task-chip-line">${trajChip}${taskChip}</div>` : ''
     return `<div class="message-row ${isUser ? 'user' : ''}">
       ${isUser ? '' : avatar(bot ?? { name: message.senderName, color: 'gray' })}
       <div class="message-body-wrap">
-        <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}</div>
+        <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}${copyBtn}</div>
         <div class="message-bubble">${quoteBlock}${richText(message.body, mdChatScope())}</div>
-        ${message.taskIdentifier ? `<div class="task-chip-line"><button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button></div>` : ''}
-        ${message.run_id && !isUser ? `<div class="task-chip-line"><button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button></div>` : ''}
+        ${chipsLine}
       </div>
     </div>`
   }
@@ -3040,7 +3050,7 @@
           const value = target.dataset.copy
           if (value) {
             await navigator.clipboard.writeText(value).catch(() => {})
-            toast('路径已复制', 'success')
+            toast('已复制', 'success')
           }
           break
         }

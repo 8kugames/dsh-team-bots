@@ -103,3 +103,37 @@ test('引用交互不回归：renderKeepingChatScroll 保留并仍聚焦输入�
   assert.match(source, /data-action="quote-message"/)
   assert.match(source, /state\.replyTo = null \/\/ 单聊无引用语义，跨上下文不留引用条/, '切换上下文仍清引用条')
 })
+
+// —— DSHBOTS-31：复制按钮 / chip 同行顺序 / 成员两行式 ——
+test('复制按钮：消息 hover 出现，复用统一 copy handler，复制原文并带无障碍属性', () => {
+  const btn = /<button class="msg-copy-btn" data-action="copy" data-copy="\$\{attr\(message\.body\)\}"[^>]*>\$\{icon\('copy'\)\}<\/button>/.exec(source)?.[0]
+  assert.ok(btn, '消息行应有 msg-copy-btn 复制按钮，data-copy 取 message.body 原文')
+  assert.match(btn, /title="复制消息"/)
+  assert.match(btn, /aria-label="[^"]+"/)
+  assert.match(source, /\$\{quoteBtn\}\$\{copyBtn\}/, '复制按钮紧邻引用按钮右侧')
+  assert.match(source, /case 'copy': \{[\s\S]*?navigator\.clipboard\.writeText\(value\)/, '复用统一 copy handler，不另写 clipboard 逻辑')
+  assert.match(source, /toast\('已复制', 'success'\)/)
+  assert.match(css, /\.message-row:hover \.msg-copy-btn/)
+})
+
+test('思考过程 chip 渲染在任务 chip 之前，两者合并同一 .task-chip-line', () => {
+  const fn = /function renderMessage\(message\) \{[\s\S]*?\n  \}/.exec(source)?.[0]
+  assert.ok(fn, '找不到 renderMessage 函数体')
+  const nonsys = fn.slice(fn.indexOf('const isUser'))
+  assert.equal((nonsys.match(/task-chip-line/g) ?? []).length, 1, '非系统消息只应有一个 task-chip-line 容器')
+  assert.ok(nonsys.indexOf('思考过程') < nonsys.indexOf('message.taskIdentifier'), '顺序固定：思考过程 → 任务')
+  assert.match(css, /\.task-chip-line \{[\s\S]*?gap: 8px/, '两个 chip 之间留 8px 呼吸距离')
+  const chipCss = /\.task-chip \{[\s\S]*?\n\}/.exec(css)?.[0]
+  assert.match(chipCss, /line-height: 1\.2/, 'task-chip 行高显式固定')
+})
+
+test('成员两行式：member-info 结构存在，模型行有可读兜底', () => {
+  assert.match(source, /<div class="side-row member-row"/)
+  assert.match(source, /<span class="member-name-line"><strong>/, '第一行：名字 + 角色标签')
+  assert.match(source, /class="member-role"/)
+  assert.match(source, /class="member-model"/)
+  assert.match(source, /bot\.provider && modelRef \? `\$\{bot\.provider\} · \$\{modelRef\}` : '未配置模型'/, 'provider·模型缺任一项显示「未配置模型」')
+  assert.match(source, /<span class="run-dot \$\{dotClass\}" aria-label="\$\{dotText\}"><\/span>/, '状态点保留在行尾')
+  const cssMember = /\.member-info strong \{[\s\S]*?\n\}/.exec(css)?.[0]
+  assert.ok(cssMember, 'member-info 两行式样式存在（对齐 .owner-info）')
+})
