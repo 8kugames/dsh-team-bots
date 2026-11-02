@@ -36,7 +36,7 @@
     memoryQuery: '',
     memoryResults: null,
     theme: 'dsh',
-    tree: { chats: true, bots: true },
+    tree: { chats: true, bots: true, archived: false },
     bootError: null,
     wechatAuth: null,
     wechatPollTimer: null,
@@ -536,6 +536,9 @@
           ? `${project.key}<span class="sep"></span>${project.status === 'active' ? '进行中' : '已归档'}`
           : '未选择项目'
     const chats = data.projects
+    // 已归档项目收进侧栏尾部的「已归档」抽屉（默认收起）；群聊组只列进行中的项目。
+    const activeChats = chats.filter(item => item.status === 'active')
+    const archivedChats = chats.filter(item => item.status !== 'active')
     const bots = data.bots ?? []
     const activeBots = bots.filter(bot => bot.status === 'active')
     const chevron = (open) => `<svg class="chev ${open ? 'open' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`
@@ -550,15 +553,14 @@
             <div class="tree-group">
               <div class="side-label">
                 <button class="tree-toggle" data-action="toggle-tree" data-tree="chats" title="群聊 / 项目">${chevron(state.tree.chats)}<span>群聊</span></button>
-                <span class="tree-count">${chats.length}</span>
+                <span class="tree-count">${activeChats.length}</span>
                 <button class="side-add" data-action="new-project" title="新建群聊 / 项目">${icon('plus')}</button>
               </div>
               ${state.tree.chats ? `<div class="tree-list">
-                ${chats.length === 0 ? '<div class="side-empty">还没有群聊。</div>' : chats.map(item => `
+                ${activeChats.length === 0 ? '<div class="side-empty">还没有群聊。</div>' : activeChats.map(item => `
                   <button class="tree-item chat-item ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
                     <span class="chat-hash">#</span>
                     <span class="tree-item-name">${esc(item.name)}</span>
-                    ${item.status !== 'active' ? '<span class="tree-flag">已归档</span>' : ''}
                     ${Number(item.reviewTasks ?? 0) > 0 ? '<span class="red-dot" title="有任务待人工验收"></span>' : ''}
                     ${Number(item.openTasks ?? 0) > 0 ? `<span class="tree-open-count">${Number(item.openTasks)}</span>` : ''}
                   </button>
@@ -579,6 +581,26 @@
                     ${bot.openTasks > 0 ? `<span class="tree-open-count">${bot.openTasks}</span>` : ''}
                     ${bot.status !== 'active' ? '<span class="tree-flag">已归档</span>' : ''}
                   </button>
+                `).join('')}
+              </div>` : ''}
+            </div>
+            <div class="tree-group tree-archived">
+              <div class="side-label">
+                <button class="tree-toggle" data-action="toggle-tree" data-tree="archived" title="已归档群聊">${chevron(state.tree.archived)}<span>已归档</span></button>
+                <span class="tree-count">${archivedChats.length}</span>
+              </div>
+              ${state.tree.archived ? `<div class="tree-list">
+                ${archivedChats.length === 0 ? '<div class="side-empty">没有已归档项目。</div>' : archivedChats.map(item => `
+                  <div class="tree-item-wrap">
+                    <button class="tree-item chat-item archived ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
+                      <span class="chat-hash">#</span>
+                      <span class="tree-item-name">${esc(item.name)}</span>
+                    </button>
+                    <span class="tree-item-actions">
+                      <button class="tree-act" data-action="reopen-project" data-project-id="${attr(item.id)}" title="项目再开（恢复为进行中）">再开</button>
+                      <button class="tree-act danger" data-action="remove-tracking-open" data-project-id="${attr(item.id)}" data-project-name="${attr(item.name)}" title="移除追踪（清理本项目管理数据）">移除</button>
+                    </span>
+                  </div>
                 `).join('')}
               </div>` : ''}
             </div>
@@ -1308,7 +1330,7 @@
         <span class="task-id">${esc(task.identifier)}</span>
         <span class="task-priority">${esc(PRIORITY[taskPriorityKey(task.priority)])}</span>
       </div>
-      <div class="task-card-title">${esc(task.title)}</div>
+      <div class="task-card-title" title="${attr(task.title)}">${esc(task.title)}</div>
       ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
       <div class="task-card-foot">
         ${run ? runDot(run.status) : ''}
@@ -2086,7 +2108,7 @@
               <div class="kv"><span>总监</span><strong>${esc(owner?.name ?? '未设置')}</strong></div>
               <div class="kv"><span>任务总数</span><strong>${project.stats.tasks}</strong></div>
               <div class="kv"><span>运行总数</span><strong>${project.stats.runs}</strong></div>
-              ${project.status === 'active' ? `<div class="btn-row" style="margin-top:12px"><button class="btn small" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>` : ''}
+              ${project.status === 'active' ? `<div class="btn-row settings-danger-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small danger" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>` : ''}
             </div>
           </div>
         </div>
@@ -2196,6 +2218,7 @@
     if (modal.loading) return modalLoading(modal.title || '加载中')
     switch (modal.type) {
       case 'new-project': return modalNewProject()
+      case 'remove-tracking': return modalRemoveTracking()
       case 'new-bot': return modalBot(null)
       case 'edit-bot': return modalBot(modal.detail)
       case 'new-task': return modalNewTask()
@@ -2238,6 +2261,40 @@
         ${bots.length > 1 ? `<div class="field"><span class="field-label" id="new-project-members-label">其他成员</span><div class="check-list" role="group" aria-labelledby="new-project-members-label">${bots.slice(1).map(bot => `<div class="check-row"><input type="checkbox" id="new-project-member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}"><label for="new-project-member-${attr(bot.id)}">${avatar(bot, 'sm')} ${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div></div>` : ''}
       </form>`,
       footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}创建项目</button>`,
+    })
+  }
+
+  // 移除追踪的两步确认弹窗：第一步列后果 + 可选「同时移除生产目录」；
+  // 第二步输入项目名（完全一致才点亮执行按钮，见 input 监听里的门禁）。
+  function modalRemoveTracking() {
+    const modal = state.modal
+    if (modal.step === 2) {
+      return modalShell({
+        title: '移除追踪 · 确认执行',
+        badge: '不可恢复',
+        subtitle: `输入项目名「${modal.name}」以确认。`,
+        body: `<form data-form="remove-tracking" id="modal-form">
+          <input type="hidden" name="projectId" value="${attr(modal.projectId)}">
+          <input type="hidden" name="purge" value="${modal.purge ? '1' : ''}">
+          <div class="field"><label for="remove-tracking-name">项目名称</label><input class="input" style="width:100%" id="remove-tracking-name" name="confirmName" placeholder="${esc(modal.name)}" autocomplete="off" autofocus></div>
+          <div class="hint">${modal.purge ? '将删除本项目全部管理数据，并移除项目生产目录（含全部文件）。' : '将删除本项目全部管理数据；项目生产目录保留。'}此操作不可恢复。</div>
+        </form>`,
+        footer: `<button class="btn" data-action="remove-tracking-back" type="button">上一步</button><button class="btn danger" type="submit" form="modal-form" id="remove-tracking-submit" disabled>确认移除追踪</button>`,
+      })
+    }
+    return modalShell({
+      title: '移除追踪 · 后果确认',
+      badge: '不可恢复',
+      subtitle: `将从本工作台移除已归档项目「${modal.name}」。`,
+      body: `
+        <ul class="remove-tracking-list">
+          <li>本项目全部管理数据将删除：任务、运行记录、聊天消息、成员、记忆、提案、密钥绑定等。</li>
+          <li>数据库中本项目的记录将一并清理，<strong>不可恢复</strong>。</li>
+          <li>项目生产目录默认保留在原处。</li>
+        </ul>
+        <div class="check-row"><input type="checkbox" id="remove-tracking-purge"><label for="remove-tracking-purge">同时移除项目生产目录</label></div>
+        <div class="hint">勾选后将删除项目生产目录（含目录内全部文件），同样不可恢复；不确定就先不勾。</div>`,
+      footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn danger" data-action="remove-tracking-step2" type="button">继续</button>`,
     })
   }
 
@@ -3349,6 +3406,33 @@
           toast('项目已归档', 'success')
           break
         }
+        case 'reopen-project': {
+          await api('reopen_project', { projectId: target.dataset.projectId })
+          await refresh()
+          toast('项目已再开，恢复为进行中', 'success')
+          break
+        }
+        case 'remove-tracking-open': {
+          const item = (state.data?.projects ?? []).find(project => project.id === target.dataset.projectId)
+          if (!item) break
+          state.modal = { type: 'remove-tracking', projectId: item.id, name: item.name, step: 1, purge: false }
+          render()
+          break
+        }
+        case 'remove-tracking-step2': {
+          if (state.modal?.type !== 'remove-tracking') break
+          // 复选框状态在翻页时读取一次：第二步的确认文案与最终提交都以此为准。
+          state.modal.purge = document.getElementById('remove-tracking-purge')?.checked === true
+          state.modal.step = 2
+          render()
+          break
+        }
+        case 'remove-tracking-back': {
+          if (state.modal?.type !== 'remove-tracking') break
+          state.modal.step = 1
+          render()
+          break
+        }
         case 'run-task': {
           const taskId = target.dataset.taskId
           const assignee = await saveTaskFromForm(taskId)
@@ -3511,6 +3595,18 @@
         state.view = 'chat'
         await refresh()
         toast('项目已创建', 'success')
+        return
+      }
+      if (type === 'remove-tracking') {
+        // 第二步表单：项目名一致才提交（input 监听门禁已保证按钮可用）。
+        await api('remove_project_tracking', {
+          projectId: payload.projectId,
+          confirmName: payload.confirmName,
+          purgeWorkdir: payload.purge === '1',
+        })
+        state.modal = null
+        await refresh()
+        toast('已移除追踪，管理数据已清理', 'success')
         return
       }
       if (type === 'create-bot' || type === 'update-bot') {
@@ -3697,6 +3793,12 @@
   document.addEventListener('input', (event) => {
     const el = event.target
     el.closest?.('form')?.setAttribute('data-dirty', '1')
+    if (el.id === 'remove-tracking-name') {
+      // 输入项目名与待移除项目完全一致才点亮执行按钮；不属于此弹窗时跳过。
+      const submitBtn = document.getElementById('remove-tracking-submit')
+      if (submitBtn) submitBtn.disabled = el.value !== state.modal?.name
+      return
+    }
     if (el.id === 'ui-scale') {
       const scale = applyUiScale(el.value)
       try { localStorage.setItem(UI_SCALE_KEY, String(scale)) } catch {}

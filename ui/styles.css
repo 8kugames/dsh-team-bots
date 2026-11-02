@@ -562,6 +562,53 @@ a {
     font-size: var(--fs-caption);
     flex: 0 0 auto;
 }
+.tree-item-wrap {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.tree-item-wrap .tree-item {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.tree-item-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity .12s ease;
+}
+.tree-item-wrap:hover .tree-item-actions,
+.tree-item-wrap:focus-within .tree-item-actions {
+    opacity: 1;
+}
+.tree-act {
+    border: none;
+    background: transparent;
+    color: var(--ink-3);
+    font: 500 var(--fs-caption) var(--sans);
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    line-height: 1.4;
+}
+.tree-act:hover {
+    background: var(--surface-2);
+    color: var(--ink-1);
+}
+.tree-act.danger:hover {
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--danger);
+}
+.remove-tracking-list {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    display: grid;
+    gap: 6px;
+    line-height: 1.55;
+}
 .bot-item .avatar {
     flex: 0 0 auto;
 }
@@ -2042,6 +2089,7 @@ a.global-config.dsh-official-link:hover {
 .column {
     display: flex;
     flex-direction: column;
+    min-width: 0;
     min-height: 116px;
     padding: 0 2px 4px;
     border-radius: 10px;
@@ -2113,6 +2161,8 @@ a.global-config.dsh-official-link:hover {
     border-radius: 10px;
     padding: 10px 11px 9px;
     margin-bottom: 8px;
+    min-width: 0;
+    overflow: hidden;
     cursor: pointer;
     box-shadow: var(--shadow-card);
     transition:
@@ -2138,11 +2188,17 @@ a.global-config.dsh-official-link:hover {
     font: 500 var(--fs-caption) var(--mono);
     color: var(--ink-3);
     letter-spacing: 0.02em;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .task-priority {
     margin-left: auto;
     color: var(--ink-3);
     font-size: var(--fs-caption);
+    flex: 0 0 auto;
 }
 .priority-dot {
     width: 6px;
@@ -2171,6 +2227,13 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-body);
     line-height: 1.55;
     color: var(--ink);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 .task-card-foot {
     display: flex;
