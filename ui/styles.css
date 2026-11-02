@@ -829,16 +829,17 @@ a.global-config.dsh-official-link:hover {
 }
 
 /* ---------------------------------------------------------------- Buttons
-   Three roles, one shape. A frame is a scarce resource: it is spent on the
-   single thing a screen wants you to do, and nowhere else.
-   action   — plain text, the default
+   Four roles, one shape. The rule that matters: a pressable thing must never
+   read as a label. Every button therefore carries a hairline frame on a
+   raised surface; every label stays bare text (eyebrow / note / kv / side-row
+   without data-action).
+   action   — hairline frame on surface-2, the default
    emphasis — accent fill, at most one per screen
-   danger   — red text, only for destructive actions
-   .outline exists for the rare action that needs to read louder than text
-   without spending the accent. */
+   danger   — red text on a faint red frame, destructive actions only
+   icon     — the glyph is the affordance, so it stays frameless */
 .btn {
-    border: 0;
-    background: transparent;
+    border: 1px solid var(--line-2);
+    background: var(--surface-2);
     color: var(--ink-2);
     border-radius: 8px;
     padding: 0 10px;
@@ -850,12 +851,15 @@ a.global-config.dsh-official-link:hover {
     justify-content: center;
     gap: 6px;
     white-space: nowrap;
+    cursor: pointer;
     transition:
         background-color 0.13s ease,
+        border-color 0.13s ease,
         color 0.13s ease;
 }
 .btn:hover {
-    background: var(--line);
+    background: var(--surface-3);
+    border-color: var(--line);
     color: var(--ink);
 }
 .btn svg {
@@ -865,18 +869,22 @@ a.global-config.dsh-official-link:hover {
 }
 .btn.primary {
     background: var(--accent);
+    border-color: transparent;
     color: var(--accent-ink);
     font-weight: 600;
 }
 .btn.primary:hover {
     background: color-mix(in srgb, var(--accent) 88%, var(--ink));
+    border-color: transparent;
     color: var(--accent-ink);
 }
 .btn.danger {
     color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 22%, var(--line-2));
 }
 .btn.danger:hover {
     background: var(--danger-wash);
+    border-color: color-mix(in srgb, var(--danger) 48%, transparent);
     color: var(--danger);
 }
 .btn.small {
@@ -894,8 +902,12 @@ a.global-config.dsh-official-link:hover {
     width: 30px;
     height: 30px;
     color: var(--ink-3);
+    border-color: transparent;
+    background: transparent;
 }
 .btn.icon:hover {
+    background: var(--line);
+    border-color: transparent;
     color: var(--ink);
 }
 .btn.icon svg {
@@ -921,11 +933,13 @@ a.global-config.dsh-official-link:hover {
     cursor: default;
 }
 .btn:disabled:hover {
-    background: transparent;
+    background: var(--surface-2);
+    border-color: var(--line-2);
     color: var(--ink-2);
 }
 .btn.primary:disabled:hover {
     background: var(--accent);
+    border-color: transparent;
     color: var(--accent-ink);
 }
 .btn-row {
@@ -1961,6 +1975,32 @@ a.global-config.dsh-official-link:hover {
 .side-row + .side-row {
     border-top: 1px solid var(--line);
 }
+/* 可点击的侧栏行（任务行 / 导航行）：悬停抬起成面、标题提亮，
+   与同栏里那些纯展示的 label 行一眼分开。 */
+.side-row[data-action] {
+    border-radius: 8px;
+    padding: 7px 8px;
+    margin: 0 -8px;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+.side-row[data-action]:hover {
+    background: var(--surface-2);
+}
+.side-row[data-action]:hover .side-row-title {
+    color: var(--ink);
+}
+/* 静态可辨：可点击行右端带一个箭头，纯展示行没有。 */
+.side-row[data-action]::after {
+    content: "\203A";
+    flex: 0 0 auto;
+    color: var(--ink-3);
+    font-size: var(--fs-body);
+    line-height: 1;
+}
+.side-row[data-action]:hover::after {
+    color: var(--accent-text);
+}
 .side-row .side-row-status {
     color: var(--ink-3);
     font-size: var(--fs-caption);
@@ -2934,12 +2974,16 @@ a.global-config.dsh-official-link:hover {
     line-height: 1.7;
 }
 .summary-link {
-    color: var(--ink-3);
+    color: var(--ink-2);
     font-size: var(--fs-small);
     cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--ink-3) 55%, transparent);
+    text-underline-offset: 3px;
 }
 .summary-link:hover {
-    color: var(--ink-2);
+    color: var(--accent-text);
+    text-decoration-color: currentColor;
 }
 .field-row {
     display: grid;
