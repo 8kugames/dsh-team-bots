@@ -191,6 +191,52 @@ export const schedulerMethods = {
       })
     }
   },
+  // 限流失败的自动重试（DSHBOTS-24）：失败 run 带 retry_after_ms（provider 真发过 Retry-After 才有），
+  // 到期派生一次新运行。只重试一次（attempt=1 才派生，新 run attempt=2 失败后不再链式），
+  // 只针对任务运行——solo/私信运行显示 plan_wait 状态但不自动派生，避免对同一个对话者重复发信。
+  // 幂等三闸：attempt=1 + task_id 非空 + 原 run 无 plan_retry 事件；idempotency_key UNIQUE 兜底并发 tick。
+  retryExpiredPlanWaits() {
+    const expired = this.store.all(
+      `SELECT r.* FROM runs r
+       WHERE r.status = 'failed' AND r.retry_after_ms IS NOT NULL
+         AND r.task_id IS NOT NULL AND r.attempt = 1
+         AND r.error_code IN ('RATE_LIMIT', 'QUOTA')
+         AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
+             <= CAST(strftime('%s', 'now') AS REAL)
+         AND NOT EXISTS(SELECT 1 FROM run_events e WHERE e.run_id = r.id AND e.type = 'plan_retry')`,
+    )
+    for (const run of expired) {
+      const task = this.store.get('SELECT * FROM tasks WHERE id = ?', run.task_id)
+      if (!task || ['done', 'canceled'].includes(task.status)) continue
+      // 任务已有排队/运行中的 run（如用户手动重试过）就不重复派生。
+      const active = this.store.get(
+        "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+        run.task_id,
+      )
+      if (active) continue
+      const runId = id('run')
+      const createdAt = nowIso()
+      try {
+        this.store.run(
+          `INSERT INTO runs(id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status,
+            attempt, idempotency_key, write_scopes, queued_at)
+           VALUES (?, ?, ?, ?, ?, 'task', 'write', 'plan_retry', ?, 'queued', ?, ?, ?, ?)`,
+          runId, run.project_id, run.bot_id, run.task_id, run.id, run.task_id,
+          (run.attempt ?? 1) + 1, `plan_retry:${run.id}`, run.write_scopes, createdAt,
+        )
+        this.store.run(
+          'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+          id('evt'), run.id, 'plan_retry',
+          `限流重试到期，派生新运行 ${runId}（attempt ${(run.attempt ?? 1) + 1}）`, createdAt,
+        )
+      } catch (error) {
+        // idempotency_key UNIQUE 撞车 = 另一个 tick 已派生过，跳过即可。
+        if (String(error).includes('UNIQUE')) continue
+        throw error
+      }
+    }
+  },
+
   async tick() {
     if (this.ticking || !this.started) return
     this.ticking = true
@@ -198,6 +244,7 @@ export const schedulerMethods = {
       this.runMaintenance()
       this.dispatchOutbox()
       await this.reapStalledRuns()
+      this.retryExpiredPlanWaits()
       const activeRows = this.store.all(
         "SELECT bot_id, kind, task_id, project_id, mode, write_scopes FROM runs WHERE status = 'running'",
       )

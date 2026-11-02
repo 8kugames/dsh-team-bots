@@ -388,10 +388,10 @@ if (run.kind === 'dm_reply') {
       : null
     const endedAt = nowIso()
     this.store.run(
-      `UPDATE runs SET status = ?, output = ?, artifacts = ?, error_code = ?, error_message = ?, ended_at = ?,
+      `UPDATE runs SET status = ?, output = ?, artifacts = ?, error_code = ?, error_message = ?, retry_after_ms = ?, ended_at = ?,
        usage_input = ?, usage_cache_read = ?, usage_cache_write = ?, usage_output = ?, usage_cost = ?
        WHERE id = ? AND status IN ('running', 'queued')`,
-      status, cleanOutput, artifactsJson, error?.code ?? null, error?.message ?? null, endedAt,
+      status, cleanOutput, artifactsJson, error?.code ?? null, error?.message ?? null, error?.retryAfterMs ?? null, endedAt,
       usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens, usage.cost,
       runId,
     )

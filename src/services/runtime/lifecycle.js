@@ -209,6 +209,10 @@ export const lifecycleMethods = {
       ? {
           code: reason.kind === 'aborted' ? 'ABORTED' : (reason.error?.code ?? 'MODEL_ERROR'),
           message: reason.error?.message ?? (reason.kind === 'aborted' ? '运行被中止' : '模型调用失败'),
+          // 限流退避只有 provider 真发 Retry-After 才有值（宿主 failureSnapshot 已校验正有限数），拿不到就是 null，不伪造。
+          retryAfterMs: reason.kind === 'error' && Number.isFinite(reason.error?.providerRetryAfterMs) && reason.error.providerRetryAfterMs > 0
+            ? reason.error.providerRetryAfterMs
+            : null,
         }
       : null
     this.releaseAttribution(root.runId)

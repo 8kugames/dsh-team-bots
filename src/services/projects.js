@@ -41,20 +41,34 @@ export const projectsMethods = {
              SELECT 1 FROM runs r
              WHERE r.bot_id = pm.member_id AND r.status IN ('queued', 'running')
            ) THEN 'running'
-           WHEN COALESCE((
-             SELECT r.status FROM runs r
-             WHERE r.bot_id = pm.member_id
-             ORDER BY COALESCE(r.ended_at, r.queued_at) DESC
-             LIMIT 1
-           ), '') = 'failed' THEN 'failed'
+           WHEN lst.status = 'failed'
+                AND lst.error_code IN ('RATE_LIMIT', 'QUOTA')
+                AND lst.retry_after_ms IS NOT NULL
+                AND lst.retry_expires_epoch > CAST(strftime('%s', 'now') AS REAL) THEN 'plan_wait'
+           WHEN lst.status = 'failed' THEN 'failed'
            ELSE 'idle'
          END AS run_status,
+         CASE
+           WHEN lst.status = 'failed'
+                AND lst.error_code IN ('RATE_LIMIT', 'QUOTA')
+                AND lst.retry_after_ms IS NOT NULL
+                AND lst.retry_expires_epoch > CAST(strftime('%s', 'now') AS REAL)
+           THEN lst.retry_expires_epoch - CAST(strftime('%s', 'now') AS REAL)
+         END AS retry_wait_seconds,
          COALESCE(u.usage_input, 0) AS usage_input,
          COALESCE(u.usage_cache_read, 0) AS usage_cache_read,
          COALESCE(u.usage_cache_write, 0) AS usage_cache_write,
          COALESCE(u.usage_output, 0) AS usage_output,
          COALESCE(u.usage_cost, 0) AS usage_cost
        FROM project_members pm JOIN bots b ON b.id = pm.member_id
+       LEFT JOIN (
+         SELECT bot_id, status, error_code, retry_after_ms,
+                ROW_NUMBER() OVER (
+                  PARTITION BY bot_id ORDER BY COALESCE(ended_at, queued_at) DESC
+                ) AS rn,
+                strftime('%s', COALESCE(ended_at, queued_at)) + retry_after_ms / 1000.0 AS retry_expires_epoch
+         FROM runs
+       ) lst ON lst.bot_id = pm.member_id AND lst.rn = 1
        LEFT JOIN (
          SELECT bot_id,
                 SUM(usage_input) AS usage_input,

@@ -23,6 +23,7 @@ const RUNS_DDL = `
   session_id TEXT,
   error_code TEXT,
   error_message TEXT,
+  retry_after_ms INTEGER,
   output TEXT,
   artifacts TEXT,
   queued_at TEXT NOT NULL,
@@ -47,7 +48,7 @@ CREATE INDEX IF NOT EXISTS runs_bot_status_idx
   ON runs(bot_id, COALESCE(ended_at, queued_at) DESC);
 `
 
-const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, error_code, error_message, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
+const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, error_code, error_message, retry_after_ms, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
 
 const BINDINGS_DDL = `
   session_id TEXT PRIMARY KEY,
@@ -559,6 +560,7 @@ export function openDatabase(path) {
   recordMigration(db, 'messages_reply_to')
   recordMigration(db, 'bots_file_policy')
   recordMigration(db, 'tasks_runs_write_scopes')
+  recordMigration(db, 'runs_retry_after_ms')
   return new Store(db, { ftsEnabled })
 }
 
@@ -584,6 +586,8 @@ function migrateRuns(db) {
   addColumn(db, 'runs', 'last_progress_at', 'TEXT')
   addColumn(db, 'runs', 'artifacts', 'TEXT')
   addColumn(db, 'runs', 'write_scopes', 'TEXT')
+  // 限流失败的机器可读退避时间（provider Retry-After 换算的毫秒数），只有 provider 真发了才有值。
+  addColumn(db, 'runs', 'retry_after_ms', 'INTEGER')
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
 }
 

@@ -270,7 +270,7 @@
     const { marked, DOMPurify } = deps ?? {}
     if (typeof marked?.parse !== 'function') return null
     if (typeof DOMPurify?.sanitize !== 'function' || DOMPurify.isSupported === false) return null
-    // 外链统一新窗口 + noopener：afterSanitizeAttributes 官方配方，随消毒管线走，不经手拼 HTML。
+    // 外链统一新窗口 + noopener：afterSanitizeAttributes 原生配方，随消毒管线走，不经手拼 HTML。
     if (typeof DOMPurify.addHook === 'function') {
       DOMPurify.addHook('afterSanitizeAttributes', (node) => {
         if (node?.tagName !== 'A' || typeof node.getAttribute !== 'function' || !node.getAttribute('href')) return
@@ -508,7 +508,7 @@
     return `
       <div class="shell">
         <aside class="sidebar">
-          <a class="brand" href="/index.html" title="返回 DSH 官方 Web 界面">
+          <a class="brand" href="/index.html" title="返回 DSH 原生 Web 界面">
             <div class="brand-mark">DSH</div>
             <div class="brand-copy"><strong>DSH Team Bots</strong></div>
           </a>
@@ -553,8 +553,8 @@
             <button class="global-config ${isGlobal ? 'active' : ''}" data-action="nav" data-view="global">
               ${icon('settings')}<span>全局配置</span>
             </button>
-            <a class="global-config dsh-official-link" href="/index.html" title="切换到 DSH 官方 Web 界面">
-              ${icon('external')}<span>DSH 官方界面</span>
+            <a class="global-config dsh-official-link" href="/index.html" title="切换到 DSH 原生 Web 界面">
+              ${icon('external')}<span>DSH 原生界面</span>
             </a>
             <div class="sidebar-meta">
               <span class="dot ${running ? 'amber' : ''}"></span>
@@ -815,14 +815,20 @@
               ${members.map(member => {
                 const bot = botById(member.id)
                 if (!bot) return ''
+                // plan_wait（限流等待）用紫点：styles.css 车道占用期先用 --c-violet 内联，车道净后迁入类。
+                const waitMin = member.retry_wait_seconds ? Math.max(1, Math.round(member.retry_wait_seconds / 60)) : null
                 const dotClass = member.run_status === 'running' ? 'running' : member.run_status === 'failed' ? 'failed' : ''
-                const dotText = member.run_status === 'running' ? '运行中' : member.run_status === 'failed' ? '最近运行失败' : '空闲'
+                const dotStyle = member.run_status === 'plan_wait' ? ' style="background:var(--c-violet)"' : ''
+                const dotText = member.run_status === 'running' ? '运行中'
+                  : member.run_status === 'failed' ? '最近运行失败'
+                  : member.run_status === 'plan_wait' ? `限流等待，约 ${waitMin} 分钟后自动重试`
+                  : '空闲'
                 const model = member.modelRef ?? bot.modelRef ?? '未配置模型'
                 return `<div class="side-row" title="${esc(bot.name)} · ${esc(member.member_role === 'owner' ? '总监' : bot.role || '成员')} · ${esc(model)} · ${dotText}">
                   ${avatar(bot, 'sm')}
                   <span class="side-row-title">${esc(bot.name)}</span>
                   <span class="side-row-status">${esc(model)}</span>
-                  <span class="run-dot ${dotClass}" aria-label="${dotText}"></span>
+                  <span class="run-dot ${dotClass}"${dotStyle} aria-label="${dotText}"></span>
                 </div>`
               }).join('')}
             </div>
