@@ -552,6 +552,27 @@ a {
 .tree-item.active .chat-hash {
     color: var(--accent-text);
 }
+/* 侧栏未读计数胶囊：与待审红点同族（同一 --danger 填充），一个信号只留一种形态。
+   文字用 --surface，四套主题下对比度均 ≥ 4.5:1。 */
+.unread-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: var(--danger);
+    color: var(--surface);
+    font: 600 var(--fs-caption) var(--mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+}
+/* 未读时项目名不加粗：徽标本身即强调，不再叠第二处焦点。 */
+.tree-item.has-unread {
+    font-weight: 400;
+}
 .tree-open-count {
     color: var(--ink-3);
     font: 500 var(--fs-small) var(--mono);

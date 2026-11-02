@@ -26,6 +26,43 @@ export const projectsMethods = {
     )
   },
 
+  // 群聊未读计数（IM 式）：以该读者对各项目的已读水位为界，统计其后到达的 bot 群聊消息。
+  // 没有水位的项目以项目创建时间为基线，历史消息不会一上来就全红。
+  unreadChatCounts() {
+    const rows = this.store.all(
+      `SELECT m.project_id AS project_id, COUNT(*) AS unread
+         FROM messages m
+         JOIN projects p ON p.id = m.project_id
+         LEFT JOIN chat_reads cr ON cr.project_id = m.project_id AND cr.reader_id = ?
+         WHERE m.sender_type = 'bot'
+           AND m.created_at > COALESCE(cr.read_at, p.created_at)
+         GROUP BY m.project_id`,
+      this.localUserId,
+    )
+    return new Map(rows.map(row => [row.project_id, Number(row.unread ?? 0)]))
+  },
+
+  // 标记群聊已读：水位只推到用户真正看到的那条消息，之后新到的消息仍算未读。
+  markChatRead(projectId, readAt) {
+    const stamp = String(readAt ?? '').trim()
+    if (!projectId || !stamp) return { ok: false, readAt: '' }
+    const latest = this.store.get(
+      "SELECT MAX(created_at) AS ts FROM messages WHERE project_id = ? AND sender_type = 'bot'",
+      projectId,
+    )
+    const serverMax = latest?.ts ?? ''
+    // 客户端水位不得越过服务端最新消息，否则会吞掉尚未到达的消息。
+    const target = serverMax && serverMax < stamp ? serverMax : stamp
+    this.store.run(
+      `INSERT INTO chat_reads (project_id, reader_id, read_at) VALUES (?, ?, ?)
+       ON CONFLICT(project_id, reader_id) DO UPDATE SET read_at = excluded.read_at`,
+      projectId,
+      this.localUserId,
+      target,
+    )
+    return { ok: true, readAt: target }
+  },
+
   // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，usage 四项与 cost 为本项目全部 run 的累计。
   // run_status 用 bot 全局口径（不限本项目）：failed 根因（模型/AUTH）是 bot 级，单聊 run 的 project_id 为 NULL，
   // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 维持项目口径不动。

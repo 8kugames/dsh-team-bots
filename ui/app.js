@@ -37,6 +37,8 @@
     memoryResults: null,
     theme: 'dsh',
     tree: { chats: true, bots: true, archived: false },
+    // 群聊已读水位：`<projectId>:<最新消息时间>`，用于避免重复上报已读。
+    markedRead: null,
     bootError: null,
     wechatAuth: null,
     wechatPollTimer: null,
@@ -377,10 +379,34 @@
     }
   }
 
+  // IM 式已读：群聊可见时把水位推到最后一条消息，服务端据此算未读数。
+  // 只在群聊视图上报；切到任务/设置等 tab 不算数。
+  async function markVisibleChatRead(data) {
+    if (state.view !== 'chat' || state.chatMode === 'solo') return
+    const projectId = state.projectId
+    if (!projectId) return
+    const messages = data?.messages ?? []
+    let newest = ''
+    for (const message of messages) {
+      if (String(message.created_at ?? '') > newest) newest = String(message.created_at)
+    }
+    if (!newest) return
+    const key = `${projectId}:${newest}`
+    if (state.markedRead === key) return
+    state.markedRead = key
+    // 本地先清零，避免下一轮轮询前徽标还挂着。
+    const target = data.projects?.find(item => item.id === projectId)
+    if (target) target.unreadCount = 0
+    try {
+      await api('mark_chat_read', { projectId, readAt: newest }, { quiet: true })
+    } catch {}
+  }
+
   async function loadState(projectId = state.projectId, { quiet = false } = {}) {
     // 仅单聊场景携带 soloBotId，避免把单聊口径的 runs/memories 泄漏进群聊视图。
     const data = await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet })
     state.data = data
+    await markVisibleChatRead(data)
     if (!state.projectId || !data.projects.some(project => project.id === state.projectId)) {
       state.projectId = data.project?.id ?? data.projects.find(project => project.status === 'active')?.id ?? null
     }
@@ -559,14 +585,22 @@
                 <button class="side-add" data-action="new-project" title="新建群聊 / 项目">${icon('plus')}</button>
               </div>
               ${state.tree.chats ? `<div class="tree-list">
-                ${activeChats.length === 0 ? '<div class="side-empty">还没有群聊。</div>' : activeChats.map(item => `
-                  <button class="tree-item chat-item ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
+                ${activeChats.length === 0 ? '<div class="side-empty">还没有群聊。</div>' : activeChats.map(item => {
+                  // 未读与待审红点互斥：行尾最多一个红色信号，未读优先（会话流更即时）。
+                  const unread = Number(item.unreadCount ?? 0)
+                  const signal = unread > 0
+                    ? (unread === 1
+                      ? '<span class="red-dot" title="1 条未读消息"></span>'
+                      : `<span class="unread-badge" title="${unread} 条未读消息">${unread > 99 ? '99+' : unread}</span>`)
+                    : (Number(item.reviewTasks ?? 0) > 0 ? '<span class="red-dot" title="有任务待人工验收"></span>' : '')
+                  return `
+                  <button class="tree-item chat-item ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''} ${unread > 0 ? 'has-unread' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
                     <span class="chat-hash">#</span>
                     <span class="tree-item-name">${esc(item.name)}</span>
-                    ${Number(item.reviewTasks ?? 0) > 0 ? '<span class="red-dot" title="有任务待人工验收"></span>' : ''}
+                    ${signal}
                     ${Number(item.openTasks ?? 0) > 0 ? `<span class="tree-open-count">${Number(item.openTasks)}</span>` : ''}
-                  </button>
-                `).join('')}
+                  </button>`
+                }).join('')}
               </div>` : ''}
             </div>
             <div class="tree-group">

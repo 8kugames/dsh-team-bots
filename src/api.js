@@ -5,6 +5,7 @@ const ACTIONS = new Set([
   'health', 'state', 'messages_page', 'models', 'bot_detail',
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
+  'mark_chat_read',
   'add_member', 'remove_member',
   'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
   'retry_run', 'cancel_run', 'run_trajectory',
@@ -60,6 +61,9 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.addProjectMember(required(payload.projectId, 'projectId'), required(payload.botId, 'botId'), actor)
     case 'remove_member':
       return service.removeProjectMember(required(payload.projectId, 'projectId'), required(payload.botId, 'botId'), actor)
+    case 'mark_chat_read':
+      // IM 式已读：水位只推到用户看到的那条消息，之后新到的仍算未读。
+      return service.markChatRead(required(payload.projectId, 'projectId'), payload.readAt ?? '')
     case 'browse_dirs':
       return service.browseDirectories(payload)
     case 'send_message':

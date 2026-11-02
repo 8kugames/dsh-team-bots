@@ -372,6 +372,15 @@ CREATE TABLE IF NOT EXISTS terminal_commands (
 
 CREATE INDEX IF NOT EXISTS terminal_commands_project_idx ON terminal_commands(project_id, created_at DESC);
 
+-- chat_reads：用户对各项目群聊的已读水位（IM 式未读计数的依据）。
+-- 未读 = 水位之后到达的 bot 群聊消息；没有水位的项目以项目创建时间为基线。
+CREATE TABLE IF NOT EXISTS chat_reads (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  reader_id TEXT NOT NULL,
+  read_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, reader_id)
+);
+
 -- outbox：状态变更 → 建运行 的可靠交接。写入即落库，调度器按顺序领取并投递，
 -- 失败按退避重试，超过上限转 failed 供人工排查。
 CREATE TABLE IF NOT EXISTS outbox (
@@ -569,6 +578,7 @@ export function openDatabase(path) {
   recordMigration(db, 'runs_retry_after_ms')
   recordMigration(db, 'bots_fallback_model')
   recordMigration(db, 'runs_model_override')
+  recordMigration(db, 'chat_reads')
   return new Store(db, { ftsEnabled })
 }
 

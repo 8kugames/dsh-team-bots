@@ -22,6 +22,7 @@ export const systemMethods = {
       FROM projects p ORDER BY CASE p.status WHEN 'active' THEN 0 ELSE 1 END, p.updated_at DESC
     `)
     const bots = this.store.all("SELECT * FROM bots ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at")
+    const unreadCounts = this.unreadChatCounts()
     let project = projectId ? this.store.get('SELECT * FROM projects WHERE id = ?', projectId) : undefined
     if (!project) project = this.store.get("SELECT * FROM projects WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1")
     const view = {
@@ -33,6 +34,7 @@ export const systemMethods = {
         openTasks: Number(item.open_tasks ?? 0),
         reviewTasks: Number(item.review_tasks ?? 0),
         ownerReviewTasks: Number(item.owner_review_tasks ?? 0),
+        unreadCount: unreadCounts.get(item.id) ?? 0,
       })),
       project: null,
       messages: [],
