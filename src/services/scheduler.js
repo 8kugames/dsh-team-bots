@@ -8,6 +8,7 @@ import { badRequest } from '../errors.js'
 import { applyRetention, reconcileUsage } from '../usage.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { MAX_RATE_LIMIT_RETRIES, RATE_LIMIT_CODES } from './backoff.js'
+import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
 import { readWriteScopes, writeScopesOverlap } from './write-scopes.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
@@ -260,6 +261,8 @@ export const schedulerMethods = {
     if (this.ticking || !this.started) return
     this.ticking = true
     try {
+      // tasks 的依赖列由 task-relations 域自管迁移（db.js 不加行），闸门读列前懒迁移一次。
+      ensureTaskRelationsSchema(this.store)
       this.runMaintenance()
       this.dispatchOutbox()
       await this.reapStalledRuns()
@@ -327,6 +330,30 @@ export const schedulerMethods = {
         if (budgetError) {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'BUDGET_EXCEEDED', message: budgetError } })
           continue
+        }
+        // 依赖闸门（DSHBOTS-59）：任务带 blocked_by 且任一依赖未 done/canceled 时不出队，
+        // run 留 queued，依赖完结后下一拍自然放行（依赖满足与否由调度器判断，不进状态流转）。
+        // 同一 run 只记一条 task_blocked_dep 事件（EXISTS 去重，防止每拍刷屏）。
+        // 只拦 kind='task' 的任务运行：总监 review/handle 等运行不受依赖影响。
+        if (run.kind === 'task' && run.task_id) {
+          const taskRow = this.store.get('SELECT * FROM tasks WHERE id = ?', run.task_id)
+          const blockers = unsatisfiedBlockedDeps(this.store, taskRow)
+          if (blockers.length) {
+            const alreadyNoted = this.store.get(
+              "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'task_blocked_dep'",
+              run.id,
+            )
+            if (!alreadyNoted) {
+              const projectKeyRow = this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id)
+              this.store.run(
+                'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+                id('evt'), run.id, 'task_blocked_dep',
+                `依赖未完结，暂缓领取：${blockers.map(row => `${projectKeyRow?.key ?? 'T'}-${row.number}`).join('、')}`,
+                nowIso(),
+              )
+            }
+            continue
+          }
         }
         const claimed = this.store.run(
           "UPDATE runs SET status = 'running', started_at = ?, last_progress_at = ? WHERE id = ? AND status = 'queued'",

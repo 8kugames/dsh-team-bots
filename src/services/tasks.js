@@ -7,6 +7,9 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { clampNumber, id, nowIso, projectKey, TASK_ID_PATTERN, text } from '../util.js'
 import { parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
+import {
+  ensureTaskRelationsSchema, normalizeBlockedByInput, taskDepsView, validateTaskRelations,
+} from './task-relations.js'
 
 export const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 
@@ -84,17 +87,24 @@ export const tasksMethods = {
       : parseWriteScopes(input.writeScopes)
     const taskId = id('task')
     const createdAt = nowIso()
+    // 父子/依赖关系（DSHBOTS-59）：camelCase 与 snake_case 都收；taskId 服务端生成，
+    // 真自引用在公共 API 层面构造不出来，validateTaskRelations 仍显式拒（防直插库与未来 update 复用）。
+    const parentTaskId = input.parentTaskId ?? input.parent_task_id ?? null
+    const blockedBy = normalizeBlockedByInput(input.blockedBy ?? input.blocked_by)
+    ensureTaskRelationsSchema(this.store)
     let number
     this.store.transaction(() => {
+      const relations = validateTaskRelations({ store: this.store, projectId: project.id, taskId, parentTaskId, blockedBy })
       number = Number(this.store.get('SELECT COALESCE(MAX(number), 0) + 1 AS n FROM tasks WHERE project_id = ?', project.id)?.n ?? 1)
       this.store.run(
         `INSERT INTO tasks(id, project_id, number, title, description, status, priority, assignee_bot_id,
-          creator_type, creator_id, review_target, source_message_id, parent_id, position, due_at, estimate,
+          creator_type, creator_id, review_target, source_message_id, parent_id, parent_task_id, blocked_by, position, due_at, estimate,
           write_scopes, version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         taskId, project.id, number, title, text(input.description, 40_000), status, priority,
         assigneeId, actor.type, actor.id, actor.type === 'bot' ? 'owner_bot' : 'user',
         input.sourceMessageId ?? null, input.parentId ?? null,
+        relations.parentTaskId, JSON.stringify(relations.blockedBy),
         Number.isFinite(Number(input.position)) ? Number(input.position) : number,
         input.dueAt ? new Date(input.dueAt).toISOString() : null,
         clampNumber(input.estimate, 0, 1000, null), JSON.stringify(writeScopes), createdAt, createdAt,
@@ -140,7 +150,9 @@ export const tasksMethods = {
   },
   taskView(task) {
     // attention_json 列由 attention 域自管迁移（db.js 不加行），读视图前懒迁移一次。
+    // parent_task_id/blocked_by 同款：task-relations 域自管迁移 + 依赖派生字段。
     ensureAttentionSchema(this.store)
+    ensureTaskRelationsSchema(this.store)
     const labels = this.store.all('SELECT label FROM task_labels WHERE task_id = ? ORDER BY label', task.id).map(row => row.label)
     // error_code='SUPERSEDED' 是管理清理冗余运行的标记，不是真实执行历史；latestRun 与 runs 历史同口径排除。
     const runs = this.store.all(
@@ -152,12 +164,16 @@ export const tasksMethods = {
     // 阶段按事实推导（task-stage 块）：与 latestRun 同源；attention 取最近运行的待回答提问。
     const attention = runs[0] ? parseAttention(runs[0].attention_json) : null
     const stage = taskStage(task, runs[0] ?? null, attention)
+    const deps = taskDepsView(this.store, task, project?.key)
     return {
       ...rest,
       identifier: `${project?.key ?? 'T'}-${task.number}`,
       labels,
       writeScopes: readWriteScopes(rawScopes),
       attention,
+      blockedBy: deps.blockedBy,
+      depsSatisfied: deps.depsSatisfied,
+      blockedByNames: deps.blockedByNames,
       comments: Number(this.store.get('SELECT COUNT(*) AS count FROM task_comments WHERE task_id = ?', task.id)?.count ?? 0),
       latestRun: runs[0] ?? null,
       runs,
@@ -456,6 +472,9 @@ export const tasksMethods = {
       assigneeBotId: member.id,
       priority: input.priority,
       writeScopes: input.write_scopes,
+      // 总监派单可带父子/依赖关系（snake_case 透传，createTask 内统一校验与落库）。
+      parentTaskId: input.parent_task_id,
+      blockedBy: input.blocked_by,
       autoStart: true,
       postCard: true,
     }, actor)
