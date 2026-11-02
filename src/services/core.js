@@ -87,8 +87,8 @@ export const coreMethods = {
         // 微信通道是可选集成，其 vendor 依赖按需加载：缺失或损坏时只降级该通道，
         // 不应让整个插件加载失败、工作台路由全部不可用。
         try {
-          const { WechatStore } = await import('./wechat/store.js')
-          const { WechatChannel } = await import('./wechat/channel.js')
+          const { WechatStore } = await import('../wechat/store.js')
+          const { WechatChannel } = await import('../wechat/channel.js')
           const wechatStore = await new WechatStore(this.config.wechatDbPath).open()
           this.wechat = new WechatChannel({ store: wechatStore, config: this.config, log: this.logger })
           this.wechat.setService(this)
