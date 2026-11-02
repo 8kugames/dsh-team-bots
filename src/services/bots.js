@@ -154,10 +154,18 @@ export const botsMethods = {
     if (fallbackProvider !== bot.fallback_provider) changes.fallback_provider = fallbackProvider
     if (fallbackModel !== bot.fallback_model) changes.fallback_model = fallbackModel
     if (fallbackEffort !== bot.fallback_effort) changes.fallback_effort = fallbackEffort
-    const configChanged = provider !== bot.provider || model !== bot.model || effort !== bot.effort
-      || fallbackProvider !== bot.fallback_provider || fallbackModel !== bot.fallback_model || fallbackEffort !== bot.fallback_effort
-      || (changes.role !== undefined && changes.role !== bot.role)
-      || (changes.instructions !== undefined && changes.instructions !== bot.instructions)
+    // 版本快照只覆盖角色+指令（DSHBOTS-51）：模型类字段（主/备 provider·model·effort）修改即生效，
+    // 仅落库+审计、不进版本历史。快照与最新版本行逐字段比对（等价于对拼接内容做 hash 校验，
+    // 逐字段比对无拼接歧义，取实现简单者）；无版本行的存量 bot 以当前 bot 行为基线。
+    const effectiveRole = changes.role !== undefined ? changes.role : bot.role
+    const effectiveInstructions = changes.instructions !== undefined ? changes.instructions : bot.instructions
+    const latestRevision = this.store.get(
+      'SELECT role, instructions FROM bot_revisions WHERE bot_id = ? ORDER BY version DESC LIMIT 1',
+      botId,
+    )
+    const snapshotBaseline = latestRevision ?? { role: bot.role, instructions: bot.instructions }
+    const snapshotUnchanged = effectiveRole === snapshotBaseline.role && effectiveInstructions === snapshotBaseline.instructions
+    const snapshotTouched = changes.role !== undefined || changes.instructions !== undefined
     if (changes.status === 'archived') {
       const owned = this.store.get("SELECT id FROM projects WHERE owner_bot_id = ? AND status = 'active'", botId)
       if (owned) throw conflict('该 Bot 仍是活动项目总监，请先更换总监')
@@ -172,20 +180,20 @@ export const botsMethods = {
       fields.push('provider = ?', 'model = ?', 'effort = ?', 'updated_at = ?')
       values.push(provider, model, effort, nowIso())
       this.store.run(`UPDATE bots SET ${fields.join(', ')} WHERE id = ?`, ...values, botId)
-      if (configChanged) {
+      if (!snapshotUnchanged) {
         const version = (Number(bot.current_revision) || 0) + 1
         this.store.run(
           `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, provider, model, effort, created_by, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id('rev'), botId, version,
-          changes.role ?? bot.role,
-          changes.instructions ?? bot.instructions,
+          effectiveRole, effectiveInstructions,
           provider, model, effort,
           `${actor.type}:${actor.id}`, nowIso(),
         )
         this.store.run('UPDATE bots SET current_revision = ? WHERE id = ?', version, botId)
       }
-      this.audit(actor, 'bot.update', 'bot', botId, changes)
+      // 同内容重复保存（含回滚到当前内容）是 no-op：不插版本行、不 bump，审计带 unchanged 标记留痕。
+      this.audit(actor, 'bot.update', 'bot', botId, snapshotTouched && snapshotUnchanged ? { ...changes, unchanged: true } : changes)
     })
     return this.botView(this.botRow(botId))
   },
@@ -195,12 +203,10 @@ export const botsMethods = {
   async rollbackBot(botId, revisionId, actor = this.actor()) {
     const revision = this.store.get('SELECT * FROM bot_revisions WHERE id = ? AND bot_id = ?', revisionId, botId)
     if (!revision) throw notFound('Bot 版本不存在')
+    // 只还原角色/指令（DSHBOTS-51）：revision 行里的模型字段是快照当时的配置，不随版本回滚。
     return this.updateBot(botId, {
       role: revision.role,
       instructions: revision.instructions,
-      provider: revision.provider,
-      model: revision.model,
-      effort: revision.effort,
     }, actor)
   },
   botView(bot) {
