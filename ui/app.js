@@ -34,6 +34,8 @@
     busy: 0,
     chatAtBottom: true,
     taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
+    // 任务面板组内排序（D-63）：默认创建时间新→旧；六档口径见 TASK_SORTS。
+    taskSort: 'created_desc',
     // 用量页三态：global=侧栏「用量统计」的全局视图；domain=群聊 NAV 用量 tab（本群）；solo=单聊 NAV 用量 tab（本 bot）。
     usageMode: 'global',
     // 全局视图内的展示维度：global / model / bot / project（口径切换只保留这四类）。
@@ -1414,6 +1416,35 @@
   function sortTasksByPriority(tasks) {
     return [...(tasks ?? [])].sort(compareTasksByPriority)
   }
+  // 组内排序口径（D-63）：排序只发生在状态分组的组内兄弟层，不改分组、不动父子挂载——
+  // 应用点在 renderTaskRows 建树前，父子挂载按 parent_task_id 组装，顺序变化不会拆散树。
+  // 完成时间排序只有终态任务参与（done→completed_at、canceled→canceled_at，复用 taskTerminalTime）；
+  // 非终态与缺时间戳的终态没有时间基准，两个方向都排在末尾，不穿插、不当 0 排最前。
+  const TASK_SORTS = [
+    { value: 'created_desc', label: '创建时间 新→旧' },
+    { value: 'created_asc', label: '创建时间 旧→新' },
+    { value: 'completed_desc', label: '完成时间 新→旧' },
+    { value: 'completed_asc', label: '完成时间 旧→新' },
+    { value: 'priority_desc', label: '优先级 高→低' },
+    { value: 'priority_asc', label: '优先级 低→高' },
+  ]
+  function sortTasksForPanel(tasks, mode = state.taskSort) {
+    const list = [...(tasks ?? [])]
+    const created = task => new Date(task?.created_at ?? 0).getTime() || 0
+    const number = task => Number(task?.number) || 0
+    if (mode === 'created_asc') return list.sort((a, b) => created(a) - created(b) || number(a) - number(b))
+    if (mode === 'created_desc') return list.sort((a, b) => created(b) - created(a) || number(b) - number(a))
+    if (mode === 'completed_desc' || mode === 'completed_asc') {
+      const dir = mode === 'completed_desc' ? -1 : 1
+      const timed = list.filter(task => taskTerminalTime(task))
+      const untimed = list.filter(task => !taskTerminalTime(task))
+      timed.sort((a, b) => (new Date(taskTerminalTime(a)).getTime() - new Date(taskTerminalTime(b)).getTime()) * dir || (number(a) - number(b)) * dir)
+      return [...timed, ...untimed]
+    }
+    if (mode === 'priority_desc') return sortTasksByPriority(list)
+    if (mode === 'priority_asc') return sortTasksByPriority(list).reverse()
+    return list
+  }
   // task-sort:end
 
   // task-time-range:start —— 终态时间筛选（DSHBOTS-44）：只作用于终态任务（done/canceled），
@@ -1488,6 +1519,9 @@
             <option value="7d" ${state.taskFilter.timeRange === '7d' ? 'selected' : ''}>近 7 天</option>
             <option value="30d" ${state.taskFilter.timeRange === '30d' ? 'selected' : ''}>近 30 天</option>
             <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>全部时间</option>
+          </select>
+          <select class="select" data-task-sort aria-label="任务排序" title="组内排序：不影响分组与父子层级">
+            ${TASK_SORTS.map(sort => `<option value="${sort.value}" ${state.taskSort === sort.value ? 'selected' : ''}>${sort.label}</option>`).join('')}
           </select>
           <span class="tag">${shownCount} 个任务</span>
           ${hiddenCount > 0 ? `<span class="faint" title="项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>` : ''}
@@ -1600,10 +1634,13 @@
   }
 
   function renderTaskRows(tasks) {
-    const visible = new Set(tasks.map(task => task.id))
+    // D-63：进组后先按当前排序档重排兄弟顺序，再组树——排序只影响同层先后，
+    // 父子挂载按 parent_task_id 判定，不因顺序变化拆树（分组结构在 renderTaskGroup 上游，不在本函数）。
+    const sorted = sortTasksForPanel(tasks)
+    const visible = new Set(sorted.map(task => task.id))
     const childrenOf = new Map()
     const roots = []
-    for (const task of tasks) {
+    for (const task of sorted) {
       const parentId = taskParentId(task)
       if (parentId && visible.has(parentId)) {
         if (!childrenOf.has(parentId)) childrenOf.set(parentId, [])
@@ -2942,14 +2979,18 @@
 
   // 任务关系选项（DSHBOTS-58）：父任务与依赖任务都只从本项目已有任务里选——
   // 后端只接受同项目内引用，跨项目与自引用会被直接拒绝，列表因此不给别的项目的任务。
-  function taskRelationOptions() {
+  // selectedId（D-63 派生子任务）：给指定任务打 selected，让预填的父任务在下拉里真正选中显示，
+  // 而不是值带了、显示还停在「无（顶层任务）」。
+  function taskRelationOptions(selectedId = '') {
     const tasks = state.data?.tasks ?? []
-    return tasks.map(task => `<option value="${attr(task.id)}">${esc(task.identifier)} · ${esc(task.title)}</option>`).join('')
+    return tasks.map(task => `<option value="${attr(task.id)}"${task.id === selectedId ? ' selected' : ''}>${esc(task.identifier)} · ${esc(task.title)}</option>`).join('')
   }
 
   function modalNewTask() {
     const project = activeProject()
     if (!project) return ''
+    // 派生子任务入口（D-63）带 parentTaskId 预填；常规新建不带。
+    const preselectedParent = state.modal?.parentTaskId ?? ''
     return modalShell({
       title: '新建任务',
       subtitle: `${project.key} · ${project.name}`,
@@ -2963,7 +3004,7 @@
           <div class="field"><label id="new-task-priority-label" for="new-task-priority">优先级</label><select class="select" style="width:100%" id="new-task-priority" name="priority"><option value="medium">中</option><option value="high">高</option><option value="urgent">紧急</option><option value="low">低</option><option value="none">无</option></select></div>
         </div>
         <div class="field-row">
-          <div class="field"><label id="new-task-parent-label" for="new-task-parent">父任务</label><select class="select" style="width:100%" id="new-task-parent" name="parentTaskId"><option value="">无（顶层任务）</option>${taskRelationOptions()}</select></div>
+          <div class="field"><label id="new-task-parent-label" for="new-task-parent">父任务</label><select class="select" style="width:100%" id="new-task-parent" name="parentTaskId"><option value="">无（顶层任务）</option>${taskRelationOptions(preselectedParent)}</select></div>
           <div class="field"><label id="new-task-blocked-label" for="new-task-blocked">依赖任务</label><select class="select" style="width:100%" id="new-task-blocked" name="blockedBy" multiple size="4">${taskRelationOptions()}</select></div>
         </div>
         <div class="usage-note">父任务只影响看板上的层级缩进；依赖任务未完成前，本任务不会被调度执行。</div>
@@ -3129,7 +3170,7 @@
           ${(task.dependencies ?? []).length ? `<div class="divider"></div><div class="eyebrow" style="margin-bottom:7px">依赖</div>${task.dependencies.map(dep => `<div class="kv"><span>${esc(dep.title)}</span><strong>${esc(STATUS[dep.status] ?? dep.status)}</strong></div>`).join('')}` : ''}
         </aside>
       </div>`,
-      footer: `<button class="btn" data-action="close-modal">关闭</button><button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button><button class="btn primary" type="submit" form="task-form">${icon('check')}保存</button>`,
+      footer: `<button class="btn" data-action="close-modal">关闭</button><button class="btn" type="button" data-action="derive-subtask" data-task-id="${attr(task.id)}" title="以本任务为父任务新建子任务">${icon('branch')}派生子任务</button><button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button><button class="btn primary" type="submit" form="task-form">${icon('check')}保存</button>`,
     })
   }
 
@@ -4094,6 +4135,21 @@
           openModal({ type: 'new-task' })
           break
         }
+        // 派生子任务（D-63）：从任务详情 footer 进入，复用新建任务表单并预填 parentTaskId；
+        // 任何任务都可派生（子任务同样可以作为父任务），不加额外限制。
+        case 'derive-subtask': {
+          if (!activeProject()) {
+            toast('请先创建项目', 'error')
+            break
+          }
+          const parentId = target.dataset.taskId || ''
+          if (!parentId || !(state.data?.tasks ?? []).some(task => task.id === parentId)) {
+            toast('父任务不存在或已刷新，请重试', 'error')
+            break
+          }
+          openModal({ type: 'new-task', parentTaskId: parentId })
+          break
+        }
         case 'new-memory':
           if (!activeProject()) {
             toast('请先创建项目', 'error')
@@ -4873,6 +4929,11 @@
     }
     if (el.matches('[data-task-filter]')) {
       state.taskFilter[el.dataset.taskFilter] = el.value
+      render()
+    }
+    // 任务排序（D-63）：组内重排，不动分组与父子层级。
+    if (el.matches('[data-task-sort]')) {
+      state.taskSort = el.value
       render()
     }
     if (el.matches('[data-model-select]')) updateEffortOptions(el)

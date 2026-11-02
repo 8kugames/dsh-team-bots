@@ -57,7 +57,8 @@ test('新建任务表单：可选父任务与依赖任务', () => {
   assert.match(source, /id="new-task-parent" name="parentTaskId"/, '有父任务下拉')
   assert.match(source, /<option value="">无（顶层任务）<\/option>/, '父任务默认不选')
   assert.match(source, /id="new-task-blocked" name="blockedBy" multiple/, '依赖任务是多选')
-  assert.match(source, /function taskRelationOptions\(\)/, '选项来自本项目任务')
+  // D-63 派生子任务：taskRelationOptions 增加 selectedId 参数（预填父任务时给对应 option 打 selected），选项来源不变。
+  assert.match(source, /function taskRelationOptions\(selectedId = ''\)/, '选项来自本项目任务')
   assert.match(source, /const tasks = state\.data\?\.tasks \?\? \[\]/, '选项取当前项目任务列表')
 })
 

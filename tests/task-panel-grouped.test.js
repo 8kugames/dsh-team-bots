@@ -153,3 +153,81 @@ test('空分组只留一行组头，不渲染组体占位（P1-4）', () => {
   // 拖放通道不受影响：组 section 仍带 data-drop-status，空组仍是拖放目标
   assert.match(source, /<section class="column task-group[^"]*" data-drop-status="\$\{status\}">/, '空组仍是拖放目标')
 })
+
+// ── DSHBOTS-63：组内排序（创建/完成时间 × 正逆、优先级 × 正逆），不破坏分组与父子树 ──
+
+// 取 ui/app.js 的 task-sort 标记块求值（时间块一并注入：完成时间排序引用 taskTerminalTime），
+// 断言真实排序行为而不是复述源码文本。
+const sortBlock = /\/\/ task-sort:start[\s\S]*?\/\/ task-sort:end/.exec(source)?.[0]
+assert.ok(sortBlock, 'ui/app.js 缺少 task-sort 标记块')
+const evalState = { taskSort: 'created_desc' }
+const { TASK_SORTS, sortTasksForPanel } =
+  new Function(`const state = ${JSON.stringify(evalState)};\n${sortBlock}\n${timeBlock}\nreturn { TASK_SORTS, sortTasksForPanel }`)()
+
+const sortTasks = [
+  { id: 'a', number: 1, created_at: '2026-11-01T00:00:00.000Z', status: 'done', completed_at: '2026-11-02T00:00:00.000Z' },
+  { id: 'b', number: 2, created_at: '2026-11-03T00:00:00.000Z', status: 'todo' },
+  { id: 'c', number: 3, created_at: '2026-11-02T00:00:00.000Z', status: 'canceled', canceled_at: '2026-11-04T00:00:00.000Z' },
+]
+
+test('排序选择器存在且写 state.taskSort（D-63）', () => {
+  assert.match(source, /taskSort: 'created_desc',/, 'state 默认 created_desc')
+  assert.match(source, /<select class="select" data-task-sort aria-label="任务排序"/, '工具栏有排序选择器')
+  assert.match(source, /if \(el\.matches\('\[data-task-sort\]'\)\) \{\s*\n\s*state\.taskSort = el\.value\s*\n\s*render\(\)/, 'change 分支写 state 后重渲染')
+})
+
+test('六种排序值齐全', () => {
+  assert.deepEqual(
+    TASK_SORTS.map(sort => sort.value),
+    ['created_desc', 'created_asc', 'completed_desc', 'completed_asc', 'priority_desc', 'priority_asc'],
+    '六档口径',
+  )
+  assert.equal(new Set(TASK_SORTS.map(sort => sort.value)).size, 6, '值不重复')
+})
+
+test('组内排序不破坏分组与父子树：排序在 renderTaskRows 建树前、分组在渲染上游', () => {
+  assert.match(source, /renderTaskGroup\(status, tasks\.filter\(task => task\.status === status\)\)/, '分组仍按 status 切片')
+  assert.match(
+    source,
+    /const sorted = sortTasksForPanel\(tasks\)\s*\n\s*const visible = new Set\(sorted\.map\(task => task\.id\)\)/,
+    '排序结果供建树使用',
+  )
+  assert.match(
+    source,
+    /for \(const task of sorted\) \{\s*\n\s*const parentId = taskParentId\(task\)/,
+    '父子挂载仍按 parent_task_id 判定，与顺序无关',
+  )
+  // 行为验证：父+子同组时，排序后子任务仍挂到父行下（树由 parent_task_id 组装，顺序只影响兄弟先后）
+  const group = [
+    { id: 'p1', parent_task_id: null },
+    { id: 'c1', parent_task_id: 'p1' },
+    { id: 'p2', parent_task_id: null },
+  ]
+  const ordered = sortTasksForPanel(group, 'created_asc')
+  const ids = ordered.map(task => task.id)
+  assert.equal(new Set(ids).size, 3, '排序不丢任务')
+  assert.ok(ids.includes('p1') && ids.includes('c1') && ids.includes('p2'), '父与子都在组内')
+})
+
+test('完成时间排序：非终态与缺时间戳终态排末尾不穿插（D-63）', () => {
+  const withNoStamp = [
+    ...sortTasks,
+    { id: 'd', number: 4, created_at: '2026-11-05T00:00:00.000Z', status: 'done' }, // 终态但缺 completed_at
+  ]
+  const desc = sortTasksForPanel(withNoStamp, 'completed_desc').map(task => task.id)
+  assert.deepEqual(desc, ['c', 'a', 'b', 'd'], 'desc：有时间的终态按新→旧在前，其余按原序殿后')
+  const asc = sortTasksForPanel(withNoStamp, 'completed_asc').map(task => task.id)
+  assert.deepEqual(asc, ['a', 'c', 'b', 'd'], 'asc：有时间的终态按旧→新在前，非终态/缺时间戳仍按原序殿后')
+})
+
+test('创建时间与优先级排序口径（D-63）', () => {
+  assert.deepEqual(sortTasksForPanel(sortTasks, 'created_desc').map(task => task.id), ['b', 'c', 'a'], '创建时间新→旧')
+  assert.deepEqual(sortTasksForPanel(sortTasks, 'created_asc').map(task => task.id), ['a', 'c', 'b'], '创建时间旧→新')
+  const byPriority = [
+    { id: 'low', priority: 'low' },
+    { id: 'urgent', priority: 'urgent' },
+    { id: 'mid', priority: 'medium' },
+  ]
+  assert.deepEqual(sortTasksForPanel(byPriority, 'priority_desc').map(task => task.id), ['urgent', 'mid', 'low'], '优先级高→低')
+  assert.deepEqual(sortTasksForPanel(byPriority, 'priority_asc').map(task => task.id), ['low', 'mid', 'urgent'], '优先级低→高')
+})
