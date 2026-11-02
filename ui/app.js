@@ -21,6 +21,9 @@
     composerHeight: null,
     // 群聊引用回复：{ id, senderName, excerpt }，非空时 composer 上方显示引用条，随发送/取消清除。
     replyTo: null,
+    // composer 待发图片：按上下文分键（与草稿同口径），值为 { key, name, mediaType, bytes, data, previewUrl } 数组。
+    // 预览走 blob: URL（不进 DOM），base64 只留在 state 里随 send_message 发出。
+    pendingImages: {},
     // 聊天历史分片（DSHBOTS-33）：state 轮询只回最后 200 条，更早的经 messages_page 手动加载后存这里。
     // key 与当前会话对齐（group:<projectId> / solo:<botId>），切会话即失效重置；items 与轮询结果按 id 去重合并。
     chatOlder: { key: null, items: [], hasMore: false, loading: false },
@@ -149,6 +152,8 @@
     // 引用标记：两枚引号（lucide quote 标准路径，水平镜像成「“」开口式，描边加粗到 2.2，
     // 保证 14px 下仍可辨），与「返回/滚回」的回转箭头彻底区分。
     quote: '<g transform="translate(24 0) scale(-1 1)" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></g>',
+    // 图片附件：相框 + 圆点 + 山形缩略图（lucide image 同款路径），用于「添加图片」按钮与消息附图块。
+    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 17 4.5-4.5 3 3L15 12l5 5"/>',
   }
 
   const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.settings}</svg>`
@@ -1028,13 +1033,16 @@
               <button class="reply-bar-cancel" data-action="cancel-reply" title="取消引用（Esc）" aria-label="取消引用">${icon('close')}</button>
             </div>` : ''}
             <div class="composer-box">
+              ${composerImageStrip()}
               <div class="composer-ac" id="composer-ac" role="listbox" aria-label="输入补全" hidden></div>
               <div class="composer-resizer" id="composer-resizer" title="拖动调整输入框高度，双击恢复自动高度" role="separator" aria-orientation="horizontal" aria-label="拖动调整输入框高度，双击恢复自动高度"></div>
               <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(currentDraft(state))}</textarea>
               <div class="composer-bottom">
+                ${attachImageButton()}
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
-                <button class="send-btn" data-action="send-message" ${currentDraft(state).trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
+                <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
               </div>
+              ${composerImageParts()}
             </div>
           </div>
         </div>
@@ -1145,12 +1153,15 @@
           </div>
           <div class="composer">
             <div class="composer-box">
+              ${composerImageStrip()}
               <div class="composer-resizer" id="composer-resizer" title="拖动调整输入框高度，双击恢复自动高度" role="separator" aria-orientation="horizontal" aria-label="拖动调整输入框高度，双击恢复自动高度"></div>
               <textarea id="composer-input" rows="2" placeholder="和 ${esc(bot.name)} 对话，/clear 清空本会话，/remember 内容 写入 Bot 记忆">${esc(currentDraft(state))}</textarea>
               <div class="composer-bottom">
+                ${attachImageButton()}
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
-                <button class="send-btn" data-action="send-message" ${currentDraft(state).trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
+                <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
               </div>
+              ${composerImageParts()}
             </div>
           </div>
         </div>
@@ -1318,11 +1329,14 @@
     const trajChip = message.run_id && !isUser ? `<button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button>` : ''
     const taskChip = message.taskIdentifier ? `<button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button>` : ''
     const chipsLine = trajChip || taskChip ? `<div class="task-chip-line">${trajChip}${taskChip}</div>` : ''
+    // 纯图片消息没有正文：气泡留空不渲染，只留附图块（避免出现一个空框）。
+    const bubbleHtml = message.body || quoteBlock ? `<div class="message-bubble">${quoteBlock}${richText(message.body, mdChatScope())}</div>` : ''
     return `<div class="message-row ${isUser ? 'user' : ''}">
       ${isUser ? '' : avatar(bot ?? { name: message.senderName, color: 'gray' })}
       <div class="message-body-wrap">
         <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}${copyBtn}</div>
-        <div class="message-bubble">${quoteBlock}${richText(message.body, mdChatScope())}</div>
+        ${bubbleHtml}
+        ${renderMessageImages(message.images)}
         ${chipsLine}
       </div>
     </div>`
@@ -3282,6 +3296,227 @@
   }
   // chat-drafts:end
 
+  // chat-images:start —— 聊天图片输入的纯逻辑（tests/chat-image-ui.test.js 抽取此块断言）
+  // 口径与后端 src/services/message-images.js 对齐：png/jpeg/gif/webp 四种，单图 ≤5MB，单条 ≤4 张。
+  const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+  const IMAGE_ACCEPT = IMAGE_MEDIA_TYPES.join(',')
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+  const MAX_IMAGES_PER_MESSAGE = 4
+  const IMAGE_EXT_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+
+  // 浏览器给的 MIME 优先；为空时按扩展名兜底（部分系统不给 type）。都不匹配返回 null（前端拦截）。
+  function resolveImageMediaType(type, name) {
+    const declared = String(type ?? '').trim().toLowerCase()
+    if (IMAGE_MEDIA_TYPES.includes(declared)) return declared
+    const ext = String(name ?? '').trim().toLowerCase().split('.').pop()
+    return IMAGE_EXT_TYPES[ext] ?? null
+  }
+
+  function formatImageBytes(bytes) {
+    const n = Number(bytes) || 0
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+    return `${(n / 1024 / 1024).toFixed(1)} MB`
+  }
+
+  // 选片校验：类型不符 / 超 5MB / 超张数，各给可读原因；accepted 只收合规文件（带原 file 引用供读取）。
+  function validateImageSelection(files, existingCount = 0) {
+    const accepted = []
+    const rejected = []
+    let count = Number(existingCount) || 0
+    for (const file of Array.from(files ?? [])) {
+      const name = file?.name ?? ''
+      const mediaType = resolveImageMediaType(file?.type, name)
+      if (!mediaType) {
+        rejected.push({ name, reason: '仅支持 PNG / JPEG / GIF / WebP 格式' })
+        continue
+      }
+      const bytes = Number(file?.size) || 0
+      if (bytes > MAX_IMAGE_BYTES) {
+        rejected.push({ name, reason: '单张图片不能超过 5MB' })
+        continue
+      }
+      if (count >= MAX_IMAGES_PER_MESSAGE) {
+        rejected.push({ name, reason: `一条消息最多 ${MAX_IMAGES_PER_MESSAGE} 张图片` })
+        continue
+      }
+      count += 1
+      accepted.push({ file, name, mediaType, bytes })
+    }
+    return { accepted, rejected }
+  }
+  // chat-images:end
+
+  // —— 聊天图片 UI（附件按钮 / 待发缩略图条 / 消息附图块 / 原图查看器）——
+  // 图片数据只走两条路：待发图片的 base64 随 send_message 出站，原图按 id 现取现看；
+  // 任何时候都不把 base64 写进 HTML 字符串，缩略图预览用 blob: URL。
+
+  // 当前上下文的待发图片（同草稿口径分键：群聊按项目、单聊按 Bot）。
+  function pendingImagesFor(s = state) {
+    return s.pendingImages?.[draftKey(s)] ?? []
+  }
+
+  function setPendingImages(list, s = state) {
+    s.pendingImages = { ...(s.pendingImages ?? {}), [draftKey(s)]: list }
+  }
+
+  // 释放预览 blob: URL（移除或发送成功后调用，避免 blob 泄漏）。
+  function revokePreview(image) {
+    if (image?.previewUrl) {
+      try { URL.revokeObjectURL(image.previewUrl) } catch {}
+    }
+  }
+
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = String(reader.result ?? '')
+        const comma = result.indexOf(',')
+        resolve(comma >= 0 ? result.slice(comma + 1) : result)
+      }
+      reader.onerror = () => reject(new Error('读取失败'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  // base64 → blob: URL：查看器里用 img.src 指向 blob，base64 本身不进 DOM。
+  function base64BlobUrl(data, mediaType) {
+    const binary = atob(String(data ?? ''))
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+    return URL.createObjectURL(new Blob([bytes], { type: mediaType || 'application/octet-stream' }))
+  }
+
+  // 选图入口：前端先按类型/大小/张数拦截，合规的读成 base64 进待发列表。
+  async function addPendingImages(files) {
+    const current = pendingImagesFor()
+    const { accepted, rejected } = validateImageSelection(files, current.length)
+    for (const item of rejected) toast(`${item.name || '文件'}：${item.reason}`, 'error')
+    const added = []
+    for (const item of accepted) {
+      try {
+        const data = await readFileAsBase64(item.file)
+        added.push({
+          key: `img-${Date.now()}-${added.length}-${Math.random().toString(36).slice(2, 8)}`,
+          name: item.name,
+          mediaType: item.mediaType,
+          bytes: item.bytes,
+          data,
+          previewUrl: URL.createObjectURL(item.file),
+        })
+      } catch {
+        toast(`${item.name || '文件'}：读取失败`, 'error')
+      }
+    }
+    if (added.length === 0) return
+    setPendingImages([...current, ...added])
+    renderKeepingChatScroll()
+    document.getElementById('composer-input')?.focus()
+  }
+
+  function removePendingImage(key) {
+    const current = pendingImagesFor()
+    const target = current.find(item => item.key === key)
+    revokePreview(target)
+    setPendingImages(current.filter(item => item.key !== key))
+    renderKeepingChatScroll()
+  }
+
+  function clearPendingImages() {
+    for (const image of pendingImagesFor()) revokePreview(image)
+    setPendingImages([])
+  }
+
+  // 「添加图片」按钮（群聊/单聊共用）：点开隐藏的 file input，读文件交给 change 事件。
+  function attachImageButton() {
+    const full = pendingImagesFor().length >= MAX_IMAGES_PER_MESSAGE
+    return `<button type="button" class="attach-btn" data-action="attach-image"${full ? ' disabled' : ''} title="添加图片（PNG / JPEG / GIF / WebP，单张 ≤5MB，一条最多 4 张）" aria-label="添加图片">${icon('image')}</button>`
+  }
+
+  // composer 的图片件：待发缩略图条（贴在输入框上方）+ 隐藏 file input（群聊/单聊共用）。
+  function composerImageStrip() {
+    const pending = pendingImagesFor()
+    if (pending.length === 0) return ''
+    return `<div class="image-strip" id="image-strip">${pending.map(image => `
+      <div class="image-thumb" data-image-key="${attr(image.key)}">
+        <img class="image-thumb-img" src="${attr(image.previewUrl)}" alt="${attr(image.name || '待发送图片')}" />
+        <button class="image-thumb-remove" data-action="remove-pending-image" data-image-key="${attr(image.key)}" title="移除这张图片" aria-label="移除图片 ${attr(image.name || '')}">${icon('close')}</button>
+      </div>`).join('')}</div>`
+  }
+
+  function composerImageParts() {
+    return `<input type="file" id="composer-image-input" class="composer-image-input" accept="${attr(IMAGE_ACCEPT)}" multiple hidden />`
+  }
+
+  // 消息附图块：只渲染元数据（文件名 + 大小），base64 不进消息 HTML；点开再按 id 取原图。
+  function renderMessageImages(images) {
+    const list = Array.isArray(images) ? images : []
+    if (list.length === 0) return ''
+    return `<div class="msg-images">${list.map(image => `
+      <button type="button" class="msg-image-tile" data-action="view-message-image" data-image-id="${attr(image.id)}" title="${attr(image.name || '查看原图')}">
+        <span class="msg-image-icon">${icon('image')}</span>
+        <span class="msg-image-meta"><span class="msg-image-name">${esc(image.name || '图片')}</span><span class="msg-image-size">${esc(formatImageBytes(image.bytes))}</span></span>
+      </button>`).join('')}</div>`
+  }
+
+  // 原图查看器：按需取 base64 → blob: URL → img.src；关闭时释放 blob。
+  function ensureImageViewer() {
+    let el = document.getElementById('image-viewer')
+    if (el) return el
+    el = document.createElement('div')
+    el.className = 'image-viewer'
+    el.id = 'image-viewer'
+    el.hidden = true
+    el.innerHTML = `<div class="image-viewer-backdrop" data-action="close-image-viewer"></div>
+      <div class="image-viewer-panel" role="dialog" aria-modal="true" aria-label="图片预览">
+        <div class="image-viewer-head">
+          <strong id="image-viewer-name"></strong>
+          <span class="faint" id="image-viewer-size"></span>
+          <button type="button" class="image-viewer-close" data-action="close-image-viewer" title="关闭" aria-label="关闭图片预览">${icon('close')}</button>
+        </div>
+        <div class="image-viewer-body" id="image-viewer-body"></div>
+      </div>`
+    document.body.appendChild(el)
+    return el
+  }
+
+  async function openMessageImage(imageId) {
+    if (!imageId) return
+    const viewer = ensureImageViewer()
+    const body = document.getElementById('image-viewer-body')
+    const nameEl = document.getElementById('image-viewer-name')
+    const sizeEl = document.getElementById('image-viewer-size')
+    viewer.hidden = false
+    body.textContent = '图片加载中…'
+    if (nameEl) nameEl.textContent = ''
+    if (sizeEl) sizeEl.textContent = ''
+    try {
+      const image = await api('get_message_image', { imageId }, { quiet: true })
+      if (nameEl) nameEl.textContent = image.name || '图片'
+      if (sizeEl) sizeEl.textContent = formatImageBytes(image.bytes)
+      body.textContent = ''
+      const img = document.createElement('img')
+      img.className = 'image-viewer-img'
+      img.alt = image.name || '图片'
+      img.src = base64BlobUrl(image.data, image.mediaType)
+      body.appendChild(img)
+    } catch (error) {
+      body.textContent = error?.message || '图片加载失败'
+    }
+  }
+
+  function closeImageViewer() {
+    const viewer = document.getElementById('image-viewer')
+    if (!viewer || viewer.hidden) return
+    const img = viewer.querySelector('.image-viewer-img')
+    if (img?.src) {
+      try { URL.revokeObjectURL(img.src) } catch {}
+      img.removeAttribute('src')
+    }
+    viewer.hidden = true
+  }
+
   // composer-resize:start —— 输入框高度合成的纯逻辑（tests/chat-ui.test.js 抽取此块断言）
   // 自动长高上限沿用 150px；手动拖高的封顶 = 聊天面板高度 × 0.618（用户给定的黄金比数字）。
   const COMPOSER_AUTO_MAX_PX = 150
@@ -3308,12 +3543,20 @@
     state.chatDrafts[draftKey(state)] = input.value
     applyComposerHeight(input)
     const button = document.querySelector('[data-action="send-message"]')
-    if (button) button.disabled = input.value.trim() === ''
+    if (button) button.disabled = input.value.trim() === '' && pendingImagesFor().length === 0
   }
 
   async function sendMessage() {
     const body = currentDraft(state).trim()
-    if (!body) return
+    const pending = pendingImagesFor()
+    if (!body && pending.length === 0) return
+    // 命令消息（/clear、/remember）后端不落图片：附件留不住，直接拦下并提示先移除。
+    if (pending.length > 0 && (body === '/clear' || body.startsWith('/remember'))) {
+      toast('该命令不支持附图，请先移除图片', 'error')
+      return
+    }
+    // 待发图片随消息一起出站：mediaType + name + base64，字段口径与后端 normalizeImageInputs 一致。
+    const images = pending.map(item => ({ mediaType: item.mediaType, name: item.name, data: item.data }))
     closeAutocomplete()
     try {
       let result
@@ -3321,17 +3564,18 @@
         const bot = botById(state.soloBotId)
         if (!bot) return
         if (body === '/clear' && !window.confirm(`清空和 ${bot.name} 的全部对话记录？清除后不可恢复（记忆保留）。`)) return
-        result = await api('send_solo_message', { botId: bot.id, body })
+        result = await api('send_solo_message', { botId: bot.id, body, ...(images.length ? { images } : {}) })
       } else {
         const project = activeProject()
         if (!project) return
         if (body === '/clear' && !window.confirm('清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
         // 引用回复：带上 replyTo；命令路径（/clear、/task、/remember）后端会忽略该参数。
-        result = await api('send_message', { projectId: project.id, body, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}) })
+        result = await api('send_message', { projectId: project.id, body, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}), ...(images.length ? { images } : {}) })
       }
       state.chatDrafts[draftKey(state)] = ''
       state.replyTo = null
       state.chatAtBottom = true
+      clearPendingImages()
       await loadState(state.projectId, { quiet: true })
       render()
       if (body === '/clear') toast(`已清空 ${result.cleared} 条消息`, 'success')
@@ -3606,6 +3850,19 @@
         case 'cancel-reply':
           state.replyTo = null
           renderKeepingChatScroll()
+          break
+        case 'attach-image':
+          // 打开隐藏的 file input，选完由 change 事件读文件（accept 已在 input 上限定四种 MIME）。
+          document.getElementById('composer-image-input')?.click()
+          break
+        case 'remove-pending-image':
+          removePendingImage(target.dataset.imageKey)
+          break
+        case 'view-message-image':
+          await openMessageImage(target.dataset.imageId)
+          break
+        case 'close-image-viewer':
+          closeImageViewer()
           break
         case 'solo-bot': {
           const botId = target.dataset.botId
@@ -4227,6 +4484,12 @@
         return
       }
     }
+    // 图片查看器：Esc 关闭（优先级高于 modal 与 composer 快捷键）。
+    if (event.key === 'Escape' && !document.getElementById('image-viewer')?.hidden) {
+      event.preventDefault()
+      closeImageViewer()
+      return
+    }
     if (event.key === 'Escape' && state.modal) {
       closeModal()
       return
@@ -4276,6 +4539,13 @@
 
   document.addEventListener('change', (event) => {
     const el = event.target
+    // composer 选图：先把文件列表取出来（清空 input 后 FileList 会失效），再交给前端校验 + 读取。
+    if (el.id === 'composer-image-input') {
+      const files = Array.from(el.files ?? [])
+      el.value = ''
+      if (files.length > 0) void addPendingImages(files)
+      return
+    }
     if (el.matches('[data-task-filter]')) {
       state.taskFilter[el.dataset.taskFilter] = el.value
       render()

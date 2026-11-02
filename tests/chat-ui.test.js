@@ -32,7 +32,7 @@ test('currentDraft：各上下文互不覆盖，无草稿回空串', () => {
 
 test('草稿接线：两个 composer 读 currentDraft，input 写回 map，发送只清当前键，solo-bot 不再清草稿', () => {
   assert.equal((source.match(/\$\{esc\(currentDraft\(state\)\)\}/g) ?? []).length, 2, '群聊与单聊 composer 都应回填 currentDraft(state)')
-  assert.equal((source.match(/currentDraft\(state\)\.trim\(\) \? '' : 'disabled'/g) ?? []).length, 2)
+  assert.equal((source.match(/currentDraft\(state\)\.trim\(\) \|\| pendingImagesFor\(\)\.length/g) ?? []).length, 2, '群聊与单聊发送键在有草稿或有待发图片时都可点')
   assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = input\.value/)
   assert.match(source, /const body = currentDraft\(state\)\.trim\(\)/)
   assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = ''/)
