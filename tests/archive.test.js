@@ -338,3 +338,32 @@ test('remove_project_tracking 经 handleAction 返回 { removed, key }', async (
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('归档项目不收 mention：入口拒绝发送，残留 chat_run 出队跳过不派 run', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const project = await makeProject(service, store)
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    await handleAction(service, 'archive_project', { projectId: project.id }, ACTOR)
+
+    // 入口闸门：归档后消息发不进，mention 无从定向（chat.js sendMessage 的项目状态判断）。
+    await assert.rejects(
+      () => handleAction(service, 'send_message', { projectId: project.id, body: '@director 在吗' }, ACTOR),
+      err => err.code === 'CONFLICT',
+    )
+
+    // 出队闸门：归档瞬间残留的 pending chat_run，dispatchOutbox 按项目状态跳过——
+    // 行标记 delivered（不重试不报警），且不为归档项目派生任何 run。
+    const ts = new Date().toISOString()
+    store.run(
+      `INSERT INTO outbox(id, kind, project_id, source_id, payload_json, status, available_at, created_at)
+       VALUES ('ob-arch', 'chat_run', ?, 'msg-arch', ?, 'pending', ?, ?)`,
+      project.id, JSON.stringify({ projectId: project.id, botId: director.id, messageId: 'msg-arch' }), ts, ts,
+    )
+    service.dispatchOutbox()
+    assert.equal(store.get('SELECT status FROM outbox WHERE id = ?', 'ob-arch').status, 'delivered')
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE project_id = ?', project.id).n, 0)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
