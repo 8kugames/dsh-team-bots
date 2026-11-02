@@ -90,11 +90,11 @@ export function resolveConfig(config = {}) {
     // 这里的总数上限只防主机过载；读运行（chat/dm）与写运行共用一个池子，给到 6 才不至于让
     // 一两条对话运行把写任务的并发位吃干。
     maxConcurrentRuns: int(config.maxConcurrentRuns ?? process.env.DSH_TEAM_MAX_RUNS, 6, 1, 16),
-    runTimeoutMs: int(config.runTimeoutMs ?? process.env.DSH_TEAM_RUN_TIMEOUT_MS, 120 * 60_000, 30_000, 6 * 60 * 60_000),
+    runTimeoutMs: int(config.runTimeoutMs ?? process.env.DSH_TEAM_RUN_TIMEOUT_MS, 60 * 60_000, 30_000, 6 * 60 * 60_000),
     // 0 关闭：单次运行的 token 上限，超出即中止，避免一个运行吃掉整月预算。
     maxRunTokens: int(config.maxRunTokens ?? process.env.DSH_TEAM_MAX_RUN_TOKENS, 0, 0, 500_000_000),
     // 0 关闭：运行多久没有任何事件就判定卡住。
-    stallTimeoutMs: int(config.stallTimeoutMs ?? process.env.DSH_TEAM_STALL_TIMEOUT_MS, 30 * 60_000, 0, 6 * 60 * 60_000),
+    stallTimeoutMs: int(config.stallTimeoutMs ?? process.env.DSH_TEAM_STALL_TIMEOUT_MS, 20 * 60_000, 0, 6 * 60 * 60_000),
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。

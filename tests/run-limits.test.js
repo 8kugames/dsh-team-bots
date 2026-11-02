@@ -44,12 +44,12 @@ async function setup() {
   return { root, store, service, async close() { store.close(); await rm(root, { recursive: true, force: true }) } }
 }
 
-test('默认运行时效：超时 2 小时、看门狗 30 分钟', async () => {
+test('默认运行时效：超时 1 小时、看门狗 20 分钟', async () => {
   await withEnv({ DSH_TEAM_RUN_TIMEOUT_MS: undefined, DSH_TEAM_STALL_TIMEOUT_MS: undefined }, () => {
     const config = resolveConfig({})
     const limits = effectiveRunLimits(config, () => null)
-    assert.equal(limits.runTimeoutMs, 120 * MIN)
-    assert.equal(limits.stallTimeoutMs, 30 * MIN)
+    assert.equal(limits.runTimeoutMs, 60 * MIN)
+    assert.equal(limits.stallTimeoutMs, 20 * MIN)
     assert.equal(limits.runTimeoutEnv, false)
     assert.equal(limits.stallTimeoutEnv, false)
   })
@@ -93,11 +93,11 @@ test('保存值越界或非法按未保存回退默认', async () => {
     const config = resolveConfig({})
     for (const bad of ['0', '361', 'abc', '1.5', '-5']) {
       const limits = effectiveRunLimits(config, () => bad)
-      assert.equal(limits.runTimeoutMs, 120 * MIN, `run_timeout=${bad} 应回退默认`)
+      assert.equal(limits.runTimeoutMs, 60 * MIN, `run_timeout=${bad} 应回退默认`)
     }
     for (const bad of ['-1', '361', 'abc', '2.5']) {
       const limits = effectiveRunLimits(config, key => (key === STALL_WATCHDOG_KEY ? bad : null))
-      assert.equal(limits.stallTimeoutMs, 30 * MIN, `stall_watchdog=${bad} 应回退默认`)
+      assert.equal(limits.stallTimeoutMs, 20 * MIN, `stall_watchdog=${bad} 应回退默认`)
     }
   })
 })
@@ -120,7 +120,7 @@ test('updateSettings 校验运行时效范围并落库生效', async () => {
 
     // 空串 = 清除保存值，回退默认。
     await ctx.service.updateSettings({ [RUN_TIMEOUT_KEY]: '' })
-    assert.equal(ctx.service.runLimitsView().runTimeoutMinutes, 120)
+    assert.equal(ctx.service.runLimitsView().runTimeoutMinutes, 60)
 
     // 越界与非法输入一律 badRequest，不静默钳制。updateSettings 是同步方法，
     // 同步 throw 时 assert.rejects 会把原始错误原样外抛，必须用 assert.throws。
