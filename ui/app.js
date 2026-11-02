@@ -696,6 +696,34 @@
     return ` data-panel="${attr(key)}"${panelOpenAttr(state, key)}`
   }
 
+  // board-scroll-restore —— render() 全量重建 DOM，聊天之外视图的滚动位随之归零：纵向滚动在
+  // window 层（.main 撑高页面、body 无 overflow），任务看板 .board 另有横向滚动（overflow-x:auto），
+  // 侧栏 .tree 自身纵向滚动且同样被重建。重建前记下三处、重建后原位恢复，2.8s 轮询不再把滚动中的
+  // 用户拽回原点。窗口滚动仅在前后两次 render 同视图时恢复，切 tab 不携带上一视图的滚动位；
+  // 聊天视图维持既有 savedChatScroll / chatAtBottom 逻辑不动。
+  let lastRenderedView = null
+
+  function captureViewScroll(sameView) {
+    return {
+      windowY: sameView ? window.scrollY : 0,
+      boardX: document.querySelector('.board')?.scrollLeft ?? 0,
+      treeY: document.querySelector('.tree')?.scrollTop ?? 0,
+    }
+  }
+
+  function restoreViewScroll(saved) {
+    if (!saved) return
+    if (saved.windowY > 0) window.scrollTo(0, saved.windowY)
+    if (saved.boardX > 0) {
+      const board = document.querySelector('.board')
+      if (board) board.scrollLeft = saved.boardX
+    }
+    if (saved.treeY > 0) {
+      const tree = document.querySelector('.tree')
+      if (tree) tree.scrollTop = saved.treeY
+    }
+  }
+
   function render() {
     if (!state.data) return
     state.ac = null
@@ -705,11 +733,14 @@
     // chat-scroll-restore:mark —— render() 全量重建 DOM，非贴底时先记下消息列表滚动位置，重建后原位恢复；
     // 2.8s 轮询重渲染因此不再把上翻历史的用户拽回顶部；贴底（chatAtBottom）仍走下方 rAF 自动落底。
     const savedChatScroll = document.querySelector('.chat-messages')?.scrollTop ?? null
+    const savedViewScroll = captureViewScroll(lastRenderedView === state.view)
     app.innerHTML = renderShell()
     if (!state.chatAtBottom && savedChatScroll !== null) {
       const fresh = document.querySelector('.chat-messages')
       if (fresh) fresh.scrollTop = savedChatScroll
     }
+    restoreViewScroll(savedViewScroll)
+    lastRenderedView = state.view
     if (state.modal && !hadModal) {
       lastFocused = previousFocus
       focusModal()
