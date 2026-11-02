@@ -1667,10 +1667,10 @@
 
   // 项目成员管理页：状态与用量均按当前项目聚合（busy=本项目有排队/运行中运行；
   // usage 四项与 cost 为该项目全部运行的累计）。邀请走 add_member API，移除走 remove_member。
-  // DSHBOTS-52：成员行改卡片式网格——单卡宽高比锁定 0.618:1（CSS aspect-ratio: 0.618，
-  // 即宽:高 = 0.618:1），内容装不下时以卡片为准不撑破；上头像、中名称+角色、下状态点与用量。
+  // DSHBOTS-52：成员行改卡片式网格；上头像、中名称+角色、下状态点与用量。
   // DSHBOTS-57：卡片放大（max-width 320px、头像 56px），中段改三行式——名称 / 角色标签 /
-  // provider·model 小字，模型不再收进 title 提示，关键信息全部在卡面可见。
+  // provider·model 小字，模型不再收进 title 提示，关键信息全部在卡面可见；
+  // 尺寸与「总览bots」的 bot 卡片同口径，不再锁 0.618:1 宽高比（用户 m_c2ff7f）。
   function renderMembers() {
     const project = activeProject()
     if (!project) return noProject()

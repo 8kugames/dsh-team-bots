@@ -168,8 +168,9 @@ test('成员列表改为卡片网格，不再是行列表', () => {
   assert.match(gridCss, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(/, '列宽自适应（auto-fill + minmax）')
 })
 
-test('单卡宽高比锁定 0.618:1，内容不足不撑破', () => {
-  assert.match(cardCss, /aspect-ratio:\s*0\.618/, '卡片 aspect-ratio: 0.618（宽:高 = 0.618:1）')
+test('单卡不再锁宽高比，高度随内容（用户 m_c2ff7f）', () => {
+  assert.ok(!/aspect-ratio/.test(cardCss), '成员卡不再用 aspect-ratio 锁 0.618:1')
+  assert.ok(!/aspect-ratio/.test(gridCss), '网格也不设宽高比')
   assert.match(cardCss, /overflow:\s*hidden/, '内容装不下时以卡片为准，不撑破卡片')
 })
 
@@ -188,13 +189,23 @@ test('卡片信息布局：上头像、中名称+角色、下状态点与用量'
 
 // DSHBOTS-57：卡片放大（max-width 320px / 头像 56px），角色标签与模型分两行——
 // 名称 / 角色标签 / provider·model 小字三行式，模型不再收进 title 提示。
-test('卡片放大：max-width 320px、头像 56px、网格列宽同步放大', () => {
+test('卡片放大：max-width 320px、头像 56px，网格列宽与「总览bots」同口径', () => {
   assert.match(cardCss, /max-width:\s*320px/, '卡片最大宽度提到 320px')
-  assert.match(gridCss, /minmax\(320px, 1fr\)/, '网格列宽基准同步放大到 320px')
+  assert.match(gridCss, /minmax\(min\(280px, 100%\), 320px\)/, '网格列宽基准 280px、封顶 320px')
   const avatarCss = /\.member-card-top \.avatar\.lg \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
   assert.match(avatarCss, /width:\s*56px/, '头像 56px')
   assert.match(avatarCss, /height:\s*56px/, '头像 56px')
-  assert.match(cardCss, /aspect-ratio:\s*0\.618/, '宽高比 0.618:1 保持不变')
+})
+
+// 用户 m_c2ff7f：成员卡太大，取消 0.618:1 宽高比，改与「总览bots」的 bot 卡片同口径。
+test('成员卡与 bot 卡片同口径：内边距 16px、圆角 12px，无宽高比', () => {
+  const botCardCss = /\.bot-card \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
+  assert.ok(botCardCss, '找不到 .bot-card 样式块')
+  assert.match(cardCss, /padding:\s*16px/, '成员卡内边距与 bot 卡一致（16px）')
+  assert.match(botCardCss, /padding:\s*16px/, 'bot 卡内边距 16px')
+  assert.match(cardCss, /border-radius:\s*12px/, '成员卡圆角与 bot 卡一致（12px）')
+  assert.match(css, /\.card \{[\s\S]*?border-radius:\s*12px/, 'bot 卡圆角来自 .card 基础样式 12px')
+  assert.ok(!/aspect-ratio/.test(cardCss), '不再用 aspect-ratio')
 })
 
 test('中段三行式：名称 / 角色标签 / 模型小字各自独立成行', () => {
@@ -253,7 +264,7 @@ test('小屏少列：窄屏收成两列，超窄屏退到单列', () => {
 
 test('卡片宽度有上限，宽屏下不被拉成巨型卡', () => {
   assert.match(cardCss, /max-width:\s*320px/, '卡片最大宽度封顶（DSHBOTS-57 放大）')
-  assert.match(gridCss, /justify-items:\s*center/, '卡片在列内居中')
+  assert.match(gridCss, /justify-content:\s*center/, '卡片网格整体居中')
 })
 
 test('卡片样式只用主题变量，明暗两套都成立', () => {
