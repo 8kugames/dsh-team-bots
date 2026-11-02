@@ -8,3 +8,5 @@ workspace
 .env
 docs/
 package-lock.json
+.art-check/
+.stage-mine.mjs
