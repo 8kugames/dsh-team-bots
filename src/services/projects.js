@@ -392,6 +392,8 @@ export const projectsMethods = {
     this.store.transaction(() => {
       const runIds = 'SELECT id FROM runs WHERE project_id = ?'
       const taskIds = 'SELECT id FROM tasks WHERE project_id = ?'
+      // 聊天附图随消息一起清（FK 级联是主路径，这里再显式删一次防孤儿行）。
+      this.store.run('DELETE FROM message_images WHERE project_id = ?', projectId)
       this.store.run('DELETE FROM messages WHERE project_id = ?', projectId)
       this.store.run('DELETE FROM bot_messages WHERE project_id = ?', projectId)
       this.store.run(`DELETE FROM run_trajectory WHERE run_id IN (${runIds})`, projectId)

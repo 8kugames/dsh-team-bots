@@ -8,6 +8,7 @@ import { AppError } from '../../errors.js'
 import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
 import { effectiveRunLimits } from '../../config.js'
+import { imageContentPartsForMessage } from '../message-images.js'
 
 export const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
@@ -271,11 +272,14 @@ export const sessionMethods = {
       id('evt'), run.id, 'started', `Session ${sessionId}`, new Date().toISOString(),
     )
     try {
+      // 聊天附图：首条 prompt 一并带上 image 分片，模型这轮就能看到用户发的图。
+      // 宿主会把不能吃图片的模型降级成占位文本，插件不判模型能力。
+      const imageParts = chatMessage?.id ? imageContentPartsForMessage(this.store, chatMessage.id) : []
       await this.ctx.sessionController.prompt({
         requestId: randomUUID(),
         sessionId,
         mode: 'queue',
-        content: [{ type: 'text', text: prompt }],
+        content: [{ type: 'text', text: prompt }, ...imageParts],
       }, AbortSignal.timeout(30_000))
     } catch (error) {
       clearTimeout(pending.timer)

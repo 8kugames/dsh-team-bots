@@ -10,6 +10,7 @@ import { seedModelPrices } from '../pricing.js'
 import { syncSkills } from '../skills.js'
 import { backfillWorkspaceGroupBindings } from './workspace-groups.js'
 import { ensureApprovalSchema } from './approvals.js'
+import { ensureMessageImagesSchema } from './message-images.js'
 import { id, nowIso } from '../util.js'
 
 
@@ -85,6 +86,8 @@ export const coreMethods = {
       // 审批表与 messages 审批列的迁移由审批域自管（db.js 保持不超 800 行）；
       // 同一步顺手把残留 pending 置 timeout——宿主侧请求随进程消失，不可能再被应答。
       ensureApprovalSchema(this.store)
+      // 聊天附图表同样由消息域自管迁移（db.js 不加行）。
+      ensureMessageImagesSchema(this.store)
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
       this.store.run(
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,

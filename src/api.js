@@ -6,7 +6,7 @@ const ACTIONS = new Set([
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
   'add_member', 'remove_member',
-  'send_message', 'send_solo_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
+  'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
   'retry_run', 'cancel_run', 'run_trajectory',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
@@ -63,9 +63,13 @@ export async function handleAction(service, action, payload = {}, actor) {
     case 'browse_dirs':
       return service.browseDirectories(payload)
     case 'send_message':
-      return service.sendMessage(required(payload.projectId, 'projectId'), required(payload.body, 'body'), actor, payload.replyTo ?? null)
+      // body 可缺省（纯图片消息）：服务层校验「正文与图片至少有一项」。
+      return service.sendMessage(required(payload.projectId, 'projectId'), payload.body ?? '', actor, payload.replyTo ?? null, payload.images ?? [])
     case 'send_solo_message':
-      return service.sendSoloMessage(required(payload.botId, 'botId'), required(payload.body, 'body'), actor)
+      return service.sendSoloMessage(required(payload.botId, 'botId'), payload.body ?? '', actor, payload.images ?? [])
+    case 'get_message_image':
+      // 按 id 取聊天图片（含 base64），供前端渲染缩略图。
+      return service.messageImage(required(payload.imageId, 'imageId'), actor)
     case 'create_task':
       return service.createTask({ ...payload, projectId: required(payload.projectId, 'projectId') }, actor)
     case 'update_task':

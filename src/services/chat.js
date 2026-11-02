@@ -9,6 +9,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { assertInside } from '../paths.js'
 import { summarizeForUi, upsertBotMessage } from '../botmsg.js'
 import { id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
+import { insertMessageImages, messageImageRow, messageImageViews, normalizeImageInputs } from './message-images.js'
 
 export const commandTaskPattern = /^\/task\s+@([\p{L}\p{N}_-]+)\s+([\s\S]+)$/u
 
@@ -17,7 +18,7 @@ export const commandRememberPattern = /^\/remember\s+([\s\S]+)$/u
 export const commandClearPattern = /^\/clear$/u
 
 export const chatMethods = {
-  insertMessage({ projectId, senderType, senderId, body, mentions = [], taskId = null, runId = null, replyToId = null, createdAt = nowIso() }) {
+  insertMessage({ projectId, senderType, senderId, body, mentions = [], taskId = null, runId = null, replyToId = null, images = [], createdAt = nowIso() }) {
     const group = this.groupOf(projectId)
     if (!group) throw notFound('项目群聊不存在')
     const messageId = id('msg')
@@ -32,6 +33,10 @@ export const chatMethods = {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       messageId, projectId, group.id, senderType, senderId, maskedBody, JSON.stringify(mentions), taskId, runId, replyToId, createdAt,
     )
+    // 图片另存 message_images：正文列保持纯文本，base64 不进 messages.body。
+    if (images.length > 0) {
+      insertMessageImages(this.store, { messageId, images, projectId })
+    }
     return messageId
   },
 
@@ -68,13 +73,32 @@ export const chatMethods = {
       reply_to: this.replyView(row.reply_to_id),
       taskIdentifier: task && project ? `${project.key}-${task.number}` : null,
       taskTitle: task?.title ?? null,
+      // 附图元数据（不含 base64）：前端拿 id 再按需取图。
+      images: messageImageViews(this.store, row.id),
     }
   },
-  async sendMessage(projectId, bodyInput, actor = this.actor(), replyTo = null) {
+  // 按 id 取聊天图片（含 base64）：前端渲染 <img src="data:..."> 用。
+  // 鉴权：仅工作台本地用户可取；bot 一律拒绝（图片是用户上传内容，不是 bot 的可读范围）。
+  messageImage(imageId, actor = this.actor()) {
+    if (actor?.type !== 'user') throw forbidden('仅工作台用户可读取聊天图片')
+    const row = messageImageRow(this.store, String(imageId ?? ''))
+    if (!row) throw notFound('图片不存在')
+    return {
+      id: row.id,
+      mediaType: row.media_type,
+      name: row.name ?? null,
+      bytes: row.bytes,
+      data: row.data,
+    }
+  },
+  async sendMessage(projectId, bodyInput, actor = this.actor(), replyTo = null, imagesInput = []) {
     const project = this.projectRow(projectId)
     if (project.status !== 'active') throw conflict('项目已归档')
     const body = text(bodyInput, 20_000)
-    if (!body) throw badRequest('消息不能为空')
+    // 图片先校验后落库：白名单/大小/数量/非法 base64 一律 invalid_request。
+    const images = normalizeImageInputs(imagesInput)
+    // 正文与图片至少有一项：允许「纯图片消息」，但不允许空消息。
+    if (!body && images.length === 0) throw badRequest('消息不能为空')
     const members = this.membersOf(projectId).filter(bot => bot.status === 'active')
     if (commandClearPattern.test(body)) {
       const cleared = this.clearChatHistory(projectId, actor)
@@ -103,6 +127,7 @@ export const chatMethods = {
         senderId: actor.id,
         body,
         mentions: [assignee.id],
+        images,
       })
       const task = await this.createTask({
         projectId,
@@ -135,6 +160,7 @@ export const chatMethods = {
       body,
       mentions: mentions.map(bot => bot.id),
       replyToId: replyMessage?.id ?? null,
+      images,
     })
     for (const bot of targets) {
       this.enqueueOutbox({
@@ -153,6 +179,9 @@ export const chatMethods = {
   clearChatHistory(projectId, actor = this.actor()) {
     const project = this.projectRow(projectId)
     const count = Number(this.store.get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)?.count ?? 0)
+    // 附图行随消息一起清：FK 级联已覆盖，这里再显式删一次，
+    // 避免外键开关被临时关掉时留下孤儿图片。
+    this.store.run('DELETE FROM message_images WHERE project_id = ?', project.id)
     this.store.run('DELETE FROM messages WHERE project_id = ?', project.id)
     this.audit(actor, 'chat.clear', 'project', project.id, { cleared: count })
     return count
@@ -179,7 +208,7 @@ export const chatMethods = {
   },
 
   // ===== 单聊：项目外与单个 Bot 的一对一会话，工作目录 _the_bots/<solo_dir> =====
-  insertSoloMessage({ botId, senderType, senderId, body, runId = null, createdAt = nowIso() }) {
+  insertSoloMessage({ botId, senderType, senderId, body, runId = null, images = [], createdAt = nowIso() }) {
     const messageId = id('msg')
     // 单聊 bot 回复同样剥残片：剥完整条为空就不落库。用户消息不动。
     const cleanedBody = senderType === 'bot' ? stripLeakedToolMarkup(body) : body
@@ -191,26 +220,39 @@ export const chatMethods = {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       messageId, botId, senderType, senderId, maskedBody, runId, createdAt,
     )
+    if (images.length > 0) {
+      insertMessageImages(this.store, { messageId, soloMessageId: messageId, images, botId })
+    }
     return messageId
   },
   soloMessageView(row) {
     const senderName = row.sender_type === 'bot'
       ? this.store.get('SELECT name FROM bots WHERE id = ?', row.sender_id)?.name ?? 'Bot'
       : row.sender_type === 'system' ? '系统' : this.actorName({ type: 'user', id: row.sender_id })
-    return { ...row, body: this.chatBodyView(row), senderName }
+    return {
+      ...row,
+      body: this.chatBodyView(row),
+      senderName,
+      // 附图元数据（不含 base64）：前端拿 id 再按需取图。
+      images: messageImageViews(this.store, row.id),
+    }
   },
   clearSoloHistory(botId, actor = this.actor()) {
     const bot = this.botRow(botId)
     const count = Number(this.store.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', bot.id)?.count ?? 0)
+    this.store.run('DELETE FROM message_images WHERE bot_id = ?', bot.id)
     this.store.run('DELETE FROM solo_messages WHERE bot_id = ?', bot.id)
     this.audit(actor, 'chat.solo_clear', 'bot', bot.id, { cleared: count })
     return count
   },
-  async sendSoloMessage(botId, bodyInput, actor = this.actor()) {
+  async sendSoloMessage(botId, bodyInput, actor = this.actor(), imagesInput = []) {
     const bot = this.botRow(botId)
     if (bot.status !== 'active') throw conflict('Bot 已归档或暂停')
     const body = text(bodyInput, 20_000)
-    if (!body) throw badRequest('消息不能为空')
+    // 图片先校验后落库：白名单/大小/数量/非法 base64 一律 invalid_request。
+    const images = normalizeImageInputs(imagesInput)
+    // 正文与图片至少有一项：允许「纯图片消息」，但不允许空消息。
+    if (!body && images.length === 0) throw badRequest('消息不能为空')
     if (commandClearPattern.test(body)) {
       const cleared = this.clearSoloHistory(bot.id, actor)
       return { cleared }
@@ -244,6 +286,7 @@ export const chatMethods = {
       senderType: actor.type,
       senderId: actor.id,
       body,
+      images,
     })
     this.enqueueOutbox({
       kind: 'solo_chat_run',

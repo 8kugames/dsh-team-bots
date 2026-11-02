@@ -8,7 +8,9 @@ import { handleAction } from './api.js'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const UI = join(HERE, '..', 'ui')
 const VENDOR = join(HERE, '..', 'vendor')
-const MAX_BODY = 2 * 1024 * 1024
+// API 请求体上限：聊天图片输入（单图 5MB、单条 4 张）走同一个 JSON 端点，
+// base64 编码膨胀约 4/3，取 32MB 覆盖「4 张 × 5MB」的最大消息。
+const MAX_BODY = 32 * 1024 * 1024
 // 交付产物文件的单文件响应上限，超出返回 413。
 const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
 // 聊天图片通道的单文件上限，任务口径 10MB；MIME 白名单与防穿越在 service.chatFile。

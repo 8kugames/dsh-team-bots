@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { recordUsage } from '../../usage.js'
 import { nowIso, sha256, stripLeakedToolMarkup } from '../../util.js'
 import { contentText, reasonOf } from './trajectory.js'
+import { toImageContentParts } from '../message-images.js'
 
 // teammate 等子会话的父指向在不同 DSH 版本里字段不一，逐个探测。
 export const PARENT_ACCESSORS = [
@@ -291,9 +292,10 @@ export const lifecycleMethods = {
   },
 
   // 向运行中的会话追加一条人类输入：优先中途 steer，失败则退回排队投递。
-  async steer(sessionId, body) {
+  // images 可选：宿主的 PromptContentPart 支持 image 分片，不传时行为与从前完全一致。
+  async steer(sessionId, body, images = []) {
     if (!sessionId || !this.ctx?.sessionController) return false
-    const content = [{ type: 'text', text: body }]
+    const content = [{ type: 'text', text: body }, ...toImageContentParts(images)]
     try {
       // 公开 Remote 契约：宿主内部会构造完整用户消息（id/role/source）再 agent.steer，
       // 避免裸 content 在并发投递时撞 message.id 去重键。
