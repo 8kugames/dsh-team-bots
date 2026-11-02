@@ -1,0 +1,105 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+
+// —— 草稿纯逻辑块 ——
+const draftsBlock = /\/\/ chat-drafts:start[\s\S]*?\/\/ chat-drafts:end/.exec(source)?.[0]
+assert.ok(draftsBlock, 'ui/app.js 缺少 chat-drafts 标记块')
+const { draftKey, currentDraft } = new Function(`${draftsBlock}\nreturn { draftKey, currentDraft }`)()
+
+test('draftKey：群聊按项目、单聊按 Bot 分键', () => {
+  assert.equal(draftKey({ chatMode: 'group', projectId: 'p1', soloBotId: null }), 'group:p1')
+  assert.equal(draftKey({ chatMode: 'solo', projectId: 'p1', soloBotId: 'b2' }), 'solo:b2')
+  assert.notEqual(
+    draftKey({ chatMode: 'group', projectId: 'p1', soloBotId: null }),
+    draftKey({ chatMode: 'solo', projectId: 'p1', soloBotId: 'b2' }),
+  )
+})
+
+test('currentDraft：各上下文互不覆盖，无草稿回空串', () => {
+  const state = { chatMode: 'group', projectId: 'p1', soloBotId: 'b2', chatDrafts: { 'group:p1': '群聊草稿', 'solo:b2': '单聊草稿' } }
+  assert.equal(currentDraft(state), '群聊草稿')
+  state.chatMode = 'solo'
+  assert.equal(currentDraft(state), '单聊草稿')
+  state.chatMode = 'group'
+  state.projectId = 'p9'
+  assert.equal(currentDraft(state), '')
+})
+
+test('草稿接线：两个 composer 读 currentDraft，input 写回 map，发送只清当前键，solo-bot 不再清草稿', () => {
+  assert.equal((source.match(/\$\{esc\(currentDraft\(state\)\)\}/g) ?? []).length, 2, '群聊与单聊 composer 都应回填 currentDraft(state)')
+  assert.equal((source.match(/currentDraft\(state\)\.trim\(\) \? '' : 'disabled'/g) ?? []).length, 2)
+  assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = input\.value/)
+  assert.match(source, /const body = currentDraft\(state\)\.trim\(\)/)
+  assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = ''/)
+  assert.ok(!source.includes('state.draft'), '旧的单值 state.draft 应已全部移除')
+  const soloBotCase = /case 'solo-bot': \{[\s\S]*?case 'copy':/.exec(source)?.[0]
+  assert.ok(!/chatDrafts\[/.test(soloBotCase ?? ''), 'solo-bot 切换不得清空任何草稿')
+})
+
+// —— 输入框高度纯逻辑块 ——
+const resizeBlock = /\/\/ composer-resize:start[\s\S]*?\/\/ composer-resize:end/.exec(source)?.[0]
+assert.ok(resizeBlock, 'ui/app.js 缺少 composer-resize 标记块')
+const { composerCap, composerHeightFor, COMPOSER_AUTO_MAX_PX, COMPOSER_PANEL_RATIO } = new Function(
+  `${resizeBlock}\nreturn { composerCap, composerHeightFor, COMPOSER_AUTO_MAX_PX, COMPOSER_PANEL_RATIO }`,
+)()
+
+test('常量：自动上限 150px 沿用，拖高封顶比例 0.618', () => {
+  assert.equal(COMPOSER_AUTO_MAX_PX, 150)
+  assert.equal(COMPOSER_PANEL_RATIO, 0.618)
+})
+
+test('composerCap：面板高度的 61.8%，四舍五入且不为 0', () => {
+  assert.equal(composerCap(1000), 618)
+  assert.equal(composerCap(487), 301)
+  assert.ok(composerCap(1) >= 1)
+})
+
+test('composerHeightFor：拖高后不回缩、内容超出可长高、两者封顶 61.8%', () => {
+  assert.equal(composerHeightFor(48, 300, 618), 300, '内容少于手动高度时保持手动高度（不回缩）')
+  assert.equal(composerHeightFor(400, 300, 618), 400, '内容超出手动高度时仍可长高')
+  assert.equal(composerHeightFor(48, 700, 618), 618, '手动高度封顶在面板 61.8%')
+  assert.equal(composerHeightFor(700, null, 618), 618, '自动长高也封顶在面板 61.8%')
+  assert.equal(composerHeightFor(120, null, 618), 120, '无手动高度时保持自动值')
+})
+
+test('拖柄接线：pointerdown 拖动 + 双击恢复 + 窗口 resize 重夹取', () => {
+  assert.match(source, /pointerdown[\s\S]*?\.composer-resizer/)
+  assert.match(source, /state\.composerHeight = Math\.min\(Math\.max\(Math\.round\(startHeight - \(moveEvent\.clientY - startY\)\), lowerBound\), capHeight\)/)
+  assert.match(source, /minHeight = Math\.min\(COMPOSER_AUTO_MAX_PX, input\.scrollHeight\)/, '拖动下限=当前内容自动高度')
+  assert.match(source, /dblclick[\s\S]*?state\.composerHeight = null/, '双击恢复自动高度')
+  assert.match(source, /window\.addEventListener\('resize'[\s\S]*?applyComposerHeight\(composerInput\)/)
+  assert.match(source, /function applyComposerHeight\(input\)/)
+})
+
+test('拖柄样式：ns-resize 热区 + 主题变量配色，CSS 不再设 170px 硬封顶', () => {
+  assert.match(css, /\.composer-resizer \{[\s\S]*?cursor: ns-resize/)
+  assert.match(css, /\.composer-resizer \{[\s\S]*?touch-action: none/)
+  assert.match(css, /\.composer-resizer:hover::after[\s\S]*?--accent|--accent[\s\S]*?\.composer-resizer:hover::after/)
+  const composerTextarea = /\.composer textarea \{[\s\S]*?\n\}/.exec(css)?.[0]
+  assert.ok(!/max-height: 170px/.test(composerTextarea ?? ''), 'textarea 的 CSS 封顶应交给 JS 面板 61.8% 规则')
+})
+
+// —— 轮询滚动保位 ——
+test('render()：重建 DOM 前记录 .chat-messages scrollTop，非贴底原位恢复，贴底仍自动落底', () => {
+  assert.match(source, /const savedChatScroll = document\.querySelector\('\.chat-messages'\)\?\.scrollTop \?\? null/)
+  assert.match(source, /if \(!state\.chatAtBottom && savedChatScroll !== null\) \{\s*\n\s*const fresh = document\.querySelector\('\.chat-messages'\)\s*\n\s*if \(fresh\) fresh\.scrollTop = savedChatScroll/)
+  assert.match(source, /if \(messages && state\.chatAtBottom\) messages\.scrollTop = messages\.scrollHeight/, '贴底时新消息仍自动贴底')
+})
+
+test('render()：重建后恢复 composer 内联高度与发送按钮态', () => {
+  assert.match(source, /const composerInput = document\.getElementById\('composer-input'\)\s*\n\s*if \(composerInput\) syncComposerBox\(composerInput\)/)
+})
+
+// —— 回归护栏：DSHBOTS-3 引用交互与 renderKeepingChatScroll 保留 ——
+test('引用交互不回归：renderKeepingChatScroll 保留并仍聚焦输入框', () => {
+  assert.match(source, /function renderKeepingChatScroll\(\) \{\s*\n\s*render\(\)\s*\n\s*document\.getElementById\('composer-input'\)\?\.focus\(\)/)
+  assert.match(source, /renderKeepingChatScroll\(\)/)
+  assert.match(source, /case 'cancel-reply':/)
+  assert.match(source, /data-action="quote-message"/)
+  assert.match(source, /state\.replyTo = null \/\/ 单聊无引用语义，跨上下文不留引用条/, '切换上下文仍清引用条')
+})

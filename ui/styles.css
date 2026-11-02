@@ -79,6 +79,14 @@
     --c-green: #15803d;
     --c-gray: #4b5563;
 
+    /* console well: the one place the UI drops into a dark surface, in both themes.
+       Violet-gray family, so it still belongs to the same palette. */
+    --console-bg: #12141c;
+    --console-bg-2: #1a1d27;
+    --console-ink: #dde0ef;
+    --console-ink-2: rgba(221, 224, 239, 0.6);
+    --console-line: rgba(221, 224, 239, 0.12);
+
     --code-bg: rgba(51, 54, 76, 0.05);
     --shadow-1: 0 1px 2px rgba(51, 54, 76, 0.04);
     --shadow-card:
@@ -1304,9 +1312,12 @@ a.global-config.dsh-official-link:hover {
     text-decoration: underline;
     text-underline-offset: 2px;
 }
-/* 引用块：气泡顶部的「↩ 名字：摘要」行，单行截断。颜色继承气泡正文，
+/* 引用块：气泡顶部的「❝ 名字：摘要」行，单行截断。颜色继承气泡正文，
    bot 气泡（surface-3）与用户气泡（accent）各自可读，明暗主题共用变量。 */
 .msg-quote {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
     margin: 0 0 6px;
     padding: 3px 8px;
     border-left: 2px solid var(--accent);
@@ -1314,9 +1325,20 @@ a.global-config.dsh-official-link:hover {
     border-radius: 4px 8px 8px 4px;
     font-size: var(--fs-small);
     opacity: 0.88;
+    min-width: 0;
+}
+.msg-quote svg {
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+    align-self: center;
+    opacity: 0.8;
+}
+.msg-quote span {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    min-width: 0;
 }
 /* 用户气泡本身是 accent 底，引用条边线换成 accent-ink 区分。 */
 .message-row.user .msg-quote {
@@ -1343,8 +1365,8 @@ a.global-config.dsh-official-link:hover {
         background-color 0.12s ease;
 }
 .msg-quote-btn svg {
-    width: 13px;
-    height: 13px;
+    width: 14px;
+    height: 14px;
 }
 .message-row:hover .msg-quote-btn,
 .msg-quote-btn:focus-visible {
@@ -1544,6 +1566,34 @@ a.global-config.dsh-official-link:hover {
     border-color: var(--accent);
     background: var(--surface);
 }
+/* 输入框拖高柄：贴 composer-box 上缘的窄拖拽热区（上下各约 4px），按住垂直拖动调高、双击恢复自动高度。
+   颜色全部走主题变量，明暗两套主题自动适配。 */
+.composer-resizer {
+    position: absolute;
+    top: -4px;
+    left: 10px;
+    right: 10px;
+    height: 8px;
+    cursor: ns-resize;
+    touch-action: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+}
+.composer-resizer::after {
+    content: '';
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line-2);
+    transition: background-color 0.13s ease, width 0.13s ease;
+}
+.composer-resizer:hover::after,
+.composer-resizer:active::after {
+    width: 56px;
+    background: var(--accent);
+}
 .composer textarea {
     width: 100%;
     resize: none;
@@ -1552,7 +1602,7 @@ a.global-config.dsh-official-link:hover {
     background: transparent;
     color: var(--ink);
     min-height: 48px;
-    max-height: 170px;
+    /* 高度上限由 JS 统一裁决：自动 150px、手动拖高封顶=面板 61.8%（applyComposerHeight）。 */
     padding: 4px;
     font-size: var(--fs-body);
     line-height: 1.65;
@@ -3625,11 +3675,14 @@ a.global-config.dsh-official-link:hover {
     line-height: 1.7;
 }
 
-/* ---------------------------------------------------------------- Project terminal tab */
+/* ---------------------------------------------------------------- Project terminal tab
+   One machine in three states: idle (empty well), running (accent pulse), history (log rows).
+   Hierarchy is carried by value, not by decoration: the chrome strip is the only ornament,
+   the output area is the only recessed (darker) surface on the page. */
 .terminal-page {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     max-width: 920px;
 }
 .terminal-warn {
@@ -3651,36 +3704,133 @@ a.global-config.dsh-official-link:hover {
 .terminal-card {
     padding: 0;
     overflow: hidden;
+    border-radius: 14px;
+    box-shadow: var(--shadow-card);
 }
+
+/* chrome strip: a quiet title bar, so the card reads as a machine not a form */
+.terminal-chrome {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 36px;
+    padding: 0 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+}
+.terminal-chrome-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+}
+.terminal-chrome-dots i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    opacity: 0.32;
+}
+.terminal-chrome-label {
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--ink-3);
+}
+.terminal-chrome-path {
+    margin-left: auto;
+    font: 500 var(--fs-caption) var(--mono);
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 46ch;
+}
+.terminal-card.is-running .terminal-chrome-dots i:last-child {
+    background: var(--accent);
+    opacity: 1;
+    animation: terminal-pulse 1.5s ease-in-out infinite;
+}
+@keyframes terminal-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+        transform: scale(0.85);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .terminal-card.is-running .terminal-chrome-dots i:last-child {
+        animation: none;
+        opacity: 1;
+    }
+}
+
+/* command bar: the prompt is the anchor, the field stays flat until focused */
 .terminal-input-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 14px;
+    padding: 11px 14px;
     border-bottom: 1px solid var(--line);
 }
 .terminal-prompt {
     font: 600 0.9375rem var(--mono);
-    color: var(--ink-3);
+    color: var(--accent-text);
     flex: 0 0 auto;
 }
 .terminal-input {
     flex: 1 1 auto;
     min-width: 0;
     font-family: var(--mono);
+    font-size: var(--fs-small);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line-2);
+    border-radius: 0;
+    padding: 5px 2px;
 }
+.terminal-input:focus {
+    outline: none;
+    background: transparent;
+    border-bottom-color: var(--accent);
+    box-shadow: 0 1px 0 0 var(--accent);
+}
+.terminal-input::placeholder {
+    color: var(--ink-3);
+    font-family: var(--sans);
+}
+.terminal-input:disabled {
+    opacity: 0.5;
+}
+.terminal-kbd {
+    font: 500 var(--fs-caption) var(--mono);
+    color: var(--ink-3);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 1px 5px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+/* running state: an accent edge on the left, so the eye finds the live row instantly */
 .terminal-active-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 14px;
+    padding: 9px 14px;
     border-bottom: 1px solid var(--line);
-    background: var(--star-wash);
+    background: var(--accent-wash);
+    box-shadow: inset 2px 0 0 0 var(--accent);
     font-size: var(--fs-small);
 }
 .terminal-active-cmd {
     font-family: var(--mono);
-    color: var(--ink-2);
+    color: var(--ink);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3695,55 +3845,87 @@ a.global-config.dsh-official-link:hover {
 .terminal-stop {
     flex: 0 0 auto;
 }
+
+/* the well: the only dark surface in the app, in both themes */
 .terminal-output {
     margin: 0;
-    padding: 12px 14px;
-    min-height: 180px;
-    max-height: 46vh;
+    padding: 14px 16px;
+    min-height: 220px;
+    max-height: 52vh;
     overflow: auto;
     font-family: var(--mono);
     font-size: var(--fs-small);
-    line-height: 1.65;
-    color: var(--ink-2);
-    background: var(--surface-2);
+    line-height: 1.7;
+    color: var(--console-ink);
+    background: var(--console-bg);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.28);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     tab-size: 4;
 }
 .terminal-output .faint {
-    color: var(--ink-3);
+    color: var(--console-ink-2);
+    font-family: var(--sans);
 }
+
+/* history: a log list, one row per command, separated by hairlines */
 .terminal-history-card {
-    padding: 14px 16px;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 14px;
 }
 .terminal-history-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 8px;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+}
+.terminal-history-head strong {
+    font-size: var(--fs-body);
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 .terminal-history {
     display: flex;
     flex-direction: column;
-    gap: 6px;
 }
 .terminal-history-item {
     display: flex;
     align-items: center;
     gap: 10px;
     width: 100%;
-    padding: 8px 10px;
-    border: 1px solid transparent;
-    border-radius: 10px;
+    padding: 9px 16px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-left: 2px solid var(--line-2);
     background: none;
     cursor: pointer;
     text-align: left;
     color: var(--ink);
     font: inherit;
+    transition:
+        background-color 0.13s ease,
+        border-left-color 0.13s ease;
+}
+.terminal-history-item:last-child {
+    border-bottom: 0;
 }
 .terminal-history-item:hover {
-    border-color: var(--line);
     background: var(--surface-2);
+    border-left-color: var(--accent);
+}
+.terminal-history-item[data-status="succeeded"] {
+    border-left-color: var(--green);
+}
+.terminal-history-item[data-status="failed"],
+.terminal-history-item[data-status="timeout"],
+.terminal-history-item[data-status="interrupted"] {
+    border-left-color: var(--danger);
+}
+.terminal-history-item[data-status="running"] {
+    border-left-color: var(--star);
 }
 .terminal-history-item .pill {
     flex: 0 0 auto;
@@ -3757,6 +3939,9 @@ a.global-config.dsh-official-link:hover {
     white-space: nowrap;
     flex: 1 1 auto;
     min-width: 0;
+}
+.terminal-history-item:hover .terminal-history-cmd {
+    color: var(--ink);
 }
 .terminal-history-meta {
     display: inline-flex;

@@ -15,7 +15,10 @@
     soloBotId: null,
     soloDetail: null,
     modal: null,
-    draft: '',
+    // 草稿按上下文分开记（群聊 group:<projectId>、单聊 solo:<botId>），切换互不覆盖、互不清空。
+    chatDrafts: {},
+    // composer 手动拖高后的像素高度；null = 自动高度（随内容长高，上限 150px）。
+    composerHeight: null,
     // 群聊引用回复：{ id, senderName, excerpt }，非空时 composer 上方显示引用条，随发送/取消清除。
     replyTo: null,
     ac: null,
@@ -119,6 +122,9 @@
     download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',
     reply: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+    // 引用标记：两枚引号（lucide quote 标准路径，水平镜像成「“」开口式，描边加粗到 2.2，
+    // 保证 14px 下仍可辨），与「返回/滚回」的回转箭头彻底区分。
+    quote: '<g transform="translate(24 0) scale(-1 1)" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></g>',
   }
 
   const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.settings}</svg>`
@@ -541,17 +547,10 @@
     document.documentElement.style.setProperty('--chrome-h', `${chrome}px`)
   }
 
-  // 引用交互专用重渲染：render() 全量重建 DOM，用户往上翻历史点「引用」时保持消息列表滚动位置
-  // （chatAtBottom 为 true 时仍由 render 的 rAF 落底，与本函数不冲突），并聚焦输入框。
+  // 引用交互专用重渲染：render() 自身已在非贴底时保持消息列表滚动位置（见 render 内 chat-scroll-restore），
+  // 这里只需在渲染后聚焦输入框，方便接着打字。
   function renderKeepingChatScroll() {
-    const list = document.querySelector('.chat-messages')
-    const scrollTop = list?.scrollTop ?? null
-    const wasAtBottom = state.chatAtBottom
     render()
-    if (!wasAtBottom && scrollTop !== null) {
-      const fresh = document.querySelector('.chat-messages')
-      if (fresh) fresh.scrollTop = scrollTop
-    }
     document.getElementById('composer-input')?.focus()
   }
 
@@ -561,7 +560,14 @@
     app.className = ''
     const hadModal = Boolean(document.querySelector('.modal'))
     const previousFocus = document.activeElement
+    // chat-scroll-restore:mark —— render() 全量重建 DOM，非贴底时先记下消息列表滚动位置，重建后原位恢复；
+    // 2.8s 轮询重渲染因此不再把上翻历史的用户拽回顶部；贴底（chatAtBottom）仍走下方 rAF 自动落底。
+    const savedChatScroll = document.querySelector('.chat-messages')?.scrollTop ?? null
     app.innerHTML = renderShell()
+    if (!state.chatAtBottom && savedChatScroll !== null) {
+      const fresh = document.querySelector('.chat-messages')
+      if (fresh) fresh.scrollTop = savedChatScroll
+    }
     if (state.modal && !hadModal) {
       lastFocused = previousFocus
       focusModal()
@@ -570,6 +576,9 @@
     requestAnimationFrame(() => {
       syncChromeHeight()
       if (state.view === 'chat') {
+        // 全量重建会丢 composer 的内联高度与发送按钮态，先恢复，再处理贴底滚动。
+        const composerInput = document.getElementById('composer-input')
+        if (composerInput) syncComposerBox(composerInput)
         const messages = document.querySelector('.chat-messages')
         if (messages && state.chatAtBottom) messages.scrollTop = messages.scrollHeight
       }
@@ -674,16 +683,17 @@
           ${renderDirectMessagesCard()}
                     <div class="composer">
             ${state.replyTo ? `<div class="reply-bar" id="reply-bar">
-              <span class="reply-bar-icon">${icon('reply')}</span>
+              <span class="reply-bar-icon">${icon('quote')}</span>
               <span class="reply-bar-text"><strong>${esc(state.replyTo.senderName)}</strong><span>${esc(state.replyTo.excerpt)}</span></span>
               <button class="reply-bar-cancel" data-action="cancel-reply" title="取消引用（Esc）" aria-label="取消引用">${icon('close')}</button>
             </div>` : ''}
             <div class="composer-box">
               <div class="composer-ac" id="composer-ac" role="listbox" aria-label="输入补全" hidden></div>
-              <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(state.draft)}</textarea>
+              <div class="composer-resizer" id="composer-resizer" title="拖动调整输入框高度，双击恢复自动高度" role="separator" aria-orientation="horizontal" aria-label="拖动调整输入框高度，双击恢复自动高度"></div>
+              <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(currentDraft(state))}</textarea>
               <div class="composer-bottom">
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
-                <button class="send-btn" data-action="send-message" ${state.draft.trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
+                <button class="send-btn" data-action="send-message" ${currentDraft(state).trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
               </div>
             </div>
           </div>
@@ -771,10 +781,11 @@
           </div>
           <div class="composer">
             <div class="composer-box">
-              <textarea id="composer-input" rows="2" placeholder="和 ${esc(bot.name)} 单聊，/clear 清空本会话，/remember 内容 写入 Bot 记忆">${esc(state.draft)}</textarea>
+              <div class="composer-resizer" id="composer-resizer" title="拖动调整输入框高度，双击恢复自动高度" role="separator" aria-orientation="horizontal" aria-label="拖动调整输入框高度，双击恢复自动高度"></div>
+              <textarea id="composer-input" rows="2" placeholder="和 ${esc(bot.name)} 单聊，/clear 清空本会话，/remember 内容 写入 Bot 记忆">${esc(currentDraft(state))}</textarea>
               <div class="composer-bottom">
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
-                <button class="send-btn" data-action="send-message" ${state.draft.trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
+                <button class="send-btn" data-action="send-message" ${currentDraft(state).trim() ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
               </div>
             </div>
           </div>
@@ -881,10 +892,10 @@
     }
     const isUser = message.sender_type === 'user'
     const bot = isUser ? null : botById(message.sender_id)
-    // 引用块：气泡顶部一行「↩ 名字：摘要」，纯展示。
-    const quoteBlock = message.reply_to ? `<div class="msg-quote" title="引用自 ${attr(message.reply_to.sender_name)}">↩ ${esc(message.reply_to.sender_name)}：${esc(message.reply_to.excerpt)}</div>` : ''
+    // 引用块：气泡顶部一行「❝ 名字：摘要」，纯展示。
+    const quoteBlock = message.reply_to ? `<div class="msg-quote" title="引用自 ${attr(message.reply_to.sender_name)}">${icon('quote')}<span>${esc(message.reply_to.sender_name)}：${esc(message.reply_to.excerpt)}</span></div>` : ''
     // hover 引用按钮：仅群聊；点击进入引用回复（选中该消息作为回复目标）。
-    const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(message.body.slice(0, 120))}" title="引用回复" aria-label="引用回复这条消息">${icon('reply')}</button>` : ''
+    const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(message.body.slice(0, 120))}" title="引用回复" aria-label="引用回复这条消息">${icon('quote')}</button>` : ''
     return `<div class="message-row ${isUser ? 'user' : ''}">
       ${isUser ? '' : avatar(bot ?? { name: message.senderName, color: 'gray' })}
       <div class="message-body-wrap">
@@ -1028,11 +1039,17 @@
     return `
       <div class="terminal-page">
         ${taskBusy ? `<div class="terminal-warn">${icon('alert')}<span>有任务正在写该项目工作区，终端命令与它并发需自担风险</span></div>` : ''}
-        <div class="card terminal-card">
+        <div class="card terminal-card${active ? ' is-running' : ''}">
+          <div class="terminal-chrome">
+            <span class="terminal-chrome-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="terminal-chrome-label">终端</span>
+            <span class="terminal-chrome-path" title="${attr(project.workspace_path ?? '')}">${esc(project.workspace_path ?? project.name)}</span>
+          </div>
           <form class="terminal-input-row" data-form="terminal-run">
             <input type="hidden" name="projectId" value="${attr(project.id)}">
             <span class="terminal-prompt" aria-hidden="true">$</span>
-            <input class="input terminal-input" id="terminal-cmd-input" name="command" placeholder="${active ? '有命令正在运行…' : '输入命令，⌘Enter 执行'}" value="${attr(state.terminalDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${active ? 'disabled' : ''}>
+            <input class="input terminal-input" id="terminal-cmd-input" name="command" placeholder="${active ? '有命令正在运行…' : '输入命令'} " value="${attr(state.terminalDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${active ? 'disabled' : ''}>
+            ${active ? '' : '<span class="terminal-kbd" aria-hidden="true">⌘ / Ctrl ↵</span>'}
             <button class="btn primary" type="submit" ${active ? 'disabled' : ''}>${icon('play')}<span class="btn-label">执行</span></button>
           </form>
           ${active ? `<div class="terminal-active-row">
@@ -1047,7 +1064,7 @@
           <div class="terminal-history-head"><strong>历史命令</strong><span class="tag">${terminal.history.length} 条</span></div>
           ${terminal.history.length === 0 ? '<div class="side-empty" style="padding:14px 16px">还没有执行过命令。</div>' : `<div class="terminal-history">
             ${terminal.history.map(item => `
-              <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" title="点击回填到输入框">
+              <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" data-status="${attr(item.status ?? '')}" title="点击回填到输入框">
                 ${terminalStatusPill(item.status)}
                 <code class="terminal-history-cmd">${esc(item.command)}</code>
                 <span class="terminal-history-meta">
@@ -2562,16 +2579,47 @@
     if (item.then === 'mention') updateAutocomplete()
   }
 
-  function syncComposerBox(input) {
-    state.draft = input.value
+  // chat-drafts:start —— 草稿键与读取的纯逻辑（tests/chat-ui.test.js 抽取此块断言）
+  // 群聊按项目、单聊按 Bot 分开记草稿，切换上下文互不覆盖、互不清空。
+  function draftKey(s) {
+    return s.chatMode === 'solo' ? `solo:${s.soloBotId}` : `group:${s.projectId}`
+  }
+  function currentDraft(s) {
+    return s.chatDrafts[draftKey(s)] ?? ''
+  }
+  // chat-drafts:end
+
+  // composer-resize:start —— 输入框高度合成的纯逻辑（tests/chat-ui.test.js 抽取此块断言）
+  // 自动长高上限沿用 150px；手动拖高的封顶 = 聊天面板高度 × 0.618（用户给定的黄金比数字）。
+  const COMPOSER_AUTO_MAX_PX = 150
+  const COMPOSER_PANEL_RATIO = 0.618
+  function composerCap(panelHeight) {
+    return Math.max(1, Math.round(panelHeight * COMPOSER_PANEL_RATIO))
+  }
+  function composerHeightFor(autoHeight, manualHeight, capHeight) {
+    // 手动高度是下限（拖高后不因内容变少回缩），内容超出手动高度仍可长高，两者都封顶在面板 61.8%。
+    return Math.min(capHeight, Math.max(autoHeight, manualHeight ?? 0))
+  }
+  // composer-resize:end
+  function composerPanelCap(input) {
+    const panel = input.closest('.chat-panel')
+    return panel ? composerCap(panel.clientHeight) : COMPOSER_AUTO_MAX_PX
+  }
+  function applyComposerHeight(input) {
     input.style.height = 'auto'
-    input.style.height = `${Math.min(150, input.scrollHeight)}px`
+    const auto = Math.min(COMPOSER_AUTO_MAX_PX, input.scrollHeight)
+    input.style.height = `${composerHeightFor(auto, state.composerHeight, composerPanelCap(input))}px`
+  }
+
+  function syncComposerBox(input) {
+    state.chatDrafts[draftKey(state)] = input.value
+    applyComposerHeight(input)
     const button = document.querySelector('[data-action="send-message"]')
-    if (button) button.disabled = state.draft.trim() === ''
+    if (button) button.disabled = input.value.trim() === ''
   }
 
   async function sendMessage() {
-    const body = state.draft.trim()
+    const body = currentDraft(state).trim()
     if (!body) return
     closeAutocomplete()
     try {
@@ -2588,7 +2636,7 @@
         // 引用回复：带上 replyTo；命令路径（/clear、/task、/remember）后端会忽略该参数。
         result = await api('send_message', { projectId: project.id, body, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}) })
       }
-      state.draft = ''
+      state.chatDrafts[draftKey(state)] = ''
       state.replyTo = null
       state.chatAtBottom = true
       await loadState(state.projectId, { quiet: true })
@@ -2831,9 +2879,9 @@
           const botId = target.dataset.botId
           if (!botId) break
           // 从树上或 Bots 页打开 1V1 对话窗口；已在看同一个会话则不重复加载。
+          // 草稿按 solo:<botId> 分开记，切换不清空（群聊/单聊/其他 Bot 各自保留）。
           if (state.soloBotId !== botId) {
             state.soloBotId = botId
-            state.draft = ''
             closeAutocomplete()
           }
           state.replyTo = null // 单聊无引用语义，跨上下文不留引用条
@@ -3423,6 +3471,39 @@
     }
   }, true)
 
+  // composer 拖柄：按住垂直拖动调整输入框高度，最小不低于当前内容的自动高度，最大不超过面板 61.8%；双击恢复自动高度。
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest?.('.composer-resizer')) return
+    const input = document.getElementById('composer-input')
+    if (!input) return
+    event.preventDefault()
+    const startY = event.clientY
+    const startHeight = input.offsetHeight
+    input.style.height = 'auto'
+    const minHeight = Math.min(COMPOSER_AUTO_MAX_PX, input.scrollHeight)
+    const capHeight = composerPanelCap(input)
+    const lowerBound = Math.min(minHeight, capHeight)
+    const onMove = (moveEvent) => {
+      state.composerHeight = Math.min(Math.max(Math.round(startHeight - (moveEvent.clientY - startY)), lowerBound), capHeight)
+      input.style.height = `${state.composerHeight}px`
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  })
+  document.addEventListener('dblclick', (event) => {
+    if (!event.target.closest?.('.composer-resizer')) return
+    const input = document.getElementById('composer-input')
+    if (!input) return
+    state.composerHeight = null
+    applyComposerHeight(input)
+  })
+
   let draggedTask = null
   document.addEventListener('dragstart', (event) => {
     const card = event.target.closest('.task-card')
@@ -3482,7 +3563,12 @@
     }
   }
 
-  window.addEventListener('resize', () => { syncChromeHeight() })
+  // 窗口尺寸变化会改变面板 61.8% 封顶，composer 高度需重夹取。
+  window.addEventListener('resize', () => {
+    syncChromeHeight()
+    const composerInput = document.getElementById('composer-input')
+    if (composerInput) applyComposerHeight(composerInput)
+  })
 
   const observer = new MutationObserver(() => {
     if (state.modal?.type === 'proposal') bindProposalForm()
