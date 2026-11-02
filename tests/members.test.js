@@ -230,6 +230,45 @@ test('membersWithUsage run_status 三态判定：bot 全局口径，busy 仍项�
   }
 })
 
+test('membersWithUsage taskStats：本项目任务聚合，待办=未完成且未取消，无任务兜底 0/0', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const builder = await service.createBot({ name: 'Worker', role: '开发', instructions: 'Build.' })
+    const watcher = await service.createBot({ name: 'Watcher', role: '测试', instructions: 'Watch.' })
+    const project = await service.createProject({
+      name: 'TaskStats Project', key: 'TSTATS', ownerBotId: director.id, memberIds: [builder.id, watcher.id],
+    })
+    const other = await service.createProject({ name: 'Elsewhere', key: 'ELSE2', ownerBotId: director.id })
+
+    // builder 在本项目：done×1 + todo×2 + canceled×1（canceled 不算待办）；另有一条属于其他项目的任务不计数
+    const mk = async (projectId, title, assignee) =>
+      (await service.createTask({ projectId, title, assigneeBotId: assignee })).id
+    const walk = async (id, ...sts) => { for (const st of sts) await service.updateTask(id, { status: st }) }
+    const tDone = await mk(project.id, '已完成的活', builder.id)
+    await walk(tDone, 'in_progress', 'in_review', 'done')
+    await mk(project.id, '待办一', builder.id)
+    await mk(project.id, '待办二', builder.id)
+    const tCanceled = await mk(project.id, '被取消的活', builder.id)
+    await walk(tCanceled, 'canceled')
+    // 别项目任务挂在总监名下：builder 在该项目无归属，其完成不计入 builder 的本项目统计
+    const tOther = await mk(other.id, '别项目的活', director.id)
+    await walk(tOther, 'in_progress', 'in_review', 'done')
+
+    const members = service.projectView(service.projectRow(project.id)).members
+    const builderRow = members.find(row => row.id === builder.id)
+    const watcherRow = members.find(row => row.id === watcher.id)
+
+    // done=1（别项目的完成不计）、open=2（canceled 被排除）
+    assert.deepEqual(builderRow.taskStats, { done: 1, open: 2 })
+    // 无任务成员兜底 0/0，不许 undefined（前端会显示 NaN）
+    assert.deepEqual(watcherRow.taskStats, { done: 0, open: 0 })
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('update_project 不带 memberIds 时不动成员表；换总监自动补齐成员归属', async () => {
   const { root, store, service } = await setup()
   try {

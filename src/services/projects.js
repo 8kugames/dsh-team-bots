@@ -66,6 +66,7 @@ export const projectsMethods = {
   // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，usage 四项与 cost 为本项目全部 run 的累计。
   // run_status 用 bot 全局口径（不限本项目）：failed 根因（模型/AUTH）是 bot 级，单聊 run 的 project_id 为 NULL，
   // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 维持项目口径不动。
+  // taskStats（DSHBOTS-65）按本项目任务聚合：done=已完成，open=未完成且未取消（canceled 不算待办），无任务兜底 0/0。
   membersWithUsage(projectId) {
     return this.store.all(
       `SELECT pm.*, pm.member_id AS id, pm.member_role, b.name, b.role AS bot_role, b.provider, b.model, b.effort, b.status,
@@ -106,7 +107,9 @@ export const projectsMethods = {
          COALESCE(u.usage_cache_read, 0) AS usage_cache_read,
          COALESCE(u.usage_cache_write, 0) AS usage_cache_write,
          COALESCE(u.usage_output, 0) AS usage_output,
-         COALESCE(u.usage_cost, 0) AS usage_cost
+         COALESCE(u.usage_cost, 0) AS usage_cost,
+         COALESCE(ts.task_done, 0) AS task_done,
+         COALESCE(ts.task_open, 0) AS task_open
        FROM project_members pm JOIN bots b ON b.id = pm.member_id
        LEFT JOIN (
          SELECT bot_id, status, error_code, retry_after_ms,
@@ -125,14 +128,22 @@ export const projectsMethods = {
                 SUM(usage_cost) AS usage_cost
          FROM runs WHERE project_id = ? GROUP BY bot_id
        ) u ON u.bot_id = pm.member_id
+       LEFT JOIN (
+         SELECT assignee_bot_id,
+                SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS task_done,
+                SUM(CASE WHEN status NOT IN ('done', 'canceled') THEN 1 ELSE 0 END) AS task_open
+         FROM tasks WHERE project_id = ? GROUP BY assignee_bot_id
+       ) ts ON ts.assignee_bot_id = pm.member_id
        WHERE pm.project_id = ? AND pm.member_type = 'bot'
        ORDER BY CASE pm.member_role WHEN 'owner' THEN 0 ELSE 1 END, b.name`,
+      projectId,
       projectId,
       projectId,
     ).map(row => ({
       ...row,
       busy: Boolean(row.busy),
       modelRef: row.provider && row.model ? `${row.provider}/${row.model}` : null,
+      taskStats: { done: Number(row.task_done ?? 0), open: Number(row.task_open ?? 0) },
     }))
   },
   assertMember(projectId, botId) {

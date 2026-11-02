@@ -1799,6 +1799,8 @@
   // DSHBOTS-57：卡片放大（max-width 320px、头像 56px），中段改三行式——名称 / 角色标签 /
   // provider·model 小字，模型不再收进 title 提示，关键信息全部在卡面可见；
   // 尺寸与「总览bots」的 bot 卡片同口径，不再锁 0.618:1 宽高比（用户 m_c2ff7f）。
+  // DSHBOTS-65：卡底去掉与 busy pill 重复的运行状态行，新增「已完成 n · 待办 m」任务统计
+  // （member.taskStats，待办=未完成且未取消，与右侧 pill 各说各的：pill 说运行态，统计说任务量）。
   function renderMembers() {
     const project = activeProject()
     if (!project) return noProject()
@@ -1820,7 +1822,9 @@
           const tokens = Number(member.usage_input ?? 0) + Number(member.usage_cache_read ?? 0) + Number(member.usage_cache_write ?? 0) + Number(member.usage_output ?? 0)
           const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
           const modelLine = modelRef ? String(modelRef) : '未配置'
-          const statusText = MEMBER_STATUS_TEXT[dot.status] ?? dot.text
+          const taskStats = member.taskStats ?? {}
+          const taskDone = Number(taskStats.done ?? 0)
+          const taskOpen = Number(taskStats.open ?? 0)
           const usageDetail = `输入 ${formatNumber(member.usage_input)} · 缓存读 ${formatNumber(member.usage_cache_read)} · 缓存写 ${formatNumber(member.usage_cache_write)} · 输出 ${formatNumber(member.usage_output)}`
           return `
           <div class="member-card${isOwner ? ' is-owner' : ''}" data-member-card data-bot-id="${attr(member.id)}" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
@@ -1832,8 +1836,8 @@
               <div class="member-card-model" title="${esc(modelLine)}">${esc(modelLine)}</div>
             </div>
             <div class="member-card-foot">
-              <span class="member-card-status">${runDotHtml(dot)}<span>${esc(statusText)}</span></span>
               <span class="pill ${member.busy ? 'amber' : 'green'} member-card-busy">${member.busy ? '任务中' : '空闲中'}</span>
+              <span class="member-card-tasks" title="本项目任务：已完成 ${taskDone} · 待办 ${taskOpen}（待办不含已取消）">已完成 ${taskDone} · 待办 ${taskOpen}</span>
               <span class="member-card-usage" title="${esc(usageDetail)}">合计 <strong>${formatNumber(tokens)}</strong> tokens</span>
               <span class="member-card-cost"><strong>${formatCost(Number(member.usage_cost ?? 0))}</strong></span>
             </div>

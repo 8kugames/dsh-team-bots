@@ -2403,12 +2403,8 @@ a.global-config.dsh-official-link:hover {
     color: var(--ink-3);
     text-align: center;
 }
-.member-card-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-}
 .member-card-usage,
+.member-card-tasks,
 .member-card-cost {
     max-width: 100%;
     overflow: hidden;

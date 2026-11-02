@@ -174,7 +174,7 @@ test('单卡不再锁宽高比，高度随内容（用户 m_c2ff7f）', () => {
   assert.match(cardCss, /overflow:\s*hidden/, '内容装不下时以卡片为准，不撑破卡片')
 })
 
-test('卡片信息布局：上头像、中名称+角色、下状态点与用量', () => {
+test('卡片信息布局：上头像、中名称+角色、下任务统计与用量', () => {
   const topIdx = membersFn.indexOf('member-card-top')
   const midIdx = membersFn.indexOf('member-card-mid')
   const footIdx = membersFn.indexOf('member-card-foot')
@@ -182,7 +182,6 @@ test('卡片信息布局：上头像、中名称+角色、下状态点与用量'
   assert.match(membersFn, /member-card-top">\$\{avatar\(bot, 'lg'\)\}/, '顶部是头像')
   assert.match(membersFn, /member-card-name"><strong>\$\{esc\(bot\.name\)\}<\/strong>/, '中部是名称')
   assert.match(membersFn, /class="member-role"/, '中部有角色标签')
-  assert.match(membersFn, /member-card-foot[\s\S]*?runDotHtml\(dot\)/, '底部有状态点')
   assert.match(membersFn, /member-card-foot[\s\S]*?合计 <strong>\$\{formatNumber\(tokens\)\}<\/strong> tokens/, '底部有 token 合计')
   assert.match(membersFn, /member-card-foot[\s\S]*?formatCost\(Number\(member\.usage_cost \?\? 0\)\)/, '底部有 cost 合计')
 })
@@ -234,12 +233,35 @@ test('总监卡保留 violet 标识，且不渲染移除按钮', () => {
 })
 
 test('busy 状态点沿用 run-dot 语义且不改色', () => {
-  assert.match(membersFn, /memberRunDot\(member\)/, '状态点仍走 memberRunDot')
-  assert.match(membersFn, /runDotHtml\(dot\)/, '状态点仍用 runDotHtml 输出')
-  assert.match(source, /function runDotHtml\(dot\)[\s\S]*?<span class="run-dot \$\{dot\.cls\}" data-status="\$\{dot\.status\}"/, 'run-dot 的类与 data-status 语义未变')
+  assert.match(membersFn, /memberRunDot\(member\)/, '状态点仍走 memberRunDot（卡面 title 提示用）')
+  assert.match(source, /function runDotHtml\(dot\)[\s\S]*?<span class="run-dot \$\{dot\.cls\}" data-status="\$\{dot\.status\}"/, 'runDotHtml 全局函数保留且 data-status 语义未变（群聊右栏/总监卡还在用）')
   // 颜色类只允许原有四类，成员页不新增状态点配色。
   assert.ok(!/run-dot\s+(red|blue|green|yellow|violet|amber)/.test(membersFn), '卡片不新增状态点配色类')
   assert.match(css, /\.run-dot\.running \{[\s\S]*?background: var\(--star\)|\.run-dot\.running \{[\s\S]*?background: var\(--amber\)/, '运行中仍用既有配色变量')
+})
+
+// DSHBOTS-65：成员卡去掉与 busy pill 重复的运行状态行，改显本项目任务统计（已完成 n · 待办 m）。
+test('成员卡不再渲染 .member-card-status 运行状态行（DSHBOTS-65）', () => {
+  assert.ok(!membersFn.includes('member-card-status'), '卡片不再渲染运行状态行——与右侧「任务中/空闲中」pill 重复')
+  assert.ok(!css.includes('.member-card-status'), '对应样式规则一并移除')
+  assert.ok(!membersFn.includes('MEMBER_STATUS_TEXT'), 'statusText 文案表不再被成员卡引用')
+})
+
+test('成员卡新增「已完成 n · 待办 m」任务统计行（DSHBOTS-65）', () => {
+  assert.match(membersFn, /const taskStats = member\.taskStats \?\? \{\}/, '数据来自 member.taskStats')
+  assert.match(membersFn, /member-card-foot[\s\S]*?已完成 \$\{taskDone\} · 待办 \$\{taskOpen\}/, '底部渲染「已完成 · 待办」统计')
+  assert.match(membersFn, /const taskDone = Number\(taskStats\.done \?\? 0\)/, '缺数据兜底 0（不产生 NaN）')
+  assert.match(membersFn, /const taskOpen = Number\(taskStats\.open \?\? 0\)/, '缺数据兜底 0（不产生 NaN）')
+  const usageIdx = membersFn.indexOf('member-card-usage')
+  const tasksIdx = membersFn.indexOf('member-card-tasks')
+  const busyIdx = membersFn.indexOf('member-card-busy')
+  assert.ok(busyIdx > 0 && tasksIdx > busyIdx && usageIdx > tasksIdx, 'busy pill → 任务统计 → 用量，顺序不抢眼')
+})
+
+test('任务统计行样式与用量行同层级：caption 小字 + 主题 ink-3（DSHBOTS-65）', () => {
+  const sharedCss = /\.member-card-usage,\s*\n\s*\.member-card-tasks,\s*\n\s*\.member-card-cost \{([\s\S]*?)\n\}/.exec(css)?.[1]
+  assert.ok(sharedCss, '任务统计与用量/cost 共用同一视觉层级规则')
+  assert.match(sharedCss, /text-overflow:\s*ellipsis/, '与用量行同样单行省略')
 })
 
 test('悬停/焦点态给轻量描边', () => {
