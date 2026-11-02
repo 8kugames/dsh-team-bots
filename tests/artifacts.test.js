@@ -205,6 +205,73 @@ test('产物清单收下 git 的组合状态：AM、MM 与重命名', async () =
   }
 })
 
+test('产物清单剔除被 .gitignore 忽略的路径', async () => {
+  const { root, workspace, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Ignored', key: 'IGN', ownerBotId: director.id })
+    const dir = join(workspace, project.slug)
+    git(dir, 'init', '-q')
+    await writeFile(join(dir, 'README.md'), 'base\n')
+    git(dir, 'add', '.')
+    git(dir, 'commit', '-q', '-m', 'init')
+
+    await writeFile(join(dir, '.gitignore'), '*.log\n.tmp/\n')
+    git(dir, 'add', '.gitignore')
+    git(dir, 'commit', '-q', '-m', 'ignore rules')
+
+    await writeFile(join(dir, 'debug.log'), 'noise\n')
+    await mkdir(join(dir, '.tmp'))
+    await writeFile(join(dir, '.tmp', 'cache.tgz'), 'BLOB')
+    await writeFile(join(dir, 'notes.md'), 'real note\n')
+
+    const runId = insertRun(store, { projectId: project.id, botId: director.id })
+    await service.finishRun({ runId, status: 'succeeded', output: 'done' })
+    const list = JSON.parse(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts)
+    const paths = list.map(item => item.path)
+    assert.ok(paths.includes('notes.md'), '正常文件应保留在产物清单')
+    assert.ok(!paths.includes('debug.log'), '被 ignore 的未跟踪文件不应进产物清单')
+    assert.ok(!paths.some(path => path.startsWith('.tmp/')), '被 ignore 目录下的文件不应进产物清单')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('已跟踪但后来被 ignore 的脏文件不进产物清单', async () => {
+  const { root, workspace, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Tracked Ignored', key: 'TRKI', ownerBotId: director.id })
+    const dir = join(workspace, project.slug)
+    git(dir, 'init', '-q')
+    await writeFile(join(dir, 'README.md'), 'base\n')
+    await writeFile(join(dir, 'legacy.log'), 'v1\n')
+    git(dir, 'add', '.')
+    git(dir, 'commit', '-q', '-m', 'init')
+
+    // legacy.log 先被跟踪、后被 ignore：它是已跟踪文件，git status 会照常列出修改，
+    // 这正是会被 check-ignore 二次过滤剔掉的形态。
+    await writeFile(join(dir, 'legacy.log'), 'v2\n')
+    await writeFile(join(dir, 'README.md'), 'changed\n')
+    await writeFile(join(dir, '.gitignore'), 'legacy.log\n')
+    git(dir, 'add', '.gitignore')
+    git(dir, 'commit', '-q', '-m', 'ignore legacy')
+    const status = execFileSync('git', ['status', '--porcelain', '-uall'], { cwd: dir, encoding: 'utf8' })
+    assert.ok(status.includes(' M legacy.log'), '前置条件：被跟踪的 ignored 文件修改后仍应出现在 git status')
+
+    const runId = insertRun(store, { projectId: project.id, botId: director.id })
+    await service.finishRun({ runId, status: 'succeeded', output: 'done' })
+    const list = JSON.parse(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts)
+    const paths = list.map(item => item.path)
+    assert.ok(!paths.includes('legacy.log'), '已跟踪但被 ignore 的文件不应进产物清单')
+    assert.deepEqual(paths, ['README.md'], '未被 ignore 的正常改动应保留')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('非 git 项目跳过产物记录并写入 run_event', async () => {
   const { root, store, service } = await setup()
   try {

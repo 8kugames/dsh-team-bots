@@ -7,6 +7,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { nowIso, stripLeakedToolMarkup } from '../src/util.js'
+import { isToolMarkupFragment, selectDeliverableText } from '../src/services/runtime/lifecycle.js'
 
 // —— 纯函数：剥 provider 泄漏的工具调用标记残片 ——
 
@@ -162,4 +163,32 @@ test('④读取侧：历史脏数据在消息视图/引用视图/单聊视图被
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }
+})
+
+// —— 运行收尾选文本：整段工具标记残片不当成交付文本（lifecycle 的 strip-tool-markup 块）——
+
+// 生产库 run_2e2b158e36c649428afede87 的真实残片样本。
+const RUN_OUTPUT_FRAGMENT = '<tool_call>\n]<]minimax[>[<invoke name="read">]<]minimax[>[<file_path>...<offset>1858'
+
+test('⑤整段工具调用残片被识别、收尾选文本时丢弃并回退正常正文', () => {
+  assert.equal(isToolMarkupFragment(RUN_OUTPUT_FRAGMENT), true)
+  // 该轮只有残片：按「模型未返回文本」处理（返回空串）。
+  assert.equal(selectDeliverableText([RUN_OUTPUT_FRAGMENT]), '')
+  // 回退到此前的正常 text block。
+  const prose = '第一轮交付说明：改动落在 src/api.js 与 tests/chat-pagination.test.js。'
+  assert.equal(selectDeliverableText([prose, RUN_OUTPUT_FRAGMENT]), prose)
+  // 无标记的普通文本永不误判，空串不算残片。
+  assert.equal(isToolMarkupFragment('完成'), false)
+  assert.equal(isToolMarkupFragment(''), false)
+  assert.equal(selectDeliverableText([]), '')
+})
+
+test('⑥正文恰好提到 <invoke> 不被误伤：只在整段无散文时才丢', () => {
+  const prose = '排查结论：模型把 <invoke name="read"> 整段序列化成了 text 块，属于 provider 侧泄漏，收尾时按残片丢弃。'
+  assert.equal(isToolMarkupFragment(prose), false)
+  assert.equal(selectDeliverableText([prose, RUN_OUTPUT_FRAGMENT]), prose)
+  // 带标记但剥完仍有成段散文的正文，同样保留原文。
+  const report = '本轮完成了收尾卫生改造。\n\n<tool_call>\n<invoke name="read">\n<file_path>/tmp/a.js</file_path>\n</invoke>\n</tool_call>\n\n具体改动见任务评论，待验收。'
+  assert.equal(isToolMarkupFragment(report), false)
+  assert.equal(selectDeliverableText([report]), report)
 })

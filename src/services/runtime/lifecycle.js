@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { recordUsage } from '../../usage.js'
-import { nowIso, sha256 } from '../../util.js'
+import { nowIso, sha256, stripLeakedToolMarkup } from '../../util.js'
 import { contentText, reasonOf } from './trajectory.js'
 
 // teammate 等子会话的父指向在不同 DSH 版本里字段不一，逐个探测。
@@ -39,6 +39,42 @@ export function sessionParentId(session) {
 export function isSubagentLike(session) {
   return Boolean(session?.subagent) || session?.mode === 'subagent' || sessionParentId(session) !== undefined
 }
+
+// strip-tool-markup:start
+// provider 偶发把工具调用序列化成普通 text 块（真实样本形如
+// `<tool_call>\n]<]minimax[>[<invoke name="read">]<]minimax[>[<file_path>...<offset>1858`）。
+// 整段只剩这类标记残片的文本不是交付报告，运行收尾选文本时丢弃并回退更早的正常正文。
+// 判定分两步：先看是否带泄漏标记，没带标记的普通文本（含短回复）直接保留；
+// 带标记的再复用 util 的 stripLeakedToolMarkup 剥壳，剥完字母/汉字数低于阈值即「整段残片」，
+// 剥完仍有成段散文的正常正文不会被误伤。
+const TOOL_MARKUP_MARKERS = [
+  /<tool_call>/,
+  /<invoke\b/,
+  /<\][\w.-]*\[>/, // 形如 <]minimax[> 的括号残渣
+]
+const MIN_DELIVERABLE_PROSE_CHARS = 12
+
+export function isToolMarkupFragment(value) {
+  if (typeof value !== 'string' || !value.trim()) return false
+  if (!TOOL_MARKUP_MARKERS.some(pattern => pattern.test(value))) return false
+  const prose = stripLeakedToolMarkup(value).match(/\p{L}/gu)
+  return (prose?.length ?? 0) < MIN_DELIVERABLE_PROSE_CHARS
+}
+
+// 运行收尾的交付文本选择：texts 按时间升序存各轮非空 text 块（最后一轮即 lastText），
+// 从后往前取第一段非残片正文；整轮只有残片就回退更早的正常正文，再没有返回 ''，
+// 由收尾按「模型未返回文本」处理。
+export function selectDeliverableText(texts) {
+  const list = Array.isArray(texts) ? texts : []
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const value = list[i]
+    if (typeof value !== 'string' || !value.trim()) continue
+    if (isToolMarkupFragment(value)) continue
+    return value
+  }
+  return ''
+}
+// strip-tool-markup:end
 
 export const lifecycleMethods = {
   attach() {
@@ -157,7 +193,7 @@ export const lifecycleMethods = {
     await this.completionHandler?.({
       runId: pending.runId,
       status: 'failed',
-      output: pending.lastText ?? '',
+      output: selectDeliverableText(pending.texts),
       error,
     })
   },
@@ -204,7 +240,7 @@ export const lifecycleMethods = {
     this.pendingByRun.delete(root.runId)
     const reason = reasonOf(event)
     const failed = reason.kind === 'error' || reason.kind === 'aborted'
-    const output = root.lastText || [...root.texts].reverse().find(value => value.trim()) || ''
+    const output = selectDeliverableText(root.texts)
     const error = failed
       ? {
           code: reason.kind === 'aborted' ? 'ABORTED' : (reason.error?.code ?? 'MODEL_ERROR'),

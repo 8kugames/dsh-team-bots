@@ -4,7 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { existsSync, realpathSync, statSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { join, sep } from 'node:path'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { assertInside } from '../paths.js'
@@ -286,8 +286,9 @@ if (run.kind === 'dm_reply') {
     )
   },
 
-  // 成功写运行的交付产物清单：项目目录 git status 的相对路径快照（M/A/?? 状态）。
-  // 非 git 仓库或 git 不可用时跳过并记 run_event；清单上限 200 条，不复制文件内容。
+  // 成功写运行的交付产物清单：项目目录 git status 的相对路径快照（M/A/?? 状态），
+  // 再用 git check-ignore 剔除 .gitignore 排除的路径。非 git 仓库或 git 不可用时跳过并记
+  // run_event；清单上限 200 条，不复制文件内容。
   captureRunArtifacts(run, project) {
     const dir = this.projectWorkDir(project)
     if (!existsSync(join(dir, '.git'))) {
@@ -334,7 +335,31 @@ if (run.kind === 'dm_reply') {
       list.push({ path, status })
       if (list.length >= 200) break
     }
-    return list.length ? JSON.stringify(list) : null
+    if (!list.length) return null
+    // 清单是给人看「这次改了什么」的，不收 .gitignore 排除的文件。git status 本身不列
+    // ignored 的未跟踪文件，但「ignore 规则补上之前就已存在」的路径与「已跟踪但后被
+    // ignore」的脏文件仍会混进来，这里对全部候选路径统一二次过滤（含已跟踪文件）。
+    // 必须带 --no-index：check-ignore 默认查索引，已跟踪文件一律不判为 ignored，
+    // --no-index 才会纯按 ignore 规则匹配出这类脏文件。
+    // check-ignore 退出码 0=有命中、1=无命中都算正常；其余退出码视为过滤失败，
+    // 保留原清单并记 run_event，不静默吞掉。
+    try {
+      const check = spawnSync('git', ['-c', 'core.quotePath=false', 'check-ignore', '--no-index', '--stdin'], {
+        cwd: dir,
+        timeout: 5_000,
+        encoding: 'utf8',
+        input: list.map(item => item.path).join('\n'),
+      })
+      if (check.status === 0 || check.status === 1) {
+        const ignored = new Set(String(check.stdout ?? '').split('\n').filter(Boolean))
+        const filtered = list.filter(item => !ignored.has(item.path))
+        return filtered.length ? JSON.stringify(filtered) : null
+      }
+      this.insertRunEvent(run.id, 'artifacts_ignore_failed', `git check-ignore 异常退出（${check.signal ?? check.status}），清单未做忽略过滤`)
+    } catch {
+      this.insertRunEvent(run.id, 'artifacts_ignore_failed', 'git check-ignore 不可用，清单未做忽略过滤')
+    }
+    return JSON.stringify(list)
   },
 
   // 项目目录的 git 指纹；不是 git 仓库时返回 null，跳过审计。
