@@ -55,7 +55,8 @@ async function manualSetup() {
   await service.initialize()
   // 关闭自动调度，由测试显式驱动 tick。
   service.started = false
-  const chief = store.get("SELECT * FROM bots WHERE name = 'chief'")
+  // 种子负责人 Bot：名字可能被改名（Chief/Director），按 id 取第一条种子 Bot，避免耦合具体名字。
+  const chief = store.get("SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)")
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
@@ -109,6 +110,86 @@ test('同项目写运行串行，跨项目与只读运行可并行', async () =>
     await runtime.complete(alphaRun.id)
     await service.tick()
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running' AND mode = 'write'", alpha.id).n, 1)
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('同项目写运行：声明的写范围不重叠时并行放行', async () => {
+  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  try {
+    const project = await service.createProject({ name: 'Scopes', key: 'SCP', ownerBotId: chief.id, memberIds: [dev.id] })
+    const first = await service.createTask({
+      projectId: project.id, title: '改聊天模块', assigneeBotId: dev.id,
+      writeScopes: ['ui/modules/chat.js'], autoStart: true,
+    })
+    const second = await service.createTask({
+      projectId: project.id, title: '改调度模块', assigneeBotId: dev.id,
+      writeScopes: ['ui/modules/scheduler.js'], autoStart: true,
+    })
+
+    service.started = true
+    await service.tick()
+
+    const running = runningRuns(store).filter(run => run.project_id === project.id)
+    assert.equal(running.length, 2, '写范围不相交的两个写运行应同时在跑')
+    const ids = running.map(run => run.task_id).sort()
+    assert.deepEqual(ids, [first.id, second.id].sort())
+    // 并行放行留痕，便于事后排查
+    assert.ok(store.get("SELECT id FROM run_events WHERE type = 'run_parallel'"), '并行放行应记一条 run_parallel 事件')
+    // 运行快照带上入队时的写范围
+    for (const run of running) {
+      assert.ok(Array.isArray(service.runView(run).writeScopes))
+      assert.equal(service.runView(run).writeScopes.length, 1)
+    }
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('同项目写运行：写范围重叠时仍然串行', async () => {
+  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  try {
+    const project = await service.createProject({ name: 'Overlap', key: 'OVL', ownerBotId: chief.id, memberIds: [dev.id] })
+    await service.createTask({
+      projectId: project.id, title: '改聊天模块', assigneeBotId: dev.id,
+      writeScopes: ['ui/modules/chat.js'], autoStart: true,
+    })
+    await service.createTask({
+      projectId: project.id, title: '改聊天目录', assigneeBotId: dev.id,
+      writeScopes: ['ui/modules/'], autoStart: true,
+    })
+
+    service.started = true
+    await service.tick()
+
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running'", project.id).n, 1)
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'queued'", project.id).n, 1)
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('同项目写运行：任一侧未声明写范围时保守串行', async () => {
+  const { root, store, service, runtime, chief, dev } = await manualSetup()
+  try {
+    const project = await service.createProject({ name: 'Undeclared', key: 'UND', ownerBotId: chief.id, memberIds: [dev.id] })
+    await service.createTask({
+      projectId: project.id, title: '声明了范围', assigneeBotId: dev.id,
+      writeScopes: ['ui/modules/chat.js'], autoStart: true,
+    })
+    await service.createTask({
+      projectId: project.id, title: '没声明范围', assigneeBotId: dev.id, autoStart: true,
+    })
+
+    service.started = true
+    await service.tick()
+
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running'", project.id).n, 1)
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'queued'", project.id).n, 1)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

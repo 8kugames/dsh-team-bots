@@ -44,6 +44,68 @@ function normalizeFilePolicy(value) {
   return value
 }
 
+// ── 写范围（write scopes）────────────────────────────────────────────────
+// 任务可以声明自己会写工作区里的哪些路径（相对项目工作目录）。调度器据此判断同项目的
+// 两个写运行能否并行：两侧都声明且路径前缀互不重叠才放行；任一未声明（空集合）按保守
+// 串行处理——既有安全边界不因并行能力而削弱。
+export const WRITE_SCOPE_MAX = 50
+export const WRITE_SCOPE_MAX_LEN = 240
+
+// 归一化单条写范围路径：相对项目工作目录，去掉 ./ 与尾部 /，拒绝绝对路径与 ..。
+function normalizeScopePath(raw) {
+  const value = String(raw ?? '').trim().replace(/\\/g, '/')
+  if (!value || value.startsWith('/')) return null
+  const parts = value.split('/').filter(part => part && part !== '.')
+  if (!parts.length || parts.some(part => part === '..')) return null
+  return parts.join('/')
+}
+
+// 解析外部输入（数组或 JSON 字符串）：非法条目直接报错，不静默降级。
+export function parseWriteScopes(input) {
+  if (input === undefined || input === null) return []
+  const list = typeof input === 'string' ? jsonParse(input, null) : input
+  if (!Array.isArray(list)) throw badRequest('写范围必须是路径数组')
+  if (list.length > WRITE_SCOPE_MAX) throw badRequest(`写范围最多 ${WRITE_SCOPE_MAX} 条`)
+  const scopes = []
+  for (const item of list) {
+    if (typeof item !== 'string') throw badRequest('写范围必须是路径数组')
+    const path = normalizeScopePath(item)
+    if (!path) throw badRequest(`写范围包含非法路径：${item}`)
+    if (path.length > WRITE_SCOPE_MAX_LEN) throw badRequest(`写范围路径过长（上限 ${WRITE_SCOPE_MAX_LEN} 字符）`)
+    if (!scopes.includes(path)) scopes.push(path)
+  }
+  return scopes
+}
+
+// 读取库里的写范围快照：坏数据一律降级成「未声明」，即保守串行。
+export function readWriteScopes(raw) {
+  if (raw === undefined || raw === null || raw === '') return []
+  const list = typeof raw === 'string' ? jsonParse(raw, null) : raw
+  if (!Array.isArray(list)) return []
+  const scopes = []
+  for (const item of list) {
+    if (typeof item !== 'string') return []
+    const path = normalizeScopePath(item)
+    if (!path || path.length > WRITE_SCOPE_MAX_LEN) return []
+    if (!scopes.includes(path)) scopes.push(path)
+  }
+  return scopes
+}
+
+// 两条写范围路径是否指向同一片区域：相等，或一方是另一方的目录前缀（按路径分段比较）。
+export function writeScopePathsOverlap(left, right) {
+  if (left === right) return true
+  return left.startsWith(`${right}/`) || right.startsWith(`${left}/`)
+}
+
+// 两个写范围集合是否冲突。空集合 = 未声明 = 冲突（保守串行）。
+export function writeScopesOverlap(a, b) {
+  const left = readWriteScopes(a)
+  const right = readWriteScopes(b)
+  if (!left.length || !right.length) return true
+  return left.some(x => right.some(y => writeScopePathsOverlap(x, y)))
+}
+
 // 工作台「终端」的硬限制：命令长度、输出封顶（只留末尾）、每项目历史条数。
 // 硬超时走 config.terminalTimeoutMs（默认 120s，测试可注入短值）。
 const TERMINAL_COMMAND_MAX = 4000
@@ -1135,6 +1197,7 @@ export class TeamService {
     if (assigneeId) this.assertMember(project.id, assigneeId)
     const status = input.status && TASK_STATUSES.has(input.status) ? input.status : (assigneeId ? 'todo' : 'backlog')
     const priority = TASK_PRIORITIES.has(input.priority) ? input.priority : 'medium'
+    const writeScopes = parseWriteScopes(input.writeScopes)
     const taskId = id('task')
     const createdAt = nowIso()
     let number
@@ -1143,14 +1206,14 @@ export class TeamService {
       this.store.run(
         `INSERT INTO tasks(id, project_id, number, title, description, status, priority, assignee_bot_id,
           creator_type, creator_id, review_target, source_message_id, parent_id, position, due_at, estimate,
-          version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          write_scopes, version, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         taskId, project.id, number, title, text(input.description, 40_000), status, priority,
         assigneeId, actor.type, actor.id, actor.type === 'bot' ? 'owner_bot' : 'user',
         input.sourceMessageId ?? null, input.parentId ?? null,
         Number.isFinite(Number(input.position)) ? Number(input.position) : number,
         input.dueAt ? new Date(input.dueAt).toISOString() : null,
-        clampNumber(input.estimate, 0, 1000, null), createdAt, createdAt,
+        clampNumber(input.estimate, 0, 1000, null), JSON.stringify(writeScopes), createdAt, createdAt,
       )
       for (const label of Array.isArray(input.labels) ? input.labels.slice(0, 12) : []) {
         const clean = text(label, 40).toLowerCase()
@@ -1200,10 +1263,12 @@ export class TeamService {
       task.id,
     )
     const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
+    const { write_scopes: rawScopes, ...rest } = task
     return {
-      ...task,
+      ...rest,
       identifier: `${project?.key ?? 'T'}-${task.number}`,
       labels,
+      writeScopes: readWriteScopes(rawScopes),
       comments: Number(this.store.get('SELECT COUNT(*) AS count FROM task_comments WHERE task_id = ?', task.id)?.count ?? 0),
       latestRun: runs[0] ?? null,
       runs,
@@ -1233,6 +1298,9 @@ export class TeamService {
     if (patch.position !== undefined) updates.position = Number(patch.position) || 0
     if (patch.dueAt !== undefined) updates.due_at = patch.dueAt ? new Date(patch.dueAt).toISOString() : null
     if (patch.estimate !== undefined) updates.estimate = clampNumber(patch.estimate, 0, 1000, null)
+    if (patch.writeScopes !== undefined) {
+      updates.write_scopes = JSON.stringify(parseWriteScopes(patch.writeScopes))
+    }
     if (patch.status !== undefined) {
       if (!TASK_STATUSES.has(patch.status)) throw badRequest('任务状态无效')
       this.assertTransition(task.status, patch.status)
@@ -1360,11 +1428,13 @@ export class TeamService {
     if (active) return active.id
     const runId = id('run')
     const createdAt = nowIso()
+    // 写范围在入队时快照：任务后续改声明不影响已排队的运行。
+    const writeScopes = JSON.stringify(readWriteScopes(task.write_scopes))
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?)`,
-      runId, task.project_id, task.assignee_bot_id, task.id, triggerType, task.id, `task:${task.id}:${Date.now()}:${runId}`, createdAt,
+        attempt, idempotency_key, write_scopes, queued_at)
+       VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?, ?)`,
+      runId, task.project_id, task.assignee_bot_id, task.id, triggerType, task.id, `task:${task.id}:${Date.now()}:${runId}`, writeScopes, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -1825,12 +1895,14 @@ export class TeamService {
     if (!task.assignee_bot_id) throw badRequest('任务没有负责人')
     const newRunId = id('run')
     const createdAt = nowIso()
+    // 重试同样按任务当前的写范围声明快照。
+    const writeScopes = JSON.stringify(readWriteScopes(task.write_scopes))
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, ?, 'task', 'write', 'retry', ?, 'queued', ?, ?, ?)`,
+        attempt, idempotency_key, write_scopes, queued_at)
+       VALUES (?, ?, ?, ?, 'task', 'write', 'retry', ?, 'queued', ?, ?, ?, ?)`,
       newRunId, task.project_id, task.assignee_bot_id, task.id, task.id,
-      Number(run.attempt) + 1, `retry:${task.id}:${Date.now()}:${newRunId}`, createdAt,
+      Number(run.attempt) + 1, `retry:${task.id}:${Date.now()}:${newRunId}`, writeScopes, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -1892,10 +1964,17 @@ export class TeamService {
       this.dispatchOutbox()
       await this.reapStalledRuns()
       const activeRows = this.store.all(
-        "SELECT bot_id, kind, task_id, project_id, mode FROM runs WHERE status = 'running'",
+        "SELECT bot_id, kind, task_id, project_id, mode, write_scopes FROM runs WHERE status = 'running'",
       )
       const activeKeys = new Set(activeRows.map(row => this.claimKey(row)))
-      const writingProjects = new Set(activeRows.filter(row => row.mode === 'write' && row.project_id).map(row => row.project_id))
+      // 同项目在跑的写运行：按写范围判定能否并行。写范围为空 = 未声明 = 保守串行。
+      const activeWriteScopes = new Map()
+      for (const row of activeRows) {
+        if (row.mode !== 'write' || !row.project_id) continue
+        const list = activeWriteScopes.get(row.project_id) ?? []
+        list.push(readWriteScopes(row.write_scopes))
+        activeWriteScopes.set(row.project_id, list)
+      }
       let activeTotal = activeRows.length
       if (activeTotal >= this.config.maxConcurrentRuns) return
       // 出队顺序：任务运行按任务优先级（urgent 先），其余运行视同 high——用户交互不能被任务积压拖死；
@@ -1917,9 +1996,15 @@ export class TeamService {
         if (activeTotal >= this.config.maxConcurrentRuns) break
         const claimKey = this.claimKey(run)
         if (activeKeys.has(claimKey)) continue
-        // 同一项目共享一个工作目录：写运行之间必须串行，只读运行可以并行。
+        // 同一项目共享一个工作目录：写运行之间按「声明的写范围」判定能否并行——
+        // 两侧都声明了写范围且路径前缀互不重叠才放行；任一未声明（空集合）按保守串行，
+        // 不降低既有安全边界。只读运行不受影响。
         // 单聊运行 project_id 为空，写锁落在各自独立的 _the_bots/<dir>，不占项目锁。
-        if (run.mode === 'write' && run.project_id && writingProjects.has(run.project_id)) continue
+        const writeScopes = run.mode === 'write' ? readWriteScopes(run.write_scopes) : []
+        if (run.mode === 'write' && run.project_id) {
+          const runningScopes = activeWriteScopes.get(run.project_id) ?? []
+          if (runningScopes.some(other => writeScopesOverlap(writeScopes, other))) continue
+        }
         const needsProject = run.kind !== 'solo_chat'
         const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
         const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
@@ -1943,7 +2028,19 @@ export class TeamService {
         if (Number(claimed.changes) !== 1) continue
         activeTotal += 1
         activeKeys.add(claimKey)
-        if (run.mode === 'write' && run.project_id) writingProjects.add(run.project_id)
+        if (run.mode === 'write' && run.project_id) {
+          const list = activeWriteScopes.get(run.project_id) ?? []
+          // 与同项目在跑的写运行写范围不重叠：记一条并行放行事件，便于事后排查。
+          const parallel = list.length > 0 && writeScopes.length > 0
+          list.push(writeScopes)
+          activeWriteScopes.set(run.project_id, list)
+          if (parallel) {
+            this.store.run(
+              'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+              id('evt'), run.id, 'run_parallel', '写范围与同项目在跑的写运行不重叠，并行放行', nowIso(),
+            )
+          }
+        }
         if (run.task_id && run.kind === 'task') {
           this.store.run(
             "UPDATE tasks SET status = 'in_progress', version = version + 1, updated_at = ? WHERE id = ? AND status NOT IN ('done', 'canceled')",
@@ -3543,12 +3640,14 @@ if (run.kind === 'dm_reply') {
     const bot = this.store.get('SELECT name FROM bots WHERE id = ?', run.bot_id)
     const task = run.task_id ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', run.task_id) : undefined
     const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
+    const { write_scopes: rawScopes, ...rest } = run
     return {
-      ...run,
+      ...rest,
       artifacts: jsonParse(run.artifacts, []),
       botName: bot?.name ?? 'Bot',
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,
+      writeScopes: readWriteScopes(rawScopes),
     }
   }
 

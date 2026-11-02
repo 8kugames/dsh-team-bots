@@ -14,6 +14,7 @@ const RUNS_DDL = `
   parent_run_id TEXT,
   kind TEXT NOT NULL DEFAULT 'chat',
   mode TEXT NOT NULL DEFAULT 'write',
+  write_scopes TEXT,
   trigger_type TEXT NOT NULL,
   trigger_ref TEXT,
   status TEXT NOT NULL DEFAULT 'queued',
@@ -176,6 +177,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   position INTEGER NOT NULL DEFAULT 0,
   due_at TEXT,
   estimate REAL,
+  write_scopes TEXT NOT NULL DEFAULT '[]',
   version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -529,6 +531,7 @@ export function openDatabase(path) {
   }
   migrateRuns(db)
   migrateBots(db)
+  migrateTasks(db)
   migrateSessionBindings(db)
   migrateProjects(db)
   migrateMemories(db)
@@ -553,6 +556,7 @@ export function openDatabase(path) {
   recordMigration(db, 'terminal_commands')
   recordMigration(db, 'messages_reply_to')
   recordMigration(db, 'bots_file_policy')
+  recordMigration(db, 'tasks_runs_write_scopes')
   return new Store(db, { ftsEnabled })
 }
 
@@ -572,11 +576,19 @@ function migrateBots(db) {
 }
 
 // run.mode 区分写入型与只读型运行：同一项目同时只允许一个写运行，只读运行可并行。
+// run.write_scopes 是任务运行入队时对写范围的快照（JSON 路径数组）；空 = 未声明。
 function migrateRuns(db) {
   addColumn(db, 'runs', 'mode', "TEXT NOT NULL DEFAULT 'write'")
   addColumn(db, 'runs', 'last_progress_at', 'TEXT')
   addColumn(db, 'runs', 'artifacts', 'TEXT')
+  addColumn(db, 'runs', 'write_scopes', 'TEXT')
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
+}
+
+// tasks.write_scopes 存任务声明的写范围（JSON 路径数组）；空数组 = 未声明，
+// 调度器据此把同项目写运行改为「范围不重叠才并行」。
+function migrateTasks(db) {
+  addColumn(db, 'tasks', 'write_scopes', "TEXT NOT NULL DEFAULT '[]'")
 }
 
 // projects.disabled_skills 存项目内关闭的技能 slug JSON 数组。
