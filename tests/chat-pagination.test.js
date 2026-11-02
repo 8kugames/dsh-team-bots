@@ -156,3 +156,45 @@ test('参数校验：scope 二选一、游标缺一不可', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// UI 源码断言：锁住 ui/app.js 里分片加载的接线不被无意拆断（DSHBOTS-33 UI 重放）。
+// 先剔行注释再断言顺序，防止「注释里的字也能让断言通过」的假锁（6040ea5 教训）。
+test('UI 接线：标记块存在、渲染/分发/样式接通、顺序正确', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const app = await readFile('ui/app.js', 'utf8')
+  const bare = app.replace(/\/\/[^\n]*/g, '')
+  const css = await readFile('ui/styles.css', 'utf8')
+
+  // ① 标记块齐全（标记本身是行注释，须在原文定位），五个 helper 都在剔注释后的块内。
+  const start = app.indexOf('chat-pagination:start')
+  const end = app.indexOf('chat-pagination:end')
+  assert.ok(start >= 0 && end > start, '标记块 start/end 应成对出现')
+  const block = app.slice(start, end).replace(/\/\/[^\n]*/g, '')
+  for (const fn of ['function chatKey', 'function mergedChatMessages', 'function canLoadOlder', 'function loadOlderButton', 'async function loadOlderMessages']) {
+    assert.ok(block.includes(fn), `标记块应含 ${fn}`)
+  }
+
+  // ② 渲染接线：两处渲染都换 mergedChatMessages，且按钮行在 chat-messages 内、消息列表前。
+  for (const anchor of ['const messages = mergedChatMessages(state.data.messages ?? [])', 'const messages = mergedChatMessages(solo?.messages ?? [])']) {
+    assert.ok(bare.includes(anchor), `渲染应使用合并视图：${anchor}`)
+  }
+  const btn = bare.indexOf('canLoadOlder(messages.length) ? loadOlderButton()')
+  assert.ok(btn >= 0, 'chat-messages 内应有条件按钮')
+  const listGroup = bare.indexOf('messages.map(renderMessage).join')
+  assert.ok(listGroup > btn, '按钮行应在消息列表之前（贴顶）')
+
+  // ③ 分发接线：load-older case 存在且调用 loadOlderMessages。
+  assert.ok(bare.includes("case 'load-older':"), 'data-action 分发应有 load-older case')
+  assert.ok(bare.includes('await loadOlderMessages()'), 'case 应调用 loadOlderMessages')
+
+  // ④ state 接线：chatOlder 桶存在且字段齐全。
+  assert.ok(bare.includes('chatOlder: { key: null, items: [], hasMore: false, loading: false }'), 'state 应初始化 chatOlder 桶')
+  assert.ok(bare.includes('const CHAT_PAGE_SIZE = 200'), '分片常量应为 200')
+
+  // ⑤ 阅读位补偿在标记块内：rAF 套一层且用 scrollHeight 差补偿。
+  assert.ok(block.includes('requestAnimationFrame'), '补偿应套 rAF')
+  assert.ok(block.includes('listEl.scrollHeight - prevHeight'), '补偿应用 scrollHeight 差')
+
+  // ⑥ 样式存在。
+  assert.ok(css.includes('.load-older'), 'styles.css 应有 .load-older 样式')
+})

@@ -21,6 +21,9 @@
     composerHeight: null,
     // 群聊引用回复：{ id, senderName, excerpt }，非空时 composer 上方显示引用条，随发送/取消清除。
     replyTo: null,
+    // 聊天历史分片（DSHBOTS-33）：state 轮询只回最后 200 条，更早的经 messages_page 手动加载后存这里。
+    // key 与当前会话对齐（group:<projectId> / solo:<botId>），切会话即失效重置；items 与轮询结果按 id 去重合并。
+    chatOlder: { key: null, items: [], hasMore: false, loading: false },
     // 折叠面板（<details data-panel>）展开态的 key 集合，toggle 时增删；render 全量重建后据此恢复 open 属性。
     openPanels: new Set(),
     ac: null,
@@ -57,6 +60,8 @@
   const COLOR_NAMES = { teal: '青', blue: '蓝', violet: '紫', amber: '琥珀', coral: '珊瑚', pink: '粉', green: '绿', gray: '灰' }
   const BOT_STATUS = { active: '运行中', paused: '已暂停', archived: '已归档' }
   const RUN_STATUS = { queued: '排队中', running: '运行中', succeeded: '已完成', failed: '失败', canceled: '已取消' }
+  // 聊天历史分片大小：与后端 messagesPage 的默认/上限一致（state 轮询同口径）。
+  const CHAT_PAGE_SIZE = 200
   const SKILL_STATUS = { active: '启用中', missing: '已失效' }
   const MEMORY_STATUS = { active: '已生效', pending: '待审', frozen: '已冻结', rejected: '已拒绝', archived: '已归档' }
   const PROPOSAL_KIND = { bot_update: 'Bot 更新', skill: '技能更新', workflow: '流程更新' }
@@ -738,17 +743,90 @@
     }).join('')
   }
 
+  // chat-pagination:start —— 聊天历史分片加载（DSHBOTS-33）纯逻辑，tests/chat-pagination.test.js 按本标记块抽取断言。
+  // state 轮询只回最后 CHAT_PAGE_SIZE 条；更早的经 messages_page 手动加载，与轮询结果按 id 去重合并展示。
+
+  // 当前会话的分片桶 key：与轮询数据的会话一一对应，切会话即失效（loadOlderMessages 里判断重置）。
+  function chatKey() {
+    if (state.chatMode === 'solo') return state.soloBotId ? `solo:${state.soloBotId}` : null
+    const project = activeProject()
+    return project ? `group:${project.id}` : null
+  }
+
+  // 合并分片桶与轮询消息：older 在前、latest 在后，按 id 去重以轮询侧为准（轮询是活数据）。
+  function mergedChatMessages(latest) {
+    const key = chatKey()
+    const bucket = state.chatOlder.key === key ? state.chatOlder : null
+    if (!bucket || !bucket.items.length) return latest ?? []
+    const seen = new Set((latest ?? []).map(m => m.id))
+    const older = bucket.items.filter(m => !seen.has(m.id))
+    return [...older, ...(latest ?? [])]
+  }
+
+  // 未翻过页且首屏已满页时也可能还有更早历史——显示按钮探一页，由 hasMore 收敛。
+  function canLoadOlder(mergedCount) {
+    const key = chatKey()
+    const bucket = state.chatOlder.key === key ? state.chatOlder : null
+    if (!bucket) return mergedCount >= CHAT_PAGE_SIZE
+    if (bucket.loading || !bucket.hasMore) return false
+    return true
+  }
+
+  function loadOlderButton() {
+    const disabled = state.chatOlder.loading ? ' disabled' : ''
+    const label = state.chatOlder.loading ? '加载中…' : `加载前 ${CHAT_PAGE_SIZE} 条`
+    return `<button class="load-older" data-action="load-older"${disabled}>${label}</button>`
+  }
+
+  async function loadOlderMessages() {
+    const key = chatKey()
+    if (!key || state.chatOlder.loading) return
+    if (state.chatOlder.key !== key) {
+      state.chatOlder = { key, items: [], hasMore: false, loading: false }
+    }
+    const listEl = document.querySelector('.chat-messages')
+    const solo = state.data?.solo?.bot?.id === state.soloBotId ? state.data.solo : null
+    const merged = state.chatMode === 'solo'
+      ? mergedChatMessages(solo?.messages ?? [])
+      : mergedChatMessages(state.data.messages ?? [])
+    const oldest = merged[0]
+    if (!oldest) return
+    state.chatOlder.loading = true
+    render()
+    try {
+      const scope = state.chatMode === 'solo' ? { soloBotId: state.soloBotId } : { projectId: key.slice('group:'.length) }
+      const res = await api('messages_page', { ...scope, beforeCreatedAt: oldest.createdAt, beforeId: oldest.id, limit: CHAT_PAGE_SIZE })
+      state.chatOlder.items = [...(res.messages ?? []), ...state.chatOlder.items]
+      state.chatOlder.hasMore = Boolean(res.hasMore)
+      const prevTop = listEl ? listEl.scrollTop : 0
+      const prevHeight = listEl ? listEl.scrollHeight : 0
+      render()
+      // 阅读位补偿：套一层 rAF 排在 render 自身 rAF 的落底滚动之后，避免被 chatAtBottom 分支覆盖。
+      requestAnimationFrame(() => {
+        if (!listEl || state.chatAtBottom) return
+        listEl.scrollTop = prevTop + (listEl.scrollHeight - prevHeight)
+      })
+    } catch (err) {
+      toast(err?.message || '加载历史失败')
+    } finally {
+      state.chatOlder.loading = false
+      render()
+    }
+  }
+  // chat-pagination:end
+
   function renderChat() {
     if (state.chatMode === 'solo') return renderSoloChat()
     const project = activeProject()
     if (!project) return noProject()
-    const messages = state.data.messages ?? []
+    const messages = mergedChatMessages(state.data.messages ?? [])
     const owner = botById(project.owner_bot_id)
     const members = project.members ?? []
     // 总监独占一张卡，成员卡里不再重复展示总监；成员行按 id 去重总监。
     const memberList = members.filter(m => m.id !== project.owner_bot_id && m.member_role !== 'owner')
-    const ownerModelRef = owner ? (owner.modelRef ?? owner.model) : null
-    const ownerModelLine = owner ? (owner.provider && ownerModelRef ? `${owner.provider} · ${ownerModelRef}` : '未配置模型') : ''
+    // modelRef 本身已是 provider/model（如 deepseek/deepseek-chat），不再单独拼 provider，避免重复。
+    const ownerModelRef = owner ? (owner.modelRef ?? owner.model ?? null) : null
+    const ownerModelLine = ownerModelRef ? String(ownerModelRef) : '未配置模型'
     const open = (state.data.tasks ?? []).filter(task => !['done', 'canceled'].includes(task.status)).slice(0, 5)
     return `
       <div class="chat-layout">
@@ -766,6 +844,7 @@
             </div>
           </div>
           <div class="chat-messages">
+            ${canLoadOlder(messages.length) ? loadOlderButton() : ''}
             ${messages.length === 0 ? `<div class="chat-empty">
               <div class="empty-symbol">${icon('message')}</div>
               <h3>还没有人说话</h3>
@@ -868,7 +947,7 @@
     if (!state.soloBotId || !bots.some(bot => bot.id === state.soloBotId)) state.soloBotId = bots[0].id
     const bot = botById(state.soloBotId)
     const solo = state.data?.solo?.bot?.id === bot.id ? state.data.solo : null
-    const messages = solo?.messages ?? []
+    const messages = mergedChatMessages(solo?.messages ?? [])
     const runs = solo?.runs ?? []
     const running = runs.filter(run => run.status === 'running' || run.status === 'queued').length
     return `
@@ -884,6 +963,7 @@
             </div>
           </div>
           <div class="chat-messages">
+            ${canLoadOlder(messages.length) ? loadOlderButton() : ''}
             ${messages.length === 0 ? `<div class="chat-empty">
               <div class="empty-symbol">${icon('message')}</div>
               <h3>和 ${esc(bot.name)} 单独聊聊</h3>
@@ -3022,6 +3102,9 @@
           break
         case 'send-message':
           await sendMessage()
+          break
+        case 'load-older':
+          await loadOlderMessages()
           break
         case 'quote-message': {
           // 引用回复：把目标消息挂到 composer 上方的引用条；再点同一条则取消。

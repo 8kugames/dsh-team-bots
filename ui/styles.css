@@ -1535,6 +1535,26 @@ a.global-config.dsh-official-link:hover {
     line-height: 1.2; /* font 简写会把行高重置为 normal，显式拉齐 */
     color: var(--accent-text);
 }
+/* 聊天历史分片加载按钮（DSHBOTS-33）：贴在 chat-messages 顶部，幽灵按钮风格弱化存在感。 */
+.load-older {
+    align-self: center;
+    margin: 8px 0;
+    padding: 4px 12px;
+    font-size: var(--fs-small);
+    color: var(--ink-3);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+}
+.load-older:hover:not(:disabled) {
+    color: var(--ink);
+    border-color: var(--ink-3);
+}
+.load-older:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
 .chat-empty {
     margin: auto;
     display: flex;
