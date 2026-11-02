@@ -12,6 +12,7 @@ import { runUsageTotals } from '../usage.js'
 import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { readWriteScopes } from './write-scopes.js'
+import { isProviderUnavailableCode } from './model-fallback.js'
 
 
 
@@ -581,7 +582,25 @@ if (run.kind === 'dm_reply') {
         })
       }
     } else {
-      if (run.task_id) {
+      // 主 provider 不可用：临时切备用模型继续跑这条任务。派生成功后任务不置 blocked、
+      // 也不转总监处理——备用运行接手的是同一条任务链。
+      const fallback = this.spawnModelFallback({ run: refreshed, bot, error })
+      if (fallback) {
+        this.addTaskEvent(run.task_id, 'model_fallback', { type: 'bot', id: bot.id }, {
+          runId,
+          fallbackRunId: fallback.runId,
+          errorCode: error?.code ?? null,
+          fallbackRef: fallback.fallback.ref,
+        })
+        this.insertMessage({
+          projectId: project.id,
+          senderType: 'bot',
+          senderId: bot.id,
+          body: `主模型不可用（${error?.code ?? '未知错误'}），已临时切换到备用模型 ${fallback.fallback.ref} 继续执行。`,
+          taskId: run.task_id,
+          runId,
+        })
+      } else if (run.task_id) {
         this.store.run(
           "UPDATE tasks SET status = 'blocked', version = version + 1, updated_at = ? WHERE id = ? AND status NOT IN ('done', 'canceled')",
           endedAt, run.task_id,
@@ -623,10 +642,12 @@ if (run.kind === 'dm_reply') {
     if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
   },
   runView(run) {
-    const bot = this.store.get('SELECT name FROM bots WHERE id = ?', run.bot_id)
+    const bot = this.store.get('SELECT name, provider, model, fallback_provider, fallback_model FROM bots WHERE id = ?', run.bot_id)
     const task = run.task_id ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', run.task_id) : undefined
     const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
     const { write_scopes: rawScopes, ...rest } = run
+    const fallbackRef = bot?.fallback_provider && bot?.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null
+    const usedRef = run.model_provider && run.model_model ? `${run.model_provider}/${run.model_model}` : null
     return {
       ...rest,
       artifacts: jsonParse(run.artifacts, []),
@@ -634,6 +655,15 @@ if (run.kind === 'dm_reply') {
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,
       writeScopes: readWriteScopes(rawScopes),
+      // 备用模型标记：configured=配了备用，applied=这条运行走了备用，
+      // degraded=主模型不可用且配了备用但这条没走（自动切换只对任务运行生效）。
+      modelFallback: {
+        configured: Boolean(fallbackRef),
+        ref: fallbackRef,
+        applied: Boolean(usedRef),
+        usedModel: usedRef ?? (bot?.provider && bot?.model ? `${bot.provider}/${bot.model}` : null),
+        degraded: Boolean(fallbackRef) && !usedRef && isProviderUnavailableCode(run.error_code),
+      },
     }
   },
 

@@ -21,6 +21,9 @@ const RUNS_DDL = `
   attempt INTEGER NOT NULL DEFAULT 1,
   idempotency_key TEXT NOT NULL UNIQUE,
   session_id TEXT,
+  model_provider TEXT,
+  model_model TEXT,
+  model_effort TEXT,
   error_code TEXT,
   error_message TEXT,
   retry_after_ms INTEGER,
@@ -48,7 +51,7 @@ CREATE INDEX IF NOT EXISTS runs_bot_status_idx
   ON runs(bot_id, COALESCE(ended_at, queued_at) DESC);
 `
 
-const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, error_code, error_message, retry_after_ms, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
+const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, model_provider, model_model, model_effort, error_code, error_message, retry_after_ms, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
 
 const BINDINGS_DDL = `
   session_id TEXT PRIMARY KEY,
@@ -83,6 +86,9 @@ CREATE TABLE IF NOT EXISTS bots (
   provider TEXT,
   model TEXT,
   effort TEXT,
+  fallback_provider TEXT,
+  fallback_model TEXT,
+  fallback_effort TEXT,
   file_policy TEXT NOT NULL DEFAULT 'workspace-write',
   solo_dir TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'active',
@@ -561,6 +567,8 @@ export function openDatabase(path) {
   recordMigration(db, 'bots_file_policy')
   recordMigration(db, 'tasks_runs_write_scopes')
   recordMigration(db, 'runs_retry_after_ms')
+  recordMigration(db, 'bots_fallback_model')
+  recordMigration(db, 'runs_model_override')
   return new Store(db, { ftsEnabled })
 }
 
@@ -575,8 +583,12 @@ function addColumn(db, table, column, definition) {
 
 
 // bots.file_policy：宿主文件沙箱档位（read-only / workspace-write / danger-full-access），默认工作区内修改。
+// bots.fallback_*：主模型不可用时临时接手的备用模型（provider 与 model 成对，effort 可空）。
 function migrateBots(db) {
   addColumn(db, 'bots', 'file_policy', "TEXT NOT NULL DEFAULT 'workspace-write'")
+  addColumn(db, 'bots', 'fallback_provider', 'TEXT')
+  addColumn(db, 'bots', 'fallback_model', 'TEXT')
+  addColumn(db, 'bots', 'fallback_effort', 'TEXT')
 }
 
 // run.mode 区分写入型与只读型运行：同一项目同时只允许一个写运行，只读运行可并行。
@@ -588,6 +600,10 @@ function migrateRuns(db) {
   addColumn(db, 'runs', 'write_scopes', 'TEXT')
   // 限流失败的机器可读退避时间（provider Retry-After 换算的毫秒数），只有 provider 真发了才有值。
   addColumn(db, 'runs', 'retry_after_ms', 'INTEGER')
+  // 本条运行实际下发的模型；model_provider 非空 = 该运行走的是备用模型（NULL = 用 Bot 主模型）。
+  addColumn(db, 'runs', 'model_provider', 'TEXT')
+  addColumn(db, 'runs', 'model_model', 'TEXT')
+  addColumn(db, 'runs', 'model_effort', 'TEXT')
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
 }
 

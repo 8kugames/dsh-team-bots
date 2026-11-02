@@ -22,6 +22,7 @@ import { projectsMethods } from './services/projects.js'
 import { chatMethods } from './services/chat.js'
 import { tasksMethods } from './services/tasks.js'
 import { runsMethods } from './services/runs.js'
+import { modelFallbackMethods } from './services/model-fallback.js'
 import { schedulerMethods } from './services/scheduler.js'
 import { memoryMethods } from './services/memory.js'
 import { secretsMethods } from './services/secrets.js'
@@ -76,6 +77,7 @@ defineMethods(TeamService.prototype, [
   chatMethods,
   tasksMethods,
   runsMethods,
+  modelFallbackMethods,
   schedulerMethods,
   memoryMethods,
   secretsMethods,

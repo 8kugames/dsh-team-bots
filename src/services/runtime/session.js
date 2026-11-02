@@ -11,6 +11,12 @@ import { effectiveRunLimits } from '../../config.js'
 
 export const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
+// 备用模型覆盖：派生运行在 runs 行里带 model_* 三列，指明这条运行改用备用模型下发。
+// 没有这三列的运行照旧走 Bot 主模型——「运行结束自动回退」就靠这条默认路径实现。
+export const modelOverrideFor = (run) => (run?.model_provider && run?.model_model
+  ? { provider: run.model_provider, model: run.model_model, effort: run.model_effort || undefined }
+  : null)
+
 export const sessionMethods = {
   bindingOfSession(sessionId) {
     if (!sessionId) return undefined
@@ -76,21 +82,25 @@ export const sessionMethods = {
       throw new AppError('INVALID_EFFORT', `模型 ${entry.ref} 不支持强度 ${effort}；可用强度：${available}`)
     }
   },
-  async selectModel(sessionId, bot) {
-    if (!bot.provider || !bot.model) {
+  // override 用于备用模型：指定了就用备用的 provider/model/effort，否则用 Bot 的主模型。
+  // 备用模型自带 effort，不继承主模型的推理强度（不同模型支持的强度不一致）。
+  async selectModel(sessionId, bot, override = null) {
+    const provider = override?.provider ?? bot.provider
+    const model = override?.model ?? bot.model
+    if (!provider || !model) {
       throw new AppError('MODEL_REQUIRED', `Bot ${bot.name} 尚未配置模型`)
     }
-    const efforts = EFFORT_FALLBACK(bot)
+    const efforts = override ? (override.effort || undefined) : EFFORT_FALLBACK(bot)
     const run = this.selecting.then(async () => {
       const defaults = this.ctx.get?.('agentDefaultModel')
       const before = defaults?.currentSelection?.()
       const result = await this.ctx.sessionController.selectModel({
         sessionId,
-        provider: bot.provider,
-        model: bot.model,
+        provider,
+        model,
         ...(efforts ? { reasoningEffort: efforts } : {}),
       })
-      const after = result?.selected ?? { provider: bot.provider, model: bot.model, ...(efforts ? { reasoningEffort: efforts } : {}) }
+      const after = result?.selected ?? { provider, model, ...(efforts ? { reasoningEffort: efforts } : {}) }
       if (before?.provider && before?.model
         && (before.provider !== after.provider || before.model !== after.model || before.reasoningEffort !== after.reasoningEffort)) {
         await defaults?.saveSelection?.(before).catch?.(error => this.logger.warn?.('dsh-team: restore default model failed: %s', error))
@@ -116,7 +126,7 @@ export const sessionMethods = {
       return {}
     }
   },
-  async ensureSession(bot, project, { run, task, sessionKind } = {}) {
+  async ensureSession(bot, project, { run, task, sessionKind, modelOverride } = {}) {
     // 任务运行使用独立会话，与该项目总监会话互不阻塞；dm 运行用独立私信会话；
     // 单聊运行（solo_chat）没有项目，落在 bot 自己的 _the_bots/<dir> 专属会话；其余运行共用项目会话。
     // sessionKind 由调用方显式指定（dm_reply 投递回任务会话等跨类别场景）。
@@ -149,7 +159,7 @@ export const sessionMethods = {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
         this.applyFilePolicy(resolved, bot)
-        await this.selectModel(existing.session_id, bot)
+        await this.selectModel(existing.session_id, bot, modelOverride)
         return existing.session_id
       }
       this.store.run('DELETE FROM session_bindings WHERE session_id = ?', existing.session_id)
@@ -197,7 +207,7 @@ export const sessionMethods = {
         taskId,
         new Date().toISOString(),
       )
-      await this.selectModel(sessionId, bot)
+      await this.selectModel(sessionId, bot, modelOverride)
       return sessionId
     })()
     this.sessionCreates.set(key, creating)
@@ -209,12 +219,19 @@ export const sessionMethods = {
   },
   async startRun({ run, bot, project, task, chatMessage, sessionKind }) {
     if (!this.ctx?.sessionController) throw new AppError('DSH_UNAVAILABLE', 'DSH Session 服务不可用')
-    const sessionId = await this.ensureSession(bot, project, { run, task, sessionKind })
+    // 备用模型覆盖：派生运行在 runs 行里带 model_* 三列，指明这条运行改用备用模型下发。
+    // 不带 override 的运行照旧走 Bot 主模型——「运行结束自动回退」就靠这条默认路径实现。
+    const modelOverride = modelOverrideFor(run)
+    // 用量记账要记实际下发的模型，备用运行不能记到主模型头上。
+    const effectiveBot = modelOverride
+      ? { ...bot, provider: modelOverride.provider, model: modelOverride.model, effort: modelOverride.effort ?? null }
+      : bot
+    const sessionId = await this.ensureSession(bot, project, { run, task, sessionKind, modelOverride })
     let prompt = this.promptFor({ run, bot, project, task, chatMessage })
     const pending = {
       runId: run.id,
       sessionId,
-      bot,
+      bot: effectiveBot,
       projectId: project?.id ?? null,
       started: false,
       texts: [],

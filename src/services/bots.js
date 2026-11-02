@@ -23,6 +23,16 @@ export const botsMethods = {
     const effort = input.effort ? text(input.effort, 80) : null
     if ((provider && !model) || (!provider && model)) throw badRequest('provider 和 model 必须同时提供')
     if (provider && model) await this.runtime?.validateBotConfig({ provider, model, effort })
+    // 备用模型：主 provider 不可用时临时接手；provider 与 model 成对，effort 可空（走模型默认）。
+    const fallbackProvider = input.fallbackProvider ? text(input.fallbackProvider, 80) : null
+    const fallbackModel = input.fallbackModel ? text(input.fallbackModel, 160) : null
+    const fallbackEffort = input.fallbackEffort ? text(input.fallbackEffort, 80) : null
+    if ((fallbackProvider && !fallbackModel) || (!fallbackProvider && fallbackModel)) {
+      throw badRequest('备用模型的 provider 和 model 必须同时提供')
+    }
+    if (fallbackProvider && fallbackModel) {
+      await this.runtime?.validateBotConfig({ provider: fallbackProvider, model: fallbackModel, effort: fallbackEffort })
+    }
     const botId = id('bot')
     const createdAt = nowIso()
     const role = text(input.role, 24)
@@ -38,17 +48,23 @@ export const botsMethods = {
     }
     this.store.transaction(() => {
       this.store.run(
-        `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort, file_policy, solo_dir,
+        `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort,
+          fallback_provider, fallback_model, fallback_effort, file_policy, solo_dir,
           status, current_revision, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
-        botId, name, role, instructions, color, provider, model, effort, filePolicy, soloDir, createdAt, createdAt,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
+        botId, name, role, instructions, color, provider, model, effort,
+        fallbackProvider, fallbackModel, fallbackEffort, filePolicy, soloDir, createdAt, createdAt,
       )
       this.store.run(
         `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, provider, model, effort, created_by, created_at)
          VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
         id('rev'), botId, role, instructions, provider, model, effort, `${actor.type}:${actor.id}`, createdAt,
       )
-      this.audit(actor, 'bot.create', 'bot', botId, { name, provider, model, effort, file_policy: filePolicy })
+      this.audit(actor, 'bot.create', 'bot', botId, {
+        name, provider, model, effort,
+        fallback_provider: fallbackProvider, fallback_model: fallbackModel, fallback_effort: fallbackEffort,
+        file_policy: filePolicy,
+      })
     })
     return this.botView(this.botRow(botId))
   },
@@ -121,7 +137,25 @@ export const botsMethods = {
     if ((provider && !model) || (!provider && model)) throw badRequest('provider 和 model 必须同时提供')
     if (provider && model) await this.runtime?.validateBotConfig({ provider, model, effort })
     if (!provider) effort = null
+    // 备用模型：留空即关闭（三个字段一起清）。
+    let fallbackProvider = bot.fallback_provider
+    let fallbackModel = bot.fallback_model
+    let fallbackEffort = bot.fallback_effort
+    if (patch.fallbackProvider !== undefined) fallbackProvider = patch.fallbackProvider ? text(patch.fallbackProvider, 80) : null
+    if (patch.fallbackModel !== undefined) fallbackModel = patch.fallbackModel ? text(patch.fallbackModel, 160) : null
+    if (patch.fallbackEffort !== undefined) fallbackEffort = patch.fallbackEffort ? text(patch.fallbackEffort, 80) : null
+    if ((fallbackProvider && !fallbackModel) || (!fallbackProvider && fallbackModel)) {
+      throw badRequest('备用模型的 provider 和 model 必须同时提供')
+    }
+    if (fallbackProvider && fallbackModel) {
+      await this.runtime?.validateBotConfig({ provider: fallbackProvider, model: fallbackModel, effort: fallbackEffort })
+    }
+    if (!fallbackModel) fallbackEffort = null
+    if (fallbackProvider !== bot.fallback_provider) changes.fallback_provider = fallbackProvider
+    if (fallbackModel !== bot.fallback_model) changes.fallback_model = fallbackModel
+    if (fallbackEffort !== bot.fallback_effort) changes.fallback_effort = fallbackEffort
     const configChanged = provider !== bot.provider || model !== bot.model || effort !== bot.effort
+      || fallbackProvider !== bot.fallback_provider || fallbackModel !== bot.fallback_model || fallbackEffort !== bot.fallback_effort
       || (changes.role !== undefined && changes.role !== bot.role)
       || (changes.instructions !== undefined && changes.instructions !== bot.instructions)
     if (changes.status === 'archived') {
@@ -189,6 +223,8 @@ export const botsMethods = {
     return {
       ...bot,
       modelRef: bot.provider && bot.model ? `${bot.provider}/${bot.model}` : null,
+      fallbackModelRef: bot.fallback_provider && bot.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null,
+      fallbackConfigured: Boolean(bot.fallback_provider && bot.fallback_model),
       soloDir: bot.solo_dir ?? null,
       soloWorkspace: bot.solo_dir ? join(this.config.workspace, '_the_bots', bot.solo_dir) : null,
       memoryCount: Number(memoryCount),
