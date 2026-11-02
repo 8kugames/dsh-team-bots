@@ -147,15 +147,15 @@ test('到期派生：attempt+1、parent 链、plan_retry 事件，重复扫描�
   }
 })
 
-test('只重试一次：attempt=2 失败不再派生；任务终态/已有活跃 run 也不派生', async () => {
+test('限流链重试上限：attempt=3 失败不再派生；任务终态/已有活跃 run 也不派生', async () => {
   const { root, store, service } = await setup()
   try {
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const project = await service.createProject({ name: 'ON Project', key: 'ONPROJ', ownerBotId: director.id })
-    const task = await service.createTask({ projectId: project.id, title: '二次失败', assigneeBotId: director.id })
-    insertFailedRun(store, { id: 'o1', projectId: project.id, botId: director.id, taskId: task.id, endedInMin: -11, attempt: 2 })
+    const task = await service.createTask({ projectId: project.id, title: '三次失败', assigneeBotId: director.id })
+    insertFailedRun(store, { id: 'o1', projectId: project.id, botId: director.id, taskId: task.id, endedInMin: -11, attempt: 3 })
     service.retryExpiredPlanWaits()
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = 'o1'").n, 0, 'attempt=2 不再派生')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = 'o1'").n, 0, 'attempt=3 已达限流链上限，不再派生')
 
     store.run("UPDATE runs SET attempt = 1 WHERE id = 'o1'")
     await service.updateTask(task.id, { status: 'canceled' }, { type: 'user', id: 'u' })

@@ -13,6 +13,7 @@ import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { readWriteScopes } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
+import { isRateLimitError, MAX_RATE_LIMIT_RETRIES, needsSynthesizedBackoff, rateLimitBackoffMs } from './backoff.js'
 
 
 
@@ -413,11 +414,16 @@ if (run.kind === 'dm_reply') {
       ? this.captureRunArtifacts(run, project)
       : null
     const endedAt = nowIso()
+    // DSHBOTS-38：限流失败且 provider 未给 Retry-After 时合成指数退避，写进 retry_after_ms，
+    // plan_wait 状态与到期派生随之自动生效。真 Retry-After 永远优先，不被合成值覆盖。
+    const attemptNo = Math.max(1, Number(run.attempt) || 1)
+    const synthesizedMs = needsSynthesizedBackoff(error) ? rateLimitBackoffMs(attemptNo) : null
+    const retryAfterMs = Number(error?.retryAfterMs) > 0 ? Number(error.retryAfterMs) : synthesizedMs
     this.store.run(
       `UPDATE runs SET status = ?, output = ?, artifacts = ?, error_code = ?, error_message = ?, retry_after_ms = ?, ended_at = ?,
        usage_input = ?, usage_cache_read = ?, usage_cache_write = ?, usage_output = ?, usage_cost = ?
        WHERE id = ? AND status IN ('running', 'queued')`,
-      status, cleanOutput, artifactsJson, error?.code ?? null, error?.message ?? null, error?.retryAfterMs ?? null, endedAt,
+      status, cleanOutput, artifactsJson, error?.code ?? null, error?.message ?? null, retryAfterMs, endedAt,
       usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens, usage.cost,
       runId,
     )
@@ -425,6 +431,14 @@ if (run.kind === 'dm_reply') {
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
     )
+    if (synthesizedMs) {
+      const suffix = attemptNo < MAX_RATE_LIMIT_RETRIES ? '后重试' : '后转总监处理'
+      this.insertRunEvent(
+        runId,
+        'rate_limit_backoff',
+        `上游限流（${error?.code}）未返回 Retry-After，第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`,
+      )
+    }
     const refreshed = this.runRow(runId)
     if (run.kind === 'dm') {
       const message = run.trigger_ref
@@ -582,9 +596,13 @@ if (run.kind === 'dm_reply') {
         })
       }
     } else {
+      // DSHBOTS-38：限流失败（provider 真发 Retry-After 或 finishRun 合成的指数退避）在等待期内
+      // 禁止立刻重打上游——不切备用模型（备用可能走同一网关），也不立刻排总监处理运行。
+      const backoffWaitMs = isRateLimitError(error) && retryAfterMs > 0 ? retryAfterMs : 0
+      const willRetry = backoffWaitMs > 0 && attemptNo < MAX_RATE_LIMIT_RETRIES
       // 主 provider 不可用：临时切备用模型继续跑这条任务。派生成功后任务不置 blocked、
-      // 也不转总监处理——备用运行接手的是同一条任务链。
-      const fallback = this.spawnModelFallback({ run: refreshed, bot, error })
+      // 也不转总监处理——备用运行接手的是同一条任务链。限流等待中不切，等 plan_retry 到期重试。
+      const fallback = backoffWaitMs > 0 ? null : this.spawnModelFallback({ run: refreshed, bot, error })
       if (fallback) {
         this.addTaskEvent(run.task_id, 'model_fallback', { type: 'bot', id: bot.id }, {
           runId,
@@ -606,21 +624,31 @@ if (run.kind === 'dm_reply') {
           endedAt, run.task_id,
         )
         this.addTaskEvent(run.task_id, 'run_failed', { type: 'bot', id: bot.id }, { runId, error })
+        const backoffNote = backoffWaitMs > 0
+          ? (willRetry
+              ? `\n上游限流，第 ${attemptNo} 次指数退避，约 ${Math.round(backoffWaitMs / 1000)} 秒后自动重试。`
+              : `\n上游限流，已达自动重试上限，约 ${Math.round(backoffWaitMs / 1000)} 秒后转总监处理。`)
+          : ''
         this.insertMessage({
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `任务执行失败：${error?.message ?? '未知错误'}\n运行 ID：${runId}`,
+          body: `任务执行失败：${error?.message ?? '未知错误'}\n运行 ID：${runId}${backoffNote}`,
           taskId: run.task_id,
           runId,
         })
-        this.enqueueOutbox({
-          kind: 'owner_task_run',
-          payload: { taskId: run.task_id, reviewKind: 'handle' },
-          projectId: run.project_id,
-          taskId: run.task_id,
-          idempotencyKey: `owner_handle:${run.task_id}:${run.id}`,
-        })
+        // attempt<MAX：不排 owner handle——plan_retry 到期派生接管重试，handle 运行会占住任务把派生挤掉。
+        // 链耗尽（attempt>=MAX）转总监处理，但仍按退避延迟投递，到点才打上游；非限流失败照旧立即投递。
+        if (!willRetry) {
+          this.enqueueOutbox({
+            kind: 'owner_task_run',
+            payload: { taskId: run.task_id, reviewKind: 'handle' },
+            projectId: run.project_id,
+            taskId: run.task_id,
+            idempotencyKey: `owner_handle:${run.task_id}:${run.id}`,
+            availableAt: backoffWaitMs > 0 ? new Date(Date.now() + backoffWaitMs) : null,
+          })
+        }
       } else if (run.kind === 'chat') {
         this.insertMessage({
           projectId: project.id,

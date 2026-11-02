@@ -7,6 +7,7 @@ import { effectiveRunLimits } from '../config.js'
 import { badRequest } from '../errors.js'
 import { applyRetention, reconcileUsage } from '../usage.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
+import { MAX_RATE_LIMIT_RETRIES, RATE_LIMIT_CODES } from './backoff.js'
 import { readWriteScopes, writeScopesOverlap } from './write-scopes.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
@@ -16,23 +17,26 @@ export const schedulerMethods = {
 
   // outbox：把「状态变更 → 建运行」这一跳变成可重放的持久交接。
   // 写事件时立刻落库，调度器按顺序领取投递，失败退避重试，超过上限转 failed。
-  enqueueOutbox({ kind, payload = {}, projectId = null, taskId = null, sourceId = null, idempotencyKey = null }) {
+  enqueueOutbox({ kind, payload = {}, projectId = null, taskId = null, sourceId = null, idempotencyKey = null, availableAt = null }) {
     const now = nowIso()
     const outboxId = id('out')
+    // availableAt：延迟投递（限流退避等场景），到点前不算可领取。
+    const availableIso = availableAt ? new Date(availableAt).toISOString() : now
     this.store.run(
       `INSERT INTO outbox(id, kind, project_id, task_id, source_id, idempotency_key, payload_json,
         status, attempts, available_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
        ON CONFLICT(idempotency_key) DO NOTHING`,
       outboxId, kind, projectId, taskId, sourceId, idempotencyKey,
-      JSON.stringify(payload), now, now,
+      JSON.stringify(payload), availableIso, now,
     )
     if (idempotencyKey) {
       const existing = this.store.get('SELECT id FROM outbox WHERE idempotency_key = ?', idempotencyKey)
       if (existing && existing.id !== outboxId) return existing.id
     }
     // 事务性 outbox：记录先落库，再立即投递；投递失败留 pending，由调度器重试。
-    this.applyOutboxRow(this.store.get('SELECT * FROM outbox WHERE id = ?', outboxId))
+    // 延迟投递（availableAt 在未来）不立即投，由 dispatchOutbox 到点领取。
+    if (availableIso <= now) this.applyOutboxRow(this.store.get('SELECT * FROM outbox WHERE id = ?', outboxId))
     return outboxId
   },
 
@@ -192,22 +196,25 @@ export const schedulerMethods = {
       })
     }
   },
-  // 限流失败的自动重试（DSHBOTS-24）：失败 run 带 retry_after_ms（provider 真发过 Retry-After 才有），
-  // 到期派生一次新运行。只重试一次（attempt=1 才派生，新 run attempt=2 失败后不再链式），
+  // 限流失败的自动重试（DSHBOTS-24；DSHBOTS-38 放开到 3 次并支持合成退避）：
+  // 失败 run 带 retry_after_ms（provider 真发过 Retry-After，或限流无头时 finishRun 合成的指数退避），
+  // 到期派生一次新运行。限流码链最多跑到 attempt=3（1→2→3），之后转常规失败处置；
+  // 非 RATE_LIMIT_CODES 的错误码不进本路径（维持只认限流码的原状）。
   // 只针对任务运行——solo/私信运行显示 plan_wait 状态但不自动派生，避免对同一个对话者重复发信。
   // 过期超过 24h 视为时过境迁不派生（服务停摆/长期搁置后不补跑旧任务）。
-  // 幂等三闸：attempt=1 + task_id 非空 + 原 run 无 plan_retry 事件；idempotency_key UNIQUE 兜底并发 tick。
+  // 幂等闸：task_id 非空 + 原 run 无 plan_retry 事件；idempotency_key UNIQUE 兜底并发 tick。
   retryExpiredPlanWaits() {
     const expired = this.store.all(
       `SELECT r.* FROM runs r
        WHERE r.status = 'failed' AND r.retry_after_ms IS NOT NULL
-         AND r.task_id IS NOT NULL AND r.attempt = 1
-         AND r.error_code IN ('RATE_LIMIT', 'QUOTA')
+         AND r.task_id IS NOT NULL AND r.attempt < ${MAX_RATE_LIMIT_RETRIES}
+         AND r.error_code IN (${[...RATE_LIMIT_CODES].map(() => '?').join(', ')})
          AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
              <= CAST(strftime('%s', 'now') AS REAL)
          AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
              > CAST(strftime('%s', 'now') AS REAL) - ${PLAN_RETRY_MAX_LATE_SECONDS}
          AND NOT EXISTS(SELECT 1 FROM run_events e WHERE e.run_id = r.id AND e.type = 'plan_retry')`,
+      ...RATE_LIMIT_CODES,
     )
     for (const run of expired) {
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', run.task_id)
