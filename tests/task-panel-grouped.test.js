@@ -24,20 +24,25 @@ test('分组仍带 data-drop-status：拖拽换状态的通道不变', () => {
   assert.match(source, /closest\('\.column\[data-drop-status\]'\)/, '拖放命中仍按 .column[data-drop-status] 定位')
 })
 
-test('组头可折叠：折叠态存 state.collapsedTaskGroups', () => {
-  assert.match(source, /collapsedTaskGroups: new Set\(\)/, '状态里有折叠集合')
-  assert.match(source, /const collapsed = state\.collapsedTaskGroups\.has\(status\)/, '渲染读取折叠态')
+test('组头可折叠：展开态记在 state.openPanels（key: task-group:<status>）', () => {
+  assert.match(source, /function taskGroupKey\(status\) \{\s*\n\s*return `task-group:\$\{status\}`/, 'panel key 形如 task-group:<status>')
+  assert.match(source, /for \(const status of STATUS_ORDER\) state\.openPanels\.add\(taskGroupKey\(status\)\)/, '分组默认全展开')
+  assert.match(source, /const expanded = state\.openPanels\.has\(key\)/, '渲染读取展开态')
   assert.match(source, /data-action="toggle-task-group"/, '组头有折叠按钮')
   assert.match(source, /case 'toggle-task-group'/, '点击事件处理折叠')
   assert.match(
     source,
-    /if \(state\.collapsedTaskGroups\.has\(status\)\) state\.collapsedTaskGroups\.delete\(status\)\s*\n\s*else state\.collapsedTaskGroups\.add\(status\)/,
-    '折叠态增删',
+    /if \(state\.openPanels\.has\(key\)\) state\.openPanels\.delete\(key\)\s*\n\s*else state\.openPanels\.add\(key\)/,
+    '展开态增删走 openPanels',
   )
 })
 
 test('折叠时组体不渲染，组头计数保留', () => {
-  assert.match(source, /\$\{collapsed \? '' : `<div class="task-group-body">\$\{body\}<\/div>`\}/, '折叠时不渲染组体')
+  assert.match(
+    source,
+    /\$\{expanded \? `<div class="task-group-body" data-panel="\$\{attr\(key\)\}">\$\{body\}<\/div>` : ''\}/,
+    '折叠时不渲染组体',
+  )
   assert.match(source, /<span class="column-count">\$\{tasks\.length\}<\/span>/, '组头计数不变')
 })
 

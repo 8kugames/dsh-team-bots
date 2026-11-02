@@ -94,6 +94,9 @@ test('看板接线：filteredTasks 走排序，看板分组沿用该顺序', () 
   // 组内行由 renderTaskRows 输出（DSHBOTS-58 第二笔起按 parent_task_id 组树，顺序仍取分组过滤结果）
   assert.match(source, /renderTaskRows\(tasks\)/)
   assert.match(source, /renderTaskCard\(task, \{ depth, childCount: children\.length, expanded \}\)/)
-  // 卡片上的优先级标签也走归一化，旧数据不再显示空白
-  assert.match(source, /PRIORITY\[taskPriorityKey\(task\.priority\)\]/)
+  // 卡片上的优先级也走归一化，旧数据不再显示空白
+  // （DSHBOTS-58 起优先级渲染为图标：taskPriorityIcon 内 taskPriorityKey 归一 + PRIORITY 取中文标签）
+  assert.match(source, /function taskPriorityIcon\(task\)/)
+  assert.match(source, /const key = taskPriorityKey\(task\?\.priority\)/)
+  assert.match(source, /PRIORITY\[key\] \?\? key/)
 })

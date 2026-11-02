@@ -2511,19 +2511,20 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-body);
 }
 
-/* Board: 状态分组 + 紧凑单行任务行（DSHBOTS-58，参照 Linear 的分组列表） */
+/* Board: Linear 风格分组树（DSHBOTS-58）：按状态分组的可折叠分组 + 紧凑单行任务行 */
 .board {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    /* 分组间距 8px */
+    gap: 8px;
     align-items: stretch;
     padding-bottom: 10px;
 }
 .column {
     display: block;
     min-width: 0;
-    padding: 0 2px 2px;
-    border-radius: 10px;
+    padding: 0;
+    border-radius: 8px;
     background: transparent;
     border: 1px solid transparent;
     transition:
@@ -2534,13 +2535,14 @@ a.global-config.dsh-official-link:hover {
     background: var(--accent-wash);
     box-shadow: inset 0 0 0 1px var(--accent);
 }
+/* 组头：Linear 式小标题行（状态圆点 + 状态名 + 计数），不画分隔线，靠间距分组。 */
 .column-head {
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 4px 4px 6px;
-    margin-bottom: 2px;
-    border-bottom: 1px solid var(--line);
+    padding: 6px 8px 4px;
+    margin-bottom: 0;
+    border-bottom: none;
 }
 /* 组头折叠按钮：chevron 默认朝右（折叠），展开时旋转朝下（.chev.open）。 */
 .task-group-toggle {
@@ -2563,6 +2565,7 @@ a.global-config.dsh-official-link:hover {
 .task-group-body {
     display: flex;
     flex-direction: column;
+    padding: 2px 0 2px;
 }
 /* 父子层级（DSHBOTS-58）：子任务挂在一级缩进的容器里，容器左侧一条导线连到父行。 */
 .task-children {
@@ -2644,30 +2647,29 @@ a.global-config.dsh-official-link:hover {
 .column-count {
     color: var(--ink-3);
     font: 500 var(--fs-caption) var(--mono);
-    margin-left: auto;
+    /* 计数紧跟状态名（Linear 口径），不推到行尾 */
+    margin-left: 1px;
     font-variant-numeric: tabular-nums;
 }
+/* 任务行（DSHBOTS-58，参照 Linear）：32px 单行、无边框无卡片阴影，hover 才出底色。 */
 .task-card.running {
-    box-shadow:
-        var(--shadow-card),
-        inset 2px 0 0 var(--accent);
+    box-shadow: inset 2px 0 0 var(--accent);
 }
 .task-card {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    height: 32px;
     background: transparent;
     border: none;
-    border-bottom: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px 8px;
+    border-radius: 6px;
+    box-shadow: none;
+    padding: 0 8px;
     margin-bottom: 0;
     min-width: 0;
     overflow: hidden;
     cursor: pointer;
-    transition:
-        background-color 0.12s ease,
-        box-shadow 0.12s ease;
+    transition: background-color 0.12s ease;
 }
 .task-card:hover {
     background: var(--surface-2);
@@ -2693,11 +2695,88 @@ a.global-config.dsh-official-link:hover {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* 优先级图标：三档横条，颜色沿用现有优先级色（danger/star/accent/ink-3/line-2）。 */
 .task-priority {
+    display: inline-flex;
+    align-items: center;
     color: var(--ink-3);
-    font-size: var(--fs-caption);
     flex: 0 0 auto;
     white-space: nowrap;
+}
+.task-priority svg {
+    width: 14px;
+    height: 14px;
+    stroke-width: 2.2;
+}
+.task-priority.urgent {
+    color: var(--danger);
+}
+.task-priority.high {
+    color: var(--star);
+}
+.task-priority.medium {
+    color: var(--accent);
+}
+.task-priority.low {
+    color: var(--ink-3);
+}
+.task-priority.none {
+    color: var(--line-2);
+}
+/* 状态图标（Linear 式小圆环）：待办/进行中/受阻/待验收是圆环，已完成环内打勾，已取消环内一横杠。 */
+.task-status-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid currentColor;
+    border-radius: 50%;
+    color: var(--ink-3);
+    flex: 0 0 auto;
+}
+.task-status-icon svg {
+    width: 9px;
+    height: 9px;
+    stroke-width: 3;
+}
+.task-status-icon.backlog {
+    color: var(--ink-3);
+    border-style: dashed;
+}
+.task-status-icon.todo {
+    color: var(--accent);
+}
+.task-status-icon.in_progress {
+    color: var(--star);
+    background: conic-gradient(currentColor 0 180deg, transparent 180deg);
+}
+.task-status-icon.blocked {
+    color: var(--danger);
+}
+.task-status-icon.in_review {
+    color: var(--accent);
+}
+.task-status-icon.in_review::after {
+    content: '';
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.task-status-icon.done {
+    color: var(--green);
+}
+.task-status-icon.canceled {
+    color: var(--ink-3);
+}
+.task-status-icon.canceled::after {
+    content: '';
+    width: 8px;
+    height: 1.5px;
+    border-radius: 1px;
+    background: currentColor;
 }
 .priority-dot {
     width: 6px;
@@ -2725,7 +2804,7 @@ a.global-config.dsh-official-link:hover {
 /* 紧凑单行标题：单行省略号，hover 用 title 看全文（DSHBOTS-58）。 */
 .task-card-title {
     font-size: var(--fs-body);
-    line-height: 1.5;
+    line-height: 1.4;
     color: var(--ink);
     flex: 1 1 auto;
     min-width: 0;
@@ -2741,7 +2820,7 @@ a.global-config.dsh-official-link:hover {
     margin-top: 0;
     color: var(--ink-3);
     font-size: var(--fs-caption);
-    /* 允许收缩：长运行标签不把卡片底行撑宽。 */
+    /* 允许收缩：长运行标签不把行尾撑宽。 */
     min-width: 0;
     overflow: hidden;
 }
@@ -2755,6 +2834,7 @@ a.global-config.dsh-official-link:hover {
 .task-card-foot .avatar.sm {
     margin-left: auto;
 }
+/* 标签簇在行尾，宽度不够时先被裁掉，标题始终优先。 */
 .task-tags {
     display: flex;
     gap: 4px;
@@ -2829,15 +2909,40 @@ a.global-config.dsh-official-link:hover {
         opacity: 0.35;
     }
 }
+/* 空分组的投放提示：平时隐形只占极小高度（避免空分组留下大块竖向空白），悬停组时才显形。 */
 .board-empty {
     color: transparent;
     font-size: var(--fs-caption);
     text-align: center;
-    padding: 14px 4px 10px;
+    padding: 4px;
     transition: color 0.12s ease;
 }
 .column:hover .board-empty {
     color: var(--ink-3);
+}
+/* 小屏（≤720px）任务面板：单行保底可读——先让出标签与运行文案，标题与状态图标不裁。 */
+@media (max-width: 720px) {
+    .task-card {
+        gap: 6px;
+        padding: 0 6px;
+    }
+    .task-tags {
+        display: none;
+    }
+    .task-card-foot .task-run-label {
+        display: none;
+    }
+    .task-card-foot .avatar.sm {
+        margin-left: 0;
+    }
+    .column-head {
+        padding: 6px 6px 4px;
+    }
+}
+@media (max-width: 430px) {
+    .task-id {
+        display: none;
+    }
 }
 
 /* Color swatch picker (Bot 外观颜色) */

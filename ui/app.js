@@ -28,9 +28,8 @@
     // key 与当前会话对齐（group:<projectId> / solo:<botId>），切会话即失效重置；items 与轮询结果按 id 去重合并。
     chatOlder: { key: null, items: [], hasMore: false, loading: false },
     // 折叠面板（<details data-panel>）展开态的 key 集合，toggle 时增删；render 全量重建后据此恢复 open 属性。
+    // 任务面板的分组（task-group:<status>）与子任务（task-children:<taskId>）也走这套 key（DSHBOTS-58）。
     openPanels: new Set(),
-    // 任务面板按状态分组的折叠态（DSHBOTS-58）：存的是「已折叠」的状态，默认全部展开。
-    collapsedTaskGroups: new Set(),
     ac: null,
     busy: 0,
     chatAtBottom: true,
@@ -63,6 +62,9 @@
     canceled: '已取消',
   }
   const STATUS_ORDER = ['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled']
+  // 任务分组默认全展开（DSHBOTS-58）：把各分组的展开态 key 预置进 state.openPanels，
+  // 与 <details data-panel> 同一套通道（key 形如 task-group:<status>），折叠即从集合里删掉。
+  for (const status of STATUS_ORDER) state.openPanels.add(taskGroupKey(status))
   const PRIORITY = { urgent: '紧急', high: '高', medium: '中', low: '低', none: '无' }
   const PROPOSAL_STATUS = { pending: '待审', canary: '灰度中', approved: '已通过', rejected: '已拒绝' }
   const COLORS = ['teal', 'blue', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
@@ -141,6 +143,8 @@
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
     folder: '<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     check: '<path d="m20 6-11 11-5-5"/>',
+    // 优先级图标（Linear 式三档横条）：紧急/高/中/低依次点亮更多横条，配色沿用现有优先级色。
+    priority: '<path d="M4 7h13M4 12h9M4 17h5"/>',
     play: '<path d="m8 5 11 7-11 7z"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/>',
@@ -1451,7 +1455,7 @@
     const filtering = Boolean(state.taskFilter.search) || state.taskFilter.status !== 'all' || state.taskFilter.assignee !== 'all' || state.taskFilter.timeRange !== 'all'
     return `
       <div class="section-head">
-        <p>拖拽卡片切换状态。</p>
+        <p>拖拽任务行切换状态，点组头可折叠分组。</p>
         <div class="board-toolbar" style="margin:0">
           <input class="input search" id="task-search" placeholder="搜索任务、编号或标签" aria-label="搜索任务、编号或标签" value="${attr(state.taskFilter.search)}">
           <select class="select" data-task-filter="status">
@@ -1481,27 +1485,49 @@
     `
   }
 
-  // 任务分组（DSHBOTS-58）：按状态分组、组头可折叠，组内是紧凑单行任务行。
-  // 组仍然带 data-drop-status —— 拖拽换状态的通道不变，拖到组头即改状态。
+  // 任务分组（DSHBOTS-58，参照 Linear）：按状态分组的树形分组列表，组头可折叠。
+  // 展开态记在 state.openPanels（key: task-group:<status>），组体容器带同一个 data-panel key —— 与 <details data-panel> 同一套通道。
+  // 组 section 仍然带 data-drop-status：拖拽换状态的通道不变，拖到组头/组体即改状态（DSHBOTS-54 看板联动靠它）。
+  function taskGroupKey(status) {
+    return `task-group:${status}`
+  }
+
   function renderTaskGroup(status, tasks) {
-    const collapsed = state.collapsedTaskGroups.has(status)
+    const key = taskGroupKey(status)
+    const expanded = state.openPanels.has(key)
     const body = tasks.length === 0
       ? `<div class="board-empty">拖到这里</div>`
       : renderTaskRows(tasks)
-    return `<section class="column task-group${collapsed ? ' collapsed' : ''}" data-drop-status="${status}">
+    return `<section class="column task-group${expanded ? '' : ' collapsed'}" data-drop-status="${status}">
       <div class="column-head task-group-head">
-        <button type="button" class="task-group-toggle" data-action="toggle-task-group" data-status="${attr(status)}" aria-expanded="${collapsed ? 'false' : 'true'}" title="${collapsed ? '展开' : '折叠'}${esc(STATUS[status])}分组">${icon('chevron', `chev${collapsed ? '' : ' open'}`)}</button>
+        <button type="button" class="task-group-toggle" data-action="toggle-task-group" data-status="${attr(status)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? '折叠' : '展开'}${esc(STATUS[status])}分组">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>
         <span class="column-dot ${status}"></span>
         <strong>${STATUS[status]}</strong>
         <span class="column-count">${tasks.length}</span>
       </div>
-      ${collapsed ? '' : `<div class="task-group-body">${body}</div>`}
+      ${expanded ? `<div class="task-group-body" data-panel="${attr(key)}">${body}</div>` : ''}
     </section>`
   }
 
-  // task-card:start —— 任务卡运行徽标（DSHBOTS-42）：文案来自后端 taskStage 纯函数查表的 stageLabel，
-  // 不再从 latestRun.status 拼映射。终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：
-  // 状态点、运行文案、计时与 running 高亮全部隐藏，已完成/已取消任务上挂着的遗留运行不再误导看板。
+  // Linear 式状态图标：小圆环（待办/进行中/受阻/待验收），已完成是环内对勾，已取消是环内横杠。
+  // 颜色沿用现有状态色 token（与分组头圆点同色表），形状靠 CSS 画，无需额外图标资源。
+  function taskStatusIcon(task) {
+    const status = task?.status ?? 'todo'
+    const label = STATUS[status] ?? status
+    return `<span class="task-status-icon ${attr(status)}" title="${attr(label)}" aria-label="${attr(label)}">${status === 'done' ? icon('check') : ''}</span>`
+  }
+
+  // 优先级图标：三档横条 + title 说明（紧急/高/中/低/无），配色沿用现有优先级色（danger/star/accent/ink-3）。
+  function taskPriorityIcon(task) {
+    const key = taskPriorityKey(task?.priority)
+    const label = PRIORITY[key] ?? key
+    return `<span class="task-priority ${key}" title="优先级：${esc(label)}" aria-label="优先级：${esc(label)}">${icon('priority')}</span>`
+  }
+
+  // task-card:start —— 任务行（DSHBOTS-58，参照 Linear）：紧凑单行 —— 状态图标 + 优先级图标 + 编号 + 标题 + 右簇（标签/依赖/运行态/终态时间/头像）。
+  // 运行徽标文案来自后端 taskStage 纯函数查表的 stageLabel，不再从 latestRun.status 拼映射。
+  // 终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：状态点、运行文案、计时与 running 高亮全部隐藏，
+  // 已完成/已取消任务上挂着的遗留运行不再误导看板。
   function renderTaskCard(task, options = {}) {
     const depth = Number(options.depth ?? 0)
     const childCount = Number(options.childCount ?? 0)
@@ -1522,14 +1548,15 @@
     const depsBlocked = task.depsSatisfied === false && blockedNames.length > 0
     const depsTitle = `被 ${blockedNames.length} 个任务阻塞：${blockedNames.join('、')}`
     return `<article class="task-card${isRunning ? ' running' : ''}${depth > 0 ? ' task-child' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
+      ${taskStatusIcon(task)}
+      ${taskPriorityIcon(task)}
       <div class="task-card-top">
         ${childCount > 0 ? `<button type="button" class="task-children-toggle" data-action="toggle-task-children" data-task-id="${attr(task.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? '折叠' : '展开'}${childCount} 个子任务">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>` : ''}
         <span class="task-id">${esc(task.identifier)}</span>
       </div>
       <div class="task-card-title" title="${attr(task.title)}">${esc(task.title)}</div>
-      ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
       <div class="task-card-foot">
-        <span class="task-priority" title="优先级：${esc(PRIORITY[taskPriorityKey(task.priority)])}">${esc(PRIORITY[taskPriorityKey(task.priority)])}</span>
+        ${tags.length ? `<span class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</span>` : ''}
         ${depsBlocked ? `<span class="task-deps-badge" title="${attr(depsTitle)}">${icon('alert')}被 ${blockedNames.length} 个任务阻塞</span>` : ''}
         ${!ended && run ? runDot(run.status) : ''}
         <span class="task-run-label">${runLabel}</span>
@@ -3889,11 +3916,12 @@
           break
         }
         case 'toggle-task-group': {
-          // 任务分组折叠（DSHBOTS-58）：存「已折叠」的状态，默认展开；折叠后组体不渲染。
+          // 分组折叠（DSHBOTS-58）：展开态记在 state.openPanels（key: task-group:<status>），默认全展开。
           const status = target.dataset.status
           if (!status) break
-          if (state.collapsedTaskGroups.has(status)) state.collapsedTaskGroups.delete(status)
-          else state.collapsedTaskGroups.add(status)
+          const key = taskGroupKey(status)
+          if (state.openPanels.has(key)) state.openPanels.delete(key)
+          else state.openPanels.add(key)
           render()
           break
         }
