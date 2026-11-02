@@ -1061,7 +1061,6 @@
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
                 <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
               </div>
-              ${composerImageParts()}
             </div>
           </div>
         </div>
@@ -1180,7 +1179,6 @@
                 <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
                 <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
               </div>
-              ${composerImageParts()}
             </div>
           </div>
         </div>
@@ -3725,9 +3723,24 @@
       </div>`).join('')}</div>`
   }
 
-  function composerImageParts() {
-    return `<input type="file" id="composer-image-input" class="composer-image-input" accept="${attr(IMAGE_ACCEPT)}" multiple hidden />`
+  // composer-file-input:start —— body 级 file input 单例（tests/chat-image-ui.test.js 抽取此块断言）
+  // 选图的 <input> 不能进 renderShell：2.8s 轮询全量重建会换掉节点，用户在系统选框选完文件后
+  // change 落在已脱离 document 的旧节点上，document 级委托收不到（DSHBOTS-64 根因）。
+  // 挂在 body 上只建一次，任何重渲染都动不了它，change 始终能冒泡到委托层。
+  function ensureComposerImageInput(doc = document) {
+    let el = doc.getElementById('composer-image-input')
+    if (el) return el
+    el = doc.createElement('input')
+    el.id = 'composer-image-input'
+    el.className = 'composer-image-input'
+    el.type = 'file'
+    el.accept = IMAGE_ACCEPT
+    el.multiple = true
+    el.hidden = true
+    doc.body.appendChild(el)
+    return el
   }
+  // composer-file-input:end
 
   // 消息附图块：只渲染元数据（文件名 + 大小），base64 不进消息 HTML；点开再按 id 取原图。
   function renderMessageImages(images) {
@@ -4154,8 +4167,8 @@
           renderKeepingChatScroll()
           break
         case 'attach-image':
-          // 打开隐藏的 file input，选完由 change 事件读文件（accept 已在 input 上限定四种 MIME）。
-          document.getElementById('composer-image-input')?.click()
+          // 打开 body 级单例 file input，选完由 change 事件读文件（accept 已在 input 上限定四种 MIME）。
+          ensureComposerImageInput().click()
           break
         case 'remove-pending-image':
           removePendingImage(target.dataset.imageKey)

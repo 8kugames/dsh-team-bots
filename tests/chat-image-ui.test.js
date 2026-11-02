@@ -79,13 +79,76 @@ test('附件按钮：复用图标集的 image 图标，群聊与单聊各一个'
   assert.match(source, /image: '<rect x="3"/, 'icons 应包含 image 图标')
   assert.equal((source.match(/\$\{attachImageButton\(\)\}/g) ?? []).length, 2, '群聊与单聊 composer 各接一个附件按钮')
   assert.match(source, /class="attach-btn" data-action="attach-image"/)
-  assert.match(source, /case 'attach-image':[\s\S]*?getElementById\('composer-image-input'\)\?\.click\(\)/)
+  assert.match(source, /case 'attach-image':[\s\S]*?ensureComposerImageInput\(\)\.click\(\)/)
 })
 
-test('file input：accept 限定四种 MIME、multiple、隐藏', () => {
-  assert.match(source, /<input type="file" id="composer-image-input"[^>]*accept="\$\{attr\(IMAGE_ACCEPT\)\}"[^>]*multiple hidden/)
+test('file input：body 级单例，不进 renderShell，change 委托读文件', () => {
+  assert.match(source, /function ensureComposerImageInput\(doc = document\)/)
+  assert.match(source, /doc\.body\.appendChild\(el\)/)
+  assert.doesNotMatch(source, /composerImageParts/, 'file input 不再渲染进 composer 模板（会被 2.8s 全量重建换掉）')
+  assert.doesNotMatch(source, /<input type="file"/, 'shell 模板里不得出现 file input')
   assert.match(source, /el\.id === 'composer-image-input'/)
   assert.match(source, /addPendingImages\(files\)/)
+})
+
+// —— DSHBOTS-64：文件选择跨渲染周期不丢 ——
+// 根因：input 渲染进 renderShell，2.8s 轮询 app.innerHTML 全量重建换掉节点，
+// 用户选完文件后 change 落在已脱离 document 的旧节点上，document 级委托收不到 → 静默丢失。
+// 修法：body 级单例。以下对真实 ensureComposerImageInput 做行为断言（不止源码文本）。
+const singletonBlock = /\/\/ composer-file-input:start[\s\S]*?\/\/ composer-file-input:end/.exec(source)?.[0]
+assert.ok(singletonBlock, 'ui/app.js 缺少 composer-file-input 标记块')
+const { ensureComposerImageInput } = new Function(
+  'IMAGE_ACCEPT', `${singletonBlock}\nreturn { ensureComposerImageInput }`,
+)(IMAGE_ACCEPT)
+
+// 迷你 DOM：body 子树（单例住处）+ app 子树（render() 全量重建时整体换新）。
+function fakeDoc() {
+  const world = { bodyChildren: [], appChildren: [] }
+  let created = 0
+  return {
+    body: { appendChild: (el) => world.bodyChildren.push(el) },
+    createElement(tag) { created += 1; return { tag } },
+    createdCount: () => created,
+    getElementById(id) {
+      return [...world.appChildren, ...world.bodyChildren].find(el => el.id === id) ?? null
+    },
+    mountInApp: (el) => world.appChildren.push(el),
+    rerender: () => { world.appChildren = [] },
+    bodyChildren: world.bodyChildren,
+  }
+}
+
+test('文件选择跨渲染周期不丢：单例挂 body 只建一次，任意次全量重建后节点不变', () => {
+  const doc = fakeDoc()
+  const first = ensureComposerImageInput(doc)
+  assert.equal(doc.createdCount(), 1)
+  assert.equal(doc.bodyChildren.length, 1, '挂在 body 上，不在 #app 子树里')
+  assert.equal(first.tag, 'input')
+  assert.equal(first.id, 'composer-image-input')
+  assert.equal(first.className, 'composer-image-input')
+  assert.equal(first.type, 'file')
+  assert.equal(first.accept, IMAGE_ACCEPT)
+  assert.equal(first.multiple, true)
+  assert.equal(first.hidden, true)
+
+  // 连续多轮 render() 全量重建（app 子树换新，body 不动）：取到的仍是同一节点。
+  for (let i = 0; i < 3; i += 1) {
+    doc.rerender()
+    assert.equal(ensureComposerImageInput(doc), first, `第 ${i + 1} 轮重建后仍取到同一节点`)
+    assert.equal(doc.getElementById('composer-image-input'), first, 'document 能查到的还是被点击的那个节点')
+  }
+  assert.equal(doc.createdCount(), 1, '只建一次')
+  assert.equal(doc.bodyChildren.length, 1, '不重复挂载')
+
+  // 对照旧结构（渲染进 shell 的 input）：一轮重建后从 document 查不到，
+  // change 落在这种节点上到不了 document 级委托 —— 这正是 DSHBOTS-64 的断点。
+  const shellInput = doc.createElement('input')
+  shellInput.id = 'composer-image-input'
+  doc.mountInApp(shellInput)
+  assert.equal(doc.getElementById('composer-image-input'), shellInput, '旧结构：在 shell 里时能查到')
+  doc.rerender()
+  assert.notEqual(doc.getElementById('composer-image-input'), shellInput, '旧结构：一轮重建后节点从 document 消失')
+  assert.equal(doc.getElementById('composer-image-input'), first, '新结构：body 单例不受重建影响')
 })
 
 test('待发缩略图条：渲染预览 + 可单删，附件满 4 张时按钮禁用', () => {
