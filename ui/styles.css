@@ -2242,6 +2242,15 @@ a.global-config.dsh-official-link:hover {
     margin-top: 9px;
     color: var(--ink-3);
     font-size: var(--fs-caption);
+    /* 允许收缩：长运行标签不把卡片底行撑宽。 */
+    min-width: 0;
+}
+/* 运行标签单行省略，避免长状态文案挤出卡片。 */
+.task-card-foot .task-run-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .task-card-foot .avatar.sm {
     margin-left: auto;
@@ -3161,6 +3170,9 @@ a.global-config.dsh-official-link:hover {
     font-weight: 600;
     line-height: 1.35;
     letter-spacing: -0.01em;
+    /* 任务详情标题常含长标识/长串，允许任意位置断行，避免撑破弹窗。 */
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 .modal-head p {
     margin: 4px 0 0;

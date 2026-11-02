@@ -1334,7 +1334,7 @@
       ${tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>` : ''}
       <div class="task-card-foot">
         ${run ? runDot(run.status) : ''}
-        <span>${runLabel}</span>
+        <span class="task-run-label">${runLabel}</span>
         ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
         ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}
       </div>
