@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import {
   applyRetention,
+  exportUsageCsv,
   recordUsage,
   reconcileUsage,
   reconciliationSummary,
@@ -228,8 +229,53 @@ test('未计价调用单独计数，不与已计价成本混算', async () => {
   })
 })
 
-test('对账记录按保留期清理', async () => {
+test('单聊口径：usageSnapshot 按 soloBotId 只统计该 bot 的项目外用量（DSHBOTS-9）', async () => {
   await withStore(async (store) => {
+    seedBot(store, 'b1', 'Builder')
+    seedBot(store, 'b2', 'Runner')
+    seedProject(store, { id: 'p1', key: 'P1', name: 'Alpha', slug: 'alpha' })
+    const now = new Date().toISOString()
+    // b1 两条项目外（单聊）运行 + 一条项目内运行；b2 一条项目外运行。
+    seedRun(store, { id: 'rs1', botId: 'b1', queuedAt: now })
+    seedRun(store, { id: 'rs2', botId: 'b1', queuedAt: now })
+    seedRun(store, { id: 'rp1', projectId: 'p1', botId: 'b1', queuedAt: now })
+    seedRun(store, { id: 'rs3', botId: 'b2', queuedAt: now })
+    recordUsage(store, {
+      sourceKey: 'u:rs1', run: { id: 'rs1', project_id: null, bot_id: 'b1' },
+      provider: 'fake', model: 'model-a', usage: { inputTokens: 100, outputTokens: 10 },
+    })
+    recordUsage(store, {
+      sourceKey: 'u:rs2', run: { id: 'rs2', project_id: null, bot_id: 'b1' },
+      provider: 'fake', model: 'model-a', usage: { inputTokens: 50, outputTokens: 5 },
+    })
+    recordUsage(store, {
+      sourceKey: 'u:rp1', run: { id: 'rp1', project_id: 'p1', bot_id: 'b1' },
+      provider: 'fake', model: 'model-a', usage: { inputTokens: 999, outputTokens: 99 },
+    })
+    recordUsage(store, {
+      sourceKey: 'u:rs3', run: { id: 'rs3', project_id: null, bot_id: 'b2' },
+      provider: 'fake', model: 'model-b', usage: { inputTokens: 7, outputTokens: 3 },
+    })
+
+    const snapshot = usageSnapshot(store, 'p1', 30, { soloBotId: 'b1' })
+    assert.equal(snapshot.solo.totalTokens, 165, 'solo 口径 = b1 项目外两条，不含项目内 999+99')
+    assert.equal(snapshot.solo.calls, 2)
+    assert.ok(snapshot.scopeTiers.solo, 'soloTiers 存在')
+    assert.equal(snapshot.scopeTiers.solo.byModel.length, 1)
+    assert.equal(snapshot.scopeTiers.solo.byModel[0].model, 'model-a')
+    assert.equal(snapshot.project.totalTokens, 1098, '项目口径不受 soloBotId 影响')
+    // 无 soloBotId 时不产出 solo 口径。
+    const plain = usageSnapshot(store, 'p1', 30)
+    assert.equal(plain.solo, null)
+    assert.equal(plain.scopeTiers.solo, null)
+    // CSV 导出同口径：只含 b1 的项目外明细。
+    const csv = exportUsageCsv(store, { soloBotId: 'b1', days: 30 })
+    const lines = csv.trim().split('\n')
+    assert.equal(lines.length, 3, '表头 + b1 两条项目外明细')
+  })
+})
+
+test('对账记录按保留期清理', async () => {  await withStore(async (store) => {
     seedBot(store, 'b1', 'Builder')
     const now = new Date().toISOString()
     seedRun(store, { id: 'r1', botId: 'b1', queuedAt: now })

@@ -183,6 +183,11 @@ function scopeFilters(scope) {
     filters.push('u.project_id = ?')
     params.push(scope.projectId)
   }
+  // 单聊口径（DSHBOTS-9）：该 Bot 的项目外用量，与 view.solo.runs 同口径。
+  if (scope.soloBotId) {
+    filters.push('u.bot_id = ?', 'u.project_id IS NULL')
+    params.push(scope.soloBotId)
+  }
   return { filters, params }
 }
 
@@ -369,15 +374,19 @@ function scopeUsage(store, scope, budgetCurrency) {
 
 export function usageSnapshot(store, projectId, days = 30, options = {}) {
   const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
+  const soloBotId = options.soloBotId ?? null
   const since = new Date(Date.now() - days * 86_400_000).toISOString()
   const globalScope = { since, projectId: null }
   const projectScope = projectId ? { since, projectId } : null
+  const soloScope = soloBotId ? { since, projectId: null, soloBotId } : null
   const global = scopeUsage(store, globalScope, budgetCurrency)
   const project = projectScope ? scopeUsage(store, projectScope, budgetCurrency) : { ...ZERO_TOTALS }
+  const solo = soloScope ? scopeUsage(store, soloScope, budgetCurrency) : null
   // byDay 只展示近 14 天。
   const cutoff = new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10)
   const globalTiers = tierSet(store, globalScope, budgetCurrency, cutoff)
   const projectTiers = projectScope ? tierSet(store, projectScope, budgetCurrency, cutoff) : null
+  const soloTiers = soloScope ? tierSet(store, soloScope, budgetCurrency, cutoff) : null
   const priceCount = store.get(
     "SELECT COUNT(DISTINCT provider || '|' || lower(model)) AS count FROM model_prices",
   )?.count ?? 0
@@ -386,12 +395,13 @@ export function usageSnapshot(store, projectId, days = 30, options = {}) {
     currency: budgetCurrency,
     global,
     project,
-    scope: { global, project },
+    solo,
+    scope: { global, project, solo },
     byBot: globalTiers.byBot,
     byProject: globalTiers.byProject,
     byModel: globalTiers.byModel,
     byDay: globalTiers.byDay,
-    scopeTiers: { global: globalTiers, project: projectTiers },
+    scopeTiers: { global: globalTiers, project: projectTiers, solo: soloTiers },
     priceCount,
     reconciliation: reconciliationSummary(store),
   }
@@ -610,13 +620,18 @@ function csvCell(value) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-export function exportUsageCsv(store, { projectId = null, days = 30 } = {}) {
+export function exportUsageCsv(store, { projectId = null, soloBotId = null, days = 30 } = {}) {
   const since = new Date(Date.now() - days * 86_400_000).toISOString()
   const filters = ['u.occurred_at >= ?']
   const params = [since]
   if (projectId) {
     filters.push('u.project_id = ?')
     params.push(projectId)
+  }
+  // 单聊口径：该 Bot 的项目外明细，与用量页 solo 口径一致。
+  if (soloBotId) {
+    filters.push('u.bot_id = ?', 'u.project_id IS NULL')
+    params.push(soloBotId)
   }
   const rows = store.all(
     `SELECT u.occurred_at AS occurred_at, u.run_id AS run_id, u.task_id AS task_id,

@@ -47,7 +47,7 @@ export const systemMethods = {
       outbox: this.outboxCounts(),
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
       revisions: {},
-      usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency() }),
+      usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null }),
       settings: this.settingsView(),
       runLimits: this.runLimitsView(),
       paths: {

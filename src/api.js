@@ -169,7 +169,7 @@ export async function handleAction(service, action, payload = {}, actor) {
     case 'export_usage_csv':
       return {
         filename: `dsh-team-usage-${new Date().toISOString().slice(0, 10)}.csv`,
-        csv: exportUsageCsv(service.store, { projectId: payload.projectId ?? null, days: payload.days ?? 30 }),
+        csv: exportUsageCsv(service.store, { projectId: payload.projectId ?? null, soloBotId: payload.soloBotId ?? null, days: payload.days ?? 30 }),
       }
     case 'outbox':
       return service.outboxView()
