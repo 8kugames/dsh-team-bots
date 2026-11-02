@@ -147,9 +147,62 @@ export const systemMethods = {
           'SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 60',
           soloBot.id,
         ).map(run => this.runView(run))
+        // 单聊页升级「调度页」的数据源：这个 bot 在各项目里的在办/待办任务与当前活跃运行。
+        view.dispatch = this.botDispatchView(soloBot.id)
       }
     }
     return view
+  },
+
+  /**
+   * bot 调度视图（DSHBOTS-28）：该 bot 名下任务与活跃运行的跨项目汇总。
+   * 只统计 active 项目（已归档项目的任务不再出现在调度页）。
+   * 在办 = in_progress/blocked/in_review，按最近更新排序；待办 = todo/backlog，按优先级权重再按位置排序。
+   */
+  botDispatchView(botId) {
+    const taskRows = (statuses, order) => this.store.all(
+      `SELECT t.*, p.key AS project_key, p.name AS project_name
+       FROM tasks t JOIN projects p ON p.id = t.project_id
+       WHERE t.assignee_bot_id = ? AND p.status = 'active' AND t.status IN (${statuses.map(() => '?').join(',')})
+       ORDER BY ${order} LIMIT 50`,
+      botId, ...statuses,
+    )
+    const activeRows = taskRows(
+      ['in_progress', 'blocked', 'in_review'],
+      't.updated_at DESC',
+    )
+    const pendingRows = taskRows(
+      ['todo', 'backlog'],
+      `CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+       t.position, t.number`,
+    )
+    const withProject = (row) => {
+      // JOIN 出来的 project_key/project_name 只是拼装用，不混进 taskView 的原始字段。
+      const { project_key: projectKey, project_name: projectName, ...task } = row
+      return { ...this.taskView(task), projectKey, projectName }
+    }
+    const runRows = this.store.all(
+      `SELECT r.*, p.key AS project_key
+       FROM runs r LEFT JOIN projects p ON p.id = r.project_id
+       WHERE r.bot_id = ? AND r.status IN ('queued','running')
+       ORDER BY r.queued_at DESC LIMIT 50`,
+      botId,
+    )
+    return {
+      botId,
+      tasks: {
+        active: activeRows.map(withProject),
+        pending: pendingRows.map(withProject),
+      },
+      // 项目外（单聊）运行没有项目 key，标「单聊」以便前端区分。
+      runs: runRows.map(row => {
+        const { project_key: joinedKey, ...run } = row
+        return {
+          ...this.runView(run),
+          projectKey: run.project_id ? joinedKey : '单聊',
+        }
+      }),
+    }
   },
 
   /**
