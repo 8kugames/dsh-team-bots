@@ -192,6 +192,24 @@ export const runsMethods = {
     const runs = this.store.all("SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')", taskId)
     for (const run of runs) await this.cancelRunInternal(run.id, false)
   },
+  // 看板拖出执行中（todo/blocked）：任务主动暂停而非终局取消，
+  // error_code='PAUSED_BY_BOARD' 让它与 SUPERSEDED（清理冗余，不进执行历史）区分开，保留可重试的执行历史。
+  async pauseRunsForBoard(taskId) {
+    const runs = this.store.all("SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')", taskId)
+    let paused = 0
+    for (const run of runs) {
+      await this.runtime?.cancelRun(run.id)
+      const changed = this.store.run(
+        "UPDATE runs SET status = 'canceled', ended_at = ?, cancel_requested = 1, error_code = 'PAUSED_BY_BOARD', error_message = ? WHERE id = ? AND status IN ('queued', 'running')",
+        nowIso(), '任务被移出执行中，运行暂停', run.id,
+      )
+      if (Number(changed?.changes ?? 0) === 1) {
+        this.insertRunEvent(run.id, 'board_pause', '任务被移出执行中，看板暂停')
+        paused += 1
+      }
+    }
+    return paused
+  },
   async retryRun(runId, actor = this.actor()) {
     const run = this.runRow(runId)
     if (!['failed', 'canceled'].includes(run.status)) throw conflict('只有失败或已取消的运行可以重试')

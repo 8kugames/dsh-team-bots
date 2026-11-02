@@ -260,7 +260,60 @@ export const tasksMethods = {
     return this.taskView(this.taskRow(taskId))
   },
   async transitionTask(taskId, status, actor = this.actor()) {
-    return this.updateTask(taskId, { status }, actor)
+    const before = this.taskRow(taskId)
+    await this.updateTask(taskId, { status }, actor)
+    await this.applyBoardDragDirective(before, status)
+    // 重新取数：拖拽联动可能刚入队或暂停了运行，沿用 updateTask 的返回会带过期的 latestRun。
+    return this.taskView(this.taskRow(taskId))
+  },
+
+  // 看板拖拽联动（DSHBOTS-54）：拖入「执行中」自动开工，拖出到 todo/blocked 自动暂停。
+  // 指令消息由系统直接发（sender_type='system'，不触发 bot 运行），实际执行靠这里入队的 task run；
+  // 出向 in_review/done/canceled 不暂停（canceled 由 updateTask 内 cancelRunsForTask 收尾）。
+  // 已有活跃 run 或无负责人时拖入侧整体跳过：消息声称「请立即开始」就必须真的开工。
+  async applyBoardDragDirective(before, afterStatus) {
+    if (before.status === afterStatus) return
+    if (before.status === 'todo' && afterStatus === 'in_progress') {
+      const active = this.store.get(
+        "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+        before.id,
+      )
+      if (active || !before.assignee_bot_id) return
+      const project = this.projectRow(before.project_id)
+      const identifier = `${project.key}-${before.number}`
+      const botName = this.botRow(before.assignee_bot_id).name
+      // 先入队后发消息：入队失败时宁可没有消息，也不留一条指向空转的「请立即开始」。
+      this.enqueueOutbox({
+        kind: 'task_run',
+        payload: { taskId: before.id, triggerType: 'board_resume' },
+        projectId: before.project_id,
+        taskId: before.id,
+        idempotencyKey: `task:${before.id}:board_resume:${Date.now()}`,
+      })
+      this.insertMessage({
+        projectId: before.project_id,
+        senderType: 'system',
+        senderId: 'system',
+        taskId: before.id,
+        body: `【系统指令】任务 ${identifier}「${before.title}」已进入执行中，请 ${botName} 立即开始。`,
+        mentions: [before.assignee_bot_id],
+      })
+      void this.tick()
+      return
+    }
+    if (before.status === 'in_progress' && (afterStatus === 'todo' || afterStatus === 'blocked')) {
+      const paused = await this.pauseRunsForBoard(before.id)
+      if (paused > 0) {
+        const project = this.projectRow(before.project_id)
+        this.insertMessage({
+          projectId: before.project_id,
+          senderType: 'system',
+          senderId: 'system',
+          taskId: before.id,
+          body: `【系统指令】任务 ${project.key}-${before.number} 已被移出执行中，相关运行已暂停。`,
+        })
+      }
+    }
   },
   async addComment(taskId, bodyInput, actor = this.actor()) {
     const task = this.taskRow(taskId)
@@ -327,6 +380,9 @@ export const tasksMethods = {
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued', `由 ${actor.type}:${actor.id} 触发`, createdAt,
     )
+    if (triggerType === 'board_resume') {
+      this.insertRunEvent(runId, 'board_resume', '看板拖入执行中，系统指令自动开工')
+    }
     return runId
   },
   enqueueOwnerTaskRun(task, kind) {
