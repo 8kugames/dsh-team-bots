@@ -4,7 +4,7 @@ import { exportUsageCsv } from './usage.js'
 const ACTIONS = new Set([
   'health', 'state', 'models', 'bot_detail',
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
-  'create_project', 'update_project', 'archive_project', 'browse_dirs',
+  'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
   'add_member', 'remove_member',
   'send_message', 'send_solo_message', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
   'retry_run', 'cancel_run', 'run_trajectory',
@@ -44,6 +44,14 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.updateProject(required(payload.projectId, 'projectId'), payload.patch ?? payload, actor)
     case 'archive_project':
       return service.archiveProject(required(payload.projectId, 'projectId'), actor)
+    case 'reopen_project':
+      return service.reopenProject(required(payload.projectId, 'projectId'), actor)
+    case 'remove_project_tracking':
+      return service.removeProjectTracking(
+        required(payload.projectId, 'projectId'),
+        { confirmName: payload.confirmName, deleteProductionDir: payload.deleteProductionDir === true },
+        actor,
+      )
     case 'add_member':
       return service.addProjectMember(required(payload.projectId, 'projectId'), required(payload.botId, 'botId'), actor)
     case 'remove_member':

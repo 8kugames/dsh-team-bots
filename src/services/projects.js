@@ -260,6 +260,22 @@ export const projectsMethods = {
           )
         }
       }
+      // 再开与归档对称：归档时冻结的项目记忆解回 active，逐条留 memory_events 审计。
+      // 已知不对称（接受）：冻结前 active/pending 一并冻为 frozen，再开统一解回 active，pending 记忆直接生效。
+      if (updates.status === 'active' && project.status === 'archived') {
+        const frozen = this.store.all(
+          "SELECT id FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'frozen'",
+          projectId,
+        )
+        for (const memory of frozen) {
+          this.store.run("UPDATE memories SET status = 'active', updated_at = ? WHERE id = ?", nowIso(), memory.id)
+          this.store.run(
+            `INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at)
+             VALUES (?, ?, 'unfrozen', ?, ?, 'frozen', 'active', ?)`,
+            id('mev'), memory.id, actor.type, actor.id, nowIso(),
+          )
+        }
+      }
       if (updates.name) this.store.run('UPDATE group_chats SET title = ? WHERE project_id = ?', updates.name, projectId)
       if (updates.owner_bot_id) {
         this.store.run('UPDATE group_chats SET owner_bot_id = ? WHERE project_id = ?', updates.owner_bot_id, projectId)
@@ -314,6 +330,74 @@ export const projectsMethods = {
   },
   archiveProject(projectId, actor = this.actor()) {
     return this.updateProject(projectId, { status: 'archived' }, actor)
+  },
+
+  // 归档项目的再开：与 archiveProject 对称的薄封装；记忆解冻在 updateProject 事务内对称补齐。
+  reopenProject(projectId, actor = this.actor()) {
+    const project = this.projectRow(projectId)
+    if (project.status !== 'archived') throw badRequest('项目未归档，无需再开')
+    const view = this.updateProject(projectId, { status: 'active' }, actor)
+    // 再开成功后补一条显式审计（updateProject 事务内已有 project.update 行）。
+    this.audit(actor, 'project.reopen', 'project', projectId, { key: project.key, name: project.name })
+    return view
+  },
+
+  // 移除已归档项目的全部管理数据（含项目行本身）。全局口径不动的三张表：usage_events（FK 置空，
+  // 用量是全局历史）、audit_log（append-only，本次移除本身要可审计）、solo_messages（Bot 域，与项目无关）。
+  // 逐表显式删除（子表先于父表），不依赖隐式级联；proposals 的 FK 是 SET NULL，必须在项目行删除前清掉。
+  removeProjectTracking(projectId, input = {}, actor = this.actor()) {
+    const project = this.projectRow(projectId)
+    if (project.status !== 'archived') throw badRequest('项目未归档，先归档再移除追踪')
+    const confirmName = typeof input.confirmName === 'string' ? input.confirmName.trim() : ''
+    if (confirmName !== project.name) throw badRequest('确认名称与项目名不一致，已拒绝移除')
+    const active = this.store.get(
+      "SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status IN ('queued', 'running')",
+      projectId,
+    )
+    if (Number(active?.n) > 0) throw badRequest('项目仍有排队或运行中的 run，不能移除追踪')
+    const dir = this.projectWorkDir(project)
+    this.store.transaction(() => {
+      const runIds = 'SELECT id FROM runs WHERE project_id = ?'
+      const taskIds = 'SELECT id FROM tasks WHERE project_id = ?'
+      this.store.run('DELETE FROM messages WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM bot_messages WHERE project_id = ?', projectId)
+      this.store.run(`DELETE FROM run_trajectory WHERE run_id IN (${runIds})`, projectId)
+      this.store.run(`DELETE FROM run_events WHERE run_id IN (${runIds})`, projectId)
+      this.store.run(`DELETE FROM usage_reconciliation WHERE run_id IN (${runIds})`, projectId)
+      this.store.run('DELETE FROM runs WHERE project_id = ?', projectId)
+      this.store.run(`DELETE FROM task_labels WHERE task_id IN (${taskIds})`, projectId)
+      this.store.run(`DELETE FROM task_dependencies WHERE task_id IN (${taskIds}) OR depends_on_task_id IN (${taskIds})`, projectId, projectId)
+      this.store.run(`DELETE FROM task_comments WHERE task_id IN (${taskIds})`, projectId)
+      this.store.run(`DELETE FROM task_events WHERE task_id IN (${taskIds})`, projectId)
+      this.store.run('DELETE FROM tasks WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM session_bindings WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM terminal_commands WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM outbox WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM group_chats WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM secret_requests WHERE project_id = ?', projectId)
+      this.store.run("DELETE FROM secrets WHERE scope = 'project' AND project_id = ?", projectId)
+      this.store.run("DELETE FROM skill_bindings WHERE scope_type = 'project' AND scope_id = ?", projectId)
+      // memories 无 FK 到 projects；memory_events 走 FK 级联、memories_fts 走删除触发器。
+      this.store.run("DELETE FROM memories WHERE scope_type = 'project' AND scope_id = ?", projectId)
+      this.store.run('DELETE FROM project_members WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM proposals WHERE project_id = ?', projectId)
+      this.store.run('DELETE FROM projects WHERE id = ?', projectId)
+      this.audit(actor, 'project.remove_tracking', 'project', projectId, {
+        key: project.key, name: project.name,
+        deleteProductionDir: input.deleteProductionDir === true, dir,
+      })
+    })
+    // 生产目录默认保留；仅显式要求且确认名已匹配时，删解析出的这一个精确路径，不做任何路径推导。
+    // 失败只 warn 不回滚（管理数据已按口径清完），并补审计行如实记录。
+    if (input.deleteProductionDir === true) {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch (error) {
+        this.logger.warn?.(`dsh-team: 移除项目 ${project.key} 生产目录失败：${error?.message ?? error}`)
+        this.audit(actor, 'project.remove_tracking_dir', 'project', projectId, { dir, deleted: false })
+      }
+    }
+    return { removed: true, key: project.key }
   },
 
   // 邀请已有 bot 加入项目。与 updateProject 的 memberIds 全量替换不同，这里做增量并给出精确错误语义。
