@@ -5,7 +5,7 @@
 
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { clampNumber, id, nowIso, projectKey, TASK_ID_PATTERN, text } from '../util.js'
-import { parseWriteScopes, readWriteScopes } from './write-scopes.js'
+import { parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
 
 export const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 
@@ -31,7 +31,10 @@ export const tasksMethods = {
     if (assigneeId) this.assertMember(project.id, assigneeId)
     const status = input.status && TASK_STATUSES.has(input.status) ? input.status : (assigneeId ? 'todo' : 'backlog')
     const priority = TASK_PRIORITIES.has(input.priority) ? input.priority : 'medium'
-    const writeScopes = parseWriteScopes(input.writeScopes)
+    // 写范围：显式传参优先（含空数组 = 明确不声明）；未传时从描述的「写范围：」行兜底解析。
+    const writeScopes = input.writeScopes === undefined || input.writeScopes === null
+      ? parseWriteScopesFromDescription(input.description)
+      : parseWriteScopes(input.writeScopes)
     const taskId = id('task')
     const createdAt = nowIso()
     let number
@@ -338,6 +341,7 @@ export const tasksMethods = {
       description: input.description,
       assigneeBotId: member.id,
       priority: input.priority,
+      writeScopes: input.write_scopes,
       autoStart: true,
       postCard: true,
     }, actor)

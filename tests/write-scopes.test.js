@@ -8,6 +8,8 @@ import {
   WRITE_SCOPE_MAX,
   WRITE_SCOPE_MAX_LEN,
 } from '../src/service.js'
+// 兜底解析函数走域模块直连：门面按 DSHBOTS-16 纪律不加代码。
+import { parseWriteScopesFromDescription } from '../src/services/write-scopes.js'
 
 // 写范围判定的纯函数：调度器据此决定同项目的两个写运行能否并行。
 // 口径：两侧都声明了写范围且路径前缀互不重叠才放行；任一未声明（空集合）按保守串行。
@@ -69,4 +71,25 @@ test('读库侧的写范围快照：坏数据降级为空集合（未声明）',
   assert.deepEqual(readWriteScopes(undefined), [])
   assert.deepEqual(readWriteScopes('{bad json'), [])
   assert.deepEqual(readWriteScopes('["/abs/path"]'), [])
+})
+
+test('描述兜底解析：行首「写范围：」/「write_scopes:」行可解析', () => {
+  // 中英文冒号、逗号/顿号分隔、每项 trim、空项剔除、去重
+  assert.deepEqual(parseWriteScopesFromDescription('做点事\n写范围：ui/a.js, src/b.js'), ['ui/a.js', 'src/b.js'])
+  assert.deepEqual(parseWriteScopesFromDescription('write_scopes: ui/a.js、src/b.js'), ['ui/a.js', 'src/b.js'])
+  assert.deepEqual(parseWriteScopesFromDescription('write_scopes： ui/a.js ， src/b.js'), ['ui/a.js', 'src/b.js'])
+  assert.deepEqual(parseWriteScopesFromDescription('写范围: docs/x.md'), ['docs/x.md'])
+  assert.deepEqual(parseWriteScopesFromDescription('写范围：ui/a.js, , ui/a.js'), ['ui/a.js'])
+})
+
+test('描述兜底解析：非行首提及与未命中返回空集合', () => {
+  // 必须行首，句中提及不算，避免误伤普通叙述
+  assert.deepEqual(parseWriteScopesFromDescription('注意本单写范围：ui/a.js'), [])
+  assert.deepEqual(parseWriteScopesFromDescription('本单没有写范围行'), [])
+  assert.deepEqual(parseWriteScopesFromDescription(undefined), [])
+})
+
+test('描述兜底解析：非法路径直接报错，不静默降级', () => {
+  assert.throws(() => parseWriteScopesFromDescription('写范围：../outside'), /写范围包含非法路径/)
+  assert.throws(() => parseWriteScopesFromDescription('write_scopes: /etc/passwd'), /写范围包含非法路径/)
 })

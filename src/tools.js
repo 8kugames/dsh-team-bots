@@ -16,6 +16,7 @@ export function installTeamTools(ctx, service) {
         title: { type: 'string', description: 'Short actionable task title (new tasks only)' },
         description: { type: 'string', description: 'Self-contained instructions, constraints and acceptance criteria (new tasks only)' },
         priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority' },
+        write_scopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths this task will modify (new tasks only); the scheduler runs tasks with disjoint scopes in parallel. Omit to parse a `写范围：`/`write_scopes:` line from the description instead' },
         task: { type: 'string', description: 'Existing task to re-dispatch, as KEY-N (for example DEMO-3). Omit to create a new task' },
       },
       required: ['assignee'],

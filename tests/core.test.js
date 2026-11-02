@@ -435,3 +435,85 @@ test('/clear empties group chat history without touching tasks or memories', asy
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// ── 派单链路声明写范围（DSHBOTS-26）：assignFromBot → createTask → enqueueTaskRun 快照 ──
+
+function taskRunScopes(store, taskId) {
+  return store.get("SELECT write_scopes FROM runs WHERE task_id = ? AND kind = 'task'", taskId)?.write_scopes
+}
+
+test('owner 派单传 write_scopes：任务落库且派生运行快照带同一集合', async () => {
+  const { root, store, service, sessionId } = await ownerSetup('WSC')
+  try {
+    const task = await service.assignFromBot(sessionId, {
+      assignee: 'Builder', title: '改聊天模块', description: '实现需求。',
+      write_scopes: ['ui/modules/chat.js'],
+    })
+    assert.deepEqual(task.writeScopes, ['ui/modules/chat.js'])
+    assert.equal(store.get('SELECT write_scopes FROM tasks WHERE id = ?', task.id)?.write_scopes, '["ui/modules/chat.js"]')
+    await waitFor(() => taskRunScopes(store, task.id) !== undefined)
+    assert.equal(taskRunScopes(store, task.id), '["ui/modules/chat.js"]')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('owner 派单描述带「写范围：」行：兜底解析落库且运行快照带上', async () => {
+  const { root, store, service, sessionId } = await ownerSetup('WSD')
+  try {
+    const task = await service.assignFromBot(sessionId, {
+      assignee: 'Builder', title: '改调度模块',
+      description: '按 GDD 实现。\n写范围：ui/modules/scheduler.js, src/services/scheduler.js',
+    })
+    assert.deepEqual(task.writeScopes, ['ui/modules/scheduler.js', 'src/services/scheduler.js'])
+    await waitFor(() => taskRunScopes(store, task.id) !== undefined)
+    assert.equal(
+      taskRunScopes(store, task.id),
+      '["ui/modules/scheduler.js","src/services/scheduler.js"]',
+    )
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('owner 派单写范围非法项直接报错，不落库不建运行', async () => {
+  const { root, store, service, sessionId } = await ownerSetup('WSX')
+  try {
+    // 显式入参非法
+    await assert.rejects(
+      () => service.assignFromBot(sessionId, {
+        assignee: 'Builder', title: '越界任务', write_scopes: ['../outside'],
+      }),
+      /写范围包含非法路径/,
+    )
+    // 描述兜底同样报错
+    await assert.rejects(
+      () => service.assignFromBot(sessionId, {
+        assignee: 'Builder', title: '越界任务', description: '写范围：/etc/passwd',
+      }),
+      /写范围包含非法路径/,
+    )
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM tasks WHERE title = '越界任务'")?.n, 0)
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('owner 派单不传写范围且描述无写范围行：任务与运行保持空集合（保守串行）', async () => {
+  const { root, store, service, sessionId } = await ownerSetup('WSN')
+  try {
+    const task = await service.assignFromBot(sessionId, {
+      assignee: 'Builder', title: '普通任务', description: '不含写范围行。',
+    })
+    assert.deepEqual(task.writeScopes, [])
+    assert.equal(store.get('SELECT write_scopes FROM tasks WHERE id = ?', task.id)?.write_scopes, '[]')
+    await waitFor(() => taskRunScopes(store, task.id) !== undefined)
+    assert.equal(taskRunScopes(store, task.id), '[]')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -40,6 +40,17 @@ export function parseWriteScopes(input) {
   return scopes
 }
 
+// 兜底解析：任务描述里行首的 `写范围：a, b` 或 `write_scopes: a, b` 行（中英文冒号、
+// 逗号/顿号分隔、每项 trim）。必须行首，避免误伤句中提及；多条命中取第一条。
+// 解析结果交给 parseWriteScopes 校验，非法项直接报错；未命中返回 []，保持保守串行。
+const DESCRIPTION_SCOPE_LINE = /(?:^|\n)[ \t]*(?:写范围|write_scopes)[ \t]*[：:][ \t]*([^\n]+)/i
+
+export function parseWriteScopesFromDescription(description) {
+  const match = DESCRIPTION_SCOPE_LINE.exec(String(description ?? ''))
+  if (!match) return []
+  return parseWriteScopes(match[1].split(/[,，、]/).map(item => item.trim()).filter(Boolean))
+}
+
 // 读取库里的写范围快照：坏数据一律降级成「未声明」，即保守串行。
 export function readWriteScopes(raw) {
   if (raw === undefined || raw === null || raw === '') return []
