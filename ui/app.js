@@ -2372,8 +2372,8 @@
   const artifactFileUrl = (runId, path) =>
     `/api/dsh-team/artifact-file?runId=${encodeURIComponent(runId)}&path=${encodeURIComponent(path)}`
 
-  // 已完成写运行的交付产物：图片内联预览（点击新窗口打开），其余文件列出路径与扩展名徽标。
-  function runArtifacts(run) {
+  // 已完成写运行的交付产物：默认收起（与「查看输出」同一折叠口径），展开后图片内联预览（点击新窗口打开），其余文件列出路径与扩展名徽标。
+  function runArtifacts(state, run) {
     const list = Array.isArray(run.artifacts) ? run.artifacts : []
     if (run.status !== 'succeeded' || list.length === 0) return ''
     const rows = []
@@ -2389,7 +2389,7 @@
       }
     }
     if (!rows.length) return ''
-    return `<div class="artifact-list"><div class="eyebrow" style="margin:8px 0 5px">交付产物</div>${rows.join('')}</div>`
+    return `<details style="margin-top:6px"${panelAttrs(state, `run-artifacts:${run.id}`)}><summary class="summary-link">交付产物（${rows.length}）</summary><div class="artifact-list">${rows.join('')}</div></details>`
   }
 
   // ===== 思考过程：Bot 运行轨迹（run_trajectory）=====
@@ -2446,7 +2446,7 @@
     return modalShell({
       title: `${task.identifier} · ${task.title}`,
       badge: '',
-      size: 'wide',
+      size: 'task',
       body: `<div class="task-detail-grid">
         <div class="task-detail-main">
           <form data-form="update-task" id="task-form">
@@ -2480,7 +2480,7 @@
             <div class="run-row-meta"><span>${esc(duration(run.started_at, run.ended_at))}</span><span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
             ${run.error_message ? `<div class="run-output error">${esc(run.error_message)}</div>` : ''}
             ${run.output ? `<details style="margin-top:6px"${panelAttrs(state, `run-output:${run.id}`)}><summary class="summary-link">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
-            ${runArtifacts(run)}
+            ${runArtifacts(state, run)}
           </div>`).join('')}</div>
           <div class="divider"></div>
           <div class="eyebrow" style="margin-bottom:7px">详情</div>

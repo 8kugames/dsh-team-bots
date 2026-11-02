@@ -3069,6 +3069,15 @@ a.global-config.dsh-official-link:hover {
 .modal.wide {
     width: min(920px, 100%);
 }
+/* 任务详情：占页面宽度 68.2%（窄屏回落到全宽）。 */
+.modal.task {
+    width: min(68.2vw, 100%);
+}
+@media (max-width: 900px) {
+    .modal.task {
+        width: 100%;
+    }
+}
 .modal.small {
     width: min(460px, 100%);
 }
