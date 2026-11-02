@@ -10,6 +10,7 @@ const ACTIONS = new Set([
   'retry_run', 'cancel_run', 'run_trajectory',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
+  'approval_decide',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
   'settings', 'update_settings', 'export_usage_csv', 'reconcile_usage', 'outbox',
@@ -120,6 +121,8 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.createProposal(payload, actor)
     case 'decide_proposal':
       return service.decideProposal(required(payload.proposalId, 'proposalId'), required(payload.decision, 'decision'), actor)
+    case 'approval_decide':
+      return service.decideApproval(required(payload.approvalId, 'approvalId'), required(payload.decision, 'decision'), actor)
     case 'evaluate_proposal':
       return service.evaluateProposal(required(payload.proposalId, 'proposalId'), payload.evaluation ?? payload, actor)
     case 'promote_proposal':

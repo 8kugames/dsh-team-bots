@@ -8,6 +8,7 @@ import { badRequest, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
 import { syncSkills } from '../skills.js'
+import { ensureApprovalSchema } from './approvals.js'
 import { id, nowIso } from '../util.js'
 
 
@@ -18,6 +19,8 @@ export const coreMethods = {
     runtime.setCompletionHandler(result => this.finishRun(result))
     // 轨迹等落库内容先过密钥掩码再写，掩码函数由 service 提供。
     runtime.setMask?.(value => this.maskSecretValues(value))
+    // 审批域监听宿主 approval/request waterfall；测试桩无 ctx.on 时静默跳过。
+    this.approvalsAttach?.(runtime)
   },
   async initialize() {
     if (this.ready) return this.ready
@@ -78,6 +81,9 @@ export const coreMethods = {
           id('evt'), run.id, '宿主重启，运行重新排队', nowIso(),
         )
       }
+      // 审批表与 messages 审批列的迁移由审批域自管（db.js 保持不超 800 行）；
+      // 同一步顺手把残留 pending 置 timeout——宿主侧请求随进程消失，不可能再被应答。
+      ensureApprovalSchema(this.store)
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
       this.store.run(
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,

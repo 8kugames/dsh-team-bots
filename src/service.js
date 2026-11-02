@@ -31,6 +31,7 @@ import { terminalMethods } from './services/terminal.js'
 import { usageMethods } from './services/usage.js'
 import { systemMethods } from './services/system.js'
 import { wechatMethods } from './services/wechat.js'
+import { approvalsMethods } from './services/approvals.js'
 import { coreMethods } from './services/core.js'
 
 export { WRITE_SCOPE_MAX, WRITE_SCOPE_MAX_LEN, parseWriteScopes, readWriteScopes, writeScopePathsOverlap, writeScopesOverlap } from './services/write-scopes.js'
@@ -86,5 +87,6 @@ defineMethods(TeamService.prototype, [
   usageMethods,
   systemMethods,
   wechatMethods,
+  approvalsMethods,
   coreMethods,
 ])

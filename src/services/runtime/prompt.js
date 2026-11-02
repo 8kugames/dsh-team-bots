@@ -334,7 +334,8 @@ Do the task in the project workspace. Use tools as needed. End with a concise de
 When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`
     }
     const recent = this.store.all(
-      'SELECT id, sender_type, sender_id, body, task_id FROM messages WHERE project_id = ? ORDER BY created_at DESC LIMIT 12',
+      // 审批卡片（kind='approval'）是给人看的 UI 锚点，不进 bot 上下文；旧行迁移后回填 'text'。
+      "SELECT id, sender_type, sender_id, body, task_id FROM messages WHERE project_id = ? AND kind = 'text' ORDER BY created_at DESC LIMIT 12",
       project.id,
     ).reverse()
     const context = recent.map((item) => {

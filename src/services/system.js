@@ -78,6 +78,8 @@ export const systemMethods = {
         project.id,
       )
       view.messages = messages.map(message => this.messageView(message))
+      // 待审批条目随群聊数据下发：卡片状态渲染时以这张表为准，消息行只是锚点。
+      view.approvals = this.approvalsForProject(project.id)
       view.tasks = this.store.all(
         `SELECT t.*, b.name AS assignee_name FROM tasks t LEFT JOIN bots b ON b.id = t.assignee_bot_id
          WHERE t.project_id = ? ORDER BY
