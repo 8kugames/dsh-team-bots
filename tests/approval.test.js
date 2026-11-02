@@ -11,6 +11,9 @@ import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 
 class StubRuntime {
+  constructor(ctx = null) {
+    this.ctx = ctx
+  }
   setCompletionHandler() {}
   async catalog() { return [] }
   async validateBotConfig() {}
@@ -18,10 +21,40 @@ class StubRuntime {
   async cancelRun() { return true }
 }
 
+// 宿主 cordis 瀑布流语义复刻（cordis/lib/index.js 的 EventsService.on / dispatch / waterfall）：
+// 监听器按注册先后排队（prepend 插到队首）；waterfall 逐个 shift 监听器，
+// 先到的监听器不调用 next() 就截断后续链路（含最内层兜底）。
+// scope 过滤：宿主 dsh-scope 的 carrier filter 对「未打 scope 标」的 ctx 一律放行，插件 ctx 即属此列。
+class FakeCordisCtx {
+  constructor() {
+    this.hooks = new Map()
+  }
+  on(name, listener, options = {}) {
+    const list = this.hooks.get(name) ?? []
+    this.hooks.set(name, list)
+    const record = { listener }
+    if (options.prepend === true) list.unshift(record)
+    else list.push(record)
+    return () => {
+      const index = list.indexOf(record)
+      if (index >= 0) list.splice(index, 1)
+    }
+  }
+  effect() { return () => {} }
+  waterfall(carrier, name, req, inner) {
+    const cbs = (this.hooks.get(name) ?? []).map(record => record.listener)
+    const next = () => {
+      const cb = cbs.shift() ?? inner
+      return cb.call(carrier, req, () => next())
+    }
+    return next()
+  }
+}
+
 const now = () => new Date().toISOString()
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-async function setup() {
+async function setup({ ctx = null } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-approval-'))
   const workspace = join(root, 'workspace')
   const dataDir = join(root, 'data')
@@ -29,7 +62,7 @@ async function setup() {
   const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
+  service.attachRuntime(new StubRuntime(ctx))
   await service.initialize()
   service.started = true
   // 全局压短审批等待：失败路径遗留的定时器不至于吊住测试进程；需要具体时长的用例自行覆盖。
@@ -43,10 +76,10 @@ function primeProject(store, service, name) {
   return service.createProject({ name, key: name.replace(/[^A-Za-z]/g, '').slice(0, 8).toUpperCase(), ownerBotId: director.id })
 }
 
-function bindSession(store, { sessionId, botId, projectId }) {
+function bindSession(store, { sessionId, botId, projectId, kind = 'project', taskId = null }) {
   store.run(
-    `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, created_at) VALUES (?, ?, ?, 'project', ?)`,
-    sessionId, botId, projectId, now(),
+    `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    sessionId, botId, projectId, kind, taskId, now(),
   )
 }
 
@@ -222,5 +255,58 @@ test('state 视图带 approvals，审批消息不进 bot 上下文', async () =>
     const context = runtime.promptFor({ run: { kind: 'task' }, bot: director, project, task: null })
     assert.ok(!context.includes('【审批请求】'), '审批卡片不得进入 bot 提示词上下文')
     service.settleApproval(view.approvals[0].id, 'cancelled', null, null)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// DSHBOTS-61：审批认领必须抢在宿主原生审批面板之前。宿主 dsh-api-remotes（web bundle 比插件先加载）
+// 注册的 approval/request 监听器拿到原生面板的答案后直接 resolve、不调 next()——按 cordis 的注册序
+// 瀑布流语义，先到的监听器即截断后续链路，插件若排在其后就永远收不到请求（卡片不出现，全落原生界面）。
+test('任务运行会话的审批被插件认领：插件先于原生面板应答，卡片进群聊', async () => {
+  const ctx = new FakeCordisCtx()
+  const native = []
+  ctx.on('approval/request', request => {
+    native.push(request)
+    return Promise.resolve('allowed-once')
+  })
+  const { root, store, service } = await setup({ ctx })
+  try {
+    const project = await primeProject(store, service, 'Approval Task')
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const taskId = 'task-approval-run'
+    store.run(
+      `INSERT INTO tasks(id, project_id, number, title, description, status, priority, creator_type, creator_id, review_target, position, write_scopes, version, created_at, updated_at)
+       VALUES (?, ?, 1, '提权执行', '', 'todo', 'medium', 'user', ?, 'user', 0, '[]', 1, ?, ?)`,
+      taskId, project.id, director.id, now(), now(),
+    )
+    bindSession(store, { sessionId: 'sess-task-run', botId: director.id, projectId: project.id, kind: 'task', taskId })
+    const { req } = makeReq({ sessionId: 'sess-task-run', zh: '需要执行一次提权 bash 命令' })
+    const outcome = ctx.waterfall({ agent: req.agent }, 'approval/request', req, () => Promise.resolve('unavailable'))
+    const row = store.get("SELECT * FROM approvals WHERE status = 'pending'")
+    assert.ok(row, '任务运行会话的审批应被插件认领')
+    assert.equal(row.session_id, 'sess-task-run')
+    assert.equal(row.tool_name, 'bash')
+    assert.equal(native.length, 0, '插件认领后原生审批面板不应再参与')
+    assert.equal(messageOf(store, row.id).kind, 'approval')
+    const view = await service.decideApproval(row.id, 'allow')
+    assert.equal(view.status, 'allowed')
+    assert.equal(await outcome, 'allowed-once')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('未绑定会话仍透传：原生面板照常接管，不落审批', async () => {
+  const ctx = new FakeCordisCtx()
+  const native = []
+  ctx.on('approval/request', request => {
+    native.push(request)
+    return Promise.resolve('allowed-once')
+  })
+  const { root, store, service } = await setup({ ctx })
+  try {
+    const { req } = makeReq({ sessionId: 'sess-not-bound' })
+    const outcome = await ctx.waterfall({ agent: req.agent }, 'approval/request', req, () => Promise.resolve('unavailable'))
+    assert.equal(native.length, 1, '未绑定会话应透传给宿主原生界面')
+    assert.equal(outcome, 'allowed-once')
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM approvals').n, 0)
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

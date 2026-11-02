@@ -57,7 +57,12 @@ export const approvalsMethods = {
     this.approvalPending = new Map()
     if (this.approvalsAttached || !runtime?.ctx?.on) return
     this.approvalsAttached = true
-    const off = runtime.ctx.on('approval/request', (req, next) => this.handleApprovalRequest(req, next))
+    // prepend：宿主 approval/request 是「按注册序」的瀑布流——先执行的监听器若不调用 next()，
+    // 就截断后面整条链路。web bundle 的 dsh-api-remotes 比本插件先加载，它把请求转给 DSH 原生审批面板，
+    // 面板给出答案后直接 resolve 且不调 next()；插件若排在其后就永远收不到请求，审批请求全落到原生界面
+    // （approvals 表零记录、工作台审批卡片不出现）。插到队首后：命中项目绑定的 bot 会话由插件自己应答，
+    // 未命中的照旧 next() 透传给原生界面。
+    const off = runtime.ctx.on('approval/request', (req, next) => this.handleApprovalRequest(req, next), { prepend: true })
     runtime.ctx.effect?.(() => () => {
       off?.()
       for (const pending of this.approvalPending.values()) clearTimeout(pending.timer)
