@@ -21,6 +21,8 @@
     composerHeight: null,
     // 群聊引用回复：{ id, senderName, excerpt }，非空时 composer 上方显示引用条，随发送/取消清除。
     replyTo: null,
+    // 折叠面板（<details data-panel>）展开态的 key 集合，toggle 时增删；render 全量重建后据此恢复 open 属性。
+    openPanels: new Set(),
     ac: null,
     busy: 0,
     chatAtBottom: true,
@@ -614,6 +616,33 @@
     document.getElementById('composer-input')?.focus()
   }
 
+  // panel-state:start —— 折叠面板（<details data-panel>）展开态纯逻辑，tests/panel-state.test.js 按本标记块抽取断言。
+  // key 约定：Bot 私信 dm；技能版本 skill-versions:<slug>；提案差异 proposal:<id>；轨迹条目 traj:<runId>:<index>；运行输出 run-output:<runId>。
+  function panelKey(el) {
+    return el?.getAttribute?.('data-panel') || null
+  }
+
+  function isPanelOpen(state, key) {
+    return typeof key === 'string' && key.length > 0 && state?.openPanels instanceof Set && state.openPanels.has(key)
+  }
+
+  function panelOpenAttr(state, key) {
+    return isPanelOpen(state, key) ? ' open' : ''
+  }
+
+  function applyPanelToggle(state, key, open) {
+    if (typeof key !== 'string' || key.length === 0 || !(state?.openPanels instanceof Set)) return state
+    if (open) state.openPanels.add(key)
+    else state.openPanels.delete(key)
+    return state
+  }
+  // panel-state:end
+
+  // details 开标签公共片段：稳定 key（data-panel，供 toggle 事件定位）+ 依展开态恢复的 open；依赖 attr()，故在纯逻辑标记块之外。
+  function panelAttrs(state, key) {
+    return ` data-panel="${attr(key)}"${panelOpenAttr(state, key)}`
+  }
+
   function render() {
     if (!state.data) return
     state.ac = null
@@ -786,10 +815,14 @@
               ${members.map(member => {
                 const bot = botById(member.id)
                 if (!bot) return ''
-                return `<div class="side-row">
+                const dotClass = member.run_status === 'running' ? 'running' : member.run_status === 'failed' ? 'failed' : ''
+                const dotText = member.run_status === 'running' ? '运行中' : member.run_status === 'failed' ? '最近运行失败' : '空闲'
+                const model = member.modelRef ?? bot.modelRef ?? '未配置模型'
+                return `<div class="side-row" title="${esc(bot.name)} · ${esc(model)} · ${dotText}">
                   ${avatar(bot, 'sm')}
                   <span class="side-row-title">${esc(bot.name)}</span>
-                  <span class="faint">${member.member_role === 'owner' ? '总监' : esc(bot.role || '成员')}</span>
+                  <span class="side-row-status">${esc(model)}</span>
+                  <span class="run-dot ${dotClass}" aria-label="${dotText}"></span>
                 </div>`
               }).join('')}
             </div>
@@ -976,7 +1009,7 @@
   function renderDirectMessagesCard() {
     const items = state.data?.directMessages ?? []
     if (items.length === 0) return ''
-    return `<details class="chat-subpanel">
+    return `<details class="chat-subpanel"${panelAttrs(state, 'dm')}>
       <summary title="展开 / 收起 Bot 私信">${icon('chevron', 'chev')}<span>Bot 私信</span><span class="subpanel-count">${items.length}</span></summary>
       <div class="subpanel-body">
         ${items.length === 0 ? '<div class="subpanel-empty">Bot 之间经 <code>team_message_bot</code> 的直接交互会出现在这里。</div>' : items.map(dm => `
@@ -1327,7 +1360,8 @@
     const versions = skill?.versions ?? []
     if (!versions.length) return ''
     const current = String(currentSkillVersion(skill))
-    return `<details class="skill-versions">
+    const key = `skill-versions:${skill.slug}`
+    return `<details class="skill-versions"${panelAttrs(state, key)}>
       <summary class="summary-link">版本历史（${versions.length}）</summary>
       ${versions.map(version => `<div class="list-meta">
         <span class="mono">v${esc(version.version)}</span>
@@ -1434,7 +1468,7 @@
             <div class="proposal-body" style="margin-top:0">${esc(proposalPreview(proposal).slice(0, 6000))}</div>
             <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>由 ${esc(proposal.decided_by)} 决定</span>` : ''}${proposal.approvedBy ? `<span>审批人 ${esc(proposal.approvedBy)}</span>` : ''}${proposal.appliedAt ? `<span>已生效 ${esc(formatTime(proposal.appliedAt))}</span>` : ''}${proposal.canary ? `<span>灰度 ${esc(canaryText(proposal.canary))}</span>` : ''}</div>
             ${proposal.evaluation ? `<div class="list-desc">评估 · ${esc(evaluationText(proposal.evaluation))}</div>` : ''}
-            ${proposal.status === 'pending' ? `<details class="proposal-diff">
+            ${proposal.status === 'pending' ? `<details class="proposal-diff"${panelAttrs(state, `proposal:${proposal.id}`)}>
               <summary class="btn small">${icon('chevron', 'chev')}查看差异</summary>
               <div class="proposal-body" style="margin-top:8px">${esc(proposalDiffText(proposal).slice(0, 4000))}</div>
             </details>
@@ -1961,7 +1995,7 @@
       case 'memory': return modalMemory(modal.memory)
       case 'proposal': return modalProposal(modal.kind)
       case 'price': return modalPrice(modal.price ?? {})
-      case 'trajectory': return modalTrajectory(modal.detail)
+      case 'trajectory': return modalTrajectory(modal.detail, modal.runId)
       default: return ''
     }
   }
@@ -2161,7 +2195,7 @@
     return title || TRAJ_LABELS[kind] || ''
   }
 
-  function trajectoryEntry(entry) {
+  function trajectoryEntry(entry, index = 0, runId = '') {
     const kind = String(entry?.kind ?? '')
     const title = String(entry?.title ?? '').trim()
     const detail = String(entry?.detail ?? '')
@@ -2174,18 +2208,18 @@
     }
     if (kind === 'thinking' || kind === 'tool_call' || kind === 'tool_result') {
       const body = detail ? `<div class="traj-detail${kind === 'thinking' ? '' : ' traj-json'}">${esc(detail)}</div>` : ''
-      return `<details class="traj-entry traj-fold"><summary class="traj-entry-head">${esc(label)}</summary>${body}</details>`
+      return `<details class="traj-entry traj-fold"${panelAttrs(state, `traj:${runId}:${index}`)}><summary class="traj-entry-head">${esc(label)}</summary>${body}</details>`
     }
     const head = `<div class="traj-entry-head">${esc(label || title || kind)}</div>`
     const body = detail ? `<div class="traj-detail">${esc(detail)}</div>` : ''
     return `<div class="traj-entry${kind === 'end' ? ' traj-end' : ''}">${head}${body}</div>`
   }
 
-  function modalTrajectory(detail) {
+  function modalTrajectory(detail, runId) {
     const entries = Array.isArray(detail?.entries) ? detail.entries : []
     const body = entries.length === 0
       ? '<div class="faint">这次运行没有可展示的轨迹。</div>'
-      : `<div class="traj-stream">${entries.map(trajectoryEntry).join('')}</div>`
+      : `<div class="traj-stream">${entries.map((entry, index) => trajectoryEntry(entry, index, runId)).join('')}</div>`
     return modalShell({
       title: '思考过程',
       subtitle: entries.length ? `${entries.length} 条轨迹记录` : '',
@@ -2236,7 +2270,7 @@
             <div class="run-row-top">${runDot(run.status)}<strong>#${run.attempt}</strong><span>${esc(RUN_STATUS[run.status] ?? run.status)}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
             <div class="run-row-meta"><span>${esc(duration(run.started_at, run.ended_at))}</span><span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
             ${run.error_message ? `<div class="run-output error">${esc(run.error_message)}</div>` : ''}
-            ${run.output ? `<details style="margin-top:6px"><summary class="summary-link">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
+            ${run.output ? `<details style="margin-top:6px"${panelAttrs(state, `run-output:${run.id}`)}><summary class="summary-link">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
             ${runArtifacts(run)}
           </div>`).join('')}</div>
           <div class="divider"></div>
@@ -2483,7 +2517,7 @@
     try {
       const detail = await api('run_trajectory', { runId }, { quiet: true })
       if (state.modal?.type !== 'trajectory') return
-      state.modal = { type: 'trajectory', detail }
+      state.modal = { type: 'trajectory', detail, runId }
       render()
     } catch (error) {
       closeModal()
@@ -3574,6 +3608,11 @@
       const el = event.target
       state.chatAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
     }
+  }, true)
+
+  // 折叠面板展开态：toggle 不冒泡，在 document 捕获阶段统一记录 <details data-panel> 的展开/收起（含 modal 里的面板）。
+  document.addEventListener('toggle', (event) => {
+    applyPanelToggle(state, panelKey(event.target), event.target.open)
   }, true)
 
   // composer 拖柄：按住垂直拖动调整输入框高度，最小不低于当前内容的自动高度，最大不超过面板 61.8%；双击恢复自动高度。
