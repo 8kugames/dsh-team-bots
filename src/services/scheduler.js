@@ -13,6 +13,14 @@ import { readWriteScopes, writeScopesOverlap } from './write-scopes.js'
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
 
+// DSHBOTS-43 人的消息保底槽：人触发的运行判定。
+// 现有字段口径：chat/solo_chat 的 trigger_type 是 'mention'，dm 是 'dm'，dm_reply 是 'dm_reply'；
+// 用 kind 判定最稳（solo_chat 也命中），以现有字段为准不新增列。
+const HUMAN_RUN_KINDS = new Set(['chat', 'solo_chat', 'dm', 'dm_reply'])
+function isHumanRun(run) {
+  return HUMAN_RUN_KINDS.has(run.kind)
+}
+
 export const schedulerMethods = {
 
   // outbox：把「状态变更 → 建运行」这一跳变成可重放的持久交接。
@@ -257,7 +265,7 @@ export const schedulerMethods = {
       await this.reapStalledRuns()
       this.retryExpiredPlanWaits()
       const activeRows = this.store.all(
-        "SELECT bot_id, kind, task_id, project_id, mode, write_scopes FROM runs WHERE status = 'running'",
+        "SELECT bot_id, kind, task_id, project_id, mode, write_scopes, trigger_type FROM runs WHERE status = 'running'",
       )
       const activeKeys = new Set(activeRows.map(row => this.claimKey(row)))
       // 同项目在跑的写运行：按写范围判定能否并行。写范围为空 = 未声明 = 保守串行。
@@ -269,7 +277,12 @@ export const schedulerMethods = {
         activeWriteScopes.set(row.project_id, list)
       }
       let activeTotal = activeRows.length
-      if (activeTotal >= this.config.maxConcurrentRuns) return
+      // DSHBOTS-43 人的消息保底槽：并发上限之外额外留 1 条，专给人触发的运行
+      // （kind ∈ chat/solo_chat/dm/dm_reply）用——人的追问不能被机器任务队列挤死。
+      // 额外槽同一时刻只放行 1 条；写范围冲突闸门照旧生效，绝不绕过。
+      const maxRuns = Number(this.config.maxConcurrentRuns)
+      let humanSlotTaken = activeRows.filter(isHumanRun).length > maxRuns
+      if (activeTotal >= maxRuns + 1) return
       // 出队顺序：任务运行按任务优先级（urgent 先），其余运行视同 high——用户交互不能被任务积压拖死；
       // 同优先级按入队时间，保证 FIFO 不饿死老运行。
       const candidates = this.store.all(
@@ -286,7 +299,8 @@ export const schedulerMethods = {
          LIMIT 50`,
       )
       for (const run of candidates) {
-        if (activeTotal >= this.config.maxConcurrentRuns) break
+        const human = isHumanRun(run)
+        if (activeTotal >= maxRuns + (human && !humanSlotTaken ? 1 : 0)) break
         const claimKey = this.claimKey(run)
         if (activeKeys.has(claimKey)) continue
         // 同一项目共享一个工作目录：写运行之间按「声明的写范围」判定能否并行——
@@ -319,6 +333,14 @@ export const schedulerMethods = {
           nowIso(), nowIso(), run.id,
         )
         if (Number(claimed.changes) !== 1) continue
+        // 借用了人的消息保底槽（超出并发上限放行）：记事件并占住额外槽，下一次归还前不再放第二条。
+        if (human && activeTotal >= maxRuns) {
+          humanSlotTaken = true
+          this.store.run(
+            'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+            id('evt'), run.id, 'human_slot', '并发已满，借人的消息保底槽放行', nowIso(),
+          )
+        }
         activeTotal += 1
         activeKeys.add(claimKey)
         if (run.mode === 'write' && run.project_id) {
