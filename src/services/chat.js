@@ -8,7 +8,7 @@ import { extname, join, sep } from 'node:path'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { assertInside } from '../paths.js'
 import { summarizeForUi, upsertBotMessage } from '../botmsg.js'
-import { id, jsonParse, nowIso, parseMentions, text } from '../util.js'
+import { id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
 
 export const commandTaskPattern = /^\/task\s+@([\p{L}\p{N}_-]+)\s+([\s\S]+)$/u
 
@@ -21,8 +21,12 @@ export const chatMethods = {
     const group = this.groupOf(projectId)
     if (!group) throw notFound('项目群聊不存在')
     const messageId = id('msg')
+    // bot 回复落库前剥掉 provider 泄漏的工具调用标记残片；剥完整条为空就不落库（返回 null），
+    // 不给群聊留噪音。只处理 bot 消息：用户引用残片属正常内容，system 卡片是固定文案。
+    const cleanedBody = senderType === 'bot' ? stripLeakedToolMarkup(body) : body
+    if (senderType === 'bot' && !cleanedBody) return null
     // 群消息持久化前过密钥掩码：密文值不进转录，模型下一轮只会看到 $<NAME> 标签（NAME 与 .team/secrets.env 里的变量名一致）。
-    const maskedBody = this.maskSecretValues(body)
+    const maskedBody = this.maskSecretValues(cleanedBody)
     this.store.run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, reply_to_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -39,12 +43,18 @@ export const chatMethods = {
   },
 
   // 引用视图：excerpt 取原消息正文前 120 字。入库正文已过 maskSecretValues，这里不再掩码；
+  // bot 历史消息读取时再过一遍标记清洗（幂等），历史上已落库的残片不再显示成乱码。
   // 目标行已被删（/clear 或级联）时 reply_to 置 null，引用悬空不炸视图。
   replyView(replyToId) {
     if (!replyToId) return null
     const row = this.store.get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', replyToId)
     if (!row) return null
-    return { id: row.id, sender_name: this.senderNameOf(row.sender_type, row.sender_id), excerpt: row.body.slice(0, 120) }
+    const excerpt = row.sender_type === 'bot' ? stripLeakedToolMarkup(row.body) : row.body
+    return { id: row.id, sender_name: this.senderNameOf(row.sender_type, row.sender_id), excerpt: excerpt.slice(0, 120) }
+  },
+  // bot 消息读取时兜底清洗历史脏数据（写入侧已清洗，这里幂等，用户/system 消息不动）。
+  chatBodyView(row) {
+    return row.sender_type === 'bot' ? stripLeakedToolMarkup(row.body) : row.body
   },
   messageView(row) {
     const senderName = this.senderNameOf(row.sender_type, row.sender_id)
@@ -52,6 +62,7 @@ export const chatMethods = {
     const project = task ? this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id) : undefined
     return {
       ...row,
+      body: this.chatBodyView(row),
       mentions: jsonParse(row.mentions_json, []),
       senderName,
       reply_to: this.replyView(row.reply_to_id),
@@ -170,8 +181,11 @@ export const chatMethods = {
   // ===== 单聊：项目外与单个 Bot 的一对一会话，工作目录 _the_bots/<solo_dir> =====
   insertSoloMessage({ botId, senderType, senderId, body, runId = null, createdAt = nowIso() }) {
     const messageId = id('msg')
+    // 单聊 bot 回复同样剥残片：剥完整条为空就不落库。用户消息不动。
+    const cleanedBody = senderType === 'bot' ? stripLeakedToolMarkup(body) : body
+    if (senderType === 'bot' && !cleanedBody) return null
     // 单聊同样过密钥掩码：单聊正文会进模型上下文，明文密钥不该落库。
-    const maskedBody = this.maskSecretValues(body)
+    const maskedBody = this.maskSecretValues(cleanedBody)
     this.store.run(
       `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, run_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -183,7 +197,7 @@ export const chatMethods = {
     const senderName = row.sender_type === 'bot'
       ? this.store.get('SELECT name FROM bots WHERE id = ?', row.sender_id)?.name ?? 'Bot'
       : row.sender_type === 'system' ? '系统' : this.actorName({ type: 'user', id: row.sender_id })
-    return { ...row, senderName }
+    return { ...row, body: this.chatBodyView(row), senderName }
   },
   clearSoloHistory(botId, actor = this.actor()) {
     const bot = this.botRow(botId)

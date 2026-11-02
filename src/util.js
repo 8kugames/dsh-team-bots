@@ -50,6 +50,26 @@ export const escapeXml = (value) => String(value ?? '')
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&apos;')
 
+// provider 把工具调用序列化成 text 块泄漏进回复（真实样例：生产库 messages 表）。
+// 形态一：DSML 标签残片 </｜｜DSML｜｜ invoke>、</｜｜DSML｜｜ calls>，可能不成对、也可能只剩标记本体；
+// 形态二：minimax 变体 <tool_call>…</tool_call>、<invoke name="read">、]<]minimax[> 括号残渣与观测到的
+// 参数标签 <file_path>/<limit>/<offset>。只剥标记与包裹残渣，不碰正常 markdown（<b>、<https://…>、代码块）。
+const LEAKED_TOOL_MARKUP_PATTERNS = [
+  /<\/?｜｜DSML｜｜[^><]*>/g,
+  /｜｜DSML｜｜/g,
+  /<(?:tool_call|tool_use|function_calls)\b[^><]*>[\s\S]{0,2000}?<\/(?:tool_call|tool_use|function_calls)>/g,
+  /<\/?(?:tool_call|tool_use|invoke|function_call|function_calls)\b[^><]*>/g,
+  /<\]?minimax\[?>|]minimax\[/g,
+  /<\/?(?:file_path|limit|offset)\b[^><]*>/g,
+]
+
+/** 剥掉 provider 泄漏的工具调用标记残片；清除后连续空行压成一个，两端留白裁掉。 */
+export const stripLeakedToolMarkup = (value) => {
+  let cleaned = String(value ?? '')
+  for (const pattern of LEAKED_TOOL_MARKUP_PATTERNS) cleaned = cleaned.replace(pattern, '')
+  return cleaned.replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export const parseMentions = (body, candidates) => {
   const found = []
   const names = [...candidates].sort((a, b) => b.name.length - a.name.length)
