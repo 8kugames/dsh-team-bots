@@ -6,6 +6,7 @@ import { scanProjectSkills } from './project-skills.js'
 import { recordUsage } from './usage.js'
 import { id, nowIso, parseDisabledSkills, sha256 } from './util.js'
 import { dmPrompt, replyDeliveryPrompt } from './botmsg.js'
+import { effectiveRunLimits } from './config.js'
 
 const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
@@ -749,9 +750,11 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
     }
     this.pending.set(sessionId, pending)
     this.pendingByRun.set(run.id, pending)
+    // 运行时效在启动瞬间定格：之后页面改值只影响后续启动的运行，进行中不追溯。
+    pending.runTimeoutMs = effectiveRunLimits(this.config, key => this.store.setting(key)).runTimeoutMs
     pending.timer = setTimeout(() => {
       void this.timeoutRun(run.id)
-    }, this.config.runTimeoutMs)
+    }, pending.runTimeoutMs)
     pending.timer.unref?.()
     const startedAt = new Date().toISOString()
     this.store.run(
@@ -1007,9 +1010,11 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
   async timeoutRun(runId) {
     const pending = this.pendingByRun.get(runId)
     if (!pending) return
+    // 中止文案用启动时定格的时效，而不是当下生效值（进行中不追溯）。
+    const runTimeoutMs = pending.runTimeoutMs ?? this.config.runTimeoutMs
     await this.abortRun(pending, {
       code: 'RUN_TIMEOUT',
-      message: `运行超过 ${Math.round(this.config.runTimeoutMs / 60000)} 分钟，已中止`,
+      message: `运行超过 ${Math.round(runTimeoutMs / 60000)} 分钟，已中止`,
     })
   }
 

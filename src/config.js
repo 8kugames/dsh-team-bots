@@ -20,6 +20,48 @@ const int = (value, fallback, min, max) => {
   return Math.min(max, Math.max(min, parsed))
 }
 
+// ── 运行时效（全局配置页「运行时效」卡）────────────────────────────────────
+// 设置键沿用 settings 表的 snake_case；范围单位为分钟，与页面保存校验一致。
+export const RUN_TIMEOUT_KEY = 'run_timeout_minutes'
+export const STALL_WATCHDOG_KEY = 'stall_watchdog_minutes'
+export const RUN_LIMIT_RANGES = {
+  [RUN_TIMEOUT_KEY]: [1, 360],
+  [STALL_WATCHDOG_KEY]: [0, 360],
+}
+
+// 保存值必须是范围内的整数分钟；非法或越界按未保存处理（回退默认），不做钳制。
+// 空串/null（未保存）必须先于数值化判空：Number('') 是 0，会把「未保存」误判成
+// 看门狗合法值 0（关闭）。用 Number() 而非 parseInt：parseInt('1.5') 会吞小数当 1。
+const savedMinutes = (value, range) => {
+  const raw = String(value ?? '').trim()
+  if (raw === '') return null
+  const [min, max] = range
+  const num = Number(raw)
+  return Number.isInteger(num) && num >= min && num <= max ? num : null
+}
+
+const envExplicit = (name) => {
+  const raw = process.env[name]
+  return raw !== undefined && String(raw).trim() !== ''
+}
+
+// 运行时效生效值：env 显式设置 > 页面保存值 > 默认。config 值在 resolveConfig
+// 里已含 env/注入解析结果，env 显式时直接采用；run*Env/stall*Env 标志供 UI 提示
+// 「环境变量已覆盖」。消费点（runtime 运行启动、service.reapStalledRuns）每次
+// 现算，新值对之后启动的运行生效，进行中不追溯。
+export function effectiveRunLimits(config, getSetting = () => null) {
+  const runEnv = envExplicit('DSH_TEAM_RUN_TIMEOUT_MS')
+  const stallEnv = envExplicit('DSH_TEAM_STALL_TIMEOUT_MS')
+  const runSaved = savedMinutes(getSetting(RUN_TIMEOUT_KEY), RUN_LIMIT_RANGES[RUN_TIMEOUT_KEY])
+  const stallSaved = savedMinutes(getSetting(STALL_WATCHDOG_KEY), RUN_LIMIT_RANGES[STALL_WATCHDOG_KEY])
+  return {
+    runTimeoutMs: !runEnv && runSaved !== null ? runSaved * 60_000 : config.runTimeoutMs,
+    stallTimeoutMs: !stallEnv && stallSaved !== null ? stallSaved * 60_000 : config.stallTimeoutMs,
+    runTimeoutEnv: runEnv,
+    stallTimeoutEnv: stallEnv,
+  }
+}
+
 export function resolveConfig(config = {}) {
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
   const workspace = resolve(config.workspace || defaultWorkspace())

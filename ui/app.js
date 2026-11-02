@@ -1565,6 +1565,37 @@
     `
   }
 
+  // 全局配置页「运行时效」卡：超时中止与无进展看门狗（分钟），保存走 update_settings。
+  // 输入框回填保存值（未保存时回填当前生效值）；卡头显示生效值。
+  function renderRunLimitsCard() {
+    const settings = state.data.settings ?? {}
+    const limits = state.data.runLimits ?? {}
+    const savedRun = settings.run_timeout_minutes ?? ''
+    const savedStall = settings.stall_watchdog_minutes ?? ''
+    const runValue = savedRun !== '' ? savedRun : String(limits.runTimeoutMinutes ?? 120)
+    // 看门狗保存值 '0'（关闭）合法，不能用 || 短路吞掉。
+    const stallValue = savedStall !== '' ? savedStall : String(limits.stallTimeoutMinutes ?? 30)
+    const envNames = [
+      limits.runTimeoutEnv ? 'DSH_TEAM_RUN_TIMEOUT_MS' : '',
+      limits.stallTimeoutEnv ? 'DSH_TEAM_STALL_TIMEOUT_MS' : '',
+    ].filter(Boolean).join(' / ')
+    const stallText = limits.stallTimeoutMinutes === 0 ? '看门狗关闭' : `${limits.stallTimeoutMinutes ?? 30} 分钟看门狗`
+    return `
+      <div class="card form-card" style="margin-top:12px">
+        <div class="card-head"><h3>运行时效</h3><span class="meta">当前生效 ${limits.runTimeoutMinutes ?? 120} 分钟超时 / ${stallText}</span></div>
+        <div class="field-row">
+          <div class="field"><label id="settings-run-timeout-label" for="settings-run-timeout">超时中止（分钟）</label><input class="input mono" style="text-align:right" type="number" min="1" max="360" id="settings-run-timeout" name="run_timeout_minutes" value="${attr(runValue)}"></div>
+          <div class="field"><label id="settings-stall-watchdog-label" for="settings-stall-watchdog">无进展看门狗（分钟）</label><input class="input mono" style="text-align:right" type="number" min="0" max="360" id="settings-stall-watchdog" name="stall_watchdog_minutes" value="${attr(stallValue)}"></div>
+        </div>
+        <div class="hint">超时中止 = 单次运行的最长时长（1–360 分钟）；无进展看门狗 = 运行多久没有任何输出即判定卡住（0–360 分钟，0 为关闭）。</div>
+        <div class="hint">新值只对之后启动的运行生效，进行中的运行不追溯。</div>
+        ${envNames ? `<div class="hint">环境变量 ${envNames} 已显式设置，对应项以环境变量为准，页面保存值不生效。</div>` : ''}
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn small" type="button" data-action="save-run-limits">保存运行时效</button>
+        </div>
+      </div>`
+  }
+
   function renderOpsCard() {
     const settings = state.data.settings ?? {}
     const outbox = state.data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
@@ -1832,6 +1863,7 @@
           </div>
         </div>
       </div>
+      ${renderRunLimitsCard()}
       ${renderOpsCard()}
       ${renderWechatCard()}
       ${renderSecretsCard()}
@@ -2733,6 +2765,16 @@
           await api('update_settings', patch)
           await loadState(state.projectId)
           toast('系统设置已保存', 'success')
+          break
+        }
+        case 'save-run-limits': {
+          const value = id => document.getElementById(id)?.value ?? ''
+          await api('update_settings', {
+            run_timeout_minutes: value('settings-run-timeout'),
+            stall_watchdog_minutes: value('settings-stall-watchdog'),
+          })
+          await loadState(state.projectId)
+          toast('运行时效已保存', 'success')
           break
         }
         case 'reconcile-usage': {

@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { join, sep, dirname, resolve } from 'node:path'
+import { dirname, extname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
+import { effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY } from './config.js'
 import { AppError, badRequest, conflict, forbidden, hotUpgradeUnsupported, notFound } from './errors.js'
 import { assertInside, botWorkspaceDir, botsHome, ensureDirResilient, ensureExternalDir, ensureProjectWorkspace, ensureSkillRoot, projectDir, SLUG_MAX } from './paths.js'
 import { applyRetention, exportUsageCsv, monthUsageForProject, monthUsageGlobal, reconcileUsage, runUsageTotals, setPrice, usageSnapshot } from './usage.js'
@@ -233,10 +234,23 @@ export class TeamService {
       'budget_currency', 'global_token_budget', 'global_cost_budget',
       'retention_usage_days', 'retention_run_event_days', 'retention_message_days',
       'memory_review', 'chat_memory_review',
+      RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY,
     ]
     const values = {}
     for (const key of keys) values[key] = this.store.setting(key, '')
     return values
+  }
+
+  // 当前生效的运行时效（分钟）与 env 覆盖标志，供全局配置页回显；
+  // 生效值与保存值分开：inputs 回填保存值，卡头显示生效值。
+  runLimitsView() {
+    const limits = effectiveRunLimits(this.config, key => this.store.setting(key))
+    return {
+      runTimeoutMinutes: Math.round(limits.runTimeoutMs / 60_000),
+      stallTimeoutMinutes: Math.round(limits.stallTimeoutMs / 60_000),
+      runTimeoutEnv: limits.runTimeoutEnv,
+      stallTimeoutEnv: limits.stallTimeoutEnv,
+    }
   }
 
   updateSettings(patch, actor = this.actor()) {
@@ -262,9 +276,24 @@ export class TeamService {
       if (!Number.isInteger(num) || num < 0) throw badRequest(`${key} 必须是天数的整数`)
       values[key] = String(num)
     }
+    // 运行时效（分钟）：超时 1–360、看门狗 0–360（0 = 关闭）；空串 = 清除保存值回退默认。
+    for (const [key, [min, max]] of Object.entries(RUN_LIMIT_RANGES)) {
+      if (values[key] === undefined || values[key] === '') continue
+      const num = Number(values[key])
+      if (!Number.isInteger(num) || num < min || num > max) {
+        throw badRequest(`${key} 必须是 ${min}–${max} 的整数分钟`)
+      }
+      values[key] = String(num)
+    }
     this.store.transaction(() => {
       for (const [key, value] of Object.entries(values)) this.store.setSetting(key, value)
       this.audit(actor, 'settings.update', 'settings', 'global', 'global', values)
+      // 运行时效单列一条 global.run_limits 审计，便于按目标检索改值历史。
+      const limitKeys = Object.keys(RUN_LIMIT_RANGES)
+      if (limitKeys.some(key => values[key] !== undefined)) {
+        this.audit(actor, 'settings.update', 'settings', 'global.run_limits',
+          Object.fromEntries(limitKeys.map(key => [key, values[key] ?? ''])))
+      }
     })
     return this.settingsView()
   }
@@ -1819,7 +1848,8 @@ export class TeamService {
 
   // 运行超时由 runtime 的定时器负责；这里补充“还活着但没有任何进展”的判定。
   async reapStalledRuns() {
-    const stallMs = this.config.stallTimeoutMs
+    // 每次现算：全局配置页改值后无需重启，下一次巡检即用新看门狗时效。
+    const stallMs = effectiveRunLimits(this.config, key => this.store.setting(key)).stallTimeoutMs
     if (!stallMs) return
     const cutoff = new Date(Date.now() - stallMs).toISOString()
     const stalled = this.store.all(
@@ -3740,6 +3770,7 @@ if (run.kind === 'dm_reply') {
       revisions: {},
       usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency() }),
       settings: this.settingsView(),
+      runLimits: this.runLimitsView(),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,
