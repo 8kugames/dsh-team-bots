@@ -33,6 +33,9 @@
     busy: 0,
     chatAtBottom: true,
     taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
+    // 用量页三态：global=侧栏「用量统计」的全局视图；domain=群聊 NAV 用量 tab（本群）；solo=单聊 NAV 用量 tab（本 bot）。
+    usageMode: 'global',
+    // 全局视图内的展示维度：global / model / bot / project（口径切换只保留这四类）。
     usageScope: 'global',
     usageBot: null,
     memoryQuery: '',
@@ -1261,6 +1264,10 @@
               <div class="field"><label for="solo-bot-model">模型</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
               <div class="field"><label for="solo-bot-effort">推理强度</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
               <div class="field"><label for="solo-bot-file-policy">文件权限</label><select class="select" style="width:100%" id="solo-bot-file-policy" name="filePolicy" title="Bot 会话内文件操作的沙箱边界，下次运行生效">${filePolicyOptions(bot.file_policy)}</select></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label for="solo-bot-fallback-model">备用模型</label><select class="select" style="width:100%" id="solo-bot-fallback-model" name="fallbackModelRef" data-fallback-model-select title="主模型不可用时自动接手的备用模型，留空 = 不启用">${fallbackModelOptions(bot.fallbackModelRef ?? '')}</select></div>
+              <div class="field"><label for="solo-bot-fallback-effort">备用推理强度</label><select class="select" style="width:100%" id="solo-bot-fallback-effort" name="fallbackEffort" data-fallback-effort-select>${effortOptions(bot.fallbackModelRef ?? '', bot.fallback_effort)}</select></div>
             </div>
             <div class="field"><span class="field-label" id="solo-bot-color-label">外观颜色</span><div class="swatch-row" role="radiogroup" aria-labelledby="solo-bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div></div>
             <div class="field"><label for="solo-bot-instructions">角色指令</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="12" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot.instructions ?? '')}</textarea></div>
@@ -2516,6 +2523,29 @@
     return `<option value="">模型默认</option>${efforts.map(effort => `<option value="${attr(effort.id)}" ${current === effort.id ? 'selected' : ''}>${esc(EFFORT[effort.id] ?? effort.name)}</option>`).join('')}`
   }
 
+  // 备用模型下拉：首项留空即「不启用」；其余与主模型同一模型表。
+  function fallbackModelOptions(currentRef) {
+    const models = state.data?.models ?? []
+    const blank = `<option value=""${currentRef ? '' : ' selected'}>不启用（留空）</option>`
+    if (models.length === 0) return blank
+    return blank + models.map(item => `<option value="${attr(item.ref)}" ${item.ref === currentRef ? 'selected' : ''}>${esc(item.providerName)} / ${esc(item.name)}</option>`).join('')
+  }
+
+  // fallback-model:start —— 备用模型字段的纯逻辑（tests/bot-fallback-model.test.js 抽取此块断言）
+  // ref 形如 provider/model；留空即「不启用」，三个字段一起清空（后端按 null 落库）。
+  function parseFallbackFields(ref, effort) {
+    const value = String(ref ?? '')
+    const slash = value.indexOf('/')
+    const provider = slash > 0 ? value.slice(0, slash) : null
+    const model = slash > 0 ? value.slice(slash + 1) : null
+    return {
+      fallbackProvider: provider,
+      fallbackModel: model,
+      fallbackEffort: model ? (effort || null) : null,
+    }
+  }
+  // fallback-model:end
+
   function modalNewProject() {
     const bots = activeBots()
     return modalShell({
@@ -2672,6 +2702,10 @@
             <div class="field"><label id="bot-model-label" for="bot-model">模型</label><select class="select" style="width:100%" id="bot-model" name="modelRef" data-model-select>${modelOptions(bot?.provider, bot?.model)}</select></div>
             <div class="field"><label id="bot-effort-label" for="bot-effort">推理强度</label><select class="select" style="width:100%" id="bot-effort" name="effort" data-effort-select>${effortOptions(modelRef, bot?.effort)}</select></div>
             <div class="field"><label id="bot-file-policy-label" for="bot-file-policy">文件权限</label><select class="select" style="width:100%" id="bot-file-policy" name="filePolicy" title="Bot 会话内文件操作的沙箱边界，下次运行生效">${filePolicyOptions(bot?.file_policy)}</select></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label id="bot-fallback-model-label" for="bot-fallback-model">备用模型</label><select class="select" style="width:100%" id="bot-fallback-model" name="fallbackModelRef" data-fallback-model-select title="主模型不可用时自动接手的备用模型，留空 = 不启用">${fallbackModelOptions(bot?.fallbackModelRef ?? '')}</select></div>
+            <div class="field"><label id="bot-fallback-effort-label" for="bot-fallback-effort">备用推理强度</label><select class="select" style="width:100%" id="bot-fallback-effort" name="fallbackEffort" data-fallback-effort-select>${effortOptions(bot?.fallbackModelRef ?? '', bot?.fallback_effort)}</select></div>
           </div>
           <div class="field"><span class="field-label" id="bot-color-label">外观颜色</span><div class="swatch-row" role="radiogroup" aria-labelledby="bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot?.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div></div>
           <div class="field"><label id="bot-instructions-label" for="bot-instructions">角色指令</label><textarea class="textarea" id="bot-instructions" name="instructions" rows="10" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot?.instructions ?? '')}</textarea></div>
@@ -3149,6 +3183,14 @@
   function updateEffortOptions(select) {
     const form = select.closest('form')
     const effort = form?.querySelector('[data-effort-select]')
+    if (!effort) return
+    effort.innerHTML = effortOptions(select.value, '')
+  }
+
+  // 备用模型的推理强度跟随备用模型变化，选项来源与主模型同一张表。
+  function updateFallbackEffortOptions(select) {
+    const form = select.closest('form')
+    const effort = form?.querySelector('[data-fallback-effort-select]')
     if (!effort) return
     effort.innerHTML = effortOptions(select.value, '')
   }
@@ -4226,6 +4268,8 @@
         const slash = ref.indexOf('/')
         const provider = slash > 0 ? ref.slice(0, slash) : null
         const model = slash > 0 ? ref.slice(slash + 1) : null
+        // 备用模型：留空 = 不启用（三个字段一起清空，由后端按 null 落库）。
+        const fallback = parseFallbackFields(payload.fallbackModelRef, payload.fallbackEffort)
         const common = {
           name: payload.name,
           role: payload.role,
@@ -4235,6 +4279,9 @@
           model,
           effort: payload.effort || null,
           filePolicy: payload.filePolicy || undefined,
+          fallbackProvider: fallback.fallbackProvider,
+          fallbackModel: fallback.fallbackModel,
+          fallbackEffort: fallback.fallbackEffort,
         }
         if (type === 'create-bot') {
           await api('create_bot', common)
@@ -4557,6 +4604,7 @@
       render()
     }
     if (el.matches('[data-model-select]')) updateEffortOptions(el)
+    if (el.matches('[data-fallback-model-select]')) updateFallbackEffortOptions(el)
     if (el.id === 'secret-scope') {
       const projectSelect = document.getElementById('secret-project')
       if (projectSelect) {
