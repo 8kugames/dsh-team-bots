@@ -9,7 +9,8 @@ import { applyRetention, reconcileUsage } from '../usage.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { readWriteScopes, writeScopesOverlap } from './write-scopes.js'
 
-
+// plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
+const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
 
 export const schedulerMethods = {
 
@@ -194,6 +195,7 @@ export const schedulerMethods = {
   // 限流失败的自动重试（DSHBOTS-24）：失败 run 带 retry_after_ms（provider 真发过 Retry-After 才有），
   // 到期派生一次新运行。只重试一次（attempt=1 才派生，新 run attempt=2 失败后不再链式），
   // 只针对任务运行——solo/私信运行显示 plan_wait 状态但不自动派生，避免对同一个对话者重复发信。
+  // 过期超过 24h 视为时过境迁不派生（服务停摆/长期搁置后不补跑旧任务）。
   // 幂等三闸：attempt=1 + task_id 非空 + 原 run 无 plan_retry 事件；idempotency_key UNIQUE 兜底并发 tick。
   retryExpiredPlanWaits() {
     const expired = this.store.all(
@@ -203,6 +205,8 @@ export const schedulerMethods = {
          AND r.error_code IN ('RATE_LIMIT', 'QUOTA')
          AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
              <= CAST(strftime('%s', 'now') AS REAL)
+         AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
+             > CAST(strftime('%s', 'now') AS REAL) - ${PLAN_RETRY_MAX_LATE_SECONDS}
          AND NOT EXISTS(SELECT 1 FROM run_events e WHERE e.run_id = r.id AND e.type = 'plan_retry')`,
     )
     for (const run of expired) {

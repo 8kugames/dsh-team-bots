@@ -176,3 +176,24 @@ test('只重试一次：attempt=2 失败不再派生；任务终态/已有活跃
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('过期超过 24h 不再派生；24h 宽限内仍派生', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Late Project', key: 'LATEPROJ', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '过晚重试', assigneeBotId: director.id })
+    // 退避 10 分钟，但失败发生在 48 小时前 → 到期已超过 24h 宽限，视为时过境迁不派生。
+    insertFailedRun(store, { id: 'late1', projectId: project.id, botId: director.id, taskId: task.id, endedInMin: -60 * 48 })
+    service.retryExpiredPlanWaits()
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = 'late1'").n, 0, '过期超过 24h 不派生')
+
+    // 失败发生在 12 小时前，退避 10 分钟 → 到期约 11h50m 前，仍在 24h 宽限内，正常派生。
+    insertFailedRun(store, { id: 'late2', projectId: project.id, botId: director.id, taskId: task.id, endedInMin: -60 * 12 })
+    service.retryExpiredPlanWaits()
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = 'late2'").n, 1, '24h 内到期仍派生')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
