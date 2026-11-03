@@ -543,7 +543,9 @@ if (run.kind === 'dm_reply') {
       projectId: project.id,
       taskId: task.id,
       sourceId: run.id,
-      idempotencyKey: `review_auto:${task.id}:${run.id}`,
+      // 幂等键取任务级：同一任务反复交付（被打回重交等）合并到同一行，经 coalescing 白名单
+      // 刷新为最新状态复活重投；不双派由投递侧复看闸（spawnReviewDelegate 复核 in_review）保证。
+      idempotencyKey: `review_auto:${task.id}`,
     })
     return true
   },

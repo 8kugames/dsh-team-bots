@@ -35,6 +35,14 @@ export function runHoldsWriteLock({ kind, mode, taskStatus } = {}) {
 }
 // write-lock-scope:end
 
+// outbox per-kind coalescing 白名单（docs/superagent-port-plan.md §1.4）：
+// 白名单内的 kind，同幂等键重复入队按「合并」处理——覆盖 payload、清零重试预算、复活 pending
+// （原型 ON CONFLICT(kind, key) DO UPDATE 语义，行 id/created_at 不动以保队列位）。
+// 只收状态汇报/重试型 kind：投递自身幂等（复看不双派），同键重排的含义是「取最新状态」而非新事件。
+// 消息类 kind（chat_run/solo_chat_run/dm_run/dm_reply 等）幂等键带消息身份，合并即丢消息，禁入白名单；
+// task_run 的先写者赢是防重复派生闸，同样保持默认（先写者赢）不动。
+const OUTBOX_COALESCE_KINDS = new Set(['review_delegate_auto'])
+
 export const schedulerMethods = {
 
   // outbox：把「状态变更 → 建运行」这一跳变成可重放的持久交接。
@@ -44,17 +52,29 @@ export const schedulerMethods = {
     const outboxId = id('out')
     // availableAt：延迟投递（限流退避等场景），到点前不算可领取。
     const availableIso = availableAt ? new Date(availableAt).toISOString() : now
+    // per-kind coalescing：白名单 kind 撞幂等键不走先写者赢，改为合并（覆盖 payload + 复活 + 清零
+    // 重试预算 + 按本次入队重算 available_at）；白名单外一律 DO NOTHING——先写者赢即去重闸。
+    const coalesce = OUTBOX_COALESCE_KINDS.has(kind)
     this.store.run(
       `INSERT INTO outbox(id, kind, project_id, task_id, source_id, idempotency_key, payload_json,
         status, attempts, available_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
-       ON CONFLICT(idempotency_key) DO NOTHING`,
+       ON CONFLICT(idempotency_key) DO ${coalesce
+         ? `UPDATE SET payload_json = excluded.payload_json, status = 'pending', attempts = 0,
+            last_error = NULL, delivered_at = NULL, available_at = excluded.available_at`
+         : 'NOTHING'}`,
       outboxId, kind, projectId, taskId, sourceId, idempotencyKey,
       JSON.stringify(payload), availableIso, now,
     )
     if (idempotencyKey) {
       const existing = this.store.get('SELECT id FROM outbox WHERE idempotency_key = ?', idempotencyKey)
-      if (existing && existing.id !== outboxId) return existing.id
+      if (existing && existing.id !== outboxId) {
+        // 合并命中：行已按最新 payload 复活，与首写路径同一契约——到点即投（同栈立即投递一次）。
+        if (coalesce && availableIso <= now) {
+          this.applyOutboxRow(this.store.get('SELECT * FROM outbox WHERE id = ?', existing.id))
+        }
+        return existing.id
+      }
     }
     // 事务性 outbox：记录先落库，再立即投递；投递失败留 pending，由调度器重试。
     // 延迟投递（availableAt 在未来）不立即投，由 dispatchOutbox 到点领取。
@@ -63,6 +83,8 @@ export const schedulerMethods = {
   },
 
   // 单条投递：成功标记 delivered，失败按退避重试，超过上限转 failed。
+  // error.defer = true 走 Later 语义：不是失败，不动 attempts、不进 5 次上限，只把 available_at
+  // 沿当前退避曲线前移；触发方（如「无空闲 slot 先等等」类投递）负责条件解除后放行，可无限次等待。
   applyOutboxRow(row) {
     if (!row) return null
     try {
@@ -73,6 +95,16 @@ export const schedulerMethods = {
       )
       return result
     } catch (error) {
+      if (error?.defer === true) {
+        this.store.run(
+          `UPDATE outbox SET status = 'pending', available_at = ?, last_error = ? WHERE id = ?`,
+          new Date(Date.now() + Math.min(60_000, 1000 * 2 ** Number(row.attempts ?? 0))).toISOString(),
+          text(error?.message ?? String(error), 500),
+          row.id,
+        )
+        this.logger.info?.('dsh-team: outbox %s (%s) deferred: %s', row.id, row.kind, error?.message ?? error)
+        return null
+      }
       const attempts = Number(row.attempts ?? 0) + 1
       const permanent = error?.permanent === true
       const exhausted = permanent || attempts >= 5
