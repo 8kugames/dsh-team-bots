@@ -9,6 +9,7 @@ import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
 import { effectiveRunLimits } from '../../config.js'
 import { imageContentPartsForMessage } from '../message-images.js'
+import { restoreDefaultModel } from './model-restore.js'
 
 export const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
@@ -104,7 +105,25 @@ export const sessionMethods = {
       const after = result?.selected ?? { provider, model, ...(efforts ? { reasoningEffort: efforts } : {}) }
       if (before?.provider && before?.model
         && (before.provider !== after.provider || before.model !== after.model || before.reasoningEffort !== after.reasoningEffort)) {
-        await defaults?.saveSelection?.(before).catch?.(error => this.logger.warn?.('dsh-team: restore default model failed: %s', error))
+        // 恢复动作必须在事务之外的干净上下文执行，否则 configEditor.edit 里的
+        // hmr.runExclusive 会以「嵌套事务」直接 reject。失败由 restoreDefaultModel
+        // 有界重试并落审计 model_restore_failed，不再只 warn 吞掉。
+        await restoreDefaultModel(defaults, before, {
+          logger: this.logger,
+          audit: (error) => this.store?.audit?.(
+            'system',
+            'system',
+            'model_restore_failed',
+            'session',
+            sessionId,
+            {
+              provider: before.provider,
+              model: before.model,
+              ...(before.reasoningEffort === undefined ? {} : { reasoningEffort: before.reasoningEffort }),
+              error: error instanceof Error ? error.message : String(error),
+            },
+          ),
+        })
       }
       return result
     })
