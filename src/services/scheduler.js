@@ -278,6 +278,44 @@ export const schedulerMethods = {
     }
   },
 
+  // 陈旧排队运行守卫（DSHBOTS-110）：任务已进终态（done/canceled）后残留的 queued 运行不得再被
+  // 起跑执行。统一置 canceled + error_code='SUPERSEDED'（管理清理标记，不进任务执行历史），
+  // 并按 run_id EXISTS 去重写 stale_superseded 事件，重复触发不重复留痕。
+  cancelQueuedRunAsSuperseded(runId) {
+    const changed = this.store.run(
+      `UPDATE runs SET status = 'canceled', ended_at = ?, cancel_requested = 1,
+        error_code = 'SUPERSEDED', error_message = ?
+       WHERE id = ? AND status = 'queued'`,
+      nowIso(), '任务已结束，排队运行被清理',
+      runId,
+    )
+    if (Number(changed?.changes ?? 0) !== 1) return false
+    const alreadyNoted = this.store.get(
+      "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'stale_superseded'",
+      runId,
+    )
+    if (!alreadyNoted) {
+      this.store.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'stale_superseded', '任务已结束，排队运行被清理（SUPERSEDED）', nowIso(),
+      )
+    }
+    return true
+  },
+  // tick 前置清理：任务已终态（done/canceled）的 queued 任务运行直接置 canceled（SUPERSEDED），
+  // 避免陈旧排队运行被起跑执行。只处理 kind='task' 的运行——非任务运行（chat/dm/审查等）不受影响。
+  cancelStaleQueuedTaskRuns() {
+    const rows = this.store.all(
+      `SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
+        WHERE r.status = 'queued' AND r.kind = 'task' AND t.status IN ('done', 'canceled')`,
+    )
+    let canceled = 0
+    for (const row of rows) {
+      if (this.cancelQueuedRunAsSuperseded(row.id)) canceled += 1
+    }
+    return canceled
+  },
+
   async tick() {
     if (this.ticking || !this.started) return
     this.ticking = true
@@ -290,6 +328,8 @@ export const schedulerMethods = {
       this.dispatchOutbox()
       await this.reapStalledRuns()
       this.retryExpiredPlanWaits()
+      // 陈旧排队运行守卫（DSHBOTS-110）：先于候选查询清掉任务已终态的 queued 任务运行。
+      this.cancelStaleQueuedTaskRuns()
       const activeRows = this.store.all(
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。
@@ -319,9 +359,12 @@ export const schedulerMethods = {
       if (activeTotal >= maxRuns + 1) return
       // 出队顺序：任务运行按任务优先级（urgent 先），其余运行视同 high——用户交互不能被任务积压拖死；
       // 同优先级按入队时间，保证 FIFO 不饿死老运行。
+      // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）的 queued 任务运行不再领取；
+      // 只排 kind='task'，非任务运行不受影响。LEFT JOIN 出 NULL 的孤儿任务运行不过滤。
       const candidates = this.store.all(
         `SELECT r.* FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
          WHERE r.status = 'queued'
+           AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled'))
          ORDER BY CASE
            WHEN r.kind <> 'task' OR t.priority IS NULL THEN 1
            WHEN t.priority = 'urgent' THEN 0

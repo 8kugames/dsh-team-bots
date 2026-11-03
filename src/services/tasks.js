@@ -251,6 +251,11 @@ export const tasksMethods = {
       }
       this.audit(actor, 'task.update', 'task', taskId, updates)
     })
+    // 终态清理（DSHBOTS-110）：任务进入 done/canceled 时先把残留的 queued 运行置 SUPERSEDED，
+    // 再释放写占用——写占用只清 mode='write' 会漏掉排队的只读运行（审查等），被调度器后续起跑执行。
+    if (updates.status && updates.status !== task.status && (updates.status === 'done' || updates.status === 'canceled')) {
+      await this.cancelSupersededQueuedRuns(taskId)
+    }
     // 写占用释放（DSHBOTS-73，用户口径）：任务状态离开「进行中」就中止它名下仍在跑/排队的写运行，
     // 写占用/锁定随之解除。单一触发点：所有任务状态变更都经过 updateTask 这一处，不在别处散着写。
     if (updates.status && updates.status !== task.status && updates.status !== 'in_progress') {
@@ -332,6 +337,20 @@ export const tasksMethods = {
       this.insertRunEvent(run.id, 'task_left_in_progress', errorMessage)
     }
     return runs.length
+  },
+  // 终态清理（DSHBOTS-110）：任务流转到 done/canceled 时，把该任务残留的 queued 运行全部置
+  // canceled（SUPERSEDED + stale_superseded 事件），防止调度窗口内漏网的排队运行被起跑执行。
+  // 只清 queued：running 的写运行由 releaseTaskWriteLocks 按 TASK_LEFT_IN_PROGRESS 口径处理。
+  async cancelSupersededQueuedRuns(taskId) {
+    const rows = this.store.all(
+      "SELECT id FROM runs WHERE task_id = ? AND status = 'queued'",
+      taskId,
+    )
+    let canceled = 0
+    for (const row of rows) {
+      if (this.cancelQueuedRunAsSuperseded(row.id)) canceled += 1
+    }
+    return canceled
   },
   assertTransition(from, to) {
     if (from === to) return
