@@ -102,6 +102,13 @@ export function resolveConfig(config = {}) {
     // 一次性密钥运行时文件（<dataDir>/secrets-runtime/<projectId>.env）的存活窗口：
     // 批准后生成，项目下一条 task 运行结束或窗口到期先到即焚，再次使用需重新批准。
     secretsRuntimeTtlMs: int(config.secretsRuntimeTtlMs ?? process.env.DSH_TEAM_SECRETS_TTL_MS, 30 * 60_000, 1_000, 24 * 60 * 60_000),
+    // 大 PNG 入库/上传前转 JPEG 的体积阈值（字节，0 关闭）：PNG 大图 base64 体积大、上传慢、
+    // 部分模型处理效率低；超过阈值先转 JPEG（质量 85、最长边 2048）再落库与传模型。
+    // gif/webp 语义保留不转；无解码能力（sharp）或转码失败一律回退原图，不阻塞发送。
+    imagePngJpegThresholdBytes: int(
+      config.imagePngJpegThresholdBytes ?? process.env.DSH_TEAM_IMAGE_PNG_JPEG_THRESHOLD_BYTES,
+      512 * 1024, 0, 5 * 1024 * 1024,
+    ),
     // 原生 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
     agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, false),
     maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 3, 1, 8),

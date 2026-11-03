@@ -3,6 +3,9 @@
 // 存储口径：base64 不进 messages.body，另存 message_images 表；正文与图片各行各司。
 // 口径来源：宿主 dsh-attachment 的 ImageMediaType 只有 png/jpeg/webp/gif 四种，插件与之对齐，
 // 不放行 SVG（可执行脚本）。
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { badRequest } from '../errors.js'
 import { id, nowIso } from '../util.js'
 
@@ -140,4 +143,109 @@ export function imageContentPartsForMessage(store, messageId) {
 export function messageImageRow(store, imageId) {
   if (!imageId) return null
   return store.get('SELECT * FROM message_images WHERE id = ?', imageId) ?? null
+}
+
+// ── 大 PNG 转 JPEG（DSHBOTS-109）───────────────────────────────────────────
+// PNG 大图 base64 体积大、上传慢、部分模型处理效率低：入库与上传前把超过阈值
+// 的 PNG 归一成 JPEG。gif/webp 不动（动图与透明语义保留）。解码用 sharp——
+// 插件自身不依赖 sharp，优先复用宿主安装树里已有的（dsh-attachment-local 的
+// 依赖）；解析不到或转码失败一律回退原图原样上传，绝不阻塞发送。
+export const PNG_JPEG_QUALITY = 85
+export const PNG_JPEG_MAX_EDGE = 2048
+
+let sharpModule
+let sharpResolved = false
+let sharpMissingWarned = false
+
+// 懒解析 sharp，结果进程内缓存。候选依次为：
+// ① 裸 'sharp'（若宿主环境把它放进了插件可解析范围）；
+// ② 从本文件目录逐级向上找 node_modules/sharp（源码仓开发态）；
+// ③ 从 process.cwd() 逐级向上；
+// ④ 从进程入口（dsh 的 lib/bin.js）逐级向上——生产环境 dsh 全局安装树里
+//    node_modules/sharp（dsh-attachment-local 的传递依赖）就在这条链上。
+function resolveSharp() {
+  if (sharpResolved) return sharpModule
+  sharpResolved = true
+  const require = createRequire(import.meta.url)
+  const starts = [dirname(fileURLToPath(import.meta.url)), process.cwd()]
+  if (process.argv[1]) starts.push(dirname(resolve(process.argv[1])))
+  const candidates = ['sharp']
+  const seen = new Set(candidates)
+  for (const start of starts) {
+    for (let dir = start; ; dir = dirname(dir)) {
+      const candidate = join(dir, 'node_modules', 'sharp')
+      if (!seen.has(candidate)) {
+        seen.add(candidate)
+        candidates.push(candidate)
+      }
+      if (dirname(dir) === dir) break
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const mod = require(candidate)
+      if (typeof mod === 'function') {
+        sharpModule = mod
+        return sharpModule
+      }
+    } catch {
+      // 候选不存在，继续往上找
+    }
+  }
+  return null
+}
+
+// 单张转换：返回新的图片描述对象，失败/不划算返回 null（调用方回退原图）。
+// PNG 的透明通道 JPEG 承载不了，按惯例压平到白底；rotate() 先吃掉 EXIF 方向。
+async function convertPngToJpeg(sharp, data, logger) {
+  const buffer = await sharp(Buffer.from(data, 'base64'))
+    .rotate()
+    .resize({ width: PNG_JPEG_MAX_EDGE, height: PNG_JPEG_MAX_EDGE, fit: 'inside', withoutEnlargement: true })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: PNG_JPEG_QUALITY })
+    .toBuffer()
+  if (buffer.length === 0) return null
+  // 转出来反而更大（阈值边缘的低复杂度 PNG 可能如此）就不换，白转不如不转。
+  if (buffer.length >= Buffer.from(data, 'base64').length) return null
+  logger?.info?.('dsh-team: PNG 转 JPEG 完成，%s -> %s 字节', Buffer.from(data, 'base64').length, buffer.length)
+  return { mediaType: 'image/jpeg', data: buffer.toString('base64'), bytes: buffer.length }
+}
+
+// 对已通过校验的图片描述列表做转码扫描：只动超阈值的 PNG，其余原样保留。
+// sharpFactory 参数供测试注入假解码器；缺省走 resolveSharp。
+export async function convertImagesForUpload(images, thresholdBytes, logger = null, sharpFactory = resolveSharp) {
+  const list = Array.isArray(images) ? images : []
+  if (!Number.isFinite(thresholdBytes) || thresholdBytes <= 0) return list
+  const needs = list.filter(image => image.mediaType === 'image/png' && image.bytes > thresholdBytes)
+  if (needs.length === 0) return list
+  const sharp = sharpFactory()
+  if (!sharp) {
+    if (!sharpMissingWarned) {
+      sharpMissingWarned = true
+      logger?.warn?.('dsh-team: 环境内无 sharp，大 PNG 不做 JPEG 归一，原样上传')
+    }
+    return list
+  }
+  const out = []
+  for (const image of list) {
+    if (image.mediaType !== 'image/png' || image.bytes <= thresholdBytes) {
+      out.push(image)
+      continue
+    }
+    try {
+      const converted = await convertPngToJpeg(sharp, image.data, logger)
+      out.push(converted ? { ...image, ...converted } : image)
+    } catch (error) {
+      // 转码失败回退原图，不阻塞发送。
+      logger?.warn?.('dsh-team: PNG 转 JPEG 失败，回退原图：%s', error?.message ?? error)
+      out.push(image)
+    }
+  }
+  return out
+}
+
+// 外部输入 → 校验 + 转码，落库前的完整归一入口（sendMessage / sendSoloMessage 用）。
+export async function prepareImagesForStorage(input, thresholdBytes, logger = null, sharpFactory) {
+  const images = normalizeImageInputs(input)
+  return convertImagesForUpload(images, thresholdBytes, logger, sharpFactory)
 }

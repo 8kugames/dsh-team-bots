@@ -9,7 +9,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { assertInside } from '../paths.js'
 import { summarizeForUi, upsertBotMessage } from '../botmsg.js'
 import { id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
-import { insertMessageImages, messageImageRow, messageImageViews, normalizeImageInputs } from './message-images.js'
+import { insertMessageImages, messageImageRow, messageImageViews, prepareImagesForStorage } from './message-images.js'
 
 export const commandTaskPattern = /^\/task\s+@([\p{L}\p{N}_-]+)\s+([\s\S]+)$/u
 
@@ -95,8 +95,9 @@ export const chatMethods = {
     const project = this.projectRow(projectId)
     if (project.status !== 'active') throw conflict('项目已归档')
     const body = text(bodyInput, 20_000)
-    // 图片先校验后落库：白名单/大小/数量/非法 base64 一律 invalid_request。
-    const images = normalizeImageInputs(imagesInput)
+    // 图片先校验后落库：白名单/大小/数量/非法 base64 一律 invalid_request；
+    // 超阈值 PNG 在此归一成 JPEG（无 sharp/转码失败回退原图，见 message-images.js）。
+    const images = await prepareImagesForStorage(imagesInput, this.config.imagePngJpegThresholdBytes, this.logger)
     // 正文与图片至少有一项：允许「纯图片消息」，但不允许空消息。
     if (!body && images.length === 0) throw badRequest('消息不能为空')
     const members = this.membersOf(projectId).filter(bot => bot.status === 'active')
@@ -249,8 +250,9 @@ export const chatMethods = {
     const bot = this.botRow(botId)
     if (bot.status !== 'active') throw conflict('Bot 已归档或暂停')
     const body = text(bodyInput, 20_000)
-    // 图片先校验后落库：白名单/大小/数量/非法 base64 一律 invalid_request。
-    const images = normalizeImageInputs(imagesInput)
+    // 图片先校验后落库：白名单/大小/数量/非法 base64 一律 invalid_request；
+    // 超阈值 PNG 在此归一成 JPEG（无 sharp/转码失败回退原图，见 message-images.js）。
+    const images = await prepareImagesForStorage(imagesInput, this.config.imagePngJpegThresholdBytes, this.logger)
     // 正文与图片至少有一项：允许「纯图片消息」，但不允许空消息。
     if (!body && images.length === 0) throw badRequest('消息不能为空')
     if (commandClearPattern.test(body)) {
