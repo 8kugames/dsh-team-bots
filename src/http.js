@@ -33,7 +33,8 @@ const SECURITY = {
   'X-Frame-Options': 'SAMEORIGIN',
   // default-src 里放开 blob:：CSV 导出用 Blob URL 交给浏览器下载；
   // script-src 仍是 'self'，blob: 无法被当成脚本执行。
-  'Content-Security-Policy': "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
+  // img-src 同样放开 blob:：待发图片缩略图用 URL.createObjectURL 做 base64 不进 DOM 的预览。
+  'Content-Security-Policy': "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
 }
 
 // 注入宿主原生 Web 界面（fallback SPA）的切换入口。原生界面没有指向本插件

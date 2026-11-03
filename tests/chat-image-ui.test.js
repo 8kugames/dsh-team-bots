@@ -205,3 +205,65 @@ test('样式：附件按钮 / 缩略图条 / 附图块 / 查看器全部走主�
   }
   assert.match(css, /\.image-viewer\[hidden\] \{/, '查看器隐藏态需显式声明')
 })
+
+// —— DSHBOTS-75：生产 CSP 曾用 img-src 'self' data: 拦下 blob: 缩略图 → 破图 + alt 文件名 ——
+// 修复：img-src 补 blob:。此锁防止 CSP 再被收紧回缺 blob: 的形态。
+test('CSP 回归锁：img-src 必须放行 blob:（待发缩略图预览依赖）', () => {
+  const http = readFileSync(fileURLToPath(new URL('../src/http.js', import.meta.url)), 'utf8')
+  const imgSrc = /img-src ([^;]+);/.exec(http)?.[1]
+  assert.ok(imgSrc, 'src/http.js 缺少 img-src 指令')
+  assert.ok(imgSrc.includes('blob:'), `img-src 必须含 blob:（当前：${imgSrc}）`)
+  assert.ok(imgSrc.includes("'self'"), "img-src 应保留 'self'")
+})
+
+// 兜底占位节点：真实 thumbnailFallback 行为断言（文件名走 textContent，不进 innerHTML）。
+const fallbackBlock = /\/\/ image-fallback:start[^\n]*\n([\s\S]*?)\/\/ image-fallback:end/.exec(source)?.[1]
+assert.ok(fallbackBlock, 'ui/app.js 缺少 image-fallback 标记块')
+const { thumbnailFallback } = new Function(`${fallbackBlock}\nreturn { thumbnailFallback }`)()
+
+test('缩略图兜底：破图换成「图标 + 文件名」占位，文件名走 textContent', () => {
+  const made = []
+  const doc = {
+    createElement(tag) {
+      const el = {
+        tag,
+        children: [],
+        append(...kids) { el.children.push(...kids) },
+        set innerHTML(v) { el._html = v },
+        get innerHTML() { return el._html },
+      }
+      made.push(el)
+      return el
+    },
+  }
+  const node = thumbnailFallback('报告 截图 <b>x</b>.png', '<svg></svg>', doc)
+  assert.equal(node.tag, 'div')
+  assert.equal(node.className, 'image-thumb-fallback')
+  const [glyph, label] = node.children
+  assert.equal(glyph._html, '<svg></svg>', '图标走注入的 iconHtml')
+  assert.equal(label._html, undefined, '文件名节点从不写 innerHTML')
+  assert.equal(label.textContent, '报告 截图 <b>x</b>.png', '文件名原样保留在 textContent')
+  assert.equal(label.className, 'image-thumb-fallback-name')
+  const anon = thumbnailFallback('', '<svg></svg>', doc)
+  assert.equal(anon.children[1].textContent, '图片预览不可用', '空名兜底文案')
+})
+
+test('兜底接线：document 捕获阶段委托 resource error，不用内联 onerror（CSP 会拦）', () => {
+  assert.match(source, /<img class="image-thumb-img" src="\$\{attr\(image\.previewUrl\)\}" alt="[^"]*" \/>/, '缩略图 img 不得带内联 onerror')
+  assert.doesNotMatch(source, /onerror=/i, '任何元素都不得出现内联 onerror（script-src 无 unsafe-inline）')
+  const reg = /document\.addEventListener\('error', \(event\) => \{[\s\S]*?\n  \}, true\)/.exec(source)?.[0]
+  assert.ok(reg, '存在 document 级 error 委托且第三参为 true（捕获）')
+  assert.match(reg, /image-thumb-img/, '只认领待发缩略图')
+  assert.match(reg, /target\.replaceWith\(thumbnailFallback\(/, '破图当场替换为兜底占位')
+  assert.match(reg, /dataset\.fallbackApplied/, '幂等防重入')
+  assert.ok(css.includes('.image-thumb-fallback'), '兜底占位样式存在')
+})
+
+test('blob 生命周期锁：previewUrl 的 revoke 只允许出现在移除与清空两条路径', () => {
+  const calls = source.match(/revokePreview\(/g) ?? []
+  assert.equal(calls.length, 3, 'revokePreview 恰好 3 处：定义 + removePendingImage + clearPendingImages')
+  assert.match(source, /function removePendingImage\(key\) \{[\s\S]*?revokePreview\(target\)/, '移除单张时释放')
+  assert.match(source, /function clearPendingImages\(\) \{[\s\S]*?for \(const image of pendingImagesFor\(\)\) revokePreview\(image\)/, '发送成功清空时释放')
+  const others = (source.match(/URL\.revokeObjectURL\(/g) ?? []).length
+  assert.equal(others, 3, '全文件 revokeObjectURL 恰好 3 处：revokePreview 定义 + CSV 导出 + 查看器关闭；兜底路径不 revoke（移除/清空时会统一释放）')
+})

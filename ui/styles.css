@@ -1946,6 +1946,36 @@ a.global-config.dsh-official-link:hover {
     width: 11px;
     height: 11px;
 }
+/* 待发缩略图加载失败占位（DSHBOTS-75）：blob: 被策略拦下或失效时不留破图。 */
+.image-thumb-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    width: 100%;
+    height: 100%;
+    padding: 4px;
+    box-sizing: border-box;
+    color: var(--ink-3);
+}
+.image-thumb-fallback-icon {
+    display: inline-flex;
+    flex: none;
+}
+.image-thumb-fallback-icon svg {
+    width: 16px;
+    height: 16px;
+}
+.image-thumb-fallback-name {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-caption, 11px);
+    line-height: 1.2;
+}
 /* 消息附图块：气泡下方的元数据条目（图标 + 文件名 + 大小），点击看原图。 */
 .msg-images {
     display: flex;

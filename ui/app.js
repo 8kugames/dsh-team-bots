@@ -3831,6 +3831,24 @@
       </div>`).join('')}</div>`
   }
 
+  // image-fallback:start —— 待发缩略图加载失败兜底（tests/chat-image-ui.test.js 抽取此块断言）
+  // CSP script-src 'self' 不允许内联 onerror 属性，兜底走 document 捕获阶段委托：
+  // 资源 error 事件不冒泡但一定经过捕获阶段。blob: URL 失效或被策略拦下时，
+  // 用「图标 + 文件名」占位替换破图，文件名走 textContent 不进 innerHTML。
+  function thumbnailFallback(name, iconHtml, doc = document) {
+    const wrap = doc.createElement('div')
+    wrap.className = 'image-thumb-fallback'
+    const glyph = doc.createElement('span')
+    glyph.className = 'image-thumb-fallback-icon'
+    glyph.innerHTML = iconHtml
+    const label = doc.createElement('span')
+    label.className = 'image-thumb-fallback-name'
+    label.textContent = String(name || '图片预览不可用')
+    wrap.append(glyph, label)
+    return wrap
+  }
+  // image-fallback:end
+
   // composer-file-input:start —— body 级 file input 单例（tests/chat-image-ui.test.js 抽取此块断言）
   // 选图的 <input> 不能进 renderShell：2.8s 轮询全量重建会换掉节点，用户在系统选框选完文件后
   // change 落在已脱离 document 的旧节点上，document 级委托收不到（DSHBOTS-64 根因）。
@@ -5049,6 +5067,17 @@
       toast('浏览器未提供完整路径', 'error')
     }
   })
+
+  // 待发缩略图兜底（DSHBOTS-75）：捕获阶段接资源 error，破图当场换成「图标 + 文件名」占位。
+  // 不用内联 onerror——CSP script-src 'self' 会把内联处理器一起拦掉。
+  document.addEventListener('error', (event) => {
+    const target = event.target
+    if (!(target instanceof HTMLImageElement)) return
+    if (!target.classList.contains('image-thumb-img')) return
+    if (target.dataset.fallbackApplied === '1') return
+    target.dataset.fallbackApplied = '1'
+    target.replaceWith(thumbnailFallback(target.getAttribute('alt') || '', icon('image'), target.ownerDocument ?? document))
+  }, true)
 
   document.addEventListener('change', (event) => {
     const el = event.target
