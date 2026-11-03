@@ -14,7 +14,7 @@ const ACTIONS = new Set([
   'approval_decide', 'approvals_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
-  'settings', 'update_settings', 'export_usage_csv', 'reconcile_usage', 'outbox',
+  'settings', 'update_settings', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
   'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout',
   'run_command', 'cancel_command', 'terminal_state',
@@ -174,9 +174,17 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.updateSettings(payload.patch ?? payload, actor)
     case 'export_usage_csv':
       return {
-        filename: `dsh-team-usage-${new Date().toISOString().slice(0, 10)}.csv`,
-        csv: exportUsageCsv(service.store, { projectId: payload.projectId ?? null, soloBotId: payload.soloBotId ?? null, days: payload.days ?? 30 }),
+        filename: `dsh-team-usage${payload.window ? `-${payload.window}` : ''}-${new Date().toISOString().slice(0, 10)}.csv`,
+        csv: exportUsageCsv(service.store, {
+          projectId: payload.projectId ?? null,
+          soloBotId: payload.soloBotId ?? null,
+          days: payload.days ?? 30,
+          window: payload.window ?? null,
+        }),
       }
+    case 'usage_window':
+      // 用量时间窗快照（DSHBOTS-121）：按需取，不进 state 轮询。
+      return service.usageWindow(payload.projectId ?? null, payload.soloBotId ?? null, payload.window ?? '30d')
     case 'outbox':
       return service.outboxView()
     case 'reconcile_usage':

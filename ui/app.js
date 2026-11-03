@@ -1998,8 +1998,68 @@ function renderEvolution() {
   `
 }
 
+// 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
+// 窗口状态放在模块里（不进全局 state）：只影响用量页，切换后按需向后端取该窗口快照。
+let usageWindowKey = '30d'
+let usageWindowCache = null
+let usageWindowLoading = false
+let usageWindowRequest = 0
+
+const USAGE_WINDOWS = [
+  { key: 'today', label: '今日' },
+  { key: '7d', label: '7 日' },
+  { key: '30d', label: '30 日' },
+  { key: 'all', label: '至今' },
+]
+
+// 时间窗取数上下文：跟页面口径一致——全局不带项目，单聊带 bot，本群带项目。
+function usageWindowContext() {
+  const project = pageProject()
+  const mode = usageMode()
+  return {
+    projectId: mode === 'domain' && project ? project.id : null,
+    soloBotId: mode === 'solo' ? (state.soloBotId ?? null) : null,
+  }
+}
+
+// 已取到的窗口快照：窗口键与口径都要对得上才算命中，否则回落到 state 里的默认快照。
+// 只有用量页用窗口快照，侧栏徽标等其它视图仍读 state 的统一口径。
+function usageWindowData() {
+  if (!usageWindowCache) return null
+  if (state.view !== 'usage') return null
+  const ctx = usageWindowContext()
+  if (usageWindowCache.key !== usageWindowKey) return null
+  if (usageWindowCache.projectId !== ctx.projectId) return null
+  if (usageWindowCache.soloBotId !== ctx.soloBotId) return null
+  return usageWindowCache.data
+}
+
+// 当前窗口的一句话口径说明。
+function usageWindowText(usage) {
+  const window = usage?.window ?? null
+  if (!window) return `近 ${Number(usage?.days ?? 30) || 30} 天`
+  if (window.key === 'today') return '今日（产品时区当日 0 点起）'
+  if (window.key === '7d') return '近 7 天（滚动窗口）'
+  if (window.key === '30d') return '近 30 天（滚动窗口）'
+  return '至今（自最早一条明细起，不设下界）'
+}
+
+// 按日面板的标题与说明：跟当前时间窗走；没有窗口信息时回落到旧的 14 天口径。
+function usageDayPanelMeta(usage) {
+  const key = String(usage?.window?.key ?? '')
+  if (key === 'today') return { title: '今日', note: '今日口径：产品时区（Asia/Shanghai）当日 0 点起。' }
+  if (key === '7d') return { title: '近 7 天', note: '滚动 7 天窗口，按产品时区日历日分组。' }
+  if (key === '30d') return { title: '近 30 天', note: '滚动 30 天窗口，按产品时区日历日分组。' }
+  if (key === 'all') return { title: '近 30 天', note: '至今窗口汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。' }
+  return { title: '', note: '' }
+}
+
+function usageDayTitle(usage) {
+  return usageDayPanelMeta(usage).title || '近 14 天'
+}
+
 function usageSnapshot() {
-  const raw = state.data?.usage ?? {}
+  const raw = usageWindowData() ?? state.data?.usage ?? {}
   const tiers = raw.scopeTiers ?? null
   const legacy = tiers ? null : (raw.scope && typeof raw.scope === 'object' ? raw.scope : null)
   const global = raw.global ?? legacy?.global ?? {}
@@ -2066,7 +2126,7 @@ function usageCostPrimaryText(totals, currency) {
 async function exportUsageCsv() {
   const usage = usageSnapshot()
   const project = pageProject()
-  const payload = { days: usage.days ?? 30 }
+  const payload = { days: usage.days ?? 30, window: usageWindowKey }
   // 导出口径跟随当前页面口径（DSHBOTS-56）：
   // global=全局明细（不带任何过滤）；domain=本群明细；solo=该 Bot 的项目外明细。
   const mode = usageMode()
@@ -2195,9 +2255,11 @@ function usageMetricCards(totals, scopeLabel, usage) {
   const currency = usageCurrency(usage)
   const cost = usageCostParts(totals, currency)
   const windowDays = Number(usage.days ?? 30) || 30
+  // 日均按实际跨度折算：今日=1 天，7/30 日=窗口天数，至今=全部历史跨度（后端给 spanDays）。
+  const spanDays = Number(usage.window?.spanDays ?? windowDays) || windowDays
   const totalTokens = Number(totals.totalTokens ?? 0)
   const calls = Number(totals.calls ?? 0)
-  const dailyTokens = windowDays > 0 ? totalTokens / windowDays : 0
+  const dailyTokens = spanDays > 0 ? totalTokens / spanDays : 0
   const perCall = calls > 0 ? totalTokens / calls : 0
   const costValue = cost.code
     ? `<span class="unit">${esc(cost.symbol.trim())}</span>${esc(formatAmount(cost.amount))}`
@@ -2225,18 +2287,22 @@ function usageMetricCards(totals, scopeLabel, usage) {
     <div class="card metric">
       <span class="metric-label">日均 tokens（${esc(scopeLabel)}）</span>
       <strong>${formatNumber(dailyTokens)}</strong>
-      <small class="mono">按 ${windowDays} 天汇总窗口折算</small>
+      <small class="mono">按 ${spanDays} 天汇总窗口折算</small>
     </div>
   </div>`
 }
 
 function usageDayPanel(days) {
+  const usage = usageSnapshot()
+  const meta = usageDayPanelMeta(usage)
   const maxDay = Math.max(1, ...days.map(item => item.totalTokens ?? 0))
   const peak = days.reduce((best, day) => ((day.totalTokens ?? 0) > (best?.totalTokens ?? 0) ? day : best), null)
+  // 日期轴标签密度：柱子越多列越窄，标签按固定步长取，否则「MM/DD」会被列宽截成「10」。
+  const labelStep = days.length > 20 ? 6 : 3
   return `<div class="card usage-panel">
-    <div class="card-head"><h3>近 14 天</h3>${peak && peak.totalTokens ? `<span class="meta">峰值 ${formatNumber(peak.totalTokens)} · ${esc(String(peak.day).slice(5))}</span>` : ''}</div>
-    ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % 3 === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
-    <div class="usage-note">按日明细由服务端保留最近 14 天；更早的调用计入上方汇总，不进这张图。</div>
+    <div class="card-head"><h3>${esc(usageDayTitle(usage))}</h3>${peak && peak.totalTokens ? `<span class="meta">峰值 ${formatNumber(peak.totalTokens)} · ${esc(String(peak.day).slice(5))}</span>` : ''}</div>
+    ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % labelStep === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
+    <div class="usage-note">${esc(meta.note || '按日明细由服务端保留最近 14 天；更早的调用计入上方汇总，不进这张图。')}</div>
   </div>`
 }
 
@@ -2255,12 +2321,18 @@ function usageSection(title, desc, body, headExtra = '') {
 }
 
 // 页面头：单一声明统计窗口与本页口径，避免各面板各说一套。
+// 时间窗切换（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今；汇总、分布明细、CSV 导出同窗口。
 function usagePageHead(usage, scopeText, exportLabel = '') {
-  const windowDays = Number(usage.days ?? 30) || 30
+  const windowText = usageWindowText(usage)
   return `<div class="section-head usage-page-head">
     <div class="usage-head-meta">
-      <span class="usage-window">汇总窗口 近 ${windowDays} 天</span>
-      <span class="usage-head-desc">${esc(scopeText)}</span>
+      <div class="usage-window-row">
+        <span class="usage-window">汇总窗口</span>
+        <div class="seg" role="group" aria-label="汇总窗口">
+          ${USAGE_WINDOWS.map(item => `<button data-action="usage-window" data-window="${item.key}" aria-pressed="${usageWindowKey === item.key}"${usageWindowLoading ? ' disabled' : ''}>${esc(item.label)}</button>`).join('')}
+        </div>
+      </div>
+      <span class="usage-head-desc">${esc(scopeText)} · 当前窗口 ${esc(windowText)}${usageWindowLoading ? ' · 载入中…' : ''}</span>
     </div>
     <div class="btn-row">
       <button class="btn" data-action="export-usage-csv">${icon('download')}导出 CSV${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
@@ -2285,7 +2357,8 @@ function renderUsageGlobal() {
   const days = tier?.byDay ?? usage.byDay ?? []
   const totals = usage.global ?? {}
   const currency = usageCurrency(usage)
-  const windowDays = Number(usage.days ?? 30) || 30
+  const windowText = usageWindowText(usage)
+  const dayTitle = usageDayTitle(usage)
   const focus = ['global', 'model', 'bot', 'project'].includes(state.usageScope) ? state.usageScope : 'global'
   const maxBot = Math.max(1, ...byBot.map(item => item.totalTokens ?? 0))
   const maxProject = Math.max(1, ...byProject.map(item => item.totalTokens ?? 0))
@@ -2313,12 +2386,12 @@ function renderUsageGlobal() {
     ${usagePageHead(usage, '全局口径，不随当前群聊 / 单聊上下文变化')}
     ${usageSection(
       '全局用量总览',
-      `四项指标覆盖全部调用来源，按汇总窗口 近 ${windowDays} 天统计。`,
+      `四项指标覆盖全部调用来源，按汇总窗口 ${windowText} 统计。`,
       `${overviewNotes}${usageMetricCards(totals, '全局', usage)}`,
     )}
     ${usageSection(
       '分布明细',
-      `四个维度始终同时展示；按日面板只保留最近 14 天明细，其余面板与上方汇总同为 ${windowDays} 天窗口。条形长度 = tokens 占比，琥珀色 = 含未计价调用，空条 = 零用量。`,
+      `四个维度始终同时展示；按日面板只画 ${dayTitle}，其余面板与上方汇总同为 ${windowText} 窗口。条形长度 = tokens 占比，琥珀色 = 含未计价调用，空条 = 零用量。`,
       `<div class="usage-grid">${order.map(key => panels[key]).join('')}</div>`,
       `<div class="usage-seg">
         <span class="usage-seg-label">面板顺序</span>
@@ -2342,7 +2415,8 @@ function renderUsageDomain() {
   const days = tier?.byDay ?? []
   const totals = usage.project ?? {}
   const currency = usageCurrency(usage)
-  const windowDays = Number(usage.days ?? 30) || 30
+  const windowText = usageWindowText(usage)
+  const dayTitle = usageDayTitle(usage)
   const maxBot = Math.max(1, ...byBot.map(item => item.totalTokens ?? 0))
   const drillBot = state.usageBot ? botById(state.usageBot) : null
   const drillRuns = drillBot
@@ -2357,12 +2431,12 @@ function renderUsageDomain() {
     ${usagePageHead(usage, '仅当前群聊内的用量，不含其他群聊', '本群')}
     ${usageSection(
       '本群用量总览',
-      `四项指标只统计当前群聊的调用，按汇总窗口 近 ${windowDays} 天归集。`,
+      `四项指标只统计当前群聊的调用，按汇总窗口 ${windowText} 归集。`,
       `${overviewNotes}${usageMetricCards(totals, '本群', usage)}`,
     )}
     ${usageSection(
       '本群分布明细',
-      `按日面板只保留最近 14 天明细，其余面板与上方汇总同为 ${windowDays} 天窗口；条形长度 = tokens 占比，琥珀色 = 含未计价调用，空条 = 零用量。`,
+      `按日面板只画 ${dayTitle}，其余面板与上方汇总同为 ${windowText} 窗口；条形长度 = tokens 占比，琥珀色 = 含未计价调用，空条 = 零用量。`,
       `<div class="usage-grid">
         ${usageDayPanel(days)}
         ${usageModelPanel(byModel, '本群分模型', '', currency)}
@@ -2388,7 +2462,8 @@ function renderUsageSolo() {
   const days = tier?.byDay ?? []
   const totals = usage.solo ?? {}
   const currency = usageCurrency(usage)
-  const windowDays = Number(usage.days ?? 30) || 30
+  const windowText = usageWindowText(usage)
+  const dayTitle = usageDayTitle(usage)
   const runs = (state.data?.solo?.runs ?? state.data?.runs ?? [])
     .filter(run => run.bot_id === state.soloBotId && (run.project_id ?? null) === null)
   const unpriced = Number(totals.unpricedCalls ?? 0)
@@ -2400,12 +2475,12 @@ function renderUsageSolo() {
     ${usagePageHead(usage, '仅该 Bot 在项目外（单聊）的用量，不含项目内调用', '该 Bot')}
     ${usageSection(
       '该 Bot 用量总览',
-      `四项指标只统计该 Bot 的单聊调用，按汇总窗口 近 ${windowDays} 天归集。`,
+      `四项指标只统计该 Bot 的单聊调用，按汇总窗口 ${windowText} 归集。`,
       `${overviewNotes}${usageMetricCards(totals, '该 Bot', usage)}`,
     )}
     ${usageSection(
       '该 Bot 分布明细',
-      `按日面板只保留最近 14 天明细，其余面板与上方汇总同为 ${windowDays} 天窗口。`,
+      `按日面板只画 ${dayTitle}，其余面板与上方汇总同为 ${windowText} 窗口。`,
       `<div class="usage-grid">
         ${usageDayPanel(days)}
         ${usageModelPanel(byModel, '该 Bot 分模型', '', currency)}
@@ -4787,6 +4862,30 @@ document.addEventListener('click', async (event) => {
         await api('promote_proposal', { proposalId: target.dataset.proposalId })
         await refresh()
         toast('提案已转正', 'success')
+        break
+      }
+      case 'usage-window': {
+        // 时间窗切换（DSHBOTS-121）：按需向后端取该窗口快照，不把四档都塞进 state 轮询。
+        const key = target.dataset.window
+        if (!key || key === usageWindowKey) break
+        const previousKey = usageWindowKey
+        const token = ++usageWindowRequest
+        const ctx = usageWindowContext()
+        usageWindowKey = key
+        usageWindowLoading = true
+        usageWindowCache = null
+        render()
+        try {
+          const data = await api('usage_window', { projectId: ctx.projectId, soloBotId: ctx.soloBotId, window: key })
+          if (token !== usageWindowRequest) break
+          usageWindowCache = { key, projectId: ctx.projectId, soloBotId: ctx.soloBotId, data }
+        } catch {
+          // 取数失败回到原窗口，页面继续用 state 里的默认口径。
+          if (token === usageWindowRequest) usageWindowKey = previousKey
+        }
+        if (token !== usageWindowRequest) break
+        usageWindowLoading = false
+        render()
         break
       }
       case 'usage-scope':

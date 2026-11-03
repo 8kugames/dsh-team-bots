@@ -50,7 +50,9 @@ test('② KPI 四卡口径写清，且不再有错名卡与假窗口卡', () => 
   assert.ok(!body.includes('统计窗口'), '不再有常量占位的统计窗口卡')
   // 窗口口径来自服务端真实值，不是写死的常量。
   assert.match(body, /Number\(usage\.days \?\? 30\)/, '窗口天数取服务端 usage.days')
-  assert.match(fnBody('usagePageHead'), /汇总窗口 近 \$\{windowDays\} 天/, '页面头单一声明汇总窗口')
+  // DSHBOTS-121：窗口口径从写死的「近 N 天」常量改成四档可切换（今日 / 7 日 / 30 日 / 至今）。
+  assert.match(fnBody('usagePageHead'), /汇总窗口/, '页面头单一声明汇总窗口')
+  assert.match(fnBody('usagePageHead'), /data-action="usage-window"/, '页面头提供四档时间窗切换')
 })
 
 test('③ 成本写法统一为符号式，同页不再混排 CNY 与 ¥', () => {

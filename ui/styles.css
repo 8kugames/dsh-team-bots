@@ -3561,10 +3561,28 @@ a.global-config.dsh-official-link:hover {
     display: grid;
     grid-template-columns: 1.1fr 0.9fr;
     gap: 12px;
-    align-items: start;
+    /* 同一行的两张卡等高：矮的那张不再在卡片下方留一块空白。 */
+    align-items: stretch;
+}
+/* 面板数为奇数时（3 张）最后一张横跨整行，不留空网格单元——这是「分布明细漏空」的根因。 */
+.usage-grid > .usage-panel:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
 }
 .usage-panel {
     padding: 16px;
+    /* 卡内纵向 flex：图例与说明贴到卡片底部，等高时不再悬空。 */
+    display: flex;
+    flex-direction: column;
+}
+.usage-panel > .usage-legend,
+.usage-panel > .usage-note {
+    margin-top: auto;
+}
+.usage-panel > .usage-legend {
+    padding-top: 12px;
+}
+.usage-panel > .usage-note {
+    padding-top: 10px;
 }
 /* 用量页骨架（DSHBOTS-81）：页面头单一声明窗口与口径，区块给真实标题 + 说明副行，
    顶栏 H1 不再被一个灰字 caption 复述。所有颜色只用既有 token。 */
@@ -3579,6 +3597,12 @@ a.global-config.dsh-official-link:hover {
     flex-direction: column;
     gap: 7px;
     min-width: 0;
+}
+.usage-window-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 .usage-window {
     align-self: flex-start;
@@ -3803,7 +3827,9 @@ a.global-config.dsh-official-link:hover {
     text-align: center;
     color: var(--ink-3);
     font: var(--fs-caption) var(--mono);
-    overflow: hidden;
+    /* 标签允许溢出列宽：30 根柱子时列宽不足，硬裁会把「10/07」截成「10」。 */
+    overflow: visible;
+    white-space: nowrap;
 }
 .usage-table {
     width: 100%;

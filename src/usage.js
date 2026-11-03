@@ -176,9 +176,107 @@ export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY) {
 }
 
 // 统计口径：since 为窗口起点（ISO 字符串），projectId 限定项目（null 表示全局）。
+// 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
+// 口径：今日 = 产品时区（默认 Asia/Shanghai）当日 0 点起；7 日 / 30 日 = 滚动窗口；
+// 至今 = 不设下界。明细 occurred_at 存的是 ISO UTC 字符串，窗口起点先换算成 UTC ISO 再比较。
+export const USAGE_WINDOW_KEYS = ['today', '7d', '30d', 'all']
+export const USAGE_WINDOW_LABELS = { today: '今日', '7d': '7 日', '30d': '30 日', all: '至今' }
+export const USAGE_TIME_ZONE = process.env.DSH_USAGE_TIME_ZONE || 'Asia/Shanghai'
+
+const DAY_MS = 86_400_000
+
+// 某一时刻在指定时区的挂钟分量与偏移（分钟，东为正）。
+function zoneClock(ms, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+  const parts = {}
+  for (const part of dtf.formatToParts(new Date(ms))) {
+    if (part.type !== 'literal') parts[part.type] = part.value
+  }
+  const year = Number(parts.year)
+  const month = Number(parts.month)
+  const day = Number(parts.day)
+  const hour = Number(parts.hour) % 24
+  const minute = Number(parts.minute)
+  const second = Number(parts.second)
+  const wall = Date.UTC(year, month - 1, day, hour, minute, second)
+  return { year, month, day, hour, minute, offsetMinutes: Math.round((wall - ms) / 60_000) }
+}
+
+// 指定时区当日 0 点对应的 UTC 毫秒（夏令时切换日按当日实际偏移二次校正）。
+function zoneDayStartUtc(ms, timeZone) {
+  const clock = zoneClock(ms, timeZone)
+  const wallStart = Date.UTC(clock.year, clock.month - 1, clock.day, 0, 0, 0)
+  const offset = zoneClock(wallStart - clock.offsetMinutes * 60_000, timeZone).offsetMinutes
+  return wallStart - offset * 60_000
+}
+
+// 时区内的日历日（YYYY-MM-DD）。
+function zoneDay(ms, timeZone) {
+  const clock = zoneClock(ms, timeZone)
+  return `${clock.year}-${String(clock.month).padStart(2, '0')}-${String(clock.day).padStart(2, '0')}`
+}
+
+// 解析时间窗：today / 7d / 30d / all，非法键回退 30 日。
+// since 为 null 表示「至今」（没有下界）；dayCount 是日历面板要画的根数。
+export function resolveUsageWindow(key, options = {}) {
+  const now = Number(options.now ?? Date.now())
+  const timeZone = options.timeZone ?? USAGE_TIME_ZONE
+  const wanted = USAGE_WINDOW_KEYS.includes(String(key)) ? String(key) : '30d'
+  const clock = zoneClock(now, timeZone)
+  let since = null
+  let days = null
+  let dayCount = 30
+  if (wanted === 'today') {
+    since = new Date(zoneDayStartUtc(now, timeZone)).toISOString()
+    days = 1
+    dayCount = 1
+  } else if (wanted === '7d') {
+    since = new Date(now - 7 * DAY_MS).toISOString()
+    days = 7
+    dayCount = 7
+  } else if (wanted === '30d') {
+    since = new Date(now - 30 * DAY_MS).toISOString()
+    days = 30
+    dayCount = 30
+  }
+  return {
+    key: wanted,
+    label: USAGE_WINDOW_LABELS[wanted],
+    since,
+    days,
+    dayCount,
+    timeZone,
+    offsetMinutes: clock.offsetMinutes,
+    // 日历面板起点：产品时区下的日历日。
+    daySince: zoneDay(now - (dayCount - 1) * DAY_MS, timeZone),
+  }
+}
+
+// 日历日表达式：offsetMinutes 为空时沿用 UTC 日期（旧口径），否则按固定偏移换算到产品时区。
+function dayExpression(column, offsetMinutes) {
+  if (offsetMinutes === null || offsetMinutes === undefined) return `substr(${column}, 1, 10)`
+  const sign = offsetMinutes < 0 ? '-' : '+'
+  return `substr(datetime(substr(replace(${column}, 'T', ' '), 1, 19), '${sign}${Math.abs(offsetMinutes)} minutes'), 1, 10)`
+}
+
+// 统计口径：since 为窗口起点（ISO 字符串），projectId 限定项目（null 表示全局）；
+// since 为 null 表示「至今」——没有下界，不加时间过滤。
 function scopeFilters(scope) {
-  const filters = ['u.occurred_at >= ?']
-  const params = [scope.since]
+  const filters = []
+  const params = []
+  if (scope.since) {
+    filters.push('u.occurred_at >= ?')
+    params.push(scope.since)
+  }
   if (scope.projectId) {
     filters.push('u.project_id = ?')
     params.push(scope.projectId)
@@ -188,11 +286,18 @@ function scopeFilters(scope) {
     filters.push('u.bot_id = ?', 'u.project_id IS NULL')
     params.push(scope.soloBotId)
   }
+  // 至今窗口没有时间下界时可能一条条件都不剩，补一条恒真条件，保证 where 子句非空。
+  if (!filters.length) filters.push('1 = 1')
   return { filters, params }
 }
 
 // 运行窗口：结束、开始、入队任一时间落在窗口内即视为「窗口内跑过」。
 const RUN_IN_WINDOW = 'COALESCE(r.ended_at, r.started_at, r.queued_at) >= ?'
+
+function runWindowFilter(scope) {
+  if (!scope.since) return { clause: '1 = 1', params: [] }
+  return { clause: RUN_IN_WINDOW, params: [scope.since] }
+}
 
 // 零用量行口径：token 与调用数为 0；成本记 0（没有发生消费，不属于未计价），
 // 币种按预算币种记 0，界面直接显示金额而不是「未配置」。
@@ -223,17 +328,18 @@ function zeroUsageBotRows(store, scope, budgetCurrency) {
     runParams.push(scope.projectId)
   }
   const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
+  const runWindow = runWindowFilter(scope)
   const rows = store.all(
     `SELECT b.id AS bot_id, b.name AS name
        FROM bots b
        JOIN runs r ON r.bot_id = b.id
-      WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${RUN_IN_WINDOW}
+      WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${runWindow.clause}
         AND NOT EXISTS (
-          SELECT 1 FROM usage_events u WHERE u.bot_id = b.id AND ${eventFilters.join(' AND ')}
+          SELECT 1 FROM usage_events u WHERE u.bot_id = b.id${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
         )
       GROUP BY b.id, b.name
       ORDER BY b.name`,
-    ...runParams, scope.since, ...eventParams,
+    ...runParams, ...runWindow.params, ...eventParams,
   )
   return rows.map(row => ({ botId: row.bot_id, name: row.name, ...zeroTotals(budgetCurrency) }))
 }
@@ -247,17 +353,18 @@ function zeroUsageProjectRows(store, scope, budgetCurrency) {
     runParams.push(scope.projectId)
   }
   const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
+  const runWindow = runWindowFilter(scope)
   const rows = store.all(
     `SELECT p.id AS project_id, p.name AS name, p.key AS key
        FROM projects p
        JOIN runs r ON r.project_id = p.id
-      WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${RUN_IN_WINDOW}
+      WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${runWindow.clause}
         AND NOT EXISTS (
-          SELECT 1 FROM usage_events u WHERE u.project_id = p.id AND ${eventFilters.join(' AND ')}
+          SELECT 1 FROM usage_events u WHERE u.project_id = p.id${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
         )
       GROUP BY p.id, p.name, p.key
       ORDER BY p.name`,
-    ...runParams, scope.since, ...eventParams,
+    ...runParams, ...runWindow.params, ...eventParams,
   )
   return rows.map(row => ({ projectId: row.project_id, name: row.name, key: row.key, ...zeroTotals(budgetCurrency) }))
 }
@@ -271,18 +378,21 @@ function zeroUsageDayRows(store, scope, budgetCurrency, daySince) {
     runParams.push(scope.projectId)
   }
   const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
+  const runWindow = runWindowFilter(scope)
+  const runDay = dayExpression('COALESCE(r.ended_at, r.started_at, r.queued_at)', scope.offsetMinutes)
+  const eventDay = dayExpression('u.occurred_at', scope.offsetMinutes)
   const rows = store.all(
     `SELECT d.day AS day FROM (
-        SELECT DISTINCT substr(COALESCE(r.ended_at, r.started_at, r.queued_at), 1, 10) AS day
+        SELECT DISTINCT ${runDay} AS day
           FROM runs r
-         WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${RUN_IN_WINDOW}
+         WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${runWindow.clause}
        ) d
       WHERE ${daySince ? 'd.day >= ? AND' : ''} NOT EXISTS (
         SELECT 1 FROM usage_events u
-         WHERE substr(u.occurred_at, 1, 10) = d.day AND ${eventFilters.join(' AND ')}
+         WHERE ${eventDay} = d.day${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
       )
       ORDER BY d.day`,
-    ...runParams, scope.since, ...(daySince ? [daySince] : []), ...eventParams,
+    ...runParams, ...runWindow.params, ...(daySince ? [daySince] : []), ...eventParams,
   )
   return rows.map(row => ({ day: row.day, ...zeroTotals(budgetCurrency) }))
 }
@@ -342,17 +452,18 @@ function byModelRows(store, scope, budgetCurrency) {
 
 function byDayRows(store, scope, budgetCurrency, daySince = null) {
   const { filters, params } = scopeFilters(scope)
-  const allFilters = daySince ? [...filters, 'substr(u.occurred_at, 1, 10) >= ?'] : filters
+  const dayExpr = dayExpression('u.occurred_at', scope.offsetMinutes)
+  const allFilters = daySince ? [...filters, `${dayExpr} >= ?`] : filters
   const allParams = daySince ? [...params, daySince] : params
   const where = filterClause(allFilters)
   const rows = store.all(
-    `SELECT substr(u.occurred_at, 1, 10) AS day, ${AGGREGATES}
+    `SELECT ${dayExpr} AS day, ${AGGREGATES}
        FROM usage_events u ${where}
       GROUP BY day ORDER BY day`,
     ...allParams,
   )
   const used = rows.map(row => {
-    const breakdown = costBreakdown(store, `${where} AND substr(u.occurred_at, 1, 10) = ?`, [...allParams, row.day], budgetCurrency)
+    const breakdown = costBreakdown(store, `${where} AND ${dayExpr} = ?`, [...allParams, row.day], budgetCurrency)
     return { day: row.day, ...mapTotals(row, breakdown) }
   })
   return [...used, ...zeroUsageDayRows(store, scope, budgetCurrency, daySince)]
@@ -372,18 +483,36 @@ function scopeUsage(store, scope, budgetCurrency) {
   return aggregateUsage(store, filters, params, budgetCurrency)
 }
 
+function windowSpanDays(store, window) {
+  if (Number.isFinite(window.days) && window.days > 0) return window.days
+  const earliest = store.get('SELECT MIN(occurred_at) AS earliest FROM usage_events')?.earliest ?? null
+  if (!earliest) return 1
+  const from = Date.parse(String(earliest))
+  if (!Number.isFinite(from)) return 1
+  return Math.max(1, Math.ceil((Date.now() - from) / DAY_MS))
+}
+
 export function usageSnapshot(store, projectId, days = 30, options = {}) {
   const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const soloBotId = options.soloBotId ?? null
-  const since = new Date(Date.now() - days * 86_400_000).toISOString()
-  const globalScope = { since, projectId: null }
-  const projectScope = projectId ? { since, projectId } : null
-  const soloScope = soloBotId ? { since, projectId: null, soloBotId } : null
+  // 时间窗口径（DSHBOTS-121）：传 window 走四档窗口；不传时沿用旧的「近 N 天」滚动窗口。
+  const window = options.window
+    ? resolveUsageWindow(options.window, { now: options.now, timeZone: options.timeZone })
+    : null
+  const since = window ? window.since : new Date(Date.now() - days * 86_400_000).toISOString()
+  // 窗口口径下日历日按产品时区分组；旧口径（offsetMinutes 为空）仍按 UTC 日期。
+  const offsetMinutes = window ? window.offsetMinutes : null
+  const globalScope = { since, projectId: null, offsetMinutes }
+  const projectScope = projectId ? { since, projectId, offsetMinutes } : null
+  const soloScope = soloBotId ? { since, projectId: null, soloBotId, offsetMinutes } : null
   const global = scopeUsage(store, globalScope, budgetCurrency)
   const project = projectScope ? scopeUsage(store, projectScope, budgetCurrency) : { ...ZERO_TOTALS }
   const solo = soloScope ? scopeUsage(store, soloScope, budgetCurrency) : null
-  // byDay 只展示近 14 天。
-  const cutoff = new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10)
+  // 日历面板：窗口口径下画窗口对应的天数（今日 1 根 / 7 日 7 根 / 30 日 30 根 / 至今封顶 30 根）；
+  // 旧口径沿用近 14 天。
+  const cutoff = window
+    ? window.daySince
+    : new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10)
   const globalTiers = tierSet(store, globalScope, budgetCurrency, cutoff)
   const projectTiers = projectScope ? tierSet(store, projectScope, budgetCurrency, cutoff) : null
   const soloTiers = soloScope ? tierSet(store, soloScope, budgetCurrency, cutoff) : null
@@ -391,7 +520,8 @@ export function usageSnapshot(store, projectId, days = 30, options = {}) {
     "SELECT COUNT(DISTINCT provider || '|' || lower(model)) AS count FROM model_prices",
   )?.count ?? 0
   return {
-    days,
+    days: window ? window.days : days,
+    window: window ? { ...window, spanDays: windowSpanDays(store, window) } : null,
     currency: budgetCurrency,
     global,
     project,
@@ -620,10 +750,16 @@ function csvCell(value) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-export function exportUsageCsv(store, { projectId = null, soloBotId = null, days = 30 } = {}) {
-  const since = new Date(Date.now() - days * 86_400_000).toISOString()
-  const filters = ['u.occurred_at >= ?']
-  const params = [since]
+export function exportUsageCsv(store, { projectId = null, soloBotId = null, days = 30, window = null } = {}) {
+  // 时间窗口径（DSHBOTS-121）：导出跟随页面选中的窗口；至今窗口没有下界，不加时间过滤。
+  const resolved = window ? resolveUsageWindow(window) : null
+  const since = resolved ? resolved.since : new Date(Date.now() - days * 86_400_000).toISOString()
+  const filters = []
+  const params = []
+  if (since) {
+    filters.push('u.occurred_at >= ?')
+    params.push(since)
+  }
   if (projectId) {
     filters.push('u.project_id = ?')
     params.push(projectId)

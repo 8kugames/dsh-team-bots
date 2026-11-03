@@ -48,7 +48,8 @@ export const systemMethods = {
       outbox: this.outboxCounts(),
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
       revisions: {},
-      usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null }),
+      // 用量快照默认按 30 日窗口（DSHBOTS-121）：与页面默认档一致，其余三档按需单独取。
+      usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null, window: '30d' }),
       settings: this.settingsView(),
       runLimits: this.runLimitsView(),
       // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
@@ -164,6 +165,23 @@ export const systemMethods = {
       }
     }
     return view
+  },
+
+  /**
+   * 用量时间窗快照（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档按需取数。
+   * 不把四档都塞进 state——state 每次轮询都要带，四份快照会把响应体积翻四倍。
+   */
+  async usageWindow(projectId = null, soloBotId = null, window = '30d') {
+    await this.initialize()
+    let project = projectId
+      ? this.store.get('SELECT id FROM projects WHERE id = ?', projectId)
+      : undefined
+    if (!project) project = this.store.get("SELECT id FROM projects WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1")
+    return usageSnapshot(this.store, project?.id, 30, {
+      currency: this.budgetCurrency(),
+      soloBotId: soloBotId ?? null,
+      window: window ?? '30d',
+    })
   },
 
   /**
