@@ -1096,15 +1096,40 @@ function questionProgressRatio(remainingMs, windowMs) {
   if (total <= 0) return 0
   return Math.max(0, Math.min(1, (Number(remainingMs) || 0) / total))
 }
-// 作答草稿：questionId → { selected: Set<label>, custom: { [itemId]: string } }。
+// 作答草稿：questionId → { selected: Map<itemId, Set<label>>, custom: { [itemId]: string } }。
+// 选择态按问题条目分桶——同卡多问时各问选项互不覆盖（共享一个 Set 会让后问的单选把前问清掉）；
 // 只存前端选择态，提交时映射成宿主 {answers:[{id,selected,custom}]}；整页重渲染不丢选择。
 function questionDraftOf(questionId) {
   let draft = state.questionDraft.get(questionId)
   if (!draft) {
-    draft = { selected: new Set(), custom: {} }
+    draft = { selected: new Map(), custom: {} }
     state.questionDraft.set(questionId, draft)
   }
   return draft
+}
+function questionDraftSelection(draft, itemId) {
+  const key = String(itemId)
+  let selected = draft.selected.get(key)
+  if (!selected) {
+    selected = new Set()
+    draft.selected.set(key, selected)
+  }
+  return selected
+}
+// 一次点击折算成选择态：单选互斥（再点已选项=取消），多选可叠加。
+// 抽成纯函数便于 UI 用例直接执行，切换只动本条目自己的桶。
+function questionSelectOption(draft, item, label, multi) {
+  const selected = questionDraftSelection(draft, item.id)
+  if (multi) {
+    if (selected.has(label)) selected.delete(label)
+    else selected.add(label)
+  } else if (selected.has(label) && selected.size === 1) {
+    selected.clear()
+  } else {
+    selected.clear()
+    selected.add(label)
+  }
+  return selected
 }
 function questionAnswerMap(question) {
   const answers = question?.answer?.answers
@@ -1113,7 +1138,7 @@ function questionAnswerMap(question) {
 }
 function questionOptionButton(question, item, option) {
   const draft = questionDraftOf(question.id)
-  const selected = draft.selected.has(String(option.label))
+  const selected = questionDraftSelection(draft, item.id).has(String(option.label))
   return `<button class="question-option${selected ? ' is-selected' : ''}" type="button"
     data-action="question-option" data-question-id="${attr(question.id)}" data-item-id="${attr(item.id)}"
     data-label="${attr(option.label)}" data-multi="${item.multiSelect ? '1' : '0'}"
@@ -4760,20 +4785,14 @@ document.addEventListener('click', async (event) => {
         const label = target.dataset.label
         if (!questionId || label === undefined) break
         const draft = state.questionDraft.get(questionId)
-        if (!draft) break
-        if (target.dataset.multi === '1') {
-          if (draft.selected.has(label)) draft.selected.delete(label)
-          else draft.selected.add(label)
-        } else if (draft.selected.has(label) && draft.selected.size === 1) {
-          draft.selected.clear()
-        } else {
-          draft.selected.clear()
-          draft.selected.add(label)
-        }
+        const question = (state.data?.questions ?? []).find(entry => entry.id === questionId)
+        const item = question?.questions?.find(entry => entry.id === target.dataset.itemId)
+        if (!draft || !item) break
+        const selectedOf = questionSelectOption(draft, item, label, target.dataset.multi === '1')
         const group = target.closest('.question-options')
         if (group) {
           for (const btn of group.querySelectorAll('.question-option')) {
-            const on = draft.selected.has(btn.dataset.label)
+            const on = selectedOf.has(btn.dataset.label)
             btn.classList.toggle('is-selected', on)
             btn.setAttribute('aria-pressed', on ? 'true' : 'false')
           }
@@ -4787,7 +4806,7 @@ document.addEventListener('click', async (event) => {
         const question = (state.data?.questions ?? []).find(entry => entry.id === questionId)
         if (!question || question.status !== 'pending') break
         const items = Array.isArray(question.questions) ? question.questions : []
-        const draft = state.questionDraft.get(questionId) ?? { selected: new Set(), custom: {} }
+        const draft = state.questionDraft.get(questionId) ?? { selected: new Map(), custom: {} }
         const card = target.closest('.question-card')
         const answers = items.map(item => {
           let custom = ''
@@ -4797,7 +4816,7 @@ document.addEventListener('click', async (event) => {
             }
           }
           if (!custom) custom = String(draft.custom[item.id] ?? '').trim()
-          return { id: item.id, selected: Array.from(draft.selected), custom: custom || undefined }
+          return { id: item.id, selected: Array.from(questionDraftSelection(draft, item.id)), custom: custom || undefined }
         })
         // 幂等 + 乐观回显：卡片立刻变已答，顶部徽标同步减一。
         state.questionAnswering.add(questionId)
