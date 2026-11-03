@@ -109,11 +109,11 @@ test('引用交互不回归：renderKeepingChatScroll 保留并仍聚焦输入�
 test('复制按钮：消息 hover 出现，复用统一 copy handler，复制原文并带无障碍属性', () => {
   const btn = /<button class="msg-copy-btn" data-action="copy" data-copy="\$\{attr\(message\.body\)\}"[^>]*>\$\{icon\('copy'\)\}<\/button>/.exec(source)?.[0]
   assert.ok(btn, '消息行应有 msg-copy-btn 复制按钮，data-copy 取 message.body 原文')
-  assert.match(btn, /title="复制消息"/)
+  assert.match(btn, /title="\$\{t\('message\.copyTitle'\)\}"/)
   assert.match(btn, /aria-label="[^"]+"/)
   assert.match(source, /\$\{quoteBtn\}\$\{copyBtn\}/, '复制按钮紧邻引用按钮右侧')
   assert.match(source, /case 'copy': \{[\s\S]*?navigator\.clipboard\.writeText\(value\)/, '复用统一 copy handler，不另写 clipboard 逻辑')
-  assert.match(source, /toast\('已复制', 'success'\)/)
+  assert.match(source, /toast\(t\('toast\.copied'\), 'success'\)/)
   assert.match(css, /\.message-row:hover \.msg-copy-btn/)
 })
 
@@ -122,7 +122,7 @@ test('思考过程 chip 渲染在任务 chip 之前，两者合并同一 .task-c
   assert.ok(fn, '找不到 renderMessage 函数体')
   const nonsys = fn.slice(fn.indexOf('const isUser')).replace(/\/\/[^\n]*/g, '') // 剔除行注释，防止注释文案满足顺序断言
   assert.equal((nonsys.match(/task-chip-line/g) ?? []).length, 1, '非系统消息只应有一个 task-chip-line 容器')
-  assert.ok(nonsys.indexOf('思考过程') < nonsys.indexOf('message.taskIdentifier'), '顺序固定：思考过程 → 任务')
+  assert.ok(nonsys.indexOf("t('message.thinking')") < nonsys.indexOf('message.taskIdentifier'), '顺序固定：思考过程 → 任务')
   assert.match(nonsys, /const chipsLine = trajChip \|\| taskChip \? `<div class="task-chip-line">\$\{trajChip\}\$\{taskChip\}<\/div>` : ''/, '插值顺序锁定 trajChip 在 taskChip 之前')
   assert.match(css, /\.task-chip-line \{[\s\S]*?gap: 8px/, '两个 chip 之间留 8px 呼吸距离')
   const chipCss = /\.task-chip \{[\s\S]*?\n\}/.exec(css)?.[0]
@@ -136,7 +136,7 @@ test('成员卡片结构存在，模型行有可读兜底', () => {
   assert.match(source, /<span class="member-name-line"><strong>/, '第一行：名字 + 角色标签')
   assert.match(source, /class="member-role"/)
   assert.match(source, /class="member-model"/)
-  assert.match(source, /const modelLine = modelRef \? String\(modelRef\) : '未配置模型'/, '模型行只显示 modelRef（已含 provider），缺任一项显示「未配置模型」')
+  assert.match(source, /const modelLine = modelRef \? String\(modelRef\) : t\('common\.modelUnset'\)/, '模型行只显示 modelRef（已含 provider），缺任一项显示「未配置模型」')
   assert.ok(!/bot\.provider && modelRef \?/.test(source), '模型行不再单独拼 provider，避免与 modelRef 内的 provider 重复')
   assert.match(source, /function memberRunDot\(member\)/, '状态点判定收敛到 memberRunDot')
   assert.match(source, /function runDotHtml\(dot\)[\s\S]*?<span class="run-dot \$\{dot\.cls\}" data-status="\$\{dot\.status\}" title="\$\{esc\(dot\.text\)\}" aria-label="\$\{esc\(dot\.text\)\}"><\/span>/, '状态点带 data-status 与 title/aria-label 无障碍属性')

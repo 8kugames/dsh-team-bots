@@ -28,8 +28,8 @@ test('① 群聊 NAV 与单聊 NAV 均恢复 usage tab', () => {
 })
 
 test('② 侧栏「用量统计」入口固定为全局视图（与上下文零耦合）', () => {
-  const idxUsage = source.indexOf('<span>用量统计</span>')
-  const idxGlobal = source.indexOf('<span>全局配置</span>')
+  const idxUsage = source.indexOf("<span>${t('sidebar.usage')}</span>")
+  const idxGlobal = source.indexOf("<span>${t('sidebar.globalConfig')}</span>")
   assert.ok(idxUsage >= 0 && idxGlobal >= 0 && idxUsage < idxGlobal, '用量统计在全局配置上方')
   assert.match(
     source,
@@ -94,9 +94,9 @@ test('⑦ 三态分派与标题区分', () => {
     'renderUsage 按三态分派',
   )
   assert.match(source, /state\.view === 'usage' \? usageViewTitle\(\)/, '标题按用量口径区分')
-  assert.match(source, /return '全局用量'/, '全局视图标题')
-  assert.match(source, /本群用量/, '本群视图标题')
-  assert.match(source, /本 Bot 用量/, '单聊视图标题')
+  assert.match(source, /t\('viewTitle\.usageGlobal'\)/, '全局视图标题')
+  assert.match(source, /t\('viewTitle\.usageDomainFallback'\)/, '本群视图标题')
+  assert.match(source, /t\('viewTitle\.usageSoloFallback'\)/, '单聊视图标题')
 })
 
 test('⑧ 服务端口径：全局 / 本群 / 单聊三套 tier 齐备', () => {

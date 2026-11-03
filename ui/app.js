@@ -3,6 +3,7 @@ import { icon } from './modules/icons.js'
 import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, initials, avatar, statusPill, runDot, memberRunDot, runDotHtml, MEMBER_STATUS_TEXT, memorySource, toast, filePolicyOptions } from './modules/util.js'
 import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
+import { t, setLanguage } from './modules/i18n.js'
 const app = document.getElementById('app')
 const UI_SCALE_KEY = 'dshb:ui-scale'
 const UI_THEME_KEY = 'dshb:ui-theme'
@@ -20,9 +21,35 @@ state.theme = applyUiTheme((() => {
   try { return localStorage.getItem(UI_THEME_KEY) } catch { return null }
 })())
 
+// UI 语言跟随 DSH 宿主 Language 设定（DSHBOTS-120）：服务端把解析结果（zh/en/auto）
+// 注入 <html data-dsh-language>，模块加载即设定语言并替换静态 boot 文案（CSP 禁内联
+// 脚本，故在 JS 里替换而非 index.html 内联）。
+setLanguage(document.documentElement.dataset.dshLanguage || 'auto')
+{
+  const bootCopy = document.querySelector('.boot-copy')
+  if (bootCopy) bootCopy.textContent = t('boot.connecting')
+  const skipLink = document.querySelector('.skip-link')
+  if (skipLink) skipLink.textContent = t('a11y.skipToContent')
+}
+
+// state.language（服务端 state() 顶层同源透传）与上次不一致时热切换：换字典 + 轻提示，
+// 下次 render 生效；首载只对齐不提示。render() 全量重建，滚动/弹窗由既有遮罩机制保持。
+function syncLanguage() {
+  const language = state.data?.language
+  if (!language || language === state.uiLanguage) return
+  const first = state.uiLanguage === undefined
+  state.uiLanguage = language
+  setLanguage(language)
+  if (!first) {
+    toast(t('toast.languageSwitched'), 'success')
+    render()
+  }
+}
+
 async function refresh({ quiet = false } = {}) {
   try {
     await loadState(state.projectId, { quiet })
+    syncLanguage()
     // 遮罩开着时 render() 内部跳过整页重建并记 pending（DSHBOTS-98），遮罩关闭后补渲染。
     render()
   } catch (error) {
@@ -42,7 +69,7 @@ function startWechatPoll() {
         stopWechatPoll()
         if (status.phase === 'connected') {
           state.wechatAuth = null
-          toast('微信通道已连接', 'success')
+          toast(t('toast.wechatConnected'), 'success')
         }
         render()
       } else if (changed && state.view === 'settings') {
@@ -105,11 +132,11 @@ function bootError(error) {
   app.className = 'boot-screen'
   app.innerHTML = `<div class="boot-mark">${icon('alert')}</div>
     <div style="text-align:center;max-width:440px">
-      <div class="boot-error-title">无法连接 DSH Team Bots</div>
+      <div class="boot-error-title">${t('boot.errorTitle')}</div>
       <div class="boot-error-msg">${esc(error?.message ?? error)}</div>
       <div class="btn-row" style="justify-content:center;margin-top:18px">
-        <button class="btn primary" data-action="retry-boot">${icon('refresh')}重试</button>
-        <a class="btn" href="/">返回 DSH</a>
+        <button class="btn primary" data-action="retry-boot">${icon('refresh')}${t('boot.retry')}</button>
+        <a class="btn" href="/">${t('boot.backToDsh')}</a>
       </div>
     </div>`
 }
@@ -132,6 +159,19 @@ function tabDot(view) {
   return false
 }
 
+// STATUS/RUN_STATUS/RUN_KIND 的渲染标签：表内有键走 t()，表外原样回落（保持旧 ?? 兜底语义）。
+function statusLabel(status) {
+  return STATUS[status] ? t('status.' + status) : status
+}
+
+function runStatusLabel(status) {
+  return RUN_STATUS[status] ? t('runStatus.' + status) : status
+}
+
+function runKindLabel(kind) {
+  return RUN_KIND[kind] ? t('runKind.' + kind) : kind
+}
+
 function renderShell() {
   const data = state.data
   const solo = inSoloContext()
@@ -150,32 +190,32 @@ function renderShell() {
   const inSolo = inSoloContext()
   const soloBot = inSolo ? botById(state.soloBotId) : null
   const viewTitle = isSolo
-    ? (soloBot ? `调度 · @${soloBot.name}` : '调度')
-    : state.view === 'solo-config' ? (soloBot ? `配置 · @${soloBot.name}` : 'Bot 配置')
-    : state.view === 'chat' ? (project?.name ?? '团队空间')
-    : state.view === 'tasks' ? '任务面板'
-    : state.view === 'members' ? '项目成员'
-    : state.view === 'bots-overview' ? '总览 Bots'
-    : state.view === 'skills' ? '技能池'
-    : state.view === 'memory' ? '记忆'
-    : state.view === 'evolution' ? '进化提案'
+    ? (soloBot ? t('viewTitle.dispatch', { name: soloBot.name }) : t('viewTitle.dispatchPlain'))
+    : state.view === 'solo-config' ? (soloBot ? t('viewTitle.config', { name: soloBot.name }) : t('viewTitle.botConfig'))
+    : state.view === 'chat' ? (project?.name ?? t('viewTitle.workspace'))
+    : state.view === 'tasks' ? t('viewTitle.tasks')
+    : state.view === 'members' ? t('viewTitle.members')
+    : state.view === 'bots-overview' ? t('viewTitle.botsOverview')
+    : state.view === 'skills' ? t('viewTitle.skills')
+    : state.view === 'memory' ? t('viewTitle.memory')
+    : state.view === 'evolution' ? t('viewTitle.evolution')
     : state.view === 'usage' ? usageViewTitle()
-    : state.view === 'terminal' ? (project ? `终端 · ${project.name}` : '项目终端')
-    : state.view === 'global' ? '全局配置'
-    : '项目设置'
+    : state.view === 'terminal' ? (project ? t('viewTitle.terminal', { name: project.name }) : t('viewTitle.terminalDefault'))
+    : state.view === 'global' ? t('viewTitle.global')
+    : t('viewTitle.projectSettings')
   const title = viewTitle
   const spec = VIEW_ACTION[state.view]
   const cardOwnsPrimary = state.view === 'evolution' && pendingProposals() > 0
   const primary = (!project && !inSolo) || !spec ? '' : spec.submit
-    ? `<button class="btn primary" type="submit" form="${spec.submit}">${icon(spec.icon)}<span class="btn-label">${spec.label}</span></button>`
-    : `<button class="btn ${cardOwnsPrimary ? '' : 'primary'}" data-action="${spec.action}"${spec.kind ? ` data-kind="${spec.kind}"` : ''}>${icon(spec.icon)}<span class="btn-label">${spec.label}</span></button>`
+    ? `<button class="btn primary" type="submit" form="${spec.submit}">${icon(spec.icon)}<span class="btn-label">${t('viewAction.' + state.view)}</span></button>`
+    : `<button class="btn ${cardOwnsPrimary ? '' : 'primary'}" data-action="${spec.action}"${spec.kind ? ` data-kind="${spec.kind}"` : ''}>${icon(spec.icon)}<span class="btn-label">${t('viewAction.' + state.view)}</span></button>`
   const eyebrow = isGlobal
     ? ''
     : inSolo
-      ? 'Bot 调度<span class="sep"></span>项目外'
+      ? `${t('eyebrow.botDispatch')}<span class="sep"></span>${t('eyebrow.outsideProject')}`
       : project
-        ? `${project.key}<span class="sep"></span>${project.status === 'active' ? '进行中' : '已归档'}`
-        : '未选择项目'
+        ? `${project.key}<span class="sep"></span>${project.status === 'active' ? t('eyebrow.active') : t('eyebrow.archived')}`
+        : t('eyebrow.noProject')
   const chats = data.projects
   // 已归档项目收进侧栏尾部的「已归档」抽屉（默认收起）；群聊组只列进行中的项目。
   const activeChats = chats.filter(item => item.status === 'active')
@@ -186,26 +226,26 @@ function renderShell() {
   return `
     <div class="shell">
       <aside class="sidebar">
-        <a class="brand" href="/index.html" title="返回 DSH 原生 Web 界面">
+        <a class="brand" href="/index.html" title="${t('brand.backToDsh')}">
           <div class="brand-mark">DSH</div>
           <div class="brand-copy"><strong>DSH Team Bots</strong></div>
         </a>
         <div class="tree">
           <div class="tree-group">
             <div class="side-label">
-              <button class="tree-toggle" data-action="toggle-tree" data-tree="chats" title="群聊 / 项目">${chevron(state.tree.chats)}<span>群聊</span></button>
+              <button class="tree-toggle" data-action="toggle-tree" data-tree="chats" title="${t('tree.chatsTitle')}">${chevron(state.tree.chats)}<span>${t('tree.chats')}</span></button>
               <span class="tree-count">${activeChats.length}</span>
-              <button class="side-add" data-action="new-project" title="新建群聊 / 项目">${icon('plus')}</button>
+              <button class="side-add" data-action="new-project" title="${t('tree.newChat')}">${icon('plus')}</button>
             </div>
             ${state.tree.chats ? `<div class="tree-list">
-              ${activeChats.length === 0 ? '<div class="side-empty">还没有群聊。</div>' : activeChats.map(item => {
+              ${activeChats.length === 0 ? `<div class="side-empty">${t('tree.chatsEmpty')}</div>` : activeChats.map(item => {
                 // 未读与待审红点互斥：行尾最多一个红色信号，未读优先（会话流更即时）。
                 const unread = Number(item.unreadCount ?? 0)
                 const signal = unread > 0
                   ? (unread === 1
-                    ? '<span class="red-dot" title="1 条未读消息"></span>'
-                    : `<span class="unread-badge" title="${unread} 条未读消息">${unread > 99 ? '99+' : unread}</span>`)
-                  : (Number(item.reviewTasks ?? 0) > 0 ? '<span class="red-dot" title="有任务待人工验收"></span>' : '')
+                    ? `<span class="red-dot" title="${t('tree.unreadOne')}"></span>`
+                    : `<span class="unread-badge" title="${t('tree.unreadMany', { count: unread })}">${unread > 99 ? '99+' : unread}</span>`)
+                  : (Number(item.reviewTasks ?? 0) > 0 ? `<span class="red-dot" title="${t('tree.reviewPending')}"></span>` : '')
                 return `
                 <button class="tree-item chat-item ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''} ${unread > 0 ? 'has-unread' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
                   <span class="chat-hash">#</span>
@@ -218,32 +258,32 @@ function renderShell() {
           </div>
           <div class="tree-group">
             <div class="side-label">
-              <button class="tree-toggle" data-action="toggle-tree" data-tree="bots" title="团队 Bots">${chevron(state.tree.bots)}<span>Bots</span></button>
+              <button class="tree-toggle" data-action="toggle-tree" data-tree="bots" title="${t('tree.botsTitle')}">${chevron(state.tree.bots)}<span>Bots</span></button>
               <span class="tree-count">${activeBots.length}</span>
-              <button class="side-add" data-action="new-bot" title="新建 Bot">${icon('plus')}</button>
+              <button class="side-add" data-action="new-bot" title="${t('tree.newBot')}">${icon('plus')}</button>
             </div>
             ${state.tree.bots ? `<div class="tree-list">
-              ${bots.length === 0 ? '<div class="side-empty">还没有 Bot。</div>' : bots.map(bot => `
-                <button class="tree-item bot-item ${state.view === 'chat' && state.chatMode === 'solo' && bot.id === state.soloBotId ? 'active' : ''}" data-action="${bot.status === 'active' ? 'solo-bot' : 'edit-bot'}" data-bot-id="${attr(bot.id)}" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(bot.modelRef ?? '未配置模型')}">
+              ${bots.length === 0 ? `<div class="side-empty">${t('tree.botsEmpty')}</div>` : bots.map(bot => `
+                <button class="tree-item bot-item ${state.view === 'chat' && state.chatMode === 'solo' && bot.id === state.soloBotId ? 'active' : ''}" data-action="${bot.status === 'active' ? 'solo-bot' : 'edit-bot'}" data-bot-id="${attr(bot.id)}" title="${esc(bot.name)} · ${esc(bot.role || t('common.member'))} · ${esc(bot.modelRef ?? t('common.modelUnset'))}">
                   <span class="avatar sm ${attr(bot.color ?? 'gray')}">${esc(initials(bot.name))}</span>
                   <span class="tree-item-name">${esc(bot.name)}</span>
                   ${bot.openTasks > 0 ? `<span class="tree-open-count">${bot.openTasks}</span>` : ''}
-                  ${bot.status !== 'active' ? '<span class="tree-flag">已归档</span>' : ''}
+                  ${bot.status !== 'active' ? `<span class="tree-flag">${t('common.archived')}</span>` : ''}
                 </button>
               `).join('')}
             </div>` : ''}
           </div>
           <div class="tree-group tree-archived">
             <div class="side-label">
-              <button class="tree-toggle" data-action="toggle-tree" data-tree="archived" title="已归档群聊">${chevron(state.tree.archived)}<span>已归档</span></button>
+              <button class="tree-toggle" data-action="toggle-tree" data-tree="archived" title="${t('tree.archivedTitle')}">${chevron(state.tree.archived)}<span>${t('tree.archived')}</span></button>
               <span class="tree-count">${archivedChats.length}</span>
             </div>
             ${state.tree.archived ? `<div class="tree-list">
-              ${archivedChats.length === 0 ? '<div class="side-empty">没有已归档项目。</div>' : archivedChats.map(item => `
-                <button class="tree-item chat-item archived ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)} · 再开与移除在项目设置 · 项目状态里">
+              ${archivedChats.length === 0 ? `<div class="side-empty">${t('tree.archivedEmpty')}</div>` : archivedChats.map(item => `
+                <button class="tree-item chat-item archived ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)} · ${t('tree.archivedHint')}">
                   <span class="chat-hash">#</span>
                   <span class="tree-item-name">${esc(item.name)}</span>
-                  <span class="tree-flag">已归档</span>
+                  <span class="tree-flag">${t('common.archived')}</span>
                 </button>
               `).join('')}
             </div>` : ''}
@@ -251,24 +291,24 @@ function renderShell() {
         </div>
         <div class="sidebar-bottom">
           <button class="global-config ${state.view === 'bots-overview' ? 'active' : ''}" data-action="nav" data-view="bots-overview">
-            ${icon('bot')}<span>总览bots</span>${pendingProposals() > 0 ? '<span class="red-dot" title="有待审批提案"></span>' : ''}
+            ${icon('bot')}<span>${t('sidebar.botsOverview')}</span>${pendingProposals() > 0 ? `<span class="red-dot" title="${t('sidebar.pendingProposals')}"></span>` : ''}
           </button>
           <button class="global-config ${state.view === 'usage' && state.usageMode === 'global' ? 'active' : ''}" data-action="nav" data-view="usage" data-usage-mode="global">
-            ${icon('chart')}<span>用量统计</span>
+            ${icon('chart')}<span>${t('sidebar.usage')}</span>
           </button>
           <button class="global-config ${state.view === 'global' ? 'active' : ''}" data-action="nav" data-view="global">
-            ${icon('settings')}<span>全局配置</span>
+            ${icon('settings')}<span>${t('sidebar.globalConfig')}</span>
           </button>
-          <a class="global-config dsh-official-link" href="/index.html" title="切换到 DSH 原生 Web 界面">
-            ${icon('external')}<span>DSH 原生界面</span>
+          <a class="global-config dsh-official-link" href="/index.html" title="${t('sidebar.switchToDsh')}">
+            ${icon('external')}<span>${t('sidebar.dshNative')}</span>
           </a>
           <div class="sidebar-meta">
             <span class="dot ${activeTasks ? 'amber' : ''}"></span>
-            <span>${activeTasks ? `${activeTasks} 个任务中` : '团队空闲'}</span>
+            <span>${activeTasks ? t('sidebar.tasksActive', { count: activeTasks }) : t('sidebar.idle')}</span>
             <span class="sidebar-meta-sep">·</span>
-            <span>${activeBots.length} Bots</span>
+            <span>${t('sidebar.botsCount', { count: activeBots.length })}</span>
             <span class="sidebar-meta-sep">·</span>
-            <span>${pending} 待审</span>
+            <span>${t('sidebar.pendingReviews', { count: pending })}</span>
           </div>
         </div>
       </aside>
@@ -281,24 +321,24 @@ function renderShell() {
             <h1>${esc(title)}</h1>
           </div>
           ${isGlobal || solo || !project ? '' : `<div class="topbar-meta">
-            <span><b>${project?.stats?.openTasks ?? 0}</b> 任务</span>
+            <span><b>${project?.stats?.openTasks ?? 0}</b> ${project?.stats?.openTasks === 1 ? t('topbar.taskOne') : t('topbar.taskMany')}</span>
             <span class="sep"></span>
-            <span><b>${projectRunning}</b> 运行中</span>
+            <span><b>${projectRunning}</b> ${projectRunning === 1 ? t('topbar.runningOne') : t('topbar.runningMany')}</span>
             <span class="sep"></span>
             <span><b>${formatNumber(tokenTotal)}</b> tokens</span>
           </div>`}
           <div class="topbar-actions">
             ${primary}
-            <button class="btn icon" data-action="refresh" title="刷新" aria-label="刷新">${icon('refresh')}</button>
+            <button class="btn icon" data-action="refresh" title="${t('topbar.refresh')}" aria-label="${t('topbar.refresh')}">${icon('refresh')}</button>
           </div>
         </header>
-        ${isGlobal ? '' : `<div class="tabbar" role="tablist" aria-label="主导航">
+        ${isGlobal ? '' : `<div class="tabbar" role="tablist" aria-label="${t('topbar.mainNav')}">
           ${(inSolo ? SOLO_NAV : NAV).map(([key, label]) => {
             const dot = tabDot(key)
             // 用量 tab 有三态：群聊 tab=本群口径，单聊 tab=本 bot 口径，侧栏入口=全局视图。
             const tabMode = key === 'usage' ? (inSolo ? 'solo' : 'domain') : null
             const active = state.view === key && (tabMode ? state.usageMode === tabMode : true)
-            return `<button class="tab ${active ? 'active' : ''}" role="tab" id="tab-${key}" aria-controls="main-content" aria-selected="${active}" tabindex="${active ? '0' : '-1'}" data-action="nav" data-view="${key}"${tabMode ? ` data-usage-mode="${tabMode}"` : ''}>${label}${dot ? '<span class="red-dot" title="有待人工处理事项"></span>' : ''}</button>`
+            return `<button class="tab ${active ? 'active' : ''}" role="tab" id="tab-${key}" aria-controls="main-content" aria-selected="${active}" tabindex="${active ? '0' : '-1'}" data-action="nav" data-view="${key}"${tabMode ? ` data-usage-mode="${tabMode}"` : ''}>${t(inSolo && key === 'chat' ? 'nav.soloChat' : 'nav.' + key)}${dot ? `<span class="red-dot" title="${t('topbar.attention')}"></span>` : ''}</button>`
           }).join('')}
         </div>`}
         </div>
@@ -470,8 +510,8 @@ function renderView() {
 function noProject() {
   return `<div class="empty-state">
     <div class="empty-symbol">${icon('layers')}</div>
-    <h3>先创建一个项目空间</h3>
-    <button class="btn primary" data-action="new-project">${icon('plus')}新建项目</button>
+    <h3>${t('empty.createProjectFirst')}</h3>
+    <button class="btn primary" data-action="new-project">${icon('plus')}${t('empty.newProject')}</button>
   </div>`
 }
 
@@ -500,7 +540,7 @@ function typingRows(runs, kind) {
       ${avatar(bot, 'sm')}
       <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
       <strong class="typing-name">${esc(row.botName)}</strong>
-      <span class="typing-text">${row.text}</span>
+      <span class="typing-text">${row.status === 'queued' ? t('chat.typingQueued') : t('chat.typingRunning')}</span>
       <span class="run-clock" data-started="${attr(row.startedAt ?? '')}">${duration(row.startedAt)}</span>
     </div>`
   }).join('')
@@ -537,7 +577,7 @@ function canLoadOlder(mergedCount) {
 
 function loadOlderButton() {
   const disabled = state.chatOlder.loading ? ' disabled' : ''
-  const label = state.chatOlder.loading ? '加载中…' : `加载前 ${CHAT_PAGE_SIZE} 条`
+  const label = state.chatOlder.loading ? t('chat.loadingOlder') : t('chat.loadOlder', { count: CHAT_PAGE_SIZE })
   return `<button class="load-older" data-action="load-older"${disabled}>${label}</button>`
 }
 
@@ -570,7 +610,7 @@ async function loadOlderMessages() {
       listEl.scrollTop = prevTop + (listEl.scrollHeight - prevHeight)
     })
   } catch (err) {
-    toast(err?.message || '加载历史失败')
+    toast(err?.message || t('toast.loadOlderFailed'))
   } finally {
     state.chatOlder.loading = false
     render()
@@ -591,19 +631,19 @@ function renderChatMembersCard() {
   const memberList = members.filter(member => member.id !== project?.owner_bot_id && member.member_role !== 'owner')
   return `
     <div class="side-card members-overview" data-members-overview>
-      <div class="side-card-head"><h3>项目成员</h3><span>${memberList.length}</span></div>
-      ${memberList.length === 0 ? '<div class="faint">没有其他成员。</div>' : `<div class="side-list">
+      <div class="side-card-head"><h3>${t('card.projectMembers')}</h3><span>${memberList.length}</span></div>
+      ${memberList.length === 0 ? `<div class="faint">${t('card.noOtherMembers')}</div>` : `<div class="side-list">
         ${memberList.map(member => {
           const bot = botById(member.id)
           if (!bot) return ''
           const dot = memberRunDot(member)
           // modelRef 已是 provider/model 形态（如 deepseek/deepseek-chat），不再拼 provider；缺配置给兜底文案。
           const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
-          const modelLine = modelRef ? String(modelRef) : '未配置模型'
-          return `<div class="side-row" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
+          const modelLine = modelRef ? String(modelRef) : t('common.modelUnset')
+          return `<div class="side-row" title="${esc(bot.name)} · ${esc(bot.role || t('common.member'))} · ${esc(dot.text)}">
             ${avatar(bot, 'sm')}
             <div class="member-info">
-              <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(bot.role || '成员')}</span></span>
+              <span class="member-name-line"><strong>${esc(bot.name)}</strong><span class="member-role">${esc(bot.role || t('common.member'))}</span></span>
               <span class="member-model">${esc(modelLine)}</span>
             </div>
             ${runDotHtml(dot)}
@@ -622,7 +662,7 @@ function renderChat() {
   const members = project.members ?? []
   // modelRef 本身已是 provider/model（如 deepseek/deepseek-chat），不再单独拼 provider，避免重复。
   const ownerModelRef = owner ? (owner.modelRef ?? owner.model ?? null) : null
-  const ownerModelLine = ownerModelRef ? String(ownerModelRef) : '未配置模型'
+  const ownerModelLine = ownerModelRef ? String(ownerModelRef) : t('common.modelUnset')
   // 总监也是 bot，状态点取同一成员表口径（bot 全局）。
   const ownerMember = members.find(m => m.id === project.owner_bot_id) ?? null
   const ownerDot = ownerMember ? memberRunDot(ownerMember) : null
@@ -633,8 +673,8 @@ function renderChat() {
       <div class="card chat-panel">
         <div class="chat-head">
           <div>
-            <div class="chat-head-title"><span class="chat-hash">#</span>群聊</div>
-            <div class="chat-head-meta"><span>总监 ${esc(owner?.name ?? '未设置')}</span><span class="sep"></span><span>${members.length} 个成员</span></div>
+            <div class="chat-head-title"><span class="chat-hash">#</span>${t('chat.groupTitle')}</div>
+            <div class="chat-head-meta"><span>${t('chat.ownerPrefix')} ${esc(owner?.name ?? t('chat.ownerUnset'))}</span><span class="sep"></span><span>${members.length === 1 ? t('chat.memberOne', { count: members.length }) : t('chat.memberMany', { count: members.length })}</span></div>
           </div>
           <div class="member-stack">
             ${members.slice(0, 6).map(member => {
@@ -647,8 +687,8 @@ function renderChat() {
           ${canLoadOlder(messages.length) ? loadOlderButton() : ''}
           ${messages.length === 0 ? `<div class="chat-empty">
             <div class="empty-symbol">${icon('message')}</div>
-            <h3>还没有人说话</h3>
-            <p>直接发言会交给总监 Bot；用 <strong>@Bot</strong> 点名成员，或输入 <strong>/task @Bot 任务标题</strong> 直接创建任务。</p>
+            <h3>${t('chat.emptyTitle')}</h3>
+            <p>${t('chat.emptyBody')}</p>
           </div>` : messages.map(renderMessage).join('')}
           ${typingRows(state.data.runs, 'chat')}
         </div>
@@ -657,51 +697,51 @@ function renderChat() {
           ${state.replyTo ? `<div class="reply-bar" id="reply-bar">
             <span class="reply-bar-icon">${icon('quote')}</span>
             <span class="reply-bar-text"><strong>${esc(state.replyTo.senderName)}</strong><span>${esc(mdPlainSummary(state.replyTo.excerpt, 120))}</span></span>
-            <button class="reply-bar-cancel" data-action="cancel-reply" title="取消引用（Esc）" aria-label="取消引用">${icon('close')}</button>
+            <button class="reply-bar-cancel" data-action="cancel-reply" title="${t('composer.replyCancelTitle')}" aria-label="${t('composer.replyCancel')}">${icon('close')}</button>
           </div>` : ''}
           <div class="composer-box">
             ${composerImageStrip()}
-            <div class="composer-ac" id="composer-ac" role="listbox" aria-label="输入补全" hidden></div>
-            <div class="composer-resizer" id="composer-resizer" title="拖动调整输入框高度，双击恢复自动高度" role="separator" aria-orientation="horizontal" aria-label="拖动调整输入框高度，双击恢复自动高度"></div>
-            <textarea id="composer-input" rows="2" placeholder="给团队发消息，或输入 /task @Bot 任务标题">${esc(currentDraft(state))}</textarea>
+            <div class="composer-ac" id="composer-ac" role="listbox" aria-label="${t('composer.acLabel')}" hidden></div>
+            <div class="composer-resizer" id="composer-resizer" title="${t('composer.resizerTitle')}" role="separator" aria-orientation="horizontal" aria-label="${t('composer.resizerTitle')}"></div>
+            <textarea id="composer-input" rows="2" placeholder="${t('composer.groupPlaceholder')}">${esc(currentDraft(state))}</textarea>
             <div class="composer-bottom">
               ${attachImageButton()}
-              <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
-              <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
+              <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> ${t('composer.sendHint')}</span>
+              <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="${t('composer.send')}" aria-label="${t('composer.sendMessage')}">${icon('send')}</button>
             </div>
           </div>
         </div>
       </div>
       <aside class="chat-side">
         <div class="side-card">
-          <div class="side-card-head"><h3>工作区</h3></div>
-          <div class="path-row">${pathCode(project.workspace_path)}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+          <div class="side-card-head"><h3>${t('card.workspace')}</h3></div>
+          <div class="path-row">${pathCode(project.workspace_path)}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="${t('common.copyPath')}" aria-label="${t('common.copyPath')}">${icon('copy')}</button></div>
         </div>
         <div class="side-card">
-          <div class="side-card-head"><h3>项目总监</h3></div>
+          <div class="side-card-head"><h3>${t('card.projectOwner')}</h3></div>
           ${owner ? `<div class="side-row owner-row">
             ${avatar(owner, 'sm')}
             <div class="member-info">
-              <span class="member-name-line"><strong>${esc(owner.name)}</strong><span class="member-role">总监</span></span>
+              <span class="member-name-line"><strong>${esc(owner.name)}</strong><span class="member-role">${t('card.ownerRole')}</span></span>
               <span class="member-model">${esc(ownerModelLine)}</span>
             </div>
             ${ownerDot ? runDotHtml(ownerDot) : ''}
-          </div>` : '<div class="faint">未设置总监</div>'}
+          </div>` : `<div class="faint">${t('card.ownerUnset')}</div>`}
         </div>
         ${renderChatMembersCard()}
         <div class="side-card">
-          <div class="side-card-head"><h3>活跃任务</h3><span>${project.stats.openTasks}</span></div>
-          ${open.length === 0 ? '<div class="faint">没有进行中的任务。</div>' : `<div class="side-list">
+          <div class="side-card-head"><h3>${t('card.activeTasks')}</h3><span>${project.stats.openTasks}</span></div>
+          ${open.length === 0 ? `<div class="faint">${t('card.noActiveTasks')}</div>` : `<div class="side-list">
             ${open.map(task => {
               const bot = botById(task.assignee_bot_id)
               return `<div class="side-row" data-action="open-task" data-task-id="${attr(task.id)}" style="cursor:pointer">
-                <span class="side-row-status">${esc(STATUS[task.status] ?? task.status)}</span>
+                <span class="side-row-status">${esc(statusLabel(task.status))}</span>
                 <strong>${esc(task.identifier)}</strong>
                 <span class="side-row-title">${esc(task.title)}</span>
                 ${bot ? avatar(bot, 'sm') : ''}
               </div>`
             }).join('')}
-          </div>${openTasks.length > CHAT_ACTIVE_TASK_LIMIT ? `<div class="faint">还有 ${openTasks.length - CHAT_ACTIVE_TASK_LIMIT} 条</div>` : ''}`}
+          </div>${openTasks.length > CHAT_ACTIVE_TASK_LIMIT ? `<div class="faint">${t('common.more', { count: openTasks.length - CHAT_ACTIVE_TASK_LIMIT })}</div>` : ''}`}
         </div>
       </aside>
     </div>`
@@ -710,13 +750,13 @@ function renderChat() {
 // 调度页侧栏列表的显示上限：后端已按 50 条封顶，侧栏再截断并给出剩余条数提示。
 const DISPATCH_LIST_LIMIT = 10
 function dispatchListNote(total) {
-  return total > DISPATCH_LIST_LIMIT ? `<div class="faint">还有 ${total - DISPATCH_LIST_LIMIT} 条</div>` : ''
+  return total > DISPATCH_LIST_LIMIT ? `<div class="faint">${t('common.more', { count: total - DISPATCH_LIST_LIMIT })}</div>` : ''
 }
 
 // 调度页任务行：编号 + 标题 + 状态 + 项目名；点击跳到该项目的任务页。
 function dispatchTaskRow(task) {
   return `<div class="side-row" data-action="nav" data-view="tasks" data-project-id="${attr(task.project_id ?? '')}" style="cursor:pointer" title="${esc(`${task.identifier ?? ''} · ${task.title ?? ''} · ${task.projectName ?? ''}`)}">
-    <span class="side-row-status">${esc(STATUS[task.status] ?? task.status)}</span>
+    <span class="side-row-status">${esc(statusLabel(task.status))}</span>
     <strong>${esc(task.identifier ?? '')}</strong>
     <span class="side-row-title">${esc(task.title ?? '')}</span>
     <span class="faint">${esc(task.projectName ?? '')}</span>
@@ -726,10 +766,10 @@ function dispatchTaskRow(task) {
 // 调度页运行行：类型 + 状态点 + 项目 + 已运行时长（run-clock 每秒自刷新）。
 function dispatchRunRow(run) {
   const started = run.started_at ?? run.queued_at ?? ''
-  return `<div class="side-row" title="${esc(`${RUN_KIND[run.kind] ?? run.kind} · ${RUN_STATUS[run.status] ?? run.status}`)}">
+  return `<div class="side-row" title="${esc(`${runKindLabel(run.kind)} · ${runStatusLabel(run.status)}`)}">
     <span class="run-dot ${attr(run.status ?? '')}"></span>
-    <strong>${esc(RUN_KIND[run.kind] ?? run.kind ?? '')}</strong>
-    <span class="side-row-title">${esc(run.projectKey ?? '单聊')}</span>
+    <strong>${esc(runKindLabel(run.kind) ?? '')}</strong>
+    <span class="side-row-title">${esc(run.projectKey == null || run.projectKey === '单聊' ? t('common.soloChat') : run.projectKey)}</span>
     <span class="run-clock" data-started="${attr(started)}">${duration(started)}</span>
   </div>`
 }
@@ -740,9 +780,9 @@ function renderSoloChat() {
   if (bots.length === 0) {
     return `<div class="empty-state">
       <div class="empty-symbol">${icon('bot')}</div>
-      <h3>还没有可调度的 Bot</h3>
-      <p>先创建一个 Bot，就可以和它一对一对话，并查看它的调度。</p>
-      <button class="btn primary" data-action="new-bot">${icon('plus')}新建 Bot</button>
+      <h3>${t('solo.noBotsTitle')}</h3>
+      <p>${t('solo.noBotsBody')}</p>
+      <button class="btn primary" data-action="new-bot">${icon('plus')}${t('solo.newBot')}</button>
     </div>`
   }
   if (!state.soloBotId || !bots.some(bot => bot.id === state.soloBotId)) state.soloBotId = bots[0].id
@@ -762,77 +802,77 @@ function renderSoloChat() {
         <div class="chat-head">
           <div>
             <div class="chat-head-title">${avatar(bot, 'sm')}<span>@${esc(bot.name)}</span></div>
-            <div class="chat-head-meta"><span>${esc(bot.role || '团队成员')}</span><span class="sep"></span><span>${esc(bot.modelRef ?? '未配置模型')}</span>${running > 0 ? `<span class="sep"></span><span class="run-dot"></span><span>${running} 个运行中</span>` : ''}</div>
+            <div class="chat-head-meta"><span>${esc(bot.role || t('solo.roleFallback'))}</span><span class="sep"></span><span>${esc(bot.modelRef ?? t('common.modelUnset'))}</span>${running > 0 ? `<span class="sep"></span><span class="run-dot"></span><span>${t('solo.runningCount', { count: running })}</span>` : ''}</div>
           </div>
           <div class="chat-head-actions">
-            <button class="btn small" data-action="nav" data-view="solo-config" title="打开集中配置页">${icon('settings')}配置</button>
+            <button class="btn small" data-action="nav" data-view="solo-config" title="${t('solo.openConfig')}">${icon('settings')}${t('solo.configButton')}</button>
           </div>
         </div>
         <div class="chat-messages">
           ${canLoadOlder(messages.length) ? loadOlderButton() : ''}
           ${messages.length === 0 ? `<div class="chat-empty">
             <div class="empty-symbol">${icon('message')}</div>
-            <h3>和 ${esc(bot.name)} 单独聊聊</h3>
-            <p>这里没有项目上下文，适合单独请教、调试指令或闲聊。需要文件产出时会落在它自己的工作区。</p>
+            <h3>${t('solo.emptyTitle', { name: bot.name })}</h3>
+            <p>${t('solo.emptyBody')}</p>
           </div>` : messages.map(renderMessage).join('')}
           ${typingRows(runs, 'solo_chat')}
         </div>
         <div class="composer">
           <div class="composer-box">
             ${composerImageStrip()}
-            <div class="composer-resizer" id="composer-resizer" title="拖动调整输入框高度，双击恢复自动高度" role="separator" aria-orientation="horizontal" aria-label="拖动调整输入框高度，双击恢复自动高度"></div>
-            <textarea id="composer-input" rows="2" placeholder="和 ${esc(bot.name)} 对话，/clear 清空本会话，/remember 内容 写入 Bot 记忆">${esc(currentDraft(state))}</textarea>
+            <div class="composer-resizer" id="composer-resizer" title="${t('composer.resizerTitle')}" role="separator" aria-orientation="horizontal" aria-label="${t('composer.resizerTitle')}"></div>
+            <textarea id="composer-input" rows="2" placeholder="${t('composer.soloPlaceholder', { name: bot.name })}">${esc(currentDraft(state))}</textarea>
             <div class="composer-bottom">
               ${attachImageButton()}
-              <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 发送</span>
-              <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="发送" aria-label="发送消息">${icon('send')}</button>
+              <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> ${t('composer.sendHint')}</span>
+              <button class="send-btn" data-action="send-message" ${(currentDraft(state).trim() || pendingImagesFor().length) ? '' : 'disabled'} title="${t('composer.send')}" aria-label="${t('composer.sendMessage')}">${icon('send')}</button>
             </div>
           </div>
         </div>
       </div>
       <aside class="chat-side">
         <div class="side-card">
-          <div class="side-card-head"><h3>调度对象</h3><button class="btn small" data-action="nav" data-view="solo-config" title="打开集中配置页">配置</button></div>
+          <div class="side-card-head"><h3>${t('solo.dispatchTarget')}</h3><button class="btn small" data-action="nav" data-view="solo-config" title="${t('solo.openConfig')}">${t('solo.configButton')}</button></div>
           <div class="owner-row">
             ${avatar(bot, 'lg')}
-            <div class="owner-info"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || '团队成员')} · ${esc(bot.modelRef ?? '未配置模型')}</span></div>
+            <div class="owner-info"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || t('solo.roleFallback'))} · ${esc(bot.modelRef ?? t('common.modelUnset'))}</span></div>
           </div>
         </div>
         <div class="side-card">
-          <div class="side-card-head"><h3>在办任务</h3><span>${dispatchActive.length}</span></div>
-          ${dispatchActive.length === 0 ? '<div class="faint">没有在办任务。</div>' : `<div class="side-list">
+          <div class="side-card-head"><h3>${t('solo.activeTasks')}</h3><span>${dispatchActive.length}</span></div>
+          ${dispatchActive.length === 0 ? `<div class="faint">${t('solo.noActive')}</div>` : `<div class="side-list">
             ${dispatchActive.slice(0, DISPATCH_LIST_LIMIT).map(dispatchTaskRow).join('')}
           </div>${dispatchListNote(dispatchActive.length)}`}
         </div>
         <div class="side-card">
-          <div class="side-card-head"><h3>待办任务</h3><span>${dispatchPending.length}</span></div>
-          ${dispatchPending.length === 0 ? '<div class="faint">没有待办任务。</div>' : `<div class="side-list">
+          <div class="side-card-head"><h3>${t('solo.pendingTasks')}</h3><span>${dispatchPending.length}</span></div>
+          ${dispatchPending.length === 0 ? `<div class="faint">${t('solo.noPending')}</div>` : `<div class="side-list">
             ${dispatchPending.slice(0, DISPATCH_LIST_LIMIT).map(dispatchTaskRow).join('')}
           </div>${dispatchListNote(dispatchPending.length)}`}
         </div>
         <div class="side-card">
-          <div class="side-card-head"><h3>正在调度</h3><span>${dispatchRuns.length}</span></div>
-          ${dispatchRuns.length === 0 ? '<div class="faint">当前没有运行中的调度。</div>' : `<div class="side-list">
+          <div class="side-card-head"><h3>${t('solo.dispatching')}</h3><span>${dispatchRuns.length}</span></div>
+          ${dispatchRuns.length === 0 ? `<div class="faint">${t('solo.noDispatching')}</div>` : `<div class="side-list">
             ${dispatchRuns.slice(0, DISPATCH_LIST_LIMIT).map(dispatchRunRow).join('')}
           </div>${dispatchListNote(dispatchRuns.length)}`}
         </div>
         <div class="side-card">
-          <div class="side-card-head"><h3>子智能体</h3></div>
-          <div class="faint">bot 会话已内置 subagent / subagent_fork / workflow 工具，可在执行中自行派生子智能体并行加速；无需工作台额外编排。</div>
+          <div class="side-card-head"><h3>${t('solo.subagents')}</h3></div>
+          <div class="faint">${t('solo.subagentsBody')}</div>
         </div>
         <div class="side-card">
-          <div class="side-card-head"><h3>最近调度运行</h3><span>${runs.length}</span></div>
-          ${runs.length === 0 ? '<div class="faint">还没有调度运行。</div>' : `<div class="side-list">
+          <div class="side-card-head"><h3>${t('solo.recentRuns')}</h3><span>${runs.length}</span></div>
+          ${runs.length === 0 ? `<div class="faint">${t('solo.noRuns')}</div>` : `<div class="side-list">
             ${runs.slice(0, 5).map(run => `<div class="side-row">
               <span class="run-dot ${attr(run.status)}"></span>
-              <strong>${esc(RUN_STATUS[run.status] ?? run.status)}</strong>
+              <strong>${esc(runStatusLabel(run.status))}</strong>
               <span class="side-row-title">${esc(formatTime(run.queued_at))}</span>
             </div>`).join('')}
           </div>`}
         </div>
         <div class="side-card">
-          <div class="side-card-head"><h3>专属工作区</h3></div>
-          <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+          <div class="side-card-head"><h3>${t('solo.workspace')}</h3></div>
+          <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="${t('common.copyPath')}" aria-label="${t('common.copyPath')}">${icon('copy')}</button></div>
         </div>
       </aside>
     </div>`
@@ -1157,13 +1197,13 @@ function renderMessage(message) {
   const bot = isUser ? null : botById(message.sender_id)
   // 引用块：气泡顶部一行「❝ 名字：摘要」，纯展示。摘要走 mdPlainSummary 去掉 markdown 记号，
   // 否则原文里的 **、-、` 会原样露出，还会让整条摘要挤成一行、撑破气泡宽度。
-  const quoteBlock = message.reply_to ? `<div class="msg-quote" title="引用自 ${attr(message.reply_to.sender_name)}">${icon('quote')}<span>${esc(message.reply_to.sender_name)}：${esc(mdPlainSummary(message.reply_to.excerpt, 120))}</span></div>` : ''
+  const quoteBlock = message.reply_to ? `<div class="msg-quote" title="${attr(t('message.quoteFrom', { name: message.reply_to.sender_name }))}">${icon('quote')}<span>${esc(message.reply_to.sender_name)}：${esc(mdPlainSummary(message.reply_to.excerpt, 120))}</span></div>` : ''
   // hover 引用按钮：仅群聊；点击进入引用回复（选中该消息作为回复目标）。摘要同样去 markdown 记号。
-  const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(mdPlainSummary(message.body, 120))}" title="引用回复" aria-label="引用回复这条消息">${icon('quote')}</button>` : ''
+  const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(mdPlainSummary(message.body, 120))}" title="${t('message.quoteTitle')}" aria-label="${t('message.quoteLabel')}">${icon('quote')}</button>` : ''
   // hover 复制按钮：群聊/单聊都有，紧邻引用按钮右侧；复制消息原文 message.body（非渲染后 HTML），走统一 copy handler。
-  const copyBtn = `<button class="msg-copy-btn" data-action="copy" data-copy="${attr(message.body)}" title="复制消息" aria-label="复制这条消息的原文">${icon('copy')}</button>`
+  const copyBtn = `<button class="msg-copy-btn" data-action="copy" data-copy="${attr(message.body)}" title="${t('message.copyTitle')}" aria-label="${t('message.copyLabel')}">${icon('copy')}</button>`
   // 任务/思考过程 chip 合并同一行：固定顺序「思考过程 → 任务」，缺哪个不留空位。
-  const trajChip = message.run_id && !isUser ? `<button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">思考过程</button>` : ''
+  const trajChip = message.run_id && !isUser ? `<button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">${t('message.thinking')}</button>` : ''
   const taskChip = message.taskIdentifier ? `<button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button>` : ''
   const chipsLine = trajChip || taskChip ? `<div class="task-chip-line">${trajChip}${taskChip}</div>` : ''
   // 纯图片消息没有正文：气泡留空不渲染，只留附图块（避免出现一个空框）。
@@ -1188,15 +1228,15 @@ function renderDirectMessagesCard() {
   const items = state.data?.directMessages ?? []
   if (items.length === 0) return ''
   return `<details class="chat-subpanel"${panelAttrs(state, 'dm')}>
-    <summary title="展开 / 收起 Bot 私信">${icon('chevron', 'chev')}<span>Bot 私信</span><span class="subpanel-count">${items.length}</span></summary>
+    <summary title="${t('dm.toggle')}">${icon('chevron', 'chev')}<span>${t('dm.title')}</span><span class="subpanel-count">${items.length}</span></summary>
     <div class="subpanel-body">
-      ${items.length === 0 ? '<div class="subpanel-empty">Bot 之间经 <code>team_message_bot</code> 的直接交互会出现在这里。</div>' : items.map(dm => `
+      ${items.length === 0 ? `<div class="subpanel-empty">${t('dm.empty')}</div>` : items.map(dm => `
         <div class="subpanel-row">
           <div class="subpanel-row-head">
             <strong>${esc(dm.fromName)} → ${esc(dm.toName)}</strong>
-            <span class="pill ${DM_STATUS_TONE[dm.status] ?? ''}">${esc(DM_STATUS[dm.status] ?? dm.status)}</span>
+            <span class="pill ${DM_STATUS_TONE[dm.status] ?? ''}">${esc(dm.status in DM_STATUS ? t('dm.' + dm.status) : dm.status)}</span>
             <span class="faint">${esc(formatTime(dm.createdAt))}</span>
-            ${dm.repliedAt ? `<span class="faint">回复于 ${esc(formatTime(dm.repliedAt))}</span>` : ''}
+            ${dm.repliedAt ? `<span class="faint">${t('dm.repliedAt', { time: formatTime(dm.repliedAt) })}</span>` : ''}
             <span class="subpanel-tag">#${esc(dm.id)}</span>
           </div>
           ${dm.textSnippet ? `<div class="subpanel-row-text">${esc(dm.textSnippet)}</div>` : ''}
@@ -2057,13 +2097,13 @@ function usageMode() {
 function usageViewTitle() {
   if (usageMode() === 'domain') {
     const project = pageProject()
-    return project ? `用量 · ${project.name}` : '本群用量'
+    return project ? t('viewTitle.usageDomain', { name: project.name }) : t('viewTitle.usageDomainFallback')
   }
   if (usageMode() === 'solo') {
     const soloBot = botById(state.soloBotId)
-    return soloBot ? `用量 · @${soloBot.name}` : '本 Bot 用量'
+    return soloBot ? t('viewTitle.usageSolo', { name: soloBot.name }) : t('viewTitle.usageSoloFallback')
   }
-  return '全局用量'
+  return t('viewTitle.usageGlobal')
 }
 
 // 用量行内容：名称 / 条形 / tokens / 调用 / 成本 五列。
@@ -3775,7 +3815,7 @@ function base64BlobUrl(data, mediaType) {
 async function addPendingImages(files) {
   const current = pendingImagesFor()
   const { accepted, rejected } = validateImageSelection(files, current.length)
-  for (const item of rejected) toast(`${item.name || '文件'}：${item.reason}`, 'error')
+  for (const item of rejected) toast(t('toast.fileRejected', { name: item.name || t('toast.fileFallback'), reason: item.reason }), 'error')
   const added = []
   for (const item of accepted) {
     try {
@@ -3789,7 +3829,7 @@ async function addPendingImages(files) {
         previewUrl: URL.createObjectURL(item.file),
       })
     } catch {
-      toast(`${item.name || '文件'}：读取失败`, 'error')
+      toast(t('toast.fileReadFailed', { name: item.name || t('toast.fileFallback') }), 'error')
     }
   }
   if (added.length === 0) return
@@ -3814,7 +3854,7 @@ function clearPendingImages() {
 // 「添加图片」按钮（群聊/单聊共用）：点开隐藏的 file input，读文件交给 change 事件。
 function attachImageButton() {
   const full = pendingImagesFor().length >= MAX_IMAGES_PER_MESSAGE
-  return `<button type="button" class="attach-btn" data-action="attach-image"${full ? ' disabled' : ''} title="添加图片（PNG / JPEG / GIF / WebP，单张 ≤5MB，一条最多 4 张）" aria-label="添加图片">${icon('image')}</button>`
+  return `<button type="button" class="attach-btn" data-action="attach-image"${full ? ' disabled' : ''} title="${t('composer.attachTitle')}" aria-label="${t('composer.attachLabel')}">${icon('image')}</button>`
 }
 
 // composer 的图片件：待发缩略图条（贴在输入框上方）+ 隐藏 file input（群聊/单聊共用）。
@@ -3823,8 +3863,8 @@ function composerImageStrip() {
   if (pending.length === 0) return ''
   return `<div class="image-strip" id="image-strip">${pending.map(image => `
     <div class="image-thumb" data-image-key="${attr(image.key)}">
-      <img class="image-thumb-img" src="${attr(image.previewUrl)}" alt="${attr(image.name || '待发送图片')}" />
-      <button class="image-thumb-remove" data-action="remove-pending-image" data-image-key="${attr(image.key)}" title="移除这张图片" aria-label="移除图片 ${attr(image.name || '')}">${icon('close')}</button>
+      <img class="image-thumb-img" src="${attr(image.previewUrl)}" alt="${attr(image.name || t('composer.imageAlt'))}" />
+      <button class="image-thumb-remove" data-action="remove-pending-image" data-image-key="${attr(image.key)}" title="${t('composer.removeImageTitle')}" aria-label="${attr(t('composer.removeImageLabel', { name: image.name || '' }))}">${icon('close')}</button>
     </div>`).join('')}</div>`
 }
 
@@ -4086,7 +4126,7 @@ async function sendMessage() {
   if (!body && pending.length === 0) return
   // 命令消息（/clear、/remember）后端不落图片：附件留不住，直接拦下并提示先移除。
   if (pending.length > 0 && (body === '/clear' || body.startsWith('/remember'))) {
-    toast('该命令不支持附图，请先移除图片', 'error')
+    toast(t('toast.attachUnsupported'), 'error')
     return
   }
   // 待发图片随消息一起出站：mediaType + name + base64，字段口径与后端 normalizeImageInputs 一致。
@@ -4112,8 +4152,8 @@ async function sendMessage() {
     clearPendingImages()
     await loadState(state.projectId, { quiet: true })
     render()
-    if (body === '/clear') toast(`已清空 ${result.cleared} 条消息`, 'success')
-    if (result?.memory) toast('已写入 Bot 记忆', 'success')
+    if (body === '/clear') toast(t('toast.chatCleared', { count: result.cleared }), 'success')
+    if (result?.memory) toast(t('toast.memorySaved'), 'success')
     const input = document.getElementById('composer-input')
     input?.focus()
   } catch {}
@@ -4511,7 +4551,7 @@ document.addEventListener('click', async (event) => {
         const value = target.dataset.copy
         if (value) {
           await navigator.clipboard.writeText(value).catch(() => {})
-          toast('已复制', 'success')
+          toast(t('toast.copied'), 'success')
         }
         break
       }
@@ -5357,6 +5397,7 @@ async function poll() {
 async function init() {
   try {
     await loadState(state.projectId)
+    syncLanguage()
     if (!state.projectId) state.projectId = state.data.project?.id ?? null
     render()
     if (state.view === 'solo-config') void loadSoloDetail()

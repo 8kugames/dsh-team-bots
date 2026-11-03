@@ -1,6 +1,6 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.2.140",
+  "version": "0.2.141",
   "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
   "repository": {
     "type": "git",

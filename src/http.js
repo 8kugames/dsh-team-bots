@@ -4,6 +4,7 @@ import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppError } from './errors.js'
 import { handleAction } from './api.js'
+import { resolveDshUiLanguage } from './services/locale.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const UI = join(HERE, '..', 'ui')
@@ -83,12 +84,25 @@ export function installHttp(ctx, service, logger = console) {
 
   const page = async () => {
     const html = await readFile(join(UI, 'index.html'), 'utf8')
-    return response(html.replaceAll('{{assetVersion}}', ASSET_VERSION), 'text/html; charset=utf-8')
+    // {{language}}（DSHBOTS-120）：服务端解析 DSH 宿主语言设定注入 <html data-dsh-language>，
+    // 客户端据此选 i18n 字典包（'auto' = 宿主未显式设定，交给浏览器语言）。
+    const language = await resolveDshUiLanguage({
+      loader: ctx.get('loader'),
+      dshHome: service?.config?.dshHome,
+      profile: process.env.DSH_PROFILE || 'team-bots',
+    })
+    return response(html
+      .replaceAll('{{assetVersion}}', ASSET_VERSION)
+      .replaceAll('{{language}}', language), 'text/html; charset=utf-8')
   }
   const script = async () => response(await readFile(join(UI, 'app.js'), 'utf8'), 'text/javascript; charset=utf-8')
   // ES module 切片（DSHBOTS-15）：app.js 的 import 依赖逐文件注册（bridge 路由为精确路径）。
   const moduleScript = (name) => async () => response(
     await readFile(join(UI, 'modules', name)), 'text/javascript; charset=utf-8',
+  )
+  // i18n 字典切片（DSHBOTS-120）：ui/i18n/ 下的语言包，同样逐文件精确注册。
+  const i18nDict = (name) => async () => response(
+    await readFile(join(UI, 'i18n', name)), 'text/javascript; charset=utf-8',
   )
   const styles = async () => response(await readFile(join(UI, 'styles.css'), 'utf8'), 'text/css; charset=utf-8')
   const font = (weight) => async () => response(
@@ -111,6 +125,9 @@ export function installHttp(ctx, service, logger = console) {
   route('/api/dsh-team/modules/util.js', ['GET'], moduleScript('util.js'))
   route('/api/dsh-team/modules/markdown.js', ['GET'], moduleScript('markdown.js'))
   route('/api/dsh-team/modules/api.js', ['GET'], moduleScript('api.js'))
+  route('/api/dsh-team/modules/i18n.js', ['GET'], moduleScript('i18n.js'))
+  route('/api/dsh-team/i18n/zh.js', ['GET'], i18nDict('zh.js'))
+  route('/api/dsh-team/i18n/en.js', ['GET'], i18nDict('en.js'))
   route('/api/dsh-team/styles.css', ['GET'], styles)
   route('/api/dsh-team/fonts/inter-400.woff2', ['GET'], font('400'))
   route('/api/dsh-team/fonts/inter-500.woff2', ['GET'], font('500'))

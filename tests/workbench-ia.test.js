@@ -31,9 +31,9 @@ test('① 成员 tab：邀请走弹窗选人 + 移除动作 + busy 徽标 + 用�
 test('① 群聊侧栏与设置页的项目成员面板已移除', () => {
   const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/aside>/g)]
     .map(m => m[1])
-    .find(block => block.includes('活跃任务'))
+    .find(block => block.includes("t('card.activeTasks')"))
   assert.ok(chatSide, '找不到群聊右栏')
-  assert.ok(!chatSide.includes('<h3>项目成员</h3>'), '群聊右栏不再有项目成员卡')
+  assert.ok(!chatSide.includes("<h3>${t('card.projectMembers')}</h3>"), '群聊右栏不再有项目成员卡')
   // 设置表单：成员 checkbox 与全量提交一并移除，防空数组清空成员（新建项目弹窗保留全量语义，不在此列）
   const settingsForm = /<form id="project-settings-form"[\s\S]*?<\/form>/.exec(source)?.[0] ?? ''
   assert.ok(settingsForm, '找不到设置表单')
@@ -50,11 +50,11 @@ test('② 项目 NAV 无进化；单聊 NAV 保留进化', () => {
 
 test('② 侧栏「总览bots」入口在全局配置上方，带待审红点', () => {
   const idxOverview = source.indexOf('data-view="bots-overview"')
-  const idxGlobal = source.indexOf('<span>全局配置</span>')
+  const idxGlobal = source.indexOf("<span>${t('sidebar.globalConfig')}</span>")
   assert.ok(idxOverview >= 0, '侧栏应有总览bots按钮')
   assert.ok(idxGlobal >= 0 && idxOverview < idxGlobal, '总览bots在全局配置上方')
   assert.match(source, /case 'bots-overview': return renderBotsOverview\(\)/, 'render 路由 bots-overview')
-  assert.match(source, /pendingProposals\(\) > 0 \? '<span class="red-dot"/, '有待审提案时红点')
+  assert.match(source, /pendingProposals\(\) > 0 \? `<span class="red-dot"/, '有待审提案时红点')
   assert.match(source, /case 'batch-decide-proposals':/, '批量审批 handler 存在')
 })
 
@@ -92,9 +92,9 @@ test('DSHBOTS-105 侧栏状态行读全局 activeTasks，不随上下文分支',
   assert.match(shell, /const activeTasks = Number\(data\?\.activeTasks \?\? 0\)/, '状态行任务数读全局字段 activeTasks，无上下文分支')
   assert.ok(!shell.includes('soloRuns'), 'renderShell 不再按单聊/群聊分别数运行')
   assert.match(shell, /class="dot \$\{activeTasks \? 'amber' : ''\}"/, '状态点判空与文案读同一全局变量')
-  assert.match(shell, /\$\{activeTasks \? `\$\{activeTasks\} 个任务中` : '团队空闲'\}/, '状态行文案用任务口径')
+  assert.match(shell, /\$\{activeTasks \? t\('sidebar\.tasksActive', \{ count: activeTasks \}\) : t\('sidebar\.idle'\)\}/, '状态行文案用任务口径')
   assert.match(shell, /const projectRunning = project\?\.stats\?\.running \?\? 0/, 'topbar 运行数拆回项目口径')
-  assert.match(shell, /<b>\$\{projectRunning\}<\/b> 运行中/, 'topbar-meta 读项目口径变量')
+  assert.match(shell, /<b>\$\{projectRunning\}<\/b> \$\{projectRunning === 1/, 'topbar-meta 读项目口径变量')
 })
 
 // DSHBOTS-105 后端：state 顶层新增 activeTasks（tasks 表 in_progress 计数），activeRuns 原样保留。

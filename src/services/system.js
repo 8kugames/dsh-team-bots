@@ -8,6 +8,7 @@ import { usageSnapshot } from '../usage.js'
 import { latestDshVersion, compareVersions, validTargetVersion } from '../updater.js'
 import { skillSnapshot } from '../skills.js'
 import { projectSkillRoots } from '../project-skills.js'
+import { resolveDshUiLanguage } from './locale.js'
 import { nowIso } from '../util.js'
 
 
@@ -71,6 +72,13 @@ export const systemMethods = {
         home: this.config.dshHome,
         ...this.runtime?.capabilityInfo?.() ?? {},
       },
+      // UI 语言（DSHBOTS-120）：与 http.js page() 的 {{language}} 注入同源
+      // （loader 直读 → patch 文件 → 'auto' 交浏览器），state 轮询据此热切换字典包。
+      language: await resolveDshUiLanguage({
+        loader: this.runtime?.ctx?.get?.('loader'),
+        dshHome: this.config.dshHome,
+        profile: process.env.DSH_PROFILE || 'team-bots',
+      }),
       // 每个 provider+model 只保留最新一条生效价格；历史版本不在这里展开。
       prices: this.latestPrices(),
       // 配置里的默认价格，Web 中可据此一键恢复。

@@ -10,10 +10,14 @@ test('dispatch page subagent card describes real capability, no placeholder', ()
   const app = fs.readFileSync(path.join(root, 'ui/app.js'), 'utf8')
   assert.doesNotMatch(app, /待接入/)
   assert.doesNotMatch(app, /依赖 DSHBOTS-27/)
-  assert.match(app, /<h3>子智能体<\/h3>/)
-  assert.match(app, /bot 会话已内置 subagent \/ subagent_fork \/ workflow 工具/)
-  assert.match(app, /可在执行中自行派生子智能体并行加速/)
-  assert.match(app, /无需工作台额外编排/)
+  assert.match(app, /<h3>\$\{t\('solo\.subagents'\)\}<\/h3>/)
+  // DSHBOTS-120 起文案进字典：实质内容锁在 zh/en 字典值里（app.js 只留 t() 接线）。
+  const zh = fs.readFileSync(path.join(root, 'ui/i18n/zh.js'), 'utf8')
+  const en = fs.readFileSync(path.join(root, 'ui/i18n/en.js'), 'utf8')
+  assert.match(zh, /bot 会话已内置 subagent \/ subagent_fork \/ workflow 工具/)
+  assert.match(zh, /可在执行中自行派生子智能体并行加速/)
+  assert.match(zh, /无需工作台额外编排/)
+  assert.match(en, /subagent \/ subagent_fork \/ workflow/)
 })
 
 test('collaboration rules include subagent usage guidance', () => {

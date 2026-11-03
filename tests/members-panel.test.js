@@ -14,7 +14,7 @@ const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.u
 // 群聊右栏（aside.chat-side 里含「活跃任务」的那一个）
 const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/aside>/g)]
   .map(m => m[1])
-  .find(block => block.includes('活跃任务'))
+  .find(block => block.includes("t('card.activeTasks')"))
 assert.ok(chatSide, '找不到群聊右栏 aside.chat-side')
 
 // 概览卡的模板函数体（只取模板字符串内部，避免把函数外的代码算进来）
@@ -28,9 +28,9 @@ test('群聊右栏渲染「项目成员」概览卡', () => {
 })
 
 test('概览卡位置在「项目总监」panel 正下方、「活跃任务」之前', () => {
-  const idxOwner = chatSide.indexOf('<h3>项目总监</h3>')
+  const idxOwner = chatSide.indexOf("<h3>${t('card.projectOwner')}</h3>")
   const idxMembers = chatSide.indexOf('${renderChatMembersCard()}')
-  const idxTasks = chatSide.indexOf('<h3>活跃任务</h3>')
+  const idxTasks = chatSide.indexOf("<h3>${t('card.activeTasks')}</h3>")
   assert.ok(idxOwner >= 0 && idxMembers >= 0 && idxTasks >= 0, '右栏三处都要在')
   assert.ok(idxOwner < idxMembers, '成员卡在项目总监卡之后')
   assert.ok(idxMembers < idxTasks, '成员卡在活跃任务卡之前')
@@ -39,7 +39,7 @@ test('概览卡位置在「项目总监」panel 正下方、「活跃任务」�
 
 test('概览卡有标题、成员计数与稳定标记', () => {
   assert.match(cardBody, /<div class="side-card members-overview" data-members-overview>/, '卡片带 side-card 类与 data-members-overview 标记')
-  assert.match(cardBody, /<div class="side-card-head"><h3>项目成员<\/h3><span>\$\{memberList\.length\}<\/span><\/div>/, '标题「项目成员」+ 成员计数（剔除总监后的口径）')
+  assert.match(cardBody, /<div class="side-card-head"><h3>\$\{t\('card\.projectMembers'\)\}<\/h3><span>\$\{memberList\.length\}<\/span><\/div>/, '标题「项目成员」+ 成员计数（剔除总监后的口径）')
 })
 
 test('概览卡数据源与「成员」tab 同一张成员表', () => {
@@ -66,7 +66,7 @@ test('行样式是成员两行式 .member-info：名称+角色 / 模型小字', 
   assert.match(cardBody, /<span class="member-name-line">[\s\S]*?class="member-role"/, '第一行：名称 + 角色标签')
   assert.match(cardBody, /<span class="member-model">\$\{esc\(modelLine\)\}<\/span>/, '第二行：模型小字')
   assert.match(cardFn, /const modelRef = member\.modelRef \?\? bot\.modelRef \?\? bot\.model \?\? null/, '模型取成员/Bot 的 modelRef')
-  assert.match(cardFn, /const modelLine = modelRef \? String\(modelRef\) : '未配置模型'/, '缺配置时兜底「未配置模型」')
+  assert.match(cardFn, /const modelLine = modelRef \? String\(modelRef\) : t\('common\.modelUnset'\)/, '缺配置时兜底「未配置模型」')
 })
 
 test('概览卡是只读的：没有任何写操作控件', () => {

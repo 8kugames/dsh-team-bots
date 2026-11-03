@@ -167,7 +167,7 @@ test('发送：base64 随既有 send_message / send_solo_message 通道出站，
   assert.match(source, /api\('send_message', \{ projectId: project\.id, body,[\s\S]*?\.\.\.\(images\.length \? \{ images \} : \{\}\) \}\)/)
   assert.match(source, /clearPendingImages\(\)/)
   assert.match(source, /if \(!body && pending\.length === 0\) return/, '纯图片消息也允许发送')
-  assert.match(source, /该命令不支持附图，请先移除图片/, '命令消息附图需拦截提示')
+  assert.match(source, /toast\(t\('toast\.attachUnsupported'\), 'error'\)/, '命令消息附图需拦截提示')
 })
 
 test('气泡渲染：只渲染图片元数据，base64 不进消息 HTML', () => {
