@@ -3824,6 +3824,48 @@
   }
   // composer-file-input:end
 
+  // composer-paste:start —— 粘贴截图与文件路径（tests/paste-paths.test.js 抽取此块断言）
+  // 纯浏览器侧：不扫目录、不读文件系统、不加服务端接口；file:// 路径只来自用户自己复制进
+  // 剪贴板的内容（浏览器已经交给我们的那份），decodeURIComponent 还原后原样插入，缺失就明说。
+  // 从 text/uri-list 或 text/plain 文本里提取 file:// 绝对路径；uri-list 的 # 行是注释要跳过。
+  // 还原失败的形态（空串/无匹配）一律返回 []，不猜、不编造。
+  function parseFileUriList(text) {
+    const raw = String(text ?? '')
+    if (!raw) return []
+    const out = []
+    const seen = new Set()
+    const push = uri => {
+      const path = decodeURIComponent(uri.replace(/^file:\/\//, ''))
+      if (path && !seen.has(path)) {
+        seen.add(path)
+        out.push(path)
+      }
+    }
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const match = /^file:\/\/\S+$/.exec(trimmed)
+      if (match) push(match[0])
+    }
+    if (out.length > 0) return out
+    // uri-list 没给：退到 text/plain 里找内嵌的 file:// 片段（Chromium 复制文件时常见只有文件名）。
+    for (const match of raw.matchAll(/file:\/\/[^\s"'<>]+/g)) push(match[0])
+    return out
+  }
+
+  // 按 textarea 当前光标位置 splice 插入，不覆盖未选内容；插入后补派 input 事件，
+  // 否则 2.8s 轮询重渲染会用旧草稿（state）回滚掉刚插入的文本。
+  function insertTextAtCursor(input, insertText) {
+    const value = String(input.value ?? '')
+    const start = Number.isInteger(input.selectionStart) ? input.selectionStart : value.length
+    const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start
+    input.value = value.slice(0, start) + insertText + value.slice(end)
+    const pos = start + insertText.length
+    try { input.setSelectionRange(pos, pos) } catch {}
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  // composer-paste:end
+
   // 消息附图块：只渲染元数据（文件名 + 大小），base64 不进消息 HTML；点开再按 id 取原图。
   function renderMessageImages(images) {
     const list = Array.isArray(images) ? images : []
@@ -4957,6 +4999,29 @@
     const el = event.target.closest('.composer-ac-item')
     if (!el || !state.ac) return
     applyAutocomplete(state.ac.items[Number(el.dataset.acIdx)])
+  })
+
+  // 粘贴分发（DSHBOTS-70）：document 级委托——#composer-input 在 renderShell 里被 2.8s 轮询重建，
+  // 监听挂节点会随节点一起被换掉（D-64 同类根因）。target 不是 composer 就完全放行，纯文本粘贴行为不变。
+  document.addEventListener('paste', (event) => {
+    const input = event.target
+    if (input?.id !== 'composer-input') return
+    const files = Array.from(event.clipboardData?.files ?? [])
+    if (files.length === 0) return
+    // 剪贴板里是文件（截图/复制的文件），接管默认行为：图片走现有校验与待发通道（顺带补上粘贴截图能力），
+    // 不支持的类型从剪贴板文本里找 file:// 绝对路径；都拿不到就明说，不静默、不猜路径。
+    event.preventDefault()
+    const images = files.filter(file => resolveImageMediaType(file.type, file.name))
+    if (images.length > 0) void addPendingImages(images)
+    if (images.length === files.length) return
+    const data = event.clipboardData
+    const paths = parseFileUriList(data.getData('text/uri-list') || data.getData('text/plain'))
+    if (paths.length > 0) {
+      insertTextAtCursor(input, paths.join('\n'))
+    } else {
+      insertTextAtCursor(input, files.map(file => file.name || '未命名文件').join('\n'))
+      toast('浏览器未提供完整路径', 'error')
+    }
   })
 
   document.addEventListener('change', (event) => {
