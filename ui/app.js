@@ -1767,8 +1767,8 @@
         <aside class="terminal-side">
           ${taskBusy ? `<div class="terminal-warn">${icon('alert', 'terminal-warn-icon')}<span class="terminal-warn-text">有任务正在写该项目工作区，终端命令与它并发需自担风险</span></div>` : ''}
           <div class="card terminal-history-card">
-            <div class="terminal-history-head"><strong>历史命令</strong><span class="tag">${terminal.history.length} 条</span></div>
-            ${terminal.history.length === 0 ? '<div class="side-empty" style="padding:14px 16px">还没有执行过命令。</div>' : `<div class="terminal-history">
+            <div class="terminal-history-head"><span class="eyebrow">命令历史</span><span class="tag">${terminal.history.length} 条</span></div>
+            ${terminal.history.length === 0 ? '<div class="terminal-history-empty">还没有执行过命令。</div>' : `<div class="terminal-history">
               ${terminal.history.map(item => `
                 <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" data-status="${attr(item.status ?? '')}" title="点击回填到输入框">
                   ${terminalStatusPill(item.status)}

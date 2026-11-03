@@ -127,3 +127,50 @@ test('输出区空态独立成层，不再由 pre 承载图标', () => {
   assert.match(cssBlock('.terminal-output-empty'), /justify-content:\s*center/, '空态说明层应居中')
 })
 
+// ── DSHBOTS-74：终端页布局继续美化（井的层次、右列视觉权重、节奏与细节）──
+
+test('输出井有内描边，与机身条分层：井读成凹陷面而非浮板', () => {
+  const output = cssBlock('.terminal-output')
+  assert.match(output, /inset 0 0 0 1px var\(--console-line\)/, '输出井应有 1px --console-line 内描边')
+  // 标题栏与输入行同色（机身条），深色井被两条浅带夹住。
+  assert.match(cssBlock('.terminal-chrome'), /background:\s*var\(--surface-2\)/, '标题栏应是 --surface-2 机身条')
+  assert.match(cssBlock('.terminal-input-row'), /background:\s*var\(--surface-2\)/, '命令输入行应是 --surface-2 机身条')
+})
+
+test('三段节奏统一：标题栏与输入行内边距一致到 16px', () => {
+  const chrome = cssBlock('.terminal-chrome')
+  const input = cssBlock('.terminal-input-row')
+  assert.match(chrome, /padding:\s*0 16px/, '标题栏横向内边距应为 16px')
+  assert.match(input, /padding:\s*12px 16px/, '输入行横向内边距应为 16px')
+})
+
+test('右列视觉权重：并发提示降权为旁注，历史卡从属于终端卡', () => {
+  const warn = cssBlock('.terminal-warn')
+  assert.match(warn, /border-left:\s*2px solid var\(--star\)/, '并发提示应改为左侧 2px 竖线，不再整圈描边')
+  assert.ok(!/border:\s*1px solid var\(--star\)/.test(warn), '并发提示不应再整圈描边')
+  assert.match(cssBlock('.terminal-history-card'), /box-shadow:\s*var\(--shadow-1\)/, '历史卡投影应比终端卡更浅')
+  assert.match(cssBlock('.terminal-history-head'), /background:\s*var\(--surface-2\)/, '历史卡标题条应有底色')
+})
+
+test('命令与元信息字号层级：命令是主角，元信息退到 --ink-3', () => {
+  assert.match(cssBlock('.terminal-history-cmd'), /color:\s*var\(--ink\);/, '命令文本应用 --ink 主色')
+  assert.match(cssBlock('.terminal-history-meta'), /color:\s*var\(--ink-3\)/, '元信息应退到 --ink-3')
+  assert.match(cssBlock('.terminal-history-item .pill'), /font-size:\s*var\(--fs-caption\)/, '状态徽标字号应收紧')
+})
+
+test('历史卡头部用 eyebrow 标题，空态用独立类不再靠行内样式', () => {
+  assert.match(renderTerminalBody, /class="terminal-history-head"><span class="eyebrow">命令历史<\/span>/, '历史卡标题应是 eyebrow')
+  assert.match(renderTerminalBody, /class="terminal-history-empty"/, '历史空态应使用独立类')
+  assert.ok(!/class="side-empty" style="padding:14px 16px"/.test(renderTerminalBody), '历史空态不应再靠行内样式')
+  assert.match(cssBlock('.terminal-history-empty'), /color:\s*var\(--ink-3\)/, '历史空态文字应弱化')
+})
+
+test('井内与历史列表滚动条走主题变量，不喧宾夺主', () => {
+  const output = cssBlock('.terminal-output')
+  assert.match(output, /scrollbar-width:\s*thin/, '输出井应使用细滚动条')
+  assert.match(output, /scrollbar-color:[^;]*var\(--console-line\)/, '输出井滚动条应走 --console-line')
+  const history = cssBlock('.terminal-history')
+  assert.match(history, /scrollbar-width:\s*thin/, '历史列表应使用细滚动条')
+  assert.match(cssBlock('.terminal-kbd'), /background:\s*var\(--surface-3\)/, '键位提示应浮在机身条之上')
+})
+
