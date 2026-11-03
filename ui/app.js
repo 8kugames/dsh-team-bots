@@ -302,9 +302,7 @@ function renderShell() {
           ${renderView()}
         </section>
       </main>
-    </div>
-    ${state.modal ? renderModal() : ''}
-  `
+    </div>`
 }
 
 function syncChromeHeight() {
@@ -393,8 +391,6 @@ function render() {
   if (!state.data) return
   state.ac = null
   app.className = ''
-  const hadModal = Boolean(document.querySelector('.modal'))
-  const previousFocus = document.activeElement
   // chat-scroll:view-enter —— 切进聊天视图时确定性贴底：不依赖历史残值。
   // 用户上翻历史后切到别的页面再切回来，一律回到最新一条（DSHBOTS-72）。
   if (state.view === 'chat' && lastRenderedView !== 'chat') state.chatAtBottom = true
@@ -414,11 +410,9 @@ function render() {
   }
   restoreViewScroll(savedViewScroll)
   lastRenderedView = state.view
-  if (state.modal && !hadModal) {
-    lastFocused = previousFocus
-    focusModal()
-  }
-  if (!state.modal && hadModal) restoreFocus()
+  // modal 层与 #app 解耦（DSHBOTS-90）：render() 只重建 #app，永不写 #modal-root；
+  // 这里仅按需同步弹窗层（state.modal 被别处直改或置空时兜底，内容未变则零 DOM 操作）。
+  renderModalLayer()
   requestAnimationFrame(() => {
     try {
       syncChromeHeight()
@@ -2612,6 +2606,74 @@ function renderModal() {
   }
 }
 
+// modal-layer:start —— modal 与全量渲染解耦（DSHBOTS-90）
+// 与 ensureComposerImageInput / ensureImageViewer 同一套 body 级常驻模式：#modal-root 在 #app 外，
+// render() 只重建 #app，弹窗层在这里独立同步。同一弹窗刷新（loading→详情、保存/评论后的
+// reloadTaskModal）只换内容：遮罩与 .modal 容器节点保持同一实例，.modal-body 节点原位保留，
+// innerHTML 只替换其内部，弹窗滚动位与正在编辑的输入焦点不被拆掉；内容未变时零 DOM 操作。
+let lastModalHtml = ''
+
+function ensureModalRoot(doc = document) {
+  let el = doc.getElementById('modal-root')
+  if (!el) {
+    el = doc.createElement('div')
+    el.id = 'modal-root'
+    doc.body.appendChild(el)
+  }
+  return el
+}
+
+function renderModalLayer() {
+  const root = ensureModalRoot()
+  const html = renderModal()
+  if (html === lastModalHtml) return
+  lastModalHtml = html
+  if (!html) {
+    root.replaceChildren()
+    return
+  }
+  const prevBackdrop = root.firstElementChild
+  if (!prevBackdrop?.classList?.contains('modal-backdrop')) {
+    root.innerHTML = html
+    return
+  }
+  const stage = document.createElement('div')
+  stage.innerHTML = html
+  const freshBackdrop = stage.firstElementChild
+  const freshPanel = freshBackdrop?.querySelector?.('.modal')
+  const prevPanel = prevBackdrop.firstElementChild
+  if (!freshBackdrop || !freshPanel || !prevPanel) {
+    root.innerHTML = html
+    return
+  }
+  const prevBody = prevPanel.querySelector('.modal-body')
+  const freshBody = freshPanel.querySelector('.modal-body')
+  if (prevBody && freshBody) {
+    const savedScroll = prevBody.scrollTop
+    const active = document.activeElement
+    const refocus = active?.id && prevBody.contains(active) ? active.id : null
+    const prevHead = prevPanel.querySelector('.modal-head')
+    const prevFoot = prevPanel.querySelector('.modal-foot')
+    const freshHead = freshPanel.querySelector('.modal-head')
+    const freshFoot = freshPanel.querySelector('.modal-foot')
+    if (freshHead) prevHead ? prevHead.replaceWith(freshHead) : prevPanel.prepend(freshHead)
+    else prevHead?.remove()
+    if (freshFoot) prevFoot ? prevFoot.replaceWith(freshFoot) : prevPanel.append(freshFoot)
+    else prevFoot?.remove()
+    prevBody.innerHTML = freshBody.innerHTML
+    prevBody.scrollTop = savedScroll
+    if (refocus) {
+      const restored = prevBody.querySelector(`[id="${refocus}"]`)
+      if (restored instanceof HTMLElement) restored.focus()
+    }
+  } else {
+    prevPanel.replaceChildren(...freshPanel.childNodes)
+  }
+  prevPanel.className = freshPanel.className
+  prevPanel.setAttribute('aria-label', freshPanel.getAttribute('aria-label') ?? '')
+}
+// modal-layer:end
+
 function modelOptions(provider, model) {
   const models = state.data?.models ?? []
   if (models.length === 0) return '<option value="">DSH 尚未提供模型</option>'
@@ -3216,38 +3278,41 @@ function trapModalFocus(event) {
   return false
 }
 
+// modal 开合只同步 #modal-root，不走 render() 全量重建（DSHBOTS-90）：
+// 开弹窗不再重建背后整页，关弹窗不再拆掉重排后的列表——滚动位与列表状态原样保留。
 function openModal(modal) {
   state.modal = modal
-  render()
+  lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  renderModalLayer()
+  focusModal()
 }
 
 function closeModal() {
   if (!state.modal) return
   state.modal = null
-  render()
+  renderModalLayer()
+  restoreFocus()
 }
 
 async function openTask(taskId) {
-  state.modal = { type: 'task', loading: true, title: '任务详情' }
-  render()
+  openModal({ type: 'task', loading: true, title: '任务详情' })
   try {
     const detail = await api('task_detail', { taskId })
     if (state.modal?.type !== 'task') return
     state.modal = { type: 'task', detail }
-    render()
+    renderModalLayer()
   } catch {
     closeModal()
   }
 }
 
 async function openSkillDetail(slug) {
-  state.modal = { type: 'skill-detail', loading: true, title: '技能详情' }
-  render()
+  openModal({ type: 'skill-detail', loading: true, title: '技能详情' })
   try {
     const detail = await api('skill_detail', { slug })
     if (state.modal?.type !== 'skill-detail') return
     state.modal = { type: 'skill-detail', detail }
-    render()
+    renderModalLayer()
   } catch {
     closeModal()
   }
@@ -3259,7 +3324,7 @@ async function openTrajectory(runId) {
     const detail = await api('run_trajectory', { runId }, { quiet: true })
     if (state.modal?.type !== 'trajectory') return
     state.modal = { type: 'trajectory', detail, runId }
-    render()
+    renderModalLayer()
   } catch (error) {
     closeModal()
     toast(error?.message || '读取思考过程失败', 'error')
@@ -3267,13 +3332,12 @@ async function openTrajectory(runId) {
 }
 
 async function openBot(botId) {
-  state.modal = { type: 'edit-bot', loading: true, title: 'Bot 配置' }
-  render()
+  openModal({ type: 'edit-bot', loading: true, title: 'Bot 配置' })
   try {
     const detail = await api('bot_detail', { botId })
     if (state.modal?.type !== 'edit-bot') return
     state.modal = { type: 'edit-bot', detail }
-    render()
+    renderModalLayer()
   } catch {
     closeModal()
   }
@@ -3283,7 +3347,7 @@ async function reloadTaskModal(taskId) {
   const detail = await api('task_detail', { taskId }, { quiet: true })
   if (state.modal?.type === 'task') {
     state.modal = { type: 'task', detail }
-    render()
+    renderModalLayer()
   }
 }
 
@@ -4175,7 +4239,7 @@ document.addEventListener('click', async (event) => {
         const model = target.dataset.model
         if (!window.confirm(`把 ${model} 的价格恢复为配置默认值？`)) break
         await api('reset_price', { provider: target.dataset.provider ?? '', model })
-        state.modal = null
+        closeModal()
         await loadState(state.projectId, { quiet: true })
         render()
         toast(`${model} 已恢复默认价格`, 'success')
@@ -4317,7 +4381,7 @@ document.addEventListener('click', async (event) => {
         const bot = botById(botId)
         if (!bot || !window.confirm(`归档 ${bot.name}？总监关系必须先解除。`)) break
         await api('archive_bot', { botId })
-        state.modal = null
+        closeModal()
         await refresh()
         if (state.view === 'solo-config' && botById(botId)?.status !== 'active') {
           state.view = 'chat'
@@ -4355,8 +4419,7 @@ document.addEventListener('click', async (event) => {
       case 'remove-tracking-open': {
         const item = (state.data?.projects ?? []).find(project => project.id === target.dataset.projectId)
         if (!item) break
-        state.modal = { type: 'remove-tracking', projectId: item.id, name: item.name, step: 1, purge: false }
-        render()
+        openModal({ type: 'remove-tracking', projectId: item.id, name: item.name, step: 1, purge: false })
         break
       }
       case 'remove-tracking-step2': {
@@ -4560,7 +4623,7 @@ document.addEventListener('submit', async (event) => {
         memberIds: new FormData(form).getAll('memberIds'),
         productionDir: payload.productionDir?.trim() || undefined,
       })
-      state.modal = null
+      closeModal()
       state.projectId = result.id
       state.view = 'chat'
       await refresh()
@@ -4574,7 +4637,7 @@ document.addEventListener('submit', async (event) => {
         confirmName: payload.confirmName,
         purgeWorkdir: payload.purge === '1',
       })
-      state.modal = null
+      closeModal()
       // 移除后若正停在该项目上，回到群聊并让 loadState 重新解析可用项目，避免引用已删除的数据。
       if (state.projectId === payload.projectId) {
         state.projectId = null
@@ -4611,7 +4674,7 @@ document.addEventListener('submit', async (event) => {
         await api('update_bot', { botId: payload.botId, patch: common })
         toast('Bot 配置已更新', 'success')
       }
-      state.modal = null
+      closeModal()
       await refresh()
       if (state.view === 'solo-config') await loadSoloDetail()
       return
@@ -4624,7 +4687,7 @@ document.addEventListener('submit', async (event) => {
         return
       }
       await api('add_member', { projectId: activeProject()?.id, botId })
-      state.modal = null
+      closeModal()
       await refresh()
       toast('已邀请加入项目', 'success')
       return
@@ -4642,7 +4705,7 @@ document.addEventListener('submit', async (event) => {
         blockedBy,
         autoStart: form.querySelector('[name="autoStart"]')?.checked === true,
       })
-      state.modal = null
+      closeModal()
       await loadState(state.projectId, { quiet: true })
       render()
       toast(`已创建 ${task.identifier}`, 'success')
@@ -4672,7 +4735,7 @@ document.addEventListener('submit', async (event) => {
         topic: payload.topic,
         content: payload.content,
       })
-      state.modal = null
+      closeModal()
       await refresh()
       toast('记忆已写入', 'success')
       return
@@ -4683,7 +4746,7 @@ document.addEventListener('submit', async (event) => {
         topic: payload.topic,
         content: payload.content,
       })
-      state.modal = null
+      closeModal()
       await refresh()
       toast('记忆已更新', 'success')
       return
@@ -4708,7 +4771,7 @@ document.addEventListener('submit', async (event) => {
           : { instructions: payload.instructions },
       })
       if (kind === 'skill' && !payload.content) throw new Error('技能内容不能为空')
-      state.modal = null
+      closeModal()
       await refresh()
       toast('提案已提交审批', 'success')
       return
@@ -4726,7 +4789,7 @@ document.addEventListener('submit', async (event) => {
         outputPerMtok: price(payload.outputPerMtok),
         currency: (payload.currency || 'CNY').toUpperCase(),
       })
-      state.modal = null
+      closeModal()
       await refresh()
       toast('模型价格已保存，新调用将按此计价', 'success')
       return
@@ -5124,10 +5187,12 @@ window.addEventListener('error', (event) => {
   img.replaceWith(chip)
 }, true)
 
+// proposal 表单随弹窗层落进 #modal-root：改盯弹窗层的子树变化（含原位内容更新），
+// #app 的全量重建不再牵动弹窗，也就不再需要靠 app 重建来重绑表单（DSHBOTS-90）。
 const observer = new MutationObserver(() => {
   if (state.modal?.type === 'proposal') bindProposalForm()
 })
-observer.observe(app, { childList: true, subtree: false })
+observer.observe(ensureModalRoot(), { childList: true, subtree: true })
 
 setInterval(() => { void poll() }, 2800)
 setInterval(() => {

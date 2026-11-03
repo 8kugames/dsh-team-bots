@@ -14,6 +14,9 @@
     <div class="boot-mark">DSH</div>
     <div class="boot-copy">正在连接团队空间</div>
   </div>
+  <!-- modal 常驻容器（#app 外）：render() 全量重建 #app 时永远碰不到这里，
+       弹窗的遮罩/滚动位/输入焦点因此不会被轮询或重渲染拆掉。 -->
+  <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
   <!-- marked + DOMPurify：聊天 markdown 渲染与消毒（vendor 拷贝，见 vendor/*/NOTICE）。
        defer 保持文档序执行，app.js 里二者缺一即回退纯文本，不会裸渲染。 -->
