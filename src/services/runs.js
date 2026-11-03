@@ -893,7 +893,8 @@ if (run.kind === 'dm_reply') {
     const bot = this.store.get('SELECT name, provider, model, fallback_provider, fallback_model FROM bots WHERE id = ?', run.bot_id)
     const task = run.task_id ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', run.task_id) : undefined
     const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
-    const { write_scopes: rawScopes, attention_json: attentionJson, ...rest } = run
+    // recovery 是重启恢复的内部瞬态标记（置位→注入→清零），不属于 API 视图，随 attention_json 一并剥出。
+    const { write_scopes: rawScopes, attention_json: attentionJson, recovery: _recovery, ...rest } = run
     const fallbackRef = bot?.fallback_provider && bot?.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null
     const usedRef = run.model_provider && run.model_model ? `${run.model_provider}/${run.model_model}` : null
     return {

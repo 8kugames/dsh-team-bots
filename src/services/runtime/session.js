@@ -263,6 +263,11 @@ export const sessionMethods = {
       : bot
     const sessionId = await this.ensureSession(bot, project, { run, task, sessionKind, modelOverride })
     let prompt = this.promptFor({ run, bot, project, task, chatMessage, sessionId })
+    // recovery note（DSHBOTS-135）：恢复标记已被上面的首条提示词消费，即刻清零——
+    // 恢复提醒只对「重排队后的第一次执行」注入一次，后续运行回到标准提示词。
+    if (Number(run.recovery) === 1) {
+      this.store.run('UPDATE runs SET recovery = 0 WHERE id = ?', run.id)
+    }
     const pending = {
       runId: run.id,
       sessionId,

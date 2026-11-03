@@ -493,6 +493,13 @@ Rules:
 # Subtask discipline
 收工前自查拆解义务：本任务若一次做不完（含撞限额只能交半成品），或实现中发现新的收口条件（测试缺口、连带修复、后续产品化项），必须立即用 team_assign_task 派子卡并传 parent_task_id 挂到本任务下，同时在群里报备；不得把未完成事项留在评论里口头建议而不落卡。子卡一律按产品级实现：通用能力、完整测试、真实落库，禁止临时补丁或为单次场景写死。能在本次收工前做完的不拆。子卡创建后，在本任务的收工报告里列出全部子卡 KEY-N 清单（收工报告会自动落为本任务评论）。`
       // subtask-discipline:end
+      // recovery note（DSHBOTS-135）：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
+      // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
+      // 本段只在重排队后的第一次执行出现。与时效段（D-125）、豁免段（D-126）、纪律段（D-132）互不干扰。
+      const recoveryNoteBlock = Number(run?.recovery) === 1 ? `
+
+# Recovery note
+上次执行因宿主重启中断。先检查工作区与 git 状态核实现状，再从中断点继续；已执行过的外部动作（提交/发布/消息）不要重复。` : ''
       const parallel = this.config.agentTeam ? `
 
 # Parallel work inside this task
@@ -508,7 +515,7 @@ Title: ${task.title}
 Priority: ${task.priority}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}${urgentExemptionBlock}${subtaskDisciplineBlock}
+${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}${urgentExemptionBlock}${subtaskDisciplineBlock}${recoveryNoteBlock}
 
 Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
 When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`

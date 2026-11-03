@@ -13,6 +13,7 @@ import { ensureApprovalSchema } from './approvals.js'
 import { ensureQuestionSchema } from './questions.js'
 import { ensureMessageImagesSchema } from './message-images.js'
 import { ensureTaskTimesSchema, ensureTaskTerminalTimeBackfill } from './tasks.js'
+import { ensureRecoverySchema } from './recovery-schema.js'
 import { id, nowIso } from '../util.js'
 
 
@@ -76,9 +77,11 @@ export const coreMethods = {
       syncSkills(this.store, this.config.skillRoot)
       seedModelPrices(this.store, this.config.modelPrices ?? [])
       this.ensureSettings()
+      // 恢复标记列由恢复域自管迁移（db.js 不加行）；列必须先在，下面的置位 UPDATE 才能写。
+      ensureRecoverySchema(this.store)
       const interrupted = this.store.all("SELECT id FROM runs WHERE status = 'running'")
       this.store.run(
-        `UPDATE runs SET status = 'queued', started_at = NULL, last_progress_at = NULL, session_id = NULL
+        `UPDATE runs SET status = 'queued', recovery = 1, started_at = NULL, last_progress_at = NULL, session_id = NULL
          WHERE status = 'running'`,
       )
       for (const run of interrupted) {
