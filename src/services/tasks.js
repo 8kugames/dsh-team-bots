@@ -479,13 +479,25 @@ export const tasksMethods = {
       void this.tick()
       return updated
     }
+    // 派单必须声明写范围（程序化闸门，不靠派单方自觉）：未声明写范围的任务其写运行会与
+    // 同项目所有写运行判为冲突并保守串行，一条空范围任务就能把整队堵死。这里直接拒绝，
+    // 而不是留到调度器里把并发能力悄悄吃掉。
+    const scopes = input.write_scopes === undefined || input.write_scopes === null
+      ? parseWriteScopesFromDescription(input.description)
+      : parseWriteScopes(input.write_scopes)
+    if (!scopes.length) {
+      throw badRequest(
+        '派单必须声明写范围：传 write_scopes 路径数组，或在描述里写一行「写范围：a, b」。'
+        + '未声明会让该任务的写运行与同项目其他写运行全部串行，一条任务即可堵死队列。',
+      )
+    }
     const task = await this.createTask({
       projectId: project.id,
       title: input.title,
       description: input.description,
       assigneeBotId: member.id,
       priority: input.priority,
-      writeScopes: input.write_scopes,
+      writeScopes: scopes,
       // 总监派单可带父子/依赖关系（snake_case 透传，createTask 内统一校验与落库）。
       parentTaskId: input.parent_task_id,
       blockedBy: input.blocked_by,

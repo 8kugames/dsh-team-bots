@@ -352,12 +352,14 @@ test('assignFromBot 透传 parent_task_id/blocked_by 并同口径校验', async 
     const assigned = await service.assignFromBot(sessionId, {
       assignee: 'Builder', title: '总监派单',
       parent_task_id: anchor.id, blocked_by: [anchor.id],
+      write_scopes: ['src/anchor.js'],
     })
     assert.equal(assigned.parent_task_id, anchor.id)
     assert.deepEqual(assigned.blockedBy, [anchor.id])
     assert.equal(assigned.depsSatisfied, false)
     await assert.rejects(() => service.assignFromBot(sessionId, {
       assignee: 'Builder', title: '跨项目', blocked_by: [otherTask.id],
+      write_scopes: ['src/cross.js'],
     }), /不在当前项目内/)
   } finally {
     closeQuietly(store)

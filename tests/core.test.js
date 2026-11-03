@@ -224,6 +224,7 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
   try {
     const task = await service.assignFromBot(sessionId, {
       assignee: 'Builder', title: 'Build module', description: 'Do it well.',
+      write_scopes: ['src/module.js'],
     })
     assert.equal(task.review_target, 'owner_bot')
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status === 'in_review')
@@ -259,6 +260,7 @@ test('owner return sends the task back for rework and it re-enters owner review'
   try {
     const task = await service.assignFromBot(sessionId, {
       assignee: 'Builder', title: 'Fix bug', description: 'Fix it.',
+      write_scopes: ['src/bug.js'],
     })
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status === 'in_review')
     await waitFor(() => store.get("SELECT status FROM runs WHERE task_id = ? AND kind = 'review'", task.id)?.status === 'succeeded')
@@ -502,16 +504,25 @@ test('owner 派单写范围非法项直接报错，不落库不建运行', async
   }
 })
 
-test('owner 派单不传写范围且描述无写范围行：任务与运行保持空集合（保守串行）', async () => {
+test('owner 派单未声明写范围直接拒绝，声明后落库并快照到运行', async () => {
   const { root, store, service, sessionId } = await ownerSetup('WSN')
   try {
-    const task = await service.assignFromBot(sessionId, {
+    // 程序化闸门：空写范围会让该任务的写运行与同项目所有写运行串行，故派单入口直接拒绝。
+    await assert.rejects(() => service.assignFromBot(sessionId, {
       assignee: 'Builder', title: '普通任务', description: '不含写范围行。',
+    }), /派单必须声明写范围/)
+    // 显式空数组同样拒绝：不能让「明确不声明」绕过闸门。
+    await assert.rejects(() => service.assignFromBot(sessionId, {
+      assignee: 'Builder', title: '空范围', write_scopes: [],
+    }), /派单必须声明写范围/)
+    // 描述里的「写范围：」行是合法声明路径。
+    const task = await service.assignFromBot(sessionId, {
+      assignee: 'Builder', title: '普通任务', description: '做点事。\n写范围：src/a.js, src/b.js',
     })
-    assert.deepEqual(task.writeScopes, [])
-    assert.equal(store.get('SELECT write_scopes FROM tasks WHERE id = ?', task.id)?.write_scopes, '[]')
+    assert.deepEqual(task.writeScopes, ['src/a.js', 'src/b.js'])
+    assert.equal(store.get('SELECT write_scopes FROM tasks WHERE id = ?', task.id)?.write_scopes, '["src/a.js","src/b.js"]')
     await waitFor(() => taskRunScopes(store, task.id) !== undefined)
-    assert.equal(taskRunScopes(store, task.id), '[]')
+    assert.equal(taskRunScopes(store, task.id), '["src/a.js","src/b.js"]')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
