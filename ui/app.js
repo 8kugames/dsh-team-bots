@@ -140,8 +140,8 @@ function renderShell() {
   const pending = pendingProposals()
   // 跨项目待审（DSHBOTS-102）：state 顶层全局口径，与当前项目解耦。
   const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
-  // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行，不随群聊/单聊上下文跳变；topbar 仍按项目口径。
-  const running = Number(data?.activeRuns ?? 0)
+  // 侧栏状态行任务口径（DSHBOTS-105）：全库任务 in_progress 计数，不随群聊/单聊上下文跳变；topbar 仍按项目口径。
+  const activeTasks = Number(data?.activeTasks ?? 0)
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
   const isGlobal = state.view === 'global' || state.view === 'bots-overview' || (state.view === 'usage' && usageMode() === 'global')
@@ -263,8 +263,8 @@ function renderShell() {
             ${icon('external')}<span>DSH 原生界面</span>
           </a>
           <div class="sidebar-meta">
-            <span class="dot ${running ? 'amber' : ''}"></span>
-            <span>${running ? `${running} 个运行中` : '团队空闲'}</span>
+            <span class="dot ${activeTasks ? 'amber' : ''}"></span>
+            <span>${activeTasks ? `${activeTasks} 个任务中` : '团队空闲'}</span>
             <span class="sidebar-meta-sep">·</span>
             <span>${activeBots.length} Bots</span>
             <span class="sidebar-meta-sep">·</span>
