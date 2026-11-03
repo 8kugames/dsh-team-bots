@@ -4,7 +4,8 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { createRequire } from 'node:module'
-import { conflict } from '../errors.js'
+import { AppError, conflict } from '../errors.js'
+import { WechatIlinkError } from '../wechat/commands.js'
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
 // 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
@@ -14,6 +15,30 @@ export function wechatQrSvg(url) {
   qr.addData(url)
   qr.make()
   return qr.createSvgTag({ cellSize: 4, margin: 2 })
+}
+
+/** channel.js 的状态守卫文案全集（未启用/已登录等，抛的都是裸 Error）。 */
+const CHANNEL_GUARD_MESSAGES = new Set([
+  '微信通道未启用（DSH_TEAM_WECHAT=1）',
+  '微信通道已登录，如需换号请先退出',
+  '当前没有等待验证码的授权流程',
+  '验证码应为数字',
+])
+
+/**
+ * 服务边界错误包装：channel.js 全部抛裸 Error，而 http.js 的 errorResponse 只认 AppError，
+ * 非 AppError 一律 500「服务端处理失败」——真实原因被吞。这里统一翻译：
+ * 通道状态守卫（固定文案）→ 409 conflict 原文案透传；其余视为上游（腾讯 iLink）请求失败
+ * → 502（同 system.js 上游不可用口径），可读原文进响应、原始 stack 只进 logger.warn（不落凭据）。
+ */
+function toChannelError(service, action, error) {
+  if (error instanceof AppError) return error
+  const text = error instanceof WechatIlinkError
+    ? `${error.code}: ${error.message}`
+    : String(error?.message ?? error).trim()
+  if (CHANNEL_GUARD_MESSAGES.has(text)) return conflict(text)
+  service.logger.warn?.('dsh-team: wechat %s 上游请求失败: %s', action, error?.stack ?? error)
+  return new AppError('WECHAT_UPSTREAM', `微信服务请求失败：${text || '未知错误'}`, 502)
 }
 
 export const wechatMethods = {
@@ -30,16 +55,29 @@ export const wechatMethods = {
   async wechatBeginLogin() {
     await this.initialize()
     if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
-    const challenge = await this.wechat.beginLogin()
+    let challenge
+    try {
+      challenge = await this.wechat.beginLogin()
+    } catch (error) {
+      throw toChannelError(this, 'beginLogin', error)
+    }
     return { qrCodeUrl: challenge.qrCodeUrl, qrSvg: wechatQrSvg(challenge.qrCodeUrl) }
   },
   wechatSubmitCode(code) {
     if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
-    return this.wechat.submitVerificationCode(code)
+    try {
+      return this.wechat.submitVerificationCode(code)
+    } catch (error) {
+      throw toChannelError(this, 'submitCode', error)
+    }
   },
   async wechatLogout() {
     if (!this.wechat) throw conflict('微信通道未启用（DSH_TEAM_WECHAT=1）')
-    await this.wechat.logout()
+    try {
+      await this.wechat.logout()
+    } catch (error) {
+      throw toChannelError(this, 'logout', error)
+    }
     return { phase: this.wechat.status().phase }
   },
 }
