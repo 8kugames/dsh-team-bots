@@ -504,6 +504,25 @@ export const tasksMethods = {
     if (project.owner_bot_id !== binding.bot_id) throw forbidden('只有项目总监 Bot 可以执行该操作')
     return { binding, project, actor: { type: 'bot', id: binding.bot_id } }
   },
+  // 派单侧同写范围重复检测（DSHBOTS-82）：同一文件上叠 N 张小卡时，各卡各立各排，
+  // 后面的卡只能等前一张跑完，形成排队空转。这里在派单入口找「写范围完全一致」的同项目在办卡。
+  // 只比完全一致（集合相等，顺序无关）；相交但不同的放行——那属于正常的串行依赖，
+  // 正确性由调度器写范围闸门保证，不在派单入口拦截。
+  findDuplicateScopeTask(projectId, scopes) {
+    const target = new Set(scopes)
+    if (!target.size) return null
+    const candidates = this.store.all(
+      `SELECT id, number, title, write_scopes FROM tasks
+        WHERE project_id = ? AND status IN ('todo', 'in_progress', 'blocked')`,
+      projectId,
+    )
+    for (const row of candidates) {
+      const other = readWriteScopes(row.write_scopes)
+      if (other.length !== target.size) continue
+      if ([...target].every(scope => other.includes(scope))) return row
+    }
+    return null
+  },
   async assignFromBot(sessionId, input) {
     const { project, actor } = this.ownerContextFor(sessionId)
     const member = this.membersOf(project.id).find(bot => bot.name.toLowerCase() === String(input.assignee ?? '').toLowerCase())
@@ -527,6 +546,16 @@ export const tasksMethods = {
         + '未声明会让该任务的写运行与同项目其他写运行全部串行，一条任务即可堵死队列。',
       )
     }
+    // 同写范围重复卡拦截（DSHBOTS-82）：同项目已有「写范围完全一致」的在办卡时直接拒绝，
+    // 避免同一文件上叠 N 张排队卡空转。force_duplicate 是逃生口：跳过检测，但留审计痕迹。
+    const duplicate = this.findDuplicateScopeTask(project.id, scopes)
+    const forceDuplicate = input.force_duplicate === true
+    if (duplicate && !forceDuplicate) {
+      throw conflict(
+        `已存在同写范围任务 ${project.key}-${duplicate.number} ${duplicate.title}，请勿重复派单；`
+        + '若需合并多张小卡，请在原任务描述追加清单后重派原任务。',
+      )
+    }
     const task = await this.createTask({
       projectId: project.id,
       title: input.title,
@@ -540,6 +569,13 @@ export const tasksMethods = {
       autoStart: true,
       postCard: true,
     }, actor)
+    if (forceDuplicate) {
+      this.audit(actor, 'dispatch_force_duplicate', 'task', task.id, {
+        writeScopes: scopes,
+        duplicateTaskId: duplicate?.id ?? null,
+        duplicateIdentifier: duplicate ? `${project.key}-${duplicate.number}` : null,
+      })
+    }
     return task
   },
   async reviewFromBot(sessionId, input) {

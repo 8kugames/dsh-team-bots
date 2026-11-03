@@ -8,7 +8,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_assign_task',
-    description: 'Assign a task to a project bot. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); without it, creates a new task that starts automatically.',
+    description: 'Assign a task to a project bot. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); without it, creates a new task that starts automatically. A new task whose write scopes exactly match an unfinished task in the same project is rejected as a duplicate dispatch; merge the cards into the existing task instead, or pass force_duplicate to override (audited).',
     parameters: {
       type: 'object',
       properties: {
@@ -17,6 +17,7 @@ export function installTeamTools(ctx, service) {
         description: { type: 'string', description: 'Self-contained instructions, constraints and acceptance criteria (new tasks only)' },
         priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths this task will modify (new tasks only); the scheduler runs tasks with disjoint scopes in parallel. Omit to parse a `写范围：`/`write_scopes:` line from the description instead' },
+        force_duplicate: { type: 'boolean', description: 'Escape hatch (new tasks only): skip the same-write-scope duplicate check when an unfinished task in this project already declares identical write scopes. Use only when a second task on the same paths is intentional; every use is audited as dispatch_force_duplicate' },
         task: { type: 'string', description: 'Existing task to re-dispatch, as KEY-N (for example DEMO-3). Omit to create a new task' },
       },
       required: ['assignee'],
