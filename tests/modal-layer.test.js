@@ -297,3 +297,67 @@ test('接线④：轮询/刷新不因弹窗早退，遮罩关闭路径都补渲�
   assert.match(source, /if \(!html\) flushAppRender\(\)/, '弹窗层清空时补渲染')
   assert.match(renderSrc, /if \(overlayOpen\(\)\) \{\n    appRenderPending = true\n    return\n  \}/, 'render() 顶部是唯一的重建闸门')
 })
+
+// —— DSHBOTS-111：断言③（同类型刷新不重播入场动画）——
+// 入场动画重播只有两条路：承载节点被重建（root.innerHTML 整层重写），或节点上的
+// 动画 class 被重复加/重写。原位刷新两条路都不存在：遮罩/面板节点实例保持，
+// 遮罩 class 零触碰，面板只做同值同步（同值 className 赋值不触发样式重算，动画无从重起）。
+test('断言③：同类型原位刷新不重播入场动画——遮罩/面板节点零重建、零动画 class 变更', () => {
+  const treeA = makeModalTree({ bodyHtml: '<p>v1</p>' })
+  const treeB = makeModalTree({ bodyHtml: '<p>v2</p>' })
+  const htmlA = 'HTML_A', htmlB = 'HTML_B'
+  const root = makeNode()
+  root.parse = h => { root.children = [(h === htmlA ? treeA : treeB).backdrop] }
+  const writes = withWriteCounter(root)
+  // 模拟「首挂即带入场动画 class」的形态：将来若给遮罩加 modal-in/modal-enter 动画即如此。
+  treeA.backdrop.className = 'modal-backdrop modal-enter'
+  treeB.backdrop.className = 'modal-backdrop modal-enter'
+  // 遮罩 className 写入计数（原位刷新路径不应写它）
+  let backdropClassWrites = 0
+  {
+    const backdrop = treeA.backdrop
+    let v = backdrop.className
+    Object.defineProperty(backdrop, 'className', { get: () => v, set(nv) { backdropClassWrites += 1; v = nv } })
+  }
+  // 面板 className 赋值记录（尺寸同步允许，但同类型必须是同值）
+  const panelClassSets = []
+  {
+    const panel = treeA.panel
+    let v = panel.className
+    Object.defineProperty(panel, 'className', { get: () => v, set(nv) { panelClassSets.push(nv); v = nv } })
+  }
+  const addCalls = []
+  treeA.backdrop.classList.add = (...cs) => { addCalls.push(['backdrop', ...cs]) }
+  treeA.panel.classList.add = (...cs) => { addCalls.push(['panel', ...cs]) }
+  let current = htmlA
+  const { renderModalLayer } = load(makeDoc(root, { [htmlA]: treeA.backdrop, [htmlB]: treeB.backdrop }), () => current)
+  renderModalLayer()
+  backdropClassWrites = 0
+  panelClassSets.length = 0
+  current = htmlB
+  renderModalLayer()
+  assert.equal(writes(), 1, 'root.innerHTML 只在首挂写一次：动画节点不被整层重建')
+  assert.equal(root.children[0], treeA.backdrop, '遮罩节点实例保持 → 其上的入场动画无从重播')
+  assert.equal(treeA.backdrop.children[0], treeA.panel, '面板节点实例保持')
+  assert.equal(backdropClassWrites, 0, '遮罩 className 零重写')
+  assert.equal(addCalls.length, 0, '原位刷新路径零 classList.add：不给保留节点重复加动画 class')
+  assert.ok(panelClassSets.every(c => c === 'modal task'), '同类型刷新面板只做同值 class 同步（同值赋值不触发动画重起）')
+})
+
+// renderModalLayer 原位刷新会重建 .modal-head / .modal-foot（replaceWith 换新节点）并整体
+// 替换 .modal-body 的 innerHTML——这三个槽位上的任何 animation 都会随每次数据刷新重播（=
+// 闪烁）。所以入场动画若要加，只能挂在被原位保留的 .modal-backdrop / .modal 上（首挂播放
+// 一次，刷新不重播）。本断言把这条约束锁进 CSS：重建槽位的规则段不得声明 animation。
+test('断言③守门：入场动画只允许挂在原位保留的遮罩/面板上，刷新会重建的槽位禁用 animation', () => {
+  const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+  const rebuiltSlots = ['modal-head', 'modal-foot', 'modal-body', 'modal-close', 'modal-loading']
+  for (const sel of rebuiltSlots) {
+    const rules = css.match(new RegExp(`\\.${sel}\\b[^{}]*\\{[^}]*\\}`, 'g')) ?? []
+    for (const rule of rules) {
+      assert.doesNotMatch(
+        rule, /animation\b/,
+        `.${sel} 规则段不得声明 animation（该节点每次原位刷新被重建，动画会随之重播）：${rule.split('\n')[0]}`,
+      )
+    }
+  }
+})
