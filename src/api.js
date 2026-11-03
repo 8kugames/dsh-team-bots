@@ -1,6 +1,5 @@
 import { AppError } from './errors.js'
 import { exportUsageCsv } from './usage.js'
-import { resolvePastedPaths } from './services/paste-paths.js'
 
 const ACTIONS = new Set([
   'health', 'state', 'messages_page', 'models', 'bot_detail',
@@ -19,7 +18,6 @@ const ACTIONS = new Set([
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
   'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout',
   'run_command', 'cancel_command', 'terminal_state',
-  'resolve_pasted_paths',
   'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
 
@@ -104,10 +102,6 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.cancelTerminalCommand(required(payload.commandId, 'commandId'), actor)
     case 'terminal_state':
       return service.terminalState(required(payload.projectId, 'projectId'))
-    // 粘贴文件路径反查（DSHBOTS-70）：只读查找固定根目录白名单；根目录在服务端写死，
-    // payload 只认 names；无缓存、不落库。
-    case 'resolve_pasted_paths':
-      return resolvePastedPaths(service.config.workspace, payload)
     case 'create_memory':
       return service.createMemory({
         scopeType: payload.scopeType,

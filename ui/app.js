@@ -5008,50 +5008,20 @@
     if (input?.id !== 'composer-input') return
     const files = Array.from(event.clipboardData?.files ?? [])
     if (files.length === 0) return
-    // 剪贴板里是文件（截图/复制的文件），接管默认行为：图片走现有校验与待发通道（顺带补上粘贴截图能力）；
-    // 不支持的类型按「能拿就拿、拿不到就反查、仍拿不到就明说」补全绝对路径——
-    // 浏览器安全边界决定粘贴的 File 对象只有 name/type/bytes、没有本地绝对路径，全路径第一来源是剪贴板
-    // 自带的 file:// URI；Chromium 通常不给 URI，所以拿不到的名字再调服务端在固定根目录白名单里只读反查
-    // （action resolve_pasted_paths，唯一命中才采用，多命中/零命中都不猜、不编造）。
+    // 剪贴板里是文件（截图/复制的文件），接管默认行为：图片走现有校验与待发通道（顺带补上粘贴截图能力），
+    // 不支持的类型从剪贴板文本里找 file:// 绝对路径；都拿不到就明说，不静默、不猜路径。
     event.preventDefault()
     const images = files.filter(file => resolveImageMediaType(file.type, file.name))
     if (images.length > 0) void addPendingImages(images)
     if (images.length === files.length) return
     const data = event.clipboardData
-    void (async () => {
-      // 第一段：剪贴板 file:// URI，按文件名对号（URI 顺序与粘贴文件顺序无关）。
-      const byName = new Map()
-      for (const path of parseFileUriList(data.getData('text/uri-list') || data.getData('text/plain'))) {
-        const name = path.split('/').pop()
-        if (name && !byName.has(name)) byName.set(name, path)
-      }
-      // 第二段：URI 没覆盖到的文件名交服务端反查；一次最多 20 个（服务端同口径拒绝超出）。
-      const pending = files
-        .filter(file => !resolveImageMediaType(file.type, file.name) && !byName.has(file.name))
-        .map(file => file.name)
-        .filter(Boolean)
-        .slice(0, 20)
-      if (pending.length > 0) {
-        try {
-          const payload = await api('resolve_pasted_paths', { names: pending }, { quiet: true })
-          for (const item of payload?.results ?? []) {
-            if (item?.chosen) byName.set(item.name, item.chosen)
-          }
-        } catch { /* 反查失败不阻塞插入，按拿不到处理 */ }
-      }
-      const lines = []
-      let missing = false
-      for (const file of files) {
-        if (resolveImageMediaType(file.type, file.name)) continue
-        const resolved = byName.get(file.name)
-        if (resolved) lines.push(resolved)
-        else { lines.push(file.name || '未命名文件'); missing = true }
-      }
-      // 反查期间 composer 可能已被 2.8s 轮询重建，插入前重取活节点；页面已切走时插不进就算了。
-      const live = document.getElementById('composer-input') ?? input
-      insertTextAtCursor(live, lines.join('\n'))
-      if (missing) toast('浏览器没有提供完整路径，可把文件拖进工作区后再粘贴路径', 'error')
-    })()
+    const paths = parseFileUriList(data.getData('text/uri-list') || data.getData('text/plain'))
+    if (paths.length > 0) {
+      insertTextAtCursor(input, paths.join('\n'))
+    } else {
+      insertTextAtCursor(input, files.map(file => file.name || '未命名文件').join('\n'))
+      toast('浏览器未提供完整路径', 'error')
+    }
   })
 
   document.addEventListener('change', (event) => {
