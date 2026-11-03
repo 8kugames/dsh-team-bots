@@ -917,7 +917,7 @@ function renderApprovalCard(message) {
   const remainMin = Math.max(1, Math.round((approval.remainingMs ?? 0) / 60000))
   const summary = approval.display_reason || approval.reason || '（无说明）'
   return `<div class="message-row">
-    <div class="message-body-wrap approval-card" data-approval-status="${attr(approval.status)}">
+    <div class="message-body-wrap approval-card" data-approval-status="${attr(approval.status)}" data-approval-id="${attr(approval.id)}">
       <div class="message-meta"><strong>${esc(approval.botName)} 请求审批</strong><span>${esc(formatTime(approval.created_at))}</span></div>
       <div class="approval-tool mono">${esc(approval.tool_name)}</div>
       <div class="approval-summary">${esc(summary)}</div>
@@ -932,6 +932,101 @@ function renderApprovalCard(message) {
   </div>`
 }
 // ===== approval-card:end =====
+
+// desktop-notify:start 审批请求桌面通知（DSHBOTS-86，tests/desktop-notify.test.js 抽取此块断言）
+const NOTIFY_KEY = 'dshb:desktop-notify'
+// 会话级基线：上一轮见过的 pending 审批 id（判增量）与已弹过通知的审批 id（每条只弹一次）。
+let notifyScope = null
+const knownPendingIds = new Set()
+const notifiedApprovals = new Set()
+
+// file:// 与非 localhost 的 http 页面拿不到 Notification（非安全上下文），统一按不支持降级。
+function notifySupported() {
+  return typeof Notification !== 'undefined' && typeof Notification.requestPermission === 'function'
+}
+
+function notifyPermission() {
+  return notifySupported() ? Notification.permission : 'unsupported'
+}
+
+function notifyStoredPref() {
+  try { return localStorage.getItem(NOTIFY_KEY) } catch { return null }
+}
+
+function notifyStorePref(value) {
+  try { localStorage.setItem(NOTIFY_KEY, value) } catch {}
+}
+
+function notifyOn() {
+  return notifyPermission() === 'granted' && notifyStoredPref() === 'granted'
+}
+
+// 开关（用户点击手势内）：开 = requestPermission 并把结果持久到 localStorage；关 = 只写 'denied' 记忆，不动浏览器权限。
+async function toggleDesktopNotify() {
+  if (!notifySupported()) return
+  if (notifyOn()) {
+    notifyStorePref('denied')
+  } else {
+    const permission = await Notification.requestPermission()
+    notifyStorePref(permission === 'granted' ? 'granted' : 'denied')
+  }
+  render()
+}
+
+// 开关显示态（全局配置页「界面」卡）：不支持或被浏览器拒绝时置灰，并附一句原因。
+function notifyToggleView() {
+  const permission = notifyPermission()
+  if (permission === 'unsupported') return { on: false, disabled: true, label: '不可用', hint: '当前环境不支持桌面通知（需 HTTPS 或 localhost）。' }
+  if (permission === 'denied') return { on: false, disabled: true, label: '已被浏览器拒绝', hint: '在浏览器站点设置中允许通知后刷新页面。' }
+  if (notifyOn()) return { on: true, disabled: false, label: '已开启', hint: '新审批到达且页面不可见或失焦时弹系统通知，需保持本页开启。' }
+  return { on: false, disabled: false, label: permission === 'granted' ? '已关闭' : '未开启', hint: '开启后新审批到达时弹系统桌面通知。' }
+}
+
+// 通知正文与群聊审批卡片同一口径：<bot 名> 请求使用 <工具>：<说明>；超长截断。
+function approvalNotifyBody(approval) {
+  const head = `${approval.botName ?? 'Bot'} 请求使用 ${approval.tool_name ?? '工具'}`
+  const summary = approval.display_reason || approval.reason || ''
+  const text = summary ? `${head}：${summary}` : head
+  return text.length > 120 ? `${text.slice(0, 119)}…` : text
+}
+
+// 点通知：聚焦窗口，跳到该项目群聊并把审批卡滚动到可视区。
+function focusApprovalCard(approval) {
+  if (!approval?.project_id) return
+  state.projectId = approval.project_id
+  state.chatMode = 'group'
+  state.view = 'chat'
+  refresh()
+    .then(() => {
+      const card = document.querySelector(`.approval-card[data-approval-id="${approval.id}"]`)
+      card?.scrollIntoView({ block: 'center' })
+    })
+    .catch(() => {})
+}
+
+// 轮询后比较 pending 增量：通知开启且页面不可见或失焦时，对新增 pending 审批各弹一次
+// （tag=approval-<id> 防同卡重复弹；换项目时基线重置，新项目从未见过的存量 pending 作为新审批弹出，
+// notifiedApprovals 会话级去重保证每条只弹一次）。页面可见且聚焦时同样记录基线——用户当场看到卡片，不再补弹。
+function notifyNewApprovals(approvals, { enabled = notifyOn(), hidden = document.hidden, focused = document.hasFocus() } = {}) {
+  const pending = (approvals ?? []).filter(item => item?.status === 'pending')
+  const scope = pending.length > 0 ? String(pending[0].project_id ?? '') : null
+  if (scope !== notifyScope) {
+    notifyScope = scope
+    knownPendingIds.clear()
+  }
+  const fresh = pending.filter(item => !knownPendingIds.has(item.id)).map(item => item.id)
+  for (const item of pending) knownPendingIds.add(item.id)
+  if (!enabled || (!hidden && focused)) return
+  for (const approval of pending) {
+    if (!fresh.includes(approval.id) || notifiedApprovals.has(approval.id)) continue
+    notifiedApprovals.add(approval.id)
+    try {
+      const notification = new Notification('DSH 审批请求', { body: approvalNotifyBody(approval), tag: `approval-${approval.id}` })
+      notification.onclick = () => { window.focus(); focusApprovalCard(approval); notification.close() }
+    } catch {}
+  }
+}
+// desktop-notify:end
 
 function renderMessage(message) {
   if (message.kind === 'approval') return renderApprovalCard(message)
@@ -2405,6 +2500,7 @@ function renderGlobal() {
   const bots = data.bots ?? []
   const activeBots = bots.filter(bot => bot.status === 'active')
   const pending = pendingProposals()
+  const notify = notifyToggleView()
   const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
   return `
     <div class="global-grid">
@@ -2427,6 +2523,11 @@ function renderGlobal() {
             <button data-action="set-theme" data-theme="dsh" aria-pressed="${state.theme === 'dsh'}">DSH</button>
             <button data-action="set-theme" data-theme="catppuccin" aria-pressed="${state.theme === 'catppuccin'}">Catppuccin</button>
           </div>
+        </div>
+        <div class="field">
+          <span class="field-label" id="desktop-notify-label">桌面通知</span>
+          <div><button class="btn small" type="button" data-action="toggle-notify" aria-labelledby="desktop-notify-label" aria-pressed="${notify.on ? 'true' : 'false'}"${notify.disabled ? ' disabled' : ''}>${esc(notify.label)}</button></div>
+          <div class="hint">${esc(notify.hint)}</div>
         </div>
         <div class="kv"><span>缩放范围</span><strong>100% – 140%</strong></div>
         <div class="kv"><span>偏好存储</span><strong>本地浏览器</strong></div>
@@ -3913,6 +4014,10 @@ document.addEventListener('click', async (event) => {
         render()
         break
       }
+      case 'toggle-notify': {
+        await toggleDesktopNotify()
+        break
+      }
       case 'save-settings': {
         const value = id => document.getElementById(id)?.value ?? ''
         const patch = {
@@ -4962,12 +5067,21 @@ document.addEventListener('drop', async (event) => {
 })
 
 async function poll() {
-  if (!state.data || state.modal || state.busy > 0 || document.hidden || isTyping()) return
+  if (!state.data || state.modal || state.busy > 0 || isTyping()) return
   // 目录选择器开着或表单有未保存修改时暂停自动刷新：整页重渲染会吞掉选择器与已选/已填的值。
   if (document.querySelector('.dir-picker:not([hidden])') || document.querySelector('form[data-dirty]')) return
   try {
+    // 页面隐藏时常规轮询照旧暂停；桌面通知开启则静默拉一份 state 专为审批增量，
+    // 不写 state.data、不渲染（避免隐藏时误推已读水位、误重渲染）。
+    if (document.hidden) {
+      if (!notifyOn()) return
+      const data = await api('state', { projectId: state.projectId || undefined }, { quiet: true })
+      notifyNewApprovals(data?.approvals ?? [])
+      return
+    }
     await loadState(state.projectId, { quiet: true })
     render()
+    notifyNewApprovals(state.data?.approvals ?? [])
   } catch {}
 }
 
