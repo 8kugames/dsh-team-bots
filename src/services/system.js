@@ -50,6 +50,8 @@ export const systemMethods = {
       usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null }),
       settings: this.settingsView(),
       runLimits: this.runLimitsView(),
+      // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
+      activeRuns: Number(this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')")?.count ?? 0),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,

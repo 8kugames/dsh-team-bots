@@ -83,3 +83,20 @@ test('② system.js：记忆查询按上下文收敛、提案全量', () => {
   assert.ok(!soloCtx.includes("scope_type = 'team'"), '单聊记忆不再并入团队 scope')
   assert.match(soloCtx, /scope_type = 'bot' AND scope_id = \?/, '单聊记忆仅该 bot scope')
 })
+
+// DSHBOTS-77 侧栏状态行运行数全局口径：读 state 载荷的 activeRuns（全库 queued+running），
+// 不随群聊/单聊上下文跳变；topbar-meta 的运行数仍是当前项目口径。
+test('DSHBOTS-77 侧栏状态行读全局 activeRuns，不随上下文分支', () => {
+  const shell = /function renderShell\(\) \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? ''
+  assert.ok(shell, '找不到 renderShell')
+  assert.match(shell, /const running = Number\(data\?\.activeRuns \?\? 0\)/, '状态行运行数读全局字段 activeRuns，无上下文分支')
+  assert.ok(!shell.includes('soloRuns'), 'renderShell 不再按单聊/群聊分别数运行')
+  assert.match(shell, /class="dot \$\{running \? 'amber' : ''\}"/, '状态点判空与文案读同一全局变量')
+  assert.match(shell, /\$\{running \? `\$\{running\} 个运行中` : '团队空闲'\}/, '状态行文案保持全局口径')
+  assert.match(shell, /const projectRunning = project\?\.stats\?\.running \?\? 0/, 'topbar 运行数拆回项目口径')
+  assert.match(shell, /<b>\$\{projectRunning\}<\/b> 运行中/, 'topbar-meta 读项目口径变量')
+  const sysSource = readFileSync(fileURLToPath(new URL('../src/services/system.js', import.meta.url)), 'utf8')
+  const stateFn = /async state\(projectId, soloBotId = null\) \{[\s\S]*?\n {2}\},/.exec(sysSource)?.[0] ?? ''
+  assert.ok(stateFn, '找不到 system.js state()')
+  assert.match(stateFn, /activeRuns: Number\(this\.store\.get\("SELECT COUNT\(\*\) AS count FROM runs WHERE status IN \('queued', 'running'\)"\)\?\.count \?\? 0\)/, 'state 载荷输出全库活跃运行计数')
+})
