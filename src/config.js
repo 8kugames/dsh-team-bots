@@ -98,7 +98,7 @@ export function resolveConfig(config = {}) {
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。
-    approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 120_000, 5_000, 3_600_000),
+    approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 600_000, 5_000, 3_600_000),
     // 原生 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
     agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, false),
     maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 3, 1, 8),
