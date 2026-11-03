@@ -6,7 +6,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { id, nowIso } from '../util.js'
-import { isQuotaExhausted } from './backoff.js'
+import { isQuotaExhausted, isThrottleError } from './backoff.js'
 
 // 「主 provider 不可用」白名单：这些失败码换模型/换 provider 有意义。
 export const PROVIDER_UNAVAILABLE_CODES = new Set([
@@ -36,12 +36,16 @@ export function isProviderUnavailableCode(code) {
   return Boolean(code) && PROVIDER_UNAVAILABLE_CODES.has(String(code).toUpperCase())
 }
 
-// 这次失败是否该切备用模型：码在白名单里，且不是「等得起」的限流。
-// 额度耗尽（已达到限额）是例外：额度窗口用尽，退避重打没有意义，直接切备用模型。
+// 这次失败是否该切备用模型：
+// 1) 网关节流（bili_throttle_*）最高优先排除——瞬时抖动，重打会打停网关，绝不切备用；
+// 2) 额度耗尽（已达到限额）直接返回 true，且不受错误码白名单限制——
+//    白名单外的额度码（如 LIMIT_REACHED）额度窗口同样用尽，必须切备用；
+// 3) 其余失败看白名单，且带短 Retry-After 的限流仍等待不切。
 export function shouldFallbackOn(error) {
+  if (isThrottleError(error)) return false
+  if (isQuotaExhausted(error)) return true
   const code = String(error?.code ?? '').toUpperCase()
   if (!isProviderUnavailableCode(code)) return false
-  if (isQuotaExhausted(error)) return true
   if (WAITABLE_CODES.has(code) && Number(error?.retryAfterMs) > 0) return false
   return true
 }

@@ -38,6 +38,12 @@ async function setup() {
 
 const mins = n => new Date(Date.now() + n * 60_000).toISOString()
 
+// 线上真实失败形态（生产库 ~/.dsh/workspace/team-bots/.data/team.sqlite 实测）：
+// 形态 B —— Token Plan 用量上限，正文是 JSON，内嵌 (2056) 额度码，中文措辞是「用量上限」。
+const TOKEN_PLAN_LIMIT_MESSAGE = '429 {"type":"error","error":{"type":"rate_limit_error","message":"已达到 Token Plan 用量上限：请升级 Token Plan 套餐或购买积分补充用量。 (2056)"},"request_id":"07379df9c0d859b797721b746c26d38e"}'
+// 英文形态：正文只有 "code":"1308"，没有任何中文额度措辞——靠内嵌码锚点命中。
+const ENGLISH_LIMIT_MESSAGE = '429: {"code":"1308","message":"Usage limit reached for 5 hour. Your limit will reset at 2026-11-02 15:17:01"}'
+
 // 落一条 running 的任务 run，交给 finishRun 走真实失败路径。
 function insertRunningRun(store, { id, projectId, botId, taskId, attempt = 1, modelProvider = null }) {
   store.run(
@@ -261,6 +267,115 @@ test('scheduler 不为额度耗尽类 run 派生 plan_retry', async () => {
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = 'q6b'").n, 0, '限额语义不派生')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = 'q6c'").n, 0, '备用链运行不派生')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = 'q6d'").n, 1, '瞬时限流照旧派生')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// DSHBOTS-103：Token Plan「用量上限」形态与白名单外额度码补漏。
+test('Token Plan 用量上限（含内嵌码 2056）：判额度耗尽、不退避、切备用', () => {
+  const error = { code: 'RATE_LIMIT', message: TOKEN_PLAN_LIMIT_MESSAGE }
+  assert.equal(isQuotaExhausted(error), true, '「用量上限」措辞 + (2056) 内嵌码 = 额度耗尽')
+  assert.equal(needsSynthesizedBackoff(error), false, '额度耗尽不合成指数退避')
+  assert.equal(shouldFallbackOn(error), true, '额度耗尽切备用模型')
+  // 英文形态：正文无中文额度措辞，只有 "code":"1308" 锚点。
+  const english = { code: 'RATE_LIMIT', message: ENGLISH_LIMIT_MESSAGE }
+  assert.equal(isQuotaExhausted(english), true, '内嵌 1308 锚点兜住英文文案')
+  assert.equal(shouldFallbackOn(english), true)
+  // 只剩内嵌码、正文措辞完全改掉也不影响判定。
+  assert.equal(isQuotaExhausted({ code: 'RATE_LIMIT', message: '429 {"code":"1308"}' }), true)
+})
+
+test('白名单外的额度码也切备用（额度判定不再受错误码白名单限制）', () => {
+  const error = { code: 'LIMIT_REACHED', message: '已达到 5 小时的使用上限' }
+  assert.equal(isQuotaExhausted(error), true, 'LIMIT_REACHED 不在白名单，但正文是额度耗尽')
+  assert.equal(needsSynthesizedBackoff(error), false)
+  assert.equal(shouldFallbackOn(error), true, '额度耗尽优先于白名单，直接切备用')
+})
+
+test('网关节流优先级最高：不判额度耗尽、绝不切备用（不回归 D-38/D-99）', () => {
+  const throttle = { code: 'RATE_LIMIT', message: 'upstream rate-limited (bili_throttle_terminal)', retryAfterMs: 30_000 }
+  assert.equal(isQuotaExhausted(throttle), false)
+  assert.equal(shouldFallbackOn(throttle), false, '带 Retry-After 的节流不切备用')
+  const throttleNoWait = { code: 'RATE_LIMIT', message: 'upstream rate-limited (bili_throttle_hold)' }
+  assert.equal(isQuotaExhausted(throttleNoWait), false)
+  assert.equal(shouldFallbackOn(throttleNoWait), false, '没给 Retry-After 的节流也不切备用')
+})
+
+test('Token Plan 用量上限走真实失败路径：不退避、派生备用运行、任务不置 blocked', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Q7', key: 'Q7', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: 'Token Plan 用量上限', assigneeBotId: director.id })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    insertRunningRun(store, { id: 'q7', projectId: project.id, botId: director.id, taskId: task.id })
+
+    await service.finishRun({
+      runId: 'q7', status: 'failed', output: '',
+      error: { code: 'RATE_LIMIT', message: TOKEN_PLAN_LIMIT_MESSAGE },
+    })
+
+    assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q7'").retry_after_ms, null, '额度耗尽不合成退避值')
+    assert.equal(
+      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'q7' AND type = 'rate_limit_backoff'").n, 0,
+      '不写指数退避事件',
+    )
+    const derived = store.get("SELECT * FROM runs WHERE parent_run_id = 'q7'")
+    assert.ok(derived, 'Token Plan 用量上限应派生备用模型运行')
+    assert.equal(derived.model_provider, 'minimax-cn')
+    assert.notEqual(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'blocked', '切备用后任务不置 blocked')
+    const msg = store.get("SELECT body FROM messages WHERE run_id = 'q7' AND body LIKE '%已切换备用模型%'")
+    assert.ok(msg, '应告知已切备用模型')
+    assert.match(msg.body, /已达限额（RATE_LIMIT）/)
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('白名单外额度码走真实失败路径：同样派生备用运行、任务不置 blocked', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Q8', key: 'Q8', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '白名单外额度码', assigneeBotId: director.id })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    insertRunningRun(store, { id: 'q8', projectId: project.id, botId: director.id, taskId: task.id })
+
+    await service.finishRun({
+      runId: 'q8', status: 'failed', output: '',
+      error: { code: 'LIMIT_REACHED', message: '已达到 5 小时的使用上限' },
+    })
+
+    const derived = store.get("SELECT * FROM runs WHERE parent_run_id = 'q8'")
+    assert.ok(derived, '白名单外的额度码也应派生备用模型运行')
+    assert.equal(derived.model_provider, 'minimax-cn')
+    assert.notEqual(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'blocked')
+    assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q8'").retry_after_ms, null)
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('网关节流走真实失败路径：不派生备用运行（不回归）', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'Q9', key: 'Q9', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '节流不切备用', assigneeBotId: director.id })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    insertRunningRun(store, { id: 'q9', projectId: project.id, botId: director.id, taskId: task.id })
+
+    await service.finishRun({
+      runId: 'q9', status: 'failed', output: '',
+      error: { code: 'RATE_LIMIT', message: 'upstream rate-limited (bili_throttle_hold)' },
+    })
+
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = ?', 'q9').n, 0, '节流不切备用模型')
+    assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q9'").retry_after_ms, rateLimitBackoffMs(1), '仍走指数退避')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
