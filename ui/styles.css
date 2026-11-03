@@ -4239,6 +4239,10 @@ a.global-config.dsh-official-link:hover {
     border-left: 1px solid var(--line);
     padding-left: 20px;
 }
+/* 写范围（DSHBOTS-124）：路径 chip 行（沿用审批卡片的等宽小字 chip）+ 未声明兜底灰字 */
+.scope-block { margin-top: 12px; }
+.scope-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.scope-empty { color: var(--ink-3); font-size: var(--fs-small); }
 .config-card {
     padding: 20px 22px;
 }

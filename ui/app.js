@@ -3297,6 +3297,9 @@ function modalTask(task) {
   // 任务关系（DSHBOTS-58）：父任务取本项目任务表里的那条，依赖只列未满足项（blockedByNames）。
   const parentTask = (state.data?.tasks ?? []).find(item => item.id === (task.parent_task_id ?? task.parentTaskId ?? null)) ?? null
   const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
+  // 写范围（DSHBOTS-124）：并行调度依据——同项目内两侧都声明且路径互不重叠才并行，任一未声明按保守串行。
+  // 数据源是 taskView.writeScopes（src/services/tasks.js），空数组 = 未声明。
+  const writeScopes = Array.isArray(task.writeScopes) ? task.writeScopes.filter(item => typeof item === 'string' && item) : []
   return modalShell({
     title: `${task.identifier} · ${task.title}`,
     // 任务阶段徽标走 taskStage 查表口径（DSHBOTS-42）：ended → stageLabel 为 null → 不显示。
@@ -3316,6 +3319,13 @@ function modalTask(task) {
           <div class="field"><label id="task-assignee-label" for="task-assignee">负责人</label><select class="select" style="width:100%" id="task-assignee" name="assigneeBotId"><option value="">未指派</option>${project.members.map(member => `<option value="${attr(member.id)}" ${task.assignee_bot_id === member.id ? 'selected' : ''}>${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
         </form>
         ${(parentTask || blockedNames.length) ? `<div class="note">${parentTask ? `父任务：${esc(parentTask.identifier)} · ${esc(parentTask.title)}` : ''}${parentTask && blockedNames.length ? ' · ' : ''}${blockedNames.length ? `被 ${blockedNames.length} 个任务阻塞：${esc(blockedNames.join('、'))}` : ''}</div>` : ''}
+        <div class="scope-block">
+          <div class="eyebrow" style="margin-bottom:6px">写范围</div>
+          ${writeScopes.length
+            ? `<div class="scope-chips">${writeScopes.map(scope => `<span class="approval-chip mono" title="${attr(scope)}">${esc(scope)}</span>`).join('')}</div>`
+            : '<div class="scope-empty">未声明（保守串行）</div>'}
+          <div class="hint" style="margin-top:6px">写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。</div>
+        </div>
         <div class="divider"></div>
         <div class="eyebrow" style="margin-bottom:6px">评论</div>
         ${(task.comments ?? []).length === 0 ? '<div class="note">还没有评论。</div>' : task.comments.map(comment => `<div class="comment">
