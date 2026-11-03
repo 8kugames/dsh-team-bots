@@ -122,6 +122,11 @@ export function ensureTaskRelationsSchema(store) {
 // 自引用拒；父/依赖必须存在且同项目；沿 parent 链与 blocked_by 图做 DFS 环检测。
 // 返回可直接落库的 { parentTaskId, blockedBy }。
 export function validateTaskRelations({ store, projectId, taskId, parentTaskId, blockedBy }) {
+  // 空串/纯空白 parent（模板变量为空的典型产物）不得静默当「无父」：那会让子卡悄悄变顶级卡，
+  // 与「立子卡挂主项」的产品意图相反。null/undefined 仍表示不挂父，正常放行。
+  if (typeof parentTaskId === 'string' && !parentTaskId.trim()) {
+    throw badRequest('parent_task_id 不能为空字符串：挂主项请传任务 id，不挂请省略该参数')
+  }
   if (parentTaskId) {
     if (parentTaskId === taskId) throw badRequest('任务不能以自身为父任务')
     const parent = store.get('SELECT id, project_id FROM tasks WHERE id = ?', parentTaskId)

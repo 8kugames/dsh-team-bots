@@ -479,6 +479,14 @@ This budget is a soft expectation for planning, not an execution limit: the runt
 
 # Urgent exemption
 本任务为紧急任务，豁免车道排队纪律：无需等待其他任务的文件车道让位，立即开工；若工作区存在同文件在途改动，先 git status 记录现场、只圈本卡文件提交，不得 add/checkout/stash 他人改动。` : ''
+      // subtask-discipline:start —— 子任务拆解纪律（DSHBOTS-132）：把「主项未完成/新收口条件 →
+      // 立产品级子卡」从总监口头纪律升级为产品能力。所有任务卡无条件注入，与时效段（D-125）、
+      // 紧急豁免段（D-126）互不干扰：本段不读 priority/time_budget，后两者不读本段。
+      const subtaskDisciplineBlock = `
+
+# Subtask discipline
+收工前自查拆解义务：本任务若一次做不完（含撞限额只能交半成品），或实现中发现新的收口条件（测试缺口、连带修复、后续产品化项），必须立即用 team_assign_task 派子卡并传 parent_task_id 挂到本任务下，同时在群里报备；不得把未完成事项留在评论里口头建议而不落卡。子卡一律按产品级实现：通用能力、完整测试、真实落库，禁止临时补丁或为单次场景写死。能在本次收工前做完的不拆。子卡创建后，在本任务的收工报告里列出全部子卡 KEY-N 清单（收工报告会自动落为本任务评论）。`
+      // subtask-discipline:end
       const parallel = this.config.agentTeam ? `
 
 # Parallel work inside this task
@@ -494,7 +502,7 @@ Title: ${task.title}
 Priority: ${task.priority}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}${urgentExemptionBlock}
+${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}${urgentExemptionBlock}${subtaskDisciplineBlock}
 
 Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
 When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`
