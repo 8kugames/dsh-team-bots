@@ -2120,6 +2120,8 @@ a.global-config.dsh-official-link:hover {
     place-items: center;
     padding: 12px;
     overflow: auto;
+    /* 同 .modal-body：面板滚动不串到底层页面（DSHBOTS-98）。 */
+    overscroll-behavior: contain;
     color: var(--ink-3);
     font-size: var(--fs-small);
 }
@@ -3997,6 +3999,8 @@ a.global-config.dsh-official-link:hover {
 .modal-body {
     padding: 18px 20px 20px;
     overflow: auto;
+    /* 面板滚到尽头不把滚动串到底层页面（DSHBOTS-98）：串动会让半透明遮罩下的底页整片移动。 */
+    overscroll-behavior: contain;
 }
 .modal-foot {
     display: flex;

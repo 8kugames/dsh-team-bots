@@ -191,3 +191,109 @@ test('接线③：closeModal 只经 renderModalLayer 清 modal-root，不走全�
   assert.doesNotMatch(closeSrc, /app\.innerHTML/)
   assert.match(source, /  if \(!html\) \{\n    root\.replaceChildren\(\)\n    return\n  \}/, '弹窗层清空只 replaceChildren modal-root')
 })
+
+// —— DSHBOTS-98：遮罩闸门（行为级）——
+// modal-layer 块与 render() 在真实代码里互相调用（render() 顶部问 overlayOpen()，
+// 块内 flushAppRender() 调 render()），所以把两者放进同一作用域求值。
+const renderSrc = /function render\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
+assert.ok(renderSrc, 'ui/app.js 缺少 render()')
+
+// 迷你运行时：只实现 render() 与遮罩闸门用到的操作子集。
+// app.innerHTML 写入次数 = 整页重建次数（闪烁的直接来源）。
+const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
+  const app = makeNode()
+  const writes = withWriteCounter(app)
+  const viewer = makeNode({ hidden: viewerHidden })
+  const root = makeNode()
+  const state = { data: { version: 1 }, modal, view: 'chat', chatAtBottom: true, rendering: false }
+  const doc = {
+    getElementById: id => (id === 'modal-root' ? root : id === 'image-viewer' ? viewer : null),
+    createElement: () => { const n = makeNode(); n.parse = () => { n.children = [] }; return n },
+    body: { appendChild() {} },
+    querySelector: () => null,
+    activeElement: null,
+  }
+  const scope = new Function(
+    'document', 'renderModal', 'HTMLElement', 'state', 'app', 'renderShell', 'hydrateMessageImageThumbs',
+    'captureViewScroll', 'restoreViewScroll', 'syncChromeHeight', 'syncComposerBox', 'syncTerminalPoll',
+    'requestAnimationFrame', 'lastRenderedView',
+    `${fnSrc}\n${renderSrc}\nreturn { render, overlayOpen, flushAppRender, get pending() { return appRenderPending } }`,
+  )(
+    doc,
+    () => '',
+    FakeHTMLElement,
+    state,
+    app,
+    () => `<div class="shell">${state.data.version}</div>`,
+    () => {},
+    () => null,
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    cb => { cb(); return 0 },
+    null,
+  )
+  // 注意：不能用展开（{...scope}）——展开会把 pending getter 求值成静态快照。
+  return {
+    render: scope.render,
+    overlayOpen: scope.overlayOpen,
+    flushAppRender: scope.flushAppRender,
+    get pending() { return scope.pending },
+    app, writes, state, viewer, root,
+  }
+}
+
+test('遮罩闸门：弹窗开着时 render() 不重建 #app，只记 pending（DSHBOTS-98）', () => {
+  const h = makeOverlayHarness({ modal: { type: 'task', title: '任务详情' } })
+  h.render()
+  assert.equal(h.writes(), 0, '遮罩开着时整页重建被跳过：半透明遮罩下不再透出闪烁')
+  assert.equal(h.pending, true, '跳过时记 pending，遮罩关闭后补渲染')
+  h.render()
+  assert.equal(h.writes(), 0, '连续多次调用同样不重建')
+  assert.equal(h.overlayOpen(), true, 'state.modal 有值即视为遮罩打开')
+})
+
+test('遮罩闸门：body 级图片查看器同样不重建 #app，关闭后补一次渲染（DSHBOTS-98）', () => {
+  const h = makeOverlayHarness({ viewerHidden: false })
+  assert.equal(h.overlayOpen(), true, '图片查看器可见即视为遮罩打开（轮询守卫此前只认 state.modal）')
+  h.render()
+  assert.equal(h.writes(), 0, '查看器开着时整页重建被跳过')
+  h.viewer.hidden = true
+  h.flushAppRender()
+  assert.equal(h.writes(), 1, '查看器关闭后补一次渲染')
+  h.flushAppRender()
+  assert.equal(h.writes(), 1, 'pending 已清，不重复渲染')
+})
+
+test('遮罩闸门：关闭后补的那一次渲染追平遮罩期间取到的新 state（DSHBOTS-98）', () => {
+  const h = makeOverlayHarness({ modal: { type: 'task' } })
+  h.render()
+  assert.equal(h.writes(), 0)
+  h.state.data = { version: 2 }   // 遮罩期间轮询照常取数
+  h.state.modal = null
+  h.flushAppRender()
+  assert.equal(h.writes(), 1, '关闭后补一次渲染')
+  assert.equal(h.app.innerHTML, '<div class="shell">2</div>', '补的渲染用的是最新 state')
+  assert.equal(h.pending, false, 'pending 清零')
+})
+
+test('接线④：轮询/刷新不因弹窗早退，遮罩关闭路径都补渲染（DSHBOTS-98）', () => {
+  const pollSrc = /async function poll\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
+  assert.ok(pollSrc, 'ui/app.js 缺少 poll()')
+  assert.doesNotMatch(pollSrc, /state\.modal/, '轮询不再因弹窗早退：遮罩期间照常取数，数据不丢')
+  assert.match(pollSrc, /await loadState\(state\.projectId, \{ quiet: true \}\)\n    render\(\)/, '取数后仍走 render()（是否重建由 render 内的遮罩闸门决定）')
+  const refreshSrc = /async function refresh\([^)]*\) \{[\s\S]*?\n\}/.exec(source)?.[0]
+  assert.ok(refreshSrc, 'ui/app.js 缺少 refresh()')
+  assert.doesNotMatch(refreshSrc, /state\.modal/, '刷新不再因弹窗跳过渲染')
+  assert.match(refreshSrc, /\n    render\(\)/, '刷新照常走 render()')
+  const closeViewerSrc = /function closeImageViewer\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
+  assert.ok(closeViewerSrc, 'ui/app.js 缺少 closeImageViewer()')
+  assert.match(closeViewerSrc, /flushAppRender\(\)/, '查看器关闭后补渲染')
+  assert.ok(
+    closeViewerSrc.indexOf('viewer.hidden = true') < closeViewerSrc.indexOf('flushAppRender()'),
+    '先隐藏查看器再补渲染：补渲染时遮罩已关闭，闸门才放行',
+  )
+  assert.match(source, /if \(!html\) flushAppRender\(\)/, '弹窗层清空时补渲染')
+  assert.match(renderSrc, /if \(overlayOpen\(\)\) \{\n    appRenderPending = true\n    return\n  \}/, 'render() 顶部是唯一的重建闸门')
+})

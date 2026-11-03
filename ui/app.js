@@ -23,7 +23,8 @@ state.theme = applyUiTheme((() => {
 async function refresh({ quiet = false } = {}) {
   try {
     await loadState(state.projectId, { quiet })
-    if (!state.modal) render()
+    // 遮罩开着时 render() 内部跳过整页重建并记 pending（DSHBOTS-98），遮罩关闭后补渲染。
+    render()
   } catch (error) {
     if (!state.data) bootError(error)
   }
@@ -389,6 +390,13 @@ function nextChatAtBottom({ rendering, connected, current, scrollHeight, scrollT
 
 function render() {
   if (!state.data) return
+  // 遮罩闸门（DSHBOTS-98）：弹窗与图片查看器都是半透明遮罩，遮罩开着时整页重建会从
+  // 遮罩下透出来（持续闪烁）。此处只记 pending 跳过重建，遮罩关闭时 flushAppRender
+  // 补一次渲染，追平遮罩期间取到的新 state。
+  if (overlayOpen()) {
+    appRenderPending = true
+    return
+  }
   state.ac = null
   app.className = ''
   // chat-scroll:view-enter —— 切进聊天视图时确定性贴底：不依赖历史残值。
@@ -2613,6 +2621,25 @@ function renderModal() {
 // innerHTML 只替换其内部，弹窗滚动位与正在编辑的输入焦点不被拆掉；内容未变时零 DOM 操作。
 let lastModalHtml = ''
 
+// overlay-render（DSHBOTS-98）：#modal-root 弹窗与 body 级 #image-viewer 同属半透明遮罩，
+// 遮罩打开期间 #app 的全量重绘肉眼可见（闪烁）。轮询照常取数但跳过重建并记 pending，
+// 遮罩关闭时 flushAppRender 补一次渲染追平最新 state。三个符号留在 modal-layer 块内：
+// 本块会被测试整段抽出求值，render/state 只在 pending=true 的调用路径上被引用。
+// state 在隔离求值时可能未定义（typeof 守卫），此时只看 DOM 层的遮罩。
+let appRenderPending = false
+
+function overlayOpen() {
+  if (typeof state !== 'undefined' && state?.modal) return true
+  const viewer = document.getElementById('image-viewer')
+  return Boolean(viewer && !viewer.hidden)
+}
+
+function flushAppRender() {
+  if (!appRenderPending || overlayOpen()) return
+  appRenderPending = false
+  render()
+}
+
 function ensureModalRoot(doc = document) {
   let el = doc.getElementById('modal-root')
   if (!el) {
@@ -2628,6 +2655,8 @@ function renderModalLayer() {
   const html = renderModal()
   if (html === lastModalHtml) return
   lastModalHtml = html
+  // 关弹窗转换（有弹窗 → 无弹窗）：清层前补上遮罩期间被跳过的 #app 渲染（DSHBOTS-98）。
+  if (!html) flushAppRender()
   if (!html) {
     root.replaceChildren()
     return
@@ -3871,6 +3900,8 @@ function closeImageViewer() {
     img.removeAttribute('src')
   }
   viewer.hidden = true
+  // 遮罩关闭：补上查看器开着期间被跳过的 #app 渲染（DSHBOTS-98）。
+  flushAppRender()
 }
 
 // 正文内嵌图（markdown 渲染的 <img>，file 路由/blob URL）点击放大：直接复用该 img 的现有 src，
@@ -5130,7 +5161,8 @@ document.addEventListener('drop', async (event) => {
 })
 
 async function poll() {
-  if (!state.data || state.modal || state.busy > 0 || isTyping()) return
+  // 遮罩打开时照常取数（数据不丢），整页重建由 render() 内部的遮罩闸门跳过（DSHBOTS-98）。
+  if (!state.data || state.busy > 0 || isTyping()) return
   // 目录选择器开着或表单有未保存修改时暂停自动刷新：整页重渲染会吞掉选择器与已选/已填的值。
   if (document.querySelector('.dir-picker:not([hidden])') || document.querySelector('form[data-dirty]')) return
   try {
@@ -5167,6 +5199,17 @@ window.addEventListener('resize', () => {
   const composerInput = document.getElementById('composer-input')
   if (composerInput) applyComposerHeight(composerInput)
 })
+
+// 遮罩打开时锁住底层滚动（DSHBOTS-98）：半透明+模糊的遮罩下，底层容器一旦滚动，底页整片
+// 移动（backdrop-filter 每帧重算），视觉上就是「全屏闪烁」。落在遮罩上的滚轮一律吞掉；
+// 弹窗/查看器面板自身的滚动区放行，配合 CSS 的 overscroll-behavior: contain 防滚动串联。
+window.addEventListener('wheel', event => {
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+  if (!target.closest?.('#modal-root, #image-viewer')) return
+  if (target.closest?.('.modal-body, .image-viewer-body')) return
+  event.preventDefault()
+}, { passive: false })
 
 // 聊天图片加载失败占位 chip：error 不冒泡，用捕获阶段全局监听；只处理消息气泡/评论里的
 // markdown 图片。chip 只显示文件名（路径查参或 alt 兜底），不复制错误页内容进 DOM。
