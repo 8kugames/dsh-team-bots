@@ -646,6 +646,47 @@ export const tasksMethods = {
     }
     return this.taskView(this.taskRow(task.id))
   },
+
+  // 验收核验委派（DSHBOTS-107）：待验收任务上，owner 一键把核验工作派给总监 Bot，
+  // 由其会话内的 subagent/subagent_fork 并行完成（提示词见 runtime/prompt.js 的
+  // review-verification 模板）。核验结论以任务评论写回（finishRun 复用 addComment 通道），
+  // 裁决权不变：accept/return 仍由 owner 经 team_review_task 或看板执行，本方法不碰任务状态。
+  async taskReviewDelegate(taskId, actor = this.actor()) {
+    if (actor.type !== 'user') throw forbidden('只有工作台 owner 可以委派子代理核验')
+    const task = this.taskRow(taskId)
+    const project = this.projectRow(task.project_id)
+    const identifier = `${project.key}-${task.number}`
+    if (task.status !== 'in_review') throw conflict(`任务 ${identifier} 不在待验收状态`)
+    const owner = project.owner_bot_id
+      ? this.store.get("SELECT * FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
+      : null
+    if (!owner) throw conflict(`项目 ${project.name} 没有可用的总监 Bot，无法委派核验`)
+    const active = this.store.get(
+      "SELECT id, trigger_type FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+      task.id,
+    )
+    // 幂等：已有委派核验运行在跑时直接复看该运行；其他活动运行（如自动验收运行）占着
+    // 任务的运行位时拒绝，避免同任务上两种验收语义叠跑。
+    if (active) {
+      if (active.trigger_type === 'review_delegate') return this.runView(this.runRow(active.id))
+      throw conflict(`任务 ${identifier} 已有运行在排队或执行，请先停止再委派核验`)
+    }
+    const runId = id('run')
+    const createdAt = nowIso()
+    this.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+        attempt, idempotency_key, queued_at)
+       VALUES (?, ?, ?, ?, 'review', 'read', 'review_delegate', ?, 'queued', 1, ?, ?)`,
+      runId, project.id, owner.id, task.id, task.id, `review_delegate:${task.id}:${Date.now()}:${runId}`, createdAt,
+    )
+    this.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'), runId, 'queued', `owner 委派子代理核验（${actor.type}:${actor.id}）`, createdAt,
+    )
+    this.audit(actor, 'task.review_delegate', 'task', task.id, { runId })
+    void this.tick()
+    return this.runView(this.runRow(runId))
+  },
   resolveTaskByIdentifier(identifier) {
     const match = TASK_ID_PATTERN.exec(String(identifier ?? '').trim())
     if (!match) throw badRequest('任务号格式应为 <项目key>-<序号>，如 web-3')

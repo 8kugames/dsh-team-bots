@@ -612,6 +612,11 @@ if (run.kind === 'dm_reply') {
     if (run.kind === 'review' || run.kind === 'handle') {
       const label = run.kind === 'review' ? '验收' : '受阻处理'
       if (run.task_id) {
+        // 委派核验运行（DSHBOTS-107）成功时，结论以任务评论写回（复用 addComment 通道：
+        // 评论+事件+审计一次落全）。不改任务状态、不代为裁决——accept/return 仍归 owner。
+        if (run.trigger_type === 'review_delegate' && status === 'succeeded' && cleanOutput) {
+          await this.addComment(run.task_id, cleanOutput, { type: 'bot', id: bot.id })
+        }
         this.insertMessage({
           projectId: project.id,
           senderType: 'bot',

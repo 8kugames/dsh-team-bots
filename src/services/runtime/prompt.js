@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
 import { parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
+import { readWriteScopes } from '../write-scopes.js'
 
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
@@ -320,6 +321,29 @@ Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatRe
         .join('\n')}`
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
       if (run.kind === 'review') {
+        // 委派核验模板（DSHBOTS-107 review-verification）：核验工作由 subagent 并行完成，
+        // 结论以「子代理核验：」开头落任务评论（finishRun 自动写回），不代 owner 裁决。
+        if (run.trigger_type === 'review_delegate') {
+          const writeScopes = readWriteScopes(task.write_scopes)
+          return `${header}
+
+# Subagent verification for task ${project.key}-${task.number}
+Title: ${task.title}
+Status: ${task.status}
+Declared write scopes: ${writeScopes.length ? writeScopes.join(', ') : '(none declared)'}
+Description:
+${task.description || '(no description)'}${threads}
+
+The owner delegated the acceptance verification of this delivered task to you. Verify the delivery report item by item; do not redo the work and do not make the final call:
+- Scope: compare what the delivery report says was changed against the declared write scopes above; flag any out-of-scope change.
+- Target tests: run only the test files this task names (for example node --test <files>), not the whole suite — full-suite numbers are the deliverer's responsibility on a clean tree. If the read-only sandbox blocks a check, say so explicitly instead of skipping it.
+- Red verification: design at least one negative check (a change that should make the target tests fail) and state the expected number of red cases; when the sandbox forbids mutating files, give the exact command and the reasoned prediction.
+- Conclusion: a recommendation of 建议 accept or 建议 return with reasons tied to the evidence above.
+
+Run the independent checks in parallel using your subagent/subagent_fork tools, then merge their findings into one verdict. Do NOT call team_review_task and do NOT change the task status — the verdict belongs to the owner.
+
+Your final reply is recorded as a task comment automatically. It MUST start with 「子代理核验：」 and carry the recommendation plus reasons. Reply in the user's language.`
+        }
         return `${header}
 
 # Review delivery for task ${project.key}-${task.number}

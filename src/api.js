@@ -7,7 +7,7 @@ const ACTIONS = new Set([
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
   'mark_chat_read',
   'add_member', 'remove_member',
-  'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail',
+  'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail', 'task_review_delegate',
   'retry_run', 'cancel_run', 'run_trajectory', 'answer_attention',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
@@ -86,6 +86,10 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.addComment(required(payload.taskId, 'taskId'), required(payload.body, 'body'), actor)
     case 'task_detail':
       return service.taskDetail(required(payload.taskId, 'taskId'))
+    // 验收核验委派（DSHBOTS-107）：owner-only 由服务层守卫（actor.type!=='user' 拒绝）；
+    // HTTP 入口 actor 恒为本地用户，与终端同一口径。
+    case 'task_review_delegate':
+      return service.taskReviewDelegate(required(payload.taskId, 'taskId'), actor)
     case 'retry_run':
       return service.retryRun(required(payload.runId, 'runId'), actor)
     case 'cancel_run':

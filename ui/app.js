@@ -3171,7 +3171,7 @@ function modalTask(task) {
         ${(task.dependencies ?? []).length ? `<div class="divider"></div><div class="eyebrow" style="margin-bottom:7px">依赖</div>${task.dependencies.map(dep => `<div class="kv"><span>${esc(dep.title)}</span><strong>${esc(STATUS[dep.status] ?? dep.status)}</strong></div>`).join('')}` : ''}
       </aside>
     </div>`,
-    footer: `<button class="btn" data-action="close-modal">关闭</button><button class="btn" type="button" data-action="derive-subtask" data-task-id="${attr(task.id)}" title="以本任务为父任务新建子任务">${icon('branch')}派生子任务</button><button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button><button class="btn primary" type="submit" form="task-form">${icon('check')}保存</button>`,
+    footer: `<button class="btn" data-action="close-modal">关闭</button><button class="btn" type="button" data-action="derive-subtask" data-task-id="${attr(task.id)}" title="以本任务为父任务新建子任务">${icon('branch')}派生子任务</button>${task.status === 'in_review' ? `<button class="btn" type="button" data-action="review-delegate" data-task-id="${attr(task.id)}" title="委派总监 Bot 的子代理并行核验交付，结论写回任务评论，裁决仍由您执行">${icon('spark')}子代理核验</button>` : ''}<button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button><button class="btn primary" type="submit" form="task-form">${icon('check')}保存</button>`,
   })
 }
 
@@ -4568,6 +4568,14 @@ document.addEventListener('click', async (event) => {
         if (state.modal?.type !== 'remove-tracking') break
         state.modal.step = 1
         render()
+        break
+      }
+      case 'review-delegate': {
+        // 验收核验委派（DSHBOTS-107）：核验运行由后端派生，结论评论落任务；裁决仍走拖卡/验收。
+        const taskId = target.dataset.taskId
+        await api('task_review_delegate', { taskId })
+        await refreshAfterTask(taskId)
+        toast('已委派子代理核验，结论将写回任务评论', 'success')
         break
       }
       case 'run-task': {
