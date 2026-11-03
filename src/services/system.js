@@ -58,6 +58,8 @@ export const systemMethods = {
       activeTasks: Number(this.store.get("SELECT COUNT(*) AS count FROM tasks WHERE status = 'in_progress'")?.count ?? 0),
       // 跨项目待审聚合（DSHBOTS-102）：与项目解耦，用户不在该项目的群聊页也能看到待处理审批。
       pendingApprovals: this.approvalsPending(),
+      // 跨项目待答聚合（DSHBOTS-116）：同口径，提问卡片出现在群聊，顶部入口给全局可见性。
+      pendingQuestions: this.questionsPending(),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,
@@ -97,6 +99,8 @@ export const systemMethods = {
       view.messages = messages.map(message => this.messageView(message))
       // 待审批条目随群聊数据下发：卡片状态渲染时以这张表为准，消息行只是锚点。
       view.approvals = this.approvalsForProject(project.id)
+      // 提问条目同理（DSHBOTS-116）：消息行只带 question_id，卡片状态以这张表为准。
+      view.questions = this.questionsForProject(project.id)
       view.tasks = this.store.all(
         `SELECT t.*, b.name AS assignee_name FROM tasks t LEFT JOIN bots b ON b.id = t.assignee_bot_id
          WHERE t.project_id = ? ORDER BY

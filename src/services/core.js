@@ -10,6 +10,7 @@ import { seedModelPrices } from '../pricing.js'
 import { syncSkills } from '../skills.js'
 import { backfillWorkspaceGroupBindings } from './workspace-groups.js'
 import { ensureApprovalSchema } from './approvals.js'
+import { ensureQuestionSchema } from './questions.js'
 import { ensureMessageImagesSchema } from './message-images.js'
 import { ensureTaskTimesSchema, ensureTaskTerminalTimeBackfill } from './tasks.js'
 import { id, nowIso } from '../util.js'
@@ -24,6 +25,8 @@ export const coreMethods = {
     runtime.setMask?.(value => this.maskSecretValues(value))
     // 审批域监听宿主 approval/request waterfall；测试桩无 ctx.on 时静默跳过。
     this.approvalsAttach?.(runtime)
+    // 提问域监听宿主 user-questions/request waterfall；同样允许测试桩无 ctx.on 时跳过。
+    this.questionsAttach?.(runtime)
   },
   async initialize() {
     if (this.ready) return this.ready
@@ -87,6 +90,9 @@ export const coreMethods = {
       // 审批表与 messages 审批列的迁移由审批域自管（db.js 保持不超 800 行）；
       // 同一步顺手把残留 pending 置 timeout——宿主侧请求随进程消失，不可能再被应答。
       ensureApprovalSchema(this.store)
+      // 提问表与 messages 提问列的迁移由提问域自管（db.js 保持不超 800 行）；
+      // 同一步把残留 pending 置 timeout，理由与审批一致。
+      ensureQuestionSchema(this.store)
       // 聊天附图表同样由消息域自管迁移（db.js 不加行）。
       ensureMessageImagesSchema(this.store)
       // 任务取消时间列由任务域自管迁移：加 canceled_at 并回填老数据（db.js 不加行）。

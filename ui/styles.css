@@ -1682,6 +1682,16 @@ a.global-config.dsh-official-link:hover {
     max-width: 24px;
     max-height: 24px;
 }
+/* 提问窄条（DSHBOTS-116）与审批窄条同形容器，沿用同一套尺寸兜底。 */
+.question-banner img {
+    max-width: 100%;
+    max-height: 120px;
+    object-fit: contain;
+}
+.question-banner svg {
+    max-width: 24px;
+    max-height: 24px;
+}
 /* 跨项目待审入口（DSHBOTS-102）：工作台顶部窄条 + 计数徽标 + 明细菜单。
    0 待办时整条不渲染（approvalBannerView 返回空串），不占位、不撑高顶栏。 */
 .approval-banner {
@@ -1748,6 +1758,187 @@ a.global-config.dsh-official-link:hover {
 .approval-menu-summary { grid-area: summary; color: var(--ink-3); font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-word; }
 .approval-menu-time { grid-area: time; color: var(--star); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .approval-menu-time.urgent { color: var(--star); }
+/* 提问卡片（DSHBOTS-116）：与审批卡片同骨架，四态中只有 pending 是强调态；已答两态回中性底。
+   圆角 12（卡）/ 8（问题块、选项）/ 6（图标徽章）/ 7（pill、进度条），间距 4-6-8-10。 */
+.question-card {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 240px;
+    max-width: 480px;
+    background: var(--surface);
+}
+.question-card[data-question-status='pending'] { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.question-card[data-question-status='answered'] { border-left-color: var(--green); }
+.question-card[data-question-status='expired'],
+.question-card[data-question-status='timeout'] { border-left-color: var(--ink-3); }
+.question-head { display: flex; align-items: flex-start; gap: 8px; }
+.question-head-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.question-icon {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--ink-3);
+}
+.question-icon svg { width: 14px; height: 14px; }
+.question-icon.is-pending { background: var(--accent-wash); color: var(--accent-text); }
+.question-icon.is-answered { background: var(--green-wash); color: var(--green); }
+.question-icon.is-expired,
+.question-icon.is-timeout { background: var(--surface-2); color: var(--ink-3); }
+.question-meta { font-size: var(--fs-small); color: var(--ink-2); gap: 4px; }
+.question-meta strong { color: var(--ink); font-weight: 600; }
+.question-ask { color: var(--ink-3); }
+.question-count { font-size: var(--fs-caption); color: var(--ink-3); }
+.question-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-2);
+}
+.question-item-title { font-size: var(--fs-body); color: var(--ink); }
+.question-item-header { color: var(--ink-3); margin-right: 4px; }
+.question-item-detail { font-size: var(--fs-small); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.question-item-intent { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-caption); color: var(--accent-text); }
+.question-item-intent svg { width: 12px; height: 12px; }
+.question-item-intent-approve { font-family: var(--mono); }
+.question-options { display: flex; flex-direction: column; gap: 4px; }
+.question-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 5px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink-2);
+    font: 500 var(--fs-small) var(--sans);
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease,
+        border-color 0.12s ease;
+}
+.question-option:hover { border-color: var(--line-2); color: var(--ink); }
+.question-option.is-selected { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-text); }
+.question-option-desc { font-size: var(--fs-caption); color: var(--ink-3); font-weight: 400; }
+.question-option.is-selected .question-option-desc { color: var(--accent-text); }
+.question-custom { width: 100%; }
+.question-answer-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-small); color: var(--ink-2); }
+.question-answer-tag { color: var(--ink-3); font-size: var(--fs-caption); }
+.question-answer-line strong { color: var(--ink); }
+.question-answer-skip,
+.question-answer-custom { color: var(--ink-3); }
+.question-clock { font-variant-numeric: tabular-nums; }
+.question-clock.urgent { color: var(--star); font-weight: 600; }
+.question-countdown { display: flex; align-items: center; gap: 4px; font-size: var(--fs-small); color: var(--ink-2); }
+.question-countdown svg { width: 13px; height: 13px; color: var(--ink-3); flex: 0 0 auto; }
+.question-countdown.urgent { color: var(--star); }
+.question-countdown.urgent svg { color: var(--star); }
+.question-progress { height: 4px; border-radius: 7px; background: var(--surface-3); overflow: hidden; }
+.question-progress-fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); transition: width .6s linear; }
+.question-progress.urgent .question-progress-fill { background: var(--star); }
+.question-actions { display: flex; gap: 8px; }
+.question-foot { display: flex; align-items: center; gap: 8px; }
+.question-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 7px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: var(--fs-caption);
+}
+.question-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); flex: 0 0 auto; }
+.question-pill.is-answered::before { background: var(--green); }
+.question-pill.is-muted::before { background: var(--ink-3); }
+.question-card img {
+    max-width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+}
+.question-card svg {
+    max-width: 64px;
+    max-height: 64px;
+}
+/* 跨项目待答入口（DSHBOTS-116）：与审批窄条同构，0 待答时整条不渲染。 */
+.question-banner {
+    position: relative;
+    padding: 6px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--accent-wash);
+}
+.question-banner-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: 500 var(--fs-small) var(--sans);
+    cursor: pointer;
+}
+.question-banner-btn:hover { border-color: var(--line-2); }
+.question-banner-btn > svg { flex: 0 0 auto; color: var(--accent-text); }
+.question-banner-text { flex: 0 0 auto; }
+.question-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
+.question-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 28px;
+    right: 28px;
+    z-index: 30;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.question-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
+.question-menu-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+        "project project time"
+        "line line line"
+        "summary summary summary";
+    gap: 2px 8px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+}
+.question-menu-item:hover,
+.question-menu-item:focus-visible { background: var(--surface-2); }
+.question-menu-project { grid-area: project; font-weight: 600; font-size: var(--fs-small); }
+.question-menu-line { grid-area: line; color: var(--ink-2); font-size: var(--fs-small); }
+.question-menu-summary { grid-area: summary; color: var(--ink-3); font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-word; }
+.question-menu-time { grid-area: time; color: var(--accent-text); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.question-menu-time.urgent { color: var(--star); }
 .task-chip-line {
     margin-top: 7px;
     display: flex;

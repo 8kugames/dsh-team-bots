@@ -180,6 +180,8 @@ function renderShell() {
   const pending = pendingProposals()
   // 跨项目待审（DSHBOTS-102）：state 顶层全局口径，与当前项目解耦。
   const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
+  // 跨项目待答提问（DSHBOTS-116）：与审批同口径，顶层全局聚合。
+  const pendingQuestions = data?.pendingQuestions ?? { count: 0, items: [] }
   // 侧栏状态行任务口径（DSHBOTS-105）：全库任务 in_progress 计数，不随群聊/单聊上下文跳变；topbar 仍按项目口径。
   const activeTasks = Number(data?.activeTasks ?? 0)
   const projectRunning = project?.stats?.running ?? 0
@@ -315,6 +317,7 @@ function renderShell() {
       <main class="main">
         <div class="main-head">
         ${approvalBannerView(pendingApprovals)}
+        ${questionBannerView(pendingQuestions)}
         <header class="topbar">
           <div class="topbar-title">
             ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}
@@ -1064,6 +1067,167 @@ function renderApprovalCard(message) {
 }
 // ===== approval-card:end =====
 
+// ===== question-card:start 提问卡片（DSHBOTS-116 UI）=====
+// 四态：pending（唯一强调态，可作答）/ answered / expired / timeout。
+// 与审批卡片同骨架：pending 有倒计时 + 进度条 + 作答区，已决态只留状态 pill 与答案摘要。
+const QUESTION_STATUS = { pending: '等待回答', answered: '已回答', expired: '已取消', timeout: '已超时' }
+const QUESTION_STATE_ICON = { pending: 'message', answered: 'check', expired: 'close', timeout: 'clock' }
+const QUESTION_URGENT_MS = 15_000
+const questionBadgeText = (count) => (Number(count) > 99 ? '99+' : String(Number(count) || 0))
+function questionExpiresMs(expiresAt) {
+  const parsed = Date.parse(expiresAt)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+function questionRemainingFrom(expiresMs, fallbackMs) {
+  const expires = Number(expiresMs)
+  return Number.isFinite(expires) ? Math.max(0, expires - Date.now()) : (Number(fallbackMs) || 0)
+}
+function questionUrgent(remainingMs) {
+  return (Number(remainingMs) || 0) <= QUESTION_URGENT_MS
+}
+function formatQuestionCountdown(remainingMs) {
+  const total = Math.max(0, Math.ceil((Number(remainingMs) || 0) / 1000))
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return minutes <= 0 ? `剩余 ${seconds} 秒` : `剩余 ${minutes} 分 ${seconds} 秒`
+}
+function questionProgressRatio(remainingMs, windowMs) {
+  const total = Number(windowMs) || 0
+  if (total <= 0) return 0
+  return Math.max(0, Math.min(1, (Number(remainingMs) || 0) / total))
+}
+// 作答草稿：questionId → { selected: Set<label>, custom: { [itemId]: string } }。
+// 只存前端选择态，提交时映射成宿主 {answers:[{id,selected,custom}]}；整页重渲染不丢选择。
+function questionDraftOf(questionId) {
+  let draft = state.questionDraft.get(questionId)
+  if (!draft) {
+    draft = { selected: new Set(), custom: {} }
+    state.questionDraft.set(questionId, draft)
+  }
+  return draft
+}
+function questionAnswerMap(question) {
+  const answers = question?.answer?.answers
+  if (!Array.isArray(answers)) return new Map()
+  return new Map(answers.filter(item => item && item.id).map(item => [item.id, item]))
+}
+function questionOptionButton(question, item, option) {
+  const draft = questionDraftOf(question.id)
+  const selected = draft.selected.has(String(option.label))
+  return `<button class="question-option${selected ? ' is-selected' : ''}" type="button"
+    data-action="question-option" data-question-id="${attr(question.id)}" data-item-id="${attr(item.id)}"
+    data-label="${attr(option.label)}" data-multi="${item.multiSelect ? '1' : '0'}"
+    aria-pressed="${selected ? 'true' : 'false'}">${esc(option.label)}${option.description ? `<span class="question-option-desc">${esc(option.description)}</span>` : ''}</button>`
+}
+function questionItemMarkup(question, item, answerMap) {
+  const options = Array.isArray(item.options) ? item.options : []
+  const answer = answerMap.get(item.id)
+  const custom = answer?.custom ? String(answer.custom) : ''
+  const selectedText = Array.isArray(answer?.selected) ? answer.selected.map(label => String(label)).join('、') : ''
+  const draft = questionDraftOf(question.id)
+  const intent = item.intent?.kind === 'plan-review' ? item.intent : null
+  const answerLine = answer
+    ? `<div class="question-answer-line"><span class="question-answer-tag">回答</span>${selectedText ? `<strong>${esc(selectedText)}</strong>` : '<span class="question-answer-skip">（未选择）</span>'}${custom ? `<span class="question-answer-custom">${esc(custom)}</span>` : ''}</div>`
+    : ''
+  return `<div class="question-item" data-question-item="${attr(item.id)}">
+    <div class="question-item-title">${item.header ? `<span class="question-item-header">${esc(item.header)}</span>` : ''}${esc(item.question)}</div>
+    ${item.detail ? `<div class="question-item-detail">${esc(item.detail)}</div>` : ''}
+    ${intent ? `<div class="question-item-intent">${icon('branch')}<span>计划评审</span>${intent.approve ? `<span class="question-item-intent-approve">${esc(intent.approve)}</span>` : ''}</div>` : ''}
+    ${question.status === 'pending'
+      ? `<div class="question-options">${options.map(option => questionOptionButton(question, item, option)).join('')}</div>
+         <input class="input question-custom" type="text" data-question-custom data-question-id="${attr(question.id)}" data-item-id="${attr(item.id)}" maxlength="2000" placeholder="补充说明（可选）" value="${attr(draft.custom[item.id] ?? '')}">`
+      : answerLine}
+  </div>`
+}
+function questionCardMarkup(question, answering = false) {
+  const status = String(question.status ?? '')
+  const pending = status === 'pending'
+  const items = Array.isArray(question.questions) ? question.questions : []
+  const answerMap = questionAnswerMap(question)
+  const expiresAt = questionExpiresMs(question.expires_at)
+  const createdAt = Date.parse(question.created_at)
+  const windowMs = Number.isFinite(createdAt) ? Math.max(1, expiresAt - createdAt) : 0
+  const remaining = pending ? questionRemainingFrom(expiresAt, question.remainingMs) : 0
+  const percent = pending ? Math.round(questionProgressRatio(remaining, windowMs) * 100) : 0
+  const urgent = questionUrgent(remaining)
+  const pillTone = status === 'answered' ? 'is-answered' : 'is-muted'
+  const pillText = status === 'answered' && question.answered_at
+    ? `${QUESTION_STATUS.answered} ${formatTime(question.answered_at)}`
+    : (QUESTION_STATUS[status] ?? status)
+  return `<div class="message-row">
+    <div class="message-body-wrap question-card" data-question-status="${attr(question.status)}" data-question-id="${attr(question.id)}">
+      <div class="question-head">
+        <span class="question-icon is-${attr(status)}">${icon(QUESTION_STATE_ICON[status] ?? 'clock')}</span>
+        <div class="question-head-main">
+          <div class="message-meta question-meta"><strong>${esc(question.botName)}</strong><span class="question-ask">发起提问</span><span>${esc(formatTime(question.created_at))}</span></div>
+          <div class="question-count">${items.length} 个问题</div>
+        </div>
+      </div>
+      ${items.map(item => questionItemMarkup(question, item, answerMap)).join('')}
+      ${pending
+        ? `<div class="question-countdown${urgent ? ' urgent' : ''}" data-expires="${expiresAt}">${icon('clock')}<span class="question-clock${urgent ? ' urgent' : ''}" data-expires="${expiresAt}">${esc(formatQuestionCountdown(remaining))}</span></div>
+      <div class="question-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" data-expires="${expiresAt}" data-window="${windowMs}"><i class="question-progress-fill" style="width:${percent}%"></i></div>
+      <div class="question-actions">
+        <button class="btn small primary" type="button" data-action="question-submit" data-question-id="${attr(question.id)}"${answering ? ' disabled' : ''}>提交回答</button>
+      </div>`
+        : `<div class="question-foot"><span class="question-pill ${pillTone}"${question.answered_at ? ` title="${attr(formatTime(question.answered_at))}"` : ''}>${esc(pillText)}</span></div>`}
+    </div>
+  </div>`
+}
+// 提问卡片：消息行只是锚点，状态以 state.data.questions 为准（渲染时查表，轮询自然刷新）。
+// 查不到该条（超出 30 条窗口）时退化为 system 纯文本，不留假状态。
+function renderQuestionCard(message) {
+  const question = (state.data?.questions ?? []).find(item => item.id === message.question_id)
+  if (!question) return `<div class="message-system"><span>${esc(message.body)}</span></div>`
+  // 提交中禁用按钮：重复点击不重复发请求（后端也有 pending 校验，前端先挡一层）。
+  const answering = state.questionAnswering?.has(question.id) ?? false
+  return questionCardMarkup(question, answering)
+}
+// ===== question-card:end =====
+
+// 跨项目待答入口（DSHBOTS-116）：与审批窄条同构，只计 pending，99+ 封顶。
+function questionBannerSummary(item) {
+  const items = Array.isArray(item.questions) ? item.questions : []
+  const first = items[0]?.question
+  if (!first) return ''
+  return items.length > 1 ? `${first}（共 ${items.length} 问）` : first
+}
+function questionBannerView(pendingQuestions) {
+  const count = Number(pendingQuestions?.count ?? 0)
+  if (count <= 0) return ''
+  const items = pendingQuestions?.items ?? []
+  return `<div class="question-banner">
+          <button class="question-banner-btn" data-action="toggle-questions" aria-expanded="${state.questionPanelOpen ? 'true' : 'false'}">
+            ${icon('message')}<span class="question-banner-text">待回答提问</span>
+            <span class="unread-badge">${questionBadgeText(count)}</span>
+            ${icon('chevron', `chev${state.questionPanelOpen ? ' open' : ''}`)}
+          </button>
+          ${state.questionPanelOpen ? `<div class="question-menu" role="menu">
+            ${items.length === 0 ? '<div class="question-menu-empty">暂无明细</div>' : items.map(item => `
+              <button class="question-menu-item" role="menuitem" data-action="focus-question" data-question-id="${attr(item.id)}">
+                <span class="question-menu-project">${esc(item.projectName || '（未命名项目）')}</span>
+                <span class="question-menu-line">${esc(item.botName || 'Bot')}</span>
+                <span class="question-menu-summary">${esc(questionBannerSummary(item))}</span>
+                <span class="question-menu-time" data-expires="${questionExpiresMs(item.expires_at)}">${esc(formatQuestionCountdown(questionRemainingFrom(questionExpiresMs(item.expires_at), item.remainingMs)))}</span>
+              </button>`).join('')}
+          </div>` : ''}
+        </div>`
+}
+
+// 点通知：聚焦窗口，跳到该项目群聊并把提问卡滚动到可视区。
+function focusQuestionCard(question) {
+  if (!question?.project_id) return
+  state.projectId = question.project_id
+  state.chatMode = 'group'
+  state.view = 'chat'
+  refresh()
+    .then(() => {
+      const card = document.querySelector(`.question-card[data-question-id="${question.id}"]`)
+      card?.scrollIntoView({ block: 'center' })
+    })
+    .catch(() => {})
+}
+
 // 跨项目待审入口（DSHBOTS-102）：工作台顶部一条窄条，只计 pending，99+ 封顶；
 // 展开后列明细（项目 / bot / 工具 / 摘要 / 剩余时间），点条目跳到对应项目并滚动到该卡片。
 // 不在顶部重复渲染完整卡片：卡片带理由/作用域/按钮，多项目并发会把窄条撑高、挤走工作区。
@@ -1187,6 +1351,7 @@ function notifyNewApprovals(approvals, { enabled = notifyOn(), hidden = document
 
 function renderMessage(message) {
   if (message.kind === 'approval') return renderApprovalCard(message)
+  if (message.kind === 'question') return renderQuestionCard(message)
   if (message.sender_type === 'system') {
     return `<div class="message-system">
       <span>${esc(message.body)}</span>
@@ -4589,6 +4754,97 @@ document.addEventListener('click', async (event) => {
         focusApprovalCard(item)
         break
       }
+      case 'question-option': {
+        // 选项切换：只改本地草稿与按钮态，不整页重绘（保住同卡内其它输入框的焦点与内容）。
+        const questionId = target.dataset.questionId
+        const label = target.dataset.label
+        if (!questionId || label === undefined) break
+        const draft = state.questionDraft.get(questionId)
+        if (!draft) break
+        if (target.dataset.multi === '1') {
+          if (draft.selected.has(label)) draft.selected.delete(label)
+          else draft.selected.add(label)
+        } else if (draft.selected.has(label) && draft.selected.size === 1) {
+          draft.selected.clear()
+        } else {
+          draft.selected.clear()
+          draft.selected.add(label)
+        }
+        const group = target.closest('.question-options')
+        if (group) {
+          for (const btn of group.querySelectorAll('.question-option')) {
+            const on = draft.selected.has(btn.dataset.label)
+            btn.classList.toggle('is-selected', on)
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+          }
+        }
+        break
+      }
+      case 'question-submit': {
+        // 提交回答：本地草稿 + 卡片内补充说明合成宿主 {answers:[{id,selected,custom}]}。
+        const questionId = target.dataset.questionId
+        if (!questionId || state.questionAnswering.has(questionId)) break
+        const question = (state.data?.questions ?? []).find(entry => entry.id === questionId)
+        if (!question || question.status !== 'pending') break
+        const items = Array.isArray(question.questions) ? question.questions : []
+        const draft = state.questionDraft.get(questionId) ?? { selected: new Set(), custom: {} }
+        const card = target.closest('.question-card')
+        const answers = items.map(item => {
+          let custom = ''
+          if (card) {
+            for (const input of card.querySelectorAll('.question-custom')) {
+              if (input.dataset.itemId === item.id) { custom = String(input.value ?? '').trim(); break }
+            }
+          }
+          if (!custom) custom = String(draft.custom[item.id] ?? '').trim()
+          return { id: item.id, selected: Array.from(draft.selected), custom: custom || undefined }
+        })
+        // 幂等 + 乐观回显：卡片立刻变已答，顶部徽标同步减一。
+        state.questionAnswering.add(questionId)
+        const list = state.data?.questions ?? []
+        const index = list.findIndex(entry => entry.id === questionId)
+        const previous = index >= 0 ? { ...list[index] } : null
+        if (previous) list[index] = { ...previous, status: 'answered', answered_at: new Date().toISOString(), answer: { answers }, remainingMs: 0 }
+        const pending = state.data?.pendingQuestions
+        if (pending) {
+          pending.items = (pending.items ?? []).filter(entry => entry.id !== questionId)
+          pending.count = Math.max(0, Number(pending.count ?? 0) - 1)
+        }
+        render()
+        try {
+          // 用后端返回的终态覆盖乐观值（answered_at 以后端为准）。
+          const updated = await api('question_answer', { questionId, answers }, { quiet: true })
+          if (updated && index >= 0) list[index] = updated
+          else if (updated) list.push(updated)
+          state.questionDraft.delete(questionId)
+        } catch (error) {
+          // 回滚到提交前状态，避免「界面已答、后端仍 pending」的假成功。
+          if (previous && index >= 0) list[index] = previous
+          const rollback = state.data?.pendingQuestions
+          if (rollback && previous) {
+            rollback.items = [previous, ...(rollback.items ?? [])]
+            rollback.count = Number(rollback.count ?? 0) + 1
+          }
+          toast(error?.message ? `回答失败：${error.message}` : '回答失败，请重试', 'error')
+        } finally {
+          state.questionAnswering.delete(questionId)
+          render()
+        }
+        break
+      }
+      case 'toggle-questions':
+        // 顶部「待回答提问」条：展开/收起跨项目明细。
+        state.questionPanelOpen = !state.questionPanelOpen
+        render()
+        break
+      case 'focus-question': {
+        // 点明细跳到对应项目群聊并滚动到该提问卡（复用 focusQuestionCard）。
+        const entry = (state.data?.pendingQuestions?.items ?? []).find(item => item.id === target.dataset.questionId)
+        if (!entry) break
+        state.questionPanelOpen = false
+        focusQuestionCard(entry)
+        break
+      }
       case 'quote-message': {
         // 引用回复：把目标消息挂到 composer 上方的引用条；再点同一条则取消。
         const messageId = target.dataset.messageId
@@ -5232,6 +5488,21 @@ document.addEventListener('input', (event) => {
   if (el.id === 'terminal-cmd-input') {
     state.terminalDraft = el.value
   }
+  // 提问卡补充说明（DSHBOTS-116）：只写草稿不重绘，避免整页重建吞掉输入焦点与未提交内容。
+  if (el.classList?.contains('question-custom')) {
+    const questionId = el.dataset.questionId
+    const itemId = el.dataset.itemId
+    if (questionId && itemId) questionDraftOf(questionId).custom[itemId] = el.value
+  }
+})
+
+// IME 组词标记（DSHBOTS-123）：组词期间 composition 事件不总是伴随常规 input 节奏，
+// 单独记 composerComposing，让轮询渲染闸门在组词全程让路；compositionend 后回到静默窗判定。
+document.addEventListener('compositionstart', (event) => {
+  if (event.target?.id === 'composer-input') state.composerComposing = true
+})
+document.addEventListener('compositionend', (event) => {
+  if (event.target?.id === 'composer-input') state.composerComposing = false
 })
 
 // select / checkbox 只发 change 不发 input，同样要计入未保存修改。
@@ -5594,6 +5865,24 @@ setInterval(() => {
     el.classList.toggle('urgent', approvalUrgent(remaining))
     el.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
   }
+  // 提问倒计时局部刷新（DSHBOTS-116）：与审批同口径，只改文本与危险色，不整卡重绘。
+  for (const el of document.querySelectorAll('.question-clock[data-expires], .question-menu-time[data-expires]')) {
+    const remaining = questionRemainingFrom(el.dataset.expires)
+    // 卡片与顶部窄条都用同一「剩余 X 分 Y 秒」口径（提问没有审批那种「自动拒绝」语义）。
+    el.textContent = formatQuestionCountdown(remaining)
+    el.classList.toggle('urgent', questionUrgent(remaining))
+  }
+  for (const el of document.querySelectorAll('.question-countdown[data-expires]')) {
+    el.classList.toggle('urgent', questionUrgent(questionRemainingFrom(el.dataset.expires)))
+  }
+  for (const el of document.querySelectorAll('.question-progress[data-expires]')) {
+    const remaining = questionRemainingFrom(el.dataset.expires)
+    const ratio = questionProgressRatio(remaining, el.dataset.window)
+    const fill = el.querySelector('.question-progress-fill')
+    if (fill) fill.style.width = `${Math.round(ratio * 100)}%`
+    el.classList.toggle('urgent', questionUrgent(remaining))
+    el.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
+  }
 }, 1000)
 void init()
 
@@ -5603,6 +5892,7 @@ export { app, UI_SCALE_KEY, UI_THEME_KEY, savedScale, startWechatPoll, stopWecha
 export { applyPanelToggle, panelAttrs, lastRenderedView, captureViewScroll, restoreViewScroll, CHAT_BOTTOM_THRESHOLD, nextChatAtBottom, render, renderView, noProject, activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote }
 export { dispatchTaskRow, dispatchRunRow, renderSoloChat, renderSoloConfig, APPROVAL_STATUS, renderApprovalCard, renderMessage, DM_STATUS, DM_STATUS_TONE, renderDirectMessagesCard, TASK_PRIORITY_WEIGHT, TASK_PRIORITY_DEFAULT, taskPriorityKey, taskPriorityWeight, compareTasksByPriority, sortTasksByPriority, TASK_SORTS, sortTasksForPanel, TASK_TIME_RANGES, taskEndsOutsideRange }
 export { formatApprovalRemaining, approvalUrgent, approvalBadgeText, approvalBannerView, approvalExpiresMs, approvalRemainingFrom }
+export { QUESTION_STATUS, questionBadgeText, questionBannerView, questionBannerSummary, questionCardMarkup, renderQuestionCard, formatQuestionCountdown, questionUrgent, questionExpiresMs, questionRemainingFrom }
 export { taskTerminalTime, filteredTasks, renderTasks, taskGroupKey, renderTaskGroup, taskStatusIcon, taskPriorityIcon, renderTaskCard, taskChildrenKey, taskParentId, renderTaskRows, terminalStatusPill, terminalOutputText, renderTerminal, renderBots, renderBotsOverview, renderMembers, renderSkills, memoryStatusTone, pendingMemoryCount }
 export { renderMemory, currentSkillVersion, skillVersions, canaryText, evaluationText, proposalPreview, renderEvolution, usageSnapshot, usageTotals, formatAmount, usageCostParts, usageCostText, usageMode, usageViewTitle, usageBarRow, usageBotRow, usageRunRow, usageModelPanel, usageMetricCards, usageDayPanel, usageSection, usagePageHead, usageListPanel, renderUsage }
 export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderWechatCard, renderSecretsCard, renderSettings, currentScale, renderGlobal, modalShell, modalLoading, renderModal, modelOptions, effortOptions, fallbackModelOptions, parseFallbackFields, modalNewProject, modalRemoveTracking, closeDirPicker }

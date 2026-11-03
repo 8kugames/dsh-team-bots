@@ -73,9 +73,30 @@ export function preserveDecidedApprovals(previous, next) {
   return next
 }
 
+// 轮询竞态保护（DSHBOTS-116）：本地已答的提问不被早于提交的 pending 响应盖回，与审批同口径。
+// 以本地 answered_at 为「已答」标记：同 id 的旧响应仍是 pending 时保留本地终态；旧响应已是终态则以服务端为准。
+export function preserveAnsweredQuestions(previous, next) {
+  const answered = new Map()
+  for (const item of previous?.questions ?? []) {
+    if (item?.id && item.answered_at) answered.set(item.id, item)
+  }
+  if (!answered.size || !next) return next
+  if (Array.isArray(next.questions)) {
+    next.questions = next.questions.map(item => (item && answered.has(item.id) && !item.answered_at ? answered.get(item.id) : item))
+  }
+  const pending = next.pendingQuestions
+  if (pending && Array.isArray(pending.items)) {
+    const items = pending.items.filter(item => !(item && answered.has(item.id)))
+    if (items.length !== pending.items.length) {
+      next.pendingQuestions = { ...pending, items, count: Math.max(0, Number(pending.count ?? 0) - (pending.items.length - items.length)) }
+    }
+  }
+  return next
+}
+
 export async function loadState(projectId = state.projectId, { quiet = false } = {}) {
   // 仅单聊场景携带 soloBotId，避免把单聊口径的 runs/memories 泄漏进群聊视图。
-  const data = preserveDecidedApprovals(state.data, await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet }))
+  const data = preserveAnsweredQuestions(state.data, preserveDecidedApprovals(state.data, await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet })))
   state.data = data
   await markVisibleChatRead(data)
   if (!state.projectId || !data.projects.some(project => project.id === state.projectId)) {

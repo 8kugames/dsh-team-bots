@@ -30,11 +30,20 @@ export const state = {
   // approvalDeciding 是正在决策的 approval id 集合（决策中禁用按钮，防重复点击）。
   approvalPanelOpen: false,
   approvalDeciding: new Set(),
+  // 顶部「待回答提问」条（DSHBOTS-116）：与审批同构；questionDraft 是卡片内未提交的选择/补充说明，
+  // 整页重渲染据此恢复选中态与输入内容（提交成功后清除）。
+  questionPanelOpen: false,
+  questionAnswering: new Set(),
+  questionDraft: new Map(),
   ac: null,
   busy: 0,
   chatAtBottom: true,
   // 渲染窗口闸门：render() 全量重建 DOM 期间为 true，此时到达的聊天滚动事件一律忽略（DSHBOTS-72）。
   rendering: false,
+  // 轮询渲染闸门（DSHBOTS-123）：composerInputAt=最近一次 composer 输入事件时间戳，
+  // composerComposing=IME 组词中；二者共同决定轮询整页渲染是否为「正在输入」让路。
+  composerInputAt: 0,
+  composerComposing: false,
   taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
   // 任务面板组内排序（D-63）：默认完成时间新→旧；六档口径见 TASK_SORTS。
   taskSort: 'completed_desc',
