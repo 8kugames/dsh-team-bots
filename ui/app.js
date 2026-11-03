@@ -146,6 +146,23 @@ function isTyping() {
   return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
 
+// poll-typing-gate:start —— 轮询渲染闸门的纯逻辑（tests/chat-typing-refresh.test.js 抽取此块断言）
+// 「焦点在输入控件」≠「正在输入」：composer（聊天输入框）只在静默窗内有输入事件、或 IME 组词中时
+// 才挡整页渲染（保住正在打的字与光标），静默即放行，让「正在思考与回复…」随轮询自动清出；
+// 其余输入控件维持原「焦点即挡」语义（保护表单填写中途不被重建吞值）；无焦点/按钮不挡。
+const COMPOSER_IDLE_MS = 2000
+
+function pollRenderBlockedByFocus(activeElement, { composing, composerInputAt, now = Date.now() }) {
+  const el = activeElement
+  if (!el) return false
+  if (el.id === 'composer-input') {
+    if (composing) return true
+    return now - (composerInputAt ?? 0) < COMPOSER_IDLE_MS
+  }
+  return Boolean(el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+}
+// poll-typing-gate:end
+
 function pendingProposals(kind = null) {
   return (state.data?.proposals ?? []).filter(item => item.status === 'pending' && (!kind || item.kind === kind)).length
 }
@@ -454,6 +471,15 @@ function render() {
   }
   state.ac = null
   app.className = ''
+  // composer 持焦时的光标快照（DSHBOTS-123）：全量重建会拆走 #composer-input，先记选区与滚动，
+  // rAF 收尾恢复焦点与光标，配合轮询渲染闸门静默放行后「边打字边轮询」不打断输入。
+  const activeBeforeRebuild = document.activeElement
+  const composerCaret = activeBeforeRebuild?.id === 'composer-input' ? {
+    start: activeBeforeRebuild.selectionStart ?? 0,
+    end: activeBeforeRebuild.selectionEnd ?? 0,
+    direction: activeBeforeRebuild.selectionDirection ?? 'forward',
+    scrollTop: activeBeforeRebuild.scrollTop ?? 0,
+  } : null
   // chat-scroll:view-enter —— 切进聊天视图时确定性贴底：不依赖历史残值。
   // 用户上翻历史后切到别的页面再切回来，一律回到最新一条（DSHBOTS-72）。
   if (state.view === 'chat' && lastRenderedView !== 'chat') state.chatAtBottom = true
@@ -483,6 +509,12 @@ function render() {
         // 全量重建会丢 composer 的内联高度与发送按钮态，先恢复，再处理贴底滚动。
         const composerInput = document.getElementById('composer-input')
         if (composerInput) syncComposerBox(composerInput)
+        // 光标续接（DSHBOTS-123）：重建前持焦且已记快照时，把焦点与选区无损放回 composer。
+        if (composerCaret && composerInput) {
+          composerInput.focus()
+          try { composerInput.setSelectionRange(composerCaret.start, composerCaret.end, composerCaret.direction) } catch {}
+          composerInput.scrollTop = composerCaret.scrollTop
+        }
         const messages = document.querySelector('.chat-messages')
         if (messages && state.chatAtBottom) messages.scrollTop = messages.scrollHeight
       }
@@ -5538,6 +5570,7 @@ document.addEventListener('input', (event) => {
     return
   }
   if (el.id === 'composer-input') {
+    state.composerInputAt = Date.now()
     syncComposerBox(el)
     updateAutocomplete()
   }
@@ -5818,7 +5851,9 @@ document.addEventListener('drop', async (event) => {
 
 async function poll() {
   // 遮罩打开时照常取数（数据不丢），整页重建由 render() 内部的遮罩闸门跳过（DSHBOTS-98）。
-  if (!state.data || state.busy > 0 || isTyping()) return
+  // 焦点不再挡取数（DSHBOTS-123）：焦点常驻 composer 时若连 fetch 都跳过，运行结束后
+  // 「正在思考与回复…」与新消息会一直冻结，直到点击页面令 composer 失焦。焦点只在下方渲染半边设闸。
+  if (!state.data || state.busy > 0) return
   // 目录选择器开着或表单有未保存修改时暂停自动刷新：整页重渲染会吞掉选择器与已选/已填的值。
   if (document.querySelector('.dir-picker:not([hidden])') || document.querySelector('form[data-dirty]')) return
   try {
@@ -5831,7 +5866,9 @@ async function poll() {
       return
     }
     await loadState(state.projectId, { quiet: true })
-    render()
+    // 渲染闸门（DSHBOTS-123）：composer 静默窗内有输入或 IME 组词中才挡整页重建，
+    // 其余输入控件维持原「焦点即挡」；被挡周期的取数已生效，下一周期自动补渲染。
+    if (!pollRenderBlockedByFocus(document.activeElement, { composing: state.composerComposing, composerInputAt: state.composerInputAt })) render()
     notifyNewApprovals(state.data?.approvals ?? [])
   } catch {}
 }
@@ -5901,6 +5938,12 @@ const observer = new MutationObserver(() => {
   if (state.modal?.type === 'proposal') bindProposalForm()
 })
 observer.observe(ensureModalRoot(), { childList: true, subtree: true })
+
+// 切回页面立即补一轮轮询（DSHBOTS-123）：隐藏期间常规轮询暂停、state.data 冻结，
+// 返回前台不用干等下一个 2.8s 周期，typing 行与新消息即刻追平。
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) void poll()
+})
 
 setInterval(() => { void poll() }, 2800)
 setInterval(() => {

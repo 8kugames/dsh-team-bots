@@ -282,7 +282,9 @@ test('接线④：轮询/刷新不因弹窗早退，遮罩关闭路径都补渲�
   const pollSrc = /async function poll\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(pollSrc, 'ui/app.js 缺少 poll()')
   assert.doesNotMatch(pollSrc, /state\.modal/, '轮询不再因弹窗早退：遮罩期间照常取数，数据不丢')
-  assert.match(pollSrc, /await loadState\(state\.projectId, \{ quiet: true \}\)\n    render\(\)/, '取数后仍走 render()（是否重建由 render 内的遮罩闸门决定）')
+  // DSHBOTS-123：poll 的 render 改为经焦点渲染闸门放行（composer 正在输入时让路，其余照常），
+  // 取数仍无条件先行；断言随行为同步迁移。
+  assert.match(pollSrc, /await loadState\(state\.projectId, \{ quiet: true \}\)\n\s*\/\/ 渲染闸门[\s\S]*?if \(!pollRenderBlockedByFocus\(document\.activeElement[\s\S]*?\)\) render\(\)/, '取数后仍走 render()（焦点渲染闸门与遮罩闸门各自决定是否重建）')
   const refreshSrc = /async function refresh\([^)]*\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(refreshSrc, 'ui/app.js 缺少 refresh()')
   assert.doesNotMatch(refreshSrc, /state\.modal/, '刷新不再因弹窗跳过渲染')
