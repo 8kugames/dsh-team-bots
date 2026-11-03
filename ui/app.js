@@ -33,6 +33,8 @@
     ac: null,
     busy: 0,
     chatAtBottom: true,
+    // 渲染窗口闸门：render() 全量重建 DOM 期间为 true，此时到达的聊天滚动事件一律忽略（DSHBOTS-72）。
+    rendering: false,
     taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
     // 任务面板组内排序（D-63）：默认创建时间新→旧；六档口径见 TASK_SORTS。
     taskSort: 'created_desc',
@@ -830,12 +832,31 @@
     }
   }
 
+  // chat-scroll:start —— 聊天滚动位置的纯逻辑（tests/chat-scroll.test.js 抽取此块断言）
+  // 判定「当前是否贴在聊天底部」：渲染窗口内（rendering）与已脱离文档的节点（connected=false）一律保持原值，
+  // 避免把「DOM 重建」误判成「用户上翻」；内容不足一屏时无处可滚，视为贴底；其余按距底部距离与阈值比较。
+  const CHAT_BOTTOM_THRESHOLD = 80
+
+  function nextChatAtBottom({ rendering, connected, current, scrollHeight, scrollTop, clientHeight, threshold = CHAT_BOTTOM_THRESHOLD }) {
+    if (rendering) return current
+    if (!connected) return current
+    if (scrollHeight <= clientHeight) return true
+    return scrollHeight - scrollTop - clientHeight < threshold
+  }
+  // chat-scroll:end
+
   function render() {
     if (!state.data) return
     state.ac = null
     app.className = ''
     const hadModal = Boolean(document.querySelector('.modal'))
     const previousFocus = document.activeElement
+    // chat-scroll:view-enter —— 切进聊天视图时确定性贴底：不依赖历史残值。
+    // 用户上翻历史后切到别的页面再切回来，一律回到最新一条（DSHBOTS-72）。
+    if (state.view === 'chat' && lastRenderedView !== 'chat') state.chatAtBottom = true
+    // chat-scroll:render-gate —— 重建 DOM 的窗口内忽略聊天滚动事件：旧 .chat-messages 被拆走时可能补发
+    // 一次 scroll 事件，若在此窗口送达会把「重建」误判成「用户上翻」。窗口在 rAF 收尾复位。
+    state.rendering = true
     // chat-scroll-restore:mark —— render() 全量重建 DOM，非贴底时先记下消息列表滚动位置，重建后原位恢复；
     // 2.8s 轮询重渲染因此不再把上翻历史的用户拽回顶部；贴底（chatAtBottom）仍走下方 rAF 自动落底。
     const savedChatScroll = document.querySelector('.chat-messages')?.scrollTop ?? null
@@ -853,17 +874,22 @@
     }
     if (!state.modal && hadModal) restoreFocus()
     requestAnimationFrame(() => {
-      syncChromeHeight()
-      if (state.view === 'chat') {
-        // 全量重建会丢 composer 的内联高度与发送按钮态，先恢复，再处理贴底滚动。
-        const composerInput = document.getElementById('composer-input')
-        if (composerInput) syncComposerBox(composerInput)
-        const messages = document.querySelector('.chat-messages')
-        if (messages && state.chatAtBottom) messages.scrollTop = messages.scrollHeight
-      }
-      if (state.view === 'terminal') {
-        const outputEl = document.getElementById('terminal-output')
-        if (outputEl) outputEl.scrollTop = outputEl.scrollHeight
+      try {
+        syncChromeHeight()
+        if (state.view === 'chat') {
+          // 全量重建会丢 composer 的内联高度与发送按钮态，先恢复，再处理贴底滚动。
+          const composerInput = document.getElementById('composer-input')
+          if (composerInput) syncComposerBox(composerInput)
+          const messages = document.querySelector('.chat-messages')
+          if (messages && state.chatAtBottom) messages.scrollTop = messages.scrollHeight
+        }
+        if (state.view === 'terminal') {
+          const outputEl = document.getElementById('terminal-output')
+          if (outputEl) outputEl.scrollTop = outputEl.scrollHeight
+        }
+      } finally {
+        // 渲染窗口结束：之后到达的滚动事件才允许更新 chatAtBottom。
+        state.rendering = false
       }
     })
     syncTerminalPoll()
@@ -5054,10 +5080,17 @@
   })
 
   document.addEventListener('scroll', (event) => {
-    if (event.target.classList?.contains('chat-messages')) {
-      const el = event.target
-      state.chatAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    }
+    const el = event.target
+    if (!el?.classList?.contains('chat-messages')) return
+    // 判定口径抽成纯函数 nextChatAtBottom：渲染窗口内与已脱离文档的节点保持原值（DSHBOTS-72）。
+    state.chatAtBottom = nextChatAtBottom({
+      rendering: state.rendering,
+      connected: el.isConnected,
+      current: state.chatAtBottom,
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+      clientHeight: el.clientHeight,
+    })
   }, true)
 
   // 折叠面板展开态：toggle 不冒泡，在 document 捕获阶段统一记录 <details data-panel> 的展开/收起（含 modal 里的面板）。
