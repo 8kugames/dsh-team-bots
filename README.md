@@ -1,5 +1,7 @@
 # DSH Team Bots
 
+[English](docs/README.en.md)
+
 DSH 团队 Bots 插件（`dsh-team-bots`）：在 DSH 里组织一支会协作的 Bot 小队——项目群聊、任务派发、写范围并行调度、终端与用量统计都装在同一个工作台里。
 
 ![群聊主界面](docs/assets/chat.png)
