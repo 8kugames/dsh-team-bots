@@ -109,6 +109,8 @@ export function installHttp(ctx, service, logger = console) {
   route('/api/dsh-team/modules/state.js', ['GET'], moduleScript('state.js'))
   route('/api/dsh-team/modules/icons.js', ['GET'], moduleScript('icons.js'))
   route('/api/dsh-team/modules/util.js', ['GET'], moduleScript('util.js'))
+  route('/api/dsh-team/modules/markdown.js', ['GET'], moduleScript('markdown.js'))
+  route('/api/dsh-team/modules/api.js', ['GET'], moduleScript('api.js'))
   route('/api/dsh-team/styles.css', ['GET'], styles)
   route('/api/dsh-team/fonts/inter-400.woff2', ['GET'], font('400'))
   route('/api/dsh-team/fonts/inter-500.woff2', ['GET'], font('500'))

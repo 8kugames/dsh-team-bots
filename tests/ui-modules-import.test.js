@@ -28,3 +28,21 @@ test('app.js 入口持有 task-group 预置循环（搬迁去向回归锁）', a
   const src = await readFile(join(root, 'ui/app.js'), 'utf8')
   assert.match(src, /for \(const status of STATUS_ORDER\) state\.openPanels\.add\(taskGroupKey\(status\)\)/)
 })
+
+// 批次2起每个新模块都必须能被真实 ESM 求值（顶层零 app.js 局部符号，同 state.js 事故防线）。
+test('ui/modules/markdown.js 与 api.js 可完整求值', async () => {
+  globalThis.location = new URL('http://127.0.0.1:3080/api/dsh-team/ui?view=chat')
+  // util.js 顶层取 toastRoot、markdown.js 顶层读 window.marked：node 下给最小桩，走设计内兜底。
+  globalThis.document = { getElementById: () => null }
+  globalThis.window = {}
+  const md = await import(pathToFileURL(join(root, 'ui/modules/markdown.js')))
+  assert.equal(typeof md.richText, 'function')
+  assert.equal(typeof md.mdPlainSummary, 'function')
+  assert.equal(typeof md.mdChatScope, 'function')
+  // window 无 marked/DOMPurify → mdRender=null → richText 回退 esc 纯文本（消毒不可绕的设计兜底）。
+  assert.equal(md.richText('**a**'), '<p>**a**</p>')
+  const apiMod = await import(pathToFileURL(join(root, 'ui/modules/api.js')))
+  assert.equal(typeof apiMod.api, 'function')
+  assert.equal(typeof apiMod.loadState, 'function')
+  assert.equal(typeof apiMod.markVisibleChatRead, 'function')
+})
