@@ -95,6 +95,11 @@ export const tasksMethods = {
     const writeScopes = input.writeScopes === undefined || input.writeScopes === null
       ? parseWriteScopesFromDescription(input.description)
       : parseWriteScopes(input.writeScopes)
+    // 时效要求（DSHBOTS-125）：发布方可传软性交付时限（分钟）；未传/非法 = NULL，提示词不注入。
+    // 钳制到 1..10080（一分钟到一周）：只挡垃圾值，不替发布方做取舍；0/负数视为未提。
+    // 运行硬中止仍由全局 runTimeoutMs 管，与本字段无关。
+    const rawTimeBudget = input.timeBudgetMinutes ?? input.time_budget_minutes
+    const timeBudgetMinutes = Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null
     const taskId = id('task')
     const createdAt = nowIso()
     // 终态时间在创建时补齐（DSHBOTS-69）：以 done/canceled 建档的任务终态列取同一 createdAt，
@@ -113,15 +118,15 @@ export const tasksMethods = {
       this.store.run(
         `INSERT INTO tasks(id, project_id, number, title, description, status, priority, assignee_bot_id,
           creator_type, creator_id, review_target, source_message_id, parent_id, parent_task_id, blocked_by, position, due_at, estimate,
-          write_scopes, version, created_at, updated_at, completed_at, canceled_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          time_budget_minutes, write_scopes, version, created_at, updated_at, completed_at, canceled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         taskId, project.id, number, title, text(input.description, 40_000), status, priority,
         assigneeId, actor.type, actor.id, actor.type === 'bot' ? 'owner_bot' : 'user',
         input.sourceMessageId ?? null, input.parentId ?? null,
         relations.parentTaskId, JSON.stringify(relations.blockedBy),
         Number.isFinite(Number(input.position)) ? Number(input.position) : number,
         input.dueAt ? new Date(input.dueAt).toISOString() : null,
-        clampNumber(input.estimate, 0, 1000, null), JSON.stringify(writeScopes), createdAt, createdAt,
+        clampNumber(input.estimate, 0, 1000, null), timeBudgetMinutes, JSON.stringify(writeScopes), createdAt, createdAt,
         completedAt, canceledAt,
       )
       for (const label of Array.isArray(input.labels) ? input.labels.slice(0, 12) : []) {
@@ -175,7 +180,7 @@ export const tasksMethods = {
       task.id,
     )
     const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
-    const { write_scopes: rawScopes, ...rest } = task
+    const { write_scopes: rawScopes, time_budget_minutes: rawTimeBudget, ...rest } = task
     // 阶段按事实推导（task-stage 块）：与 latestRun 同源；attention 取最近运行的待回答提问。
     const attention = runs[0] ? parseAttention(runs[0].attention_json) : null
     const stage = taskStage(task, runs[0] ?? null, attention)
@@ -185,6 +190,8 @@ export const tasksMethods = {
       identifier: `${project?.key ?? 'T'}-${task.number}`,
       labels,
       writeScopes: readWriteScopes(rawScopes),
+      // 时效要求（分钟）：null=发布方未提；供 UI 展示与提示词注入共用一个口径。
+      timeBudgetMinutes: Number.isFinite(rawTimeBudget) ? rawTimeBudget : null,
       attention,
       blockedBy: deps.blockedBy,
       depsSatisfied: deps.depsSatisfied,
@@ -651,6 +658,8 @@ export const tasksMethods = {
       // 总监派单可带父子/依赖关系（snake_case 透传，createTask 内统一校验与落库）。
       parentTaskId: input.parent_task_id,
       blockedBy: input.blocked_by,
+      // 时效要求（新任务 only）：重派已有任务（上面 input.taskId/input.task 分支）不更新该字段。
+      timeBudgetMinutes: input.time_budget_minutes ?? input.timeBudgetMinutes,
       autoStart: true,
       postCard: true,
     }, actor)

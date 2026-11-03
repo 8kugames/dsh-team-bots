@@ -465,7 +465,15 @@ Rules:
 - Return [] when nothing is worth remembering. Chat replies rarely need more than one entry.`
     }
     if (task) {
-      const parallel = this.config.agentTeam ? `
+      // 时效要求（DSHBOTS-125）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
+      const timeBudget = Number(task.timeBudgetMinutes ?? task.time_budget_minutes)
+      const timeBudgetBlock = Number.isFinite(timeBudget) && timeBudget > 0 ? `
+
+# Time budget
+This task is expected to be delivered within ${timeBudget} minutes; plan the depth of your work accordingly.
+If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
+This budget is a soft expectation for planning, not an execution limit: the runtime may still be stopped by the global run timeout (runTimeoutMs), which is independent of this field.` : ''
+        const parallel = this.config.agentTeam ? `
 
 # Parallel work inside this task
 - Split into teammates only when the task has two or more independent parts (separate modules, separate docs, an independent review). Small or single-file work: do it yourself.
@@ -480,7 +488,7 @@ Title: ${task.title}
 Priority: ${task.priority}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}${parallel}
+${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}
 
 Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
 When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`
