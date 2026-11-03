@@ -81,10 +81,6 @@ Usage stats separate the summary window from the last 14 days of detail, with co
 
 ![Usage stats](assets/usage.png)
 
-The terminal page runs commands and keeps the history:
-
-![Terminal](assets/terminal.png)
-
 Dark mode:
 
 ![Dark project chat](assets/chat-dark.png)

@@ -81,10 +81,6 @@ CI：push `v*` tag 自动发 npm——工作流跑全量测试，全绿后发布
 
 ![用量统计](docs/assets/usage.png)
 
-终端页直接执行命令并保留历史：
-
-![终端](docs/assets/terminal.png)
-
 暗色模式：
 
 ![暗色群聊](docs/assets/chat-dark.png)
