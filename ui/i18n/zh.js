@@ -198,6 +198,11 @@ export default {
   'dm.replied': '已回复',
   'dm.failed': '失败',
   'dm.repliedAt': '回复于 ${time}',
+  // 任务时效要求（DSHBOTS-129）
+  'taskForm.timeBudgetLabel': '时效要求（分钟）',
+  'taskForm.timeBudgetPlaceholder': '选填，留空不设',
+  'task.timeBudgetValue': '${minutes} 分钟',
+  'task.timeBudgetNote': '软性时限，超时硬中止仍由运行超时控制',
   // 高频 toast
   'toast.copied': '已复制',
   'toast.wechatConnected': '微信通道已连接',

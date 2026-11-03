@@ -3365,6 +3365,18 @@ function taskRelationOptions(selectedId = '') {
   return tasks.map(task => `<option value="${attr(task.id)}"${task.id === selectedId ? ' selected' : ''}>${esc(task.identifier)} · ${esc(task.title)}</option>`).join('')
 }
 
+// time-budget:start —— 「时效要求（分钟）」表单值归一（DSHBOTS-129）
+// 空串 / 0 / 负数 / 非数字 → null（视为未提时效，提交时整键不传，服务端按 NULL 处理）；
+// 正数向下取整到整数分钟（服务端再钳到 1..10080）。
+function normalizeTimeBudgetMinutes(raw) {
+  const text = String(raw ?? '').trim()
+  if (!text) return null
+  const value = Number(text)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return Math.floor(value)
+}
+// time-budget:end
+
 function modalNewTask() {
   const project = activeProject()
   if (!project) return ''
@@ -3378,9 +3390,10 @@ function modalNewTask() {
       <input type="hidden" name="projectId" value="${attr(project.id)}">
       <div class="field"><label id="new-task-title-label" for="new-task-title">标题</label><input class="input" style="width:100%" id="new-task-title" name="title" required maxlength="240" placeholder="一个可执行、可验收的结果" autofocus></div>
       <div class="field"><label id="new-task-description-label" for="new-task-description">描述</label><textarea class="textarea" id="new-task-description" name="description" rows="8" placeholder="背景、范围、约束、验收标准"></textarea></div>
-      <div class="field-row">
+      <div class="field-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
         <div class="field"><label id="new-task-assignee-label" for="new-task-assignee">指派给</label><select class="select" style="width:100%" id="new-task-assignee" name="assigneeBotId">${project.members.map(member => `<option value="${attr(member.id)}">${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
         <div class="field"><label id="new-task-priority-label" for="new-task-priority">优先级</label><select class="select" style="width:100%" id="new-task-priority" name="priority"><option value="medium">中</option><option value="high">高</option><option value="urgent">紧急</option><option value="low">低</option><option value="none">无</option></select></div>
+        <div class="field"><label id="new-task-time-budget-label" for="new-task-time-budget">${t('taskForm.timeBudgetLabel')}</label><input class="input" style="width:100%" id="new-task-time-budget" name="time_budget_minutes" type="number" min="1" max="10080" step="1" placeholder="${attr(t('taskForm.timeBudgetPlaceholder'))}"><div class="usage-note">${t('task.timeBudgetNote')}</div></div>
       </div>
       <div class="field-row">
         <div class="field"><label id="new-task-parent-label" for="new-task-parent">父任务</label><select class="select" style="width:100%" id="new-task-parent" name="parentTaskId"><option value="">无（顶层任务）</option>${taskRelationOptions(preselectedParent)}</select></div>
@@ -3528,6 +3541,11 @@ function modalTask(task) {
             : '<div class="scope-empty">未声明（保守串行）</div>'}
           <div class="hint" style="margin-top:6px">写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。</div>
         </div>
+        ${task.timeBudgetMinutes ? `<div class="scope-block">
+          <div class="eyebrow" style="margin-bottom:6px">${t('taskForm.timeBudgetLabel')}</div>
+          <div class="note" style="color:var(--ink)">${t('task.timeBudgetValue', { minutes: Number(task.timeBudgetMinutes) })}</div>
+          <div class="hint" style="margin-top:6px">${t('task.timeBudgetNote')}</div>
+        </div>` : ''}
         <div class="divider"></div>
         <div class="eyebrow" style="margin-bottom:6px">评论</div>
         ${(task.comments ?? []).length === 0 ? '<div class="note">还没有评论。</div>' : task.comments.map(comment => `<div class="comment">
@@ -5336,6 +5354,8 @@ document.addEventListener('submit', async (event) => {
     if (type === 'create-task') {
       // 父任务与依赖任务（DSHBOTS-58）：多选字段用 getAll 取全部选中项；空值即不建关系。
       const blockedBy = new FormData(form).getAll('blockedBy').map(String).filter(Boolean)
+      // 时效要求（分钟）：选填；空串/0/负数 → null（整键不传），正数取整数分钟。
+      const timeBudgetMinutes = normalizeTimeBudgetMinutes(payload.time_budget_minutes)
       const task = await api('create_task', {
         projectId: payload.projectId,
         title: payload.title,
@@ -5345,6 +5365,8 @@ document.addEventListener('submit', async (event) => {
         parentTaskId: payload.parentTaskId || null,
         blockedBy,
         autoStart: form.querySelector('[name="autoStart"]')?.checked === true,
+        // 时效要求（分钟）：选填；空串/0/负数归一为 null 且整键不传（服务端钳 1..10080，NULL 即不注入提示词）。
+        ...(timeBudgetMinutes === null ? {} : { time_budget_minutes: timeBudgetMinutes }),
       })
       closeModal()
       await loadState(state.projectId, { quiet: true })

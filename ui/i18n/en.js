@@ -199,6 +199,11 @@ export default {
   'dm.replied': 'Replied',
   'dm.failed': 'Failed',
   'dm.repliedAt': 'Replied at ${time}',
+  // Task time budget (DSHBOTS-129)
+  'taskForm.timeBudgetLabel': 'Time budget (minutes)',
+  'taskForm.timeBudgetPlaceholder': 'Optional; leave blank for none',
+  'task.timeBudgetValue': '${minutes} min',
+  'task.timeBudgetNote': 'Soft limit — a hard abort on expiry is still driven by the run timeout',
   // High-frequency toasts
   'toast.copied': 'Copied',
   'toast.wechatConnected': 'WeChat channel connected',
