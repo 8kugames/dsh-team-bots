@@ -11,6 +11,7 @@ import { runMigrations } from '../src/db-migrations.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
+import { installTeamTools } from '../src/tools.js'
 
 class StubRuntime {
   setCompletionHandler() {}
@@ -157,4 +158,17 @@ test('迁移幂等：新库自带列，老库补列可重跑，迁移名单只�
   } finally {
     await cleanup(ctx)
   }
+})
+
+test('team_assign_task 工具 schema 暴露 time_budget_minutes（owner 派单入口契约）', () => {
+  const tools = []
+  installTeamTools({ tools: { register: (tool) => tools.push(tool) } }, {})
+  const tool = tools.find(item => item.name === 'team_assign_task')
+  assert.ok(tool, 'team_assign_task 未注册')
+  const field = tool.parameters.properties.time_budget_minutes
+  // additionalProperties=false：schema 不声明就等于 owner bot 无法传入，必须显式暴露。
+  assert.ok(field, 'schema 必须声明 time_budget_minutes，否则 owner 派单路径传不进时效要求')
+  assert.equal(field.type, 'integer')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.match(field.description, /soft on-schedule delivery constraint/)
 })

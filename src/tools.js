@@ -18,6 +18,7 @@ export function installTeamTools(ctx, service) {
         priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths this task will modify (new tasks only); the scheduler runs tasks with disjoint scopes in parallel. Omit to parse a `写范围：`/`write_scopes:` line from the description instead' },
         force_duplicate: { type: 'boolean', description: 'Escape hatch (new tasks only): skip the same-write-scope duplicate check when an unfinished task in this project already declares identical write scopes. Use only when a second task on the same paths is intentional; every use is audited as dispatch_force_duplicate' },
+        time_budget_minutes: { type: 'integer', description: 'Expected delivery time limit in minutes (new tasks only, 1-10080): injected into the task prompt as a soft on-schedule delivery constraint. Omit when there is no time requirement; the global run timeout still applies regardless' },
         task: { type: 'string', description: 'Existing task to re-dispatch, as KEY-N (for example DEMO-3). Omit to create a new task' },
       },
       required: ['assignee'],
