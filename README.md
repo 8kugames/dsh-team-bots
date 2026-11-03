@@ -1,98 +1,98 @@
 # DSH Team Bots
 
-[English](docs/README.en.md)
+[中文](docs/README.zh.md)
 
-DSH 团队 Bots 插件（`dsh-team-bots`）：在 DSH 里组织一支会协作的 Bot 小队——项目群聊、任务派发、写范围并行调度、终端与用量统计都装在同一个工作台里。
+DSH team bots plugin (`dsh-team-bots`): run a crew of collaborating bots inside DSH — project chat, task dispatch, write-scope scheduling, terminal and usage stats, all in one workspace.
 
-![群聊主界面](docs/assets/chat.png)
+![Project chat](docs/assets/chat.png)
 
-## 核心特性
+## Features
 
-- **项目群聊**：每个项目一间群聊和一位项目总监 Bot。支持普通消息、`@Bot`、`/task @Bot 标题`、`/remember`、`/clear`，输入 `/` 或 `@` 弹出命令、技能与成员补全。
-- **任务看板**：Linear 风格任务面板，按状态分组、父子任务树、优先级与负责人、评论直投运行中的会话、拖拽流转；任务详情内联展示交付产物。
-- **写范围并行调度**：任务声明自己要写的路径后，同项目的两个写运行按声明范围判定：范围互不重叠即可并行，重叠或有一方未声明则串行，既不误踩共享工作区也不空耗并发；任务会话彼此独立，任务与群聊互不阻塞。
-- **Bot 记忆与技能池**：Bot、项目两级长期记忆，每轮结束自动做记忆审查；共享技能池固定在本机 `~/.agents/skills`，项目还能自带 `.agents/skills`、`.claude/skills`、`.codex/skills`。
-- **版本化进化**：角色、模型、强度与技能变更走提案审批，Bot 配置保留不可变历史，可回滚。
-- **团队工具**：注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_recall`、`team_propose_evolution`、`team_message_bot`、`team_request_secret` 七个工具，Bot 之间可直接私信协作。
-- **密钥管道**：密钥 AES-256-GCM 加密落库；批准后一次性物化到数据目录（不进项目工作区），任务运行结束或 TTL 到期即焚，消息与运行输出里一律掩码为 `$名称`。
-- **用量统计**：全局 / 项目 / Bot 三档口径归集 token、调用次数、成本与运行时长，成本按可配置的模型价格计算，未配置价格不按 0 计费。
+- **Project chat**: every project gets its own group chat and a project director bot. Supports plain messages, `@Bot`, `/task @Bot title`, `/remember`, `/clear`; typing `/` or `@` opens completion for commands, skills and members.
+- **Task board**: a Linear-style task panel grouped by status, with parent/child task trees, priority and assignee, comments delivered straight into the running session, drag-to-transition, and delivery artifacts shown inline in the task detail.
+- **Write-scope scheduling**: once a task declares the paths it will write, two write runs in the same project are judged by those scopes — non-overlapping scopes run in parallel, overlapping scopes or an undeclared side serialize, so shared workspaces are never stomped on and concurrency is not wasted; task sessions stay independent, and tasks never block chat replies.
+- **Bot memory and skill pool**: bot-scoped and project-scoped long-term memory, with an automatic memory review after every turn; the shared skill pool is fixed at `~/.agents/skills`, and each project can also carry its own `.agents/skills`, `.claude/skills`, `.codex/skills`.
+- **Versioned evolution**: role, model, effort and skill changes go through proposal review; every bot config keeps an immutable history that can be rolled back.
+- **Team tools**: registers `team_assign_task`, `team_review_task`, `team_remember`, `team_recall`, `team_propose_evolution`, `team_message_bot`, `team_request_secret`; bots can also message each other directly.
+- **Secret pipeline**: secrets are stored AES-256-GCM encrypted; on approval a one-time plaintext env file is written under the data directory (never inside a project workspace) and burned when the next task run finishes or its TTL expires; values are masked as `$NAME` in messages and run output.
+- **Usage stats**: tokens, call counts, cost and runtime are attributed globally, per project and per bot; cost is computed from configurable model prices, and calls without a price are never counted as zero.
 
-## 安装与启用
+## Install
 
-要求 Node 22.19+ 与已安装的 DSH CLI（`dsh --version` 自查）。插件随 DSH Web 在本机进程内运行：
+Requires Node 22.19+ and the DSH CLI (`dsh --version` to check). The plugin runs in-process with DSH Web:
 
 ```sh
 cd <repo>
-npm pack                                        # 产出 dsh-team-bots-<version>.tgz
-dsh plugin --profile <名字> add ./dsh-team-bots-<version>.tgz
-dsh --profile <名字>                             # 从启动日志读取 dsh web 的带 token 入口
+npm pack                                        # produces dsh-team-bots-<version>.tgz
+dsh plugin --profile <name> add ./dsh-team-bots-<version>.tgz
+dsh --profile <name>                             # read the tokenized dsh web entry from the startup log
 ```
 
-一键刷新（打包到仓库 `.dist/` 并重装进指定 profile，缺省装 `team-bots`）：
+One-shot refresh (packs into the repo's `.dist/` and reinstalls into the given profile; default `team-bots`):
 
 ```sh
-npm run profile:install -- --profile <名字>
+npm run profile:install -- --profile <name>
 ```
 
-团队数据与 profile 解耦：数据目录只由 `DSH_TEAM_WORKSPACE` / `DSH_TEAM_DATA` 决定（缺省 `~/.dsh/workspace/team-bots/.data`），换 profile 安装或并存多份安装读写的都是同一份数据。共享技能池固定在本机 `~/.agents/skills`。常用变量模板见 `.env.example`，请用 direnv 或编辑器 dotenv 插件导出，不要在仓库根目录放 `.env`。
+Team data is decoupled from the profile: the data directory is decided only by `DSH_TEAM_WORKSPACE` / `DSH_TEAM_DATA` (default `~/.dsh/workspace/team-bots/.data`), so installing into another profile — or running several installs side by side — reads and writes the same data. The shared skill pool is fixed at `~/.agents/skills`. A template for the common variables lives in `.env.example` at the repository root; export them with direnv or an editor dotenv plugin, and do not put a `.env` file in the repo root.
 
 ```text
-http://<host>:<port>/                     自动登录，直达团队工作台
-http://<host>:<port>/api/dsh-team/ui      DSH Team Bots 团队工作台（直连）
-http://<host>:<port>/index.html           DSH 原生 Web 界面
+http://<host>:<port>/                     auto-login, straight to the team workspace
+http://<host>:<port>/api/dsh-team/ui      DSH Team Bots workspace (direct)
+http://<host>:<port>/index.html           native DSH web UI
 ```
 
-首次打开首页会用当前启动 token 兑换一枚 30 天登录 Cookie 并跳转到工作台，无需手动步骤。自动登录意味着能连上该端口的人即获得 owner 访问，服务只应监听本机或受信任网络。
+The first visit exchanges the startup token for a 30-day login cookie and redirects to the workspace, with no manual step. Auto-login means anyone who can reach that port gets owner access, so the service should listen on localhost or a trusted network only.
 
-常用环境变量：
+Common environment variables:
 
-| 变量 | 默认 | 作用 |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `DSH_TEAM_WORKSPACE` | `~/.dsh/workspace/team-bots` | 团队工作区根目录 |
-| `DSH_TEAM_DATA` | `<工作区>/.data` | 团队 SQLite 与运行记录 |
-| `DSH_TEAM_MAX_RUNS` | `3` | 全局并发运行上限 |
-| `DSH_TEAM_RUN_TIMEOUT_MS` | `900000` | 单个运行的硬超时 |
-| `DSH_TEAM_MAX_RUN_TOKENS` | `0` | 单运行 token 上限，0 关闭 |
-| `DSH_TEAM_STALL_TIMEOUT_MS` | `600000` | 多久没有新事件判定卡住 |
-| `DSH_TEAM_SECRET_KEY` | — | 密钥主密钥（64 位十六进制） |
-| `DSH_TEAM_MODEL_PRICES` | — | 模型价格 JSON 数组 |
-| `DSH_TEAM_AGENT_TEAM` | `0` | 是否启用原生 Agent Teams 层 |
-| `DSH_TEAM_WECHAT` | `0` | 微信通道 |
+| `DSH_TEAM_WORKSPACE` | `~/.dsh/workspace/team-bots` | team workspace root |
+| `DSH_TEAM_DATA` | `<workspace>/.data` | team SQLite database and run records |
+| `DSH_TEAM_MAX_RUNS` | `3` | global concurrent run limit |
+| `DSH_TEAM_RUN_TIMEOUT_MS` | `900000` | hard timeout for a single run |
+| `DSH_TEAM_MAX_RUN_TOKENS` | `0` | token cap per run, 0 disables the cap |
+| `DSH_TEAM_STALL_TIMEOUT_MS` | `600000` | how long a run may go without new events before it counts as stalled |
+| `DSH_TEAM_SECRET_KEY` | — | secret master key (64 hex characters) |
+| `DSH_TEAM_MODEL_PRICES` | — | model prices as a JSON array |
+| `DSH_TEAM_AGENT_TEAM` | `0` | enable the native Agent Teams layer |
+| `DSH_TEAM_WECHAT` | `0` | WeChat channel |
 
-## 开发
+## Development
 
 ```sh
-npm run dev        # http://127.0.0.1:4317，假 runtime，数据写在 .dev/
+npm run dev        # http://127.0.0.1:4317, fake runtime, data written to .dev/
 npm test           # node --test "tests/*.test.js"
-npm run doctor     # 检查 Node/DSH 版本、工作区与技能池路径的可写性
+npm run doctor     # checks Node/DSH versions and writability of workspace and skill pool
 ```
 
-`src/` 是服务端与调度，`ui/` 是工作台前端，`tests/` 是测试，`docs/` 放设计与评审文档。开发预览无认证，不动任何 DSH 配置，不能用于生产。
+`src/` holds the server and scheduler, `ui/` the workspace frontend, `tests/` the test suite, `docs/` design and review notes. The dev preview has no authentication, touches no DSH configuration, and is not for production.
 
-CI：push `v*` tag 自动发 npm——工作流跑全量测试，全绿后发布到 registry.npmjs.org（见 `.github/workflows/publish.yml`）。
+CI: pushing a `v*` tag publishes to npm — the workflow runs the full test suite and publishes to registry.npmjs.org only when everything is green (see `.github/workflows/publish.yml`).
 
-## 截图
+## Screenshots
 
-任务看板按状态分组，父子任务与待验收标记一眼可见：
+The task board groups by status, so parent/child tasks and pending reviews are visible at a glance:
 
-![任务看板](docs/assets/tasks.png)
+![Task board](docs/assets/tasks.png)
 
-用量统计区分汇总窗口与近 14 天明细，成本按模型价格计算：
+Usage stats separate the summary window from the last 14 days of detail, with cost computed from model prices:
 
-![用量统计](docs/assets/usage.png)
+![Usage stats](docs/assets/usage.png)
 
-暗色模式：
+Dark mode:
 
-![暗色群聊](docs/assets/chat-dark.png)
+![Dark project chat](docs/assets/chat-dark.png)
 
-![暗色用量统计](docs/assets/usage-dark.png)
+![Dark usage stats](docs/assets/usage-dark.png)
 
-## 安全边界
+## Security boundaries
 
-- 本插件不自带沙箱：Bot 会话在 DSH 的 `danger-full-access` 下以当前用户身份执行命令，能读写该用户可达的一切文件。
-- `<工作区>/{project}` 只是逻辑隔离，不是强沙箱；互不信任的团队不要共用同一个 DSH 实例与工作区。
-- 对外提供服务必须走 HTTPS 反向代理，并正确转发 Host 与 WebSocket。
+- The plugin ships no sandbox: bot sessions execute commands as the current user under DSH's `danger-full-access`, with access to every file that user can reach.
+- `<workspace>/{project}` is logical isolation, not a strong sandbox; do not let mutually untrusted teams share one DSH instance and workspace.
+- Serving it publicly requires an HTTPS reverse proxy that forwards Host and WebSocket correctly.
 
 ## License
 
-Apache-2.0，见 `LICENSE` 与 `NOTICE`。
+Apache-2.0, see `LICENSE` and `NOTICE` in the repository root.

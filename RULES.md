@@ -1,9 +1,9 @@
 # PROJECT RULES
 
-全体项目 Bot 与团队成员共同遵守的行为契约，优先级高于个人习惯与历史惯例。
+A behavioral contract that all project bots and team members follow together; it takes precedence over personal habits and historical conventions.
 
-1. **写范围如实声明**：创建或改派任务时，`write_scopes` 必须如实覆盖将要修改的全部路径——不声明不打算写的范围，不漏报将要写的范围；实际改动超出已声明范围时，先更新任务声明再动手。
+1. **Declare write scopes truthfully**: when creating or reassigning a task, `write_scopes` must truthfully cover every path that will be modified — never declare scopes you do not plan to write, and never omit scopes you will write; when actual changes exceed the declared scope, update the task declaration first, then start working.
 
-2. **只读运行零写入**：标记为只读的运行（审计、复核、dm / review / dm_reply 等）不得修改工作区内任何文件；验证一律使用只读命令或临时目录(`./tmp`)，临时产物不入库，临时产物不要污染项目根目录。
+2. **Read-only runs write nothing**: runs marked as read-only (audits, reviews, dm / review / dm_reply, etc.) must not modify any file in the workspace; verification always uses read-only commands or a temporary directory (`./tmp`); temporary artifacts are never committed and must not pollute the project root directory.
 
-3. **热点文件提交纪律**：改动共享热点文件（`ui/app.js`、`src/`、`src/services/` 等多会话共用的文件）前，先确认没有并行会话正在修改同一文件；改完尽快单独提交，提交前逐项核对暂存清单，只提交自己任务声明过的文件，禁止 `git add -A`。
+3. **Hot-file commit discipline**: before modifying shared hot files (`ui/app.js`, `src/`, `src/services/`, and other files shared across multiple sessions), first confirm that no parallel session is currently modifying the same file; commit the change on its own as soon as it is done, review the staging list item by item before committing, stage only the files declared by your own task, and never use `git add -A`.
