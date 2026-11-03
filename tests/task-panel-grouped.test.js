@@ -161,7 +161,7 @@ test('空分组只留一行组头，不渲染组体占位（P1-4）', () => {
 // 断言真实排序行为而不是复述源码文本。
 const sortBlock = /\/\/ task-sort:start[\s\S]*?\/\/ task-sort:end/.exec(source)?.[0]
 assert.ok(sortBlock, 'ui/app.js 缺少 task-sort 标记块')
-const evalState = { taskSort: 'created_desc' }
+const evalState = { taskSort: 'completed_desc' }
 const { TASK_SORTS, sortTasksForPanel } =
   new Function(`const state = ${JSON.stringify(evalState)};\n${sortBlock}\n${timeBlock}\nreturn { TASK_SORTS, sortTasksForPanel }`)()
 
@@ -172,9 +172,15 @@ const sortTasks = [
 ]
 
 test('排序选择器存在且写 state.taskSort（D-63）', () => {
-  assert.match(source, /taskSort: 'created_desc',/, 'state 默认 created_desc')
+  assert.match(source, /taskSort: 'completed_desc',/, 'state 默认 completed_desc')
   assert.match(source, /<select class="select" data-task-sort aria-label="任务排序"/, '工具栏有排序选择器')
   assert.match(source, /if \(el\.matches\('\[data-task-sort\]'\)\) \{\s*\n\s*state\.taskSort = el\.value\s*\n\s*render\(\)/, 'change 分支写 state 后重渲染')
+})
+
+test('默认排序=完成时间 新→旧（DSHBOTS-76）', () => {
+  // 默认值单一事实源在 ui/modules/state.js（上一测试的源码断言已锁字面量）；
+  // 这里锁行为：不传 mode 时走 state.taskSort 默认档，无完成时间基准的任务排末尾不穿插。
+  assert.deepEqual(sortTasksForPanel(sortTasks).map(task => task.id), ['c', 'a', 'b'], '不传 mode 默认按完成时间新→旧')
 })
 
 test('六种排序值齐全', () => {

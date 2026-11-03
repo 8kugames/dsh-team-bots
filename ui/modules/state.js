@@ -32,8 +32,8 @@ export const state = {
   // 渲染窗口闸门：render() 全量重建 DOM 期间为 true，此时到达的聊天滚动事件一律忽略（DSHBOTS-72）。
   rendering: false,
   taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
-  // 任务面板组内排序（D-63）：默认创建时间新→旧；六档口径见 TASK_SORTS。
-  taskSort: 'created_desc',
+  // 任务面板组内排序（D-63）：默认完成时间新→旧；六档口径见 TASK_SORTS。
+  taskSort: 'completed_desc',
   // 用量页三态：global=侧栏「用量统计」的全局视图；domain=群聊 NAV 用量 tab（本群）；solo=单聊 NAV 用量 tab（本 bot）。
   usageMode: 'global',
   // 全局视图内的展示维度：global / model / bot / project（口径切换只保留这四类）。
