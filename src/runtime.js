@@ -20,6 +20,9 @@ export class DshRuntime {
     this.modelsCache = { at: 0, value: [] }
     // system 区会话级冻结缓存（方案 B）：session id -> 定格的身份提示词字节。
     this.promptFreeze = new Map()
+    // 尾窗增量水位（DSHBOTS-96 P1-1）：session id → 已注入到 messages/solo_messages 的
+    // rowid。值随会话线性增长，条目数受会话数约束，不做 LRU。
+    this.messageWatermarks = new Map()
     this.selecting = Promise.resolve()
     this.completionHandler = null
     this.attached = false

@@ -234,7 +234,7 @@ export const sessionMethods = {
       ? { ...bot, provider: modelOverride.provider, model: modelOverride.model, effort: modelOverride.effort ?? null }
       : bot
     const sessionId = await this.ensureSession(bot, project, { run, task, sessionKind, modelOverride })
-    let prompt = this.promptFor({ run, bot, project, task, chatMessage })
+    let prompt = this.promptFor({ run, bot, project, task, chatMessage, sessionId })
     const pending = {
       runId: run.id,
       sessionId,

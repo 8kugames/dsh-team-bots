@@ -51,6 +51,9 @@ export class TeamService {
     this.rate = {}
     // 只读运行开始时的项目工作区指纹，用于事后发现“只读会话改了文件”。
     this.fingerprints = new Map()
+    // 已告警过的只读审计指纹（project.id:after 的 sha256 → run.id，DSHBOTS-96 P1-2）：
+    // 同一指纹跨运行只点名一次，重复只记 run_event，不重复插群消息。
+    this.readAuditAlerted = new Map()
     this.lastMaintenanceAt = 0
     this.wechat = null
     // 运行中的终端命令：commandId → { child, buffer, startedAtMs, timedOut, cancelRequested, timer }。

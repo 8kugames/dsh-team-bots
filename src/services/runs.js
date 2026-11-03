@@ -10,7 +10,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { assertInside } from '../paths.js'
 import { runUsageTotals } from '../usage.js'
 import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
-import { id, jsonParse, nowIso, text } from '../util.js'
+import { id, jsonParse, nowIso, sha256, text } from '../util.js'
 import { readWriteScopes, writeScopePathsOverlap } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
 import { isRateLimitError, MAX_RATE_LIMIT_RETRIES, needsSynthesizedBackoff, rateLimitBackoffMs } from './backoff.js'
@@ -487,11 +487,20 @@ if (run.kind === 'dm_reply') {
     const suspectNote = decision.suspects.length
       ? `（存在并发写运行 ${decision.suspects.join('、')}，但变化不在其写范围内）`
       : ''
+    // 同指纹去重（DSHBOTS-96 P1-2）：after 内容 hash 相同说明是同一工作区状态再次被扫到，
+    // 已点名过就不再重复插群消息，只留 run_event 供追溯。
+    const dedupKey = `${project.id}:${sha256(after)}`
+    if (this.readAuditAlerted.has(dedupKey)) {
+      this.insertRunEvent(run.id, 'read_audit_dup', '工作区指纹与已告警记录相同，本次不重复点名')
+      this.logger.warn?.('dsh-team: read-only run %s changed the workspace (duplicate fingerprint, alert suppressed)', run.id)
+      return
+    }
+    this.readAuditAlerted.set(dedupKey, run.id)
     this.insertMessage({
       projectId: project.id,
       senderType: 'system',
       senderId: 'system',
-      body: `只读运行（${run.kind}）修改了项目工作区${suspectNote}，请确认是否应该由任务运行来做：\n${after.slice(0, 800)}`,
+      body: `⚠️ 工作区在只读运行（${run.kind}，运行 ${run.id}）期间被修改，未归因到并发写运行${suspectNote}：\n\`\`\`\n${after.slice(0, 400)}\n\`\`\`\n若此变更应由任务产出，请立卡跟进。`,
       taskId: run.task_id ?? undefined,
       runId: run.id,
     })

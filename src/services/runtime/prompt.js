@@ -15,6 +15,11 @@ export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-acces
 // 死会话不再求值，条目只会等 LRU 淘汰）。
 export const PROMPT_FREEZE_LIMIT = 256
 
+// 增量尾窗（DSHBOTS-96 P1-1）：无水位（新会话/进程重启）回退尾 12 条全量窗给足上下文；
+// 有水位只注入其后新消息；上限 24 条兜住多 run 并发共用 session 时的积压。
+export const RECENT_FALLBACK_LIMIT = 12
+export const RECENT_INCREMENTAL_LIMIT = 24
+
 // 沙箱档位按运行类型收紧：一切非写运行（dm/dm_reply/chat/memory_review/solo_chat/review/handle
 // 等 mode!=='write'）物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
 // run 为空（无运行上下文的会话建立）保持 bot.file_policy 现行为。
@@ -227,33 +232,70 @@ export const promptMethods = {
     }
   },
 
-  // 单聊运行提示词：没有项目上下文，只带本会话最近消息。
-  soloRunPrompt({ bot, chatMessage }) {
+  // 增量水位尾窗（DSHBOTS-96 P1-1）：每 session 维护已注入的 rowid 水位，此后每轮只注入
+  // 水位之后的新消息，替代旧的「尾 12 条×240 摘录每轮重烧」。语义：
+  // - 无水位（新会话首次注入/进程重启）→ 回退尾 RECENT_FALLBACK_LIMIT 条全量窗；
+  // - 有水位 → rowid > 水位的新消息（rowid 单调递增，与 created_at 排序一致）；
+  // - 水位推进到取窗时刻该表 scope 内最大 rowid，只前进不回退；空窗也推进（越过触发消息）；
+  // - 多 run 并发共用同一 session：先取窗者把积压新消息一次带走并前移水位，后取窗者窗口
+  //   为空——两条 prompt 进同一宿主 session 历史，消息不丢不重；
+  // - excludeId 排除本轮触发消息（正文已在 # Group message / # Solo message 完整呈现，不再双份）。
+  // sessionId 为空（无会话上下文的直接调用）时不读不写水位，等价旧的固定尾窗。
+  watermarkWindow({ sessionId, table, columns, where, params, excludeId }) {
+    const advance = this.store.get(`SELECT MAX(rowid) AS m FROM ${table} WHERE ${where}`, ...params)?.m ?? null
+    const watermark = sessionId ? this.messageWatermarks.get(sessionId) : undefined
+    const rows = watermark === undefined
+      ? this.store.all(
+        `SELECT ${columns} FROM ${table} WHERE ${where} ORDER BY rowid DESC LIMIT ?`,
+        ...params, RECENT_FALLBACK_LIMIT,
+      ).reverse()
+      : this.store.all(
+        `SELECT ${columns} FROM ${table} WHERE ${where} AND rowid > ? ORDER BY rowid DESC LIMIT ?`,
+        ...params, watermark, RECENT_INCREMENTAL_LIMIT,
+      ).reverse()
+    if (sessionId && advance !== null) {
+      const current = this.messageWatermarks.get(sessionId)
+      if (current === undefined || advance > current) this.messageWatermarks.set(sessionId, advance)
+    }
+    return {
+      rows: excludeId ? rows.filter(row => row.id !== excludeId) : rows,
+      incremental: watermark !== undefined,
+    }
+  },
+
+  // 单聊运行提示词：没有项目上下文，只带本会话增量新消息。
+  soloRunPrompt({ bot, chatMessage, sessionId }) {
     const header = [
       `You are: ${bot.name}`,
       'Mode: one-on-one conversation (outside projects)',
       `Workspace: ${join(this.config.workspace, '_the_bots', bot.solo_dir)}`,
     ].join('\n')
-    const recent = this.store.all(
-      'SELECT id, sender_type, sender_id, body FROM solo_messages WHERE bot_id = ? ORDER BY created_at DESC LIMIT 12',
-      bot.id,
-    ).reverse()
+    const { rows: recent, incremental } = this.watermarkWindow({
+      sessionId,
+      table: 'solo_messages',
+      columns: 'id, sender_type, sender_id, body',
+      where: 'bot_id = ?',
+      params: [bot.id],
+      excludeId: chatMessage?.id,
+    })
     const context = recent.map((item) => {
       const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
       return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}: ${body}`
     }).join('\n')
+    const recentBlock = context
+      ? `${incremental ? 'New messages since your last turn (ids are for team_recall):' : 'Recent conversation (truncated, ids are for team_recall):'}\n${context}`
+      : (incremental ? 'No new messages since your last turn.' : 'No recent conversation.')
     return `${header}
 
 # Solo message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
 
-Recent conversation (truncated, ids are for team_recall):
-${context}
+${recentBlock}
 
 Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.`
   },
-  promptFor({ run, bot, project, task, chatMessage }) {
-    if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage })
+  promptFor({ run, bot, project, task, chatMessage, sessionId }) {
+    if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, sessionId })
     const header = [
       `Project: ${project.name} (${project.key})`,
       `Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
@@ -384,15 +426,22 @@ ${task.description || '(no description)'}${threads}${parallel}
 Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
 When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`
     }
-    const recent = this.store.all(
+    const { rows: recent, incremental } = this.watermarkWindow({
+      sessionId,
       // 审批卡片（kind='approval'）是给人看的 UI 锚点，不进 bot 上下文；旧行迁移后回填 'text'。
-      "SELECT id, sender_type, sender_id, body, task_id FROM messages WHERE project_id = ? AND kind = 'text' ORDER BY created_at DESC LIMIT 12",
-      project.id,
-    ).reverse()
+      table: 'messages',
+      columns: 'id, sender_type, sender_id, body, task_id',
+      where: "project_id = ? AND kind = 'text'",
+      params: [project.id],
+      excludeId: chatMessage?.id,
+    })
     const context = recent.map((item) => {
       const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
       return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}${item.task_id ? ' (task thread)' : ''}: ${body}`
     }).join('\n')
+    const recentBlock = context
+      ? `${incremental ? 'New project messages since your last turn (ids are for team_recall):' : 'Recent project messages (truncated, ids are for team_recall):'}\n${context}`
+      : (incremental ? 'No new project messages since your last turn.' : 'No recent project messages.')
     const openTasks = this.store.all(
       `SELECT number, title, status FROM tasks
        WHERE project_id = ? AND status NOT IN ('done', 'canceled')
@@ -409,8 +458,7 @@ When the deliverable includes images, put the files in the workspace and referen
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
 ${quoteLine}
-Recent project messages (truncated, ids are for team_recall):
-${context}
+${recentBlock}
 
 Open tasks:
 ${taskList}
