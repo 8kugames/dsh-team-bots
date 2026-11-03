@@ -911,8 +911,6 @@ function renderSoloConfig() {
 }
 
 // ===== approval-card:start 审批卡片（DSHBOTS-32 UI）=====
-const APPROVAL_STATUS = { pending: '等待审批', allowed: '已允许一次', rejected: '已拒绝', timeout: '已超时', cancelled: '已取消' }
-
 // ===== approval-ux:start 审批交互（DSHBOTS-102）=====
 // 超时可见：秒级倒计时 + 临期危险色。剩余时间从 expires_at 反推，
 // 1s 定时器只改 .approval-clock 文本，不整卡重绘（2.8s 轮询整卡重绘会打断跳动感）。
@@ -941,30 +939,88 @@ function approvalExpiresMs(expiresAt) {
 }
 // ===== approval-ux:end =====
 
+// ===== approval-v2:start 审批卡片视觉规格 V2（DSHBOTS-108）=====
+// 五态：pending（唯一强调态）/ allowed / rejected / timeout / cancelled。
+// pending 之外四态统一走「已决」排版：无倒计时无按钮、正文降 --ink-2、卡片回中性底；
+// 红色只出现在 rejected 的左侧条与 pill 小点，其余中性。
+const APPROVAL_STATUS = { pending: '等待审批', allowed: '已允许一次', rejected: '已拒绝', timeout: '已超时', cancelled: '已取消' }
+// 各态图标：盾牌（待批）/ 对勾（已放行）/ 叉（已拒绝）/ 时钟（超时）/ 禁止（取消）。
+// ui/modules/icons.js 不在本卡写范围，shield 与 ban 两枚路径在此内联；check/close/clock 走既有图标表。
+const APPROVAL_ICON_PATHS = {
+  shield: '<path d="M12 3l7 3v5c0 4.4-3 8.2-7 9.9-4-1.7-7-5.5-7-9.9V6z"/>',
+  ban: '<circle cx="12" cy="12" r="8"/><path d="m6.7 6.7 10.6 10.6"/>',
+}
+const APPROVAL_STATE_ICON = { pending: 'shield', allowed: 'check', rejected: 'close', timeout: 'clock', cancelled: 'ban' }
+function approvalIcon(name) {
+  const path = APPROVAL_ICON_PATHS[name]
+  if (!path) return icon(name)
+  return `<svg class="approval-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`
+}
+// 卡片倒计时文案：⏱ 剩余 X 分 Y 秒（顶部窄条另用「X 分后自动拒绝」，两处口径各自保留）。
+function formatApprovalCountdown(remainingMs) {
+  const total = Math.max(0, Math.ceil((Number(remainingMs) || 0) / 1000))
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return minutes <= 0 ? `剩余 ${seconds} 秒` : `剩余 ${minutes} 分 ${seconds} 秒`
+}
+// 进度条比例：剩余时间 ÷ 授权窗口总长，夹在 0–1（剩余越多条越长，临期变短）。
+function approvalProgressRatio(remainingMs, windowMs) {
+  const total = Number(windowMs) || 0
+  if (total <= 0) return 0
+  return Math.max(0, Math.min(1, (Number(remainingMs) || 0) / total))
+}
+// 工具路径：approvals 表没有独立路径字段，从摘要里取第一个路径片段（绝对路径，或带扩展名的相对路径）；取不到不出 chip。
+function approvalPath(text) {
+  const match = String(text ?? '').match(/(?:^|[\s"'`(（])((?:~|\.{1,2})?\/[\w.\-@]+(?:\/[\w.\-@]*)+|[\w.\-@]+\/[\w.\-@]+\.[A-Za-z0-9]+)/)
+  return match ? match[1] : ''
+}
+// 卡片 HTML：头部（图标 + 角色 + 工具/路径 chip）、正文、页脚三段；五态共用同一骨架。
+// pending 页脚是倒计时 + 进度条 + 双按钮；已决四态页脚只有状态 pill。
+function approvalCardMarkup(approval, deciding = false) {
+  const status = String(approval.status ?? '')
+  const pending = status === 'pending'
+  const summary = approval.display_reason || approval.reason || '（无说明）'
+  const expiresAt = approvalExpiresMs(approval.expires_at)
+  const createdAt = Date.parse(approval.created_at)
+  const windowMs = Number.isFinite(createdAt) ? Math.max(1, expiresAt - createdAt) : 0
+  const percent = pending ? Math.round(approvalProgressRatio(approval.remainingMs, windowMs) * 100) : 0
+  const urgent = approvalUrgent(approval.remainingMs)
+  const path = approvalPath(summary)
+  const pillTone = status === 'allowed' ? 'is-allowed' : status === 'rejected' ? 'is-rejected' : 'is-muted'
+  const pillText = status === 'allowed' && approval.decided_at
+    ? `${APPROVAL_STATUS.allowed} ${formatTime(approval.decided_at)}`
+    : (APPROVAL_STATUS[status] ?? status)
+  return `<div class="message-row">
+    <div class="message-body-wrap approval-card" data-approval-status="${attr(approval.status)}" data-approval-id="${attr(approval.id)}">
+      <div class="approval-head">
+        <span class="approval-icon is-${attr(status)}">${approvalIcon(APPROVAL_STATE_ICON[status] ?? 'clock')}</span>
+        <div class="approval-head-main">
+          <div class="message-meta approval-meta"><strong>${esc(approval.botName)}</strong><span class="approval-ask">请求提权</span><span>${esc(formatTime(approval.created_at))}</span></div>
+          <div class="approval-tools"><span class="approval-chip mono">${esc(approval.tool_name)}</span>${path ? `<span class="approval-chip mono approval-chip-path" title="${attr(path)}">${esc(path)}</span>` : ''}</div>
+        </div>
+      </div>
+      <div class="approval-summary">${esc(summary)}</div>
+      ${pending
+        ? `<div class="approval-countdown${urgent ? ' urgent' : ''}" data-expires="${expiresAt}">${icon('clock')}<span class="approval-clock${approvalUrgent(approval.remainingMs) ? ' urgent' : ''}" data-expires="${expiresAt}">${esc(formatApprovalCountdown(approval.remainingMs))}</span></div>
+      <div class="approval-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" data-expires="${expiresAt}" data-window="${windowMs}"><i class="approval-progress-fill" style="width:${percent}%"></i></div>
+      <div class="approval-actions">
+        <button class="btn small primary" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="allow"${deciding ? ' disabled' : ''}>允许一次</button>
+        <button class="btn small danger" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="reject"${deciding ? ' disabled' : ''}>拒绝</button>
+      </div>`
+        : `<div class="approval-foot"><span class="approval-pill ${pillTone}"${approval.decided_at ? ` title="${attr(formatTime(approval.decided_at))}"` : ''}>${esc(pillText)}</span></div>`}
+    </div>
+  </div>`
+}
+// ===== approval-v2:end =====
+
 // 审批卡片：消息行只是锚点，状态以 state.data.approvals 为准（渲染时查表，轮询自然刷新）。
 // 查不到该条（超出 30 条窗口）时退化为 system 纯文本，不留假状态。
 function renderApprovalCard(message) {
   const approval = (state.data?.approvals ?? []).find(item => item.id === message.approval_id)
   if (!approval) return `<div class="message-system"><span>${esc(message.body)}</span></div>`
-  const pending = approval.status === 'pending'
   // 决策中禁用按钮：重复点击不重复发请求（后端也有 pending 校验，前端先挡一层）。
   const deciding = state.approvalDeciding?.has(approval.id) ?? false
-  const summary = approval.display_reason || approval.reason || '（无说明）'
-  const expiresAt = approvalExpiresMs(approval.expires_at)
-  return `<div class="message-row">
-    <div class="message-body-wrap approval-card" data-approval-status="${attr(approval.status)}" data-approval-id="${attr(approval.id)}">
-      <div class="message-meta"><strong>${esc(approval.botName)} 请求审批</strong><span>${esc(formatTime(approval.created_at))}</span></div>
-      <div class="approval-tool mono">${esc(approval.tool_name)}</div>
-      <div class="approval-summary">${esc(summary)}</div>
-      ${pending
-        ? `<div class="approval-foot faint"><span class="approval-clock${approvalUrgent(approval.remainingMs) ? ' urgent' : ''}" data-expires="${expiresAt}">${esc(formatApprovalRemaining(approval.remainingMs))}</span></div>
-      <div class="approval-actions">
-        <button class="btn small primary" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="allow"${deciding ? ' disabled' : ''}>允许一次</button>
-        <button class="btn small danger" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="reject"${deciding ? ' disabled' : ''}>拒绝</button>
-      </div>`
-        : `<div class="approval-foot"><span class="pill">${esc(APPROVAL_STATUS[approval.status] ?? approval.status)}</span>${approval.decided_at ? `<span class="faint">${esc(formatTime(approval.decided_at))}</span>` : ''}</div>`}
-    </div>
-  </div>`
+  return approvalCardMarkup(approval, deciding)
 }
 // ===== approval-card:end =====
 
@@ -4608,7 +4664,9 @@ document.addEventListener('click', async (event) => {
       }
       case 'delete-secret': {
         const name = target.dataset.secretName || '该密钥'
-        if (!window.confirm(`删除密钥 ${name}？各项目的 .team/secrets.env 会同步更新。`)) break
+        // DSHBOTS-106 起明文只在批准时一次性物化到数据目录，项目工作区不再有明文密钥文件；
+        // 删除即吊销：已下发的一次性运行时副本当场失效，重新使用要再走一次申请与批准。
+        if (!window.confirm(`删除密钥 ${name}？相关项目已下发的一次性运行时副本会立即失效，重新使用需再次申请。`)) break
         await api('delete_secret', { secretId: target.dataset.secretId })
         await refresh()
         toast('密钥已删除', 'success')
@@ -5364,8 +5422,22 @@ setInterval(() => {
   // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
   for (const el of document.querySelectorAll('.approval-clock[data-expires], .approval-menu-time[data-expires]')) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
-    el.textContent = formatApprovalRemaining(remaining)
+    // 卡片内 .approval-clock 用 V2 倒计时文案（剩余 X 分 Y 秒），顶部窄条沿用「X 分后自动拒绝」。
+    el.textContent = el.classList.contains('approval-menu-time') ? formatApprovalRemaining(remaining) : formatApprovalCountdown(remaining)
     el.classList.toggle('urgent', approvalUrgent(remaining))
+  }
+  // 卡片倒计时外层：图标随临期转黄（DSHBOTS-108）。
+  for (const el of document.querySelectorAll('.approval-countdown[data-expires]')) {
+    el.classList.toggle('urgent', approvalUrgent(approvalRemainingFrom(el.dataset.expires)))
+  }
+  // 卡片进度条：剩余越多条越长，临期变短并转黄（DSHBOTS-108）。
+  for (const el of document.querySelectorAll('.approval-progress[data-expires]')) {
+    const remaining = approvalRemainingFrom(el.dataset.expires)
+    const ratio = approvalProgressRatio(remaining, el.dataset.window)
+    const fill = el.querySelector('.approval-progress-fill')
+    if (fill) fill.style.width = `${Math.round(ratio * 100)}%`
+    el.classList.toggle('urgent', approvalUrgent(remaining))
+    el.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
   }
 }, 1000)
 void init()

@@ -1565,29 +1565,123 @@ a.global-config.dsh-official-link:hover {
     color: var(--ink-3);
     font-size: var(--fs-caption);
 }
-/* 审批卡片：群聊气泡流内的待审批/已决条目（DSHBOTS-32） */
+/* 审批卡片：群聊气泡流内的待审批/已决条目（DSHBOTS-32）+ 视觉规格 V2（DSHBOTS-108）。
+   五态骨架一致，只有 pending 是强调态；已决四态回中性底、正文降 --ink-2、无倒计时无按钮。
+   圆角 12（卡）/ 6（图标徽章）/ 7（chip、pill、按钮），间距 4-8-10，字号 15/13/12。 */
 .approval-card {
     border: 1px solid var(--line);
-    border-left: 3px solid var(--c-violet);
-    border-radius: 10px;
-    padding: 10px 12px;
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     min-width: 240px;
     max-width: 480px;
+    background: var(--surface);
 }
-.approval-card[data-approval-status='allowed'] { border-left-color: var(--c-green); }
-.approval-card[data-approval-status='rejected'],
+.approval-card[data-approval-status='pending'] { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.approval-card[data-approval-status='allowed'] { border-left-color: var(--green); }
+.approval-card[data-approval-status='rejected'] { border-left-color: var(--danger); }
 .approval-card[data-approval-status='timeout'],
-.approval-card[data-approval-status='cancelled'] { border-left-color: var(--c-coral); }
-.approval-tool { font-weight: 600; }
-.approval-summary { white-space: pre-wrap; word-break: break-word; }
-.approval-actions { display: flex; gap: 8px; margin-top: 2px; }
-.approval-foot { display: flex; align-items: center; gap: 8px; }
+.approval-card[data-approval-status='cancelled'] { border-left-color: var(--ink-3); }
+/* 头部：状态徽章 + 角色/工具 chip */
+.approval-head { display: flex; align-items: flex-start; gap: 8px; }
+.approval-head-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.approval-icon {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--ink-3);
+}
+.approval-icon svg { width: 14px; height: 14px; }
+.approval-icon.is-pending { background: var(--accent-wash); color: var(--accent-text); }
+.approval-icon.is-allowed { background: var(--green-wash); color: var(--green); }
+.approval-icon.is-rejected,
+.approval-icon.is-timeout,
+.approval-icon.is-cancelled { background: var(--surface-2); color: var(--ink-3); }
+/* 角色行：角色名加粗 + 「请求提权」灰字 + 时间 */
+.approval-meta { font-size: var(--fs-small); color: var(--ink-2); gap: 4px; }
+.approval-meta strong { color: var(--ink); font-weight: 600; }
+.approval-ask { color: var(--ink-3); }
+/* 工具名 + 路径：等宽小字 chip */
+.approval-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.approval-chip {
+    font-family: var(--mono);
+    font-size: var(--fs-caption);
+    line-height: 1.4;
+    padding: 2px 6px;
+    border-radius: 7px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.approval-chip-path { color: var(--ink-3); }
+/* 正文：pending --ink，已决四态 --ink-2 */
+.approval-summary { font-size: var(--fs-body); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.approval-card[data-approval-status='pending'] .approval-summary { color: var(--ink); }
 /* 倒计时（DSHBOTS-102）：秒级精确剩余时间，临期切 --star（D-101 规格的临期告警色）。 */
 .approval-clock { font-variant-numeric: tabular-nums; }
 .approval-clock.urgent { color: var(--star); font-weight: 600; }
+/* 倒计时行（V2）：⏱ + 「剩余 X 分 Y 秒」，临期图标与文字一起转黄 */
+.approval-countdown { display: flex; align-items: center; gap: 4px; font-size: var(--fs-small); color: var(--ink-2); }
+.approval-countdown svg { width: 13px; height: 13px; color: var(--ink-3); flex: 0 0 auto; }
+.approval-countdown.urgent { color: var(--star); }
+.approval-countdown.urgent svg { color: var(--star); }
+/* 进度条（V2）：剩余越多条越长，临期变短并转黄 */
+.approval-progress { height: 4px; border-radius: 7px; background: var(--surface-3); overflow: hidden; }
+.approval-progress-fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); transition: width .6s linear; }
+.approval-progress.urgent .approval-progress-fill { background: var(--star); }
+.approval-actions { display: flex; gap: 8px; }
+.approval-foot { display: flex; align-items: center; gap: 8px; }
+/* 已决 pill：中性字 + 状态小点（红色小点只出现在 rejected） */
+.approval-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 7px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: var(--fs-caption);
+}
+.approval-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); flex: 0 0 auto; }
+.approval-pill.is-allowed::before { background: var(--green); }
+.approval-pill.is-rejected::before { background: var(--danger); }
+.approval-pill.is-muted::before { background: var(--ink-3); }
+/* 消息流与通知容器的图片/图标尺寸兜底（DSHBOTS-108）：
+   正文、审批摘要或宿主通知带进来的大图/大图标不能撑爆视口——限宽限高、图片保持比例。
+   既有 .message-bubble img 规则只管正文图片，这里补齐 svg 与通知容器（toast、待审横幅）。 */
+:is(.message-bubble, .comment-body, .message-system) svg {
+    max-width: 120px;
+    max-height: 120px;
+}
+.approval-card img {
+    max-width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+}
+.approval-card svg {
+    max-width: 64px;
+    max-height: 64px;
+}
+:is(#toast-root, .toast, .approval-banner) img {
+    max-width: 100%;
+    max-height: 120px;
+    object-fit: contain;
+}
+:is(#toast-root, .toast, .approval-banner) svg {
+    max-width: 24px;
+    max-height: 24px;
+}
 /* 跨项目待审入口（DSHBOTS-102）：工作台顶部窄条 + 计数徽标 + 明细菜单。
    0 待办时整条不渲染（approvalBannerView 返回空串），不占位、不撑高顶栏。 */
 .approval-banner {
