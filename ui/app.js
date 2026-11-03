@@ -406,6 +406,8 @@ function render() {
   const savedChatScroll = document.querySelector('.chat-messages')?.scrollTop ?? null
   const savedViewScroll = captureViewScroll(lastRenderedView === state.view)
   app.innerHTML = renderShell()
+  // 附图缩略图：模板嵌缓存命中者，未命中的在此异步补齐（会话级缓存去重，见 hydrateMessageImageThumbs）。
+  hydrateMessageImageThumbs(app)
   if (!state.chatAtBottom && savedChatScroll !== null) {
     const fresh = document.querySelector('.chat-messages')
     if (fresh) fresh.scrollTop = savedChatScroll
@@ -3454,15 +3456,62 @@ function insertTextAtCursor(input, insertText) {
 }
 // composer-paste:end
 
-// 消息附图块：只渲染元数据（文件名 + 大小），base64 不进消息 HTML；点开再按 id 取原图。
+// 消息附图块：缩略图 + 文件名/大小。缩略图 URL 走会话级缓存（hydrateMessageImageThumbs 渲染后补齐），
+// 原图数据不进消息 HTML；点击行为不变，仍走 data-action 进全屏查看器。
+const messageImageThumbUrls = new Map()
+const messageImageThumbPending = new Map()
+
+// 按 id 取原图并转 blob: URL：复用全屏查看器同一条取图 API 与转换函数，会话级缓存 + 并发去重，
+// 同一张图只请求一次；轮询全量重建时命中缓存直接嵌模板，不重复请求。
+function messageImageThumbUrl(imageId) {
+  const cached = messageImageThumbUrls.get(imageId)
+  if (cached) return Promise.resolve(cached)
+  let pending = messageImageThumbPending.get(imageId)
+  if (!pending) {
+    pending = api('get_message_image', { imageId }, { quiet: true })
+      .then(image => {
+        const url = base64BlobUrl(image.data, image.mediaType)
+        messageImageThumbUrls.set(imageId, url)
+        return url
+      })
+      .finally(() => { messageImageThumbPending.delete(imageId) })
+    messageImageThumbPending.set(imageId, pending)
+  }
+  return pending
+}
+
 function renderMessageImages(images) {
   const list = Array.isArray(images) ? images : []
   if (list.length === 0) return ''
-  return `<div class="msg-images">${list.map(image => `
+  return `<div class="msg-images">${list.map(image => {
+    const thumbUrl = messageImageThumbUrls.get(image.id) ?? ''
+    return `
     <button type="button" class="msg-image-tile" data-action="view-message-image" data-image-id="${attr(image.id)}" title="${attr(image.name || '查看原图')}">
-      <span class="msg-image-icon">${icon('image')}</span>
+      ${thumbUrl
+        ? `<img class="msg-image-thumb" src="${attr(thumbUrl)}" alt="${attr(image.name || '图片')}" />`
+        : `<span class="msg-image-icon">${icon('image')}</span>`}
       <span class="msg-image-meta"><span class="msg-image-name">${esc(image.name || '图片')}</span><span class="msg-image-size">${esc(formatImageBytes(image.bytes))}</span></span>
-    </button>`).join('')}</div>`
+    </button>`
+  }).join('')}</div>`
+}
+
+// 渲染后补缩略图：模板已同步嵌缓存命中者，这里只处理未命中的瓦片——异步取图并原位替换图标占位；
+// 取图失败保留占位（瓦片仍可点击，报错交给查看器路径兜底）。
+async function hydrateMessageImageThumbs(root = document) {
+  const tiles = Array.from(root.querySelectorAll('.msg-image-tile[data-image-id]'))
+  await Promise.all(tiles.filter(tile => !tile.querySelector('.msg-image-thumb')).map(async tile => {
+    const imageId = tile.dataset.imageId
+    if (!imageId) return
+    try {
+      const url = await messageImageThumbUrl(imageId)
+      if (!tile.isConnected || tile.querySelector('.msg-image-thumb')) return
+      const img = document.createElement('img')
+      img.className = 'msg-image-thumb'
+      img.alt = tile.querySelector('.msg-image-name')?.textContent || '图片'
+      img.src = url
+      tile.querySelector('.msg-image-icon')?.replaceWith(img)
+    } catch {}
+  }))
 }
 
 // 原图查看器：按需取 base64 → blob: URL → img.src；关闭时释放 blob。
@@ -3520,6 +3569,33 @@ function closeImageViewer() {
     img.removeAttribute('src')
   }
   viewer.hidden = true
+}
+
+// 正文内嵌图（markdown 渲染的 <img>，file 路由/blob URL）点击放大：直接复用该 img 的现有 src，
+// 不再拉原图数据；关闭链路复用 close-image-viewer——它只 revoke 查看器自建的 blob: URL，
+// 对 file 路由 URL 是 no-op，正文里的原 img 不受影响。
+function openInlineImage(img) {
+  const src = img.currentSrc || img.getAttribute('src') || ''
+  if (!src) return
+  const viewer = ensureImageViewer()
+  const body = document.getElementById('image-viewer-body')
+  let name = img.getAttribute('alt')?.trim() || ''
+  if (!name) {
+    try {
+      const url = new URL(src, location.href)
+      name = url.searchParams.get('path')?.split('/').pop() ?? url.pathname.split('/').pop() ?? ''
+    } catch { name = '' }
+  }
+  if (!name) name = '图片'
+  document.getElementById('image-viewer-name').textContent = name
+  document.getElementById('image-viewer-size').textContent = ''
+  viewer.hidden = false
+  body.textContent = ''
+  const view = document.createElement('img')
+  view.className = 'image-viewer-img'
+  view.alt = name
+  view.src = src
+  body.appendChild(view)
 }
 
 // composer-resize:start —— 输入框高度合成的纯逻辑（tests/chat-ui.test.js 抽取此块断言）
@@ -3615,6 +3691,14 @@ async function refreshAfterTask(taskId) {
 }
 
 document.addEventListener('click', async (event) => {
+  // 正文内嵌图（markdown <img>）没有 data-action：先于动作委托拦截，点击直接放大；
+  // 附图缩略图在 .message-bubble 外，不受此分支影响，仍走 view-message-image 进查看器。
+  const bubbleImg = event.target.closest?.('.message-bubble img')
+  if (bubbleImg) {
+    event.preventDefault()
+    openInlineImage(bubbleImg)
+    return
+  }
   const target = event.target.closest('[data-action]')
   if (!target) return
   const action = target.dataset.action
@@ -4813,4 +4897,4 @@ export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsC
 export { modalInviteMember, modalBot, taskRelationOptions, modalNewTask, modalSkill, ARTIFACT_IMAGE, artifactFileUrl, runArtifacts, TRAJ_LABELS, trajectoryLabel, trajectoryEntry, modalTrajectory, modalTask, modalMemory, modalProposal, priceDefaults, defaultPriceFor, modalPrice, renderPriceCard, FOCUSABLE }
 export { lastFocused, focusableItems, focusModal, restoreFocus, trapModalFocus, openModal, closeModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, formPayload, AC_COMMANDS, acWordChar, detectAcToken, buildAcItems, acSources, updateAutocomplete, renderAcPopup, moveAcSelection, closeAutocomplete }
 export { applyAutocomplete, draftKey, currentDraft, IMAGE_MEDIA_TYPES, IMAGE_ACCEPT, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, IMAGE_EXT_TYPES, resolveImageMediaType, formatImageBytes, validateImageSelection, pendingImagesFor, setPendingImages, revokePreview, readFileAsBase64, base64BlobUrl, removePendingImage, clearPendingImages, attachImageButton, composerImageStrip }
-export { thumbnailFallback, ensureComposerImageInput, parseFileUriList, insertTextAtCursor, renderMessageImages, ensureImageViewer, closeImageViewer, COMPOSER_AUTO_MAX_PX, COMPOSER_PANEL_RATIO, composerCap, composerHeightFor, composerPanelCap, applyComposerHeight, syncComposerBox, draggedTask, observer }
+export { thumbnailFallback, ensureComposerImageInput, parseFileUriList, insertTextAtCursor, renderMessageImages, messageImageThumbUrls, messageImageThumbPending, messageImageThumbUrl, hydrateMessageImageThumbs, ensureImageViewer, openInlineImage, closeImageViewer, COMPOSER_AUTO_MAX_PX, COMPOSER_PANEL_RATIO, composerCap, composerHeightFor, composerPanelCap, applyComposerHeight, syncComposerBox, draggedTask, observer }

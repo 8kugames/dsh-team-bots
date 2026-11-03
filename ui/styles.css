@@ -1976,7 +1976,7 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-caption, 11px);
     line-height: 1.2;
 }
-/* 消息附图块：气泡下方的元数据条目（图标 + 文件名 + 大小），点击看原图。 */
+/* 消息附图块：气泡下方的缩略图瓦片（方形缩略图 + 文件名/大小注脚），点击进全屏查看器。 */
 .msg-images {
     display: flex;
     flex-wrap: wrap;
@@ -1985,10 +1985,10 @@ a.global-config.dsh-official-link:hover {
 }
 .msg-image-tile {
     display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    max-width: 220px;
-    padding: 5px 10px 5px 7px;
+    flex-direction: column;
+    gap: 4px;
+    width: 112px;
+    padding: 4px;
     border: 1px solid var(--line-2);
     border-radius: 9px;
     background: var(--surface-2);
@@ -2003,14 +2003,37 @@ a.global-config.dsh-official-link:hover {
     border-color: var(--accent);
     color: var(--ink);
 }
+/* 缩略图与图标占位同尺寸：未取到图时瓦片形状不变，不跳动。 */
+.msg-image-thumb,
+.msg-image-icon {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    flex: none;
+    border-radius: 6px;
+    background: var(--surface);
+    overflow: hidden;
+}
+.msg-image-thumb {
+    display: block;
+    object-fit: cover;
+    transition: filter 0.13s ease;
+}
+.msg-image-tile:hover .msg-image-thumb {
+    filter: brightness(1.08);
+}
 .msg-image-icon {
     display: inline-flex;
-    flex: none;
+    align-items: center;
+    justify-content: center;
     color: var(--ink-3);
 }
 .msg-image-icon svg {
-    width: 15px;
-    height: 15px;
+    width: 18px;
+    height: 18px;
+}
+/* 正文内嵌 markdown 图点击放大（openInlineImage）：给出可点暗示。 */
+.message-bubble img {
+    cursor: zoom-in;
 }
 .msg-image-meta {
     display: flex;
