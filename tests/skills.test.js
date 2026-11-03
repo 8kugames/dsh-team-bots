@@ -139,12 +139,17 @@ test('project-level skill toggle flows through service, api and system prompt', 
     const prompt = runtime.systemPromptFor({ agent: { id: sessionId } })
     assert.ok(prompt.includes('disabled for this project'), 'prompt 应包含禁用声明')
     assert.ok(prompt.includes('`review`'), 'prompt 应包含被禁技能 slug')
+    assert.ok(!prompt.includes('Long-term memory'), '记忆块不进 system 区')
 
-    // 恢复后提示回到默认文案
+    // 恢复后：同会话 system 区已按 session id 冻结（字节不变），新会话回到默认文案
     const on = await handleAction(service, 'toggle_skill', { projectId: project.id, slug: 'review', disabled: false }, actor)
     assert.deepEqual(on.disabledSkills, [])
     const promptAfter = runtime.systemPromptFor({ agent: { id: sessionId } })
-    assert.ok(!promptAfter.includes('disabled for this project'))
+    assert.equal(promptAfter, prompt, '同 session 二次求值应逐字节相同（会话级冻结）')
+    // 新会话看默认文案：同 bot+project 的 project 绑定有唯一索引，换 programmer 开新会话
+    const programmer = store.get("SELECT * FROM bots WHERE name = 'programmer'")
+    const freshPrompt = runtime.systemPromptFor({ agent: { id: bindSession(store, programmer.id, project.id) } })
+    assert.ok(!freshPrompt.includes('disabled for this project'), '新会话不应再看到禁用声明')
 
     // 未知技能与未知项目报错
     await assert.rejects(() => service.setProjectSkillDisabled(project.id, 'nope', true, actor), /不存在/)

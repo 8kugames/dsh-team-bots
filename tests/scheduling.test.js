@@ -432,10 +432,80 @@ test('任务会话的 system prompt 走执行者身份，不再承担群聊分�
     assert.match(taskPrompt, /DEMO-7: 实现对账页/)
     assert.doesNotMatch(taskPrompt, /team_assign_task/)
     assert.doesNotMatch(taskPrompt, /Triage requests/)
+    assert.doesNotMatch(taskPrompt, /Long-term memory/)
 
     const chatPrompt = runtime.systemPromptFor({ agent: { id: 'sess-project' } })
     assert.match(chatPrompt, /Triage requests/)
     assert.match(chatPrompt, /team_assign_task/)
+    assert.doesNotMatch(chatPrompt, /Long-term memory/)
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('system 区会话级冻结，记忆块走 runtime context 尾部快照', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-team-freeze-'))
+  const store = openDatabase(join(root, 'team.sqlite'))
+  try {
+    const now = new Date().toISOString()
+    store.run(
+      `INSERT INTO bots(id, name, role, instructions, color, status, current_revision, created_at, updated_at)
+       VALUES ('b1', 'Builder', '开发', '', 'blue', 'active', 0, ?, ?)`, now, now,
+    )
+    store.run(
+      `INSERT INTO projects(id, key, name, slug, owner_bot_id, status, created_at, updated_at)
+       VALUES ('p1', 'DEMO', 'Demo', 'demo', 'b1', 'active', ?, ?)`, now, now,
+    )
+    store.run(
+      `INSERT INTO tasks(id, project_id, number, title, status, priority, creator_type, creator_id, created_at, updated_at)
+       VALUES ('t1', 'p1', 7, '旧标题', 'in_progress', 'medium', 'user', 'u1', ?, ?)`, now, now,
+    )
+    store.run(
+      `INSERT INTO tasks(id, project_id, number, title, status, priority, creator_type, creator_id, created_at, updated_at)
+       VALUES ('t2', 'p1', 8, '另一个任务', 'in_progress', 'medium', 'user', 'u1', ?, ?)`, now, now,
+    )
+    store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)`,
+      'sess-a', 'b1', 'p1', 'task', 't1', now,
+    )
+    store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)`,
+      'sess-b', 'b1', 'p1', 'task', 't2', now,
+    )
+    const runtime = new DshRuntime({ ctx: {}, config: { workspace: join(root, 'workspace') }, store, logger: { warn() {} } })
+
+    const first = runtime.systemPromptFor({ agent: { id: 'sess-a' } })
+    assert.match(first, /旧标题/)
+    assert.doesNotMatch(first, /Long-term memory/)
+
+    // 中途改任务标题 + 落一条新记忆：system 区字节不变（冻结），新记忆经 context 通道可见
+    store.run("UPDATE tasks SET title = '新标题' WHERE id = 't1'")
+    store.run(
+      `INSERT INTO memories(scope_type, scope_id, topic, content, status, created_by, created_at, updated_at)
+       VALUES ('project', 'p1', '中途', '会话中途落库的记忆', 'active', 'user:user_local', ?, ?)`, now, now,
+    )
+    const frozen = runtime.systemPromptFor({ agent: { id: 'sess-a' } })
+    assert.equal(frozen, first, '同 session 二次求值应逐字节相同')
+    const memoryContext = runtime.memoryContextFor({ agent: { id: 'sess-a' } })
+    assert.match(memoryContext, /Long-term memory/)
+    assert.match(memoryContext, /会话中途落库的记忆/, '新记忆对进行中会话仍可见（尾部快照通道）')
+
+    // 新 session 不复用旧冻结
+    const other = runtime.systemPromptFor({ agent: { id: 'sess-b' } })
+    assert.notEqual(other, first)
+    assert.match(other, /另一个任务/)
+
+    // 未绑定会话返回空且不冻结空值：绑定落库后的首次非空求值可正常定格
+    assert.equal(runtime.systemPromptFor({ agent: { id: 'sess-late' } }), '')
+    assert.equal(runtime.promptFreeze.has('sess-late'), false, '空结果不得进冻结缓存')
+    store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, created_at) VALUES (?,?,?,?,?)`,
+      'sess-late', 'b1', 'p1', 'project', now,
+    )
+    const late = runtime.systemPromptFor({ agent: { id: 'sess-late' } })
+    assert.match(late, /# Team bot identity/, '绑定后首次非空求值应正常返回')
+    assert.equal(runtime.promptFreeze.get('sess-late'), late)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

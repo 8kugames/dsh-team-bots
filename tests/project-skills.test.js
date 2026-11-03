@@ -198,6 +198,7 @@ test('project session prompt tells the bot about the project skill pool', async 
     assert.ok(prompt.includes('Project skill pools are mounted at'), 'prompt 应说明项目技能池位置')
     assert.ok(prompt.includes(`${workspace}/${project.slug}/.agents/skills`), 'prompt 应带出项目技能根路径')
     assert.ok(prompt.includes('`deploy`'), 'prompt 应列出可用项目技能')
+    assert.ok(!prompt.includes('Long-term memory'), '记忆块不进 system 区')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
@@ -244,6 +245,7 @@ test('生产目录：会话 cwd、prompt 与项目技能池都以生产目录为
     assert.ok(!system.includes(`${workspace}/${project.slug}/.agents/skills`), '技能池 mount 不应再指向管理目录')
     assert.ok(system.includes('`deploy`'), 'prompt 应列出生产目录技能')
     assert.ok(!system.includes('`legacy`'), '管理目录旧技能不应进池')
+    assert.ok(!system.includes('Long-term memory'), '记忆块不进 system 区')
 
     const view = await service.state()
     assert.deepEqual(view.projectSkills.map(skill => skill.name), ['deploy'], '项目技能卡应扫生产目录')

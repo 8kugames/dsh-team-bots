@@ -89,6 +89,7 @@ export const lifecycleMethods = {
       this.pendingByRun.clear()
       this.childOwner.clear()
       this.parentHints.clear()
+      this.promptFreeze.clear()
     }, 'dsh-team: runtime event binding')
     const offModels = this.ctx.on?.('llm/adapters-updated', () => {
       this.modelsCache = { at: 0, value: [] }
@@ -97,13 +98,30 @@ export const lifecycleMethods = {
     this.installPrompt()
   },
   installPrompt() {
-    if (!this.ctx.systemPrompt?.section) return
-    this.ctx.effect?.(() => this.ctx.systemPrompt.section({
-      name: 'dsh-team-bot-identity',
-      order: 620,
-      interpolate: false,
-      text: context => this.systemPromptFor(context),
-    }), 'dsh-team: bot identity')
+    const systemPrompt = this.ctx.systemPrompt
+    if (!systemPrompt?.section) return
+    this.ctx.effect?.(() => {
+      const disposeSection = systemPrompt.section({
+        name: 'dsh-team-bot-identity',
+        order: 620,
+        interpolate: false,
+        text: context => this.systemPromptFor(context),
+      })
+      // 记忆块走宿主 runtime-context 通道（D-85 方案 A）：渲染为历史尾部 user 快照，
+      // 文本变化才追加，前缀缓存不动；interpolate:false 防记忆文本里的 {{ }} 被变量插值。
+      const disposeMemory = systemPrompt.context
+        ? systemPrompt.context({
+          name: 'dsh-team-memory',
+          order: 620,
+          interpolate: false,
+          text: context => this.memoryContextFor(context),
+        })
+        : null
+      return () => {
+        disposeMemory?.()
+        disposeSection?.()
+      }
+    }, 'dsh-team: bot identity')
   },
 
   // teammate 子会话只贡献用量，不参与根运行的 turn 生命周期。

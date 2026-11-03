@@ -253,8 +253,14 @@ test('单聊会话：身份提示词、运行提示词与 recall', async () => {
     const identity = runtime.systemPromptFor({ agent: { id: 'sess-solo' } })
     assert.match(identity, /Solo conversation/)
     assert.match(identity, /_the_bots\/builder/)
-    assert.match(identity, /回复保持简短/)
+    assert.doesNotMatch(identity, /Long-term memory/, '记忆块不再进 system 区')
+    assert.doesNotMatch(identity, /回复保持简短/, '记忆内容不再出现在身份段')
     assert.doesNotMatch(identity, /team_assign_task to hand/)
+
+    // 记忆块改走宿主 runtime-context 通道（历史尾部 user 快照），单聊会话仍可见
+    const memoryContext = runtime.memoryContextFor({ agent: { id: 'sess-solo' } })
+    assert.match(memoryContext, /Long-term memory/)
+    assert.match(memoryContext, /回复保持简短/)
 
     const run = { kind: 'solo_chat', bot_id: 'b1' }
     const prompt = runtime.promptFor({ run, bot: store.get('SELECT * FROM bots WHERE id = ?', 'b1'), chatMessage: { body: '新消息' } })

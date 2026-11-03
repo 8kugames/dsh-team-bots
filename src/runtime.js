@@ -18,6 +18,8 @@ export class DshRuntime {
     this.parentHints = new Map()
     this.sessionCreates = new Map()
     this.modelsCache = { at: 0, value: [] }
+    // system 区会话级冻结缓存（方案 B）：session id -> 定格的身份提示词字节。
+    this.promptFreeze = new Map()
     this.selecting = Promise.resolve()
     this.completionHandler = null
     this.attached = false
