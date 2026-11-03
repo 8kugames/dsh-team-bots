@@ -9,7 +9,7 @@ import { applyRetention, reconcileUsage } from '../usage.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { MAX_RATE_LIMIT_RETRIES, RATE_LIMIT_CODES, isQuotaExhausted } from './backoff.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
-import { readWriteScopes, writeScopesOverlap } from './write-scopes.js'
+import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
@@ -385,7 +385,8 @@ export const schedulerMethods = {
         // 任务不在「进行中」就不占写槽（DSHBOTS-73）：写占用随任务离开进行中即时释放。
         if (!runHoldsWriteLock({ kind: row.kind, mode: row.mode, taskStatus: row.task_status })) continue
         const list = activeWriteScopes.get(row.project_id) ?? []
-        list.push(readWriteScopes(row.write_scopes))
+        // package.json 是版本钩子机械改动，比对前剥掉（DSHBOTS-133），否则全队列判交叠串行。
+        list.push(effectiveWriteScopes(row.write_scopes))
         activeWriteScopes.set(row.project_id, list)
       }
       let activeTotal = activeRows.length
@@ -422,7 +423,9 @@ export const schedulerMethods = {
         // 两侧都声明了写范围且路径前缀互不重叠才放行；任一未声明（空集合）按保守串行，
         // 不降低既有安全边界。只读运行不受影响。
         // 单聊运行 project_id 为空，写锁落在各自独立的 _the_bots/<dir>，不占项目锁。
-        const writeScopes = run.mode === 'write' ? readWriteScopes(run.write_scopes) : []
+        // 候选侧同样先剥 package.json（DSHBOTS-133）：存量 queued 运行快照可能带它，
+        // 过滤后任一为空仍按「未声明」保守串行，不降低既有安全边界。
+        const writeScopes = run.mode === 'write' ? effectiveWriteScopes(run.write_scopes) : []
         if (run.mode === 'write' && run.project_id) {
           const runningScopes = activeWriteScopes.get(run.project_id) ?? []
           if (runningScopes.some(other => writeScopesOverlap(writeScopes, other))) continue

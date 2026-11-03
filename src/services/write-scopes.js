@@ -37,7 +37,9 @@ export function parseWriteScopes(input) {
     if (path.length > WRITE_SCOPE_MAX_LEN) throw badRequest(`写范围路径过长（上限 ${WRITE_SCOPE_MAX_LEN} 字符）`)
     if (!scopes.includes(path)) scopes.push(path)
   }
-  return scopes
+  // package.json 由版本钩子机械改动（.githooks/pre-commit 每次提交 bump patch 位），
+  // 不纳入写范围锁（DSHBOTS-133）：声明出口直接剥掉，新任务从源头不带它。
+  return scopes.filter(scope => scope !== 'package.json')
 }
 
 // 兜底解析：任务描述里行首的 `写范围：a, b` 或 `write_scopes: a, b` 行（中英文冒号、
@@ -78,4 +80,12 @@ export function writeScopesOverlap(a, b) {
   const right = readWriteScopes(b)
   if (!left.length || !right.length) return true
   return left.some(x => right.some(y => writeScopePathsOverlap(x, y)))
+}
+
+// 写范围锁豁免（DSHBOTS-133）：package.json 是版本钩子的机械改动（pre-commit 每次提交
+// bump patch 位），任何任务都会碰它，纳入写范围会让同项目所有写运行两两判交叠、全队列串行。
+// 闸门比对前用它过滤双侧：只剥路径恰为 'package.json' 的条目，scripts/、src/ 等不受影响。
+// 入参口径与 readWriteScopes 一致（数组或库里快照），过滤后为空即按「未声明」保守串行。
+export function effectiveWriteScopes(scopes) {
+  return readWriteScopes(scopes).filter(scope => scope !== 'package.json')
 }
