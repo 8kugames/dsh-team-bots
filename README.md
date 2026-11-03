@@ -14,7 +14,7 @@ DSH 团队 Bots 插件（`dsh-team-bots`）：在 DSH 里组织一支会协作�
 - **Bot 记忆与技能池**：Bot、项目两级长期记忆，每轮结束自动做记忆审查；共享技能池固定在本机 `~/.agents/skills`，项目还能自带 `.agents/skills`、`.claude/skills`、`.codex/skills`。
 - **版本化进化**：角色、模型、强度与技能变更走提案审批，Bot 配置保留不可变历史，可回滚。
 - **团队工具**：注册 `team_assign_task`、`team_review_task`、`team_remember`、`team_recall`、`team_propose_evolution`、`team_message_bot`、`team_request_secret` 七个工具，Bot 之间可直接私信协作。
-- **密钥管道**：密钥 AES-256-GCM 加密落库并物化到项目 `.team/secrets.env`，消息与运行输出里一律掩码为 `$名称`。
+- **密钥管道**：密钥 AES-256-GCM 加密落库；批准后一次性物化到数据目录（不进项目工作区），任务运行结束或 TTL 到期即焚，消息与运行输出里一律掩码为 `$名称`。
 - **用量统计**：全局 / 项目 / Bot 三档口径归集 token、调用次数、成本与运行时长，成本按可配置的模型价格计算，未配置价格不按 0 计费。
 
 ## 安装与启用

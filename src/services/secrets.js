@@ -3,11 +3,17 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { AppError, badRequest, forbidden, notFound } from '../errors.js'
-import { SecretBox, maskSecrets, materializeEnvFile, normalizeSecretName, secretFingerprint, secretKeyFingerprint } from '../secrets.js'
+import {
+  SecretBox, maskSecrets, normalizeSecretName, secretFingerprint, secretKeyFingerprint,
+  secretsRuntimeDir, secretsRuntimeEnvPath, writeRuntimeEnvFileSync,
+} from '../secrets.js'
 import { id, nowIso, text } from '../util.js'
+
+// 后台焚毁（TTL 巡检、任务运行结束）没有人类操作者，审计落系统主体。
+const SYSTEM_ACTOR = { type: 'system', id: 'dsh-team' }
 
 
 
@@ -93,20 +99,92 @@ export const secretsMethods = {
     })
   },
 
-  // 写入后物化：团队级写所有活动项目，项目级写该项目。bot 的 shell 里 `set -a; . .team/secrets.env` 生效。
-  async materializeProjectSecrets(project) {
+  // ===== 一次性密钥运行时（DSHBOTS-106） =====
+  // 明文不再进项目工作区：批准后写 <dataDir>/secrets-runtime/<projectId>.env（目录 0700、文件 0600），
+  // 在先到者发生时焚毁：①该项目下一条 task 运行 finishRun（成功/失败都删，见 runs.js）；
+  // ②TTL（config.secretsRuntimeTtlMs）到期，sweepSecretsRuntime 巡检；③密钥吊销/删除。
+  // 重新使用需再次批准，每次批准都重新物化。路径只通过批准回执向 Bot 披露，不进 state 视图。
+  materializeSecretsRuntime(project, actor) {
     const rows = this.store.all(
       "SELECT * FROM secrets WHERE scope = 'team' OR (scope = 'project' AND project_id = ?)",
       project.id,
     )
-    const entries = rows.map((row) => {
-      const box = this.ensureSecretBox()
-      return { name: row.name, value: box.decrypt({ valueEnc: row.value_enc, valueIv: row.value_iv, valueTag: row.value_tag }) }
-    })
-    if (!entries.length) return null
-    const dir = this.projectWorkDir(project)
-    return materializeEnvFile(entries, dir)
+    const box = this.ensureSecretBox()
+    const entries = rows.map(row => ({
+      name: row.name,
+      value: box.decrypt({ valueEnc: row.value_enc, valueIv: row.value_iv, valueTag: row.value_tag }),
+    }))
+    const filePath = secretsRuntimeEnvPath(this.config.dataDir, project.id)
+    // 同步落盘（fs 同步族）再回执：避免批准消息先于文件可读到达，Bot 侧 source 扑空。
+    writeRuntimeEnvFileSync(entries, filePath)
+    this.audit(actor, 'secret.materialize', 'project', project.id, { names: entries.length, ttlMs: this.config.secretsRuntimeTtlMs })
+    return filePath
   },
+
+  // 焚毁一次性文件：不存在时是幂等空操作（不记审计）；删除失败要留痕，不能默默留着明文。
+  burnProjectSecretsRuntime(projectId, reason, actor = SYSTEM_ACTOR) {
+    const filePath = secretsRuntimeEnvPath(this.config.dataDir, projectId)
+    try {
+      if (!existsSync(filePath)) return false
+      rmSync(filePath, { force: true })
+    } catch (error) {
+      this.logger.warn?.('dsh-team: 焚毁项目 %s 运行时密钥失败：%s', projectId, error?.message ?? error)
+      return false
+    }
+    this.audit(actor, 'secret.burn', 'project', projectId, { reason })
+    return true
+  },
+
+  // 旧残留清理（DSHBOTS-106 迁移）：物化改走数据目录后，项目侧 .team/secrets.env 全是历史
+  // 遗留，启动巡检与批准/删除时顺带删除；管理目录与生产目录都查，能删空的 .team 目录一并收走。
+  cleanupLegacyProjectSecretFile(project) {
+    const dirs = new Set([join(this.config.workspace, project.slug)])
+    if (project.production_dir) dirs.add(project.production_dir)
+    for (const dir of dirs) {
+      try {
+        rmSync(join(dir, '.team', 'secrets.env'), { force: true })
+        rmdirSync(join(dir, '.team'))
+      } catch {}
+    }
+  },
+
+  // TTL 巡检：挂在调度 tick 上，内部节流 15 秒扫一次 secrets-runtime；进程内首次执行时
+  // 顺带做一次全项目旧 .team/secrets.env 迁移清理（等于启动时清理）。
+  sweepSecretsRuntime() {
+    const now = Date.now()
+    if (this._secretsSweepAt && now < this._secretsSweepAt) return
+    this._secretsSweepAt = now + 15_000
+    if (!this._secretsLegacyCleaned) {
+      this._secretsLegacyCleaned = true
+      for (const project of this.store.all('SELECT * FROM projects')) {
+        this.cleanupLegacyProjectSecretFile(project)
+      }
+    }
+    let files = []
+    try {
+      files = readdirSync(secretsRuntimeDir(this.config.dataDir))
+    } catch {
+      return
+    }
+    const ttl = Number(this.config.secretsRuntimeTtlMs)
+    for (const name of files) {
+      if (!name.endsWith('.env')) continue
+      const filePath = join(secretsRuntimeDir(this.config.dataDir), name)
+      try {
+        if (now - statSync(filePath).mtimeMs < ttl) continue
+      } catch {
+        continue
+      }
+      this.burnProjectSecretsRuntime(name.slice(0, -'.env'.length), 'ttl')
+    }
+  },
+
+  // 兼容旧调用点（projects.js 建项目/切生产目录）：一次性语义下不再物化明文，只清旧残留。
+  async materializeProjectSecrets(project) {
+    this.cleanupLegacyProjectSecretFile(project)
+    return null
+  },
+
   async upsertSecret({ scope, projectId, name, purpose, value }, actor = this.actor()) {
     if (!['team', 'project'].includes(scope)) throw badRequest('密钥作用域必须是 team 或 project')
     if (scope === 'project' && !projectId) throw badRequest('项目级密钥必须指定项目')
@@ -143,10 +221,7 @@ export const secretsMethods = {
       this.audit(actor, existing ? 'secret.update' : 'secret.create', 'secret', secretId, { scope, name: normalized })
     })
     this._secretEntries = null
-    const targets = scope === 'team'
-      ? this.store.all("SELECT * FROM projects WHERE status = 'active'")
-      : [this.projectRow(projectId)]
-    for (const project of targets) await this.materializeProjectSecrets(project)
+    // DSHBOTS-106：入库不再落盘——明文只在批准（approveSecretRequest）时一次性物化到数据目录。
     return { id: secretId, name: normalized, fingerprint }
   },
   async deleteSecret(secretId, actor = this.actor()) {
@@ -157,20 +232,14 @@ export const secretsMethods = {
       this.audit(actor, 'secret.delete', 'secret', secretId, { scope: row.scope, name: row.name })
     })
     this._secretEntries = null
-    // 删除后剩余条目重新物化；没有剩余条目时保留旧文件会误导，删除之。
+    // DSHBOTS-106：吊销/删除即焚——受影响项目的一次性运行时文件当场删掉，重新使用需再次批准；
+    // 项目侧旧 .team/secrets.env 残留顺带清理。
     const targets = row.scope === 'team'
       ? this.store.all("SELECT * FROM projects WHERE status = 'active'")
       : [this.projectRow(row.project_id)]
     for (const project of targets) {
-      const path = await this.materializeProjectSecrets(project)
-      if (!path) {
-        // 删掉密钥后必须把工作区里的明文 env 一并清掉；清不掉要留痕，不能默默留着明文文件。
-        try {
-          rmSync(join(this.projectWorkDir(project), '.team', 'secrets.env'), { force: true })
-        } catch (error) {
-          this.logger.warn?.('dsh-team: 删除密钥后清理 %s 失败：%s', project.slug, error?.message ?? error)
-        }
-      }
+      this.burnProjectSecretsRuntime(project.id, 'secret_delete', actor)
+      this.cleanupLegacyProjectSecretFile(project)
     }
     return { deleted: true }
   },
@@ -234,11 +303,17 @@ export const secretsMethods = {
       nowIso(), requestId,
     )
     if (request.project_id) {
+      const project = this.projectRow(request.project_id)
+      // 批准时顺带清掉项目侧旧 .team/secrets.env 残留（迁移），再一次性物化到数据目录。
+      this.cleanupLegacyProjectSecretFile(project)
+      const envPath = this.materializeSecretsRuntime(project, actor)
+      const ttlMinutes = Math.max(1, Math.round(this.config.secretsRuntimeTtlMs / 60_000))
+      // 路径只在批准回执里向 Bot 披露（不进 state 视图、不进常规群聊消息）。
       this.insertMessage({
         projectId: request.project_id,
         senderType: 'system',
         senderId: 'system',
-        body: `密钥 ${request.name} 已批准并物化到项目 .team/secrets.env，Bot 下次 shell 里 set -a; . .team/secrets.env 即可使用。`,
+        body: `密钥 ${request.name} 已批准，一次性物化到 ${envPath}（0600）。该文件在本项目下一条任务运行结束时或约 ${ttlMinutes} 分钟后自动焚毁，再次使用需重新申请批准。Bot 在 shell 里执行：set -a; . ${envPath}; set +a`,
       })
     }
     return created

@@ -26,7 +26,7 @@ export const chatMethods = {
     // 不给群聊留噪音。只处理 bot 消息：用户引用残片属正常内容，system 卡片是固定文案。
     const cleanedBody = senderType === 'bot' ? stripLeakedToolMarkup(body) : body
     if (senderType === 'bot' && !cleanedBody) return null
-    // 群消息持久化前过密钥掩码：密文值不进转录，模型下一轮只会看到 $<NAME> 标签（NAME 与 .team/secrets.env 里的变量名一致）。
+    // 群消息持久化前过密钥掩码：密文值不进转录，模型下一轮只会看到 $<NAME> 标签（NAME 与一次性 env 文件里的变量名一致）。
     const maskedBody = this.maskSecretValues(cleanedBody)
     this.store.run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, reply_to_id, created_at)

@@ -83,7 +83,7 @@ export const promptMethods = {
       project.id,
     )?.n ?? 0
     const secretRule = secretCount > 0
-      ? '- Real credentials live in `.team/secrets.env` inside this workspace (never pasted into chat). Load them in shell with `set -a; . ./.team/secrets.env; set +a`. To ask for a new credential, call team_request_secret.'
+      ? '- Credentials are released one at a time: after you call team_request_secret and it is approved, the approval receipt names a one-time env file outside this workspace. Source it in shell (`set -a; . <path>; set +a`); it is burned when the next task run finishes or its TTL expires, so re-use requires a fresh request and approval. Never write secret values into chat or files.'
       : '- No credentials are configured. To request one, call team_request_secret with a name and reason.'
     const roleLine = taskSession
       ? `- You are executing one assigned task in ${project.name}${assignedTask ? ` (${project.key}-${assignedTask.number}: ${assignedTask.title})` : ''}. This session is not the group chat: do the work, verify it, and report back. Do not triage other requests here.`

@@ -161,7 +161,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_request_secret',
-    description: 'Ask the human to provision a named secret (credential) for this project. The value never passes through you: once approved it is materialized into .team/secrets.env in the project workspace and you read it with `set -a; . .team/secrets.env` in the shell, where the variable name is the uppercased secret name.',
+    description: 'Ask the human to provision a named secret (credential) for this project. The value never passes through you: once approved, a one-time env file is written outside the workspace and the approval receipt names its exact path; source it in shell (`set -a; . <path>; set +a`). That file is burned when the next task run finishes or its TTL expires, so re-using the credential requires a fresh request and approval.',
     parameters: {
       type: 'object',
       properties: {

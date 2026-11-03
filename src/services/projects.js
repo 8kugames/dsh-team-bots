@@ -277,13 +277,13 @@ export const projectsMethods = {
       }
       this.audit(actor, 'project.create', 'project', projectId, { name, key, owner: owner.id })
     })
-    // 团队级密钥已存在时，新项目立即物化 .team/secrets.env，成员 Bot 开箱可用。
+    // 团队级密钥已存在时，新项目只做旧架构 .team/secrets.env 残留清理（DSHBOTS-106 起不物化明文）。
     const teamSecrets = this.store.get("SELECT COUNT(*) AS n FROM secrets WHERE scope = 'team'")
     if (Number(teamSecrets?.n) > 0) {
       try {
         await this.materializeProjectSecrets(this.projectRow(projectId))
       } catch (error) {
-        this.logger.warn?.(`dsh-team: 新项目 ${projectId} 物化 .team/secrets.env 失败：${error?.message ?? error}`)
+        this.logger.warn?.(`dsh-team: 新项目 ${projectId} 清理旧 .team/secrets.env 残留失败：${error?.message ?? error}`)
       }
     }
     return this.projectView(this.projectRow(projectId))
@@ -412,7 +412,7 @@ export const projectsMethods = {
       }
       this.audit(actor, 'project.update', 'project', projectId, updates)
     })
-    // 生产目录切换后：旧目录的明文 secrets.env 不许留下；新目录立即物化已有密钥。
+    // 生产目录切换后：旧目录的明文 secrets.env 不许留下（新目录不再物化，DSHBOTS-106 起明文走数据目录一次性文件）。
     if (productionDirChanged && project.production_dir) {
       try {
         rmSync(join(project.production_dir, '.team', 'secrets.env'), { force: true })
@@ -426,7 +426,7 @@ export const projectsMethods = {
         try {
           await this.materializeProjectSecrets(this.projectRow(projectId))
         } catch (error) {
-          this.logger.warn?.(`dsh-team: 切换生产目录后重新物化密钥失败：${error?.message ?? error}`)
+          this.logger.warn?.(`dsh-team: 切换生产目录后清理旧密钥残留失败：${error?.message ?? error}`)
         }
       }
     }

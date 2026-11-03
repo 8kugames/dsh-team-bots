@@ -135,13 +135,42 @@ export async function materializeEnvFile(entries, workspaceDir) {
   await chmod(teamDir, 0o700)
   await ensureGitignore(workspaceDir)
   const envPath = join(teamDir, 'secrets.env')
+  await writeFile(envPath, `${envFileLines(entries).join('\n')}\n`, { encoding: 'utf8', mode: 0o600 })
+  await chmod(envPath, 0o600)
+  return envPath
+}
+
+/**
+ * One-time runtime env file (DSHBOTS-106): plaintext secrets never land in a
+ * project workspace. Instead an approval writes `<dataDir>/secrets-runtime/
+ * <projectId>.env` (dir 0700, file 0600) which is burned on the project's next
+ * task-run finish, TTL expiry or secret deletion. Same line format as
+ * `materializeEnvFile`. Synchronous on purpose: the approval receipt naming
+ * this path must never beat the file onto the disk.
+ */
+export function secretsRuntimeDir(dataDir) {
+  return join(dataDir, 'secrets-runtime')
+}
+
+export function secretsRuntimeEnvPath(dataDir, projectId) {
+  return join(secretsRuntimeDir(dataDir), `${projectId}.env`)
+}
+
+export function writeRuntimeEnvFileSync(entries, filePath) {
+  const dir = dirname(filePath)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(dir, 0o700)
+  writeFileSync(filePath, `${envFileLines(entries).join('\n')}\n`, { encoding: 'utf8', mode: 0o600 })
+  chmodSync(filePath, 0o600)
+  return filePath
+}
+
+function envFileLines(entries) {
   const lines = [ENV_FILE_HEADER]
   for (const { name, value } of entries) {
     lines.push(`${normalizeSecretName(name)}=${formatEnvValue(value)}`)
   }
-  await writeFile(envPath, `${lines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 })
-  await chmod(envPath, 0o600)
-  return envPath
+  return lines
 }
 
 function formatEnvValue(value) {
@@ -169,10 +198,10 @@ async function ensureGitignore(workspaceDir) {
 
 /**
  * Replace every occurrence of a known secret value in persisted text with
- * `$<NAME>`, where `<NAME>` is the variable name the bot's shell sees after
- * `set -a; . .team/secrets.env`. Values shorter than 8 characters are left
- * alone (they would eat ordinary words); longer values are replaced longest
- * first, so a value containing another is replaced whole.
+ * `$<NAME>`, where `<NAME>` is the env variable name the bot's shell sees
+ * after sourcing the one-time runtime env file. Values shorter than 8
+ * characters are left alone (they would eat ordinary words); longer values
+ * are replaced longest first, so a value containing another is replaced whole.
  *
  * All replacements go through an unambiguous sentinel first and only become
  * placeholders at the very end, so a placeholder can never be masked a second

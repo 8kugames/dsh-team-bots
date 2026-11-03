@@ -14,7 +14,7 @@ DSH team bots plugin (`dsh-team-bots`): run a crew of collaborating bots inside 
 - **Bot memory and skill pool**: bot-scoped and project-scoped long-term memory, with an automatic memory review after every turn; the shared skill pool is fixed at `~/.agents/skills`, and each project can also carry its own `.agents/skills`, `.claude/skills`, `.codex/skills`.
 - **Versioned evolution**: role, model, effort and skill changes go through proposal review; every bot config keeps an immutable history that can be rolled back.
 - **Team tools**: registers `team_assign_task`, `team_review_task`, `team_remember`, `team_recall`, `team_propose_evolution`, `team_message_bot`, `team_request_secret`; bots can also message each other directly.
-- **Secret pipeline**: secrets are stored AES-256-GCM encrypted and materialized into the project's `.team/secrets.env`; values are masked as `$NAME` in messages and run output.
+- **Secret pipeline**: secrets are stored AES-256-GCM encrypted; on approval a one-time plaintext env file is written under the data directory (never inside a project workspace) and burned when the next task run finishes or its TTL expires; values are masked as `$NAME` in messages and run output.
 - **Usage stats**: tokens, call counts, cost and runtime are attributed globally, per project and per bot; cost is computed from configurable model prices, and calls without a price are never counted as zero.
 
 ## Install

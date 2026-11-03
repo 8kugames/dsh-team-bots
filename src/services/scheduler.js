@@ -284,6 +284,8 @@ export const schedulerMethods = {
     try {
       // tasks 的依赖列由 task-relations 域自管迁移（db.js 不加行），闸门读列前懒迁移一次。
       ensureTaskRelationsSchema(this.store)
+      // 一次性密钥 TTL 巡检（DSHBOTS-106）：内部 15s 节流，首个 tick 顺带全项目旧残留清理。
+      this.sweepSecretsRuntime()
       this.runMaintenance()
       this.dispatchOutbox()
       await this.reapStalledRuns()

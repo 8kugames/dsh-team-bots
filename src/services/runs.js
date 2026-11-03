@@ -546,6 +546,11 @@ if (run.kind === 'dm_reply') {
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
     )
+    // DSHBOTS-106 一次性密钥：项目内 task 运行一结束（成功/失败都算）即焚该项目的运行时
+    // 密钥文件。放在分派主体之前，不受下方任何提前 return 影响。
+    if (run.kind === 'task' && run.project_id) {
+      this.burnProjectSecretsRuntime(run.project_id, 'run_finish')
+    }
     if (synthesizedMs) {
       const suffix = attemptNo < MAX_RATE_LIMIT_RETRIES ? '后重试' : '后转总监处理'
       this.insertRunEvent(
