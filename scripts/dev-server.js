@@ -14,6 +14,16 @@ import { recordUsage } from '../src/usage.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PORT = Number(process.env.PORT || 4317)
+// 静态切片（DSHBOTS-127）：路径与 MIME 与线上 src/http.js 对齐。
+// i18n 字典是 ES 模块图的一环（ui/modules/i18n.js 相对导入 ../i18n/<lang>.js →
+// /api/dsh-team/i18n/<lang>.js），缺这条路由时 app.js 模块图 404 加载失败，
+// 预览页会一直卡在 boot screen「正在连接团队空间」（线上有这些路由，故只在预览复现）。
+const STATIC_SLICES = new Map([
+  ['/api/dsh-team/i18n/zh.js', 'ui/i18n/zh.js'],
+  ['/api/dsh-team/i18n/en.js', 'ui/i18n/en.js'],
+  ['/api/dsh-team/vendor/marked.js', 'vendor/marked/marked.umd.js'],
+  ['/api/dsh-team/vendor/purify.min.js', 'vendor/dompurify/purify.min.js'],
+])
 const ASSET_VERSION = String(createRequire(import.meta.url)('../package.json').version ?? '0')
 const CONFIG = resolveConfig({
   workspace: join(ROOT, '.dev', 'workspace'),
@@ -78,7 +88,10 @@ async function main() {
       const url = new URL(req.url, `http://${req.headers.host}`)
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/ui' || url.pathname === '/index.html')) {
         const html = await readFile(join(ROOT, 'ui', 'index.html'), 'utf8')
-        return send(res, 200, 'text/html; charset=utf-8', html.replaceAll('{{assetVersion}}', ASSET_VERSION))
+        // {{language}}：预览没有 DSH 宿主的语言设定，按线上兜底语义注入 'auto'（客户端按 navigator 解析）。
+        return send(res, 200, 'text/html; charset=utf-8', html
+          .replaceAll('{{assetVersion}}', ASSET_VERSION)
+          .replaceAll('{{language}}', 'auto'))
       }
       if (req.method === 'GET' && url.pathname === '/api/dsh-team/styles.css') {
         return send(res, 200, 'text/css; charset=utf-8', await readFile(join(ROOT, 'ui', 'styles.css')))
@@ -95,6 +108,10 @@ async function main() {
         const mod = url.pathname.slice('/api/dsh-team/modules/'.length)
         if (!/^[\w-]+\.js$/.test(mod)) return send(res, 404, 'text/plain', 'Not found')
         return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, 'ui', 'modules', mod)))
+      }
+      if (req.method === 'GET') {
+        const slice = STATIC_SLICES.get(url.pathname)
+        if (slice) return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, slice)))
       }
       const fontMatch = req.method === 'GET' && url.pathname.match(/^\/api\/dsh-team\/fonts\/inter-(400|500|600)\.woff2$/)
       if (fontMatch) {
