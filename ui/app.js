@@ -364,6 +364,32 @@
     return `<p>${esc(value).replaceAll('\n', '<br>')}</p>`
   }
 
+  // quote-summary:start —— 引用摘要纯文本化（tests/quote-ui.test.js 抽取此块断言）。
+  // 引用块与引用回复条展示的是「原文前 120 字」，原文可能带 markdown 记号（**、-、`、[]()）。
+  // 记号原样塞进气泡会既被当字面量显示，又让整条摘要挤成一行、撑破气泡宽度，
+  // 所以先把 markdown 记号剥成纯文本，再交给 UI 单行省略。
+  function mdPlainSummary(value, max = 120) {
+    const text = String(value ?? '')
+      .replace(/```[^\n`]*\n?/g, ' ')             // 围栏代码块：只去掉围栏标记，留内容
+      .replace(/`([^`]*)`/g, '$1')                // 行内代码：留内容
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')   // 图片：留 alt
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')    // 链接：留文字
+      .replace(/^\s{0,3}>\s?/gm, '')              // 引用行标记
+      .replace(/^\s{0,3}#{1,6}\s+/gm, '')         // 标题标记
+      .replace(/^\s{0,3}([-*+]|\d+[.)])\s+/gm, '') // 列表标记
+      .replace(/^\s{0,3}([-*_]\s*){3,}$/gm, ' ')  // 分隔线
+      .replace(/\*\*\*|\*\*|__|~~/g, '')          // 强调与删除线记号
+      .replace(/\*([^*\n]+)\*/g, '$1')            // 斜体
+      .replace(/(^|\s)_([^_\n]+)_(?=\s|$)/g, '$1$2') // 下划线斜体（不碰 snake_case）
+      .replace(/`/g, '')                          // 落单反引号
+      .replace(/\s+/g, ' ')
+      .trim()
+    const limit = Math.max(0, Number(max) || 0)
+    if (!limit || text.length <= limit) return text
+    return `${text.slice(0, limit - 1)}…`
+  }
+  // quote-summary:end
+
   // 聊天图片的工作区指向：群聊=当前项目工作区，单聊=Bot 专属工作区；root 供绝对路径归一。
   function mdChatScope() {
     if (inSoloContext()) {
@@ -1053,7 +1079,7 @@
                     <div class="composer">
             ${state.replyTo ? `<div class="reply-bar" id="reply-bar">
               <span class="reply-bar-icon">${icon('quote')}</span>
-              <span class="reply-bar-text"><strong>${esc(state.replyTo.senderName)}</strong><span>${esc(state.replyTo.excerpt)}</span></span>
+              <span class="reply-bar-text"><strong>${esc(state.replyTo.senderName)}</strong><span>${esc(mdPlainSummary(state.replyTo.excerpt, 120))}</span></span>
               <button class="reply-bar-cancel" data-action="cancel-reply" title="取消引用（Esc）" aria-label="取消引用">${icon('close')}</button>
             </div>` : ''}
             <div class="composer-box">
@@ -1345,10 +1371,11 @@
     }
     const isUser = message.sender_type === 'user'
     const bot = isUser ? null : botById(message.sender_id)
-    // 引用块：气泡顶部一行「❝ 名字：摘要」，纯展示。
-    const quoteBlock = message.reply_to ? `<div class="msg-quote" title="引用自 ${attr(message.reply_to.sender_name)}">${icon('quote')}<span>${esc(message.reply_to.sender_name)}：${esc(message.reply_to.excerpt)}</span></div>` : ''
-    // hover 引用按钮：仅群聊；点击进入引用回复（选中该消息作为回复目标）。
-    const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(message.body.slice(0, 120))}" title="引用回复" aria-label="引用回复这条消息">${icon('quote')}</button>` : ''
+    // 引用块：气泡顶部一行「❝ 名字：摘要」，纯展示。摘要走 mdPlainSummary 去掉 markdown 记号，
+    // 否则原文里的 **、-、` 会原样露出，还会让整条摘要挤成一行、撑破气泡宽度。
+    const quoteBlock = message.reply_to ? `<div class="msg-quote" title="引用自 ${attr(message.reply_to.sender_name)}">${icon('quote')}<span>${esc(message.reply_to.sender_name)}：${esc(mdPlainSummary(message.reply_to.excerpt, 120))}</span></div>` : ''
+    // hover 引用按钮：仅群聊；点击进入引用回复（选中该消息作为回复目标）。摘要同样去 markdown 记号。
+    const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(mdPlainSummary(message.body, 120))}" title="引用回复" aria-label="引用回复这条消息">${icon('quote')}</button>` : ''
     // hover 复制按钮：群聊/单聊都有，紧邻引用按钮右侧；复制消息原文 message.body（非渲染后 HTML），走统一 copy handler。
     const copyBtn = `<button class="msg-copy-btn" data-action="copy" data-copy="${attr(message.body)}" title="复制消息" aria-label="复制这条消息的原文">${icon('copy')}</button>`
     // 任务/思考过程 chip 合并同一行：固定顺序「思考过程 → 任务」，缺哪个不留空位。

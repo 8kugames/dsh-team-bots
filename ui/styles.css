@@ -1328,6 +1328,9 @@ a.global-config.dsh-official-link:hover {
     line-height: 1.7;
     white-space: normal;
     overflow-wrap: anywhere;
+    /* 气泡不许比它的容器（.message-body-wrap）更宽：引用摘要整行 nowrap 时，
+       其 min-content 会把气泡顶出容器、溢出聊天列（DSHBOTS-71）。 */
+    max-width: 100%;
 }
 .message-row.user .message-bubble {
     background: var(--accent);
@@ -1488,6 +1491,9 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-small);
     opacity: 0.88;
     min-width: 0;
+    /* 引用块自身也不许超出气泡内容宽；摘要保持单行省略（DSHBOTS-71）。 */
+    max-width: 100%;
+    overflow: hidden;
 }
 .msg-quote svg {
     width: 11px;
@@ -4574,10 +4580,10 @@ a.global-config.dsh-official-link:hover {
 .terminal-page {
     display: grid;
     /* 主列自适应，右列固定可读宽度；窄屏整块落到下方（见下方媒体查询）。 */
-    grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
     gap: 16px;
     align-items: start;
-    max-width: 1180px;
+    max-width: 1280px;
 }
 .terminal-main {
     min-width: 0;
