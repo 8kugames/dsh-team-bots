@@ -110,10 +110,10 @@ test('boot seeds owner director, default companions and shared skills', async ()
   const { store, service, root } = await setup()
   try {
     const bots = store.all('SELECT * FROM bots ORDER BY created_at')
-    assert.equal(bots.length, 6)
+    assert.equal(bots.length, 7)
     assert.equal(bots[0].name, 'director')
     assert.equal(bots[0].provider, 'fake')
-    for (const name of ['designer', 'programmer', 'graphics', 'devops', 'artist']) {
+    for (const name of ['designer', 'programmer', 'graphics', 'devops', 'artist', 'reviewer']) {
       assert.ok(bots.some(bot => bot.name === name), `missing seed bot ${name}`)
     }
     const state = await service.state()

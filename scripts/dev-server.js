@@ -48,8 +48,8 @@ class PreviewRuntime {
         runId: run.id,
         status: 'succeeded',
         output: task
-          ? `已完成「${task.title}」。\n\n变更摘要：\n- 在 ${project.slug} 工作区完成实现与自检\n- 更新了相关入口与配置\n- 验证路径与错误分支\n\n验收建议：检查任务面板状态并查看运行输出。`
-          : `收到。当前项目「${project.name}」的群聊、任务和共享技能都已就绪。需要我拆分下一批工作吗？`,
+          ? `已完成「${task.title}」。\n\n变更摘要：\n- 在 ${project?.slug ?? '项目'} 工作区完成实现与自检\n- 更新了相关入口与配置\n- 验证路径与错误分支\n\n验收建议：检查任务面板状态并查看运行输出。`
+          : `收到。${project ? `当前项目「${project.name}」的` : ''}群聊、任务和共享技能都已就绪。需要我拆分下一批工作吗？`,
         error: null,
       })
     }, 300)
