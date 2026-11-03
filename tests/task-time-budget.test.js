@@ -2,7 +2,8 @@
 // 覆盖：createTask 落库与 taskView 快照（双命名/缺省/钳制）、owner 派单透传、
 // 任务提示词注入与不注入两分支（硬口径文案 + runTimeoutMs 取更短者）、迁移幂等（含老库升级）。
 // DSHBOTS-131：运行时效上限 min(全局 runTimeoutMs, budget) 的纯计算、startRun 启动期定格、
-// 到期即超时中止（run 置 failed/RUN_TIMEOUT + run_events 留痕）、budget 大于全局时按全局中止。
+// 到期即超时中止（run 置 failed/RUN_TIMEOUT + run_events 留痕）、budget 大于全局时按全局中止、
+// 派生运行（review/handle/memory_review）提示词同步同一时效口径。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -161,6 +162,54 @@ test('提示词注入两分支：有时效注入硬口径段并写明与 runTime
     })
     assert.ok(!withoutBudget.includes('# Time budget'), '未传时效不得注入时效段')
     assert.ok(!withoutBudget.includes('minutes; plan the depth'), '交付规划句同样不得出现')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('派生运行提示词同步时效：review/handle/memory_review 与任务卡同口径，无时效零注入', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
+    const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
+    const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
+    const actor = ctx.service.actor()
+    const budgeted = await ctx.service.createTask({ projectId: project.id, title: '限时交付', time_budget_minutes: 30 }, actor)
+    const plain = await ctx.service.createTask({ projectId: project.id, title: '普通交付' }, actor)
+    const at = new Date().toISOString()
+    // 派生运行一律置 succeeded：one_active_run_per_task 唯一索引只挡 queued/running，
+    // 同一任务下插多条派生运行做提示词断言时必须避开它。
+    const insertRun = (id, { kind, taskId, triggerType = 'test', triggerRef = null, status = 'succeeded' }) => {
+      ctx.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+         VALUES (?, ?, ?, ?, ?, 'read', ?, ?, ?, 1, ?, ?)`,
+        id, project.id, dev.id, taskId, kind, triggerType, triggerRef, status, `${id}-1`, at,
+      )
+      return ctx.store.get('SELECT * FROM runs WHERE id = ?', id)
+    }
+    const promptOf = (run, task) => runtime.promptFor({ run, bot: botRow, project: projectRow, task })
+
+    ctx.store.run("UPDATE tasks SET status = 'in_review' WHERE id IN (?, ?)", budgeted.id, plain.id)
+    const delegate = insertRun('run-delegate', { kind: 'review', taskId: budgeted.id, triggerType: 'review_delegate' })
+    const review = insertRun('run-review', { kind: 'review', taskId: budgeted.id })
+    const handle = insertRun('run-handle', { kind: 'handle', taskId: budgeted.id })
+    const finished = insertRun('run-finished', { kind: 'task', taskId: budgeted.id, status: 'succeeded' })
+    ctx.store.run('UPDATE runs SET output = ? WHERE id = ?', '交付说明', finished.id)
+    const memory = insertRun('run-memory', { kind: 'memory_review', taskId: budgeted.id, triggerRef: finished.id })
+
+    // 这些派生运行与任务卡共用同一时效上限（run.task_id 非空即继承），提示词必须同步告知，
+    // 否则代理会在不知情的情况下被超时中止。
+    for (const [label, run] of [['委派核验', delegate], ['owner 验收', review], ['受阻处理', handle], ['记忆复核', memory]]) {
+      const prompt = promptOf(run, rowOf(ctx.store, budgeted.id))
+      assert.match(prompt, /# Time budget/, `${label}运行应注入时效段`)
+      assert.match(prompt, /within 30 minutes/, `${label}运行应带时限值`)
+      assert.match(prompt, /aborted when the budget expires/, `${label}运行应写明到期即中止`)
+    }
+
+    const plainDelegate = insertRun('run-plain-delegate', { kind: 'review', taskId: plain.id, triggerType: 'review_delegate' })
+    const plainPrompt = promptOf(plainDelegate, rowOf(ctx.store, plain.id))
+    assert.ok(!plainPrompt.includes('# Time budget'), '无时效任务的派生运行不得注入时效段')
   } finally {
     await cleanup(ctx)
   }

@@ -342,6 +342,18 @@ Transcription requirements:
       : `\nRecent task comments:\n${taskComments
         .map(item => `- [c_${item.id.slice(-6)}] ${item.author_type}:${item.author_id}: ${item.body.length > 800 ? `${item.body.slice(0, 800)}…` : item.body}`)
         .join('\n')}`
+    // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入。
+    // 任务派生运行（review/handle/memory_review）与该任务共用同一时效上限，提示词必须同步告知，
+    // 否则运行会在代理不知情的情况下被超时中止。
+    const timeBudgetBlockFor = (row) => {
+      const timeBudget = Number(row?.timeBudgetMinutes ?? row?.time_budget_minutes)
+      return Number.isFinite(timeBudget) && timeBudget > 0 ? `
+
+# Time budget
+This task must be delivered within ${timeBudget} minutes; the run is aborted when the budget expires.
+Plan the depth of your work accordingly. If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
+The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).` : ''
+    }
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
       if (run.kind === 'review') {
         // 委派核验模板（DSHBOTS-107 review-verification）：核验工作由 subagent 并行完成，
@@ -361,7 +373,7 @@ Title: ${task.title}
 Status: ${task.status}
 Declared write scopes: ${writeScopes.length ? writeScopes.join(', ') : '(none declared)'}
 Description:
-${description}${threads}
+${description}${threads}${timeBudgetBlockFor(task)}
 
 The owner delegated the acceptance verification of this delivered task to you. Verify the delivery report item by item; do not redo the work and do not make the final call:
 - Scope: compare what the delivery report says was changed against the declared write scopes above; flag any out-of-scope change.
@@ -379,7 +391,7 @@ Your final reply is recorded as a task comment automatically. It MUST start with
 Title: ${task.title}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}
+${task.description || '(no description)'}${threads}${timeBudgetBlockFor(task)}
 
 As the project owner, review the delivered result above against the task description. Check the delivery report claims when needed (files exist, tests pass). Then decide:
 - If the work is acceptable, call team_review_task with decision "accept".
@@ -396,7 +408,7 @@ Do not redo the task yourself, and do not start parallel work here. Reply in the
 Title: ${task.title}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}
+${task.description || '(no description)'}${threads}${timeBudgetBlockFor(task)}
 Last failure: ${failure?.error_message ?? 'unknown'}
 
 As the project owner, handle this blocked task:
@@ -428,13 +440,13 @@ Avoid re-dispatching more than once without progress. Reply in the user's langua
         ? this.store.get('SELECT id, kind, task_id, trigger_ref, output FROM runs WHERE id = ?', run.trigger_ref)
         : null
       if (sourceRun?.task_id) {
-        const sourceTask = this.store.get('SELECT number, title FROM tasks WHERE id = ?', sourceRun.task_id)
+        const sourceTask = this.store.get('SELECT number, title, time_budget_minutes FROM tasks WHERE id = ?', sourceRun.task_id)
         return `${header}
 
 # Memory review for a finished task
 Task: ${sourceTask ? `${project.key}-${sourceTask.number} ${sourceTask.title}` : '(unknown task)'}
 Delivery output:
-${(sourceRun.output ?? '').slice(0, 6000)}
+${(sourceRun.output ?? '').slice(0, 6000)}${timeBudgetBlockFor(sourceTask)}
 
 Extract the durable facts worth remembering for later runs. Reply with a JSON array only, no prose and no code fence. Each item:
 {"scope":"bot|project|team","topic":"short label","content":"one durable fact","confidence":0.0-1.0}
@@ -465,14 +477,8 @@ Rules:
 - Return [] when nothing is worth remembering. Chat replies rarely need more than one entry.`
     }
     if (task) {
-      // 时效要求（DSHBOTS-125）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
-      const timeBudget = Number(task.timeBudgetMinutes ?? task.time_budget_minutes)
-      const timeBudgetBlock = Number.isFinite(timeBudget) && timeBudget > 0 ? `
-
-# Time budget
-This task must be delivered within ${timeBudget} minutes; the run is aborted when the budget expires.
-Plan the depth of your work accordingly. If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
-The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).` : ''
+      // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
+      const timeBudgetBlock = timeBudgetBlockFor(task)
       // 紧急豁免（DSHBOTS-126）：urgent 任务卡追加豁免指令（用户口径 m08196-2）——
       // 无视车道排队立即开工；非 urgent 完全不注入，保持既有车道纪律。
       const urgentExemptionBlock = task.priority === 'urgent' ? `
