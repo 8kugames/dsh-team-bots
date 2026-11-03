@@ -4572,14 +4572,25 @@ a.global-config.dsh-official-link:hover {
    Hierarchy is carried by value, not by decoration: the chrome strip is the only ornament,
    the output area is the only recessed (darker) surface on the page. */
 .terminal-page {
+    display: grid;
+    /* 主列自适应，右列固定可读宽度；窄屏整块落到下方（见下方媒体查询）。 */
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+    gap: 16px;
+    align-items: start;
+    max-width: 1180px;
+}
+.terminal-main {
+    min-width: 0;
+}
+.terminal-side {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    max-width: 920px;
+    gap: 12px;
+    min-width: 0;
 }
 .terminal-warn {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     color: var(--ink-2);
     border: 1px solid var(--star);
@@ -4589,9 +4600,19 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-small);
     line-height: 1.6;
 }
+/* 图标必须显式定尺寸：SVG 无 width/height 属性时在弹性行里会撑成整屏宽（DSHBOTS-66）。 */
+.terminal-warn-icon {
+    width: 18px;
+    height: 18px;
+}
 .terminal-warn svg {
     color: var(--star);
     flex: 0 0 auto;
+}
+.terminal-warn-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 .terminal-card {
     padding: 0;
@@ -4667,7 +4688,7 @@ a.global-config.dsh-official-link:hover {
     align-items: center;
     gap: 10px;
     padding: 11px 14px;
-    border-bottom: 1px solid var(--line);
+    border-top: 1px solid var(--line);
 }
 .terminal-prompt {
     font: 600 0.9375rem var(--mono);
@@ -4739,6 +4760,9 @@ a.global-config.dsh-official-link:hover {
 }
 
 /* the well: the only dark surface in the app, in both themes */
+.terminal-output-wrap {
+    position: relative;
+}
 .terminal-output {
     margin: 0;
     padding: 14px 16px;
@@ -4755,9 +4779,30 @@ a.global-config.dsh-official-link:hover {
     overflow-wrap: anywhere;
     tab-size: 4;
 }
-.terminal-output .faint {
-    color: var(--console-ink-2);
+/* 空态：独立于 pre 的说明层，图标显式定尺寸，避免 SVG 在弹性容器里被撑开（DSHBOTS-66）。 */
+.terminal-output-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px;
+    text-align: center;
     font-family: var(--sans);
+    font-size: var(--fs-small);
+    line-height: 1.7;
+    color: var(--console-ink-2);
+    pointer-events: none;
+}
+.terminal-empty-icon {
+    width: 34px;
+    height: 34px;
+    opacity: 0.5;
+}
+.terminal-output-empty[hidden] {
+    display: none;
 }
 
 /* history: a log list, one row per command, separated by hairlines */
@@ -4782,11 +4827,16 @@ a.global-config.dsh-official-link:hover {
 .terminal-history {
     display: flex;
     flex-direction: column;
+    max-height: 420px;
+    overflow: auto;
 }
 .terminal-history-item {
-    display: flex;
+    /* 窄列里命令是主角：状态徽标占左列，命令与元信息上下两行（DSHBOTS-66）。 */
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 10px;
+    column-gap: 8px;
+    row-gap: 2px;
     width: 100%;
     padding: 9px 16px;
     border: 0;
@@ -4820,28 +4870,45 @@ a.global-config.dsh-official-link:hover {
     border-left-color: var(--star);
 }
 .terminal-history-item .pill {
-    flex: 0 0 auto;
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-self: start;
 }
 .terminal-history-cmd {
+    grid-column: 2;
+    grid-row: 1;
     font-family: var(--mono);
     font-size: var(--fs-small);
     color: var(--ink-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1 1 auto;
     min-width: 0;
 }
 .terminal-history-item:hover .terminal-history-cmd {
     color: var(--ink);
 }
 .terminal-history-meta {
+    grid-column: 2;
+    grid-row: 2;
     display: inline-flex;
     align-items: center;
     gap: 6px;
     color: var(--ink-3);
     font-size: var(--fs-caption);
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    flex: 0 0 auto;
+    min-width: 0;
+    white-space: normal;
+    flex-wrap: wrap;
+}
+
+/* 窄屏：右列整块落到终端卡下方，避免被挤成竖排一字一行（DSHBOTS-66）。 */
+@media (max-width: 980px) {
+    .terminal-page {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .terminal-history {
+        max-height: 320px;
+    }
 }

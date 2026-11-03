@@ -520,6 +520,9 @@
       if (outputEl.textContent !== text) {
         outputEl.textContent = text
         outputEl.scrollTop = outputEl.scrollHeight
+        // 空态占位是 pre 之外的独立层，有输出时收起，避免遮住首屏内容。
+        const emptyEl = document.querySelector('.terminal-output-empty')
+        if (emptyEl) emptyEl.hidden = Boolean(text)
       }
     }
   }
@@ -1682,43 +1685,50 @@
     const taskBusy = (state.data?.runs ?? []).some(run => run.kind === 'task' && ['queued', 'running'].includes(run.status))
     return `
       <div class="terminal-page">
-        ${taskBusy ? `<div class="terminal-warn">${icon('alert')}<span>有任务正在写该项目工作区，终端命令与它并发需自担风险</span></div>` : ''}
-        <div class="card terminal-card${active ? ' is-running' : ''}">
-          <div class="terminal-chrome">
-            <span class="terminal-chrome-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="terminal-chrome-label">终端</span>
-            <span class="terminal-chrome-path" title="${attr(project.workspace_path ?? '')}">${esc(project.workspace_path ?? project.name)}</span>
+        <div class="terminal-main">
+          <div class="card terminal-card${active ? ' is-running' : ''}">
+            <div class="terminal-chrome">
+              <span class="terminal-chrome-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="terminal-chrome-label">终端</span>
+              <span class="terminal-chrome-path" title="${attr(project.workspace_path ?? '')}">${esc(project.workspace_path ?? project.name)}</span>
+            </div>
+            ${active ? `<div class="terminal-active-row">
+              ${runDot('running')}
+              <code class="terminal-active-cmd">${esc(active.command)}</code>
+              <span class="run-clock" data-started="${attr(active.createdAt ?? '')}">${duration(active.createdAt)}</span>
+              <button class="btn danger terminal-stop" data-action="terminal-stop" data-command-id="${attr(active.id)}">${icon('stop')}<span class="btn-label">停止</span></button>
+            </div>` : ''}
+            <div class="terminal-output-wrap">
+              <pre class="terminal-output" id="terminal-output" data-command-id="${attr(latest?.id ?? '')}">${output ? esc(output) : ''}</pre>
+              ${output ? '' : `<div class="terminal-output-empty">${icon('terminal', 'terminal-empty-icon')}<span>暂无输出。执行一条命令后，这里显示实时输出（最多保留末尾 200KB）。</span></div>`}
+            </div>
+            <form class="terminal-input-row" data-form="terminal-run">
+              <input type="hidden" name="projectId" value="${attr(project.id)}">
+              <span class="terminal-prompt" aria-hidden="true">$</span>
+              <input class="input terminal-input" id="terminal-cmd-input" name="command" placeholder="${active ? '有命令正在运行…' : '输入命令'} " value="${attr(state.terminalDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${active ? 'disabled' : ''}>
+              ${active ? '' : '<span class="terminal-kbd" aria-hidden="true">⌘ / Ctrl ↵</span>'}
+              <button class="btn primary" type="submit" ${active ? 'disabled' : ''}>${icon('play')}<span class="btn-label">执行</span></button>
+            </form>
           </div>
-          <form class="terminal-input-row" data-form="terminal-run">
-            <input type="hidden" name="projectId" value="${attr(project.id)}">
-            <span class="terminal-prompt" aria-hidden="true">$</span>
-            <input class="input terminal-input" id="terminal-cmd-input" name="command" placeholder="${active ? '有命令正在运行…' : '输入命令'} " value="${attr(state.terminalDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${active ? 'disabled' : ''}>
-            ${active ? '' : '<span class="terminal-kbd" aria-hidden="true">⌘ / Ctrl ↵</span>'}
-            <button class="btn primary" type="submit" ${active ? 'disabled' : ''}>${icon('play')}<span class="btn-label">执行</span></button>
-          </form>
-          ${active ? `<div class="terminal-active-row">
-            ${runDot('running')}
-            <code class="terminal-active-cmd">${esc(active.command)}</code>
-            <span class="run-clock" data-started="${attr(active.createdAt ?? '')}">${duration(active.createdAt)}</span>
-            <button class="btn danger terminal-stop" data-action="terminal-stop" data-command-id="${attr(active.id)}">${icon('stop')}<span class="btn-label">停止</span></button>
-          </div>` : ''}
-          <pre class="terminal-output" id="terminal-output" data-command-id="${attr(latest?.id ?? '')}">${output ? esc(output) : '<span class="faint">暂无输出。执行一条命令后，这里显示实时输出（最多保留末尾 200KB）。</span>'}</pre>
         </div>
-        <div class="card terminal-history-card">
-          <div class="terminal-history-head"><strong>历史命令</strong><span class="tag">${terminal.history.length} 条</span></div>
-          ${terminal.history.length === 0 ? '<div class="side-empty" style="padding:14px 16px">还没有执行过命令。</div>' : `<div class="terminal-history">
-            ${terminal.history.map(item => `
-              <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" data-status="${attr(item.status ?? '')}" title="点击回填到输入框">
-                ${terminalStatusPill(item.status)}
-                <code class="terminal-history-cmd">${esc(item.command)}</code>
-                <span class="terminal-history-meta">
-                  ${item.status === 'running' ? `<span class="run-clock" data-started="${attr(item.createdAt ?? '')}">${duration(item.createdAt)}</span>` : `exit ${item.exitCode ?? '—'} · ${duration(item.createdAt, item.endedAt)}`}
-                  · ${formatTime(item.createdAt)}
-                </span>
-              </button>
-            `).join('')}
-          </div>`}
-        </div>
+        <aside class="terminal-side">
+          ${taskBusy ? `<div class="terminal-warn">${icon('alert', 'terminal-warn-icon')}<span class="terminal-warn-text">有任务正在写该项目工作区，终端命令与它并发需自担风险</span></div>` : ''}
+          <div class="card terminal-history-card">
+            <div class="terminal-history-head"><strong>历史命令</strong><span class="tag">${terminal.history.length} 条</span></div>
+            ${terminal.history.length === 0 ? '<div class="side-empty" style="padding:14px 16px">还没有执行过命令。</div>' : `<div class="terminal-history">
+              ${terminal.history.map(item => `
+                <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" data-status="${attr(item.status ?? '')}" title="点击回填到输入框">
+                  ${terminalStatusPill(item.status)}
+                  <code class="terminal-history-cmd">${esc(item.command)}</code>
+                  <span class="terminal-history-meta">
+                    ${item.status === 'running' ? `<span class="run-clock" data-started="${attr(item.createdAt ?? '')}">${duration(item.createdAt)}</span>` : `exit ${item.exitCode ?? '—'} · ${duration(item.createdAt, item.endedAt)}`}
+                    · ${formatTime(item.createdAt)}
+                  </span>
+                </button>
+              `).join('')}
+            </div>`}
+          </div>
+        </aside>
       </div>
     `
   }
