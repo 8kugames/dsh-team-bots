@@ -106,3 +106,24 @@ export function effectivePrice(store, provider, model, at = nowIso()) {
   return store.get(sql, String(provider ?? ''), model, at)
     ?? store.get(sql, '', model, at)
 }
+
+// 当前价目表：每个 provider|model 只保留最新一条生效价格（与 Web 价格列表同口径）。
+// 入库时没命中价目的历史明细按这张表追认成本——价目配齐后无需迁移，聚合时自动补算。
+export function currentPriceMap(store, at = nowIso()) {
+  const rows = store.all(
+    'SELECT * FROM model_prices WHERE effective_at <= ? ORDER BY effective_at DESC',
+    at,
+  )
+  const map = new Map()
+  for (const row of rows) {
+    const key = priceKey(row.provider, row.model)
+    if (!map.has(key)) map.set(key, row)
+  }
+  return map
+}
+
+// 与 effectivePrice 同口径的两级回退：先精确 provider，再退到通配 provider=''。
+export function lookupPrice(prices, provider, model) {
+  if (!model) return undefined
+  return prices.get(priceKey(provider, model)) ?? prices.get(priceKey('', model))
+}

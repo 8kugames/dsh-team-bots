@@ -1,4 +1,4 @@
-import { effectivePrice } from './pricing.js'
+import { currentPriceMap, effectivePrice, lookupPrice } from './pricing.js'
 import { id, nowIso } from './util.js'
 
 const count = value => (Number.isSafeInteger(value) && value > 0 ? value : 0)
@@ -15,6 +15,20 @@ export const BUDGET_CURRENCY = 'CNY'
 
 function currentPrice(store, provider, model) {
   return effectivePrice(store, provider, model)
+}
+
+// 单条明细成本：输入侧（含缓存读写）+ 输出侧，按每百万 token 计价。
+// recordUsage 入库与事后追认共用同一公式，保证两条口径算出的金额一致。
+function costForTokens(price, tokens = {}) {
+  const input = Number(tokens.input ?? 0)
+  const cacheRead = Number(tokens.cacheRead ?? 0)
+  const cacheWrite = Number(tokens.cacheWrite ?? 0)
+  const output = Number(tokens.output ?? 0)
+  const inputCost = (input / 1_000_000) * price.input_per_mtok
+    + (cacheRead / 1_000_000) * price.cache_read_per_mtok
+    + (cacheWrite / 1_000_000) * price.cache_write_per_mtok
+  const outputCost = (output / 1_000_000) * price.output_per_mtok
+  return { inputCost, outputCost, totalCost: inputCost + outputCost }
 }
 
 export function recordUsage(store, {
@@ -41,11 +55,10 @@ export function recordUsage(store, {
   let outputCost = null
   let totalCost = null
   if (price) {
-    inputCost = (input / 1_000_000) * price.input_per_mtok
-      + (cacheRead / 1_000_000) * price.cache_read_per_mtok
-      + (cacheWrite / 1_000_000) * price.cache_write_per_mtok
-    outputCost = (output / 1_000_000) * price.output_per_mtok
-    totalCost = inputCost + outputCost
+    const costs = costForTokens(price, { input, cacheRead, cacheWrite, output })
+    inputCost = costs.inputCost
+    outputCost = costs.outputCost
+    totalCost = costs.totalCost
   }
   const currency = String(price?.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const eventId = id('use')
@@ -80,20 +93,15 @@ export function recordUsage(store, {
   return store.get('SELECT * FROM usage_events WHERE id = ?', eventId)
 }
 
-// priced_calls / unpriced_calls：直接按明细计价状态统计，未计价（total_cost IS NULL）单独计数，
-// 不与已计价调用混算，避免未计价被当成 0 成本。
+// 明细级聚合：token 与调用次数。计价状态（priced/unpriced）由 costBreakdown 统一给出，
+// 口径是「入库已算死 + 现价可追认」，避免同一语义在两处各统计一遍。
 const AGGREGATES = `
   COALESCE(SUM(u.input_tokens), 0) AS input_tokens,
   COALESCE(SUM(u.cache_read_tokens), 0) AS cache_read_tokens,
   COALESCE(SUM(u.cache_write_tokens), 0) AS cache_write_tokens,
   COALESCE(SUM(u.output_tokens), 0) AS output_tokens,
   COALESCE(SUM(u.reasoning_tokens), 0) AS reasoning_tokens,
-  COUNT(*) AS calls,
-  SUM(CASE WHEN u.total_cost IS NOT NULL THEN 1 ELSE 0 END) AS priced_calls,
-  SUM(CASE WHEN u.total_cost IS NULL THEN 1 ELSE 0 END) AS unpriced_calls,
-  COALESCE(SUM(CASE WHEN u.total_cost IS NULL
-    THEN u.input_tokens + u.cache_read_tokens + u.cache_write_tokens + u.output_tokens + u.reasoning_tokens
-    ELSE 0 END), 0) AS unpriced_tokens`
+  COUNT(*) AS calls`
 
 // 汇总口径：成本按币种分列，cost 只取预算币种的金额，不同币种不混算。
 function filterClause(filters) {
@@ -101,30 +109,86 @@ function filterClause(filters) {
   return list.length ? `WHERE ${list.join(' AND ')}` : ''
 }
 
-function costBreakdown(store, where, params, budgetCurrency) {
+// 在既有 where 上追加分组条件：where 为空时补 WHERE，否则接 AND。
+function andClause(where, clause) {
+  return `${where ? `${where} AND` : 'WHERE'} ${clause}`
+}
+
+// 成本聚合（含追认）：已计价明细用入库时算死的成本，未计价明细（total_cost IS NULL）
+// 按当前价目表补算——价目配齐后无需迁移，聚合结果即全量。pricedCalls/unpricedCalls
+// 也随之按「当前能否计价」统计：能追认的未计价计入 priced，仍无价可追认的才是真未计价。
+function costBreakdown(store, where, params, budgetCurrency, prices = null) {
+  const priceMap = prices ?? currentPriceMap(store)
   const rows = store.all(
-    `SELECT u.currency AS currency, SUM(u.total_cost) AS cost
-       FROM usage_events u ${where ? `${where} AND` : 'WHERE'} u.total_cost IS NOT NULL
-      GROUP BY u.currency`,
+    `SELECT u.currency AS currency,
+            u.provider AS provider,
+            u.model AS model,
+            SUM(CASE WHEN u.total_cost IS NOT NULL THEN 1 ELSE 0 END) AS priced_calls,
+            SUM(CASE WHEN u.total_cost IS NULL THEN 1 ELSE 0 END) AS null_calls,
+            COALESCE(SUM(CASE WHEN u.total_cost IS NOT NULL THEN u.total_cost ELSE 0 END), 0) AS stored_cost,
+            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.input_tokens ELSE 0 END), 0) AS null_input_tokens,
+            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.cache_read_tokens ELSE 0 END), 0) AS null_cache_read_tokens,
+            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.cache_write_tokens ELSE 0 END), 0) AS null_cache_write_tokens,
+            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.output_tokens ELSE 0 END), 0) AS null_output_tokens,
+            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.reasoning_tokens ELSE 0 END), 0) AS null_reasoning_tokens
+       FROM usage_events u ${where}
+      GROUP BY u.currency, u.provider, u.model`,
     ...params,
   )
   const costByCurrency = {}
+  let pricedCalls = 0
+  let unpricedCalls = 0
+  let unpricedTokens = 0
   for (const row of rows) {
-    costByCurrency[String(row.currency ?? BUDGET_CURRENCY)] = Number(row.cost ?? 0)
+    const priced = Number(row.priced_calls ?? 0)
+    const nullCalls = Number(row.null_calls ?? 0)
+    // 入库已计价的金额仍记在明细自己的币种下，不因后续改价改写历史。
+    if (priced > 0) {
+      const currency = String(row.currency ?? BUDGET_CURRENCY)
+      costByCurrency[currency] = (costByCurrency[currency] ?? 0) + Number(row.stored_cost ?? 0)
+    }
+    pricedCalls += priced
+    const price = lookupPrice(priceMap, row.provider, row.model)
+    if (!price) {
+      unpricedCalls += nullCalls
+      unpricedTokens += Number(row.null_input_tokens ?? 0) + Number(row.null_cache_read_tokens ?? 0)
+        + Number(row.null_cache_write_tokens ?? 0) + Number(row.null_output_tokens ?? 0)
+        + Number(row.null_reasoning_tokens ?? 0)
+      continue
+    }
+    if (nullCalls > 0) {
+      const { totalCost } = costForTokens(price, {
+        input: Number(row.null_input_tokens ?? 0),
+        cacheRead: Number(row.null_cache_read_tokens ?? 0),
+        cacheWrite: Number(row.null_cache_write_tokens ?? 0),
+        output: Number(row.null_output_tokens ?? 0),
+      })
+      // 追认金额记在价目币种下，与入库计价同口径。
+      const priceCurrency = String(price.currency ?? BUDGET_CURRENCY)
+      costByCurrency[priceCurrency] = (costByCurrency[priceCurrency] ?? 0) + totalCost
+    }
+    pricedCalls += nullCalls
   }
-  const cost = costByCurrency[budgetCurrency] ?? null
-  return { cost, costByCurrency }
+  return {
+    cost: costByCurrency[budgetCurrency] ?? null,
+    costByCurrency,
+    pricedCalls,
+    unpricedCalls,
+    unpricedTokens,
+  }
 }
 
-function mapTotals(row, breakdown = { cost: null, costByCurrency: {} }) {
+function mapTotals(row, breakdown = {
+  cost: null, costByCurrency: {}, pricedCalls: 0, unpricedCalls: 0, unpricedTokens: 0,
+}) {
   const input = Number(row?.input_tokens ?? 0)
   const cacheRead = Number(row?.cache_read_tokens ?? 0)
   const cacheWrite = Number(row?.cache_write_tokens ?? 0)
   const output = Number(row?.output_tokens ?? 0)
   const reasoning = Number(row?.reasoning_tokens ?? 0)
   const calls = Number(row?.calls ?? 0)
-  const pricedCalls = Number(row?.priced_calls ?? 0)
-  const unpricedCalls = Number(row?.unpriced_calls ?? Math.max(calls - pricedCalls, 0))
+  const pricedCalls = Number(breakdown.pricedCalls ?? 0)
+  const unpricedCalls = Number(breakdown.unpricedCalls ?? 0)
   const totalTokens = input + cacheRead + cacheWrite + output + reasoning
   return {
     inputTokens: input,
@@ -140,7 +204,7 @@ function mapTotals(row, breakdown = { cost: null, costByCurrency: {} }) {
     pricedCalls,
     unpricedCalls,
     // 未计价调用占掉的 token：预算估算按它折算成本，避免把未计价当成 0 成本而低估预算。
-    unpricedTokens: Number(row?.unpriced_tokens ?? 0),
+    unpricedTokens: Number(breakdown.unpricedTokens ?? 0),
     // 成本完整性：存在未计价调用时 cost 只是部分值，不能当作完整成本使用。
     costComplete: unpricedCalls === 0,
   }
@@ -164,10 +228,11 @@ const ZERO_TOTALS = {
 }
 
 // 单条件聚合：token 与调用次数 + 成本分币种。
-export function aggregateUsage(store, filters = [], params = [], budgetCurrency = BUDGET_CURRENCY) {
+// prices 为调用方已取好的当前价目表（usageSnapshot 只取一次，避免 N+1）；缺省自行加载。
+export function aggregateUsage(store, filters = [], params = [], budgetCurrency = BUDGET_CURRENCY, prices = null) {
   const where = filterClause(filters)
   const row = store.get(`SELECT ${AGGREGATES} FROM usage_events u ${where}`, ...params)
-  const breakdown = costBreakdown(store, where, params, budgetCurrency)
+  const breakdown = costBreakdown(store, where, params, budgetCurrency, prices)
   return mapTotals(row, breakdown)
 }
 
@@ -175,7 +240,6 @@ export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY) {
   return aggregateUsage(store, ['u.run_id = ?'], [runId], budgetCurrency)
 }
 
-// 统计口径：since 为窗口起点（ISO 字符串），projectId 限定项目（null 表示全局）。
 // 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
 // 口径：今日 = 产品时区（默认 Asia/Shanghai）当日 0 点起；7 日 / 30 日 = 滚动窗口；
 // 至今 = 不设下界。明细 occurred_at 存的是 ISO UTC 字符串，窗口起点先换算成 UTC ISO 再比较。
@@ -399,7 +463,7 @@ function zeroUsageDayRows(store, scope, budgetCurrency, daySince) {
 
 // 分档口径：Bot / 项目 / 日期维度用 LEFT JOIN + 零用量行补齐，
 // 跑过但没有产出用量明细的 run 也会出现在分档结果里。
-function byBotRows(store, scope, budgetCurrency) {
+function byBotRows(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
@@ -410,13 +474,13 @@ function byBotRows(store, scope, budgetCurrency) {
     ...params,
   )
   const used = rows.map(row => {
-    const breakdown = costBreakdown(store, `${where} AND u.bot_id IS ?`, [...params, row.bot_id], budgetCurrency)
+    const breakdown = costBreakdown(store, andClause(where, 'u.bot_id IS ?'), [...params, row.bot_id], budgetCurrency, prices)
     return { botId: row.bot_id, name: row.name, ...mapTotals(row, breakdown) }
   })
   return [...used, ...zeroUsageBotRows(store, scope, budgetCurrency)]
 }
 
-function byProjectRows(store, scope, budgetCurrency) {
+function byProjectRows(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
@@ -427,14 +491,14 @@ function byProjectRows(store, scope, budgetCurrency) {
     ...params,
   )
   const used = rows.map(row => {
-    const breakdown = costBreakdown(store, `${where} AND u.project_id IS ?`, [...params, row.project_id], budgetCurrency)
+    const breakdown = costBreakdown(store, andClause(where, 'u.project_id IS ?'), [...params, row.project_id], budgetCurrency, prices)
     return { projectId: row.project_id, name: row.name, key: row.key, ...mapTotals(row, breakdown) }
   })
   return [...used, ...zeroUsageProjectRows(store, scope, budgetCurrency)]
 }
 
 // 模型维度来自明细本身，无法归集「跑过但零用量」的 run，因此只有事件行。
-function byModelRows(store, scope, budgetCurrency) {
+function byModelRows(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
@@ -445,12 +509,12 @@ function byModelRows(store, scope, budgetCurrency) {
     ...params,
   )
   return rows.map(row => {
-    const breakdown = costBreakdown(store, `${where} AND u.provider = ? AND u.model = ?`, [...params, row.provider, row.model], budgetCurrency)
+    const breakdown = costBreakdown(store, andClause(where, 'u.provider = ? AND u.model = ?'), [...params, row.provider, row.model], budgetCurrency, prices)
     return { provider: row.provider, model: row.model, ...mapTotals(row, breakdown) }
   })
 }
 
-function byDayRows(store, scope, budgetCurrency, daySince = null) {
+function byDayRows(store, scope, budgetCurrency, daySince = null, prices = null) {
   const { filters, params } = scopeFilters(scope)
   const dayExpr = dayExpression('u.occurred_at', scope.offsetMinutes)
   const allFilters = daySince ? [...filters, `${dayExpr} >= ?`] : filters
@@ -463,24 +527,24 @@ function byDayRows(store, scope, budgetCurrency, daySince = null) {
     ...allParams,
   )
   const used = rows.map(row => {
-    const breakdown = costBreakdown(store, `${where} AND ${dayExpr} = ?`, [...allParams, row.day], budgetCurrency)
+    const breakdown = costBreakdown(store, andClause(where, `${dayExpr} = ?`), [...allParams, row.day], budgetCurrency, prices)
     return { day: row.day, ...mapTotals(row, breakdown) }
   })
   return [...used, ...zeroUsageDayRows(store, scope, budgetCurrency, daySince)]
 }
 
-function tierSet(store, scope, budgetCurrency, daySince = null) {
+function tierSet(store, scope, budgetCurrency, daySince = null, prices = null) {
   return {
-    byBot: byBotRows(store, scope, budgetCurrency),
-    byProject: byProjectRows(store, scope, budgetCurrency),
-    byModel: byModelRows(store, scope, budgetCurrency),
-    byDay: byDayRows(store, scope, budgetCurrency, daySince),
+    byBot: byBotRows(store, scope, budgetCurrency, prices),
+    byProject: byProjectRows(store, scope, budgetCurrency, prices),
+    byModel: byModelRows(store, scope, budgetCurrency, prices),
+    byDay: byDayRows(store, scope, budgetCurrency, daySince, prices),
   }
 }
 
-function scopeUsage(store, scope, budgetCurrency) {
+function scopeUsage(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
-  return aggregateUsage(store, filters, params, budgetCurrency)
+  return aggregateUsage(store, filters, params, budgetCurrency, prices)
 }
 
 function windowSpanDays(store, window) {
@@ -505,17 +569,19 @@ export function usageSnapshot(store, projectId, days = 30, options = {}) {
   const globalScope = { since, projectId: null, offsetMinutes }
   const projectScope = projectId ? { since, projectId, offsetMinutes } : null
   const soloScope = soloBotId ? { since, projectId: null, soloBotId, offsetMinutes } : null
-  const global = scopeUsage(store, globalScope, budgetCurrency)
-  const project = projectScope ? scopeUsage(store, projectScope, budgetCurrency) : { ...ZERO_TOTALS }
-  const solo = soloScope ? scopeUsage(store, soloScope, budgetCurrency) : null
+  // 价目表只取一次：所有口径的追认共用同一张「当前价目」，避免每个分组各查一遍。
+  const prices = currentPriceMap(store)
+  const global = scopeUsage(store, globalScope, budgetCurrency, prices)
+  const project = projectScope ? scopeUsage(store, projectScope, budgetCurrency, prices) : { ...ZERO_TOTALS }
+  const solo = soloScope ? scopeUsage(store, soloScope, budgetCurrency, prices) : null
   // 日历面板：窗口口径下画窗口对应的天数（今日 1 根 / 7 日 7 根 / 30 日 30 根 / 至今封顶 30 根）；
   // 旧口径沿用近 14 天。
   const cutoff = window
     ? window.daySince
     : new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10)
-  const globalTiers = tierSet(store, globalScope, budgetCurrency, cutoff)
-  const projectTiers = projectScope ? tierSet(store, projectScope, budgetCurrency, cutoff) : null
-  const soloTiers = soloScope ? tierSet(store, soloScope, budgetCurrency, cutoff) : null
+  const globalTiers = tierSet(store, globalScope, budgetCurrency, cutoff, prices)
+  const projectTiers = projectScope ? tierSet(store, projectScope, budgetCurrency, cutoff, prices) : null
+  const soloTiers = soloScope ? tierSet(store, soloScope, budgetCurrency, cutoff, prices) : null
   const priceCount = store.get(
     "SELECT COUNT(DISTINCT provider || '|' || lower(model)) AS count FROM model_prices",
   )?.count ?? 0
@@ -784,9 +850,26 @@ export function exportUsageCsv(store, { projectId = null, soloBotId = null, days
       ORDER BY u.occurred_at`,
     ...params,
   )
+  // 与用量页同口径：入库时未计价的明细按当前价目追认后再导出，避免页面与导出不一致。
+  const prices = currentPriceMap(store)
   const lines = [CSV_COLUMNS.join(',')]
   for (const row of rows) {
-    lines.push(CSV_COLUMNS.map(column => csvCell(row[column])).join(','))
+    const price = row.total_cost === null ? lookupPrice(prices, row.provider, row.model) : null
+    const costs = price ? costForTokens(price, {
+      input: Number(row.input_tokens ?? 0),
+      cacheRead: Number(row.cache_read_tokens ?? 0),
+      cacheWrite: Number(row.cache_write_tokens ?? 0),
+      output: Number(row.output_tokens ?? 0),
+    }) : null
+    // 追认出来的金额按价目币种记，不用入库时的占位币种。
+    const currency = price ? String(price.currency ?? BUDGET_CURRENCY) : row.currency
+    lines.push(CSV_COLUMNS.map(column => {
+      if (column === 'currency') return csvCell(currency)
+      if (column === 'input_cost') return csvCell(costs ? costs.inputCost : row.input_cost)
+      if (column === 'output_cost') return csvCell(costs ? costs.outputCost : row.output_cost)
+      if (column === 'total_cost') return csvCell(costs ? costs.totalCost : row.total_cost)
+      return csvCell(row[column])
+    }).join(','))
   }
   return lines.join('\n')
 }
