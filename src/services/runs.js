@@ -13,7 +13,13 @@ import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, sha256, text } from '../util.js'
 import { readWriteScopes, writeScopePathsOverlap } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
-import { isRateLimitError, MAX_RATE_LIMIT_RETRIES, needsSynthesizedBackoff, rateLimitBackoffMs } from './backoff.js'
+import {
+  isQuotaExhausted,
+  isRateLimitError,
+  MAX_RATE_LIMIT_RETRIES,
+  needsSynthesizedBackoff,
+  rateLimitBackoffMs,
+} from './backoff.js'
 import { ensureAttentionSchema, normalizeAttention, parseAttention } from './attention-schema.js'
 
 // ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
@@ -521,8 +527,12 @@ if (run.kind === 'dm_reply') {
     const endedAt = nowIso()
     // DSHBOTS-38：限流失败且 provider 未给 Retry-After 时合成指数退避，写进 retry_after_ms，
     // plan_wait 状态与到期派生随之自动生效。真 Retry-After 永远优先，不被合成值覆盖。
+    // DSHBOTS-99：额度耗尽（已达到限额）不合成指数退避——额度窗口用尽，退避重打撞同一堵墙。
     const attemptNo = Math.max(1, Number(run.attempt) || 1)
+    const quotaExhausted = isQuotaExhausted(error)
     const synthesizedMs = needsSynthesizedBackoff(error) ? rateLimitBackoffMs(attemptNo) : null
+    // 额度耗尽时 provider 真给的重置时间照样保留（信息不丢，供 UI 显示额度恢复时间），
+    // 但它不再触发对主模型的自动重试（见下方失败分支与 scheduler.retryExpiredPlanWaits）。
     const retryAfterMs = Number(error?.retryAfterMs) > 0 ? Number(error.retryAfterMs) : synthesizedMs
     this.store.run(
       `UPDATE runs SET status = ?, output = ?, artifacts = ?, error_code = ?, error_message = ?, retry_after_ms = ?, ended_at = ?,
@@ -711,11 +721,21 @@ if (run.kind === 'dm_reply') {
     } else {
       // DSHBOTS-38：限流失败（provider 真发 Retry-After 或 finishRun 合成的指数退避）在等待期内
       // 禁止立刻重打上游——不切备用模型（备用可能走同一网关），也不立刻排总监处理运行。
+      // DSHBOTS-99：额度耗尽（已达到限额）不走这条路径——不指数退避、无条件先试备用模型；
+      // 瞬时限流的等待语义原样保留。
       const backoffWaitMs = isRateLimitError(error) && retryAfterMs > 0 ? retryAfterMs : 0
-      const willRetry = backoffWaitMs > 0 && attemptNo < MAX_RATE_LIMIT_RETRIES
+      // 额度耗尽不做自动重试：重置时间只当信息留着，不据此重打主模型。
+      const willRetry = !quotaExhausted && backoffWaitMs > 0 && attemptNo < MAX_RATE_LIMIT_RETRIES
       // 主 provider 不可用：临时切备用模型继续跑这条任务。派生成功后任务不置 blocked、
-      // 也不转总监处理——备用运行接手的是同一条任务链。限流等待中不切，等 plan_retry 到期重试。
-      const fallback = backoffWaitMs > 0 ? null : this.spawnModelFallback({ run: refreshed, bot, error })
+      // 也不转总监处理——备用运行接手的是同一条任务链。
+      // 瞬时限流等待中不切，等 plan_retry 到期重试；额度耗尽无条件先切备用。
+      const fallback = quotaExhausted || backoffWaitMs === 0
+        ? this.spawnModelFallback({ run: refreshed, bot, error })
+        : null
+      // provider 给的额度重置时间（仅额度耗尽时可能带）。
+      const quotaResetNote = quotaExhausted && retryAfterMs > 0
+        ? `（额度预计 ${Math.max(1, Math.round(retryAfterMs / 60_000))} 分钟后恢复）`
+        : ''
       if (fallback) {
         this.addTaskEvent(run.task_id, 'model_fallback', { type: 'bot', id: bot.id }, {
           runId,
@@ -727,7 +747,9 @@ if (run.kind === 'dm_reply') {
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `主模型不可用（${error?.code ?? '未知错误'}），已临时切换到备用模型 ${fallback.fallback.ref} 继续执行。`,
+          body: quotaExhausted
+            ? `已达限额（${error?.code ?? '未知错误'}），已切换备用模型 ${fallback.fallback.ref} 继续执行。${quotaResetNote}`
+            : `主模型不可用（${error?.code ?? '未知错误'}），已临时切换到备用模型 ${fallback.fallback.ref} 继续执行。`,
           taskId: run.task_id,
           runId,
         })
@@ -737,6 +759,10 @@ if (run.kind === 'dm_reply') {
           endedAt, run.task_id,
         )
         this.addTaskEvent(run.task_id, 'run_failed', { type: 'bot', id: bot.id }, { runId, error })
+        // 额度耗尽没有「退避后自动重试」这回事：主备都限额就是终点，任务转受阻。
+        const quotaNote = quotaExhausted
+          ? `\n已达限额（${error?.code ?? '未知错误'}），主备模型均不可用，任务转为受阻${quotaResetNote}。`
+          : ''
         const backoffNote = backoffWaitMs > 0
           ? (willRetry
               ? `\n上游限流，第 ${attemptNo} 次指数退避，约 ${Math.round(backoffWaitMs / 1000)} 秒后自动重试。`
@@ -746,13 +772,14 @@ if (run.kind === 'dm_reply') {
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `任务执行失败：${error?.message ?? '未知错误'}\n运行 ID：${runId}${backoffNote}`,
+          body: `任务执行失败：${error?.message ?? '未知错误'}\n运行 ID：${runId}${quotaNote}${backoffNote}`,
           taskId: run.task_id,
           runId,
         })
         // attempt<MAX：不排 owner handle——plan_retry 到期派生接管重试，handle 运行会占住任务把派生挤掉。
         // 链耗尽（attempt>=MAX）转总监处理，但仍按退避延迟投递，到点才打上游；非限流失败照旧立即投递。
-        if (!willRetry) {
+        // 额度耗尽不排 handle：主备都限额时再派总监运行只会再撞一次额度，任务留受阻等人工介入。
+        if (!willRetry && !quotaExhausted) {
           this.enqueueOutbox({
             kind: 'owner_task_run',
             payload: { taskId: run.task_id, reviewKind: 'handle' },

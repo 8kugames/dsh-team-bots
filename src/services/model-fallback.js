@@ -6,12 +6,14 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { id, nowIso } from '../util.js'
+import { isQuotaExhausted } from './backoff.js'
 
 // 「主 provider 不可用」白名单：这些失败码换模型/换 provider 有意义。
 export const PROVIDER_UNAVAILABLE_CODES = new Set([
   'AUTH',
   'ACCOUNT_QUOTA',
   'QUOTA',
+  '1308',
   'RATE_LIMIT',
   'SERVER',
   'OVERLOADED',
@@ -27,6 +29,7 @@ export const PROVIDER_UNAVAILABLE_CODES = new Set([
 ])
 
 // 等得起的限流：带 provider 退避时间时交给 DSHBOTS-24 的 plan_wait 等待路径，不切模型。
+// 额度耗尽不在此列——它没有可等的短窗口，必须换模型。
 const WAITABLE_CODES = new Set(['RATE_LIMIT', 'QUOTA'])
 
 export function isProviderUnavailableCode(code) {
@@ -34,9 +37,11 @@ export function isProviderUnavailableCode(code) {
 }
 
 // 这次失败是否该切备用模型：码在白名单里，且不是「等得起」的限流。
+// 额度耗尽（已达到限额）是例外：额度窗口用尽，退避重打没有意义，直接切备用模型。
 export function shouldFallbackOn(error) {
   const code = String(error?.code ?? '').toUpperCase()
   if (!isProviderUnavailableCode(code)) return false
+  if (isQuotaExhausted(error)) return true
   if (WAITABLE_CODES.has(code) && Number(error?.retryAfterMs) > 0) return false
   return true
 }
@@ -97,7 +102,10 @@ export const modelFallbackMethods = {
         this.store.run(
           'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
           id('evt'), run.id, 'model_fallback',
-          `主模型不可用（${error?.code ?? '未知错误'}），派生备用模型运行 ${runId}（${fallback.ref}）`, createdAt,
+          isQuotaExhausted(error)
+            ? `主模型已达限额（${error?.code ?? '未知错误'}），派生备用模型运行 ${runId}（${fallback.ref}）`
+            : `主模型不可用（${error?.code ?? '未知错误'}），派生备用模型运行 ${runId}（${fallback.ref}）`,
+          createdAt,
         )
       })
     } catch (insertError) {

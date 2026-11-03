@@ -7,7 +7,7 @@ import { effectiveRunLimits } from '../config.js'
 import { badRequest } from '../errors.js'
 import { applyRetention, reconcileUsage } from '../usage.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
-import { MAX_RATE_LIMIT_RETRIES, RATE_LIMIT_CODES } from './backoff.js'
+import { MAX_RATE_LIMIT_RETRIES, RATE_LIMIT_CODES, isQuotaExhausted } from './backoff.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
 import { readWriteScopes, writeScopesOverlap } from './write-scopes.js'
 
@@ -225,6 +225,7 @@ export const schedulerMethods = {
   // 只针对任务运行——solo/私信运行显示 plan_wait 状态但不自动派生，避免对同一个对话者重复发信。
   // 过期超过 24h 视为时过境迁不派生（服务停摆/长期搁置后不补跑旧任务）。
   // 幂等闸：task_id 非空 + 原 run 无 plan_retry 事件；idempotency_key UNIQUE 兜底并发 tick。
+  // DSHBOTS-99：额度耗尽类运行（已达限额）与备用链上的运行不派生——受阻后不自己空转重试。
   retryExpiredPlanWaits() {
     const expired = this.store.all(
       `SELECT r.* FROM runs r
@@ -239,6 +240,13 @@ export const schedulerMethods = {
       ...RATE_LIMIT_CODES,
     )
     for (const run of expired) {
+      // DSHBOTS-99：额度耗尽（已达到限额）的运行不再自动派生重试——额度窗口用尽时重打主模型
+      // 只会再撞一次额度，任务已经转受阻，不能让它自己空转。
+      // 备用链上的运行同理：每条链只切一次备用，plan_retry 派生出来的是主模型运行，等于绕开限额口径。
+      if (run.model_provider) continue
+      // 只看错误码与错误正文：retry_after_ms 在库里既可能是 provider 的重置时间，
+      // 也可能是限流链的合成退避（既有测试用 10 分钟退避当到期样本），拿它判额度会误伤 D-24/D-38 的退避派生。
+      if (isQuotaExhausted({ code: run.error_code, message: run.error_message })) continue
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', run.task_id)
       if (!task || ['done', 'canceled'].includes(task.status)) continue
       // 任务已有排队/运行中的 run（如用户手动重试过）就不重复派生。
