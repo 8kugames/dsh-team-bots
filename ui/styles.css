@@ -1585,6 +1585,75 @@ a.global-config.dsh-official-link:hover {
 .approval-summary { white-space: pre-wrap; word-break: break-word; }
 .approval-actions { display: flex; gap: 8px; margin-top: 2px; }
 .approval-foot { display: flex; align-items: center; gap: 8px; }
+/* 倒计时（DSHBOTS-102）：秒级精确剩余时间，临期切 --star（D-101 规格的临期告警色）。 */
+.approval-clock { font-variant-numeric: tabular-nums; }
+.approval-clock.urgent { color: var(--star); font-weight: 600; }
+/* 跨项目待审入口（DSHBOTS-102）：工作台顶部窄条 + 计数徽标 + 明细菜单。
+   0 待办时整条不渲染（approvalBannerView 返回空串），不占位、不撑高顶栏。 */
+.approval-banner {
+    position: relative;
+    padding: 6px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--star-wash);
+}
+.approval-banner-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: 500 var(--fs-small) var(--sans);
+    cursor: pointer;
+}
+.approval-banner-btn:hover { border-color: var(--line-2); }
+.approval-banner-btn > svg { flex: 0 0 auto; color: var(--star); }
+.approval-banner-text { flex: 0 0 auto; }
+.approval-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
+.approval-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 28px;
+    right: 28px;
+    z-index: 30;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.approval-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
+.approval-menu-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+        "project project time"
+        "line line line"
+        "summary summary summary";
+    gap: 2px 8px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+}
+.approval-menu-item:hover,
+.approval-menu-item:focus-visible { background: var(--surface-2); }
+.approval-menu-project { grid-area: project; font-weight: 600; font-size: var(--fs-small); }
+.approval-menu-line { grid-area: line; color: var(--ink-2); font-size: var(--fs-small); }
+.approval-menu-summary { grid-area: summary; color: var(--ink-3); font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-word; }
+.approval-menu-time { grid-area: time; color: var(--star); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.approval-menu-time.urgent { color: var(--star); }
 .task-chip-line {
     margin-top: 7px;
     display: flex;

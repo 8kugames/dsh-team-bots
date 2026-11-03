@@ -138,6 +138,8 @@ function renderShell() {
   // 场景分支：单聊上下文无项目域；群聊上下文 = 当前项目。
   const project = solo ? null : activeProject()
   const pending = pendingProposals()
+  // 跨项目待审（DSHBOTS-102）：state 顶层全局口径，与当前项目解耦。
+  const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
   // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行，不随群聊/单聊上下文跳变；topbar 仍按项目口径。
   const running = Number(data?.activeRuns ?? 0)
   const projectRunning = project?.stats?.running ?? 0
@@ -272,6 +274,7 @@ function renderShell() {
       </aside>
       <main class="main">
         <div class="main-head">
+        ${approvalBannerView(pendingApprovals)}
         <header class="topbar">
           <div class="topbar-title">
             ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}
@@ -910,30 +913,86 @@ function renderSoloConfig() {
 // ===== approval-card:start 审批卡片（DSHBOTS-32 UI）=====
 const APPROVAL_STATUS = { pending: '等待审批', allowed: '已允许一次', rejected: '已拒绝', timeout: '已超时', cancelled: '已取消' }
 
+// ===== approval-ux:start 审批交互（DSHBOTS-102）=====
+// 超时可见：秒级倒计时 + 临期危险色。剩余时间从 expires_at 反推，
+// 1s 定时器只改 .approval-clock 文本，不整卡重绘（2.8s 轮询整卡重绘会打断跳动感）。
+const APPROVAL_URGENT_MS = 15_000
+// 徽标口径：只计 pending，≥99 显示 99+（与侧栏未读胶囊同形态）。
+const approvalBadgeText = (count) => (Number(count) > 99 ? '99+' : String(Number(count) || 0))
+function formatApprovalRemaining(remainingMs) {
+  const total = Math.max(0, Math.ceil((Number(remainingMs) || 0) / 1000))
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  if (minutes <= 0) return `${seconds} 秒后自动拒绝`
+  return seconds === 0 ? `${minutes} 分后自动拒绝` : `${minutes} 分 ${seconds} 秒后自动拒绝`
+}
+function approvalUrgent(remainingMs) {
+  return (Number(remainingMs) || 0) <= APPROVAL_URGENT_MS
+}
+// 从 epoch ms 反推剩余毫秒，供 1s 局部刷新复用（与后端 approvalView 同口径）。
+function approvalRemainingFrom(expiresMs, fallbackMs) {
+  const expires = Number(expiresMs)
+  return Number.isFinite(expires) ? Math.max(0, expires - Date.now()) : (Number(fallbackMs) || 0)
+}
+// 后端 expires_at 是 ISO 串；转成 epoch ms 挂到 data-expires，避免 1s 刷新时重复解析。
+function approvalExpiresMs(expiresAt) {
+  const parsed = Date.parse(expiresAt)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+// ===== approval-ux:end =====
+
 // 审批卡片：消息行只是锚点，状态以 state.data.approvals 为准（渲染时查表，轮询自然刷新）。
 // 查不到该条（超出 30 条窗口）时退化为 system 纯文本，不留假状态。
 function renderApprovalCard(message) {
   const approval = (state.data?.approvals ?? []).find(item => item.id === message.approval_id)
   if (!approval) return `<div class="message-system"><span>${esc(message.body)}</span></div>`
   const pending = approval.status === 'pending'
-  const remainMin = Math.max(1, Math.round((approval.remainingMs ?? 0) / 60000))
+  // 决策中禁用按钮：重复点击不重复发请求（后端也有 pending 校验，前端先挡一层）。
+  const deciding = state.approvalDeciding?.has(approval.id) ?? false
   const summary = approval.display_reason || approval.reason || '（无说明）'
+  const expiresAt = approvalExpiresMs(approval.expires_at)
   return `<div class="message-row">
     <div class="message-body-wrap approval-card" data-approval-status="${attr(approval.status)}" data-approval-id="${attr(approval.id)}">
       <div class="message-meta"><strong>${esc(approval.botName)} 请求审批</strong><span>${esc(formatTime(approval.created_at))}</span></div>
       <div class="approval-tool mono">${esc(approval.tool_name)}</div>
       <div class="approval-summary">${esc(summary)}</div>
       ${pending
-        ? `<div class="approval-foot faint">约 ${remainMin} 分钟内有效</div>
+        ? `<div class="approval-foot faint"><span class="approval-clock${approvalUrgent(approval.remainingMs) ? ' urgent' : ''}" data-expires="${expiresAt}">${esc(formatApprovalRemaining(approval.remainingMs))}</span></div>
       <div class="approval-actions">
-        <button class="btn small" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="allow">允许一次</button>
-        <button class="btn small danger" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="reject">拒绝</button>
+        <button class="btn small primary" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="allow"${deciding ? ' disabled' : ''}>允许一次</button>
+        <button class="btn small danger" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="reject"${deciding ? ' disabled' : ''}>拒绝</button>
       </div>`
         : `<div class="approval-foot"><span class="pill">${esc(APPROVAL_STATUS[approval.status] ?? approval.status)}</span>${approval.decided_at ? `<span class="faint">${esc(formatTime(approval.decided_at))}</span>` : ''}</div>`}
     </div>
   </div>`
 }
 // ===== approval-card:end =====
+
+// 跨项目待审入口（DSHBOTS-102）：工作台顶部一条窄条，只计 pending，99+ 封顶；
+// 展开后列明细（项目 / bot / 工具 / 摘要 / 剩余时间），点条目跳到对应项目并滚动到该卡片。
+// 不在顶部重复渲染完整卡片：卡片带理由/作用域/按钮，多项目并发会把窄条撑高、挤走工作区。
+function approvalBannerView(pendingApprovals) {
+  const count = Number(pendingApprovals?.count ?? 0)
+  if (count <= 0) return ''
+  const items = pendingApprovals?.items ?? []
+  return `<div class="approval-banner">
+          <button class="approval-banner-btn" data-action="toggle-approvals" aria-expanded="${state.approvalPanelOpen ? 'true' : 'false'}">
+            ${icon('alert')}<span class="approval-banner-text">待处理审批</span>
+            <span class="unread-badge">${approvalBadgeText(count)}</span>
+            ${icon('chevron', `chev${state.approvalPanelOpen ? ' open' : ''}`)}
+          </button>
+          ${state.approvalPanelOpen ? `<div class="approval-menu" role="menu">
+            ${items.length === 0 ? '<div class="approval-menu-empty">暂无明细</div>' : items.map(item => `
+              <button class="approval-menu-item" role="menuitem" data-action="focus-approval" data-approval-id="${attr(item.id)}">
+                <span class="approval-menu-project">${esc(item.projectName || '（未命名项目）')}</span>
+                <span class="approval-menu-line">${esc(item.botName || 'Bot')} · ${esc(item.tool_name || '工具')}</span>
+                <span class="approval-menu-summary">${esc(item.display_reason || item.reason || '')}</span>
+                <span class="approval-menu-time" data-expires="${approvalExpiresMs(item.expires_at)}">${esc(formatApprovalRemaining(item.remainingMs))}</span>
+              </button>`).join('')}
+          </div>` : ''}
+        </div>`
+}
+
 
 // desktop-notify:start 审批请求桌面通知（DSHBOTS-86，tests/desktop-notify.test.js 抽取此块断言）
 const NOTIFY_KEY = 'dshb:desktop-notify'
@@ -4292,12 +4351,56 @@ document.addEventListener('click', async (event) => {
         await loadOlderMessages()
         break
       case 'approval-decide': {
-        // 群聊审批卡片按钮：allow/reject 后刷新状态表，卡片按新状态回显。
+        // 群聊审批卡片按钮：本地立即回显已决状态（不等 2.8s 轮询），请求失败回滚并提示。
         const approvalId = target.dataset.approvalId
         const decision = target.dataset.decision
         if (!approvalId || !['allow', 'reject'].includes(decision)) break
-        await api('approval_decide', { approvalId, decision })
-        await loadState(state.projectId, { quiet: true })
+        // 幂等：同一审批正在决策中时不再发请求（按钮已 disabled，这里再挡一层）。
+        if (state.approvalDeciding.has(approvalId)) break
+        const list = state.data?.approvals ?? []
+        const index = list.findIndex(item => item.id === approvalId)
+        const previous = index >= 0 ? { ...list[index] } : null
+        const status = decision === 'allow' ? 'allowed' : 'rejected'
+        state.approvalDeciding.add(approvalId)
+        // 乐观回显：卡片立刻变已决，顶部徽标同步减一。
+        if (previous) list[index] = { ...previous, status, decided_at: new Date().toISOString(), remainingMs: 0 }
+        const pending = state.data?.pendingApprovals
+        if (pending) {
+          pending.items = (pending.items ?? []).filter(item => item.id !== approvalId)
+          pending.count = Math.max(0, Number(pending.count ?? 0) - 1)
+        }
+        render()
+        try {
+          // 用后端返回的终态覆盖乐观值（decided_at 以后端为准）。
+          const updated = await api('approval_decide', { approvalId, decision }, { quiet: true })
+          if (updated && index >= 0) list[index] = updated
+          else if (updated) list.push(updated)
+        } catch (error) {
+          // 回滚到决策前状态，避免「界面已决、后端仍 pending」的假成功。
+          if (previous && index >= 0) list[index] = previous
+          const rollback = state.data?.pendingApprovals
+          if (rollback && previous) {
+            rollback.items = [previous, ...(rollback.items ?? [])]
+            rollback.count = Number(rollback.count ?? 0) + 1
+          }
+          toast(error?.message ? `审批失败：${error.message}` : '审批失败，请重试', 'error')
+        } finally {
+          state.approvalDeciding.delete(approvalId)
+          render()
+        }
+        break
+      }
+      case 'toggle-approvals':
+        // 顶部「待处理审批」条：展开/收起跨项目明细。
+        state.approvalPanelOpen = !state.approvalPanelOpen
+        render()
+        break
+      case 'focus-approval': {
+        // 点明细跳到对应项目群聊并滚动到该审批卡（复用 focusApprovalCard）。
+        const item = (state.data?.pendingApprovals?.items ?? []).find(entry => entry.id === target.dataset.approvalId)
+        if (!item) break
+        state.approvalPanelOpen = false
+        focusApprovalCard(item)
         break
       }
       case 'quote-message': {
@@ -5211,6 +5314,14 @@ window.addEventListener('wheel', event => {
   event.preventDefault()
 }, { passive: false })
 
+// 顶部待审明细菜单（DSHBOTS-102）：点击菜单外任意处收起；面板关着时直接返回，不额外渲染。
+document.addEventListener('click', (event) => {
+  if (!state.approvalPanelOpen) return
+  if (event.target.closest?.('.approval-banner')) return
+  state.approvalPanelOpen = false
+  render()
+})
+
 // 聊天图片加载失败占位 chip：error 不冒泡，用捕获阶段全局监听；只处理消息气泡/评论里的
 // markdown 图片。chip 只显示文件名（路径查参或 alt 兜底），不复制错误页内容进 DOM。
 window.addEventListener('error', (event) => {
@@ -5242,6 +5353,12 @@ setInterval(() => {
   for (const el of document.querySelectorAll('.run-clock[data-started]')) {
     el.textContent = duration(el.dataset.started)
   }
+  // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
+  for (const el of document.querySelectorAll('.approval-clock[data-expires], .approval-menu-time[data-expires]')) {
+    const remaining = approvalRemainingFrom(el.dataset.expires)
+    el.textContent = formatApprovalRemaining(remaining)
+    el.classList.toggle('urgent', approvalUrgent(remaining))
+  }
 }, 1000)
 void init()
 
@@ -5250,6 +5367,7 @@ void init()
 export { app, UI_SCALE_KEY, UI_THEME_KEY, savedScale, startWechatPoll, stopWechatPoll, startTerminalPoll, stopTerminalPoll, syncTerminalPoll, updateTerminalDom, bootError, isTyping, pendingProposals, tabDot, renderShell, syncChromeHeight, renderKeepingChatScroll, panelKey, isPanelOpen, panelOpenAttr }
 export { applyPanelToggle, panelAttrs, lastRenderedView, captureViewScroll, restoreViewScroll, CHAT_BOTTOM_THRESHOLD, nextChatAtBottom, render, renderView, noProject, activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote }
 export { dispatchTaskRow, dispatchRunRow, renderSoloChat, renderSoloConfig, APPROVAL_STATUS, renderApprovalCard, renderMessage, DM_STATUS, DM_STATUS_TONE, renderDirectMessagesCard, TASK_PRIORITY_WEIGHT, TASK_PRIORITY_DEFAULT, taskPriorityKey, taskPriorityWeight, compareTasksByPriority, sortTasksByPriority, TASK_SORTS, sortTasksForPanel, TASK_TIME_RANGES, taskEndsOutsideRange }
+export { formatApprovalRemaining, approvalUrgent, approvalBadgeText, approvalBannerView, approvalExpiresMs, approvalRemainingFrom }
 export { taskTerminalTime, filteredTasks, renderTasks, taskGroupKey, renderTaskGroup, taskStatusIcon, taskPriorityIcon, renderTaskCard, taskChildrenKey, taskParentId, renderTaskRows, terminalStatusPill, terminalOutputText, renderTerminal, renderBots, renderBotsOverview, renderMembers, renderSkills, memoryStatusTone, pendingMemoryCount }
 export { renderMemory, currentSkillVersion, skillVersions, canaryText, evaluationText, proposalPreview, renderEvolution, usageSnapshot, usageTotals, formatAmount, usageCostParts, usageCostText, usageMode, usageViewTitle, usageBarRow, usageBotRow, usageRunRow, usageModelPanel, usageMetricCards, usageDayPanel, usageSection, usagePageHead, usageListPanel, renderUsage }
 export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderWechatCard, renderSecretsCard, renderSettings, currentScale, renderGlobal, modalShell, modalLoading, renderModal, modelOptions, effortOptions, fallbackModelOptions, parseFallbackFields, modalNewProject, modalRemoveTracking, closeDirPicker }

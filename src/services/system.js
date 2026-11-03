@@ -52,6 +52,8 @@ export const systemMethods = {
       runLimits: this.runLimitsView(),
       // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
       activeRuns: Number(this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')")?.count ?? 0),
+      // 跨项目待审聚合（DSHBOTS-102）：与项目解耦，用户不在该项目的群聊页也能看到待处理审批。
+      pendingApprovals: this.approvalsPending(),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,

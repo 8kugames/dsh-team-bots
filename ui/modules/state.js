@@ -26,6 +26,10 @@ export const state = {
   // 折叠面板（<details data-panel>）展开态的 key 集合，toggle 时增删；render 全量重建后据此恢复 open 属性。
   // 任务面板的分组（task-group:<status>）与子任务（task-children:<taskId>）也走这套 key（DSHBOTS-58）。
   openPanels: new Set(),
+  // 顶部「待处理审批」条（DSHBOTS-102）：跨项目 pending 聚合；approvalPanelOpen 是明细面板展开态，
+  // approvalDeciding 是正在决策的 approval id 集合（决策中禁用按钮，防重复点击）。
+  approvalPanelOpen: false,
+  approvalDeciding: new Set(),
   ac: null,
   busy: 0,
   chatAtBottom: true,

@@ -172,4 +172,20 @@ export const approvalsMethods = {
     )
     return rows.map(row => this.approvalView(row))
   },
+
+  // 全局待审视图（DSHBOTS-102）：跨项目聚合 status='pending'，按创建时间倒序。
+  // count 是全库 pending 总数（徽标口径，已决一律不计），items 最多 50 条供顶部入口列明细。
+  // 明细带项目名，用户不在该项目群聊页也能看到「谁、在哪个项目、要什么、还剩多久」。
+  approvalsPending(limit = 50) {
+    const rows = this.store.all(
+      `SELECT a.*, p.name AS project_name FROM approvals a LEFT JOIN projects p ON p.id = a.project_id
+       WHERE a.status = 'pending' ORDER BY a.created_at DESC LIMIT ?`,
+      limit,
+    )
+    const count = Number(this.store.get("SELECT COUNT(*) AS count FROM approvals WHERE status = 'pending'")?.count ?? 0)
+    return {
+      count,
+      items: rows.map(row => ({ ...this.approvalView(row), projectName: row.project_name ?? '' })),
+    }
+  },
 }
