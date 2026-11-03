@@ -91,6 +91,11 @@ async function main() {
       if (req.method === 'GET' && url.pathname === '/api/dsh-team/app.js') {
         return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, 'ui', 'app.js')))
       }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/dsh-team/modules/')) {
+        const mod = url.pathname.slice('/api/dsh-team/modules/'.length)
+        if (!/^[\w-]+\.js$/.test(mod)) return send(res, 404, 'text/plain', 'Not found')
+        return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, 'ui', 'modules', mod)))
+      }
       const fontMatch = req.method === 'GET' && url.pathname.match(/^\/api\/dsh-team\/fonts\/inter-(400|500|600)\.woff2$/)
       if (fontMatch) {
         return send(res, 200, 'font/woff2', await readFile(join(ROOT, 'ui', 'fonts', `inter-${fontMatch[1]}.woff2`)))

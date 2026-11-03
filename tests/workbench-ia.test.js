@@ -5,9 +5,11 @@ import { fileURLToPath } from 'node:url'
 
 // DSHBOTS-5 工作台信息架构改造：读源码断言（与 terminal-ui.test.js 同模式）。
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+// NAV/SOLO_NAV 已拆到 modules/state.js（DSHBOTS-15），从模块源码读取。
+const stateSource = readFileSync(fileURLToPath(new URL('../ui/modules/state.js', import.meta.url)), 'utf8')
 
-const NAV = /const NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1] ?? ''
-const SOLO_NAV = /const SOLO_NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1] ?? ''
+const NAV = /const NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1] ?? ''
+const SOLO_NAV = /const SOLO_NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1] ?? ''
 
 // ① 项目导航：bots 改「成员」members，群聊侧栏「项目成员」面板移除，设置页成员 checkbox 移除。
 test('① 项目导航 bots → members 成员 tab', () => {

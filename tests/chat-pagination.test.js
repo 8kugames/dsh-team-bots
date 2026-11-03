@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
+import { readUiSource } from './helpers/ui-sources.js'
 
 class StubRuntime {
   setCompletionHandler() {}
@@ -161,7 +162,7 @@ test('参数校验：scope 二选一、游标缺一不可', async () => {
 // 先剔行注释再断言顺序，防止「注释里的字也能让断言通过」的假锁（6040ea5 教训）。
 test('UI 接线：标记块存在、渲染/分发/样式接通、顺序正确', async () => {
   const { readFile } = await import('node:fs/promises')
-  const app = await readFile('ui/app.js', 'utf8')
+  const app = readUiSource()
   const bare = app.replace(/\/\/[^\n]*/g, '')
   const css = await readFile('ui/styles.css', 'utf8')
 

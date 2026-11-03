@@ -86,6 +86,10 @@ export function installHttp(ctx, service, logger = console) {
     return response(html.replaceAll('{{assetVersion}}', ASSET_VERSION), 'text/html; charset=utf-8')
   }
   const script = async () => response(await readFile(join(UI, 'app.js'), 'utf8'), 'text/javascript; charset=utf-8')
+  // ES module 切片（DSHBOTS-15）：app.js 的 import 依赖逐文件注册（bridge 路由为精确路径）。
+  const moduleScript = (name) => async () => response(
+    await readFile(join(UI, 'modules', name)), 'text/javascript; charset=utf-8',
+  )
   const styles = async () => response(await readFile(join(UI, 'styles.css'), 'utf8'), 'text/css; charset=utf-8')
   const font = (weight) => async () => response(
     await readFile(join(UI, 'fonts', `inter-${weight}.woff2`)),
@@ -102,6 +106,9 @@ export function installHttp(ctx, service, logger = console) {
   route('/api/dsh-team', ['GET'], page)
   route('/api/dsh-team/ui', ['GET'], page)
   route('/api/dsh-team/app.js', ['GET'], script)
+  route('/api/dsh-team/modules/state.js', ['GET'], moduleScript('state.js'))
+  route('/api/dsh-team/modules/icons.js', ['GET'], moduleScript('icons.js'))
+  route('/api/dsh-team/modules/util.js', ['GET'], moduleScript('util.js'))
   route('/api/dsh-team/styles.css', ['GET'], styles)
   route('/api/dsh-team/fonts/inter-400.woff2', ['GET'], font('400'))
   route('/api/dsh-team/fonts/inter-500.woff2', ['GET'], font('500'))

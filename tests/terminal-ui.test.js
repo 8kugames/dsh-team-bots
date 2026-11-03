@@ -6,13 +6,15 @@ import { fileURLToPath } from 'node:url'
 // 按 tests/ac.test.js 的先例：读 ui/app.js 源码做关键标记断言（不跑浏览器）。
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
 const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+// NAV/SOLO_NAV 已拆到 modules/state.js（DSHBOTS-15），从模块源码读取。
+const stateSource = readFileSync(fileURLToPath(new URL('../ui/modules/state.js', import.meta.url)), 'utf8')
 
 test('终端 tab 只出现在项目上下文导航', () => {
-  // NAV/SOLO_NAV 都是每行一项、两空格缩进收口，按缩进出口截取整块。
-  const nav = /const NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1]
+  // NAV/SOLO_NAV 都是每行一项，按收口括号截取整块（模块顶层 0 缩进）。
+  const nav = /const NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1]
   assert.ok(nav, '缺少 NAV 定义')
   assert.match(nav, /\['terminal',\s*'终端',\s*'terminal'\]/)
-  const soloNav = /const SOLO_NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1]
+  const soloNav = /const SOLO_NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1]
   assert.ok(soloNav, '缺少 SOLO_NAV 定义')
   assert.ok(!soloNav.includes("'terminal'"), '单聊导航不应出现终端 tab')
 })

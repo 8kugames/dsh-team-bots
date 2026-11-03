@@ -4,8 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
 
 test('① 侧栏树尾「已归档」抽屉：默认收起 + 计数徽标', () => {

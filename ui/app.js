@@ -1,313 +1,26 @@
+import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, COLORS, COLOR_NAMES, BOT_STATUS, RUN_STATUS, RUN_KIND, CHAT_PAGE_SIZE, CHAT_ACTIVE_TASK_LIMIT, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, CREATOR_TYPE, EFFORT, FILE_POLICY, DEFAULT_FILE_POLICY, VIEW_ACTION, NAV, SOLO_NAV } from './modules/state.js'
+import { icon } from './modules/icons.js'
+import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, initials, avatar, statusPill, runDot, memberRunDot, runDotHtml, MEMBER_STATUS_TEXT, memorySource, toast, filePolicyOptions } from './modules/util.js'
+
 (() => {
   'use strict'
 
   const app = document.getElementById('app')
-  const toastRoot = document.getElementById('toast-root')
-  const params = new URLSearchParams(location.search)
-  const initialView = params.get('view')
   const UI_SCALE_KEY = 'dshb:ui-scale'
   const UI_THEME_KEY = 'dshb:ui-theme'
-  const state = {
-    data: null,
-    view: ['chat', 'solo-config', 'tasks', 'bots-overview', 'members', 'skills', 'memory', 'evolution', 'usage', 'terminal', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
-    projectId: params.get('project') || null,
-    chatMode: 'group',
-    soloBotId: null,
-    soloDetail: null,
-    modal: null,
-    // 草稿按上下文分开记（群聊 group:<projectId>、单聊 solo:<botId>），切换互不覆盖、互不清空。
-    chatDrafts: {},
-    // composer 手动拖高后的像素高度；null = 自动高度（随内容长高，上限 150px）。
-    composerHeight: null,
-    // 群聊引用回复：{ id, senderName, excerpt }，非空时 composer 上方显示引用条，随发送/取消清除。
-    replyTo: null,
-    // composer 待发图片：按上下文分键（与草稿同口径），值为 { key, name, mediaType, bytes, data, previewUrl } 数组。
-    // 预览走 blob: URL（不进 DOM），base64 只留在 state 里随 send_message 发出。
-    pendingImages: {},
-    // 聊天历史分片（DSHBOTS-33）：state 轮询只回最后 200 条，更早的经 messages_page 手动加载后存这里。
-    // key 与当前会话对齐（group:<projectId> / solo:<botId>），切会话即失效重置；items 与轮询结果按 id 去重合并。
-    chatOlder: { key: null, items: [], hasMore: false, loading: false },
-    // 折叠面板（<details data-panel>）展开态的 key 集合，toggle 时增删；render 全量重建后据此恢复 open 属性。
-    // 任务面板的分组（task-group:<status>）与子任务（task-children:<taskId>）也走这套 key（DSHBOTS-58）。
-    openPanels: new Set(),
-    ac: null,
-    busy: 0,
-    chatAtBottom: true,
-    // 渲染窗口闸门：render() 全量重建 DOM 期间为 true，此时到达的聊天滚动事件一律忽略（DSHBOTS-72）。
-    rendering: false,
-    taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
-    // 任务面板组内排序（D-63）：默认创建时间新→旧；六档口径见 TASK_SORTS。
-    taskSort: 'created_desc',
-    // 用量页三态：global=侧栏「用量统计」的全局视图；domain=群聊 NAV 用量 tab（本群）；solo=单聊 NAV 用量 tab（本 bot）。
-    usageMode: 'global',
-    // 全局视图内的展示维度：global / model / bot / project（口径切换只保留这四类）。
-    usageScope: 'global',
-    usageBot: null,
-    memoryQuery: '',
-    memoryResults: null,
-    theme: 'dsh',
-    tree: { chats: true, bots: true, archived: false },
-    // 群聊已读水位：`<projectId>:<最新消息时间>`，用于避免重复上报已读。
-    markedRead: null,
-    bootError: null,
-    wechatAuth: null,
-    wechatPollTimer: null,
-    terminalDraft: '',
-    terminalPollTimer: null,
-  }
 
-  const STATUS = {
-    backlog: '待规划',
-    todo: '待执行',
-    in_progress: '进行中',
-    blocked: '受阻',
-    in_review: '待验收',
-    done: '已完成',
-    canceled: '已取消',
-  }
-  const STATUS_ORDER = ['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled']
   // 任务分组默认全展开（DSHBOTS-58）：把各分组的展开态 key 预置进 state.openPanels，
   // 与 <details data-panel> 同一套通道（key 形如 task-group:<status>），折叠即从集合里删掉。
   for (const status of STATUS_ORDER) state.openPanels.add(taskGroupKey(status))
-  const PRIORITY = { urgent: '紧急', high: '高', medium: '中', low: '低', none: '无' }
-  const PROPOSAL_STATUS = { pending: '待审', canary: '灰度中', approved: '已通过', rejected: '已拒绝' }
-  const COLORS = ['teal', 'blue', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
-  const COLOR_NAMES = { teal: '青', blue: '蓝', violet: '紫', amber: '琥珀', coral: '珊瑚', pink: '粉', green: '绿', gray: '灰' }
-  const BOT_STATUS = { active: '运行中', paused: '已暂停', archived: '已归档' }
-  const RUN_STATUS = { queued: '排队中', running: '运行中', succeeded: '已完成', failed: '失败', canceled: '已取消' }
-  // 调度页「正在调度」列表用的运行类型名；未知 kind 直接显示原值，不静默吞掉。
-  const RUN_KIND = {
-    task_run: '任务运行',
-    owner_task_run: '总监任务',
-    solo_chat_run: '单聊回复',
-    chat_run: '群聊运行',
-    dm_run: '私信运行',
-    dm_reply: '私信回复',
-    memory_review: '记忆复核',
-  }
-  // 聊天历史分片大小：与后端 messagesPage 的默认/上限一致（state 轮询同口径）。
-  const CHAT_PAGE_SIZE = 200
-  // 群聊右栏「活跃任务」列表显示上限：标题右侧计数仍显示项目在办任务总数，超出部分用「还有 N 条」提示。
-  const CHAT_ACTIVE_TASK_LIMIT = 9
-  const SKILL_STATUS = { active: '启用中', missing: '已失效' }
-  const MEMORY_STATUS = { active: '已生效', pending: '待审', frozen: '已冻结', rejected: '已拒绝', archived: '已归档' }
-  const PROPOSAL_KIND = { bot_update: 'Bot 更新', skill: '技能更新', workflow: '流程更新' }
-  const TERMINAL_STATUS = { running: '运行中', succeeded: '已完成', failed: '失败', timeout: '超时', canceled: '已停止', interrupted: '已中断' }
-  const CREATOR_TYPE = { bot: 'Bot', user: '用户' }
-  const EFFORT = { minimal: '最低', low: '低', medium: '中', high: '高', max: '最高' }
-  const FILE_POLICY = { 'read-only': '只读', 'workspace-write': '工作区内修改', 'danger-full-access': '完全访问' }
-  const DEFAULT_FILE_POLICY = 'workspace-write'
-  function filePolicyOptions(current) {
-    const value = FILE_POLICY[current] ? current : DEFAULT_FILE_POLICY
-    return Object.entries(FILE_POLICY).map(([id, label]) => `<option value="${attr(id)}" ${value === id ? 'selected' : ''}>${esc(label)}</option>`).join('')
-  }
-  // The one action in the top-right belongs to the page you are on.
-  const VIEW_ACTION = {
-    tasks: { label: '新建任务', action: 'new-task', icon: 'plus' },
-    memory: { label: '写入记忆', action: 'new-memory', icon: 'plus' },
-    skills: { label: '新建提案', action: 'new-proposal', icon: 'plus', kind: 'skill' },
-    settings: { label: '保存设置', icon: 'check', submit: 'project-settings-form' },
-    'solo-config': { label: '保存配置', icon: 'check', submit: 'solo-config-form' },
-  }
-  // 项目导航：进化只挂在单聊 bot tab（逐个审批）与「总览bots」（批量审批），项目 NAV 不再出现。
-  // 「用量」tab 只看本群；全局用量走侧栏「用量统计」。
-  const NAV = [
-    ['chat', '群聊', 'message'],
-    ['tasks', '任务', 'board'],
-    ['members', '成员', 'users'],
-    ['skills', '技能', 'spark'],
-    ['memory', '记忆', 'memory'],
-    ['usage', '用量', 'chart'],
-    ['terminal', '终端', 'terminal'],
-    ['settings', '设置', 'settings'],
-  ]
-  // 1V1 上下文的导航：调度窗口 + 集中配置页 + 团队级页面（技能/记忆/进化）+ 本 bot 用量。
-  // 首个 tab 展示名是「调度」——单聊页已升级为调度页（对话 + 任务 + 运行一览）。
-  const SOLO_NAV = [
-    ['chat', '调度', 'message'],
-    ['solo-config', '配置', 'settings'],
-    ['skills', '技能', 'spark'],
-    ['memory', '记忆', 'memory'],
-    ['evolution', '进化', 'branch'],
-    ['usage', '用量', 'chart'],
-  ]
 
-  const icons = {
-    message: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>',
-    board: '<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/>',
-    bot: '<rect x="4" y="7" width="16" height="13" rx="4"/><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6"/>',
-    spark: '<path d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7z"/><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z"/>',
-    memory: '<path d="M9 4h6a4 4 0 0 1 4 4v12H9a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
-    branch: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 10h4a6 6 0 0 0 6-2"/>',
-    chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 9A7 7 0 0 1 18.7 7M17.9 15A7 7 0 0 1 5.3 17"/>',
-    send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
-    close: '<path d="M18 6 6 18M6 6l12 12"/>',
-    folder: '<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-    check: '<path d="m20 6-11 11-5-5"/>',
-    // 优先级图标（Linear 式三档横条）：紧急/高/中/低依次点亮更多横条，配色沿用现有优先级色。
-    priority: '<path d="M4 7h13M4 12h9M4 17h5"/>',
-    play: '<path d="m8 5 11 7-11 7z"/>',
-    stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
-    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/>',
-    trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6"/>',
-    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-    alert: '<path d="M12 3 2 21h20z"/><path d="M12 9v5M12 18h.01"/>',
-    chevron: '<path d="m9 18 6-6-6-6"/>',
-    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
-    external: '<path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
-    layers: '<path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/>',
-    terminal: '<path d="m4 17 6-6-6-6M12 19h8"/>',
-    users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
-    download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/>',
-    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',
-    reply: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>',
-    // 引用标记：两枚引号（lucide quote 标准路径，水平镜像成「“」开口式，描边加粗到 2.2，
-    // 保证 14px 下仍可辨），与「返回/滚回」的回转箭头彻底区分。
-    quote: '<g transform="translate(24 0) scale(-1 1)" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></g>',
-    // 图片附件：相框 + 圆点 + 山形缩略图（lucide image 同款路径），用于「添加图片」按钮与消息附图块。
-    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 17 4.5-4.5 3 3L15 12l5 5"/>',
-  }
-
-  const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.settings}</svg>`
-
-  function applyUiScale(value) {
-    const scale = Math.min(1.4, Math.max(1, Number(value) || 1))
-    document.documentElement.style.setProperty('--ui-scale', String(scale))
-    return scale
-  }
   if (window.matchMedia?.('(max-width: 980px)').matches) state.tree = { chats: false, bots: false }
   const savedScale = (() => {
     try { return Number(localStorage.getItem(UI_SCALE_KEY)) || null } catch { return null }
   })()
   if (savedScale) applyUiScale(savedScale)
-  function applyUiTheme(value) {
-    const theme = value === 'catppuccin' ? 'catppuccin' : 'dsh'
-    if (theme === 'dsh') document.documentElement.removeAttribute('data-theme')
-    else document.documentElement.setAttribute('data-theme', theme)
-    return theme
-  }
   state.theme = applyUiTheme((() => {
     try { return localStorage.getItem(UI_THEME_KEY) } catch { return null }
   })())
-  const esc = (value) => String(value ?? '')
-    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;').replaceAll("'", '&#39;')
-  const attr = esc
-  const pathCode = value => `<code>${esc(value).split('/').join('/<wbr>')}</code>`
-  const costValue = value => {
-    const text = formatCost(value)
-    return /^[¥$€£]/.test(text) ? `<span class="unit">${esc(text[0])}</span>${esc(text.slice(1))}` : esc(text)
-  }
-  const clamp = (value, max, fallback = '') => String(value ?? fallback).slice(0, max)
-  const botById = (id) => state.data?.bots.find(bot => bot.id === id)
-  // 审批人/决定人标识形如 `bot:<id>`、`user:<id>`：bot 显示「名称·角色标签」，user 显示本地用户名；
-  // bot 已删除时回退短 id（对齐 team_recall 的 m_短id 口径，只取末 6 位），不暴露完整原始 id。
-  const shortRefId = (id) => String(id ?? '').slice(-6)
-  function actorLabel(raw) {
-    const value = String(raw ?? '').trim()
-    if (!value) return ''
-    const sep = value.indexOf(':')
-    const type = sep >= 0 ? value.slice(0, sep) : ''
-    const id = sep >= 0 ? value.slice(sep + 1) : value
-    if (type === 'user' || (!type && (id === 'user' || id === 'owner'))) return state.data?.me?.name || '用户'
-    if (type === 'bot' || (!type && id.startsWith('bot_'))) {
-      const bot = botById(id)
-      if (bot) return `${bot.name}·${bot.role || '成员'}`
-      return `已删除 Bot · ${shortRefId(id)}`
-    }
-    return value
-  }
-  const taskById = (id) => state.data?.tasks.find(task => task.id === id)
-  const activeProject = () => state.data?.project
-  // 1V1 单聊上下文（对话/配置/技能/记忆/进化/用量）不携带任何项目，页面呈现团队全局口径。
-  const inSoloContext = () => state.chatMode === 'solo' || state.view === 'solo-config'
-  const pageProject = () => (inSoloContext() ? null : activeProject())
-  const activeBots = () => (state.data?.bots ?? []).filter(bot => bot.status === 'active')
-
-  function formatNumber(value) {
-    const n = Number(value ?? 0)
-    if (!Number.isFinite(n)) return '0'
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}m`
-    if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 1 : 2)}k`
-    return String(Math.round(n))
-  }
-  const CURRENCY_SYMBOL = { CNY: '¥', RMB: '¥', USD: '$', EUR: '€', JPY: '¥' }
-  function formatCost(value, currency = 'CNY') {
-    if (value === null || value === undefined) return '未配置'
-    const code = String(currency || 'CNY').toUpperCase()
-    const symbol = CURRENCY_SYMBOL[code] ?? `${code} `
-    if (value === 0) return `${symbol}0.00`
-    if (value < 0.01) return `${symbol}${value.toFixed(4)}`
-    return `${symbol}${value.toFixed(2)}`
-  }
-  function timeAgo(value) {
-    if (!value) return '—'
-    const ms = Date.now() - new Date(value).getTime()
-    if (!Number.isFinite(ms)) return '—'
-    if (ms < 45_000) return '刚刚'
-    if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} 分钟前`
-    if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)} 小时前`
-    if (ms < 7 * 86_400_000) return `${Math.floor(ms / 86_400_000)} 天前`
-    return new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
-  }
-  function formatTime(value) {
-    if (!value) return ''
-    return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-  }
-  function duration(start, end) {
-    if (!start) return '—'
-    const ms = (end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime()
-    if (!Number.isFinite(ms) || ms < 0) return '—'
-    if (ms < 1000) return `${ms}ms`
-    if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
-    return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
-  }
-  function initials(name) {
-    const text = String(name ?? '?').trim()
-    return /^[A-Za-z]/.test(text) ? text.slice(0, 2).toUpperCase() : text.slice(0, 2)
-  }
-  function avatar(bot, size = '') {
-    return `<div class="avatar ${attr(bot?.color ?? 'gray')} ${size}">${esc(initials(bot?.name ?? '?'))}</div>`
-  }
-  function statusPill(status, text = STATUS[status] ?? status) {
-    const tone = status === 'done' ? 'green' : status === 'blocked' || status === 'canceled' ? 'red' : status === 'in_review' ? 'violet' : status === 'in_progress' ? 'amber' : ''
-    return `<span class="pill ${tone}">${esc(text)}</span>`
-  }
-  function runDot(status) {
-    return `<span class="run-dot ${attr(status ?? '')}" title="${attr(RUN_STATUS[status] ?? '未运行')}"></span>`
-  }
-  // 成员/总监状态点：红黄绿三色——空闲绿、运行中黄（且仅此态闪烁）、失败红（含限流等待）。
-  // 排队中按空闲处理（绿、不闪），只有真正 running 才闪。
-  function memberRunDot(member) {
-    const status = member?.run_status ?? 'idle'
-    const phase = member?.run_phase ?? null
-    const waitMin = member?.retry_wait_seconds ? Math.max(1, Math.round(member.retry_wait_seconds / 60)) : null
-    if (status === 'running') {
-      return phase === 'running'
-        ? { cls: 'running', status: 'running', text: '运行中' }
-        : { cls: 'idle', status: 'queued', text: '排队中（按空闲计）' }
-    }
-    if (status === 'plan_wait') return { cls: 'plan-wait', status: 'plan_wait', text: `限流等待，约 ${waitMin} 分钟后自动重试` }
-    if (status === 'failed') return { cls: 'failed', status: 'failed', text: '最近运行失败' }
-    return { cls: 'idle', status: 'idle', text: '空闲' }
-  }
-  function runDotHtml(dot) {
-    return `<span class="run-dot ${dot.cls}" data-status="${dot.status}" title="${esc(dot.text)}" aria-label="${esc(dot.text)}"></span>`
-  }
-  // 卡片底部的状态短标签（完整说明仍在 run-dot 的 title 里）。
-  const MEMBER_STATUS_TEXT = { idle: '空闲', running: '运行中', queued: '排队中', plan_wait: '限流等待', failed: '运行失败' }
-  function memorySource(source) {
-    const value = String(source ?? '')
-    if (!value) return '手动写入'
-    if (value === 'chat-command') return '群聊指令'
-    if (value.startsWith('run:')) return '运行沉淀'
-    if (value.startsWith('session:')) return '会话沉淀'
-    return '自动沉淀'
-  }
 
   // markdown-render:start —— 聊天 markdown 渲染纯逻辑（tests/markdown.test.js 抽取此块断言）。
   // 管线固定：md → mdRewriteImageSources → marked.parse → DOMPurify.sanitize → innerHTML。
@@ -400,19 +113,6 @@
     }
     const project = pageProject()
     return project ? { projectId: project.id, root: project.workspace_path } : null
-  }
-
-  function toast(message, type = '') {
-    const el = document.createElement('div')
-    el.className = `toast ${type}`
-    el.textContent = message
-    toastRoot.appendChild(el)
-    setTimeout(() => {
-      el.style.opacity = '0'
-      el.style.transform = 'translateY(5px)'
-      el.style.transition = 'opacity .2s, transform .2s'
-      setTimeout(() => el.remove(), 220)
-    }, 3600)
   }
 
   async function api(action, payload = {}, { quiet = false } = {}) {

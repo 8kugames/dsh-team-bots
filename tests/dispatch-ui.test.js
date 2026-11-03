@@ -5,8 +5,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 
 test('① 更名：导航首 tab、侧卡与入口按钮都改成「调度」口径', () => {
   assert.match(source, /\['chat', '调度', 'message'\]/, '单聊导航首 tab 应显示「调度」')

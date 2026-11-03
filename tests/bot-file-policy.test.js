@@ -9,6 +9,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
+import { readUiSource } from './helpers/ui-sources.js'
 
 // bot.file_policy：默认工作区内修改、可改、改了有审计、派发时写成宿主 sandbox/mode 覆盖。
 
@@ -192,7 +193,7 @@ test('applyFilePolicy reads the optional service through ctx.get, never as a pro
 
 test('UI marks file policy dropdowns on both bot forms', async () => {
   // 按 tests/terminal-ui.test.js 先例：读 ui/app.js 源码做关键标记断言（不跑浏览器）。
-  const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+  const source = readUiSource()
   // 两个表单（单聊配置 + 总览编辑/新建）都有 name="filePolicy" 下拉。
   const selects = source.match(/name="filePolicy"/g) ?? []
   assert.equal(selects.length, 2, '单聊配置页与总览表单各应有一个文件权限下拉')

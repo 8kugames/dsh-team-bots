@@ -2,8 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 
 // 群聊页右栏（aside.chat-side 里含「活跃任务」的那一个）
 const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/aside>/g)]

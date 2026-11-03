@@ -2,8 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 
 // —— 纯逻辑标记块 ——
 const block = /\/\/ chat-scroll:start[\s\S]*?\/\/ chat-scroll:end/.exec(source)?.[0]

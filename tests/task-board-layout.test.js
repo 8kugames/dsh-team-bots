@@ -2,8 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
 
 // 取某个选择器的规则体（选择器需写全，如后代选择器 '.task-card-foot .task-run-label'）。

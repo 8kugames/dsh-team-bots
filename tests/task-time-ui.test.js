@@ -5,8 +5,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const app = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8')
+const app = readUiSource()
 const css = readFileSync(new URL('../ui/styles.css', import.meta.url), 'utf8')
 
 /** 定位 `// <marker>:start` 到 `// <marker>:end` 的原始块，再剔块内行注释。 */

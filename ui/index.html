@@ -19,6 +19,6 @@
        defer 保持文档序执行，app.js 里二者缺一即回退纯文本，不会裸渲染。 -->
   <script src="/api/dsh-team/vendor/marked.js?v={{assetVersion}}" defer></script>
   <script src="/api/dsh-team/vendor/purify.min.js?v={{assetVersion}}" defer></script>
-  <script src="/api/dsh-team/app.js?v={{assetVersion}}" defer></script>
+  <script type="module" src="/api/dsh-team/app.js?v={{assetVersion}}" defer></script>
 </body>
 </html>

@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url'
 // DSHBOTS-56 用量信息架构：侧栏入口纯全局（与群聊/单聊上下文零耦合），
 // 群聊/单聊 NAV 各自恢复「用量」tab（内容严格限本群/本 bot）。读源码断言（与 workbench-ia 同模式）。
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+// NAV/SOLO_NAV 已拆到 modules/state.js（DSHBOTS-15），从模块源码读取。
+const stateSource = readFileSync(fileURLToPath(new URL('../ui/modules/state.js', import.meta.url)), 'utf8')
 
-const NAV = /const NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1] ?? ''
-const SOLO_NAV = /const SOLO_NAV = \[([\s\S]*?)\n {2}\]/.exec(source)?.[1] ?? ''
+const NAV = /const NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1] ?? ''
+const SOLO_NAV = /const SOLO_NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1] ?? ''
 
 // 取某个函数的源码片段（函数体统一两空格缩进收尾）。
 function fnBody(name) {
