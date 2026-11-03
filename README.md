@@ -7,7 +7,7 @@ DSH Web + 团队 Bots 插件（包名 `dsh-team-bots`），本机随 DSH 运行�
 ## 功能
 
 - 每个 Bot 独立配置角色、模型、reasoning effort 和长期记忆。
-- 首次启动默认出场总监「director」与五个游戏团队伙伴：designer（策划）、programmer（程序）、graphics（图形渲染）、devops（工具链与运维）、artist（美术）（定义见 `src/seed-bots.js`）。
+- 首次启动默认出场总监「director」与六个通用团队伙伴：designer（策划）、programmer（程序）、graphics（视觉与体验）、devops（工具链与运维）、artist（美术）、reviewer（质量评审）（定义见 `src/seed-bots.js`）。
 - 每个项目自动创建群聊、总监 Bot、任务编号和独立工作区。
 - 群聊支持普通消息、`@Bot`、`/task @Bot 标题`、`/remember 内容` 和 `/clear`（清空本群聊天记录，任务与记忆保留）；输入 `/` 或 `@` 会弹出命令、共享技能与成员的自动补全。
 - 任务运行使用独立会话，长任务不会阻塞同一个 Bot 的群聊回复。
