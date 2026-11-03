@@ -11,6 +11,13 @@ import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
 
+// 沙箱档位按运行类型收紧：一切非写运行（dm/dm_reply/chat/memory_review/solo_chat/review/handle
+// 等 mode!=='write'）物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
+// run 为空（无运行上下文的会话建立）保持 bot.file_policy 现行为。
+export function sandboxModeForRun(run, bot) {
+  return run && run.mode !== 'write' ? 'read-only' : bot?.file_policy
+}
+
 export const promptMethods = {
   systemPromptFor(context) {
     const sessionId = context?.agent?.id ?? context?.session?.id ?? context?.sessionId
@@ -155,12 +162,12 @@ export const promptMethods = {
     ].filter(Boolean).join('\n')
   },
 
-  // 把 bot.file_policy 写成宿主 session 的文件沙箱覆盖。宿主原生写路径
-  // setSandboxMode(session, mode) 就是 session.append('sandbox/mode', { mode })，
+  // 把按运行类型收紧后的档位（sandboxModeForRun）写成宿主 session 的文件沙箱覆盖。
+  // 宿主原生写路径 setSandboxMode(session, mode) 就是 session.append('sandbox/mode', { mode })，
   // 这里等价直调（插件不依赖宿主包），事件 log-only、replay 持久、下次受限调用生效。
   // 会话已是目标档位就不重复追加；设置失败只告警不阻断会话（沙箱回落宿主默认）。
-  applyFilePolicy(agent, bot) {
-    const mode = bot?.file_policy
+  applyFilePolicy(agent, bot, run) {
+    const mode = sandboxModeForRun(run, bot)
     if (!SANDBOX_MODES.includes(mode)) return
     const liveSession = agent?.agent?.session ?? agent?.session
     if (!liveSession?.append) return
