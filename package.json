@@ -1,0 +1,25 @@
+{
+  "name": "dsh-team-bots",
+  "version": "0.2.127",
+  "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots (development on the dev branch; this branch holds release metadata only)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/8kugames/dsh-team-bots.git"
+  },
+  "homepage": "https://github.com/8kugames/dsh-team-bots#readme",
+  "bugs": {
+    "url": "https://github.com/8kugames/dsh-team-bots/issues"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "bots",
+    "team",
+    "tasks"
+  ]
+}
