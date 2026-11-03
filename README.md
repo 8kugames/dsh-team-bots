@@ -67,6 +67,8 @@ npm run doctor     # 检查 Node/DSH 版本、工作区与技能池路径的可�
 
 `src/` 是服务端与调度，`ui/` 是工作台前端，`tests/` 是测试，`docs/` 放设计与评审文档。开发预览无认证，不动任何 DSH 配置，不能用于生产。
 
+CI：push `v*` tag 自动发 npm——工作流跑全量测试，全绿后发布到 registry.npmjs.org（见 `.github/workflows/publish.yml`）。
+
 ## 截图
 
 任务看板按状态分组，父子任务与待验收标记一眼可见：

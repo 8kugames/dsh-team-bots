@@ -1,7 +1,15 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.2.118",
+  "version": "0.2.119",
   "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/8kugames/dsh-team-bots.git"
+  },
+  "homepage": "https://github.com/8kugames/dsh-team-bots#readme",
+  "bugs": {
+    "url": "https://github.com/8kugames/dsh-team-bots/issues"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "main": "index.js",
