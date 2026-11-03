@@ -146,7 +146,9 @@ export const tasksMethods = {
         projectId: project.id,
         senderType: 'system',
         senderId: 'system',
-        body: `任务 ${project.key}-${number} 已创建${assigneeId ? ` → @${this.botRow(assigneeId).name}` : ''}`,
+        body: `任务 ${project.key}-${number} 已创建${assigneeId ? ` → @${this.botRow(assigneeId).name}` : ''}`
+          // 紧急豁免报备（DSHBOTS-126）：urgent 与在办卡共用车道时在同一条创建消息里注明，不静默并行。
+          + (input.laneShareTask ? `；紧急豁免：与在办卡 ${input.laneShareTask} 共用写范围车道，立即开工` : ''),
         taskId,
       })
     }
@@ -640,12 +642,16 @@ export const tasksMethods = {
     }
     // 同写范围重复卡拦截（DSHBOTS-82）：同项目已有「写范围完全一致」的在办卡时直接拒绝，
     // 避免同一文件上叠 N 张排队卡空转。force_duplicate 是逃生口：跳过检测，但留审计痕迹。
+    // 紧急豁免（DSHBOTS-126）：priority='urgent' 的新卡放行——紧急任务无视排队立即施工，
+    // 但创建消息报备与哪张在办卡共用车道，不静默并行。
     const duplicate = this.findDuplicateScopeTask(project.id, scopes)
     const forceDuplicate = input.force_duplicate === true
-    if (duplicate && !forceDuplicate) {
+    const urgentExempt = input.priority === 'urgent'
+    if (duplicate && !forceDuplicate && !urgentExempt) {
       throw conflict(
         `已存在同写范围任务 ${project.key}-${duplicate.number} ${duplicate.title}，请勿重复派单；`
-        + '若需合并多张小卡，请在原任务描述追加清单后重派原任务。',
+        + '若需合并多张小卡，请在原任务描述追加清单后重派原任务。'
+        + '紧急任务（priority=urgent）豁免此拦截，可立即派单施工。',
       )
     }
     const task = await this.createTask({
@@ -660,6 +666,8 @@ export const tasksMethods = {
       blockedBy: input.blocked_by,
       // 时效要求（新任务 only）：重派已有任务（上面 input.taskId/input.task 分支）不更新该字段。
       timeBudgetMinutes: input.time_budget_minutes ?? input.timeBudgetMinutes,
+      // 紧急豁免共用车道报备（DSHBOTS-126）：urgent 放行同写范围派单时，创建消息注明与哪张在办卡共用车道。
+      laneShareTask: urgentExempt && duplicate ? `${project.key}-${duplicate.number}` : null,
       autoStart: true,
       postCard: true,
     }, actor)

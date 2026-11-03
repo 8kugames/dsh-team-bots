@@ -473,7 +473,13 @@ Rules:
 This task is expected to be delivered within ${timeBudget} minutes; plan the depth of your work accordingly.
 If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
 This budget is a soft expectation for planning, not an execution limit: the runtime may still be stopped by the global run timeout (runTimeoutMs), which is independent of this field.` : ''
-        const parallel = this.config.agentTeam ? `
+      // 紧急豁免（DSHBOTS-126）：urgent 任务卡追加豁免指令（用户口径 m08196-2）——
+      // 无视车道排队立即开工；非 urgent 完全不注入，保持既有车道纪律。
+      const urgentExemptionBlock = task.priority === 'urgent' ? `
+
+# Urgent exemption
+本任务为紧急任务，豁免车道排队纪律：无需等待其他任务的文件车道让位，立即开工；若工作区存在同文件在途改动，先 git status 记录现场、只圈本卡文件提交，不得 add/checkout/stash 他人改动。` : ''
+      const parallel = this.config.agentTeam ? `
 
 # Parallel work inside this task
 - Split into teammates only when the task has two or more independent parts (separate modules, separate docs, an independent review). Small or single-file work: do it yourself.
@@ -488,7 +494,7 @@ Title: ${task.title}
 Priority: ${task.priority}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}
+${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}${urgentExemptionBlock}
 
 Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
 When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`
