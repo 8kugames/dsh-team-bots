@@ -11,11 +11,57 @@ import { assertInside } from '../paths.js'
 import { runUsageTotals } from '../usage.js'
 import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
-import { readWriteScopes } from './write-scopes.js'
+import { readWriteScopes, writeScopePathsOverlap } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
 import { isRateLimitError, MAX_RATE_LIMIT_RETRIES, needsSynthesizedBackoff, rateLimitBackoffMs } from './backoff.js'
 import { ensureAttentionSchema, normalizeAttention, parseAttention } from './attention-schema.js'
 
+// ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
+// 指纹行形如 " M dir/file"（前两字符状态位 + 空格 + 路径）；重命名 "R  old -> new"
+// 的新旧路径都算被触碰。带引号的 quoted 路径不解析（与产物清单同一口径，跳过）。
+export function porcelainTouchedPaths(output) {
+  const paths = new Set()
+  for (const line of String(output ?? '').split('\n')) {
+    if (line.length < 4) continue
+    const path = line.slice(3).trim()
+    if (!path || path.startsWith('"')) continue
+    const arrow = path.indexOf(' -> ')
+    if (arrow === -1) {
+      paths.add(path)
+      continue
+    }
+    const left = path.slice(0, arrow).trim()
+    const right = path.slice(arrow + 4).trim()
+    if (left) paths.add(left)
+    if (right) paths.add(right)
+  }
+  return paths
+}
+
+// 归因判定（纯函数，供测试直接锚定）：before/after 为 read 运行起止两次
+// `git status --porcelain` 指纹；concurrentWrites 为窗口内并发的写运行
+// [{ id, label, scopes }]，scopes 是归一化写范围数组（空数组 = 未声明，
+// 视为可能写任何路径）。返回 { silent, suspects, unattributedPaths }：
+// - 无并发写运行，或有路径不落在任何并发写范围 → 不静默，suspects 供告警点名；
+// - 变化全部可归因（含并发写未声明范围的保守情形）→ 静默不打扰用户。
+export function attributeWorkspaceChange({ before, after, concurrentWrites = [] }) {
+  const beforeLines = new Set(String(before ?? '').split('\n'))
+  const afterLines = new Set(String(after ?? '').split('\n'))
+  const changedLines = []
+  for (const line of beforeLines) if (!afterLines.has(line)) changedLines.push(line)
+  for (const line of afterLines) if (!beforeLines.has(line)) changedLines.push(line)
+  const writes = concurrentWrites.filter(item => item && item.id)
+  const unattributedPaths = []
+  for (const path of porcelainTouchedPaths(changedLines.join('\n'))) {
+    const covered = writes.some(write =>
+      !write.scopes?.length || write.scopes.some(scope => writeScopePathsOverlap(path, scope)))
+    if (!covered) unattributedPaths.push(path)
+  }
+  if (!writes.length || unattributedPaths.length) {
+    return { silent: false, suspects: writes.map(write => write.label ?? write.id), unattributedPaths }
+  }
+  return { silent: true, attributedTo: writes.map(write => write.label ?? write.id) }
+}
 
 
 export const runsMethods = {
@@ -401,6 +447,9 @@ if (run.kind === 'dm_reply') {
   },
 
   // 只读运行（群聊、验收、受阻处理）不应该改文件；改了就在群里点名。
+  // DSHBOTS-94：指纹变化先归因——窗口内（started_at→结束时刻）存在并发写运行且变化
+  // 落在其写范围内（或其未声明范围）时不点名，改记 run_event 留痕；只有无人认领的
+  // 变化才维持点名告警，告警里带上对不上号的并发写运行号。
   auditReadRunWrites(run, project) {
     if (run.mode !== 'read' || !this.fingerprints.has(run.id)) {
       this.fingerprints.delete(run.id)
@@ -411,11 +460,38 @@ if (run.kind === 'dm_reply') {
     if (before === null || !project) return
     const after = this.workspaceFingerprint(project)
     if (after === null || after === before) return
+    // finishRun 在更新 runs 行之前调用本方法，此时 run.ended_at 还没落库，用当前时刻收口。
+    const windowEnd = run.ended_at ?? nowIso()
+    const windowStart = run.started_at ?? run.queued_at ?? windowEnd
+    const concurrentWrites = (this.store.all(
+      `SELECT r.id, r.write_scopes, t.number AS task_number
+       FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+       WHERE r.project_id = ? AND r.mode = 'write' AND r.id != ?
+         AND r.started_at IS NOT NULL AND r.started_at <= ?
+         AND (r.ended_at IS NULL OR r.ended_at >= ?)`,
+      project.id, run.id, windowEnd, windowStart,
+    ) ?? []).map(row => ({
+      id: row.id,
+      label: row.task_number ? `${project.key}-${row.task_number}` : row.id,
+      scopes: readWriteScopes(row.write_scopes),
+    }))
+    const decision = attributeWorkspaceChange({ before, after, concurrentWrites })
+    if (decision.silent) {
+      this.insertRunEvent(
+        run.id,
+        'read_audit_attributed',
+        `工作区变化已归因到并发写运行（${decision.attributedTo.join('、')}），不点名只读运行`,
+      )
+      return
+    }
+    const suspectNote = decision.suspects.length
+      ? `（存在并发写运行 ${decision.suspects.join('、')}，但变化不在其写范围内）`
+      : ''
     this.insertMessage({
       projectId: project.id,
       senderType: 'system',
       senderId: 'system',
-      body: `只读运行（${run.kind}）修改了项目工作区，请确认是否应该由任务运行来做：\n${after.slice(0, 800)}`,
+      body: `只读运行（${run.kind}）修改了项目工作区${suspectNote}，请确认是否应该由任务运行来做：\n${after.slice(0, 800)}`,
       taskId: run.task_id ?? undefined,
       runId: run.id,
     })
