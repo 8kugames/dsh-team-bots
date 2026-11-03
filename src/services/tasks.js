@@ -140,7 +140,7 @@ export const tasksMethods = {
         projectId: project.id,
         senderType: 'system',
         senderId: 'system',
-        body: `任务 ${project.key}-${number}：${title}${assigneeId ? ` → @${this.botRow(assigneeId).name}` : ''}`,
+        body: `任务 ${project.key}-${number} 已创建${assigneeId ? ` → @${this.botRow(assigneeId).name}` : ''}`,
         taskId,
       })
     }
@@ -361,7 +361,7 @@ export const tasksMethods = {
         senderType: 'system',
         senderId: 'system',
         taskId: before.id,
-        body: `【系统指令】任务 ${identifier}「${before.title}」已进入执行中，请 ${botName} 立即开始。`,
+        body: `任务 ${identifier} 已开始（${botName}）。`,
         mentions: [before.assignee_bot_id],
       })
       void this.tick()
@@ -376,7 +376,7 @@ export const tasksMethods = {
           senderType: 'system',
           senderId: 'system',
           taskId: before.id,
-          body: `【系统指令】任务 ${project.key}-${before.number} 已被移出执行中，相关运行已暂停。`,
+          body: `任务 ${project.key}-${before.number} 已移出执行中，运行已暂停。`,
         })
       }
     }

@@ -191,11 +191,14 @@ export const secretsMethods = {
       requestId, binding.project_id, binding.bot_id, normalized, text(reason, 500) ?? '', nowIso(),
     )
     const project = this.projectRow(binding.project_id)
+    // 长理由围栏化（DSHBOTS-96 P3-2）：正文保持一句话可扫读，>100 字符的理由单独成块。
+    const reasonText = text(reason, 300) ?? '（未说明）'
+    const reasonBlock = reasonText.length > 100 ? `理由：\n\`\`\`\n${reasonText}\n\`\`\`` : `理由：${reasonText}`
     this.insertMessage({
       projectId: binding.project_id,
       senderType: 'system',
       senderId: 'system',
-      body: `${bot.name} 请求密钥 ${normalized}（项目 ${project.name}）。\n理由：${text(reason, 300) ?? '（未说明）'}\n请在设置页「密钥」中批准或拒绝。`,
+      body: `${bot.name} 请求密钥 ${normalized}（项目 ${project.name}）。\n${reasonBlock}\n请在设置页「密钥」中批准或拒绝。`,
     })
     return { requestId, name: normalized, status: 'pending' }
   },

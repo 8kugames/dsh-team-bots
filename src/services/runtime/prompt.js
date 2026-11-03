@@ -20,6 +20,10 @@ export const PROMPT_FREEZE_LIMIT = 256
 export const RECENT_FALLBACK_LIMIT = 12
 export const RECENT_INCREMENTAL_LIMIT = 24
 
+// 无信息量的 system 短状态通知（DSHBOTS-96 P3-1）：状态已由 Open tasks 与任务评论通道
+// 覆盖，不再重复进尾窗（命中即整条跳过，不占窗位）。
+export const NOISE_SYSTEM_BODY = /^(已写入.+记忆。|任务 \S+ 验收通过。|密钥 \S+ 的请求被拒绝。)$/
+
 // 沙箱档位按运行类型收紧：一切非写运行（dm/dm_reply/chat/memory_review/solo_chat/review/handle
 // 等 mode!=='write'）物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
 // run 为空（无运行上下文的会话建立）保持 bot.file_policy 现行为。
@@ -278,7 +282,9 @@ export const promptMethods = {
       params: [bot.id],
       excludeId: chatMessage?.id,
     })
-    const context = recent.map((item) => {
+    // P3-1：单聊同款，无信息量 system 短状态不进尾窗。
+    const visible = recent.filter(item => !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
+    const context = visible.map((item) => {
       const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
       return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}: ${body}`
     }).join('\n')
@@ -435,7 +441,9 @@ When the deliverable includes images, put the files in the workspace and referen
       params: [project.id],
       excludeId: chatMessage?.id,
     })
-    const context = recent.map((item) => {
+    // P3-1：无信息量 system 短状态不进尾窗。
+    const visible = recent.filter(item => !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
+    const context = visible.map((item) => {
       const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
       return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}${item.task_id ? ' (task thread)' : ''}: ${body}`
     }).join('\n')
@@ -445,7 +453,7 @@ When the deliverable includes images, put the files in the workspace and referen
     const openTasks = this.store.all(
       `SELECT number, title, status FROM tasks
        WHERE project_id = ? AND status NOT IN ('done', 'canceled')
-       ORDER BY updated_at DESC LIMIT 10`,
+       ORDER BY updated_at DESC LIMIT 5`,
       project.id,
     )
     const taskList = openTasks.length === 0

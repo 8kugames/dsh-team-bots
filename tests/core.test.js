@@ -242,7 +242,7 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
     assert.equal(state.projects.find(item => item.id === project.id).reviewTasks, 0)
     assert.equal(state.projects.find(item => item.id === project.id).ownerReviewTasks, 1)
     assert.ok(store.all('SELECT body FROM messages WHERE project_id = ?', project.id)
-      .some(message => message.body.includes('等待总监验收')))
+      .some(message => message.body.includes('待总监验收')))
     // 总监验收通过 → done
     const done = await service.reviewFromBot(sessionId, { task: 'OWN-1', decision: 'accept' })
     assert.equal(done.status, 'done')

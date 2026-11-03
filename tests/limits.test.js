@@ -161,7 +161,8 @@ test('群聊只放结论，完整交付留在任务评论', async () => {
     const comment = store.get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task.id)
     assert.equal(comment.body, longOutput)
     const message = store.get("SELECT body FROM messages WHERE task_id = ? AND sender_type = 'bot' ORDER BY created_at DESC LIMIT 1", task.id)
-    assert.match(message.body, /完整交付与验证记录见该任务评论/)
+    assert.match(message.body, /任务 \S+ 已交付，待(总监)?验收。/)
+    assert.match(message.body, /（完整记录见任务评论）/)
     assert.ok(message.body.length < longOutput.length / 2)
     assert.ok(message.body.includes('…'))
   } finally {

@@ -651,8 +651,8 @@ if (run.kind === 'dm_reply') {
           senderType: 'bot',
           senderId: bot.id,
           body: ownerReview
-            ? `任务 ${project.key}-${task.number} 已交付，等待总监验收。\n\n${summary}\n\n完整交付与验证记录见该任务评论。`
-            : `任务 ${project.key}-${task.number} 已完成，待您验收。\n\n${summary}\n\n完整交付与验证记录见该任务评论。`,
+            ? `任务 ${project.key}-${task.number} 已交付，待总监验收。\n\n${summary}\n\n（完整记录见任务评论）`
+            : `任务 ${project.key}-${task.number} 已交付，待验收。\n\n${summary}\n\n（完整记录见任务评论）`,
           taskId: task.id,
           runId,
         })

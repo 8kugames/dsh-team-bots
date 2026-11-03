@@ -113,7 +113,7 @@ test('拖入执行中：自动入队 board_resume 运行并发系统指令消息
     assert.equal(messages.length, 1)
     assert.equal(messages[0].task_id, task.id)
     assert.equal(messages[0].sender_id, 'system')
-    assert.equal(messages[0].body, `【系统指令】任务 BRD-${task.number}「落地看板联动」已进入执行中，请 Builder 立即开始。`)
+    assert.equal(messages[0].body, `任务 BRD-${task.number} 已开始（Builder）。`)
     assert.deepEqual(JSON.parse(messages[0].mentions_json), [dev.id])
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})
@@ -129,8 +129,8 @@ test('拖出执行中（todo 与 blocked 两跳）：活跃运行 canceled + PAU
     const { dev, project } = await seedProject(service, store)
     task = await service.createTask({ projectId: project.id, title: '看板暂停验证', assigneeBotId: dev.id, postCard: false })
     const actor = { type: 'user', id: service.localUserId }
-    const resumeBody = `【系统指令】任务 BRD-${task.number}「看板暂停验证」已进入执行中，请 Builder 立即开始。`
-    const pauseBody = `【系统指令】任务 BRD-${task.number} 已被移出执行中，相关运行已暂停。`
+    const resumeBody = `任务 BRD-${task.number} 已开始（Builder）。`
+    const pauseBody = `任务 BRD-${task.number} 已移出执行中，运行已暂停。`
 
     await service.transitionTask(task.id, 'in_progress', actor)
     let run1
@@ -229,7 +229,7 @@ test('系统指令消息不触发 bot 运行：无会话类 run、无以消息�
 
     const messages = systemMessages(store, project.id)
     assert.equal(messages.length, 1)
-    assert.ok(messages[0].body.startsWith('【系统指令】'))
+    assert.ok(messages[0].body.startsWith('任务 '), '生命周期状态消息照常投递')
     assert.equal(messages[0].sender_type, 'system')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE kind IN ('chat', 'solo_chat', 'dm_reply')").n, 0, '无任何会话类运行')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE trigger_ref = ?', messages[0].id).n, 0, '指令消息不是任何运行的触发源')
