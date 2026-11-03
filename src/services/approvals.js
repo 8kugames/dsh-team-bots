@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS approvals (
   call_id TEXT,
   reason TEXT,
   display_reason TEXT,
+  tool_target TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   decided_by TEXT,
   decided_at TEXT,
@@ -37,6 +38,11 @@ export function ensureApprovalSchema(store) {
   if (!messageColumns.includes('approval_id')) {
     store.exec('ALTER TABLE messages ADD COLUMN approval_id TEXT')
   }
+  // 旧库的 approvals 表没有 tool_target 列（新库建表 DDL 已带）。
+  const approvalColumns = store.all('PRAGMA table_info(approvals)').map(column => column.name)
+  if (!approvalColumns.includes('tool_target')) {
+    store.exec('ALTER TABLE approvals ADD COLUMN tool_target TEXT')
+  }
   store.run(
     "INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
     'approvals_table', nowIso(),
@@ -46,15 +52,38 @@ export function ensureApprovalSchema(store) {
     'messages_approval_link', nowIso(),
   )
   store.run(
+    "INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
+    'approvals_tool_target', nowIso(),
+  )
+  store.run(
     "UPDATE approvals SET status = 'timeout' WHERE status = 'pending'",
   )
 }
+
+// 目标提取（纯函数）：按参数形状判别，不按工具名——宿主工具族会扩展，形状更稳。
+// bash 类取 command 首行（超长截 120 字符，chip 只需要可辨认的意图）；
+// edit/write/read 类取 file_path 原样（绝对路径入库，展示层再收成工作区相对形）。
+export function toolTargetOf(arguments_) {
+  if (!arguments_ || typeof arguments_ !== 'object') return null
+  if (typeof arguments_.command === 'string') {
+    const firstLine = arguments_.command.trim().split('\n')[0].trim()
+    return firstLine ? firstLine.slice(0, 120) : null
+  }
+  if (typeof arguments_.file_path === 'string' && arguments_.file_path.trim()) {
+    return arguments_.file_path.trim()
+  }
+  return null
+}
+
+// pre-execute 目标缓存上限：只记最近若干次调用的目标，防长会话里无界增长。
+const APPROVAL_TARGET_CACHE_LIMIT = 200
 
 export const approvalsMethods = {
   // 由 core.attachRuntime 调用：注册宿主事件。runtime.ctx 不存在（测试桩）时跳过注册，
   // 但 pending Map 无条件初始化——handleApprovalRequest 直调（测试）也依赖它。
   approvalsAttach(runtime) {
     this.approvalPending = new Map()
+    this.approvalTargets = new Map()
     if (this.approvalsAttached || !runtime?.ctx?.on) return
     this.approvalsAttached = true
     // prepend：宿主 approval/request 是「按注册序」的瀑布流——先执行的监听器若不调用 next()，
@@ -63,10 +92,26 @@ export const approvalsMethods = {
     // （approvals 表零记录、工作台审批卡片不出现）。插到队首后：命中项目绑定的 bot 会话由插件自己应答，
     // 未命中的照旧 next() 透传给原生界面。
     const off = runtime.ctx.on('approval/request', (req, next) => this.handleApprovalRequest(req, next), { prepend: true })
+    // approval/request 事件不带工具参数，目标取数只能从 tools/pre-execute 透传监听来：
+    // 宿主先过 pre-execute 网关、gate 返回 ask 才发起审批，此刻 exec 里带着 callId/name/arguments。
+    // 按 callId 记已提取目标（先提短串再掩码，只存小字符串），审批发起时一次性取走；超量 FIFO 驱逐。
+    const offPreExecute = runtime.ctx.on('tools/pre-execute', (exec, next) => {
+      const callId = exec?.callId ? String(exec.callId) : ''
+      const target = callId ? toolTargetOf(exec.arguments) : null
+      if (callId && target) {
+        this.approvalTargets.set(callId, this.maskSecretValues(target))
+        if (this.approvalTargets.size > APPROVAL_TARGET_CACHE_LIMIT) {
+          this.approvalTargets.delete(this.approvalTargets.keys().next().value)
+        }
+      }
+      return next()
+    })
     runtime.ctx.effect?.(() => () => {
       off?.()
+      offPreExecute?.()
       for (const pending of this.approvalPending.values()) clearTimeout(pending.timer)
       this.approvalPending.clear()
+      this.approvalTargets.clear()
     }, 'dsh-team: approval request binding')
   },
 
@@ -92,12 +137,17 @@ export const approvalsMethods = {
     // 摘要优先展示中文文案；reason 是英文机读串，落库前统一过密钥掩码。
     const displayReason = req.displayReason?.zh ? this.maskSecretValues(String(req.displayReason.zh).slice(0, 2_000)) : null
     const reason = this.maskSecretValues(String(req.reason ?? '').slice(0, 2_000))
+    // 本次调用的操作目标：pre-execute 阶段按 callId 记下，这里一次性取走（不留残页）；没有则为 NULL，
+    // UI 回退到从摘要正则猜测的旧口径。
+    const callId = req.callId ? String(req.callId) : null
+    const toolTarget = callId ? (this.approvalTargets.get(callId) ?? null) : null
+    if (callId) this.approvalTargets.delete(callId)
 
     store.run(
-      `INSERT INTO approvals(id, project_id, run_id, bot_id, session_id, tool_name, call_id, reason, display_reason, status, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      `INSERT INTO approvals(id, project_id, run_id, bot_id, session_id, tool_name, call_id, reason, display_reason, tool_target, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       approvalId, project.id, run?.id ?? null, bot.id, sessionId,
-      toolName, req.callId ? String(req.callId) : null, reason, displayReason,
+      toolName, callId, reason, displayReason, toolTarget,
       createdAt, new Date(Date.parse(createdAt) + timeoutMs).toISOString(),
     )
 
@@ -153,12 +203,24 @@ export const approvalsMethods = {
     return this.approvalView(this.store.get('SELECT * FROM approvals WHERE id = ?', approvalId))
   },
 
+  // 目标展示形：绝对路径落在项目工作区内且剩余段非空、不含空白时收成相对路径（chip 少占宽）；
+  // 命令、带空白的路径或库外路径原样返回。title 层恒用原始值，鼠标悬停可见全貌。
+  toolTargetDisplay(target) {
+    const prefix = `${this.config.workspace}/`
+    if (typeof target === 'string' && target.startsWith(prefix)) {
+      const rest = target.slice(prefix.length)
+      if (rest && !/\s/.test(rest)) return rest
+    }
+    return target
+  },
+
   approvalView(row) {
     const bot = this.store.get('SELECT name FROM bots WHERE id = ?', row.bot_id)
     const expiresAt = Date.parse(row.expires_at)
     return {
       ...row,
       botName: bot?.name ?? 'Bot',
+      tool_target_display: row.tool_target ? this.toolTargetDisplay(row.tool_target) : null,
       remainingMs: row.status === 'pending' ? Math.max(0, expiresAt - Date.now()) : 0,
     }
   },

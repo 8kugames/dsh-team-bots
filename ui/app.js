@@ -1012,10 +1012,22 @@ function approvalProgressRatio(remainingMs, windowMs) {
   if (total <= 0) return 0
   return Math.max(0, Math.min(1, (Number(remainingMs) || 0) / total))
 }
-// 工具路径：approvals 表没有独立路径字段，从摘要里取第一个路径片段（绝对路径，或带扩展名的相对路径）；取不到不出 chip。
+// 旧数据兜底：approvals 表落 tool_target 列之前的历史卡片没有目标，从摘要里取第一个路径片段
+// （绝对路径，或带扩展名的相对路径）；取不到不出 chip。新数据不走这里。
 function approvalPath(text) {
   const match = String(text ?? '').match(/(?:^|[\s"'`(（])((?:~|\.{1,2})?\/[\w.\-@]+(?:\/[\w.\-@]*)+|[\w.\-@]+\/[\w.\-@]+\.[A-Za-z0-9]+)/)
   return match ? match[1] : ''
+}
+// 目标 chip 取数：优先落库 tool_target（后端从工具参数直取：bash 命令首行 / 文件路径），
+// text 用工作区相对形 tool_target_display、title 留原始值；列为空（旧数据）才回退 approvalPath 猜摘要。
+function approvalTargetChip(approval, summary) {
+  const raw = String(approval?.tool_target ?? '').trim()
+  if (raw) {
+    const display = String(approval?.tool_target_display ?? '').trim() || raw
+    return { text: display, title: raw }
+  }
+  const guessed = approvalPath(summary)
+  return guessed ? { text: guessed, title: guessed } : null
 }
 // 卡片 HTML：头部（图标 + 角色 + 工具/路径 chip）、正文、页脚三段；五态共用同一骨架。
 // pending 页脚是倒计时 + 进度条 + 双按钮；已决四态页脚只有状态 pill。
@@ -1028,7 +1040,7 @@ function approvalCardMarkup(approval, deciding = false) {
   const windowMs = Number.isFinite(createdAt) ? Math.max(1, expiresAt - createdAt) : 0
   const percent = pending ? Math.round(approvalProgressRatio(approval.remainingMs, windowMs) * 100) : 0
   const urgent = approvalUrgent(approval.remainingMs)
-  const path = approvalPath(summary)
+  const target = approvalTargetChip(approval, summary)
   const pillTone = status === 'allowed' ? 'is-allowed' : status === 'rejected' ? 'is-rejected' : 'is-muted'
   const pillText = status === 'allowed' && approval.decided_at
     ? `${APPROVAL_STATUS.allowed} ${formatTime(approval.decided_at)}`
@@ -1039,7 +1051,7 @@ function approvalCardMarkup(approval, deciding = false) {
         <span class="approval-icon is-${attr(status)}">${approvalIcon(APPROVAL_STATE_ICON[status] ?? 'clock')}</span>
         <div class="approval-head-main">
           <div class="message-meta approval-meta"><strong>${esc(approval.botName)}</strong><span class="approval-ask">请求提权</span><span>${esc(formatTime(approval.created_at))}</span></div>
-          <div class="approval-tools"><span class="approval-chip mono">${esc(approval.tool_name)}</span>${path ? `<span class="approval-chip mono approval-chip-path" title="${attr(path)}">${esc(path)}</span>` : ''}</div>
+          <div class="approval-tools"><span class="approval-chip mono">${esc(approval.tool_name)}</span>${target ? `<span class="approval-chip mono approval-chip-path" title="${attr(target.title)}">${esc(target.text)}</span>` : ''}</div>
         </div>
       </div>
       <div class="approval-summary">${esc(summary)}</div>
