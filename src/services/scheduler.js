@@ -22,6 +22,19 @@ function isHumanRun(run) {
   return HUMAN_RUN_KINDS.has(run.kind)
 }
 
+// write-lock-scope:start —— 写占用判定纯函数（DSHBOTS-73，tests/write-lock-state.test.js 断言此块）。
+// 用户口径：写范围占用只看「进行中」的任务——任务一旦离开「进行中」就立刻解除占用/锁定。
+// 入参：运行自身的 kind/mode + 它所属任务的当前状态 taskStatus；返回该运行是否占住项目的写槽。
+//   - 只读运行（mode ≠ 'write'）不占写槽。
+//   - 非任务运行（chat/dm/dm_reply 等）不绑任务，按运行自身判定，照旧占槽。
+//   - 任务运行（kind = 'task'）只有任务 status = 'in_progress' 时才占槽；任务不在进行中即视为已释放。
+export function runHoldsWriteLock({ kind, mode, taskStatus } = {}) {
+  if (mode !== 'write') return false
+  if (kind !== 'task') return true
+  return taskStatus === 'in_progress'
+}
+// write-lock-scope:end
+
 export const schedulerMethods = {
 
   // outbox：把「状态变更 → 建运行」这一跳变成可重放的持久交接。
@@ -268,13 +281,21 @@ export const schedulerMethods = {
       await this.reapStalledRuns()
       this.retryExpiredPlanWaits()
       const activeRows = this.store.all(
-        "SELECT bot_id, kind, task_id, project_id, mode, write_scopes, trigger_type FROM runs WHERE status = 'running'",
+        // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
+        // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。
+        // 非任务运行 LEFT JOIN 出的 task_status 为空，按运行自身判定，不受这条闸门影响。
+        `SELECT r.bot_id, r.kind, r.task_id, r.project_id, r.mode, r.write_scopes, r.trigger_type,
+                t.status AS task_status
+           FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+          WHERE r.status = 'running'`,
       )
       const activeKeys = new Set(activeRows.map(row => this.claimKey(row)))
       // 同项目在跑的写运行：按写范围判定能否并行。写范围为空 = 未声明 = 保守串行。
       const activeWriteScopes = new Map()
       for (const row of activeRows) {
         if (row.mode !== 'write' || !row.project_id) continue
+        // 任务不在「进行中」就不占写槽（DSHBOTS-73）：写占用随任务离开进行中即时释放。
+        if (!runHoldsWriteLock({ kind: row.kind, mode: row.mode, taskStatus: row.task_status })) continue
         const list = activeWriteScopes.get(row.project_id) ?? []
         list.push(readWriteScopes(row.write_scopes))
         activeWriteScopes.set(row.project_id, list)
@@ -373,6 +394,8 @@ export const schedulerMethods = {
         if (run.mode === 'write' && run.project_id) {
           const list = activeWriteScopes.get(run.project_id) ?? []
           // 与同项目在跑的写运行写范围不重叠：记一条并行放行事件，便于事后排查。
+          // 刚领取的运行本拍就占住写槽（下方随即把任务切到 in_progress）；
+          // 任务已不在进行中的老运行由 write-lock-scope 块在下一拍释放，本拍不提前放行。
           const parallel = list.length > 0 && writeScopes.length > 0
           list.push(writeScopes)
           activeWriteScopes.set(run.project_id, list)

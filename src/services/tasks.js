@@ -249,8 +249,38 @@ export const tasksMethods = {
       }
       this.audit(actor, 'task.update', 'task', taskId, updates)
     })
+    // 写占用释放（DSHBOTS-73，用户口径）：任务状态离开「进行中」就中止它名下仍在跑/排队的写运行，
+    // 写占用/锁定随之解除。单一触发点：所有任务状态变更都经过 updateTask 这一处，不在别处散着写。
+    if (updates.status && updates.status !== task.status && updates.status !== 'in_progress') {
+      await this.releaseTaskWriteLocks(taskId, { fromStatus: task.status, toStatus: updates.status })
+    }
     if (updates.status === 'canceled') await this.cancelRunsForTask(taskId)
     return this.taskView(this.taskRow(taskId))
+  },
+  // 写占用释放（DSHBOTS-73，用户口径）：写范围占用只看「进行中」的任务，
+  // 任务一旦离开「进行中」就立刻解除占用/锁定——中止它名下仍在跑/排队的写运行，
+  // 写槽让给同项目其他写运行（调度器侧另有 write-lock-scope 闸门兜底）。
+  // 只停写运行：只读运行（验收/受阻处理/记忆复盘）不停，否则会打断验收流程。
+  // 看板拖出到 todo/blocked 沿用既有暂停口径（PAUSED_BY_BOARD + board_pause 事件），其余目的地用稳定码。
+  async releaseTaskWriteLocks(taskId, { fromStatus = null, toStatus = null } = {}) {
+    if (fromStatus === 'in_progress' && (toStatus === 'todo' || toStatus === 'blocked')) {
+      // 看板暂停路径：取消该任务全部在跑/排队运行并写 PAUSED_BY_BOARD（DSHBOTS-54 既有口径）。
+      return await this.pauseRunsForBoard(taskId)
+    }
+    const runs = this.store.all(
+      "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running') AND mode = 'write'",
+      taskId,
+    )
+    const errorMessage = `任务离开「进行中」（${fromStatus ?? '-'} → ${toStatus ?? '-'}），写运行中止，写占用已释放`
+    for (const run of runs) {
+      await this.cancelRunInternal(run.id, false)
+      this.store.run(
+        'UPDATE runs SET error_code = ?, error_message = ? WHERE id = ?',
+        'TASK_LEFT_IN_PROGRESS', errorMessage, run.id,
+      )
+      this.insertRunEvent(run.id, 'task_left_in_progress', errorMessage)
+    }
+    return runs.length
   },
   assertTransition(from, to) {
     if (from === to) return
@@ -291,17 +321,23 @@ export const tasksMethods = {
   },
   async transitionTask(taskId, status, actor = this.actor()) {
     const before = this.taskRow(taskId)
+    // 离开「进行中」前的活跃运行数：运行中止已由 updateTask 内的写占用释放统一完成，
+    // 这里只按中止条数决定要不要发看板暂停的系统指令消息，避免同一处中止被算两遍。
+    const activeRuns = Number(this.store.get(
+      "SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+      taskId,
+    )?.n ?? 0)
     await this.updateTask(taskId, { status }, actor)
-    await this.applyBoardDragDirective(before, status)
+    await this.applyBoardDragDirective(before, status, { activeRuns })
     // 重新取数：拖拽联动可能刚入队或暂停了运行，沿用 updateTask 的返回会带过期的 latestRun。
     return this.taskView(this.taskRow(taskId))
   },
 
   // 看板拖拽联动（DSHBOTS-54）：拖入「执行中」自动开工，拖出到 todo/blocked 自动暂停。
   // 指令消息由系统直接发（sender_type='system'，不触发 bot 运行），实际执行靠这里入队的 task run；
-  // 出向 in_review/done/canceled 不暂停（canceled 由 updateTask 内 cancelRunsForTask 收尾）。
+  // 出向 in_review/done/canceled 的写运行中止由 updateTask 内的写占用释放统一处理（DSHBOTS-73）。
   // 已有活跃 run 或无负责人时拖入侧整体跳过：消息声称「请立即开始」就必须真的开工。
-  async applyBoardDragDirective(before, afterStatus) {
+  async applyBoardDragDirective(before, afterStatus, { activeRuns = 0 } = {}) {
     if (before.status === afterStatus) return
     if (before.status === 'todo' && afterStatus === 'in_progress') {
       const active = this.store.get(
@@ -332,8 +368,8 @@ export const tasksMethods = {
       return
     }
     if (before.status === 'in_progress' && (afterStatus === 'todo' || afterStatus === 'blocked')) {
-      const paused = await this.pauseRunsForBoard(before.id)
-      if (paused > 0) {
+      // 运行中止已由 updateTask 内的写占用释放统一完成（同一处处理），这里只按中止条数发系统指令消息。
+      if (activeRuns > 0) {
         const project = this.projectRow(before.project_id)
         this.insertMessage({
           projectId: before.project_id,

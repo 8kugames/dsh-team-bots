@@ -179,7 +179,7 @@ test('拖出执行中（todo 与 blocked 两跳）：活跃运行 canceled + PAU
   }
 })
 
-test('重复拖拽零副作用；拖出到 in_review（枚举外）不暂停、不发指令消息', async () => {
+test('重复拖拽零副作用；拖出到 in_review 释放写占用（中止写运行）但不发指令消息', async () => {
   const { root, store, service } = await setup()
   let task
   try {
@@ -199,10 +199,18 @@ test('重复拖拽零副作用；拖出到 in_review（枚举外）不暂停、�
     await service.transitionTask(task.id, 'in_progress', actor)
     assert.deepEqual(counts(), before, '同状态重复拖拽：零新运行、零新消息、零新事件')
 
+    // DSHBOTS-73：任务离开「进行中」即释放写占用——写运行被中止，写槽让给同项目其他写运行。
+    // 看板指令消息仍只覆盖 todo/blocked 两跳，拖到 in_review 不发消息、不新建运行。
     await service.transitionTask(task.id, 'in_review', actor)
-    assert.deepEqual(counts(), before, '拖出到 in_review 不产生任何联动新行')
+    const after = counts()
+    assert.equal(after.runs, before.runs, '拖出到 in_review 不新建运行')
+    assert.equal(after.messages, before.messages, '拖出到 in_review 不发指令消息')
+    assert.ok(after.events > before.events, '拖出到 in_review 记写占用释放事件')
     const run = store.get('SELECT * FROM runs WHERE task_id = ?', task.id)
-    assert.equal(run.status, 'running', 'in_review 出向不暂停活跃运行')
+    assert.equal(run.status, 'canceled', 'in_review 出向中止写运行，释放写占用')
+    assert.equal(run.error_code, 'TASK_LEFT_IN_PROGRESS')
+    assert.ok(runEventTypes(store, run.id).includes('task_left_in_progress'), 'run 侧记写占用释放事件')
+    assert.equal(service.taskRow(task.id).status, 'in_review')
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})
     await closeQuietly(store)
