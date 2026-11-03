@@ -18,9 +18,9 @@ const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/asid
 assert.ok(chatSide, '找不到群聊右栏 aside.chat-side')
 
 // 概览卡的模板函数体（只取模板字符串内部，避免把函数外的代码算进来）
-const cardFn = /function renderChatMembersCard\(\)\s*\{[\s\S]*?\n  \}/.exec(source)?.[0]
+const cardFn = /function renderChatMembersCard\(\)\s*\{[\s\S]*?\n\}/.exec(source)?.[0]
 assert.ok(cardFn, '找不到 renderChatMembersCard()')
-const cardBody = /return `([\s\S]*?)`\n  \}/.exec(cardFn)?.[1]
+const cardBody = /return `([\s\S]*?)`\n\}/.exec(cardFn)?.[1]
 assert.ok(cardBody, '找不到 renderChatMembersCard() 的模板字符串')
 
 test('群聊右栏渲染「项目成员」概览卡', () => {
@@ -97,11 +97,11 @@ test('概览卡样式对齐现有 side-card 视觉规格', () => {
 // ②弹窗只列未入项目且 status=active 的 bot，单选（radio）后确认提交 add_member；
 // ③无可选 bot 时给空态文案，不给提交动作；④未选人时提交零变更；
 // ⑤弹窗复用现有 modal 骨架（close-modal / 遮罩 / ESC），关闭即零变更。
-const membersFn = /function renderMembers\(\)\s*\{[\s\S]*?\n {2}\}/.exec(source)?.[0]
+const membersFn = /function renderMembers\(\)\s*\{[\s\S]*?\n\}/.exec(source)?.[0]
 assert.ok(membersFn, '找不到 renderMembers()')
-const inviteModalFn = /function modalInviteMember\(\)\s*\{[\s\S]*?\n {2}\}/.exec(source)?.[0]
+const inviteModalFn = /function modalInviteMember\(\)\s*\{[\s\S]*?\n\}/.exec(source)?.[0]
 assert.ok(inviteModalFn, '找不到 modalInviteMember()')
-const inviteSubmit = /if \(type === 'invite-member'\) \{[\s\S]*?\n {6}\}/.exec(source)?.[0]
+const inviteSubmit = /if \(type === 'invite-member'\) \{[\s\S]*?\n {4}\}/.exec(source)?.[0]
 assert.ok(inviteSubmit, '找不到 invite-member 表单提交分支')
 
 test('成员页只有「邀请加入」按钮，没有内联下拉', () => {
@@ -138,7 +138,7 @@ test('确认按钮走 add_member；未选人时零变更', () => {
 
 test('无可选 bot 时给空态文案且没有提交动作', () => {
   assert.match(inviteModalFn, /所有可用 Bot 都已在项目中/, '空态文案')
-  const emptyBranch = /if \(candidates\.length === 0\) \{[\s\S]*?\n {4}\}/.exec(inviteModalFn)?.[0]
+  const emptyBranch = /if \(candidates\.length === 0\) \{[\s\S]*?\n {2}\}/.exec(inviteModalFn)?.[0]
   assert.ok(emptyBranch, '找不到空态分支')
   assert.ok(!emptyBranch.includes('type="submit"'), '空态不给提交按钮')
   assert.ok(!emptyBranch.includes('add_member'), '空态不发 add_member')

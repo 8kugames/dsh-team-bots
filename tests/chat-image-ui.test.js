@@ -172,7 +172,7 @@ test('发送：base64 随既有 send_message / send_solo_message 通道出站，
 
 test('气泡渲染：只渲染图片元数据，base64 不进消息 HTML', () => {
   assert.match(source, /\$\{renderMessageImages\(message\.images\)\}/)
-  const fn = /function renderMessageImages\(images\) \{[\s\S]*?\n  \}/.exec(source)?.[0]
+  const fn = /function renderMessageImages\(images\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(fn, '找不到 renderMessageImages')
   assert.match(fn, /data-image-id="\$\{attr\(image\.id\)\}"/)
   assert.ok(!/base64/.test(fn), '消息附图块不得直接输出 base64')
@@ -252,7 +252,7 @@ test('缩略图兜底：破图换成「图标 + 文件名」占位，文件名�
 test('兜底接线：document 捕获阶段委托 resource error，不用内联 onerror（CSP 会拦）', () => {
   assert.match(source, /<img class="image-thumb-img" src="\$\{attr\(image\.previewUrl\)\}" alt="[^"]*" \/>/, '缩略图 img 不得带内联 onerror')
   assert.doesNotMatch(source, /onerror=/i, '任何元素都不得出现内联 onerror（script-src 无 unsafe-inline）')
-  const reg = /document\.addEventListener\('error', \(event\) => \{[\s\S]*?\n  \}, true\)/.exec(source)?.[0]
+  const reg = /document\.addEventListener\('error', \(event\) => \{[\s\S]*?\n\}, true\)/.exec(source)?.[0]
   assert.ok(reg, '存在 document 级 error 委托且第三参为 true（捕获）')
   assert.match(reg, /image-thumb-img/, '只认领待发缩略图')
   assert.match(reg, /target\.replaceWith\(thumbnailFallback\(/, '破图当场替换为兜底占位')

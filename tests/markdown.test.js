@@ -121,7 +121,7 @@ test('外链钩子：带 href 的 A 加 target=_blank + rel=noopener noreferrer'
 // —— 接线断言（真实 UI 文件里，渲染管线各环节都在位）——
 
 test('renderMessage：system 保持 esc 纯文本，用户与 bot 气泡走 markdown 渲染', () => {
-  const systemBranch = /function renderMessage\(message\) \{[\s\S]*?\n  \}/.exec(source)?.[0] ?? ''
+  const systemBranch = /function renderMessage\(message\) \{[\s\S]*?\n\}/.exec(source)?.[0] ?? ''
   assert.ok(systemBranch.includes("message.sender_type === 'system'"), 'system 分支存在')
   assert.ok(systemBranch.includes('${esc(message.body)}'), 'system 消息仍是 esc 纯文本')
   assert.match(source, /message-bubble">\$\{quoteBlock\}\$\{richText\(message\.body, mdChatScope\(\)\)\}/, '气泡正文走 richText(body, scope)')

@@ -52,7 +52,7 @@ test('超出上限时提示剩余条数', () => {
 
 test('项目成员概览卡不再有「管理成员请前往…」提示行', () => {
   // 用户 m_6f8d93：概览卡只留成员列表与计数，冗余的跳转提示整行删掉。
-  const card = /function renderChatMembersCard\(\)\s*\{[\s\S]*?\n  \}/.exec(source)?.[0]
+  const card = /function renderChatMembersCard\(\)\s*\{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(card, '找不到 renderChatMembersCard')
   assert.ok(!/管理成员请前往/.test(card), '概览卡不再渲染跳转提示行')
   assert.ok(!/side-card-foot/.test(card), '概览卡不再带 side-card-foot 提示行')

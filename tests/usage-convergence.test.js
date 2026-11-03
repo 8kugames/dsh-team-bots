@@ -16,7 +16,7 @@ const SOLO_NAV = /const SOLO_NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1] ?? '
 function fnBody(name) {
   const start = source.indexOf(`function ${name}(`)
   assert.ok(start >= 0, `缺少函数 ${name}`)
-  const end = source.indexOf('\n  }\n', start)
+  const end = source.indexOf('\n}\n', start)
   assert.ok(end > start, `函数 ${name} 未正常收尾`)
   return source.slice(start, end)
 }

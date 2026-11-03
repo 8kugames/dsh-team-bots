@@ -49,7 +49,7 @@ test('行为：taskRelationOptions 给指定任务打 selected，其余不打', 
       { id: 't1', identifier: 'DSH-1', title: '父任务' },
       { id: 't2', identifier: 'DSH-2', title: '另一个' },
     ] } };
-    ${/\/\/ 任务关系选项（DSHBOTS-58）[\s\S]*?\n  \}/.exec(source)?.[0] ?? ''}
+    ${/\/\/ 任务关系选项（DSHBOTS-58）[\s\S]*?\n\}/.exec(source)?.[0] ?? ''}
     return taskRelationOptions;
   `)()
   const html = fn('t1')

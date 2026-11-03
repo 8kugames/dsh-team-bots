@@ -98,7 +98,7 @@ test('insertTextAtCursor：补派 input 事件（草稿同步依赖，防轮询�
 })
 
 test('paste 分发：document 级委托，只认领 #composer-input，纯文本粘贴不受影响', () => {
-  const pasteHandler = /document\.addEventListener\('paste', \(event\) => \{([\s\S]*?)\n  \}\)/.exec(source)?.[0]
+  const pasteHandler = /document\.addEventListener\('paste', \(event\) => \{([\s\S]*?)\n\}\)/.exec(source)?.[0]
   assert.ok(pasteHandler, '存在 document 级 paste 委托')
   assert.match(pasteHandler, /if \(input\?\.id !== 'composer-input'\) return/, 'target 守卫：不是 composer 直接放行')
   assert.match(pasteHandler, /const files = Array\.from\(event\.clipboardData\?\.files \?\? \[\]\)/, '只接管 files 非空的粘贴')
@@ -107,7 +107,7 @@ test('paste 分发：document 级委托，只认领 #composer-input，纯文本�
 })
 
 test('paste 分发：图片走 addPendingImages（粘贴截图），不支持类型 preventDefault 后找 file://', () => {
-  const pasteHandler = /document\.addEventListener\('paste', \(event\) => \{([\s\S]*?)\n  \}\)/.exec(source)?.[0]
+  const pasteHandler = /document\.addEventListener\('paste', \(event\) => \{([\s\S]*?)\n\}\)/.exec(source)?.[0]
   assert.match(pasteHandler, /event\.preventDefault\(\)/, '接管文件粘贴的默认行为')
   assert.match(pasteHandler, /resolveImageMediaType\(file\.type, file\.name\)/, '受支持类型与选图同一判定')
   assert.match(pasteHandler, /void addPendingImages\(images\)/, '图片复用现有待发通道')

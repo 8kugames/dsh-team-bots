@@ -67,7 +67,7 @@ test('② 记忆随上下文收敛：无作用域筛选、无团队记忆', () =
   assert.ok(!/value="team"[^>]*>团队记忆/.test(source), '不再有「团队记忆」选项')
   assert.ok(!source.includes("'团队记忆'"), '不再有团队记忆标题字面量')
   assert.ok(!source.includes('memoryFilter'), 'memoryFilter 状态与监听一并移除')
-  const memoryFn = /function renderMemory\(\) \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? ''
+  const memoryFn = /function renderMemory\(\) \{[\s\S]*?\n\}/.exec(source)?.[0] ?? ''
   assert.match(memoryFn, /const memories = state\.data\?\.memories \?\? \[\]/, '直接使用服务端按上下文收敛后的列表')
 })
 
@@ -87,7 +87,7 @@ test('② system.js：记忆查询按上下文收敛、提案全量', () => {
 // DSHBOTS-77 侧栏状态行运行数全局口径：读 state 载荷的 activeRuns（全库 queued+running），
 // 不随群聊/单聊上下文跳变；topbar-meta 的运行数仍是当前项目口径。
 test('DSHBOTS-77 侧栏状态行读全局 activeRuns，不随上下文分支', () => {
-  const shell = /function renderShell\(\) \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? ''
+  const shell = /function renderShell\(\) \{[\s\S]*?\n\}/.exec(source)?.[0] ?? ''
   assert.ok(shell, '找不到 renderShell')
   assert.match(shell, /const running = Number\(data\?\.activeRuns \?\? 0\)/, '状态行运行数读全局字段 activeRuns，无上下文分支')
   assert.ok(!shell.includes('soloRuns'), 'renderShell 不再按单聊/群聊分别数运行')

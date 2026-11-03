@@ -7,7 +7,7 @@ const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.ur
 const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
 
 test('任务详情 modal 占页面宽度 68.2%，窄屏回落全宽', () => {
-  const modalTask = /function modalTask\(task\) \{[\s\S]*?\n  \}/.exec(source)?.[0]
+  const modalTask = /function modalTask\(task\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(modalTask, '找不到 modalTask 函数体')
   assert.match(modalTask, /size: 'task'/, '任务详情用独立尺寸类，不动其它 wide modal')
   assert.match(css, /\.modal\.task \{\s*width: min\(68\.2vw, 100%\);/, '任务详情宽度为页宽 68.2%')

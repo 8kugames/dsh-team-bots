@@ -118,7 +118,7 @@ test('复制按钮：消息 hover 出现，复用统一 copy handler，复制原
 })
 
 test('思考过程 chip 渲染在任务 chip 之前，两者合并同一 .task-chip-line', () => {
-  const fn = /function renderMessage\(message\) \{[\s\S]*?\n  \}/.exec(source)?.[0]
+  const fn = /function renderMessage\(message\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(fn, '找不到 renderMessage 函数体')
   const nonsys = fn.slice(fn.indexOf('const isUser')).replace(/\/\/[^\n]*/g, '') // 剔除行注释，防止注释文案满足顺序断言
   assert.equal((nonsys.match(/task-chip-line/g) ?? []).length, 1, '非系统消息只应有一个 task-chip-line 容器')

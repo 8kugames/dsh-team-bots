@@ -69,7 +69,7 @@ function cssBlock(selector) {
 }
 
 // 取 renderTerminal 函数体。
-const renderTerminalBody = /function renderTerminal\(\)\s*\{([\s\S]*?)\n {2}\}/.exec(source)?.[1]
+const renderTerminalBody = /function renderTerminal\(\)\s*\{([\s\S]*?)\n\}/.exec(source)?.[1]
 assert.ok(renderTerminalBody, '缺少 renderTerminal 函数体')
 
 test('图标显式定尺寸：警告图标与空态图标各带尺寸类，不会再撑爆容器', () => {

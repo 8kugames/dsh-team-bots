@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
 
 // 抽取 captureViewScroll / restoreViewScroll（闭包内 2 空格缩进，函数闭合均为 "\n  }"）
-const fnSrc = /function captureViewScroll\([\s\S]*?\n  \}\n\n  function restoreViewScroll\([\s\S]*?\n  \}/.exec(source)?.[0]
+const fnSrc = /function captureViewScroll\([\s\S]*?\n\}\n\nfunction restoreViewScroll\([\s\S]*?\n\}/.exec(source)?.[0]
 assert.ok(fnSrc, 'ui/app.js 缺少 captureViewScroll / restoreViewScroll')
 
 const makeWindow = (scrollY = 0) => {
