@@ -13,6 +13,7 @@ import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, sha256, text } from '../util.js'
 import { readWriteScopes, writeScopePathsOverlap } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
+import { completeVisionRun, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
 import {
   isQuotaExhausted,
   isRateLimitError,
@@ -295,9 +296,12 @@ export const runsMethods = {
     const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
     try {
       const task = run.task_id ? this.taskRow(run.task_id) : null
-      const chatMessage = run.kind === 'chat' && run.trigger_ref
+      // DSHBOTS-112：vision 派生运行按 project_id 归位原消息（群聊 messages / 单聊
+      // solo_messages），trigger_ref 即原消息 id——startRun 据此把附图随首条 prompt
+      // 带给代理模型（与 chat/solo_chat 同一链路）。
+      const chatMessage = (run.kind === 'chat' || (run.kind === 'vision' && run.project_id)) && run.trigger_ref
         ? this.store.get('SELECT * FROM messages WHERE id = ?', run.trigger_ref)
-        : run.kind === 'solo_chat' && run.trigger_ref
+        : (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) && run.trigger_ref
           ? this.store.get('SELECT * FROM solo_messages WHERE id = ?', run.trigger_ref)
           : null
       if (run.mode === 'read') this.fingerprints.set(runId, this.workspaceFingerprint(project))
@@ -327,6 +331,8 @@ export const runsMethods = {
 
   // 跨类别运行的目标会话类别：dm_reply 按来信来源的类别。
   sessionKindFor(run) {
+    // DSHBOTS-112：单聊读图代理运行落 bot 的 solo 会话（与 solo_chat 同一绑定）。
+    if (run.kind === 'vision' && !run.project_id) return 'solo'
     if (run.kind === 'dm_reply') {
       const message = run.trigger_ref
         ? this.store.get('SELECT origin_kind FROM bot_messages WHERE id = ?', run.trigger_ref)
@@ -568,6 +574,14 @@ if (run.kind === 'dm_reply') {
       this.store.run('UPDATE runs SET attention_json = ? WHERE id = ?', attentionJson, runId)
     }
     const refreshed = this.runRow(runId)
+    // DSHBOTS-112 读图代理收尾：转写成功 →「[图片转写] …」system 消息写回原消息
+    // 所在会话并审计 vision.transcribe；失败/空产出 → 只审计 vision.fallback（原
+    // 对话已按现状报过模型无视觉，不插消息不重试）。写回后即结束，不走下方分支。
+    if (run.kind === 'vision') {
+      await completeVisionRun(this, { run: refreshed, bot, status, output: cleanOutput, error })
+      if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
+      return
+    }
     if (run.kind === 'dm') {
       const message = run.trigger_ref
         ? this.store.get('SELECT * FROM bot_messages WHERE id = ?', run.trigger_ref)
@@ -729,6 +743,11 @@ if (run.kind === 'dm_reply') {
         })
       }
     } else {
+      // DSHBOTS-112：无视觉模型收图失败的兜底信号——错误表明模型无视觉且消息带图时补派生
+      // 读图代理（幂等，与主动派生不重复）；代理未配置只审计 vision.fallback，错误按现状已报。
+      if (run.kind === 'chat' || run.kind === 'solo_chat') {
+        maybeSpawnVisionAfterFailure(this, { run: refreshed, bot, error })
+      }
       // DSHBOTS-38：限流失败（provider 真发 Retry-After 或 finishRun 合成的指数退避）在等待期内
       // 禁止立刻重打上游——不切备用模型（备用可能走同一网关），也不立刻排总监处理运行。
       // DSHBOTS-99：额度耗尽（已达到限额）不走这条路径——不指数退避、无条件先试备用模型；

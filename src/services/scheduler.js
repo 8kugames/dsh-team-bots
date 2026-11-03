@@ -389,7 +389,8 @@ export const schedulerMethods = {
           const runningScopes = activeWriteScopes.get(run.project_id) ?? []
           if (runningScopes.some(other => writeScopesOverlap(writeScopes, other))) continue
         }
-        const needsProject = run.kind !== 'solo_chat'
+        // DSHBOTS-112：单聊读图代理运行与 solo_chat 同样不带 project_id，豁免项目闸门。
+        const needsProject = run.kind !== 'solo_chat' && !(run.kind === 'vision' && !run.project_id)
         const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
         const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
         if (!bot || (needsProject && !project)) {

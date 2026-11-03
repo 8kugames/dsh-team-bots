@@ -301,8 +301,31 @@ ${recentBlock}
 
 Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.`
   },
+  // 读图代理运行提示词（DSHBOTS-112）：代理模型把消息附图转写成中文结构化文本，
+  // 供无视觉能力的主模型在后续轮次消费。图片分片由 startRun 随首条 prompt 自动
+  // 附带（imageContentPartsForMessage 统一群聊/单聊口径），这里只出指令。
+  visionRunPrompt({ bot, project, chatMessage }) {
+    const header = [
+      project ? `Project: ${project.name} (${project.key})` : 'Mode: one-on-one conversation (outside projects)',
+      `Transcription proxy for: ${bot.name} (${bot.provider}/${bot.model})`,
+    ].join('\n')
+    return `${header}
+
+# Image transcription request
+The user message below carries images that ${bot.name}'s main model cannot see. Your only job: transcribe every attached image into Chinese.
+
+Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
+${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}
+
+Transcription requirements:
+- 输出中文，按图片顺序逐张编号（图片 1、图片 2……），一张一小节。
+- 每张包含：【类型】截图/照片/图表等；【主体】画面主要内容；【文字】图中出现的全部文字（保持原文；长文可摘要，但关键数字、路径、命令、报错必须逐字保留）；【细节】颜色、布局、状态等对理解有用的信息。
+- 只描述看得见的内容，不推测画面之外的信息；看不清的部分明确说「看不清」。
+- 不要调用任何工具，不要写入文件；直接输出转写正文，不要用代码块包裹整个回复。`
+  },
   promptFor({ run, bot, project, task, chatMessage, sessionId }) {
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, sessionId })
+    if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
     const header = [
       `Project: ${project.name} (${project.key})`,
       `Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,

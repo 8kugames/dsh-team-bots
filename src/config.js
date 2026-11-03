@@ -115,6 +115,11 @@ export function resolveConfig(config = {}) {
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。
     routerPreset: String(config.routerPreset ?? process.env.DSH_TEAM_ROUTER_PRESET ?? '').trim(),
     workerPreset: String(config.workerPreset ?? process.env.DSH_TEAM_WORKER_PRESET ?? '').trim(),
+    // 读图代理（DSHBOTS-112）：Bot 主模型无视觉能力收图时，自动派生 kind='vision' 只读
+    // 转写运行所用的代理模型（provider/model）。两个都非空才启用；任一为空 = 不启用，
+    // 此时按现状直接报「模型不支持图片」，不做任何派生。
+    visionProxyProvider: String(config.visionProxyProvider ?? process.env.DSH_TEAM_VISION_PROXY_PROVIDER ?? '').trim(),
+    visionProxyModel: String(config.visionProxyModel ?? process.env.DSH_TEAM_VISION_PROXY_MODEL ?? '').trim(),
     schedulerIntervalMs: int(config.schedulerIntervalMs, 1_500, 250, 30_000),
     modelCacheMs: int(config.modelCacheMs, 8_000, 0, 120_000),
     // 终端命令硬超时：默认 120s；测试可注入更短值（下限 500ms）。

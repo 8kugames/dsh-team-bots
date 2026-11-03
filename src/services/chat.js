@@ -10,6 +10,7 @@ import { assertInside } from '../paths.js'
 import { summarizeForUi, upsertBotMessage } from '../botmsg.js'
 import { id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
 import { insertMessageImages, messageImageRow, messageImageViews, prepareImagesForStorage } from './message-images.js'
+import { considerVisionProxy } from './vision-proxy.js'
 
 export const commandTaskPattern = /^\/task\s+@([\p{L}\p{N}_-]+)\s+([\s\S]+)$/u
 
@@ -171,6 +172,9 @@ export const chatMethods = {
         sourceId: messageId,
         idempotencyKey: `chat:${messageId}:${bot.id}`,
       })
+      // DSHBOTS-112 读图代理：带图消息投递后即评估是否派生转写运行（fire-and-forget，
+      // 不阻塞发送；判据与派生见 vision-proxy.js）。
+      void considerVisionProxy(this, { bot, message: { id: messageId, project_id: project.id } })
     }
     void this.tick()
     return { messageId, runBots: targets.map(bot => bot.id) }
@@ -297,6 +301,8 @@ export const chatMethods = {
       sourceId: messageId,
       idempotencyKey: `solo_chat:${messageId}`,
     })
+    // DSHBOTS-112 读图代理：单聊带图消息同样评估派生（fire-and-forget，见 vision-proxy.js）。
+    void considerVisionProxy(this, { bot, message: { id: messageId } })
     void this.tick()
     return { messageId, runBot: bot.id }
   },
