@@ -133,6 +133,11 @@ export const questionsMethods = {
       JSON.stringify(masked), createdAt, new Date(Date.parse(createdAt) + timeoutMs).toISOString(),
     )
 
+    // 认领审计：谁（bot）在哪个会话替宿主提问，便于回溯「这条提问为何出现在群聊」。
+    this.audit({ type: 'bot', id: bot.id }, 'question.claim', 'question', questionId, {
+      sessionId, callId, count: masked.length,
+    })
+
     // 群聊里写一条提问卡片消息：状态渲染时查 questions 表，消息体只是纯文本兜底，不承载状态。
     const group = this.groupOf(project.id)
     store.run(
@@ -172,6 +177,10 @@ export const questionsMethods = {
     if (!pending) return
     if (hostAnswer) pending.resolve(hostAnswer)
     else if (reason) pending.reject(new Error(reason))
+    // 终态审计：超时/中止都不是人的动作，归因 system；已答由 answerQuestion 单独审计（带答案内容）。
+    if (status === 'timeout' || status === 'expired') {
+      this.audit({ type: 'system', id: 'system' }, `question.${status}`, 'question', questionId, { reason })
+    }
   },
 
   // 群聊按钮入口（api action question_answer）。鉴权：仅项目负责人（本地工作台用户）可作答，

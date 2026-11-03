@@ -125,6 +125,7 @@ test('命中 bot 会话：落 pending 提问与 kind=question 消息，单选映
     assert.equal(view.status, 'answered')
     assert.deepEqual(await outcome, { answers: [{ id: 'q1', selected: ['dev'] }] })
     assert.deepEqual(JSON.parse(questionOf(store, row.id).answer), { answers: [{ id: 'q1', selected: ['dev'] }] })
+    assert.ok(store.get("SELECT * FROM audit_log WHERE action = 'question.claim' AND target_id = ?", row.id))
     assert.ok(store.get("SELECT * FROM audit_log WHERE action = 'question.answer' AND target_id = ?", row.id))
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -235,6 +236,7 @@ test('超时到点：当轮 reject，条目置 timeout，迟到应答 conflict',
     await assert.rejects(() => outcome, /timed out/)
     assert.equal(questionOf(store, row.id).status, 'timeout')
     assert.ok(questionOf(store, row.id).ended_at)
+    assert.ok(store.get("SELECT * FROM audit_log WHERE action = 'question.timeout' AND target_id = ?", row.id))
     await assert.rejects(() => service.answerQuestion(row.id, { answers: [] }), /已处理/)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -252,6 +254,7 @@ test('abort：条目置 expired 并当轮 reject（宿主 ask() 无信号竞态�
     controller.abort()
     await assert.rejects(() => outcome, /aborted/)
     assert.equal(questionOf(store, row.id).status, 'expired')
+    assert.ok(store.get("SELECT * FROM audit_log WHERE action = 'question.expired' AND target_id = ?", row.id))
     await assert.rejects(() => service.answerQuestion(row.id, { answers: [] }), /已处理/)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
