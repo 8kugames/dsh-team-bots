@@ -9,7 +9,7 @@ export function defaultWorkspace() {
   return join(homedir(), '.dsh', 'workspace', 'team-bots')
 }
 
-const bool = (value, fallback = false) => {
+export const bool = (value, fallback = false) => {
   if (value === undefined || value === '') return fallback
   return /^(1|true|yes|on)$/i.test(String(value))
 }
@@ -98,7 +98,7 @@ export function resolveConfig(config = {}) {
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。
-    approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 600_000, 5_000, 3_600_000),
+    approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 180_000, 5_000, 3_600_000),
     // 一次性密钥运行时文件（<dataDir>/secrets-runtime/<projectId>.env）的存活窗口：
     // 批准后生成，项目下一条 task 运行结束或窗口到期先到即焚，再次使用需重新批准。
     secretsRuntimeTtlMs: int(config.secretsRuntimeTtlMs ?? process.env.DSH_TEAM_SECRETS_TTL_MS, 30 * 60_000, 1_000, 24 * 60 * 60_000),
@@ -120,6 +120,10 @@ export function resolveConfig(config = {}) {
     // 此时按现状直接报「模型不支持图片」，不做任何派生。
     visionProxyProvider: String(config.visionProxyProvider ?? process.env.DSH_TEAM_VISION_PROXY_PROVIDER ?? '').trim(),
     visionProxyModel: String(config.visionProxyModel ?? process.env.DSH_TEAM_VISION_PROXY_MODEL ?? '').trim(),
+    // 验收自动委派（DSHBOTS-113）：任务交付迁移 in_review 时自动派生子代理核验运行
+    // （与手动「子代理核验」按钮同一入口）。总监裁决不受影响：owner_bot 卡在核验运行
+    // 结束后再触发总监验收；user 卡核验结论写回评论，裁决仍归工作台 owner。
+    autoReviewDelegate: bool(config.autoReviewDelegate ?? process.env.DSH_TEAM_AUTO_REVIEW_DELEGATE, true),
     schedulerIntervalMs: int(config.schedulerIntervalMs, 1_500, 250, 30_000),
     modelCacheMs: int(config.modelCacheMs, 8_000, 0, 120_000),
     // 终端命令硬超时：默认 120s；测试可注入更短值（下限 500ms）。

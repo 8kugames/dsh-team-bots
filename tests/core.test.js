@@ -140,9 +140,13 @@ test('project, group task assignment and completion form a closed loop', async (
     const first = await service.sendMessage(project.id, '/task @Builder Build the demo page')
     assert.ok(first.taskId)
     await waitFor(() => service.store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status === 'in_review')
+    // 自动核验委派（DSHBOTS-113 默认开）：交付报告之外再落一条核验结论评论。
+    await waitFor(() => Number(service.store.get(
+      "SELECT COUNT(*) AS n FROM task_comments WHERE task_id = ?", first.taskId,
+    )?.n ?? 0) >= 2)
     const task = await service.taskDetail(first.taskId)
     assert.equal(task.identifier, 'DEMO-1')
-    assert.equal(task.comments.length, 1)
+    assert.equal(task.comments.length, 2)
     assert.match(task.comments[0].body, /Implemented/)
     assert.equal(task.runs[0].status, 'succeeded')
     assert.ok(task.runs[0].usage_input >= 100)

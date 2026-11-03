@@ -4,6 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
+import { bool } from '../config.js'
 import { clampNumber, id, nowIso, projectKey, TASK_ID_PATTERN, text } from '../util.js'
 import { parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
@@ -193,7 +194,45 @@ export const tasksMethods = {
       runs,
       stage,
       stageLabel: taskStageLabel(stage),
+      reviewStatus: this.taskReviewStatus(task),
     }
+  },
+
+  // 核验状态（DSHBOTS-113）：none=未核验 / pending=核验中（委派运行在跑或自动委派待投递）/
+  // done=本次交付已有核验结论 / failed=核验失败（运行失败或自动委派重试耗尽）。
+  // 以「最近一次成功的执行运行」（本次交付）为基准，只认其后发起的核验，避免上一轮
+  // 交付的旧结论被误读为本轮已核验。自动流程失败必须在 UI 可见（防静默漏审）。
+  taskReviewStatus(task) {
+    const delivery = this.store.get(
+      "SELECT queued_at FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'succeeded' AND COALESCE(error_code, '') <> 'SUPERSEDED' ORDER BY ended_at DESC LIMIT 1",
+      task.id,
+    )
+    if (!delivery) return 'none'
+    const activeRun = this.store.get(
+      "SELECT id FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND status IN ('queued', 'running') AND queued_at >= ?",
+      task.id, delivery.queued_at,
+    )
+    if (activeRun) return 'pending'
+    const pendingSpawn = this.store.get(
+      "SELECT id FROM outbox WHERE kind = 'review_delegate_auto' AND task_id = ? AND status = 'pending' AND created_at >= ?",
+      task.id, delivery.queued_at,
+    )
+    if (pendingSpawn) return 'pending'
+    const latest = this.store.get(
+      "SELECT status FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND queued_at >= ? ORDER BY queued_at DESC LIMIT 1",
+      task.id, delivery.queued_at,
+    )
+    if (latest) {
+      if (latest.status === 'succeeded') return 'done'
+      if (latest.status === 'failed') return 'failed'
+      return 'none'
+    }
+    const failedSpawn = this.store.get(
+      "SELECT id FROM outbox WHERE kind = 'review_delegate_auto' AND task_id = ? AND status = 'failed' AND created_at >= ?",
+      task.id, delivery.queued_at,
+    )
+    if (failedSpawn) return 'failed'
+    return 'none'
   },
   // options.startTriggerType：进入「进行中」时给运行用的触发类型标签（看板拖拽沿用 D-54 的 board_resume，
   // 其余路径默认 task_started）。只影响运行元数据与幂等键，不影响行为口径。
@@ -673,6 +712,15 @@ export const tasksMethods = {
   async taskReviewDelegate(taskId, actor = this.actor()) {
     if (actor.type !== 'user') throw forbidden('只有工作台 owner 可以委派子代理核验')
     const task = this.taskRow(taskId)
+    const { runId } = this.spawnReviewDelegate(task, { actor, origin: 'manual' })
+    return this.runView(this.runRow(runId))
+  },
+
+  // 核验委派共享入口（DSHBOTS-113）：手动按钮（taskReviewDelegate）与交付后自动委派
+  // （review_delegate_auto outbox）走同一实现，守卫（待验收状态 / 可用总监 / one_active
+  // 幂等复看）与运行形态（kind='review', mode='read', trigger='review_delegate'）完全一致。
+  // 返回 { runId, reused }；不满足守卫时抛 conflict，由调用方决定阻塞还是留痕重试。
+  spawnReviewDelegate(task, { actor, origin = 'manual' }) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
     if (task.status !== 'in_review') throw conflict(`任务 ${identifier} 不在待验收状态`)
@@ -687,7 +735,7 @@ export const tasksMethods = {
     // 幂等：已有委派核验运行在跑时直接复看该运行；其他活动运行（如自动验收运行）占着
     // 任务的运行位时拒绝，避免同任务上两种验收语义叠跑。
     if (active) {
-      if (active.trigger_type === 'review_delegate') return this.runView(this.runRow(active.id))
+      if (active.trigger_type === 'review_delegate') return { runId: active.id, reused: true }
       throw conflict(`任务 ${identifier} 已有运行在排队或执行，请先停止再委派核验`)
     }
     const runId = id('run')
@@ -700,11 +748,17 @@ export const tasksMethods = {
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, 'queued', `owner 委派子代理核验（${actor.type}:${actor.id}）`, createdAt,
+      id('evt'), runId, 'queued',
+      `${origin === 'auto' ? '交付后自动' : 'owner'}委派子代理核验（${actor.type}:${actor.id}）`, createdAt,
     )
-    this.audit(actor, 'task.review_delegate', 'task', task.id, { runId })
+    this.audit(actor, origin === 'auto' ? 'review.auto_delegate' : 'task.review_delegate', 'task', task.id, { runId })
     void this.tick()
-    return this.runView(this.runRow(runId))
+    return { runId, reused: false }
+  },
+
+  // 自动委派开关（DSHBOTS-113）：默认开，DSH_TEAM_AUTO_REVIEW_DELEGATE=0 关闭回到纯手动。
+  autoReviewDelegateEnabled() {
+    return bool(this.config.autoReviewDelegate, true)
   },
   resolveTaskByIdentifier(identifier) {
     const match = TASK_ID_PATTERN.exec(String(identifier ?? '').trim())

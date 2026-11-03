@@ -348,6 +348,12 @@ Transcription requirements:
         // 结论以「子代理核验：」开头落任务评论（finishRun 自动写回），不代 owner 裁决。
         if (run.trigger_type === 'review_delegate') {
           const writeScopes = readWriteScopes(task.write_scopes)
+          // 超长防护（DSHBOTS-113，事故 m_33bddb）：任务全文拼进提示词可能顶爆 400 上下文，
+          // 超过 8K 字符截断并注明，核验子代理据此只核验截断内可见的部分并声明盲区。
+          const rawDescription = task.description || '(no description)'
+          const description = rawDescription.length > 8_000
+            ? `${rawDescription.slice(0, 8_000)}\n\n[任务描述共 ${rawDescription.length} 字符，超过 8000 已截断；超出部分未展示，核验结论请注明基于截断后的描述]`
+            : rawDescription
           return `${header}
 
 # Subagent verification for task ${project.key}-${task.number}
@@ -355,7 +361,7 @@ Title: ${task.title}
 Status: ${task.status}
 Declared write scopes: ${writeScopes.length ? writeScopes.join(', ') : '(none declared)'}
 Description:
-${task.description || '(no description)'}${threads}
+${description}${threads}
 
 The owner delegated the acceptance verification of this delivered task to you. Verify the delivery report item by item; do not redo the work and do not make the final call:
 - Scope: compare what the delivery report says was changed against the declared write scopes above; flag any out-of-scope change.

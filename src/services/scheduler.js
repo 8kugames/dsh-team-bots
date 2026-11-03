@@ -142,6 +142,44 @@ export const schedulerMethods = {
       if (!task || ['done', 'canceled'].includes(task.status)) return null
       return this.enqueueOwnerTaskRun(task, payload.reviewKind ?? 'review')
     }
+    if (row.kind === 'review_delegate_auto') {
+      // 自动核验委派（DSHBOTS-113）：与手动按钮同一入口（spawnReviewDelegate）。守卫冲突
+      // 按退避重派，上限 3 次；耗尽后不再重试，失败保持可见——任务卡「未核验」标记 +
+      // 消息 + 审计，owner_bot 卡改由总监验收运行兜底（其自带子代理核验）。
+      const task = this.store.get('SELECT * FROM tasks WHERE id = ?', payload.taskId)
+      if (!task || task.status !== 'in_review') return null
+      try {
+        return this.spawnReviewDelegate(task, { actor: { type: 'system', id: 'system' }, origin: 'auto' }).runId
+      } catch (error) {
+        const exhausted = Number(row.attempts ?? 0) >= 3
+        this.audit({ type: 'system', id: 'system' }, 'review.auto_delegate_retry', 'task', task.id, {
+          attempt: Number(row.attempts ?? 0) + 1,
+          final: exhausted,
+          reason: text(error?.message ?? String(error), 300),
+        })
+        if (!exhausted) throw error
+        this.insertMessage({
+          projectId: task.project_id,
+          senderType: 'system',
+          senderId: 'system',
+          body: `自动核验委派连续失败（${error?.message ?? '未知错误'}），任务卡保持「未核验」，可手动委派子代理核验。`,
+          taskId: task.id,
+        })
+        if ((task.review_target ?? 'user') === 'owner_bot') {
+          this.enqueueOutbox({
+            kind: 'owner_task_run',
+            payload: { taskId: task.id, reviewKind: 'review' },
+            projectId: task.project_id,
+            taskId: task.id,
+            idempotencyKey: `owner_review:${task.id}:after_failed:${row.id}`,
+          })
+        }
+        // 终结为 failed（而非 delivered）：运维在 outboxView 一眼看到耗尽的委派，
+        // taskReviewStatus 也据此刻「未核验」。
+        error.permanent = true
+        throw error
+      }
+    }
     if (row.kind === 'memory_review') {
       const sourceRun = this.store.get('SELECT * FROM runs WHERE id = ?', payload.sourceRunId)
       if (!sourceRun) return null

@@ -1404,7 +1404,12 @@ function renderTaskCard(task, options = {}) {
   const ended = stage.stage === 'ended'
   const runLabel = ended ? '' : task.stageLabel ?? ''
   const tags = []
-  if (task.status === 'in_review') tags.push(task.review_target === 'owner_bot' ? '总监验收中' : '待您验收')
+  if (task.status === 'in_review') {
+    tags.push(task.review_target === 'owner_bot' ? '总监验收中' : '待您验收')
+    // 核验可见性（DSHBOTS-113）：自动/手动核验的状态标记——未核验/失败亮出，防止静默漏审。
+    if (task.reviewStatus === 'pending') tags.push('核验中')
+    else if (task.reviewStatus !== 'done') tags.push('未核验')
+  }
   for (const label of task.labels ?? []) tags.push(label)
   const isRunning = stage.stage === 'working' && !stage.action
   // 终态时间小字（DSHBOTS-44）：done 取 completed_at、canceled 取 canceled_at，缺列或非终态不显示。

@@ -129,14 +129,14 @@ test('api 层暴露 approvals_pending，供顶部入口跨项目拉取', () => {
   assert.match(apiSource, /case 'approvals_pending':\s*return service\.approvalsPending\(\)/)
 })
 
-test('审批授权窗口默认 10 分钟，env 覆盖优先级不变（DSHBOTS-102 追加需求）', async () => {
+test('审批授权窗口默认 3 分钟，env 覆盖优先级不变（DSHBOTS-113 口径）', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'dsh-approval-timeout-'))
   const workspace = join(rootDir, 'workspace')
   const dataDir = join(rootDir, 'data')
   await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
   try {
     const base = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents') })
-    assert.equal(base.approvalTimeoutMs, 600_000, '默认授权窗口放宽为 10 分钟')
+    assert.equal(base.approvalTimeoutMs, 180_000, '默认授权窗口 3 分钟')
     const previous = process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS
     process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS = '90000'
     try {

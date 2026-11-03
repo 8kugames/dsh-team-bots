@@ -518,6 +518,35 @@ if (run.kind === 'dm_reply') {
     })
     this.logger.warn?.('dsh-team: read-only run %s changed the workspace', run.id)
   },
+  // 自动核验委派（DSHBOTS-113）：交付迁移 in_review 的同一事务内调用。开关关闭或
+  // 迁移未生效（任务已终态）时静默跳过；项目无可用总监属结构性前提缺失，审计留痕后
+  // 跳过（不进重试队列）。满足条件则排 review_delegate_auto outbox（立即投递一次），
+  // 后续守卫冲突的退避重试与耗尽可见性由 outbox 侧统一负责。返回是否已排队。
+  queueAutoReviewDelegate(task, project, run, attentionPending) {
+    if (!this.autoReviewDelegateEnabled()) return false
+    // 交付带提问（attention）时先让 owner 答话：核验结论会因方向未定而过时，
+    // 且派生运行会顶掉 taskView 的「等待你回答」阶段；退位手动委派。
+    // attentionPending 是本次完成时新落库的提问标记（run 行是完成前取的，已过期）。
+    if (attentionPending) return false
+    const current = this.taskRow(task.id)
+    if (current.status !== 'in_review') return false
+    const owner = project.owner_bot_id
+      ? this.store.get("SELECT id FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
+      : null
+    if (!owner) {
+      this.audit({ type: 'system', id: 'system' }, 'review.auto_delegate', 'task', task.id, { skipped: 'no_owner' })
+      return false
+    }
+    this.enqueueOutbox({
+      kind: 'review_delegate_auto',
+      payload: { taskId: task.id },
+      projectId: project.id,
+      taskId: task.id,
+      sourceId: run.id,
+      idempotencyKey: `review_auto:${task.id}:${run.id}`,
+    })
+    return true
+  },
   async finishRun({ runId, status, output, error, attention }) {
     const run = this.runRow(runId)
     if (!['running', 'queued'].includes(run.status)) return
@@ -654,6 +683,21 @@ if (run.kind === 'dm_reply') {
           })
           void this.tick()
         }
+        // 串联两跳（DSHBOTS-113）：委派核验运行结束后，owner_bot 卡的裁决运行在此触发——
+        // 总监在尾窗读到上面写回的核验结论后 team_review_task 裁决。核验运行失败也照常触发：
+        // 总监的验收运行自带子代理核验，核验跳失败不丢裁决。user 卡不裁决，维持人工验收。
+        // 核验运行自身带提问时同样不排：先答话，避免裁决运行顶掉「等待你回答」阶段。
+        if (run.trigger_type === 'review_delegate' && task.status === 'in_review'
+          && !attentionJson
+          && (task.review_target ?? 'user') === 'owner_bot') {
+          this.enqueueOutbox({
+            kind: 'owner_task_run',
+            payload: { taskId: task.id, reviewKind: 'review' },
+            projectId: task.project_id,
+            taskId: task.id,
+            idempotencyKey: `owner_review:${task.id}:${run.id}`,
+          })
+        }
       } else if (status !== 'succeeded') {
         this.insertMessage({
           projectId: project.id,
@@ -667,6 +711,7 @@ if (run.kind === 'dm_reply') {
       if (run.task_id) {
         const task = this.taskRow(run.task_id)
         const ownerReview = (task.review_target ?? 'user') === 'owner_bot'
+        let autoReviewQueued = false
         this.store.transaction(() => {
           this.store.run(
             `UPDATE tasks SET status = 'in_review', version = version + 1, updated_at = ?
@@ -678,6 +723,10 @@ if (run.kind === 'dm_reply') {
             id('cmt'), task.id, 'bot', bot.id, cleanOutput || '运行完成，但模型未返回文本。', endedAt,
           )
           this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, { runId, identifier: `${project.key}-${task.number}` })
+          // 自动核验委派（DSHBOTS-113）：与 in_review 迁移同一事务触发留痕；实际派生由
+          // review_delegate_auto outbox 承接（幂等键绑定本次交付运行），守卫冲突的退避重试
+          // 与耗尽可见性都在 outbox 侧，任何失败都不回滚本次迁移。
+          autoReviewQueued = this.queueAutoReviewDelegate(task, project, run, Boolean(attentionJson))
         })
         const summary = this.chatSummary(cleanOutput)
         this.insertMessage({
@@ -699,7 +748,9 @@ if (run.kind === 'dm_reply') {
           sourceId: runId,
           idempotencyKey: `memory_review:${runId}`,
         })
-        if (ownerReview) {
+        if (ownerReview && !autoReviewQueued && !attentionJson) {
+          // 自动委派未接管时维持原链路（开关关 / 无可用总监）：交付后直接触发总监验收。
+          // 带提问的交付同样不排——派生运行会顶掉「等待你回答」阶段，先答话再验收。
           const ownerBot = project.owner_bot_id
             ? this.store.get("SELECT id FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
             : null
