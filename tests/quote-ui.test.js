@@ -68,11 +68,20 @@ test('样式：气泡与引用块都不许超出容器宽度', () => {
   assert.match(quote, /min-width:\s*0/, '引用块需要 min-width:0 才能在 flex 里收缩')
 })
 
-test('样式：引用摘要仍是单行省略（不被改成多行换行）', () => {
+test('样式：引用摘要两行截断，不再是单行 nowrap', () => {
   const span = /\n\.msg-quote span\s*\{([\s\S]*?)\n\}/.exec(css)?.[1]
   assert.ok(span, '缺少 .msg-quote span 规则')
-  assert.match(span, /white-space:\s*nowrap/)
-  assert.match(span, /text-overflow:\s*ellipsis/)
+  assert.match(span, /-webkit-line-clamp:\s*2/, '摘要应两行截断')
+  assert.match(span, /display:\s*-webkit-box/)
+  assert.match(span, /-webkit-box-orient:\s*vertical/)
+  assert.match(span, /overflow-wrap:\s*anywhere/, '长词/长串要能换行，不能把气泡撑宽')
   assert.match(span, /overflow:\s*hidden/)
   assert.match(span, /min-width:\s*0/)
+  assert.doesNotMatch(span, /white-space:\s*nowrap/, '摘要不许再走单行 nowrap（那会把整条摘要挤成一行）')
+})
+
+test('样式：气泡补 min-width:0，flex 里才收缩得下来', () => {
+  const bubble = /\n\.message-bubble\s*\{([\s\S]*?)\n\}/.exec(css)?.[1]
+  assert.ok(bubble, '缺少 .message-bubble 规则')
+  assert.match(bubble, /min-width:\s*0/)
 })

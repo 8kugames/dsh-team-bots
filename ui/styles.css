@@ -1331,6 +1331,7 @@ a.global-config.dsh-official-link:hover {
     /* 气泡不许比它的容器（.message-body-wrap）更宽：引用摘要整行 nowrap 时，
        其 min-content 会把气泡顶出容器、溢出聊天列（DSHBOTS-71）。 */
     max-width: 100%;
+    min-width: 0;
 }
 .message-row.user .message-bubble {
     background: var(--accent);
@@ -1477,7 +1478,7 @@ a.global-config.dsh-official-link:hover {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-/* 引用块：气泡顶部的「❝ 名字：摘要」行，单行截断。颜色继承气泡正文，
+/* 引用块：气泡顶部的「❝ 名字：摘要」行。颜色继承气泡正文，
    bot 气泡（surface-3）与用户气泡（accent）各自可读，明暗主题共用变量。 */
 .msg-quote {
     display: flex;
@@ -1491,7 +1492,7 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-small);
     opacity: 0.88;
     min-width: 0;
-    /* 引用块自身也不许超出气泡内容宽；摘要保持单行省略（DSHBOTS-71）。 */
+    /* 引用块自身也不许超出气泡内容宽（DSHBOTS-71）。 */
     max-width: 100%;
     overflow: hidden;
 }
@@ -1503,9 +1504,15 @@ a.global-config.dsh-official-link:hover {
     opacity: 0.8;
 }
 .msg-quote span {
+    /* 摘要两行截断：单行 nowrap 把整条摘要挤成一行、右侧裁切（DSHBOTS-71）。
+       两行 + anywhere 换行能多露上下文，又不会撑破气泡。 */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
+    white-space: normal;
     min-width: 0;
 }
 /* 用户气泡本身是 accent 底，引用条边线换成 accent-ink 区分。 */
