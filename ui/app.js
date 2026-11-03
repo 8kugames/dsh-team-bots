@@ -164,6 +164,15 @@ function statusLabel(status) {
   return STATUS[status] ? t('status.' + status) : status
 }
 
+// 侧栏任务行的状态标签：status === 'in_progress' 时挂 .task-status-live，
+// 摆动动效由 ui/styles.css 的 @keyframes task-status-swim 承担（等效复刻 DSH 原生
+// 会话页鱼尾动画），并受 prefers-reduced-motion 闸门约束——本文件只负责挂类名，
+// 不在 JS 里做逐帧动画。
+function sideRowStatusHtml(status) {
+  const live = status === 'in_progress' ? ' task-status-live' : ''
+  return `<span class="side-row-status${live}">${esc(statusLabel(status))}</span>`
+}
+
 function runStatusLabel(status) {
   return RUN_STATUS[status] ? t('runStatus.' + status) : status
 }
@@ -738,7 +747,7 @@ function renderChat() {
             ${open.map(task => {
               const bot = botById(task.assignee_bot_id)
               return `<div class="side-row" data-action="open-task" data-task-id="${attr(task.id)}" style="cursor:pointer">
-                <span class="side-row-status">${esc(statusLabel(task.status))}</span>
+                ${sideRowStatusHtml(task.status)}
                 <strong>${esc(task.identifier)}</strong>
                 <span class="side-row-title">${esc(task.title)}</span>
                 ${bot ? avatar(bot, 'sm') : ''}
@@ -759,7 +768,7 @@ function dispatchListNote(total) {
 // 调度页任务行：编号 + 标题 + 状态 + 项目名；点击跳到该项目的任务页。
 function dispatchTaskRow(task) {
   return `<div class="side-row" data-action="nav" data-view="tasks" data-project-id="${attr(task.project_id ?? '')}" style="cursor:pointer" title="${esc(`${task.identifier ?? ''} · ${task.title ?? ''} · ${task.projectName ?? ''}`)}">
-    <span class="side-row-status">${esc(statusLabel(task.status))}</span>
+    ${sideRowStatusHtml(task.status)}
     <strong>${esc(task.identifier ?? '')}</strong>
     <span class="side-row-title">${esc(task.title ?? '')}</span>
     <span class="faint">${esc(task.projectName ?? '')}</span>

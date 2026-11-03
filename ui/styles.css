@@ -2668,6 +2668,21 @@ a.global-config.dsh-official-link:hover {
     font-size: var(--fs-caption);
     flex: 0 0 auto;
 }
+/* 「进行中」状态标签的 swim 摆动（等效复刻 DSH 原生会话页 hero 的鱼尾动画）：
+   三帧 keyframes 只动 transform，不触发布局重排，暗色/亮色同一套，无需额外色值。
+   无障碍闸门对齐宿主做法——只有在 prefers-reduced-motion: no-preference 时才启用动效，
+   系统开启「减弱动态效果」的读者拿到静止标签。 */
+@keyframes task-status-swim {
+    0%, 100% { transform: none; }
+    35% { transform: rotate(-4deg) translate(-0.4px, -0.9px); }
+    70% { transform: rotate(1.6deg) translate(0.3px, 0.2px); }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .task-status-live {
+        transform-origin: 50% 100%;
+        animation: task-status-swim 1.6s ease-in-out infinite;
+    }
+}
 .side-row strong {
     color: var(--ink-2);
     font: 500 var(--fs-small) var(--mono);
