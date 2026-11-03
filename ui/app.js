@@ -1767,14 +1767,43 @@ function formatAmount(value) {
   return n.toFixed(2)
 }
 
-function costSplit(totals) {
+// 用量页成本口径（DSHBOTS-81）：预算币种用符号式（¥42.64），其余币种进副行，
+// 同页不再混排「CNY 42.64」与「¥0.11」两种写法；小数位规则与全站 formatCost 一致。
+function usageCurrency(usage) {
+  return String(usage?.currency ?? 'CNY').toUpperCase() || 'CNY'
+}
+
+function usageCostParts(totals, currency) {
   const map = totals?.costByCurrency
-  if (map && typeof map === 'object') {
-    const codes = Object.keys(map).sort()
-    if (codes.length) return codes.map(code => `${code} ${formatAmount(map[code])}`).join(' / ')
+  const codes = map && typeof map === 'object' ? Object.keys(map).sort() : []
+  const budget = String(currency || 'CNY').toUpperCase()
+  const primary = codes.includes(budget) ? budget : (codes[0] ?? null)
+  if (!primary && (totals?.cost === null || totals?.cost === undefined)) {
+    return { code: null, symbol: '', amount: null, others: [] }
   }
-  if (totals?.cost === null || totals?.cost === undefined) return '未配置'
-  return `${formatAmount(totals.cost)}（币种未知）`
+  const code = primary ?? budget
+  return {
+    code,
+    symbol: CURRENCY_SYMBOL[code] ?? `${code} `,
+    amount: primary ? Number(map[primary] ?? 0) : Number(totals.cost ?? 0),
+    others: codes.filter(code2 => code2 !== code).map(code2 => ({ code: code2, amount: Number(map[code2] ?? 0) })),
+  }
+}
+
+// 成本文本：符号 + 金额；多币种时主币种在前，其余币种跟在后面（不再用 'CNY x / USD y'）。
+function usageCostText(totals, currency) {
+  const parts = usageCostParts(totals, currency)
+  if (!parts.code) return '未配置'
+  const main = `${parts.symbol.trim()}${formatAmount(parts.amount)}`
+  if (!parts.others.length) return main
+  return `${main} + ${parts.others.map(other => `${other.code} ${formatAmount(other.amount)}`).join(' + ')}`
+}
+
+// 成本单元格只放主币种金额（保证列宽固定不折行），完整多币种金额进 title。
+function usageCostPrimaryText(totals, currency) {
+  const parts = usageCostParts(totals, currency)
+  if (!parts.code) return '未配置'
+  return formatCost(parts.amount, parts.code)
 }
 
 async function exportUsageCsv() {
@@ -1820,29 +1849,65 @@ function usageViewTitle() {
   return '全局用量'
 }
 
-function usageBarRow(item, label, max) {
-  return `<div class="bar-row">
-    <span class="bar-label">${esc(label)}</span>
-    <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (item.totalTokens ?? 0) / max * 100)}%"></span></span>
-    <span class="bar-value">${formatNumber(item.totalTokens)}</span>
-    <span class="bar-calls">${formatNumber(item.calls)} 次</span>
-    <span class="bar-cost">${costSplit(item)}</span>
-  </div>`
+// 用量行内容：名称 / 条形 / tokens / 调用 / 成本 五列。
+// 数值列等宽右对齐、单位只出现在表头，行内不塞「次」「CNY」等后缀，杜绝折行。
+function usageRowCells(item, label, hint, max, currency) {
+  const tokens = Number(item.totalTokens ?? 0)
+  const calls = Number(item.calls ?? 0)
+  const ratio = tokens > 0 ? Math.min(100, (tokens / (max || 1)) * 100) : 0
+  const unpriced = Number(item.unpricedCalls ?? 0)
+  const fill = tokens > 0 ? `<span class="usage-fill${unpriced > 0 ? ' partial' : ''}" style="width:${ratio}%"></span>` : ''
+  const cost = usageCostPrimaryText(item, currency)
+  const costFull = usageCostText(item, currency)
+  const costTitle = unpriced > 0 ? `${costFull}（含 ${unpriced} 次未计价调用，成本为部分值）` : costFull
+  return `<span class="usage-col-name" title="${attr(label + hint)}">${esc(label)}</span>
+    <span class="usage-track">${fill}</span>
+    <span class="usage-col-num">${formatNumber(tokens)}</span>
+    <span class="usage-col-num">${formatNumber(calls)}</span>
+    <span class="usage-col-num" title="${attr(costTitle)}">${esc(cost)}</span>`
+}
+
+function usageBarRow(item, label, max, currency, hint = '') {
+  return `<div class="usage-row">${usageRowCells(item, label, hint, max, currency)}</div>`
 }
 
 // 分 bot 行：drillable=true 时可点击查看该 bot 的运行记录。
-function usageBotRow(item, max, drillable) {
+function usageBotRow(item, max, drillable, currency) {
   const botId = item.botId ?? item.id ?? ''
-  const name = item.name ?? botById(botId)?.name ?? '未知 Bot'
-  if (!drillable) return usageBarRow(item, name, max)
+  const name = String(item.name ?? botById(botId)?.name ?? '').trim() || '未知 Bot'
+  const cells = usageRowCells(item, name, '', max, currency)
+  if (!drillable) return `<div class="usage-row">${cells}</div>`
   const active = state.usageBot === botId
-  return `<button type="button" class="bar-row bar-row-action${active ? ' active' : ''}" data-action="usage-drill" data-bot-id="${attr(botId)}" aria-pressed="${active}" title="查看该 Bot 在本群的运行记录">
-    <span class="bar-label">${esc(name)}</span>
-    <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (item.totalTokens ?? 0) / max * 100)}%"></span></span>
-    <span class="bar-value">${formatNumber(item.totalTokens)}</span>
-    <span class="bar-calls">${formatNumber(item.calls)} 次</span>
-    <span class="bar-cost">${costSplit(item)}</span>
-  </button>`
+  return `<button type="button" class="usage-row usage-row-action${active ? ' active' : ''}" data-action="usage-drill" data-bot-id="${attr(botId)}" aria-pressed="${active}" title="查看该 Bot 在本群的运行记录">${cells}</button>`
+}
+
+// 分项目行：行首只显示项目名/项目 key，不再回落到 prj_ raw id（D-67 P1-6），原始 id 只进 title。
+function usageProjectRow(item, max, currency) {
+  const label = String(item.name ?? item.key ?? '').trim() || '未命名项目'
+  const hint = item.projectId ? ` · ${item.projectId}` : ''
+  return usageBarRow(item, label, max, currency, hint)
+}
+
+// 分布列表面板：表头给出列名与单位，行内只放数值。
+function usageListPanel(title, rows, nameLabel) {
+  return `<div class="card usage-panel">
+    <div class="card-head"><h3>${esc(title)}</h3><span class="meta">${rows.length} 个</span></div>
+    ${rows.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="usage-list">
+      <div class="usage-list-head">
+        <span class="usage-col-name">${esc(nameLabel)}</span>
+        <span class="usage-col-bar">tokens 占比</span>
+        <span class="usage-col-num">tokens</span>
+        <span class="usage-col-num">调用</span>
+        <span class="usage-col-num">成本</span>
+      </div>
+      ${rows.join('')}
+    </div>
+    <div class="usage-legend">
+      <span class="usage-legend-item"><i class="usage-swatch"></i>已计价用量</span>
+      <span class="usage-legend-item"><i class="usage-swatch star"></i>含未计价调用</span>
+      <span class="usage-legend-item"><i class="usage-swatch empty"></i>零用量</span>
+    </div>`}
+  </div>`
 }
 
 function usageRunRow(run) {
@@ -1852,44 +1917,97 @@ function usageRunRow(run) {
   </div>`
 }
 
-function usageModelPanel(byModel, title, headerExtra = '') {
+// 同一模型名可能分属不同 provider（src/usage.js 按 provider+model 分组），用暗色标签区分。
+function usageModelCell(item) {
+  const provider = String(item.provider ?? '').trim()
+  const model = String(item.model ?? '').trim() || '未知模型'
+  const tag = provider ? `<span class="usage-tag">${esc(provider)}</span>` : ''
+  return `${tag}<span class="usage-model-name" title="${attr(model)}">${esc(model)}</span>`
+}
+
+function usageModelPanel(byModel, title, headerExtra = '', currency = 'CNY') {
   return `<div class="card usage-panel">
     <div class="card-head"><h3>${esc(title)}</h3>${headerExtra || `<span class="meta">${byModel.length} 个</span>`}</div>
-    ${byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td>${esc(item.model)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono">${costSplit(item)}</td></tr>`).join('')}</tbody></table>`}
+    ${byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono num">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td class="usage-model-cell">${usageModelCell(item)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono num" title="${attr(usageCostText(item, currency))}">${esc(usageCostPrimaryText(item, currency))}</td></tr>`).join('')}</tbody></table>`}
     <div class="usage-note">未配置价格的成本不会按 0 计费；价格按每百万 token 配置。</div>
   </div>`
 }
 
+// 四张 KPI 卡：同字重同字号（成本卡不再降级成小字），标签写清口径。
 function usageMetricCards(totals, scopeLabel, usage) {
+  const currency = usageCurrency(usage)
+  const cost = usageCostParts(totals, currency)
+  const windowDays = Number(usage.days ?? 30) || 30
+  const totalTokens = Number(totals.totalTokens ?? 0)
+  const calls = Number(totals.calls ?? 0)
+  const dailyTokens = windowDays > 0 ? totalTokens / windowDays : 0
+  const perCall = calls > 0 ? totalTokens / calls : 0
+  const costValue = cost.code
+    ? `<span class="unit">${esc(cost.symbol.trim())}</span>${esc(formatAmount(cost.amount))}`
+    : '未配置'
+  const costMeta = [
+    ...cost.others.map(other => `另有 ${other.code} ${formatAmount(other.amount)}`),
+    usage.priceCount ? `${usage.priceCount} 条价格规则` : '尚未配置模型价格',
+  ].join(' · ')
   return `<div class="metric-grid">
     <div class="card metric">
       <span class="metric-label">总 tokens（${esc(scopeLabel)}）</span>
-      <strong>${formatNumber(totals.totalTokens)}</strong>
-      <small class="mono">${formatNumber(totals.inputTokens)} 输入 · ${formatNumber(totals.outputTokens)} 输出</small>
+      <strong>${formatNumber(totalTokens)}</strong>
+      <small class="mono">入 ${formatNumber(totals.inputTokens)} · 出 ${formatNumber(totals.outputTokens)} · 缓存读 ${formatNumber(totals.cacheReadTokens)}</small>
     </div>
     <div class="card metric">
-      <span class="metric-label">模型调用</span>
-      <strong>${formatNumber(totals.calls)}</strong>
-      <small class="mono">缓存读 ${formatNumber(totals.cacheReadTokens)}</small>
+      <span class="metric-label">调用次数（${esc(scopeLabel)}）</span>
+      <strong>${formatNumber(calls)}</strong>
+      <small class="mono">平均每次 ${formatNumber(perCall)} tokens</small>
     </div>
     <div class="card metric">
-      <span class="metric-label">成本（${esc(scopeLabel)}）</span>
-      <strong class="metric-cost">${costSplit(totals)}</strong>
-      <small class="mono">${usage.priceCount ? `${usage.priceCount} 条价格规则` : '尚未配置模型价格'}</small>
+      <span class="metric-label">总成本（${esc(scopeLabel)}）</span>
+      <strong class="metric-cost">${costValue}</strong>
+      <small class="mono">${esc(costMeta)}</small>
     </div>
     <div class="card metric">
-      <span class="metric-label">统计窗口</span>
-      <strong>${usage.days ?? 30}d</strong>
-      <small class="mono">${esc(scopeLabel)} · 按调用时间归集</small>
+      <span class="metric-label">日均 tokens（${esc(scopeLabel)}）</span>
+      <strong>${formatNumber(dailyTokens)}</strong>
+      <small class="mono">按 ${windowDays} 天汇总窗口折算</small>
     </div>
   </div>`
 }
 
 function usageDayPanel(days) {
   const maxDay = Math.max(1, ...days.map(item => item.totalTokens ?? 0))
+  const peak = days.reduce((best, day) => ((day.totalTokens ?? 0) > (best?.totalTokens ?? 0) ? day : best), null)
   return `<div class="card usage-panel">
-    <div class="card-head"><h3>近 14 天</h3></div>
+    <div class="card-head"><h3>近 14 天</h3>${peak && peak.totalTokens ? `<span class="meta">峰值 ${formatNumber(peak.totalTokens)} · ${esc(String(peak.day).slice(5))}</span>` : ''}</div>
     ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % 3 === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
+    <div class="usage-note">按日明细由服务端保留最近 14 天；更早的调用计入上方汇总，不进这张图。</div>
+  </div>`
+}
+
+// 用量页区块：真实标题（H2）+ 一行口径说明。页面不再只剩一个与 H1 重复的灰字 caption。
+function usageSection(title, desc, body, headExtra = '') {
+  return `<section class="usage-section">
+    <div class="usage-section-head">
+      <div class="usage-section-title">
+        <h2 class="usage-h2">${esc(title)}</h2>
+        <p class="usage-desc">${esc(desc)}</p>
+      </div>
+      ${headExtra}
+    </div>
+    ${body}
+  </section>`
+}
+
+// 页面头：单一声明统计窗口与本页口径，避免各面板各说一套。
+function usagePageHead(usage, scopeText, exportLabel = '') {
+  const windowDays = Number(usage.days ?? 30) || 30
+  return `<div class="section-head usage-page-head">
+    <div class="usage-head-meta">
+      <span class="usage-window">汇总窗口 近 ${windowDays} 天</span>
+      <span class="usage-head-desc">${esc(scopeText)}</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-action="export-usage-csv">${icon('download')}导出 CSV${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
+    </div>
   </div>`
 }
 
@@ -1900,7 +2018,7 @@ function renderUsage() {
 }
 
 // 全局视图：只用全局口径数据，与当前群聊/单聊上下文零耦合。
-// 四类统计：全视图汇总 + 分模型 + 分 Bot + 分项目；口径切换只保留这四类。
+// 四个维度（趋势 / 分模型 / 分 Bot / 分项目）始终同时展示，口径切换只调展示顺序。
 function renderUsageGlobal() {
   const usage = usageSnapshot()
   const tier = usage.tiers?.global
@@ -1909,6 +2027,8 @@ function renderUsageGlobal() {
   const byModel = tier?.byModel ?? usage.byModel ?? []
   const days = tier?.byDay ?? usage.byDay ?? []
   const totals = usage.global ?? {}
+  const currency = usageCurrency(usage)
+  const windowDays = Number(usage.days ?? 30) || 30
   const focus = ['global', 'model', 'bot', 'project'].includes(state.usageScope) ? state.usageScope : 'global'
   const maxBot = Math.max(1, ...byBot.map(item => item.totalTokens ?? 0))
   const maxProject = Math.max(1, ...byProject.map(item => item.totalTokens ?? 0))
@@ -1916,15 +2036,9 @@ function renderUsageGlobal() {
   const unpriced = Number(totals.unpricedCalls ?? 0)
   const panels = {
     days: usageDayPanel(days),
-    model: usageModelPanel(byModel, '分模型', `<span class="meta">${byModel.length} 个</span><button class="btn small" data-action="new-price">设置价格</button>`),
-    bot: `<div class="card usage-panel">
-      <div class="card-head"><h3>分 Bot</h3><span class="meta">${byBot.length} 个</span></div>
-      ${byBot.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byBot.map(item => usageBotRow(item, maxBot, false)).join('')}</div>`}
-    </div>`,
-    project: `<div class="card usage-panel">
-      <div class="card-head"><h3>分项目</h3><span class="meta">${byProject.length} 个</span></div>
-      ${byProject.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byProject.map(item => usageBarRow(item, item.name ?? item.key ?? item.projectId ?? '', maxProject)).join('')}</div>`}
-    </div>`,
+    model: usageModelPanel(byModel, '分模型', `<span class="meta">${byModel.length} 个</span><button class="btn small" data-action="new-price">设置价格</button>`, currency),
+    bot: usageListPanel('分 Bot', byBot.map(item => usageBotRow(item, maxBot, false, currency)), 'Bot'),
+    project: usageListPanel('分项目', byProject.map(item => usageProjectRow(item, maxProject, currency)), '项目'),
   }
   // 口径切换只调展示顺序，四个维度始终可见（关键信息不折叠）。
   const order = {
@@ -1933,98 +2047,121 @@ function renderUsageGlobal() {
     bot: ['bot', 'days', 'model', 'project'],
     project: ['project', 'days', 'model', 'bot'],
   }[focus]
+  const overviewNotes = [
+    unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
+    Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${Number(reconciliation.mismatched)} 次运行的用量记录对不上，数据可能不完整。</div>` : '',
+    usage.legacy ? '<div class="usage-note">服务端尚未按口径过滤明细，下方分组仍是全局数据。</div>' : '',
+  ].join('')
   return `
-    <div class="section-head">
-      <div class="seg" role="group" aria-label="用量口径">
-        <button data-action="usage-scope" data-scope="global" aria-pressed="${focus === 'global'}">全局</button>
-        <button data-action="usage-scope" data-scope="model" aria-pressed="${focus === 'model'}">按模型</button>
-        <button data-action="usage-scope" data-scope="bot" aria-pressed="${focus === 'bot'}">按 Bot</button>
-        <button data-action="usage-scope" data-scope="project" aria-pressed="${focus === 'project'}">按项目</button>
-      </div>
-      <div class="btn-row">
-        <button class="btn" data-action="export-usage-csv">${icon('download')}导出 CSV</button>
-      </div>
-    </div>
-    ${usageMetricCards(totals, '全局', usage)}
-    ${unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : ''}
-    ${Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${Number(reconciliation.mismatched)} 次运行的用量记录对不上，数据可能不完整。</div>` : ''}
-    ${usage.legacy ? '<div class="usage-note">服务端尚未按口径过滤明细，下方分组仍是全局数据。</div>' : ''}
-    <div class="usage-note">口径：全局视图，不随当前群聊/单聊上下文变化。</div>
-    <div class="usage-grid">
-      ${order.map(key => panels[key]).join('')}
-    </div>
+    ${usagePageHead(usage, '全局口径，不随当前群聊 / 单聊上下文变化')}
+    ${usageSection(
+      '全局用量总览',
+      `四项指标覆盖全部调用来源，按汇总窗口 近 ${windowDays} 天统计。`,
+      `${overviewNotes}${usageMetricCards(totals, '全局', usage)}`,
+    )}
+    ${usageSection(
+      '分布明细',
+      `四个维度始终同时展示；按日面板只保留最近 14 天明细，其余面板与上方汇总同为 ${windowDays} 天窗口。条形长度 = tokens 占比，琥珀色 = 含未计价调用，空条 = 零用量。`,
+      `<div class="usage-grid">${order.map(key => panels[key]).join('')}</div>`,
+      `<div class="usage-seg">
+        <span class="usage-seg-label">面板顺序</span>
+        <div class="seg" role="group" aria-label="面板顺序">
+          <button data-action="usage-scope" data-scope="global" aria-pressed="${focus === 'global'}">趋势优先</button>
+          <button data-action="usage-scope" data-scope="model" aria-pressed="${focus === 'model'}">模型优先</button>
+          <button data-action="usage-scope" data-scope="bot" aria-pressed="${focus === 'bot'}">Bot 优先</button>
+          <button data-action="usage-scope" data-scope="project" aria-pressed="${focus === 'project'}">项目优先</button>
+        </div>
+      </div>`,
+    )}
   `
 }
 
 // 群聊「用量」tab：本群消耗汇总 + 本群分模型 + 本群各 bot，内容严格限本群。
 function renderUsageDomain() {
   const usage = usageSnapshot()
-  const project = pageProject()
   const tier = usage.tiers?.project
   const byModel = tier?.byModel ?? []
   const byBot = tier?.byBot ?? []
+  const days = tier?.byDay ?? []
   const totals = usage.project ?? {}
+  const currency = usageCurrency(usage)
+  const windowDays = Number(usage.days ?? 30) || 30
   const maxBot = Math.max(1, ...byBot.map(item => item.totalTokens ?? 0))
   const drillBot = state.usageBot ? botById(state.usageBot) : null
   const drillRuns = drillBot
     ? (state.data?.runs ?? []).filter(run => run.bot_id === drillBot.id)
     : []
   const unpriced = Number(totals.unpricedCalls ?? 0)
+  const overviewNotes = [
+    unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
+    tier ? '' : '<div class="usage-note">服务端尚未提供本群口径明细，下方分组可能是全局数据。</div>',
+  ].join('')
   return `
-    <div class="section-head">
-      <div class="usage-note">本群用量 · ${esc(project?.name ?? '当前群聊')}</div>
-      <div class="btn-row">
-        <button class="btn" data-action="export-usage-csv">${icon('download')}导出 CSV（本群）</button>
-      </div>
-    </div>
-    ${usageMetricCards(totals, '本群', usage)}
-    ${unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : ''}
-    ${tier ? '' : '<div class="usage-note">服务端尚未提供本群口径明细，下方分组可能是全局数据。</div>'}
-    <div class="usage-note">口径：仅当前群聊（本项目）的用量。</div>
-    <div class="usage-grid">
-      ${usageModelPanel(byModel, '本群分模型')}
-      <div class="card usage-panel">
-        <div class="card-head"><h3>本群各 Bot</h3><span class="meta">${byBot.length} 个</span></div>
-        ${byBot.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="bar-list">${byBot.map(item => usageBotRow(item, maxBot, true)).join('')}</div>`}
-      </div>
-    </div>
-    ${drillBot ? `<div class="usage-grid" style="margin-top:12px">
-      <div class="card usage-panel">
-        <div class="card-head"><h3>${esc(drillBot.name)} 在本群的运行记录</h3><button class="btn small" data-action="usage-clear-drill">${icon('close')}清除选择</button></div>
+    ${usagePageHead(usage, '仅当前群聊内的用量，不含其他群聊', '本群')}
+    ${usageSection(
+      '本群用量总览',
+      `四项指标只统计当前群聊的调用，按汇总窗口 近 ${windowDays} 天归集。`,
+      `${overviewNotes}${usageMetricCards(totals, '本群', usage)}`,
+    )}
+    ${usageSection(
+      '本群分布明细',
+      `按日面板只保留最近 14 天明细，其余面板与上方汇总同为 ${windowDays} 天窗口；条形长度 = tokens 占比，琥珀色 = 含未计价调用，空条 = 零用量。`,
+      `<div class="usage-grid">
+        ${usageDayPanel(days)}
+        ${usageModelPanel(byModel, '本群分模型', '', currency)}
+        ${usageListPanel('本群各 Bot', byBot.map(item => usageBotRow(item, maxBot, true, currency)), 'Bot')}
+      </div>`,
+    )}
+    ${drillBot ? usageSection(
+      `${drillBot.name} 在本群的运行记录`,
+      '在「本群各 Bot」列表点选可切换查看对象。',
+      `<div class="card usage-panel">
         ${drillRuns.length === 0 ? '<div class="faint">该 Bot 在本群还没有运行记录。</div>' : `<div class="run-list">${drillRuns.map(usageRunRow).join('')}</div>`}
-      </div>
-    </div>` : ''}
+      </div>`,
+      `<button class="btn small" data-action="usage-clear-drill">${icon('close')}清除选择</button>`,
+    ) : ''}
   `
 }
 
 // 单聊「用量」tab：本 bot 汇总 + 本 bot 分模型，内容严格限本 bot。
 function renderUsageSolo() {
   const usage = usageSnapshot()
-  const soloBot = botById(state.soloBotId)
   const tier = usage.tiers?.solo
   const byModel = tier?.byModel ?? []
+  const days = tier?.byDay ?? []
   const totals = usage.solo ?? {}
+  const currency = usageCurrency(usage)
+  const windowDays = Number(usage.days ?? 30) || 30
   const runs = (state.data?.solo?.runs ?? state.data?.runs ?? [])
     .filter(run => run.bot_id === state.soloBotId && (run.project_id ?? null) === null)
   const unpriced = Number(totals.unpricedCalls ?? 0)
+  const overviewNotes = [
+    unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
+    usage.solo ? '' : '<div class="usage-note">服务端尚未提供该 Bot 的单聊口径明细。</div>',
+  ].join('')
   return `
-    <div class="section-head">
-      <div class="usage-note">本 Bot 用量 · ${esc(soloBot ? `@${soloBot.name}` : '该 Bot')}</div>
-      <div class="btn-row">
-        <button class="btn" data-action="export-usage-csv">${icon('download')}导出 CSV（该 Bot）</button>
-      </div>
-    </div>
-    ${usageMetricCards(totals, '该 Bot', usage)}
-    ${unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : ''}
-    ${usage.solo ? '' : '<div class="usage-note">服务端尚未提供该 Bot 的单聊口径明细。</div>'}
-    <div class="usage-note">口径：仅该 Bot 在项目外（单聊）的用量，不含项目内调用。</div>
-    <div class="usage-grid">
-      ${usageModelPanel(byModel, '该 Bot 分模型')}
-      <div class="card usage-panel">
-        <div class="card-head"><h3>运行记录</h3><span class="meta">${runs.length} 条</span></div>
+    ${usagePageHead(usage, '仅该 Bot 在项目外（单聊）的用量，不含项目内调用', '该 Bot')}
+    ${usageSection(
+      '该 Bot 用量总览',
+      `四项指标只统计该 Bot 的单聊调用，按汇总窗口 近 ${windowDays} 天归集。`,
+      `${overviewNotes}${usageMetricCards(totals, '该 Bot', usage)}`,
+    )}
+    ${usageSection(
+      '该 Bot 分布明细',
+      `按日面板只保留最近 14 天明细，其余面板与上方汇总同为 ${windowDays} 天窗口。`,
+      `<div class="usage-grid">
+        ${usageDayPanel(days)}
+        ${usageModelPanel(byModel, '该 Bot 分模型', '', currency)}
+      </div>`,
+    )}
+    ${usageSection(
+      '该 Bot 的运行记录',
+      '与上方用量同口径：只含项目外（单聊）的运行。',
+      `<div class="card usage-panel">
+        <div class="card-head"><h3>运行明细</h3><span class="meta">${runs.length} 条</span></div>
         ${runs.length === 0 ? '<div class="faint">该 Bot 在项目外还没有运行记录。</div>' : `<div class="run-list">${runs.map(usageRunRow).join('')}</div>`}
-      </div>
-    </div>
+      </div>`,
+    )}
   `
 }
 
@@ -4892,7 +5029,7 @@ export { app, UI_SCALE_KEY, UI_THEME_KEY, savedScale, startWechatPoll, stopWecha
 export { applyPanelToggle, panelAttrs, lastRenderedView, captureViewScroll, restoreViewScroll, CHAT_BOTTOM_THRESHOLD, nextChatAtBottom, render, renderView, noProject, activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote }
 export { dispatchTaskRow, dispatchRunRow, renderSoloChat, renderSoloConfig, APPROVAL_STATUS, renderApprovalCard, renderMessage, DM_STATUS, DM_STATUS_TONE, renderDirectMessagesCard, TASK_PRIORITY_WEIGHT, TASK_PRIORITY_DEFAULT, taskPriorityKey, taskPriorityWeight, compareTasksByPriority, sortTasksByPriority, TASK_SORTS, sortTasksForPanel, TASK_TIME_RANGES, taskEndsOutsideRange }
 export { taskTerminalTime, filteredTasks, renderTasks, taskGroupKey, renderTaskGroup, taskStatusIcon, taskPriorityIcon, renderTaskCard, taskChildrenKey, taskParentId, renderTaskRows, terminalStatusPill, terminalOutputText, renderTerminal, renderBots, renderBotsOverview, renderMembers, renderSkills, memoryStatusTone, pendingMemoryCount }
-export { renderMemory, currentSkillVersion, skillVersions, canaryText, evaluationText, proposalPreview, renderEvolution, usageSnapshot, usageTotals, formatAmount, costSplit, usageMode, usageViewTitle, usageBarRow, usageBotRow, usageRunRow, usageModelPanel, usageMetricCards, usageDayPanel, renderUsage }
+export { renderMemory, currentSkillVersion, skillVersions, canaryText, evaluationText, proposalPreview, renderEvolution, usageSnapshot, usageTotals, formatAmount, usageCostParts, usageCostText, usageMode, usageViewTitle, usageBarRow, usageBotRow, usageRunRow, usageModelPanel, usageMetricCards, usageDayPanel, usageSection, usagePageHead, usageListPanel, renderUsage }
 export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderWechatCard, renderSecretsCard, renderSettings, currentScale, renderGlobal, modalShell, modalLoading, renderModal, modelOptions, effortOptions, fallbackModelOptions, parseFallbackFields, modalNewProject, modalRemoveTracking, closeDirPicker }
 export { modalInviteMember, modalBot, taskRelationOptions, modalNewTask, modalSkill, ARTIFACT_IMAGE, artifactFileUrl, runArtifacts, TRAJ_LABELS, trajectoryLabel, trajectoryEntry, modalTrajectory, modalTask, modalMemory, modalProposal, priceDefaults, defaultPriceFor, modalPrice, renderPriceCard, FOCUSABLE }
 export { lastFocused, focusableItems, focusModal, restoreFocus, trapModalFocus, openModal, closeModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, formPayload, AC_COMMANDS, acWordChar, detectAcToken, buildAcItems, acSources, updateAutocomplete, renderAcPopup, moveAcSelection, closeAutocomplete }
