@@ -1713,7 +1713,7 @@ function renderTaskCard(task, options = {}) {
       ${tags.length ? `<span class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</span>` : ''}
       ${depsBlocked ? `<span class="task-deps-badge" title="${attr(depsTitle)}">${icon('alert')}被 ${blockedNames.length} 个任务阻塞</span>` : ''}
       ${!ended && run ? runDot(run.status) : ''}
-      <span class="task-run-label">${runLabel}</span>
+      <span class="task-run-label${stage.stage === 'person' ? ' task-stage-person' : ''}">${runLabel}</span>
       ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
       ${endAt ? `<span class="task-end-time" title="${attr(endAt)}">${icon('check')} ${formatTime(endAt)}</span>` : ''}
       ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}

@@ -68,7 +68,8 @@ test('任务号省略号、优先级不压缩、运行标签单行省略', () =>
   assert.match(block('.task-card-foot'), /min-width:\s*0/, '卡片底行需允许收缩')
   const runLabel = block('.task-card-foot .task-run-label')
   assert.match(runLabel, /text-overflow:\s*ellipsis/, '运行标签过长需省略号')
-  assert.match(source, /<span class="task-run-label">\$\{runLabel\}<\/span>/, '运行标签需带 class 供样式命中')
+  // 基类 task-run-label 必须在（供省略号等样式命中）；后缀修饰类（工单七态的 person 强调，DSHBOTS-137）允许按 stage 插值。
+  assert.match(source, /<span class="task-run-label\$\{stage\.stage === 'person' \? ' task-stage-person' : ''\}">\$\{runLabel\}<\/span>/, '运行标签需带 class 供样式命中')
 })
 
 test('任务详情弹窗标题长串可断行，不撑破弹窗', () => {

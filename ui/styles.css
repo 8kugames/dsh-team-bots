@@ -3272,6 +3272,12 @@ a.global-config.dsh-official-link:hover {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* 工单七态里「在等人」的 stage（等待你回答/等待验收/需要你处理/等人处理）用暖色强调： */
+/* 机器态（执行/排队/待执行/空闲）保持中性灰，人责与机责一眼可分；复用既有色 token，不新增色值。 */
+.task-card-foot .task-run-label.task-stage-person {
+    color: var(--star);
+    flex: 0 0 auto;
+}
 .task-card-foot .avatar.sm {
     margin-left: auto;
 }

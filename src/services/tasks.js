@@ -11,6 +11,8 @@ import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 import {
   ensureTaskRelationsSchema, normalizeBlockedByInput, taskDepsView, validateTaskRelations,
 } from './task-relations.js'
+// 任务工单七态派生与标签口径的唯一来源：task-stage 纯函数域（tests/task-stage.test.js 断言其判定表）。
+import { taskStage, taskStageLabel } from './task-stage.js'
 
 export const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 
@@ -26,39 +28,8 @@ export const TRANSITIONS = {
   canceled: new Set(['todo']),
 }
 
-// task-stage:start —— 任务阶段纯推导 + 标签口径唯一来源（DSHBOTS-42，tests/task-stage.test.js 断言此块）。
-// 阶段不落库、不新增状态位：由事实（任务终态、结构化提问、最近运行）按优先级顺序推导，第一匹配行获胜。
-// 返回两层结构 {stage, action?}，中文文案由 TASK_STAGE_LABEL 查表得出，调用方不得从 latestRun.status 拼接文案。
-// 优先级：ended → person/answer → working(running 且 kind='task') → working/queued → person/failed → idle。
-// 终态（done/canceled）一律 ended、不渲染任何运行徽标——即使任务上还挂着遗留运行
-// （线上 bug 回归锁：「已完成」列出现过「已取消/运行中」标签，DSHBOTS-37 只修了数据源，此处把口径收死）。
-export function taskStage(task, latestRun, attention) {
-  if (task?.status === 'done' || task?.status === 'canceled') return { stage: 'ended' }
-  if (attention) return { stage: 'person', action: 'answer' }
-  if (latestRun?.status === 'running' && latestRun?.kind === 'task') return { stage: 'working' }
-  if (latestRun?.status === 'queued') return { stage: 'working', action: 'queued' }
-  if (latestRun?.status === 'failed') return { stage: 'person', action: 'failed' }
-  return { stage: 'idle' }
-}
-
-// 标签查表：key 为 stage 或 `stage/action`；ended 映射 null（不显示）。标签说「在等谁、等什么」，不露内部状态码。
-export const TASK_STAGE_LABEL = {
-  'person/answer': '等待你回答',
-  'person/failed': '需要你处理',
-  'person/review': '等待验收',
-  working: '正在执行',
-  'working/queued': '排队中',
-  idle: '空闲',
-  ended: null,
-}
-
-// stage 结构 → 标签文案：UI 只消费查表结果（taskView 已挂 stageLabel），不自行拼字符串。
-export function taskStageLabel(stage) {
-  if (!stage) return null
-  const key = stage.action ? `${stage.stage}/${stage.action}` : stage.stage
-  return TASK_STAGE_LABEL[key] ?? null
-}
-// task-stage:end
+// task-stage 域已拆至 src/services/task-stage.js（工单七态判定表 + 标签口径唯一来源），
+// 此处经顶部 import 引入 taskStage/taskStageLabel 供 taskView 派生 stage/stageLabel。
 
 // tasks 表时间列迁移（外置自管：db.js 已贴 800 行红线不再加行，approvals/message-images 同款先例）。
 // canceled_at 与 completed_at 对称：进 canceled 写、离开清；老数据回填 canceled_at=updated_at，仅补空行。
