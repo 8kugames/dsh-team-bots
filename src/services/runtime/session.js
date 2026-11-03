@@ -19,6 +19,15 @@ export const modelOverrideFor = (run) => (run?.model_provider && run?.model_mode
   ? { provider: run.model_provider, model: run.model_model, effort: run.model_effort || undefined }
   : null)
 
+// 运行时效上限（DSHBOTS-131）：任务派生运行（runs.task_id 非空）若任务声明了时效要求，
+// 其超时上限取 min(全局 runTimeoutMs, 时效分钟数)；无时效、非任务运行沿用全局值。
+// 只做纯计算：全局值仍在 startRun 启动瞬间定格，之后改设置不追溯进行中的运行。
+export const runTimeoutMsForTaskRun = ({ run, task, globalRunTimeoutMs }) => {
+  const minutes = Number(task?.timeBudgetMinutes ?? task?.time_budget_minutes)
+  if (!run?.task_id || !Number.isFinite(minutes) || minutes <= 0) return globalRunTimeoutMs
+  return Math.min(globalRunTimeoutMs, minutes * 60_000)
+}
+
 export const sessionMethods = {
   bindingOfSession(sessionId) {
     if (!sessionId) return undefined
@@ -276,7 +285,9 @@ export const sessionMethods = {
     this.pending.set(sessionId, pending)
     this.pendingByRun.set(run.id, pending)
     // 运行时效在启动瞬间定格：之后页面改值只影响后续启动的运行，进行中不追溯。
-    pending.runTimeoutMs = effectiveRunLimits(this.config, key => this.store.setting(key)).runTimeoutMs
+    // 任务时效要求（DSHBOTS-131）在全局上限内再收紧：到期未完成即超时中止。
+    const globalRunTimeoutMs = effectiveRunLimits(this.config, key => this.store.setting(key)).runTimeoutMs
+    pending.runTimeoutMs = runTimeoutMsForTaskRun({ run, task, globalRunTimeoutMs })
     pending.timer = setTimeout(() => {
       void this.timeoutRun(run.id)
     }, pending.runTimeoutMs)

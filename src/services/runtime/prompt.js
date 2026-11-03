@@ -470,9 +470,9 @@ Rules:
       const timeBudgetBlock = Number.isFinite(timeBudget) && timeBudget > 0 ? `
 
 # Time budget
-This task is expected to be delivered within ${timeBudget} minutes; plan the depth of your work accordingly.
-If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
-This budget is a soft expectation for planning, not an execution limit: the runtime may still be stopped by the global run timeout (runTimeoutMs), which is independent of this field.` : ''
+This task must be delivered within ${timeBudget} minutes; the run is aborted when the budget expires.
+Plan the depth of your work accordingly. If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
+The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).` : ''
       // 紧急豁免（DSHBOTS-126）：urgent 任务卡追加豁免指令（用户口径 m08196-2）——
       // 无视车道排队立即开工；非 urgent 完全不注入，保持既有车道纪律。
       const urgentExemptionBlock = task.priority === 'urgent' ? `

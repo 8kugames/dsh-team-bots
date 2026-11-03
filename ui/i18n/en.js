@@ -203,7 +203,7 @@ export default {
   'taskForm.timeBudgetLabel': 'Time budget (minutes)',
   'taskForm.timeBudgetPlaceholder': 'Optional; leave blank for none',
   'task.timeBudgetValue': '${minutes} min',
-  'task.timeBudgetNote': 'Soft limit — a hard abort on expiry is still driven by the run timeout',
+  'task.timeBudgetNote': 'Hard limit: the run is aborted on expiry; the shorter of this budget and the global run timeout applies',
   // High-frequency toasts
   'toast.copied': 'Copied',
   'toast.wechatConnected': 'WeChat channel connected',

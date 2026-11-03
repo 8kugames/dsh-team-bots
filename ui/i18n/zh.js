@@ -202,7 +202,7 @@ export default {
   'taskForm.timeBudgetLabel': '时效要求（分钟）',
   'taskForm.timeBudgetPlaceholder': '选填，留空不设',
   'task.timeBudgetValue': '${minutes} 分钟',
-  'task.timeBudgetNote': '软性时限，超时硬中止仍由运行超时控制',
+  'task.timeBudgetNote': '硬性时限：到期运行将被中止；与全局运行超时取更短者',
   // 高频 toast
   'toast.copied': '已复制',
   'toast.wechatConnected': '微信通道已连接',

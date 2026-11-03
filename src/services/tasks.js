@@ -95,9 +95,9 @@ export const tasksMethods = {
     const writeScopes = input.writeScopes === undefined || input.writeScopes === null
       ? parseWriteScopesFromDescription(input.description)
       : parseWriteScopes(input.writeScopes)
-    // 时效要求（DSHBOTS-125）：发布方可传软性交付时限（分钟）；未传/非法 = NULL，提示词不注入。
+    // 时效要求（DSHBOTS-125）：发布方可传交付时限（分钟）；未传/非法 = NULL，提示词不注入。
     // 钳制到 1..10080（一分钟到一周）：只挡垃圾值，不替发布方做取舍；0/负数视为未提。
-    // 运行硬中止仍由全局 runTimeoutMs 管，与本字段无关。
+    // DSHBOTS-131：该任务派生运行的超时上限取 min(本字段, 全局 runTimeoutMs)，到期即超时中止。
     const rawTimeBudget = input.timeBudgetMinutes ?? input.time_budget_minutes
     const timeBudgetMinutes = Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null
     const taskId = id('task')
