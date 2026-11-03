@@ -50,9 +50,32 @@ export async function markVisibleChatRead(data) {
   } catch {}
 }
 
+// 轮询竞态保护（DSHBOTS-102）：本地已决的审批不被早于决策的 pending 响应盖回。
+// 根因是 2.8s 轮询的在途旧响应会在乐观回显之后到达，把 state.data 整体盖回 pending，
+// 表现为点「允许一次」后卡片闪回。以本地 decided_at 为「已决」标记：同 id 的旧响应仍是
+// pending 时保留本地终态；旧响应已是终态（如 timeout）则以服务端为准。
+export function preserveDecidedApprovals(previous, next) {
+  const decided = new Map()
+  for (const item of previous?.approvals ?? []) {
+    if (item?.id && item.decided_at) decided.set(item.id, item)
+  }
+  if (!decided.size || !next) return next
+  if (Array.isArray(next.approvals)) {
+    next.approvals = next.approvals.map(item => (item && decided.has(item.id) && !item.decided_at ? decided.get(item.id) : item))
+  }
+  const pending = next.pendingApprovals
+  if (pending && Array.isArray(pending.items)) {
+    const items = pending.items.filter(item => !(item && decided.has(item.id)))
+    if (items.length !== pending.items.length) {
+      next.pendingApprovals = { ...pending, items, count: Math.max(0, Number(pending.count ?? 0) - (pending.items.length - items.length)) }
+    }
+  }
+  return next
+}
+
 export async function loadState(projectId = state.projectId, { quiet = false } = {}) {
   // 仅单聊场景携带 soloBotId，避免把单聊口径的 runs/memories 泄漏进群聊视图。
-  const data = await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet })
+  const data = preserveDecidedApprovals(state.data, await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet }))
   state.data = data
   await markVisibleChatRead(data)
   if (!state.projectId || !data.projects.some(project => project.id === state.projectId)) {

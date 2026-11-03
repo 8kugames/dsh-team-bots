@@ -228,3 +228,29 @@ test('超时可见：秒级倒计时文案与临期阈值', () => {
   assert.match(uiSource, /querySelectorAll\('\.approval-clock\[data-expires\], \.approval-menu-time\[data-expires\]'\)/)
   assert.match(uiSource, /el\.classList\.toggle\('urgent', approvalUrgent\(remaining\)\)/)
 })
+
+test('轮询竞态保护：已决审批不被在途旧响应盖回 pending', () => {
+  const moduleSource = readSource('ui', 'modules', 'api.js')
+  assert.match(moduleSource, /preserveDecidedApprovals\(state\.data,/, 'loadState 必须在写回前合并本地终态')
+  const match = moduleSource.match(/export function preserveDecidedApprovals[\s\S]*?\n\}/)
+  assert.ok(match, 'api.js 必须导出 preserveDecidedApprovals')
+  const preserve = new Function(`${match[0].replace(/^export /, '')}\nreturn preserveDecidedApprovals`)()
+  const decided = { id: 'ap1', status: 'allowed', decided_at: '2026-11-03T00:00:00.000Z' }
+  // 旧响应仍报 pending：保留本地终态，顶部徽标不回升。
+  const stale = preserve(
+    { approvals: [decided] },
+    { approvals: [{ id: 'ap1', status: 'pending', decided_at: null }], pendingApprovals: { count: 1, items: [{ id: 'ap1' }] } },
+  )
+  assert.equal(stale.approvals[0].status, 'allowed')
+  assert.equal(stale.pendingApprovals.count, 0)
+  assert.deepEqual(stale.pendingApprovals.items, [])
+  // 旧响应已是终态（如超时）：以服务端为准。
+  const terminal = preserve(
+    { approvals: [decided] },
+    { approvals: [{ id: 'ap1', status: 'timeout', decided_at: '2026-11-03T00:00:05.000Z' }] },
+  )
+  assert.equal(terminal.approvals[0].status, 'timeout')
+  // 没有本地终态时不做任何改写。
+  const untouched = preserve(null, { approvals: [{ id: 'ap1', status: 'pending' }] })
+  assert.equal(untouched.approvals[0].status, 'pending')
+})
