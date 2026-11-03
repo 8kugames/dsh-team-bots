@@ -1383,6 +1383,14 @@ a.global-config.dsh-official-link:hover {
 :is(.message-bubble, .comment-body) a {
     text-decoration: underline;
     text-underline-offset: 2px;
+    /* bot 气泡底是 --surface-3、评论底是 --surface：--accent-text 在四套主题下
+       对比 4.22:1 ~ 8.40:1，配合下划线可读。 */
+    color: var(--accent-text);
+}
+/* 用户气泡底是 --accent，链接字必须换 --accent-ink：Catppuccin 暗色下
+   --accent-text 与 --accent 同为 #b7bdf8，链接会整段隐形（DSHBOTS-130）。 */
+.message-row.user .message-bubble a {
+    color: var(--accent-ink);
 }
 :is(.message-bubble, .comment-body) h1,
 :is(.message-bubble, .comment-body) h2,
