@@ -1,6 +1,6 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.2.117",
+  "version": "0.2.118",
   "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
   "license": "Apache-2.0",
   "type": "module",
@@ -16,6 +16,7 @@
     "vendor/",
     "cordis.patch.yml",
     "README.md",
+    "docs/assets/",
     "NOTICE",
     "LICENSE"
   ],
