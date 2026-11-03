@@ -195,7 +195,9 @@ export const tasksMethods = {
       stageLabel: taskStageLabel(stage),
     }
   },
-  async updateTask(taskId, patch, actor = this.actor()) {
+  // options.startTriggerType：进入「进行中」时给运行用的触发类型标签（看板拖拽沿用 D-54 的 board_resume，
+  // 其余路径默认 task_started）。只影响运行元数据与幂等键，不影响行为口径。
+  async updateTask(taskId, patch, actor = this.actor(), options = {}) {
     const task = this.taskRow(taskId)
     if (patch.version !== undefined && Number(patch.version) !== Number(task.version)) {
       throw conflict('任务已被其他人更新，请刷新后重试')
@@ -255,7 +257,56 @@ export const tasksMethods = {
       await this.releaseTaskWriteLocks(taskId, { fromStatus: task.status, toStatus: updates.status })
     }
     if (updates.status === 'canceled') await this.cancelRunsForTask(taskId)
+    // 进入「进行中」的统一联动（DSHBOTS-100）：任何路径让任务进入「进行中」且有负责人，
+    // 都要通知负责人并真的开工。单一触发点：所有状态变更都经过 updateTask 这一处，
+    // 看板拖拽（transition_task）、编辑表单改状态（update_task）、总监退回重做都从这里过，
+    // 同一任务只会发一条消息、只入队一次运行。
+    if (updates.status === 'in_progress' && task.status !== 'in_progress') {
+      this.notifyTaskStarted(this.taskRow(taskId), { triggerType: options.startTriggerType ?? 'task_started' })
+    }
     return this.taskView(this.taskRow(taskId))
+  },
+  // 任务开始通知与开工入队（DSHBOTS-100）：「任务进入进行中」的唯一落点。
+  // 幂等口径：已有活跃运行时不重复入队、不重复发消息（不能对已经在跑的任务再喊一次开始）；
+  // 没有负责人时不发消息也不入队（没人可通知、也没人可开工）。
+  // 先入队后发消息：入队失败时宁可没有消息，也不留一条指向空转的「开始」。
+  notifyTaskStarted(task, { triggerType = 'task_started' } = {}) {
+    const assigneeId = task.assignee_bot_id
+    if (!assigneeId) return null
+    const active = this.store.get(
+      "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+      task.id,
+    )
+    if (active) return null
+    // 负责人 bot 行缺失（数据异常）时整体跳过：通知与开工都指不到人，
+    // 也不能让通知失败反过来把已经落库的状态变更顶掉。
+    const bot = this.store.get('SELECT name FROM bots WHERE id = ?', assigneeId)
+    if (!bot) return null
+    const project = this.projectRow(task.project_id)
+    const identifier = `${project.key}-${task.number}`
+    try {
+      this.enqueueOutbox({
+        kind: 'task_run',
+        payload: { taskId: task.id, triggerType },
+        projectId: task.project_id,
+        taskId: task.id,
+        idempotencyKey: `task:${task.id}:${triggerType}:${Date.now()}`,
+      })
+      this.insertMessage({
+        projectId: task.project_id,
+        senderType: 'system',
+        senderId: 'system',
+        taskId: task.id,
+        body: `任务 ${identifier} 已开始（${bot.name}）。`,
+        mentions: [assigneeId],
+      })
+    } catch (error) {
+      // 状态变更已经落库，通知/开工失败不能反过来把整次 update_task 打挂（用户会看到报错但状态已变）。
+      this.logger.warn?.('dsh-team: 任务开始通知失败 %s: %s', identifier, error?.message ?? error)
+      return null
+    }
+    void this.tick()
+    return { taskId: task.id, triggerType }
   },
   // 写占用释放（DSHBOTS-73，用户口径）：写范围占用只看「进行中」的任务，
   // 任务一旦离开「进行中」就立刻解除占用/锁定——中止它名下仍在跑/排队的写运行，
@@ -327,46 +378,22 @@ export const tasksMethods = {
       "SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
       taskId,
     )?.n ?? 0)
-    await this.updateTask(taskId, { status }, actor)
+    // 看板拖拽沿用 D-54 的运行触发类型（board_resume）：拖入「执行中」的通知与开工由
+    // updateTask 内的统一触发点完成（同一任务只发一条消息、只入队一次运行）。
+    await this.updateTask(taskId, { status }, actor, { startTriggerType: 'board_resume' })
     await this.applyBoardDragDirective(before, status, { activeRuns })
     // 重新取数：拖拽联动可能刚入队或暂停了运行，沿用 updateTask 的返回会带过期的 latestRun。
     return this.taskView(this.taskRow(taskId))
   },
 
-  // 看板拖拽联动（DSHBOTS-54）：拖入「执行中」自动开工，拖出到 todo/blocked 自动暂停。
-  // 指令消息由系统直接发（sender_type='system'，不触发 bot 运行），实际执行靠这里入队的 task run；
+  // 看板拖拽联动（DSHBOTS-54）：拖出到 todo/blocked 自动暂停。
+  // 拖入「执行中」一侧的通知与开工已收进 updateTask 内的统一触发点（DSHBOTS-100）：
+  // blocked/in_review → in_progress 与编辑表单改状态同样要通知并开工，逻辑只有那一处，
+  // 这里不再重复发消息、重复入队（同一任务只发一条）。
+  // 指令消息由系统直接发（sender_type='system'，不触发 bot 运行）；
   // 出向 in_review/done/canceled 的写运行中止由 updateTask 内的写占用释放统一处理（DSHBOTS-73）。
-  // 已有活跃 run 或无负责人时拖入侧整体跳过：消息声称「请立即开始」就必须真的开工。
   async applyBoardDragDirective(before, afterStatus, { activeRuns = 0 } = {}) {
     if (before.status === afterStatus) return
-    if (before.status === 'todo' && afterStatus === 'in_progress') {
-      const active = this.store.get(
-        "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
-        before.id,
-      )
-      if (active || !before.assignee_bot_id) return
-      const project = this.projectRow(before.project_id)
-      const identifier = `${project.key}-${before.number}`
-      const botName = this.botRow(before.assignee_bot_id).name
-      // 先入队后发消息：入队失败时宁可没有消息，也不留一条指向空转的「请立即开始」。
-      this.enqueueOutbox({
-        kind: 'task_run',
-        payload: { taskId: before.id, triggerType: 'board_resume' },
-        projectId: before.project_id,
-        taskId: before.id,
-        idempotencyKey: `task:${before.id}:board_resume:${Date.now()}`,
-      })
-      this.insertMessage({
-        projectId: before.project_id,
-        senderType: 'system',
-        senderId: 'system',
-        taskId: before.id,
-        body: `任务 ${identifier} 已开始（${botName}）。`,
-        mentions: [before.assignee_bot_id],
-      })
-      void this.tick()
-      return
-    }
     if (before.status === 'in_progress' && (afterStatus === 'todo' || afterStatus === 'blocked')) {
       // 运行中止已由 updateTask 内的写占用释放统一完成（同一处处理），这里只按中止条数发系统指令消息。
       if (activeRuns > 0) {
@@ -603,22 +630,11 @@ export const tasksMethods = {
       const reason = text(comment, 20_000)
       if (!reason) throw badRequest('退回任务必须说明原因')
       if (!task.assignee_bot_id) throw conflict(`任务 ${identifier} 没有负责人，无法退回重做`)
-      await this.updateTask(task.id, { status: 'in_progress' }, actor)
+      // 退回重做回到「进行中」：走 updateTask 内的统一触发点（DSHBOTS-100）——
+      // 通知负责人并入队重跑，运行触发类型沿用 returned；
+      // 总监验收运行仍在进行时触发点会跳过（不重复开工），由其结束时的收尾逻辑补排。
+      await this.updateTask(task.id, { status: 'in_progress' }, actor, { startTriggerType: 'returned' })
       await this.addComment(task.id, `退回重做：${reason}`, actor)
-      // 若总监验收运行仍在进行，由其结束时的收尾逻辑补排；否则立即重排执行。
-      const active = this.store.get(
-        "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
-        task.id,
-      )
-      if (!active) {
-        this.enqueueOutbox({
-          kind: 'task_run',
-          payload: { taskId: task.id, triggerType: 'returned' },
-          projectId: task.project_id,
-          taskId: task.id,
-          idempotencyKey: `task:${task.id}:returned:${Date.now()}`,
-        })
-      }
       void this.tick()
       this.insertMessage({
         projectId: project.id,
