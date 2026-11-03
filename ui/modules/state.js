@@ -62,9 +62,9 @@ export const STATUS = {
   canceled: '已取消',
 }
 export const STATUS_ORDER = ['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled']
-// 任务分组默认全展开（DSHBOTS-58）：把各分组的展开态 key 预置进 state.openPanels，
-// 与 <details data-panel> 同一套通道（key 形如 task-group:<status>），折叠即从集合里删掉。
-for (const status of STATUS_ORDER) state.openPanels.add(taskGroupKey(status))
+// 任务分组默认全展开（DSHBOTS-58）：预置循环在 app.js 入口执行（taskGroupKey 定义在
+// app.js 侧）——这里不许引用 app.js 的局部函数：模块顶层 ReferenceError 会让整张
+// 模块图加载失败，工作台卡在「正在连接团队空间」。
 export const PRIORITY = { urgent: '紧急', high: '高', medium: '中', low: '低', none: '无' }
 export const PROPOSAL_STATUS = { pending: '待审', canary: '灰度中', approved: '已通过', rejected: '已拒绝' }
 export const COLORS = ['teal', 'blue', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
