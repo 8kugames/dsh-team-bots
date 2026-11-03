@@ -146,7 +146,7 @@ import { api, loadState, markVisibleChatRead } from './modules/api.js'
       ? soloRuns.filter(run => run.status === 'running' || run.status === 'queued').length
       : (project?.stats?.running ?? 0)
     const tokenTotal = usageTotals('project').totalTokens ?? 0
-    const isGlobal = state.view === 'global' || state.view === 'bots-overview'
+    const isGlobal = state.view === 'global' || state.view === 'bots-overview' || (state.view === 'usage' && usageMode() === 'global')
     // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
     const isSolo = state.view === 'chat' && state.chatMode === 'solo'
     const inSolo = inSoloContext()

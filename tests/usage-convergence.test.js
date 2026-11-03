@@ -110,3 +110,12 @@ test('⑧ 服务端口径：全局 / 本群 / 单聊三套 tier 齐备', () => {
   const sysSource = readFileSync(fileURLToPath(new URL('../src/services/system.js', import.meta.url)), 'utf8')
   assert.match(sysSource, /soloBotId: soloBotId \?\? null/, 'state 的 usageSnapshot 携带 soloBotId')
 })
+
+test('⑨ 全局口径用量页按全局页处理（不渲染项目 tab）', () => {
+  assert.match(
+    source,
+    /const isGlobal = state\.view === 'global' \|\| state\.view === 'bots-overview' \|\| \(state\.view === 'usage' && usageMode\(\) === 'global'\)/,
+    'isGlobal 认全局口径用量页',
+  )
+  assert.match(source, /\$\{isGlobal \? '' : `<div class="tabbar"/, '项目 tabbar 渲染受 isGlobal 抑制')
+})
