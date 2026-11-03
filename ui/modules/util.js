@@ -48,13 +48,16 @@ export const inSoloContext = () => state.chatMode === 'solo' || state.view === '
 export const pageProject = () => (inSoloContext() ? null : activeProject())
 export const activeBots = () => (state.data?.bots ?? []).filter(bot => bot.status === 'active')
 
+// format-tokens:start —— tokens/调用量展示的唯一格式化出口：k/m/b 标准进位，档内 <10 两位小数、≥10 一位小数（DSHBOTS-114），tests/token-format.test.js 按本标记块抽取断言。
 export function formatNumber(value) {
   const n = Number(value ?? 0)
   if (!Number.isFinite(n)) return '0'
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(n >= 10_000_000_000 ? 1 : 2)}b`
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}m`
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 1 : 2)}k`
   return String(Math.round(n))
 }
+// format-tokens:end
 export const CURRENCY_SYMBOL = { CNY: '¥', RMB: '¥', USD: '$', EUR: '€', JPY: '¥' }
 export function formatCost(value, currency = 'CNY') {
   if (value === null || value === undefined) return '未配置'
