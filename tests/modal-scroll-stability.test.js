@@ -1,9 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 
 // —— DSHBOTS-154：任务详情 modal 滚动稳定性 ——
 // 取证结论（CDP 活体）：2.8s 轮询期间 renderModalLayer 根本不被调（render() 的遮罩闸门
@@ -169,7 +168,7 @@ test('守卫接线：defer 闸门在 no-op 之后/lastModalHtml 之前，关闭�
   const scrollListener = /window\.addEventListener\('scroll', event => \{[\s\S]*?\}, \{ capture: true, passive: true \}\)/.exec(source)?.[0]
   assert.ok(scrollListener, '缺少 modal 滚动守卫的 scroll 监听')
   assert.match(scrollListener, /closest\?\.\('\.modal-body'\)/)
-  assert.match(scrollListener, /modalScrollAt = performance\.now\(\)/, '监听命中即更新滚动时间戳')
+  assert.match(scrollListener, /noteModalScroll\(\)/, '监听命中即更新滚动时间戳')
 })
 
 // —— no-op 路径可达性：秒级时钟定点刷新通道接线 ——

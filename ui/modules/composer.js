@@ -6,7 +6,8 @@ import { activeProject, attr, avatar, botById, esc, initials, toast } from './ut
 import { api, loadState } from './api.js'
 import { applyOptimisticTyping } from './typing-linger.js'
 import { t } from './i18n.js'
-import { app, renderShell, renderKeepingChatScroll, render, flushAppRender } from '../app.js'
+import { app, renderShell, renderKeepingChatScroll, render } from '../app.js'
+import { flushAppRender } from './modal-layer.js'
 
 // ac-core:start —— 输入框 / 与 @ 自动补全的纯逻辑（tests/ac.test.js 抽取此块断言）
 const AC_COMMANDS = [

@@ -1,11 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 const block = /\/\/ fallback-model:start[\s\S]*?\/\/ fallback-model:end/.exec(source)?.[0]
-assert.ok(block, 'ui/app.js 缺少 fallback-model 标记块')
+assert.ok(block, 'ui 源码缺少 fallback-model 标记块')
 
 const { parseFallbackFields } = new Function(`${block}\nreturn { parseFallbackFields }`)()
 

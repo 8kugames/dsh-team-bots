@@ -6,7 +6,8 @@ import { activeBots, activeProject, attr, botById, esc, formatTime, pathCode } f
 import { loadState } from './api.js'
 import { notifyToggleView } from './cards.js'
 import { usageBotRow, usageCurrency, usageDayPanel, usageDayTitle, usageListPanel, usageMetricCards, usageModelPanel, usagePageHead, usageProjectRow, usageRunRow, usageSection, usageSnapshot, usageWindowText } from './usage.js'
-import { refresh, pendingProposals, noProject, renderPriceCard } from '../app.js'
+import { refresh, pendingProposals, noProject } from '../app.js'
+import { renderPriceCard } from './modal-forms.js'
 
 function renderUsageGlobal() {
   const usage = usageSnapshot()

@@ -299,7 +299,7 @@ test('接线④：轮询/刷新不因弹窗早退，遮罩关闭路径都补渲�
     '先隐藏查看器再补渲染：补渲染时遮罩已关闭，闸门才放行',
   )
   assert.match(source, /if \(!html\) flushAppRender\(\)/, '弹窗层清空时补渲染')
-  assert.match(renderSrc, /if \(overlayOpen\(\)\) \{\n    appRenderPending = true\n    return\n  \}/, 'render() 顶部是唯一的重建闸门')
+  assert.match(renderSrc, /if \(overlayOpen\(\)\) \{\n    markAppRenderPending\(\)\n    return\n  \}/, 'render() 顶部是唯一的重建闸门')
 })
 
 // —— DSHBOTS-111：断言③（同类型刷新不重播入场动画）——

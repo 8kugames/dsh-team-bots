@@ -3,10 +3,9 @@
 // 预填必须让父任务下拉真正选中该任务（值与显示一致），不是值带了、下拉仍显示「无（顶层任务）」。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 
 test('任务详情 footer 有「派生子任务」按钮且带 data-task-id', () => {
   assert.match(
