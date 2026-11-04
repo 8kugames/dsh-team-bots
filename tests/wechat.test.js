@@ -340,7 +340,7 @@ test('wechat channel 旧授权流程失败不会清掉新登录状态', async ()
   }
 })
 
-test('wechat channel 不可重试错误停止重试该条且写日志，可重试错误保留待发', async () => {
+test('wechat channel 不可重试错误直接废弃不补发，可重试错误计次保留待发', async () => {
   const { dir, store } = await openStore('wechat-outbox-')
   try {
     const logs = []
@@ -364,17 +364,24 @@ test('wechat channel 不可重试错误停止重试该条且写日志，可重�
 
     await channel.flushOutbox(channel.transport, new AbortController().signal)
     assert.equal(attempts, 1)
-    assert.equal(store.pendingOutbox().length, 1, '发送失败不能标记为已发送')
-    assert.ok(logs.some(line => line.includes('不可重试') && line.includes('推送内容') || line.includes('不可重试')))
+    const rows = () => store.db.prepare('SELECT * FROM outbox ORDER BY id').all()
+    let row = rows()[0]
+    assert.equal(row.sent_at, null, '发送失败不能标记为已发送')
+    assert.ok(row.gave_up_at, '不可重试错误应直接废弃')
+    assert.equal(store.pendingOutbox().length, 0, '废弃条目不再占用待发队列')
+    assert.ok(logs.some(line => line.includes('推送废弃') && line.includes('id=1')))
 
     await channel.flushOutbox(channel.transport, new AbortController().signal)
-    assert.equal(attempts, 1, '不可重试错误应停止重试该条')
+    assert.equal(attempts, 1, '废弃条目不再重试')
 
     mode = 'retryable'
-    channel.failedOutbox.clear()
+    store.enqueue('可重试内容')
     await channel.flushOutbox(channel.transport, new AbortController().signal)
     assert.equal(attempts, 2, '可重试错误应继续尝试')
-    assert.equal(store.pendingOutbox().length, 1)
+    row = rows().at(-1)
+    assert.equal(row.attempts, 1, '可重试失败计一次尝试')
+    assert.equal(row.gave_up_at, null, '未超限不废弃')
+    assert.equal(store.pendingOutbox().length, 1, '可重试失败保留待发')
     assert.ok(logs.some(line => line.includes('可重试')))
     store.close()
   } finally {

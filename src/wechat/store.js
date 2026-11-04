@@ -37,11 +37,30 @@ export class WechatStore {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         text TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        sent_at TEXT
+        sent_at TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        gave_up_at TEXT
       );
     `)
+    await this.migrateOutboxColumns()
     await this.secureFiles()
     return this
+  }
+
+  /**
+   * 旧库补列迁移：outbox 引入重试上限（attempts）与废弃标记（gave_up_at）前的库缺这两列。
+   * 幂等：列已存在则跳过；补列带默认值，旧行语义等价于「未重试过、未废弃」。
+   */
+  async migrateOutboxColumns() {
+    const columns = new Set(
+      this.db.prepare('PRAGMA table_info(outbox)').all().map(column => column.name),
+    )
+    if (!columns.has('attempts')) {
+      this.db.exec("ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+    }
+    if (!columns.has('gave_up_at')) {
+      this.db.exec('ALTER TABLE outbox ADD COLUMN gave_up_at TEXT')
+    }
   }
 
   /** 库文件与 WAL/SHM 侧文件都收紧到 0600（新建与已存在都检查，过宽则收紧）。 */
@@ -100,7 +119,7 @@ export class WechatStore {
 
   pendingOutbox(limit = 20) {
     return this.db.prepare(
-      'SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT ?',
+      'SELECT * FROM outbox WHERE sent_at IS NULL AND gave_up_at IS NULL ORDER BY id LIMIT ?',
     ).all(limit)
   }
 
@@ -111,12 +130,42 @@ export class WechatStore {
     for (const id of ids) statement.run(at, id)
   }
 
-  /** 清理 N 天前已发送的记录，默认保留 7 天。 */
+  /** 记一次发送失败，返回该条累计尝试次数（含本次；持久化，重启不重置）。 */
+  markAttempt(id) {
+    const result = this.db.prepare(
+      'UPDATE outbox SET attempts = attempts + 1 WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL',
+    ).run(id)
+    if (!Number(result?.changes ?? 0)) return null
+    const row = this.db.prepare('SELECT attempts FROM outbox WHERE id = ?').get(id)
+    return Number(row?.attempts ?? 0)
+  }
+
+  /** 废弃指定待发条目：仍视为未发送，但永久不再补发（重试超限或不可重试失败）。 */
+  giveUp(ids) {
+    if (!ids.length) return 0
+    const statement = this.db.prepare(
+      'UPDATE outbox SET gave_up_at = ? WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL',
+    )
+    const at = nowIso()
+    let changed = 0
+    for (const id of ids) changed += Number(statement.run(at, id)?.changes ?? 0)
+    return changed
+  }
+
+  /** 通道链接建立时调用：作废全部存量待发（历史堆积不补发，只发链接后产生的新事件）。 */
+  giveUpAllPending() {
+    const result = this.db.prepare(
+      'UPDATE outbox SET gave_up_at = ? WHERE sent_at IS NULL AND gave_up_at IS NULL',
+    ).run(nowIso())
+    return Number(result?.changes ?? 0)
+  }
+
+  /** 清理 N 天前已发送或已废弃的记录，默认保留 7 天。 */
   purgeSentOutbox(days = 7) {
     const cutoff = new Date(Date.now() - Math.max(0, days) * DAY_MS).toISOString()
     const result = this.db.prepare(
-      'DELETE FROM outbox WHERE sent_at IS NOT NULL AND sent_at < ?',
-    ).run(cutoff)
+      'DELETE FROM outbox WHERE (sent_at IS NOT NULL AND sent_at < ?) OR (gave_up_at IS NOT NULL AND gave_up_at < ?)',
+    ).run(cutoff, cutoff)
     return Number(result?.changes ?? 0)
   }
 }

@@ -7,8 +7,15 @@ import { AppError } from '../errors.js'
 const { version: PLUGIN_VERSION } = createRequire(import.meta.url)('../../package.json')
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000]
 const VERIFICATION_WAIT_MS = 180_000
-/** 已发送的出站消息默认保留 7 天，之后清理。 */
+/** 已发送的出站消息默认保留 7 天，之后清理（废弃行同样按此清理）。 */
 const OUTBOX_RETENTION_DAYS = 7
+/** 待发消息最大尝试次数（含首次发送）：达到上限仍未发出即废弃，永不补发。
+ *  治理口径：历史堆积不无限重试，通道恢复后只发新事件，避免逐条补发刷屏占额度。 */
+const OUTBOX_MAX_ATTEMPTS = 3
+/** 合批窗口：窗口内到达的多条推送合并为一次发送（一轮任务事件常并发多条，逐条发占消息额度）。 */
+const OUTBOX_BATCH_WINDOW_MS = 1500
+/** 合批摘要的明细行数上限：超过只保留最旧的 N 条原文，其余以「等 N 项」汇总。 */
+const OUTBOX_BATCH_LINES = 5
 /** 进程内记忆已处理消息，避免 cursor 未推进时重复回复。 */
 const PROCESSED_MEMORY_LIMIT = 500
 /** 用户侧只给通用失败提示，具体错误写日志。 */
@@ -24,7 +31,7 @@ const AUTH_USER_ID_KEYS = ['userId', 'ilink_user_id', 'ilinkUserId', 'peerId', '
  * 协议细节全部在 vendor/wechat-ilink（见 NOTICE 出处）。
  */
 export class WechatChannel {
-  constructor({ store, config, log = console }) {
+  constructor({ store, config, log = console, batchWindowMs = OUTBOX_BATCH_WINDOW_MS }) {
     this.store = store
     this.config = config
     this.log = log
@@ -38,10 +45,14 @@ export class WechatChannel {
     this.peers = new Map()
     /** 授权成功但响应未带用户标识时的降级绑定标记。 */
     this.pendingAdmin = null
-    /** 本进程内已放弃重试的出站消息 id。 */
-    this.failedOutbox = new Set()
     /** 本进程内已处理过的入站消息 id。 */
     this.processedMessages = new Set()
+    /** 合批窗口毫秒数（测试可注入）；窗口内多次 notify 合并为一次发送。 */
+    this.batchWindowMs = batchWindowMs
+    /** 合批窗口定时器；unref，不阻止进程退出。 */
+    this.flushTimer = null
+    /** flushOutbox 串行化链：并发 flush 会重复读取同一批 pending 造成重复发送。 */
+    this.flushChain = Promise.resolve()
   }
 
   setService(service) {
@@ -66,6 +77,10 @@ export class WechatChannel {
   }
 
   async stop() {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
     if (this.epoch) {
       this.epoch.abort.abort()
       await this.epoch.drain.catch(() => {})
@@ -193,7 +208,6 @@ export class WechatChannel {
     await this.stop()
     this.store.clearCredentials()
     this.pendingAdmin = null
-    this.failedOutbox.clear()
     this.phase = 'unbound'
   }
 
@@ -210,6 +224,10 @@ export class WechatChannel {
 
   async connect(credentials) {
     await this.stop()
+    // 本次链接建立之前的堆积一律作废不补发（历史积压治理口径）：
+    // 重启恢复或换号重登都不追溯旧状态，链接之后产生的新事件才发送。
+    const voided = this.store.giveUpAllPending?.() ?? 0
+    if (voided > 0) this.log.info?.(`[wechat] 链接建立，作废此前待发堆积 ${voided} 条（不补发）`)
     const transport = this.makeTransport(credentials)
     const abort = new AbortController()
     const epoch = { abort, credentials }
@@ -312,8 +330,6 @@ export class WechatChannel {
       this.log.info?.(`[wechat] 忽略非管理员消息来自 ${peerId}`)
       return
     }
-    // 与管理员的会话凭证已可用，之前因缺凭证放弃的推送可以再试
-    this.failedOutbox.clear()
     try {
       const reply = await handleCommand(this.service, message.text)
       await this.sendTo(peerId, reply, signal)
@@ -350,7 +366,7 @@ export class WechatChannel {
     }
   }
 
-  /** 对外事件推送入口：未连接或无会话凭证时落盘，管理员出现后补发。 */
+  /** 对外事件推送入口：入队后经合批窗口合并发送；未连接时仅落盘，链接建立后由新事件触发。 */
   notify(text) {
     if (!this.enabled()) return
     const body = String(text ?? '').trim()
@@ -364,34 +380,70 @@ export class WechatChannel {
       this.log.warn?.(`[wechat] 推送入队失败: ${this.errorText(error)}`)
       return
     }
-    if (this.phase === 'connected' && this.transport) {
+    if (this.phase === 'connected' && this.transport) this.scheduleOutboxFlush()
+  }
+
+  /** 合批窗口：窗口内的多次推送合并到同一次 flush，一轮并发任务事件只占一次消息额度。 */
+  scheduleOutboxFlush() {
+    if (this.flushTimer) return
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null
+      const transport = this.transport
+      if (!transport || this.phase !== 'connected') return
       const signal = this.epoch?.abort?.signal ?? new AbortController().signal
-      void this.flushOutbox(this.transport, signal).catch(error => {
+      void this.flushOutbox(transport, signal).catch(error => {
         this.log.warn?.(`[wechat] 推送刷新失败${isRetryable(error) ? '（可重试）' : '（不可重试）'}: ${this.errorText(error)}`)
       })
+    }, this.batchWindowMs)
+    this.flushTimer.unref?.()
+  }
+
+  /** 刷出全部待发：串行化（防并发重复发送），合批为一次通道调用（单条保持原文）。 */
+  async flushOutbox(transport, signal) {
+    const previous = this.flushChain
+    let release
+    this.flushChain = new Promise(resolve => {
+      release = resolve
+    })
+    await previous.catch(() => {})
+    try {
+      return await this.flushOutboxLocked(transport, signal)
+    } finally {
+      release()
     }
   }
 
-  async flushOutbox(transport, signal) {
+  async flushOutboxLocked(transport, signal) {
     const admin = this.adminPeerId()
     if (!admin) return
     const pending = this.store.pendingOutbox()
-    for (const item of pending) {
-      if (this.failedOutbox.has(item.id)) continue
-      try {
-        await this.sendTo(admin, item.text, signal)
-        this.store.markSent([item.id])
-        this.failedOutbox.delete(item.id)
-      } catch (error) {
-        // 发送失败绝不能标记为已发送
-        if (isRetryable(error)) {
-          this.log.warn?.(`[wechat] 推送失败(可重试，保留待发) id=${item.id}: ${this.errorText(error)}`)
-        } else {
-          this.failedOutbox.add(item.id)
-          this.log.warn?.(`[wechat] 推送失败(不可重试，本进程不再重试该条) id=${item.id}: ${this.errorText(error)}`)
-        }
-      }
+    if (!pending.length) return
+    // 发送中止不算失败：不烧尝试次数，条目保留待发由下次 flush 再试
+    if (signal?.aborted) return
+    const digest = pending.length === 1 ? pending[0].text : batchDigest(pending)
+    try {
+      await this.sendTo(admin, digest, signal)
+      this.store.markSent(pending.map(item => item.id))
+    } catch (error) {
+      if (signal?.aborted) return
+      for (const item of pending) this.recordOutboxFailure(item, error)
     }
+  }
+
+  /** 失败记账：可重试错误计一次尝试，达到上限废弃；不可重试错误直接废弃。废弃后永不补发。 */
+  recordOutboxFailure(item, error) {
+    const retryable = isRetryable(error)
+    const attempts = retryable ? this.store.markAttempt(item.id) : null
+    if (!retryable || (attempts ?? 0) >= OUTBOX_MAX_ATTEMPTS) {
+      this.store.giveUp([item.id])
+      this.log.warn?.(
+        `[wechat] 推送废弃(不再补发) id=${item.id}${retryable ? `(尝试 ${attempts}/${OUTBOX_MAX_ATTEMPTS} 次超限)` : '(不可重试)'}: ${this.errorText(error)}`,
+      )
+      return
+    }
+    this.log.warn?.(
+      `[wechat] 推送失败(可重试 ${attempts}/${OUTBOX_MAX_ATTEMPTS}，保留待发) id=${item.id}: ${this.errorText(error)}`,
+    )
   }
 
   errorText(error) {
@@ -403,6 +455,15 @@ export class WechatChannel {
 /** 业务性拒绝（任务不存在、参数非法等）：可读提示即可，不重试。 */
 function isBusinessError(error) {
   return error instanceof AppError || error instanceof WechatBusinessError || error?.permanent === true
+}
+
+/** 合批摘要：首行条数，逐条保留原文（每条自带 KEY-N 与状态），超明细上限截断加「等 N 项」。 */
+function batchDigest(items) {
+  const shown = items.slice(0, OUTBOX_BATCH_LINES)
+  const rest = items.length - shown.length
+  const lines = [`任务动态 ${items.length} 条：`, ...shown.map(item => item.text)]
+  if (rest > 0) lines.push(`……等 ${rest} 项`)
+  return lines.join('\n')
 }
 
 /** 从授权响应里取用户标识（vendor confirmed 返回 userId=ilink_user_id）。 */
