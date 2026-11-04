@@ -352,6 +352,7 @@ function scopeFilters(scope) {
 // 运行窗口：结束、开始、入队任一时间落在窗口内即视为「窗口内跑过」。
 const RUN_IN_WINDOW = 'COALESCE(r.ended_at, r.started_at, r.queued_at) >= ?'
 
+// 至今窗口没有下界：运行过滤条件退化为恒真。
 function runWindowFilter(scope) {
   if (!scope.since) return { clause: '1 = 1', params: [] }
   return { clause: RUN_IN_WINDOW, params: [scope.since] }
@@ -541,6 +542,7 @@ function scopeUsage(store, scope, budgetCurrency, prices = null) {
   return aggregateUsage(store, filters, params, budgetCurrency, prices)
 }
 
+// 日均折算用的实际天数：滚动窗口用窗口天数；至今用最早明细到今天跨过的天数。
 function windowSpanDays(store, window) {
   if (Number.isFinite(window.days) && window.days > 0) return window.days
   const earliest = store.get('SELECT MIN(occurred_at) AS earliest FROM usage_events')?.earliest ?? null
