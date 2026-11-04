@@ -80,4 +80,19 @@ export const wechatMethods = {
     }
     return { phase: this.wechat.status().phase }
   },
+
+  /**
+   * 微信派单转发（DSHBOTS-183）：按 key 定位 active 项目，把消息以工作台用户身份
+   * 插入该项目群聊并触发一轮 chat 运行（无 mention 时定向总监，由其自行安排任务）。
+   * 未命中 key 返回 null，提示文案由 commands.js 统一拼装（带 q 列表）。
+   */
+  async wechatDispatch(key, body) {
+    const project = this.store.get(
+      "SELECT * FROM projects WHERE key = ? COLLATE NOCASE AND status = 'active'",
+      String(key ?? '').trim(),
+    )
+    if (!project) return null
+    await this.sendMessage(project.id, String(body ?? ''), { type: 'user', id: this.localUserId })
+    return project
+  },
 }

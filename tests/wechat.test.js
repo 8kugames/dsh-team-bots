@@ -8,6 +8,9 @@ import { extractTaskId, handleCommand, isRetryable, outboundChunks, WechatBusine
 import { WechatChannel } from '../src/wechat/channel.js'
 import { TASK_ID_PATTERN } from '../src/util.js'
 import { AppError } from '../src/errors.js'
+import { openDatabase } from '../src/db.js'
+import { resolveConfig } from '../src/config.js'
+import { TeamService } from '../src/service.js'
 
 const SERVICE_STUB = () => ({
   stateView() {
@@ -493,5 +496,121 @@ test('wechat channel 扫码授权 begin 与 wait 必须同一 transport 实例',
     store.close()
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+// —— DSHBOTS-183：help 变体、q 列项目 key、{key}: {msg} 派单转发 ——
+
+const DISPATCH_STUB = () => ({
+  stateView() {
+    return { projects: [{ key: 'web', name: 'Web', tasks: [] }, { key: 'bot', name: '', tasks: [] }] }
+  },
+  dispatched: null,
+  async wechatDispatch(key, message) {
+    this.dispatched = { key, message }
+    return key.toLowerCase() === 'web' ? { id: 'p-web', key: 'web', name: 'Web' } : null
+  },
+})
+
+test('wechat commands help/help 大小写变体都出帮助', async () => {
+  for (const text of ['help', 'Help', 'HELP', '?']) {
+    const reply = await handleCommand({}, text)
+    assert.ok(reply.includes('可用指令'), `「${text}」应输出帮助`)
+    assert.ok(reply.includes('q'), '帮助里应提到 q 指令')
+    assert.ok(reply.includes('<key>: <消息>'), '帮助里应提到派单转发格式')
+  }
+})
+
+test('wechat commands q 列出可派单项目 key，空列表给空态文案', async () => {
+  const service = DISPATCH_STUB()
+  const reply = await handleCommand(service, 'q')
+  assert.ok(reply.startsWith('可派单的项目'))
+  assert.ok(reply.includes('  web  Web'), 'key 与名称都应出现')
+  assert.ok(reply.includes('  bot'), '无名称项目只列 key')
+  assert.equal((await handleCommand(service, 'Q')), reply, '大小写不敏感')
+
+  const empty = { stateView: () => ({ projects: [] }) }
+  assert.ok((await handleCommand(empty, 'q')).includes('当前没有可派单的项目'))
+})
+
+test('wechat commands 派单转发命中：按 key 调 wechatDispatch 并回执', async () => {
+  const service = DISPATCH_STUB()
+  const reply = await handleCommand(service, 'web: 上线新版官网')
+  assert.ok(reply.includes('已转发到【Web】'))
+  assert.deepEqual(service.dispatched, { key: 'WEB', message: '上线新版官网' })
+
+  // 全角冒号、key 大小写、消息里再含冒号只切第一段
+  const reply2 = await handleCommand(service, 'WEB：改导航样式，备注：今晚发')
+  assert.ok(reply2.includes('已转发到【Web】'))
+  assert.deepEqual(service.dispatched, { key: 'WEB', message: '改导航样式，备注：今晚发' })
+})
+
+test('wechat commands 派单未命中 key 给出可用的 q 列表提示', async () => {
+  const service = DISPATCH_STUB()
+  const reply = await handleCommand(service, 'nope: 干活')
+  assert.ok(reply.includes('没有找到项目 NOPE'))
+  assert.ok(reply.includes('可派单的项目'))
+  assert.ok(reply.includes('web'), '提示里应带可用 key 列表')
+  assert.equal(service.dispatched.key, 'NOPE', '未命中也要走一次解析定位')
+})
+
+test('wechat commands 现有指令行为不变：状态/验收/驳回/详情照旧', async () => {
+  const service = SERVICE_STUB()
+  const state = await handleCommand(service, '状态')
+  assert.ok(state.includes('web-3 [in_progress] 写登录页'))
+  assert.ok((await handleCommand(service, '验收 web-3 好')).includes('已验收 web-3'))
+  assert.ok((await handleCommand(service, '驳回 web-3 差')).includes('已驳回 web-3'))
+  assert.ok((await handleCommand(service, '详情 web-3')).includes('写登录页'))
+  assert.ok((await handleCommand({}, 'foo')).includes('未识别'))
+})
+
+class DispatchStubRuntime {
+  setCompletionHandler() {}
+  async catalog() { return [] }
+  async validateBotConfig() {}
+  async startRun({ run }) { return `session-${run.id}` }
+  async cancelRun() { return true }
+}
+
+test('wechat dispatch 真 service：消息以用户身份插入项目会话并触发总监 chat 运行', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-wechat-dispatch-'))
+  const workspace = join(root, 'workspace')
+  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
+  const config = resolveConfig({
+    workspace,
+    dataDir: join(root, 'data'),
+    skillRoot: join(workspace, '.agents'),
+    modelCacheMs: 0,
+    schedulerIntervalMs: 60_000,
+  })
+  const store = openDatabase(config.dbPath)
+  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
+  service.attachRuntime(new DispatchStubRuntime())
+  await service.initialize()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    await service.createProject({ name: 'Dispatch Demo', key: 'DISPATCH', ownerBotId: director.id })
+
+    // 小写 key 也要命中（COLLATE NOCASE 同 resolveTaskByIdentifier 口径）
+    const reply = await handleCommand(service, 'dispatch: 上线新版官网')
+    assert.ok(reply.includes('已转发到【Dispatch Demo】'))
+
+    const message = store.get("SELECT * FROM messages WHERE body = '上线新版官网'")
+    assert.ok(message, '转发消息必须落库到项目群聊')
+    assert.equal(message.project_id, store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id)
+    assert.equal(message.sender_type, 'user')
+    assert.equal(message.sender_id, service.localUserId, '以工作台用户身份插入')
+
+    const outbox = store.get("SELECT * FROM outbox WHERE kind = 'chat_run'")
+    assert.ok(outbox, '转发必须入 chat_run outbox 触发一轮运行')
+    assert.equal(outbox.status, 'delivered')
+    assert.equal(outbox.idempotency_key, `chat:${message.id}:${director.id}`)
+
+    const run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
+    assert.ok(run, '必须派生 chat 运行')
+    assert.equal(run.bot_id, director.id, '无 mention 时定向项目总监（owner_bot_id）')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
   }
 })
