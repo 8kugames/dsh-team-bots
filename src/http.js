@@ -4,7 +4,8 @@ import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppError } from './errors.js'
 import { handleAction } from './api.js'
-import { resolveDshUiLanguage } from './services/locale.js'
+import { resolveUiLanguage } from './services/locale.js'
+import { effectiveUiLanguage } from './config.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const UI = join(HERE, '..', 'ui')
@@ -61,11 +62,32 @@ export const OFFICIAL_UI_SWITCH_ROWS = [
   },
 ]
 
-// ui/styles.css 组件域拆分（DSHBOTS-160）：单文件按 Section 域拆到 ui/styles/*.css，
-// 本表是拼接顺序的唯一真源（线上 installHttp 与 scripts/dev-server.js 共用同一
-// readUiStyles），顺序即层叠语义——base 的变量声明在最前、wide 的媒体覆盖在后，
-// 不得重排。过渡态保留 styles.css 承载未拆域，拆分完成后由 styles/* 完全取代。
-export const UI_STYLE_PARTS = ['styles.css', 'styles/terminal.css']
+// ui/styles.css 组件域拆分（DSHBOTS-160）：5626 行巨石按 Section 域拆到 ui/styles/*.css，
+// 每文件 <800 行。本表是拼接顺序的唯一真源（线上 installHttp 与 scripts/dev-server.js
+// 共用同一 readUiStyles），顺序即层叠语义——base 的变量声明在最前、wide 的媒体覆盖在
+// 后，不得重排。
+export const UI_STYLE_PARTS = [
+  'styles/base.css',
+  'styles/boot.css',
+  'styles/frame.css',
+  'styles/main.css',
+  'styles/buttons.css',
+  'styles/surfaces.css',
+  'styles/avatars.css',
+  'styles/chat.css',
+  'styles/chat-cards.css',
+  'styles/chat-composer.css',
+  'styles/chat-images.css',
+  'styles/tasks.css',
+  'styles/cards.css',
+  'styles/usage.css',
+  'styles/settings.css',
+  'styles/modal.css',
+  'styles/toast.css',
+  'styles/a11y.css',
+  'styles/wide.css',
+  'styles/terminal.css',
+]
 
 export const readUiStyles = async () => {
   const parts = await Promise.all(UI_STYLE_PARTS.map((part) => readFile(join(UI, part), 'utf8')))
@@ -97,10 +119,12 @@ export function installHttp(ctx, service, logger = console) {
     const html = await readFile(join(UI, 'index.html'), 'utf8')
     // {{language}}（DSHBOTS-120）：服务端解析 DSH 宿主语言设定注入 <html data-dsh-language>，
     // 客户端据此选 i18n 字典包（'auto' = 宿主未显式设定，交给浏览器语言）。
-    const language = await resolveDshUiLanguage({
+    // DSHBOTS-162：页面保存值 zh/en 优先于宿主解析，'auto' 才回落宿主链。
+    const language = await resolveUiLanguage({
       loader: ctx.get('loader'),
       dshHome: service?.config?.dshHome,
       profile: process.env.DSH_PROFILE || 'team-bots',
+      uiLanguage: service ? effectiveUiLanguage(service.config, key => service.store.setting(key)) : 'auto',
     })
     return response(html
       .replaceAll('{{assetVersion}}', ASSET_VERSION)

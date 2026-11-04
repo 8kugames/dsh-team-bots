@@ -67,3 +67,11 @@ test('拼接零漂移：readUiStyles 输出与按表独立读取一致且花括�
   // 切割不得截断规则块。
   assert.equal((served.match(/{/g) ?? []).length, (served.match(/}/g) ?? []).length)
 })
+
+test('终态：巨石 styles.css 已删，顺序表不再引用，首尾域正确', async () => {
+  // 5626 行巨石必须由 ui/styles/* 完全取代（过渡态 ['styles.css', ...] 不允许回潮）。
+  await assert.rejects(stat(join(ROOT, 'ui', 'styles.css')), /ENOENT/, 'ui/styles.css 应已删除')
+  assert.ok(!UI_STYLE_PARTS.includes('styles.css'), 'UI_STYLE_PARTS 不得再引用 styles.css')
+  assert.equal(UI_STYLE_PARTS[0], 'styles/base.css', 'base 域必须最前（变量声明）')
+  assert.equal(UI_STYLE_PARTS.at(-1), 'styles/terminal.css', 'terminal 域必须最后')
+})

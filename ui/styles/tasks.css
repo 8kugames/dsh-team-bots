@@ -1,0 +1,580 @@
+/* ---------------------------------------------------------------- Tasks */
+.board-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+.input,
+.select,
+.textarea {
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    outline: none;
+    color: var(--ink);
+    padding: 0 10px;
+    font-size: var(--fs-body);
+    min-height: 32px;
+    transition:
+        border-color 0.13s ease,
+        background-color 0.13s ease;
+}
+.input:focus,
+.select:focus,
+.textarea:focus {
+    border-color: var(--accent);
+    background: var(--surface);
+}
+.input::placeholder,
+.textarea::placeholder {
+    color: var(--ink-3);
+}
+.input.search {
+    min-width: 220px;
+}
+.select {
+    padding-right: 26px;
+}
+.textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 92px;
+    padding: 8px 10px;
+    line-height: 1.65;
+    font-size: var(--fs-body);
+}
+
+/* Board: Linear 风格分组树（DSHBOTS-58）：按状态分组的可折叠分组 + 紧凑单行任务行 */
+.board {
+    display: flex;
+    flex-direction: column;
+    /* 分组间距 8px */
+    gap: 8px;
+    align-items: stretch;
+    padding-bottom: 10px;
+}
+.column {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    transition:
+        background-color 0.12s ease,
+        box-shadow 0.12s ease;
+}
+.column.drop-target {
+    background: var(--accent-wash);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+/* 组头：Linear 式小标题行（状态圆点 + 状态名 + 计数），不画分隔线，靠间距分组。 */
+.column-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 8px 4px;
+    margin-bottom: 0;
+    border-bottom: none;
+}
+/* 组头折叠按钮：chevron 默认朝右（折叠），展开时旋转朝下（.chev.open）。 */
+.task-group-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+}
+.task-group-toggle:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
+.task-group-body {
+    display: flex;
+    flex-direction: column;
+    padding: 2px 0 2px;
+}
+/* 父子层级（DSHBOTS-58）：子任务挂在一级缩进的容器里，容器左侧一条导线连到父行。 */
+.task-children {
+    display: flex;
+    flex-direction: column;
+    margin-left: 18px;
+    border-left: 1px solid var(--line);
+}
+/* 父行上的子任务折叠按钮：chevron 朝右=收起，朝下=展开。 */
+.task-children-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+.task-children-toggle:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
+/* 终态任务卡的驳回按钮（DSHBOTS-141）：与折叠按钮同高的幽灵小按钮，hover 转 danger 提示不可逆。 */
+.task-reject {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 18px;
+    padding: 0 5px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-3);
+    font: var(--fs-caption) var(--sans);
+    line-height: 1;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+.task-reject:hover {
+    color: var(--danger);
+    border-color: var(--danger-wash);
+    background: var(--danger-wash);
+}
+.task-reject svg {
+    width: 12px;
+    height: 12px;
+}
+/* 依赖徽标：被未完成的任务挡住时出现在卡片底行。 */
+.task-deps-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--danger-wash);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-size: var(--fs-caption);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+.task-deps-badge svg {
+    width: 11px;
+    height: 11px;
+}
+.column-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    flex: 0 0 auto;
+}
+.column-dot.backlog {
+    background: var(--ink-3);
+}
+.column-dot.todo {
+    background: var(--accent);
+}
+.column-dot.in_progress {
+    background: var(--star);
+}
+.column-dot.blocked {
+    background: var(--danger);
+}
+.column-dot.in_review {
+    background: var(--accent);
+}
+.column-dot.done {
+    background: var(--green);
+}
+.column-dot.canceled {
+    background: var(--line-2);
+}
+.column-head strong {
+    font-size: var(--fs-small);
+    font-weight: 500;
+    color: var(--ink);
+}
+.column-count {
+    color: var(--ink-3);
+    font: 500 var(--fs-caption) var(--mono);
+    /* 计数紧跟状态名（Linear 口径），不推到行尾 */
+    margin-left: 1px;
+    font-variant-numeric: tabular-nums;
+}
+/* 任务行（DSHBOTS-58，参照 Linear）：32px 单行、无边框无卡片阴影，hover 才出底色。 */
+.task-card.running {
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+.task-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    box-shadow: none;
+    padding: 0 8px;
+    margin-bottom: 0;
+    min-width: 0;
+    overflow: hidden;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+.task-card:hover {
+    background: var(--surface-2);
+    box-shadow: none;
+}
+.task-card.dragging {
+    opacity: 0.45;
+}
+.task-card-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin-bottom: 0;
+}
+.task-id {
+    font: 500 var(--fs-caption) var(--mono);
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 优先级图标：三档横条，颜色沿用现有优先级色（danger/star/accent/ink-3/line-2）。 */
+.task-priority {
+    display: inline-flex;
+    align-items: center;
+    color: var(--ink-3);
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.task-priority svg {
+    width: 14px;
+    height: 14px;
+    stroke-width: 2.2;
+}
+.task-priority.urgent {
+    color: var(--danger);
+}
+.task-priority.high {
+    color: var(--star);
+}
+.task-priority.medium {
+    color: var(--accent);
+}
+.task-priority.low {
+    color: var(--ink-3);
+}
+.task-priority.none {
+    color: var(--line-2);
+}
+/* 状态图标（Linear 式小圆环）：待办/进行中/受阻/待验收是圆环，已完成环内打勾，已取消环内一横杠。 */
+.task-status-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid currentColor;
+    border-radius: 50%;
+    color: var(--ink-3);
+    flex: 0 0 auto;
+}
+.task-status-icon svg {
+    width: 9px;
+    height: 9px;
+    stroke-width: 3;
+}
+.task-status-icon.backlog {
+    color: var(--ink-3);
+    border-style: dashed;
+}
+.task-status-icon.todo {
+    color: var(--accent);
+}
+.task-status-icon.in_progress {
+    color: var(--star);
+    background: conic-gradient(currentColor 0 180deg, transparent 180deg);
+}
+.task-status-icon.blocked {
+    color: var(--danger);
+}
+.task-status-icon.in_review {
+    color: var(--accent);
+}
+.task-status-icon.in_review::after {
+    content: '';
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.task-status-icon.done {
+    color: var(--green);
+}
+.task-status-icon.canceled {
+    color: var(--ink-3);
+}
+.task-status-icon.canceled::after {
+    content: '';
+    width: 8px;
+    height: 1.5px;
+    border-radius: 1px;
+    background: currentColor;
+}
+.priority-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-left: auto;
+    background: var(--ink-3);
+    flex: 0 0 auto;
+}
+.priority-dot.urgent {
+    background: var(--danger);
+}
+.priority-dot.high {
+    background: var(--star);
+}
+.priority-dot.medium {
+    background: var(--accent);
+}
+.priority-dot.low {
+    background: var(--ink-3);
+}
+.priority-dot.none {
+    background: var(--line-2);
+}
+/* 紧凑单行标题：单行省略号，hover 用 title 看全文（DSHBOTS-58）。 */
+.task-card-title {
+    font-size: var(--fs-body);
+    line-height: 1.4;
+    color: var(--ink);
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.task-card-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 1 auto;
+    margin-top: 0;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    /* 允许收缩：长运行标签不把行尾撑宽。 */
+    min-width: 0;
+    overflow: hidden;
+}
+/* 运行标签单行省略，避免长状态文案挤出卡片。 */
+.task-card-foot .task-run-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 工单七态里「在等人」的 stage（等待你回答/等待验收/需要你处理/等人处理）用暖色强调： */
+/* 机器态（执行/排队/待执行/空闲）保持中性灰，人责与机责一眼可分；复用既有色 token，不新增色值。 */
+.task-card-foot .task-run-label.task-stage-person {
+    color: var(--star);
+    flex: 0 0 auto;
+}
+.task-card-foot .avatar.sm {
+    margin-left: auto;
+}
+/* 标签簇在行尾，宽度不够时先被裁掉，标题始终优先。 */
+.task-tags {
+    display: flex;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    flex-wrap: nowrap;
+    margin-top: 0;
+}
+.tag {
+    border-radius: 5px;
+    padding: 1px 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: var(--fs-caption);
+    white-space: nowrap;
+}
+.board-toolbar .tag {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+}
+.run-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    flex: 0 0 auto;
+}
+.run-dot.idle {
+    background: var(--green);
+}
+.run-dot.running {
+    background: var(--star);
+    animation: pulse 1.4s infinite;
+    box-shadow: 0 0 0 3px rgba(201, 122, 16, 0.16);
+}
+.run-clock {
+    color: var(--ink-3);
+    font: var(--fs-caption) var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+/* 终态时间小字（DSHBOTS-44）：done/canceled 卡片脚部的完成/取消时间，仅终态渲染。 */
+.task-end-time {
+    color: var(--ink-3);
+    font: var(--fs-caption) var(--mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.task-end-time svg {
+    width: 12px;
+    height: 12px;
+    vertical-align: -1.5px;
+}
+.run-dot.failed {
+    background: var(--danger);
+}
+.run-dot.plan-wait {
+    background: var(--c-violet);
+}
+.run-dot.succeeded {
+    background: var(--green);
+}
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.35;
+    }
+}
+/* 空分组的投放提示：平时隐形只占极小高度（避免空分组留下大块竖向空白），悬停组时才显形。 */
+.board-empty {
+    color: transparent;
+    font-size: var(--fs-caption);
+    text-align: center;
+    padding: 4px;
+    transition: color 0.12s ease;
+}
+.column:hover .board-empty {
+    color: var(--ink-3);
+}
+/* 小屏（≤720px）任务面板：单行保底可读——先让出标签与运行文案，标题与状态图标不裁。 */
+@media (max-width: 720px) {
+    .task-card {
+        gap: 6px;
+        padding: 0 6px;
+    }
+    .task-tags {
+        display: none;
+    }
+    .task-card-foot .task-run-label {
+        display: none;
+    }
+    .task-card-foot .avatar.sm {
+        margin-left: 0;
+    }
+    .column-head {
+        padding: 6px 6px 4px;
+    }
+}
+@media (max-width: 430px) {
+    .task-id {
+        display: none;
+    }
+}
+
+/* Color swatch picker (Bot 外观颜色) */
+.swatch-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.swatch {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+}
+.swatch input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    margin: 0;
+    cursor: pointer;
+}
+.swatch-dot {
+    display: block;
+    width: 26px;
+    height: 26px;
+    margin: 2px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--av, var(--c-gray)) 62%, var(--ink));
+    transition:
+        transform 0.12s ease,
+        box-shadow 0.12s ease;
+}
+.swatch:hover .swatch-dot {
+    transform: scale(1.12);
+}
+.swatch input:checked + .swatch-dot {
+    box-shadow:
+        0 0 0 2px var(--surface),
+        0 0 0 4px var(--av, var(--c-gray));
+}
+.swatch input:focus-visible + .swatch-dot {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 3px;
+}
+.swatch-dot.teal {
+    --av: var(--c-teal);
+}
+.swatch-dot.blue {
+    --av: var(--c-blue);
+}
+.swatch-dot.violet {
+    --av: var(--c-violet);
+}
+.swatch-dot.amber {
+    --av: var(--c-amber);
+}
+.swatch-dot.coral {
+    --av: var(--c-coral);
+}
+.swatch-dot.pink {
+    --av: var(--c-pink);
+}
+.swatch-dot.green {
+    --av: var(--c-green);
+}
+.swatch-dot.gray {
+    --av: var(--c-gray);
+}
+

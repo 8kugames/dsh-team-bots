@@ -1,0 +1,245 @@
+/* 聊天历史分片加载按钮（DSHBOTS-33）：贴在 chat-messages 顶部，幽灵按钮风格弱化存在感。 */
+.load-older {
+    align-self: center;
+    margin: 8px 0;
+    padding: 4px 12px;
+    font-size: var(--fs-small);
+    color: var(--ink-3);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+}
+.load-older:hover:not(:disabled) {
+    color: var(--ink);
+    border-color: var(--ink-3);
+}
+.load-older:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.chat-empty {
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    color: var(--ink-3);
+    padding: 30px;
+}
+.chat-empty .empty-symbol {
+    margin-bottom: 14px;
+}
+.chat-empty h3 {
+    margin: 0 0 6px;
+    font-size: var(--fs-title);
+    font-weight: 600;
+    color: var(--ink);
+}
+.chat-empty p {
+    max-width: 30em;
+    margin: 0;
+    font-size: var(--fs-small);
+    line-height: 1.8;
+}
+.chat-empty p strong {
+    color: var(--ink-2);
+    font-weight: 500;
+}
+
+/* Bot 响应状态行：活跃运行期间在消息流末尾展示，视觉上与 Bot 气泡同族 */
+.typing-row {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: min(640px, 82%);
+    padding: 9px 13px;
+    border-radius: 4px 12px 12px 12px;
+    background: var(--surface-3);
+    color: var(--ink-2);
+    line-height: 1.7;
+}
+.typing-name {
+    font-weight: 600;
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+.typing-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.typing-dots {
+    display: inline-flex;
+    gap: 3px;
+    flex: 0 0 auto;
+}
+.typing-dots i {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    animation: typing-bounce 1.2s infinite;
+}
+.typing-dots i:nth-child(2) {
+    animation-delay: 0.15s;
+}
+.typing-dots i:nth-child(3) {
+    animation-delay: 0.3s;
+}
+@keyframes typing-bounce {
+    0%,
+    60%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.5;
+    }
+    30% {
+        transform: translateY(-3px);
+        opacity: 1;
+    }
+}
+
+.composer {
+    padding: 10px 16px 14px;
+}
+/* 引用条：发送前挂在 composer 上方的待回复目标（发送者名 + 摘要 + 取消）。 */
+.reply-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 2px 6px;
+    padding: 5px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-left: 2px solid var(--accent);
+    border-radius: 8px;
+    font-size: var(--fs-small);
+}
+.reply-bar-icon {
+    display: inline-flex;
+    flex: none;
+    color: var(--ink-3);
+}
+.reply-bar-icon svg {
+    width: 13px;
+    height: 13px;
+}
+.reply-bar-text {
+    flex: 1;
+    min-width: 0;
+    color: var(--ink-3);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.reply-bar-text strong {
+    margin-right: 6px;
+    color: var(--ink-2);
+    font-weight: 600;
+}
+.reply-bar-cancel {
+    display: inline-flex;
+    flex: none;
+    padding: 2px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+}
+.reply-bar-cancel:hover {
+    color: var(--ink);
+}
+.reply-bar-cancel svg {
+    width: 13px;
+    height: 13px;
+}
+.composer-box {
+    position: relative;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    padding: 8px 10px;
+    transition:
+        border-color 0.13s ease,
+        background-color 0.13s ease;
+}
+.composer-box:focus-within {
+    border-color: var(--accent);
+    background: var(--surface);
+}
+/* 输入框拖高柄：贴 composer-box 上缘的窄拖拽热区（上下各约 4px），按住垂直拖动调高、双击恢复自动高度。
+   颜色全部走主题变量，明暗两套主题自动适配。 */
+.composer-resizer {
+    position: absolute;
+    top: -4px;
+    left: 10px;
+    right: 10px;
+    height: 8px;
+    cursor: ns-resize;
+    touch-action: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+}
+.composer-resizer::after {
+    content: '';
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line-2);
+    transition: background-color 0.13s ease, width 0.13s ease;
+}
+.composer-resizer:hover::after,
+.composer-resizer:active::after {
+    width: 56px;
+    background: var(--accent);
+}
+.composer textarea {
+    width: 100%;
+    resize: none;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--ink);
+    min-height: 48px;
+    /* 高度上限由 JS 统一裁决：自动 150px、手动拖高封顶=面板 61.8%（applyComposerHeight）。 */
+    padding: 4px;
+    font-size: var(--fs-body);
+    line-height: 1.65;
+}
+.composer textarea::placeholder {
+    color: var(--ink-3);
+}
+.composer-bottom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+}
+.composer-hint {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.composer-hint kbd {
+    font: var(--fs-caption) var(--mono);
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 5px;
+}
+.composer-hint strong {
+    color: var(--ink-2);
+    font-weight: 500;
+}
+.composer-bottom .send-btn {
+    margin-left: auto;
+}
+

@@ -1,0 +1,320 @@
+/* DSH Team Bots — Team OS console.
+   Design language: one ink family, one accent, value-driven hierarchy.
+   Light and dark surfaces are stepped from the same low-chroma violet-gray family.
+   Type:  5 sizes (24 / 18 / 15 / 13 / 12), 3 weights (400 / 500 / 600).
+   Space: 4px base, 8px rhythm. */
+
+@font-face {
+    font-family: "Inter";
+    src: url("/api/dsh-team/fonts/inter-400.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Inter";
+    src: url("/api/dsh-team/fonts/inter-500.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Inter";
+    src: url("/api/dsh-team/fonts/inter-600.woff2") format("woff2");
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+
+:root {
+    color-scheme: light;
+    --ui-scale: 1;
+
+    /* type scale: display 24 / title 18 / body 15 / small 13 / caption 12.
+     Every step stays >= 2px apart, otherwise the hierarchy reads as noise. */
+    --fs-display: 1.5rem; /* 24 page title */
+    --fs-title: 1.125rem; /* 18 card title */
+    --fs-body: 0.9375rem; /* 15 body */
+    --fs-small: 0.8125rem; /* 13 meta */
+    --fs-caption: 0.75rem; /* 12 eyebrow / label */
+
+    /* surfaces: canvas -> card -> well -> track */
+    --bg: #e8ebf1;
+    --surface: #f7f8fb;
+    --surface-2: #eef0f6;
+    --surface-3: #e3e7ef;
+    --track: #dfe3ec; /* recessed track: board lanes, always darker than a card */
+    --sidebar: #dfe3ec;
+    --overlay: rgba(255, 255, 255, 0.72);
+
+    /* ink family */
+    --ink: #33364c;
+    --ink-2: rgba(51, 54, 76, 0.82);
+    --ink-3: rgba(51, 54, 76, 0.76);
+    --line: rgba(51, 54, 76, 0.13);
+    --line-2: rgba(51, 54, 76, 0.22);
+
+    /* accent: fills, indicators, and text-safe variant */
+    --accent: #7287fd;
+    --accent-ink: #1e2030;
+    --accent-text: #4a5bd6;
+    --accent-wash: rgba(114, 135, 253, 0.12);
+    --accent-wash-2: rgba(114, 135, 253, 0.2);
+
+    /* semantic */
+    --danger: #d02f50;
+    --danger-wash: rgba(208, 47, 80, 0.1);
+    --green: #2f9e44;
+    --green-wash: rgba(47, 158, 68, 0.12);
+    --star: #c97a10;
+    --star-wash: rgba(201, 122, 16, 0.13);
+
+    /* bot identity colors */
+    --c-teal: #0f766e;
+    --c-blue: #2563eb;
+    --c-violet: #7c3aed;
+    --c-amber: #b45309;
+    --c-coral: #c2410c;
+    --c-pink: #be185d;
+    --c-green: #15803d;
+    --c-gray: #4b5563;
+
+    /* console well: the one place the UI drops into a dark surface, in both themes.
+       Violet-gray family, so it still belongs to the same palette. */
+    --console-bg: #12141c;
+    --console-bg-2: #1a1d27;
+    --console-ink: #dde0ef;
+    --console-ink-2: rgba(221, 224, 239, 0.6);
+    --console-line: rgba(221, 224, 239, 0.12);
+
+    --code-bg: rgba(51, 54, 76, 0.05);
+    --shadow-1: 0 1px 2px rgba(51, 54, 76, 0.04);
+    --shadow-card:
+        0 1px 2px rgba(51, 54, 76, 0.06), 0 2px 8px -3px rgba(51, 54, 76, 0.16);
+    --shadow-2:
+        0 2px 10px -2px rgba(51, 54, 76, 0.12), 0 1px 3px rgba(51, 54, 76, 0.05);
+    --shadow-3:
+        0 24px 60px -12px rgba(40, 44, 66, 0.28),
+        0 2px 8px rgba(40, 44, 66, 0.06);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans:
+        "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+
+    /* legacy aliases used by inline styles in app.js */
+}
+
+@media (prefers-color-scheme: dark) {
+    .card,
+    .side-card {
+        box-shadow:
+            var(--shadow-1),
+            inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    :root {
+        color-scheme: dark;
+        --bg: #101219;
+        --surface: #191b26;
+        --surface-2: #21242f;
+        --surface-3: #272a37;
+        --track: #14161f;
+        --sidebar: #14161f;
+        --overlay: rgba(18, 19, 28, 0.76);
+        --ink: #e4e7f3;
+        --ink-2: rgba(228, 231, 243, 0.74);
+        --ink-3: rgba(228, 231, 243, 0.62);
+        --line: rgba(228, 231, 243, 0.1);
+        --line-2: rgba(228, 231, 243, 0.19);
+        --accent: #7d88f8;
+        --accent-ink: #12131c;
+        --accent-text: #a7b0ff;
+        --accent-wash: rgba(125, 136, 248, 0.16);
+        --accent-wash-2: rgba(125, 136, 248, 0.26);
+        --danger: #ed8796;
+        --danger-wash: rgba(237, 135, 150, 0.12);
+        --green: #a6da95;
+        --green-wash: rgba(166, 218, 149, 0.13);
+        --star: #eed49f;
+        --star-wash: rgba(238, 212, 159, 0.14);
+        --c-teal: #5eead4;
+        --c-blue: #93c5fd;
+        --c-violet: #c4b5fd;
+        --c-amber: #fcd34d;
+        --c-coral: #fdba74;
+        --c-pink: #f9a8d4;
+        --c-green: #86efac;
+        --c-gray: #9ca3af;
+        --code-bg: rgba(228, 231, 243, 0.06);
+        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-card:
+            0 1px 2px rgba(0, 0, 0, 0.42), 0 2px 10px -3px rgba(0, 0, 0, 0.55);
+        --shadow-2:
+            0 2px 12px -2px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+        --shadow-3:
+            0 28px 64px -12px rgba(0, 0, 0, 0.62), 0 2px 10px rgba(0, 0, 0, 0.4);
+    }
+}
+
+/* Palette option: Catppuccin (Latte in light mode, Macchiato in dark mode).
+   Same token set, different values — the DSH palette above stays the default. */
+:root[data-theme="catppuccin"] {
+    --bg: #e6e9ef;
+    --surface: #eff1f5;
+    --surface-2: #e6e9ef;
+    --surface-3: #dce0e8;
+    --track: #dce0e8;
+    --sidebar: #dce0e8;
+    --overlay: rgba(239, 241, 245, 0.78);
+    --ink: #4c4f69;
+    --ink-2: #54586f;
+    --ink-3: #595d74;
+    --line: rgba(76, 79, 105, 0.12);
+    --line-2: rgba(76, 79, 105, 0.2);
+    --accent: #7287fd;
+    --accent-ink: #24273a;
+    --accent-text: #4a5bd6;
+    --accent-wash: rgba(114, 135, 253, 0.12);
+    --accent-wash-2: rgba(114, 135, 253, 0.2);
+    --danger: #d20f39;
+    --danger-wash: rgba(210, 15, 57, 0.1);
+    --green: #40a02b;
+    --green-wash: rgba(64, 160, 43, 0.12);
+    --star: #df8e1d;
+    --star-wash: rgba(223, 142, 29, 0.13);
+    --c-teal: #209fb5;
+    --c-blue: #1e66f5;
+    --c-violet: #8839ef;
+    --c-amber: #df8e1d;
+    --c-coral: #fe640b;
+    --c-pink: #ea76cb;
+    --c-green: #40a02b;
+    --c-gray: #7c7f92;
+    --code-bg: rgba(76, 79, 105, 0.06);
+    --shadow-1: 0 1px 2px rgba(76, 79, 105, 0.05);
+    --shadow-2:
+        0 2px 10px -2px rgba(76, 79, 105, 0.14),
+        0 1px 3px rgba(76, 79, 105, 0.06);
+    --shadow-3:
+        0 24px 60px -12px rgba(76, 79, 105, 0.3),
+        0 2px 8px rgba(76, 79, 105, 0.07);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="catppuccin"] {
+        --bg: #181926;
+        --surface: #24273a;
+        --surface-2: #363a4f;
+        --surface-3: #414559;
+        --track: #1e2030;
+        --sidebar: #1e2030;
+        --overlay: rgba(24, 25, 38, 0.78);
+        --ink: #cad3f5;
+        --ink-2: #b8c2ec;
+        --ink-3: #aab4e0;
+        --line: rgba(202, 211, 245, 0.1);
+        --line-2: rgba(202, 211, 245, 0.18);
+        --accent: #b7bdf8;
+        --accent-ink: #24273a;
+        --accent-text: #b7bdf8;
+        --accent-wash: rgba(183, 189, 248, 0.15);
+        --accent-wash-2: rgba(183, 189, 248, 0.24);
+        --danger: #ed8796;
+        --danger-wash: rgba(237, 135, 150, 0.12);
+        --green: #a6da95;
+        --green-wash: rgba(166, 218, 149, 0.13);
+        --star: #eed49f;
+        --star-wash: rgba(238, 212, 159, 0.14);
+        --c-teal: #94e2d5;
+        --c-blue: #8aadf4;
+        --c-violet: #c6a0f6;
+        --c-amber: #eed49f;
+        --c-coral: #f5a97f;
+        --c-pink: #f5bde6;
+        --c-green: #a6da95;
+        --c-gray: #9399b2;
+        --code-bg: rgba(202, 211, 245, 0.07);
+        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-card:
+            0 1px 2px rgba(0, 0, 0, 0.42), 0 2px 10px -3px rgba(0, 0, 0, 0.55);
+        --shadow-2:
+            0 2px 12px -2px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+        --shadow-3:
+            0 28px 64px -12px rgba(0, 0, 0, 0.62), 0 2px 10px rgba(0, 0, 0, 0.4);
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+html {
+    font-size: calc(16px * var(--ui-scale));
+}
+html,
+body {
+    height: 100%;
+}
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--fs-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+button,
+input,
+select,
+textarea {
+    font: inherit;
+    color: inherit;
+}
+button {
+    cursor: pointer;
+}
+a {
+    color: var(--accent-text);
+    text-decoration: none;
+}
+::selection {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+.skip-link {
+    position: fixed;
+    left: 12px;
+    top: -60px;
+    z-index: 140;
+    padding: 9px 14px;
+    border-radius: 0 0 10px 10px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+    text-decoration: none;
+    transition: top 0.15s ease;
+}
+.skip-link:focus {
+    top: 0;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--ink) 26%, transparent);
+}
+

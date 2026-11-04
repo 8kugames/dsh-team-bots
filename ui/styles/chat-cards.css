@@ -1,0 +1,410 @@
+/* 审批卡片：群聊气泡流内的待审批/已决条目（DSHBOTS-32）+ 视觉规格 V2（DSHBOTS-108）。
+   五态骨架一致，只有 pending 是强调态；已决四态回中性底、正文降 --ink-2、无倒计时无按钮。
+   圆角 12（卡）/ 6（图标徽章）/ 7（chip、pill、按钮），间距 4-8-10，字号 15/13/12。 */
+.approval-card {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 240px;
+    max-width: 480px;
+    background: var(--surface);
+}
+.approval-card[data-approval-status='pending'] { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.approval-card[data-approval-status='allowed'] { border-left-color: var(--green); }
+.approval-card[data-approval-status='rejected'] { border-left-color: var(--danger); }
+.approval-card[data-approval-status='timeout'],
+.approval-card[data-approval-status='cancelled'] { border-left-color: var(--ink-3); }
+/* 头部：状态徽章 + 角色/工具 chip */
+.approval-head { display: flex; align-items: flex-start; gap: 8px; }
+.approval-head-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.approval-icon {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--ink-3);
+}
+.approval-icon svg { width: 14px; height: 14px; }
+.approval-icon.is-pending { background: var(--accent-wash); color: var(--accent-text); }
+.approval-icon.is-allowed { background: var(--green-wash); color: var(--green); }
+.approval-icon.is-rejected,
+.approval-icon.is-timeout,
+.approval-icon.is-cancelled { background: var(--surface-2); color: var(--ink-3); }
+/* 角色行：角色名加粗 + 「请求提权」灰字 + 时间 */
+.approval-meta { font-size: var(--fs-small); color: var(--ink-2); gap: 4px; }
+.approval-meta strong { color: var(--ink); font-weight: 600; }
+.approval-ask { color: var(--ink-3); }
+/* 工具名 + 路径：等宽小字 chip */
+.approval-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.approval-chip {
+    font-family: var(--mono);
+    font-size: var(--fs-caption);
+    line-height: 1.4;
+    padding: 2px 6px;
+    border-radius: 7px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.approval-chip-path { color: var(--ink-3); }
+/* 正文：pending --ink，已决四态 --ink-2 */
+.approval-summary { font-size: var(--fs-body); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.approval-card[data-approval-status='pending'] .approval-summary { color: var(--ink); }
+/* 倒计时（DSHBOTS-102）：秒级精确剩余时间，临期切 --star（D-101 规格的临期告警色）。 */
+.approval-clock { font-variant-numeric: tabular-nums; }
+.approval-clock.urgent { color: var(--star); font-weight: 600; }
+/* 倒计时行（V2）：⏱ + 「剩余 X 分 Y 秒」，临期图标与文字一起转黄 */
+.approval-countdown { display: flex; align-items: center; gap: 4px; font-size: var(--fs-small); color: var(--ink-2); }
+.approval-countdown svg { width: 13px; height: 13px; color: var(--ink-3); flex: 0 0 auto; }
+.approval-countdown.urgent { color: var(--star); }
+.approval-countdown.urgent svg { color: var(--star); }
+/* 进度条（V2）：剩余越多条越长，临期变短并转黄 */
+.approval-progress { height: 4px; border-radius: 7px; background: var(--surface-3); overflow: hidden; }
+.approval-progress-fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); transition: width .6s linear; }
+.approval-progress.urgent .approval-progress-fill { background: var(--star); }
+.approval-actions { display: flex; gap: 8px; }
+.approval-foot { display: flex; align-items: center; gap: 8px; }
+/* 已决 pill：中性字 + 状态小点（红色小点只出现在 rejected） */
+.approval-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 7px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: var(--fs-caption);
+}
+.approval-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); flex: 0 0 auto; }
+.approval-pill.is-allowed::before { background: var(--green); }
+.approval-pill.is-rejected::before { background: var(--danger); }
+.approval-pill.is-muted::before { background: var(--ink-3); }
+/* 消息流与通知容器的图片/图标尺寸兜底（DSHBOTS-108）：
+   正文、审批摘要或宿主通知带进来的大图/大图标不能撑爆视口——限宽限高、图片保持比例。
+   既有 .message-bubble img 规则只管正文图片，这里补齐 svg 与通知容器（toast、待审横幅）。 */
+:is(.message-bubble, .comment-body, .message-system) svg {
+    max-width: 120px;
+    max-height: 120px;
+}
+.approval-card img {
+    max-width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+}
+.approval-card svg {
+    max-width: 64px;
+    max-height: 64px;
+}
+:is(#toast-root, .toast, .approval-banner) img {
+    max-width: 100%;
+    max-height: 120px;
+    object-fit: contain;
+}
+:is(#toast-root, .toast, .approval-banner) svg {
+    max-width: 24px;
+    max-height: 24px;
+}
+/* 提问窄条（DSHBOTS-116）与审批窄条同形容器，沿用同一套尺寸兜底。 */
+.question-banner img {
+    max-width: 100%;
+    max-height: 120px;
+    object-fit: contain;
+}
+.question-banner svg {
+    max-width: 24px;
+    max-height: 24px;
+}
+/* 跨项目待审入口（DSHBOTS-102）：工作台顶部窄条 + 计数徽标 + 明细菜单。
+   0 待办时整条不渲染（approvalBannerView 返回空串），不占位、不撑高顶栏。 */
+.approval-banner {
+    position: relative;
+    padding: 6px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--star-wash);
+}
+.approval-banner-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: 500 var(--fs-small) var(--sans);
+    cursor: pointer;
+}
+.approval-banner-btn:hover { border-color: var(--line-2); }
+.approval-banner-btn > svg { flex: 0 0 auto; color: var(--star); }
+.approval-banner-text { flex: 0 0 auto; }
+.approval-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
+.approval-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 28px;
+    right: 28px;
+    z-index: 30;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.approval-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
+.approval-menu-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+        "project project time"
+        "line line line"
+        "summary summary summary";
+    gap: 2px 8px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+}
+.approval-menu-item:hover,
+.approval-menu-item:focus-visible { background: var(--surface-2); }
+.approval-menu-project { grid-area: project; font-weight: 600; font-size: var(--fs-small); }
+.approval-menu-line { grid-area: line; color: var(--ink-2); font-size: var(--fs-small); }
+.approval-menu-summary { grid-area: summary; color: var(--ink-3); font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-word; }
+.approval-menu-time { grid-area: time; color: var(--star); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.approval-menu-time.urgent { color: var(--star); }
+/* 提问卡片（DSHBOTS-116）：与审批卡片同骨架，四态中只有 pending 是强调态；已答两态回中性底。
+   圆角 12（卡）/ 8（问题块、选项）/ 6（图标徽章）/ 7（pill、进度条），间距 4-6-8-10。 */
+.question-card {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 240px;
+    max-width: 480px;
+    background: var(--surface);
+}
+.question-card[data-question-status='pending'] { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.question-card[data-question-status='answered'] { border-left-color: var(--green); }
+.question-card[data-question-status='expired'],
+.question-card[data-question-status='timeout'] { border-left-color: var(--ink-3); }
+.question-head { display: flex; align-items: flex-start; gap: 8px; }
+.question-head-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.question-icon {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--ink-3);
+}
+.question-icon svg { width: 14px; height: 14px; }
+.question-icon.is-pending { background: var(--accent-wash); color: var(--accent-text); }
+.question-icon.is-answered { background: var(--green-wash); color: var(--green); }
+.question-icon.is-expired,
+.question-icon.is-timeout { background: var(--surface-2); color: var(--ink-3); }
+.question-meta { font-size: var(--fs-small); color: var(--ink-2); gap: 4px; }
+.question-meta strong { color: var(--ink); font-weight: 600; }
+.question-ask { color: var(--ink-3); }
+.question-count { font-size: var(--fs-caption); color: var(--ink-3); }
+.question-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-2);
+}
+.question-item-title { font-size: var(--fs-body); color: var(--ink); }
+.question-item-header { color: var(--ink-3); margin-right: 4px; }
+.question-item-detail { font-size: var(--fs-small); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.question-item-intent { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-caption); color: var(--accent-text); }
+.question-item-intent svg { width: 12px; height: 12px; }
+.question-item-intent-approve { font-family: var(--mono); }
+.question-options { display: flex; flex-direction: column; gap: 4px; }
+.question-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 5px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink-2);
+    font: 500 var(--fs-small) var(--sans);
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease,
+        border-color 0.12s ease;
+}
+.question-option:hover { border-color: var(--line-2); color: var(--ink); }
+.question-option.is-selected { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-text); }
+.question-option-desc { font-size: var(--fs-caption); color: var(--ink-3); font-weight: 400; }
+.question-option.is-selected .question-option-desc { color: var(--accent-text); }
+.question-custom { width: 100%; }
+.question-answer-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-small); color: var(--ink-2); }
+.question-answer-tag { color: var(--ink-3); font-size: var(--fs-caption); }
+.question-answer-line strong { color: var(--ink); }
+.question-answer-skip,
+.question-answer-custom { color: var(--ink-3); }
+.question-clock { font-variant-numeric: tabular-nums; }
+.question-clock.urgent { color: var(--star); font-weight: 600; }
+.question-countdown { display: flex; align-items: center; gap: 4px; font-size: var(--fs-small); color: var(--ink-2); }
+.question-countdown svg { width: 13px; height: 13px; color: var(--ink-3); flex: 0 0 auto; }
+.question-countdown.urgent { color: var(--star); }
+.question-countdown.urgent svg { color: var(--star); }
+.question-progress { height: 4px; border-radius: 7px; background: var(--surface-3); overflow: hidden; }
+.question-progress-fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); transition: width .6s linear; }
+.question-progress.urgent .question-progress-fill { background: var(--star); }
+.question-actions { display: flex; gap: 8px; }
+.question-foot { display: flex; align-items: center; gap: 8px; }
+.question-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 7px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: var(--fs-caption);
+}
+.question-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); flex: 0 0 auto; }
+.question-pill.is-answered::before { background: var(--green); }
+.question-pill.is-muted::before { background: var(--ink-3); }
+.question-card img {
+    max-width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+}
+.question-card svg {
+    max-width: 64px;
+    max-height: 64px;
+}
+/* 跨项目待答入口（DSHBOTS-116）：与审批窄条同构，0 待答时整条不渲染。 */
+.question-banner {
+    position: relative;
+    padding: 6px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--accent-wash);
+}
+.question-banner-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: 500 var(--fs-small) var(--sans);
+    cursor: pointer;
+}
+.question-banner-btn:hover { border-color: var(--line-2); }
+.question-banner-btn > svg { flex: 0 0 auto; color: var(--accent-text); }
+.question-banner-text { flex: 0 0 auto; }
+.question-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
+.question-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 28px;
+    right: 28px;
+    z-index: 30;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.question-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
+.question-menu-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+        "project project time"
+        "line line line"
+        "summary summary summary";
+    gap: 2px 8px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+}
+.question-menu-item:hover,
+.question-menu-item:focus-visible { background: var(--surface-2); }
+.question-menu-project { grid-area: project; font-weight: 600; font-size: var(--fs-small); }
+.question-menu-line { grid-area: line; color: var(--ink-2); font-size: var(--fs-small); }
+.question-menu-summary { grid-area: summary; color: var(--ink-3); font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-word; }
+.question-menu-time { grid-area: time; color: var(--accent-text); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.question-menu-time.urgent { color: var(--star); }
+.task-chip-line {
+    margin-top: 7px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.task-chip-line.center {
+    justify-content: center;
+}
+.message-row.user .task-chip-line {
+    justify-content: flex-end;
+}
+.task-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-2);
+    padding: 4px 9px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    line-height: 1.2; /* 与 .task-chip strong 拉齐行高，保证「思考过程」「任务」两个 chip 高度一致 */
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease;
+}
+.task-chip:hover {
+    background: var(--surface-3);
+    color: var(--ink);
+}
+.task-chip strong {
+    font: 500 var(--fs-small) var(--mono);
+    line-height: 1.2; /* font 简写会把行高重置为 normal，显式拉齐 */
+    color: var(--accent-text);
+}

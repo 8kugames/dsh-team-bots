@@ -1,0 +1,501 @@
+/* ---------------------------------------------------------------- Wide screens */
+@media (max-width: 1240px) {
+    .chat-layout {
+        grid-template-columns: minmax(0, 1fr) 270px;
+    }
+    .topbar-meta {
+        display: none;
+    }
+    .global-grid > * {
+        grid-column: span 6;
+    }
+}
+
+/* Mobile */
+@media (max-width: 980px) {
+    .shell {
+        grid-template-columns: 1fr;
+    }
+    .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 10px 12px 8px;
+    }
+    .brand {
+        padding: 2px 4px 10px;
+    }
+    .tree {
+        overflow: visible;
+        gap: 10px;
+    }
+    .tree-group {
+        margin-bottom: 2px;
+    }
+    .tree-list {
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 4px;
+        padding-bottom: 4px;
+        scrollbar-width: none;
+    }
+    .tree-list::-webkit-scrollbar {
+        height: 0;
+        display: none;
+    }
+    .tree-item {
+        width: auto;
+        min-width: 120px;
+        flex: 0 0 auto;
+        min-height: 44px;
+    }
+    .tree-count {
+        display: none;
+    }
+    .sidebar-bottom {
+        margin-top: 4px;
+        padding-top: 0;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+    }
+    .global-config {
+        width: auto;
+        min-height: 44px;
+        padding: 0 12px;
+    }
+    .sidebar-meta {
+        padding: 0;
+    }
+    .topbar {
+        padding: 10px 16px;
+        min-height: 60px;
+    }
+    .tabbar {
+        padding: 0 12px;
+    }
+    .content {
+        padding: 16px 16px 32px;
+    }
+    .chat-layout {
+        height: auto;
+        min-height: 0;
+        grid-template-columns: 1fr;
+    }
+    .chat-panel {
+        min-height: 70vh;
+    }
+    .chat-side {
+        overflow: visible;
+    }
+    .member-stack {
+        display: none;
+    }
+    .usage-grid,
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+    .global-grid > * {
+        grid-column: 1 / -1;
+    }
+    .metric-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .task-detail-grid {
+        grid-template-columns: 1fr;
+    }
+    .task-detail-side {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding-left: 0;
+        padding-top: 16px;
+    }
+    .column {
+        min-height: 0;
+    }
+    /* Touch floors: primary ≥48, secondary ≥44, rows ≥48 */
+    .btn {
+        min-height: 44px;
+        padding: 0 14px;
+    }
+    .btn.small {
+        min-height: 40px;
+    }
+    .btn.icon {
+        width: 44px;
+        height: 44px;
+    }
+    .send-btn {
+        width: 40px;
+        height: 40px;
+    }
+    .tab {
+        min-height: 44px;
+    }
+    .tree-item {
+        min-height: 44px;
+    }
+    .tree-toggle {
+        min-height: 40px;
+        min-width: 40px;
+    }
+    .side-add {
+        width: 40px;
+        height: 40px;
+    }
+    .global-config {
+        min-height: 44px;
+    }
+    .modal-close {
+        width: 40px;
+        height: 40px;
+    }
+    .side-row,
+    .check-row {
+        min-height: 44px;
+    }
+    .composer textarea {
+        min-height: 56px;
+    }
+    .task-chip {
+        min-height: 40px;
+    }
+    .traj-fold > summary.traj-entry-head {
+        min-height: 44px;
+    }
+}
+@media (max-width: 620px) {
+    .desktop-only-action {
+        display: none !important;
+    }
+    .topbar-actions .btn-label {
+        display: none;
+    }
+    .topbar-actions .btn.primary {
+        padding: 0;
+        width: 44px;
+        height: 44px;
+        border-radius: 10px;
+    }
+    .topbar h1 {
+        font-size: 1.25rem;
+    }
+    .field-row {
+        grid-template-columns: 1fr;
+    }
+    .metric-grid {
+        grid-template-columns: 1fr;
+    }
+    .modal-backdrop {
+        padding: 3vh 8px 14px;
+    }
+    .modal {
+        max-height: 93vh;
+    }
+    /* 窄屏：名称独占一行，tokens / 调用 / 成本仍在同一行等宽右对齐，不折行。 */
+    .usage-list-head,
+    .usage-row {
+        grid-template-columns: minmax(0, 1fr) 54px 42px 70px;
+        grid-template-areas:
+            "name name name name"
+            "track tokens calls cost";
+        row-gap: 7px;
+        column-gap: 8px;
+    }
+    .usage-list-head > :nth-child(1),
+    .usage-row > :nth-child(1) {
+        grid-area: name;
+    }
+    .usage-list-head > :nth-child(2),
+    .usage-row > :nth-child(2) {
+        grid-area: track;
+    }
+    .usage-list-head > :nth-child(3),
+    .usage-row > :nth-child(3) {
+        grid-area: tokens;
+    }
+    .usage-list-head > :nth-child(4),
+    .usage-row > :nth-child(4) {
+        grid-area: calls;
+    }
+    .usage-list-head > :nth-child(5),
+    .usage-row > :nth-child(5) {
+        grid-area: cost;
+    }
+    /* 窄屏：日期轴只保留首尾两个日期，中间标签放不下会截字。 */
+    .day-axis {
+        position: relative;
+        display: block;
+        height: 16px;
+    }
+    .day-axis span {
+        position: absolute;
+        top: 0;
+        font-size: 0;
+        overflow: visible;
+    }
+    .day-axis span:first-child {
+        left: 0;
+        font-size: var(--fs-caption);
+    }
+    .day-axis span:last-child {
+        right: 0;
+        font-size: var(--fs-caption);
+    }
+    .message-body-wrap {
+        max-width: 88%;
+    }
+    .content {
+        padding: 14px 12px 28px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* 微信通道卡片 */
+.wechat-qr {
+    display: flex;
+    justify-content: center;
+    padding: 10px;
+    background: #fff;
+    border-radius: 10px;
+    margin-top: 10px;
+}
+.wechat-qr svg {
+    width: 208px;
+    height: 208px;
+    display: block;
+}
+
+/* 群聊折叠面板：Bot 私信 / 会话滚动 */
+.chat-subpanel {
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
+    padding: 6px 16px 8px;
+}
+.chat-subpanel > summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    min-height: 32px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    font-weight: 600;
+    user-select: none;
+}
+.chat-subpanel > summary::-webkit-details-marker {
+    display: none;
+}
+.chat-subpanel[open] > summary .chev {
+    transform: rotate(90deg);
+}
+.subpanel-count {
+    margin-left: auto;
+    color: var(--ink-3);
+    font: 500 var(--fs-caption) var(--mono);
+}
+.subpanel-body {
+    max-height: 220px;
+    overflow: auto;
+    padding: 2px 0 4px;
+}
+.subpanel-empty {
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    padding: 4px 0 6px;
+}
+.subpanel-row {
+    padding: 7px 0;
+    border-top: 1px dashed var(--line);
+    font-size: var(--fs-small);
+}
+.subpanel-row:first-child {
+    border-top: 0;
+}
+.subpanel-row-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    color: var(--ink-2);
+}
+.subpanel-row-head strong {
+    font-weight: 600;
+}
+.subpanel-row-text,
+.subpanel-row-sub {
+    margin-top: 4px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--ink-2);
+}
+.subpanel-row-sub {
+    color: var(--ink-3);
+}
+.subpanel-tag {
+    color: var(--ink-3);
+    font: 500 var(--fs-caption) var(--mono);
+}
+
+/* 密钥管理（设置页） */
+.secret-block {
+    margin-bottom: 12px;
+}
+.secret-request {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-top: 8px;
+    background: var(--surface-2);
+}
+.secret-request-info {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    font-size: var(--fs-small);
+    color: var(--ink-2);
+}
+.secret-request-reason {
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    margin-top: 4px;
+}
+.secret-request-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+.secret-request-actions .input {
+    flex: 1;
+    min-width: 180px;
+}
+.secret-list {
+    display: flex;
+    flex-direction: column;
+}
+.secret-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+    font-size: var(--fs-small);
+}
+.secret-row:first-child {
+    border-top: 0;
+}
+.secret-row strong {
+    color: var(--ink-2);
+    font-weight: 600;
+}
+.secret-purpose {
+    flex: 1;
+    min-width: 40px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--ink-3);
+}
+
+/* 思考过程：Bot 运行轨迹（run_trajectory） */
+.traj-stream {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+.traj-turn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 3px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    font-weight: 600;
+}
+.traj-turn::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+}
+.traj-entry {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-2);
+}
+.traj-entry-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    font-weight: 500;
+}
+.traj-fold > summary.traj-entry-head {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.traj-fold > summary.traj-entry-head::-webkit-details-marker {
+    display: none;
+}
+.traj-fold > summary.traj-entry-head::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 0;
+    height: 0;
+    border-left: 5px solid var(--ink-3);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform 0.12s ease;
+}
+.traj-fold[open] > summary.traj-entry-head::before {
+    transform: rotate(90deg);
+}
+.traj-fold > summary.traj-entry-head:hover {
+    color: var(--ink);
+}
+.traj-detail {
+    padding: 9px 11px 10px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    line-height: 1.75;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.traj-detail.traj-json {
+    font-family: var(--mono);
+    font-size: var(--fs-caption);
+    line-height: 1.65;
+}
+.traj-end {
+    border-color: var(--line-2);
+}
+.traj-end .traj-entry-head {
+    color: var(--ink);
+    font-weight: 600;
+}
+.traj-note {
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    line-height: 1.7;
+}
+
