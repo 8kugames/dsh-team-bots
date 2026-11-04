@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
-import { readUiSource } from './helpers/ui-sources.js'
+import { handleAction } from '../src/api.js'
 
 // 手动完成的 runtime：startRun 后运行保持 running，直到测试显式 complete。
 class ManualRuntime {
@@ -185,4 +185,30 @@ test('api.js 分发收录 task_update_scopes（ACTIONS + case 双口径）', () 
   assert.match(apiSource, /'task_update_scopes',/, 'ACTIONS Set 收录')
   assert.match(apiSource, /case 'task_update_scopes':/, 'switch 分发收录')
   assert.match(apiSource, /service\.taskUpdateScopes\(/, 'case 调用服务层 taskUpdateScopes')
+})
+
+test('handleAction 分发层：write_scopes 与 writeScopes 双口径收参一致落库，缺 taskId 被拦截', async () => {
+  const { root, store, service, project, dev } = await setup()
+  try {
+    const task = await makeTask(service, project, dev)
+    await handleAction(service, 'task_update_scopes', { taskId: task.id, write_scopes: [' src/a.js ', 'src/a.js/'] }, userActor(service))
+    assert.deepEqual(
+      JSON.parse(store.get('SELECT write_scopes FROM tasks WHERE id = ?', task.id).write_scopes),
+      ['src/a.js'],
+      'write_scopes 键：分发层直传服务层并归一落库',
+    )
+    await handleAction(service, 'task_update_scopes', { taskId: task.id, writeScopes: ['src/b.js'] }, userActor(service))
+    assert.deepEqual(
+      JSON.parse(store.get('SELECT write_scopes FROM tasks WHERE id = ?', task.id).write_scopes),
+      ['src/b.js'],
+      'writeScopes 键：camelCase 口径同样生效',
+    )
+    await assert.rejects(
+      () => handleAction(service, 'task_update_scopes', { write_scopes: ['src/c.js'] }, userActor(service)),
+      /taskId/,
+      '缺 taskId 被分发层 required 拦截',
+    )
+  } finally {
+    await cleanup(root, store)
+  }
 })
