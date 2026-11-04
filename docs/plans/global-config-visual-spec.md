@@ -78,11 +78,12 @@
 
 ## 7. 落地清单与测试
 
-- `ui/styles/global-config.css`：新增域文件（264 行 < 800 行铁律），在 `src/http.js` 的 `UI_STYLE_PARTS` 中登记于 `styles/settings.css` 之后。
+- `ui/styles/global-config.css`：新增域文件（270 行 < 800 行铁律），在 `src/http.js` 的 `UI_STYLE_PARTS` 中登记于 `styles/settings.css` 之后。
   （卡面写的「ui/styles/settings.css（新）」与仓库现状不符：该文件已存在且承载表单基元，故同域另起新文件，原文件不动。）
 - `tests/styles-split.test.js` +1 例：登记存在且紧跟 settings 域、关键选择器齐全、剥离注释后无 hex 色值。
 - `tests/global-config-layout.test.js`（新文件，6 例）：分组与导航一一对应、分组头四要素、指标带降级、九块模块与交互入口不丢、迁移标注齐全、微信启用时带标注。
-- 全量：`npm test` → 1172 pass / 0 fail（开工基线 1165，本卡 +7）。
+- 全量：落地到 dev 后 `npm test` → 1186 pass / 0 fail（dev 基线 1179，本卡 +7）。
+- 落地提交（dev）：8976462 实现、7049bbd 方案与截图、d3b994d 按落地后代码重取截图。
 
 ## 8. 本卡未做（交给 programmer 车道）
 
