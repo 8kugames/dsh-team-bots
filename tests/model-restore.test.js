@@ -2,6 +2,10 @@
 // 宿主 selectModel 会把下发模型写成默认模型，插件必须恢复运行前的默认值；恢复经
 // configEditor.edit → hmr.runExclusive，若调用点残留 HMR 事务的 AsyncLocalStorage
 // 上下文，runExclusive 会以「嵌套事务」直接 reject，恢复被 warn 吞掉。
+// DSHBOTS-163：模块本身经 HMR 事务加载/热更时，模块评估期创建的 restoreScope
+// 捕获到的就是被标记的上下文（生产审计 model_restore_failed 成簇根因）；
+// 撞嵌套拒绝时须丢弃污染 scope 自愈重捕获。经 ?query 动态 import 造独立模块
+// 实例、令其评估期落在 executing.run 窗口内，忠实模拟该加载路径。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -187,4 +191,47 @@ test('selectModel 集成：残留上下文里恢复成功，且 selecting 串行
     store.close()
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('自愈重捕获：scope 出生于 HMR 事务上下文时，丢弃重捕后恢复成功', async () => {
+  const hmr = createHmrStub()
+  // 模拟插件经 HMR 事务加载（安装/热更路径）：模块评估期落在被 executing 标记的
+  // 上下文里，模块级 restoreScope 捕获到的即被污染的上下文——生产审计
+  // model_restore_failed 成簇的根因。?query 造独立模块实例，不污染顶部干净导入。
+  const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?born-in-hmr-tx'))
+  const stores = []
+  const defaults = {
+    saveSelection: async (next) => {
+      stores.push(hmr.executing.getStore())
+      await hmr.runExclusive(async () => { await Promise.resolve() })
+      return next
+    },
+  }
+  const ok = await instance.restoreDefaultModel(defaults, BEFORE, { retryBaseMs: 1 })
+  assert.equal(ok, true, '出生污染的 scope 必须经一次重捕获自愈才能恢复')
+  assert.equal(instance.restoreScopeRecaptures(), 1, '恰好重捕获一次')
+  assert.equal(stores.length, 2, '首次尝试被嵌套拒绝，重试即成功')
+  assert.equal(stores[0], true, '出生污染的 scope 让第一次尝试仍落在事务标记里')
+  assert.equal(stores[1], undefined, '重捕获后的 scope 必须落在干净上下文')
+})
+
+test('重捕获复用：成功过的 scope 保留，后续恢复不再重建', async () => {
+  const hmr = createHmrStub()
+  const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?reuse-after-heal'))
+  const stores = []
+  const defaults = {
+    saveSelection: async (next) => {
+      stores.push(hmr.executing.getStore())
+      await hmr.runExclusive(async () => { await Promise.resolve() })
+      return next
+    },
+  }
+  const first = await instance.restoreDefaultModel(defaults, BEFORE, { retryBaseMs: 1 })
+  assert.equal(first, true)
+  assert.equal(instance.restoreScopeRecaptures(), 1, '第一次调用自愈重捕获一次')
+  const second = await instance.restoreDefaultModel(defaults, BEFORE, { retryBaseMs: 1 })
+  assert.equal(second, true)
+  assert.equal(instance.restoreScopeRecaptures(), 1, '成功过的干净 scope 直接复用，不再重建')
+  assert.equal(stores.length, 3, '第一次 2 次尝试（污染+自愈）+ 第二次直接成功')
+  assert.equal(stores[2], undefined, '第二次调用直接落在复用的干净 scope 上')
 })

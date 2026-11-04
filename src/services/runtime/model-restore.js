@@ -5,18 +5,32 @@
 //
 // 恢复经 configEditor.edit → hmr.runExclusive 落地，而 runExclusive 用
 // AsyncLocalStorage 标记事务：只要调用点还留在某个 HMR 事务的异步上下文里，
-// 就会直接 reject「HMR transactions cannot be nested」。插件的 selectModel 由
-// 调度定时器与宿主回调触发，个别路径的上下文会跨 await 残留，因此恢复必须切到
-// 干净上下文执行。本文件在模块加载期（早于任何事务）创建 AsyncResource，
-// runInAsyncScope 把恢复动作切出残留上下文；setTimeout 等 timer 无法做到这点。
+// 就会直接 reject「HMR transactions cannot be nested」。污染源有两类：
+// ① selectModel 调用链残留事务上下文（调度定时器/宿主回调的个别路径）；
+// ② 插件本身经 HMR 事务加载/热更（安装、热更路径）时，模块评估期创建的
+//    restoreScope 捕获到的就是被标记的上下文，此后每次 runInAsyncScope 都
+//    逃不出去，重试只会反复撞同一面墙（审计 model_restore_failed 成簇）。
+// 对①靠模块加载期捕获的干净 scope 逃逸；对②在撞到嵌套拒绝时丢弃污染 scope、
+// 从当前调用上下文自愈重捕获——事务窗口外发起的调用链是干净的，重试即可逃逸。
+// 成功过一次的 scope 即证明捕获时干净，保留复用不再重建。
 
 import { AsyncResource } from 'node:async_hooks'
 
-const RESTORE_SCOPE = new AsyncResource('dsh-team:model-restore')
+// dsh-hmr runExclusive 的嵌套拒绝文本，精确匹配。
+const NESTED_TRANSACTION_MESSAGE = 'HMR transactions cannot be nested'
 
-// 首次尝试 + 两次退避重试；退避基数 200ms，第 1/2 次重试分别等 200ms、400ms。
+let restoreScope = new AsyncResource('dsh-team:model-restore')
+
+// 首次尝试 + 两次退避重试；退避基数 250ms，第 1/2 次重试分别等 250ms、750ms，
+// 三次尝试整体覆盖 ≥1s，越过常见 HMR 事务窗口。
 export const RESTORE_MAX_ATTEMPTS = 3
-export const RESTORE_RETRY_BASE_MS = 200
+export const RESTORE_RETRY_BASE_MS = 250
+
+// 自愈重捕获累计次数（模块级状态）；测试经 ?query 独立实例观测自愈路径。
+let scopeRecaptures = 0
+export function restoreScopeRecaptures() {
+  return scopeRecaptures
+}
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -32,12 +46,17 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
   if (typeof defaults?.saveSelection !== 'function') return false
   let lastError = null
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) await delay(retryBaseMs * attempt)
+    if (attempt > 0) await delay(retryBaseMs * (attempt * 2 - 1))
     try {
-      await RESTORE_SCOPE.runInAsyncScope(() => defaults.saveSelection(before))
+      await restoreScope.runInAsyncScope(() => defaults.saveSelection(before))
       return true
     } catch (error) {
       lastError = error
+      if (error?.message === NESTED_TRANSACTION_MESSAGE) {
+        // scope 被事务窗口污染（头部注释②）：丢弃并从当前上下文重捕，下次重试逃逸。
+        restoreScope = new AsyncResource('dsh-team:model-restore')
+        scopeRecaptures += 1
+      }
     }
   }
   try {
