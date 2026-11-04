@@ -75,3 +75,18 @@ test('终态：巨石 styles.css 已删，顺序表不再引用，首尾域正�
   assert.equal(UI_STYLE_PARTS[0], 'styles/base.css', 'base 域必须最前（变量声明）')
   assert.equal(UI_STYLE_PARTS.at(-1), 'styles/terminal.css', 'terminal 域必须最后')
 })
+
+// DSHBOTS-184：全局配置页视觉域（ui/styles/global-config.css）必须登记在顺序表里，
+// 且只能靠 token 取色——明暗双主题与 Catppuccin 调色板都靠 base.css 的变量覆盖，
+// 写死色值等于把主题钉死在这一个文件里。
+test('全局配置页视觉域已登记、层叠顺序正确、且不写死色值', async () => {
+  const idx = UI_STYLE_PARTS.indexOf('styles/global-config.css')
+  assert.ok(idx > 0, 'ui/styles/global-config.css 未登记进 UI_STYLE_PARTS')
+  assert.equal(UI_STYLE_PARTS[idx - 1], 'styles/settings.css', 'global-config 域必须紧跟 settings 域')
+  const css = await readFile(join(ROOT, 'ui', 'styles', 'global-config.css'), 'utf8')
+  for (const selector of ['.global-page', '.global-head', '.global-nav', '.gsec', '.gsec-body', '.g-slot', '.g-move-note']) {
+    assert.ok(css.includes(selector), `global-config.css 缺少 ${selector}`)
+  }
+  const body = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(body), 'global-config.css 不得写死色值（明暗双主题必须走 token）')
+})

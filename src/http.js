@@ -82,6 +82,7 @@ export const UI_STYLE_PARTS = [
   'styles/cards.css',
   'styles/usage.css',
   'styles/settings.css',
+  'styles/global-config.css',
   'styles/modal.css',
   'styles/toast.css',
   'styles/a11y.css',

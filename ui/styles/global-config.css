@@ -1,0 +1,270 @@
+/* DSHBOTS-184 全局配置页：信息架构分组 + 明暗双主题视觉。
+   约定：颜色一律走 base.css 的 token（--surface / --line / --ink / --accent…），
+   暗色与 Catppuccin 调色板都由 token 覆盖，本文件不写死任何色值。 */
+
+/* ---------- 页面骨架 ---------- */
+.global-page {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+}
+
+/* ---------- 页头：标题 + 团队指标带 ---------- */
+.global-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 20px 32px;
+    align-items: end;
+    padding: 22px 24px 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+}
+.global-head-copy {
+    min-width: 0;
+}
+.global-eyebrow {
+    margin: 0 0 8px;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+.global-title {
+    margin: 0;
+    font-size: var(--fs-display);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+}
+.global-desc {
+    margin: 10px 0 0;
+    max-width: 60ch;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    line-height: 1.75;
+}
+
+/* ---------- 指标带（原「团队与资源」卡降级） ---------- */
+.global-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(78px, 1fr));
+    gap: 12px 20px;
+    padding-left: 28px;
+    border-left: 1px solid var(--line);
+}
+.global-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+.global-metric-label {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    white-space: nowrap;
+}
+.global-metric-value {
+    font-size: var(--fs-title);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+.global-metrics-note {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+}
+
+/* ---------- 分组导航（锚点） ---------- */
+.global-nav {
+    position: sticky;
+    top: 76px;
+    z-index: 30;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    backdrop-filter: blur(10px);
+}
+.global-nav-item {
+    padding: 6px 12px;
+    border-radius: 8px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    font-weight: 500;
+    text-decoration: none;
+}
+.global-nav-item:hover {
+    background: var(--surface-2);
+    color: var(--ink);
+}
+.global-nav-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+/* 锚点命中时高亮对应分组条目 */
+.global-page:has(#g-pref:target) .global-nav-item[href="#g-pref"],
+.global-page:has(#g-runtime:target) .global-nav-item[href="#g-runtime"],
+.global-page:has(#g-env:target) .global-nav-item[href="#g-env"],
+.global-page:has(#g-integrations:target) .global-nav-item[href="#g-integrations"] {
+    background: var(--accent-wash);
+    color: var(--accent-text);
+}
+
+/* ---------- 分组 ---------- */
+.gsec {
+    scroll-margin-top: 132px;
+}
+.gsec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 10px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+}
+.gsec-index {
+    color: var(--accent-text);
+    font-family: var(--mono);
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+}
+.gsec-copy {
+    flex: 1;
+    min-width: 0;
+}
+.gsec-title {
+    margin: 0;
+    font-size: var(--fs-title);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.gsec-desc {
+    margin: 4px 0 0;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    line-height: 1.6;
+}
+.gsec-meta {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    white-space: nowrap;
+}
+
+/* ---------- 组内 12 列槽位 ---------- */
+.gsec-body {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 16px;
+    /* 同行卡片等高：槽位拉伸，卡片吃掉槽位高度，底边对齐而不是参差。 */
+    align-items: stretch;
+}
+.g-slot {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.g-slot > .card {
+    flex: 1 1 auto;
+}
+.g-slot--full {
+    grid-column: 1 / -1;
+}
+.g-slot--two-thirds {
+    grid-column: span 8;
+}
+.g-slot--half {
+    grid-column: span 6;
+}
+.g-slot--third {
+    grid-column: span 4;
+}
+
+/* ---------- 卡片 ---------- */
+.g-card {
+    margin-top: 0;
+}
+.g-card .card-head h3 {
+    margin: 0;
+}
+.g-card .card-head {
+    margin-bottom: 14px;
+}
+
+/* ---------- 界面卡内部：字段两列 + 底部条 ---------- */
+.g-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 24px;
+    align-items: start;
+}
+.g-fields .field {
+    margin-bottom: 0;
+}
+.g-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 24px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+.g-kvs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 24px;
+    flex: 1 1 320px;
+}
+.g-kvs .kv {
+    border-bottom: 0;
+    padding: 0;
+}
+
+/* ---------- 计划迁移标记 ---------- */
+.g-move-note,
+.gsec-body .price-card::after {
+    display: block;
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px dashed color-mix(in srgb, var(--ink-3) 45%, transparent);
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    letter-spacing: 0.02em;
+}
+.gsec-body .price-card::after {
+    content: '计划迁移 · 用量页';
+}
+
+/* ---------- 窄屏 ---------- */
+@media (max-width: 1080px) {
+    .global-head {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+    }
+    .global-metrics {
+        padding-left: 0;
+        padding-top: 16px;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+    }
+}
+@media (max-width: 860px) {
+    .g-slot--two-thirds,
+    .g-slot--half,
+    .g-slot--third {
+        grid-column: 1 / -1;
+    }
+    .g-fields {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

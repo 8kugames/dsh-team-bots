@@ -174,7 +174,7 @@ function renderRunLimitsCard() {
   ].filter(Boolean).join(' / ')
   const stallText = limits.stallTimeoutMinutes === 0 ? '看门狗关闭' : `${limits.stallTimeoutMinutes ?? 30} 分钟看门狗`
   return `
-    <div class="card form-card" style="margin-top:12px">
+    <div class="card form-card g-card">
       <div class="card-head"><h3>运行时效</h3><span class="meta">当前生效 ${limits.runTimeoutMinutes ?? 120} 分钟超时 / ${stallText}</span></div>
       <div class="field-row">
         <div class="field"><label id="settings-run-timeout-label" for="settings-run-timeout">超时中止（分钟）</label><input class="input mono" style="text-align:right" type="number" min="1" max="360" id="settings-run-timeout" name="run_timeout_minutes" value="${attr(runValue)}"></div>
@@ -196,7 +196,7 @@ function renderOpsCard() {
   const currency = settings.budget_currency || 'CNY'
   const num = value => (value === '' || value === undefined || value === null ? '' : String(value))
   return `
-    <div class="card form-card" style="margin-top:12px">
+    <div class="card form-card g-card">
       <div class="card-head"><h3>系统与运维</h3></div>
       <div class="field-row">
         <div class="field">
@@ -241,7 +241,7 @@ function renderWechatCard() {
   const auth = state.wechatAuth
   const pillClass = wechat.phase === 'connected' ? 'green' : ['needs_reauth'].includes(wechat.phase) ? 'amber' : ''
   return `
-    <div class="card form-card" style="margin-top:12px" id="wechat-card">
+    <div class="card form-card g-card" id="wechat-card">
       <div class="card-head"><h3>微信通道</h3><span class="pill ${pillClass}">${phaseText[wechat.phase] ?? wechat.phase}</span></div>
       ${wechat.adminPeerId ? `<div class="kv"><span>管理员</span><strong>${esc(String(wechat.adminPeerId).slice(0, 12))}…</strong></div>` : ''}
       ${wechat.error ? `<div class="hint" style="color:var(--coral,#e5484d)">${esc(wechat.error)}</div>` : ''}
@@ -259,6 +259,7 @@ function renderWechatCard() {
           : '<button class="btn small" type="button" data-action="wechat-login">扫码绑定</button>'}
       </div>
       <div class="hint">扫码授权成功后自动把授权者绑定为管理员；之后可用：状态 / 详情 web-3 / 验收 web-3 / 驳回 web-3 理由。任务完成会主动推送。</div>
+      <div class="g-move-note">计划迁移 · 通道页</div>
     </div>`
 }
 
@@ -268,7 +269,7 @@ function renderSecretsCard() {
   const requests = state.data?.secretRequests ?? []
   const projects = (state.data?.projects ?? []).filter(project => project.status === 'active')
   return `
-    <div class="card form-card" style="margin-top:12px">
+    <div class="card form-card g-card">
       <div class="card-head"><h3>密钥管理</h3><span class="meta">${secrets.length} 条 · ${requests.length} 待审</span></div>
       <div class="hint" style="margin:2px 0 12px">密钥加密存储；团队级密钥对所有活动项目生效，Bot 可以直接使用。</div>
       ${requests.length === 0 ? '' : `<div class="secret-block">
@@ -327,6 +328,7 @@ function renderSecretsCard() {
         </div>
         <div class="btn-row"><button class="btn small" type="submit">${icon('check')}保存密钥</button></div>
       </form>
+      <div class="g-move-note">计划迁移 · 密钥页</div>
     </div>`
 }
 
@@ -400,6 +402,23 @@ function currentScale() {
   return Number.isFinite(value) && value > 0 ? value : 1
 }
 
+// 分组信息架构（DSHBOTS-184）：一节 = 一组 = 一个锚点；组内是 12 列槽位，
+// 槽位负责跨列排布，modal-forms 的价格卡因此不必改自己的结构。
+function gsec(index, id, title, desc, meta, body) {
+  return `
+      <section class="gsec" id="${id}" aria-labelledby="${id}-title">
+        <div class="gsec-head">
+          <span class="gsec-index mono">${index}</span>
+          <div class="gsec-copy">
+            <h3 class="gsec-title" id="${id}-title">${title}</h3>
+            <p class="gsec-desc">${desc}</p>
+          </div>
+          <span class="gsec-meta">${meta}</span>
+        </div>
+        <div class="gsec-body">${body}</div>
+      </section>`
+}
+
 function renderGlobal() {
   const data = state.data
   const scale = currentScale()
@@ -418,78 +437,107 @@ function renderGlobal() {
     : available
       ? `<strong>${esc(latest)} <span class="pill amber">可升级</span></strong>`
       : `<strong>${esc(latest)} <span class="pill green">最新</span></strong>`
+  const wechatCard = renderWechatCard()
   return `
-    <div class="global-grid">
-      <div class="card form-card">
-        <div class="card-head">
-          <h3>界面</h3>
-          <div class="btn-row"><button class="btn small" type="button" data-action="reset-scale">${icon('refresh')}重置</button></div>
+    <div class="global-page">
+      <header class="global-head">
+        <div class="global-head-copy">
+          <p class="global-eyebrow">GLOBAL CONFIGURATION</p>
+          <h2 class="global-title">团队级配置</h2>
+          <p class="global-desc">跨项目生效的团队设置，按「偏好 → 运行 → 环境 → 接入」分组。改动即时生效的项在卡片内就地保存；标了「计划迁移」的模块在迁移完成前仍在本页可用。</p>
         </div>
-        <div class="field">
-          <label id="ui-scale-label" for="ui-scale">界面字号 <span class="mono" id="ui-scale-value">${Math.round(scale * 100)}%</span></label>
-          <input type="range" id="ui-scale" class="range" min="1" max="1.4" step="0.05" value="${scale}">
-          <div class="scale-row">
-            <span class="faint">小</span>
-            <span class="faint" style="margin-left:auto">大</span>
-          </div>
+        <div class="global-metrics">
+          <div class="global-metric"><span class="global-metric-label">活跃 Bot</span><strong class="global-metric-value">${activeBots.length} / ${bots.length}</strong></div>
+          <div class="global-metric"><span class="global-metric-label">群聊 / 项目</span><strong class="global-metric-value">${data.projects.length}</strong></div>
+          <div class="global-metric"><span class="global-metric-label">共享技能</span><strong class="global-metric-value">${(data.skills ?? []).length}</strong></div>
+          <div class="global-metric"><span class="global-metric-label">待审提案</span><strong class="global-metric-value">${pending}</strong></div>
+          <div class="global-metric"><span class="global-metric-label">模型价格规则</span><strong class="global-metric-value">${data.usage?.priceCount ?? 0}</strong></div>
+          <p class="global-metrics-note">团队与资源概览 · 与「总览」页重复，计划迁出本页</p>
         </div>
-        <div class="field">
-          <span class="field-label" id="ui-theme-label">配色</span>
-          <div class="seg" role="group" aria-labelledby="ui-theme-label">
-            <button data-action="set-theme" data-theme="dsh" aria-pressed="${state.theme === 'dsh'}">DSH</button>
-            <button data-action="set-theme" data-theme="catppuccin" aria-pressed="${state.theme === 'catppuccin'}">Catppuccin</button>
-          </div>
-        </div>
-        <div class="field">
-          <span class="field-label" id="desktop-notify-label">桌面通知</span>
-          <div><button class="btn small" type="button" data-action="toggle-notify" aria-labelledby="desktop-notify-label" aria-pressed="${notify.on ? 'true' : 'false'}"${notify.disabled ? ' disabled' : ''}>${esc(notify.label)}</button></div>
-          <div class="hint">${esc(notify.hint)}</div>
-        </div>
-        <div class="field">
-          <label id="settings-ui-language-label" for="settings-ui-language">${t('settings.uiLanguage')}</label>
-          <select class="select" id="settings-ui-language" name="ui_language">
-            <option value="auto" ${uiLanguage === 'auto' ? 'selected' : ''}>${esc(t('settings.uiLanguageAuto'))}</option>
-            <option value="zh" ${uiLanguage === 'zh' ? 'selected' : ''}>${esc(t('settings.uiLanguageZh'))}</option>
-            <option value="en" ${uiLanguage === 'en' ? 'selected' : ''}>${esc(t('settings.uiLanguageEn'))}</option>
-          </select>
-          <div class="hint">${esc(t('settings.uiLanguageHint'))}</div>
-        </div>
-        <div class="kv"><span>缩放范围</span><strong>100% – 140%</strong></div>
-        <div class="kv"><span>偏好存储</span><strong>本地浏览器（语言除外）</strong></div>
-        <div class="btn-row" style="margin-top:12px">
-          <button class="btn small primary" type="button" data-action="save-ui-language">${esc(t('settings.uiLanguageSave'))}</button>
-        </div>
-      </div>
-      <div class="card form-card">
-        <div class="card-head"><h3>DSH 路径</h3><button class="btn small" data-action="sync-skills">${icon('refresh')}重新扫描技能</button></div>
-        <div class="path-row"><span>DSH 目录</span>${pathCode(data.paths.dshHome ?? '~/.dsh')}${copyPath(data.paths.dshHome ?? '')}</div>
-        <div class="path-row"><span>工作区</span>${pathCode(tildePath(data.paths.workspace))}${copyPath(data.paths.workspace)}</div>
-        <div class="path-row"><span>共享</span>${pathCode(data.paths.skillRoot)}${copyPath(data.paths.skillRoot)}</div>
-        <div class="path-row"><span>数据</span>${pathCode(data.paths.dataDir)}${copyPath(data.paths.dataDir)}</div>
-      </div>
-      <div class="card form-card">
-        <div class="card-head"><h3>DSH 服务</h3><button class="btn small" data-action="check-dsh-update">${icon('refresh')}检查更新</button></div>
-        <div class="kv"><span>dsh 当前版本</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
-        <div class="kv"><span>dsh 最新版本</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
-        <div class="kv"><span>dsh-team-bots 当前版本</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
-        <div class="kv"><span>dsh-team-bots 最新版本</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
-      </div>
-      <div class="card form-card" style="grid-column:1/-1">
-        <div class="card-head"><h3>团队与资源</h3></div>
-        <div class="kv-grid">
-          <div class="kv"><span>活跃 Bot</span><strong>${activeBots.length} / ${bots.length}</strong></div>
-          <div class="kv"><span>群聊 / 项目</span><strong>${data.projects.length}</strong></div>
-          <div class="kv"><span>共享技能</span><strong>${(data.skills ?? []).length}</strong></div>
-          <div class="kv"><span>待审提案</span><strong>${pending}</strong></div>
-          <div class="kv"><span>模型价格规则</span><strong>${data.usage?.priceCount ?? 0}</strong></div>
-        </div>
-      </div>
+      </header>
+      <nav class="global-nav" aria-label="配置分组导航">
+        <a class="global-nav-item" href="#g-pref">偏好</a>
+        <a class="global-nav-item" href="#g-runtime">运行与预算</a>
+        <a class="global-nav-item" href="#g-env">环境与版本</a>
+        <a class="global-nav-item" href="#g-integrations">接入与计价</a>
+      </nav>
+      ${gsec('01', 'g-pref', '偏好', '只影响这台机器上的显示方式，保存后立即生效。', '1 个模块 · 1 处保存', `
+            <div class="g-slot g-slot--full">
+            <div class="card form-card g-card">
+              <div class="card-head">
+                <h3>界面</h3>
+                <div class="btn-row"><button class="btn small" type="button" data-action="reset-scale">${icon('refresh')}重置</button></div>
+              </div>
+              <div class="g-fields">
+                <div class="field">
+                  <label id="ui-scale-label" for="ui-scale">界面字号 <span class="mono" id="ui-scale-value">${Math.round(scale * 100)}%</span></label>
+                  <input type="range" id="ui-scale" class="range" min="1" max="1.4" step="0.05" value="${scale}">
+                  <div class="scale-row">
+                    <span class="faint">小</span>
+                    <span class="faint" style="margin-left:auto">大</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="field-label" id="ui-theme-label">配色</span>
+                  <div class="seg" role="group" aria-labelledby="ui-theme-label">
+                    <button data-action="set-theme" data-theme="dsh" aria-pressed="${state.theme === 'dsh'}">DSH</button>
+                    <button data-action="set-theme" data-theme="catppuccin" aria-pressed="${state.theme === 'catppuccin'}">Catppuccin</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="field-label" id="desktop-notify-label">桌面通知</span>
+                  <div><button class="btn small" type="button" data-action="toggle-notify" aria-labelledby="desktop-notify-label" aria-pressed="${notify.on ? 'true' : 'false'}"${notify.disabled ? ' disabled' : ''}>${esc(notify.label)}</button></div>
+                  <div class="hint">${esc(notify.hint)}</div>
+                </div>
+                <div class="field">
+                  <label id="settings-ui-language-label" for="settings-ui-language">${t('settings.uiLanguage')}</label>
+                  <select class="select" id="settings-ui-language" name="ui_language">
+                    <option value="auto" ${uiLanguage === 'auto' ? 'selected' : ''}>${esc(t('settings.uiLanguageAuto'))}</option>
+                    <option value="zh" ${uiLanguage === 'zh' ? 'selected' : ''}>${esc(t('settings.uiLanguageZh'))}</option>
+                    <option value="en" ${uiLanguage === 'en' ? 'selected' : ''}>${esc(t('settings.uiLanguageEn'))}</option>
+                  </select>
+                  <div class="hint">${esc(t('settings.uiLanguageHint'))}</div>
+                </div>
+              </div>
+              <div class="g-foot">
+                <div class="g-kvs">
+                  <div class="kv"><span>缩放范围</span><strong>100% – 140%</strong></div>
+                  <div class="kv"><span>偏好存储</span><strong>本地浏览器（语言除外）</strong></div>
+                </div>
+                <div class="btn-row"><button class="btn small primary" type="button" data-action="save-ui-language">${esc(t('settings.uiLanguageSave'))}</button></div>
+              </div>
+            </div>
+            </div>`)}
+      ${gsec('02', 'g-runtime', '运行与预算', '影响所有项目运行的行为与开销上限：超时中止、无进展看门狗、预算与数据保留。', '2 个模块 · 2 处保存', `<div class="g-slot g-slot--half">${renderRunLimitsCard()}</div><div class="g-slot g-slot--half">${renderOpsCard()}</div>`)}
+      ${gsec('03', 'g-env', '环境与版本', '本机路径与 DSH 版本状态。这两块计划迁往「关于」页，迁移完成前仍在本页可用。', '2 个模块 · 计划迁移', `
+            <div class="g-slot g-slot--half">
+            <div class="card form-card g-card">
+              <div class="card-head">
+                <h3>DSH 路径</h3>
+                <button class="btn small" data-action="sync-skills">${icon('refresh')}重新扫描技能</button>
+              </div>
+              <div class="path-row"><span>DSH 目录</span>${pathCode(data.paths.dshHome ?? '~/.dsh')}${copyPath(data.paths.dshHome ?? '')}</div>
+              <div class="path-row"><span>工作区</span>${pathCode(tildePath(data.paths.workspace))}${copyPath(data.paths.workspace)}</div>
+              <div class="path-row"><span>共享</span>${pathCode(data.paths.skillRoot)}${copyPath(data.paths.skillRoot)}</div>
+              <div class="path-row"><span>数据</span>${pathCode(data.paths.dataDir)}${copyPath(data.paths.dataDir)}</div>
+              <div class="g-move-note">计划迁移 · 关于页</div>
+            </div>
+            </div>
+            <div class="g-slot g-slot--half">
+            <div class="card form-card g-card">
+              <div class="card-head">
+                <h3>DSH 服务</h3>
+                <button class="btn small" data-action="check-dsh-update">${icon('refresh')}检查更新</button>
+              </div>
+              <div class="kv"><span>dsh 当前版本</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
+              <div class="kv"><span>dsh 最新版本</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
+              <div class="kv"><span>dsh-team-bots 当前版本</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
+              <div class="kv"><span>dsh-team-bots 最新版本</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
+              <div class="g-move-note">计划迁移 · 关于页</div>
+            </div>
+            </div>`)}
+      ${gsec('04', 'g-integrations', '接入与计价', '外部通道、密钥与模型价格规则，分别计划迁往「通道」「密钥」「用量」页，迁移完成前仍在本页可用。', `${wechatCard ? 3 : 2} 个模块 · 计划迁移`, (wechatCard ? `<div class="g-slot g-slot--third">${wechatCard}</div>` : '') + `<div class="g-slot g-slot--two-thirds">${renderSecretsCard()}</div><div class="g-slot g-slot--full">${renderPriceCard()}</div>`)}
     </div>
-    ${renderRunLimitsCard()}
-    ${renderOpsCard()}
-    ${renderWechatCard()}
-    ${renderSecretsCard()}
-    ${renderPriceCard()}
   `
 }
 
