@@ -93,15 +93,13 @@ test('仅有 queued 占位：换负责人成功，旧运行被 SUPERSEDED 清理
   }
 })
 
-test('重复改派仍能排出新运行：时间戳幂等键不撞首写者赢闸', async () => {
+test('重复改派仍能排出新运行：version 后缀幂等键不撞先写者赢闸', async () => {
   const { root, store, service, dev, artist, project } = await setup()
   try {
     const task = await service.createTask({
       projectId: project.id, title: '连续改派', assigneeBotId: dev.id, writeScopes: ['ui/modules'], autoStart: true,
     })
     await service.assignTask(task.id, artist.id, userActor(service))
-    // 时间戳幂等键按毫秒取值：两次改派间稍作间隔，避免同毫秒撞键。
-    await new Promise(resolve => setTimeout(resolve, 3))
     await service.assignTask(task.id, dev.id, userActor(service))
 
     const superseded = store.all("SELECT id FROM runs WHERE task_id = ? AND status = 'canceled' AND error_code = 'SUPERSEDED'", task.id)
@@ -109,6 +107,12 @@ test('重复改派仍能排出新运行：时间戳幂等键不撞首写者赢�
     const actives = activeTaskRuns(store, task.id)
     assert.equal(actives.length, 1, '第二次改派仍排得出新运行（未被 outbox 先写者赢吞掉）')
     assert.equal(actives[0].bot_id, dev.id, '最终运行归属第二任负责人')
+    const keys = store.all(
+      "SELECT idempotency_key FROM outbox WHERE task_id = ? AND kind = 'task_run' ORDER BY created_at, id",
+      task.id,
+    ).map(row => row.idempotency_key)
+    const assignedKeys = keys.filter(key => key.startsWith(`task:${task.id}:assigned`))
+    assert.equal(new Set(assignedKeys).size, assignedKeys.length, '改派键互不相同（version 后缀）')
   } finally {
     await cleanup(root, store)
   }

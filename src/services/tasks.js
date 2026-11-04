@@ -298,7 +298,7 @@ export const tasksMethods = {
     // 终态清理（DSHBOTS-110）：任务进入 done/canceled 时先把残留的 queued 运行置 SUPERSEDED，
     // 再释放写占用——写占用只清 mode='write' 会漏掉排队的只读运行（审查等），被调度器后续起跑执行。
     if (updates.status && updates.status !== task.status && (updates.status === 'done' || updates.status === 'canceled')) {
-      await this.cancelSupersededQueuedRuns(taskId)
+      this.cancelSupersededQueuedRuns(taskId)
     }
     // 写占用释放（DSHBOTS-73，用户口径）：任务状态离开「进行中」就中止它名下仍在跑/排队的写运行，
     // 写占用/锁定随之解除。单一触发点：所有任务状态变更都经过 updateTask 这一处，不在别处散着写。
@@ -385,7 +385,9 @@ export const tasksMethods = {
   // 终态清理（DSHBOTS-110）：任务流转到 done/canceled 时，把该任务残留的 queued 运行全部置
   // canceled（SUPERSEDED + stale_superseded 事件），防止调度窗口内漏网的排队运行被起跑执行。
   // 只清 queued：running 的写运行由 releaseTaskWriteLocks 按 TASK_LEFT_IN_PROGRESS 口径处理。
-  async cancelSupersededQueuedRuns(taskId) {
+  // 清理任务名下的排队运行（SUPERSEDED 口径）。体内纯同步 store 调用、无 await，
+  // 因此是同步函数：调用点可直接放进事务，抛错即回滚，不会出现「事务已提交但清理失败」的静默态。
+  cancelSupersededQueuedRuns(taskId) {
     const rows = this.store.all(
       "SELECT id FROM runs WHERE task_id = ? AND status = 'queued'",
       taskId,
@@ -426,8 +428,8 @@ export const tasksMethods = {
     const sandboxTouched = sandboxOverride !== undefined
     this.store.transaction(() => {
       // queued 占位清理与改派同事务（DSHBOTS-169）：SUPERSEDED 不进任务执行历史，run 事件可审计。
-      // 助手体内无 await，同步跑完即返回，事务原子性不受影响。
-      if (supersedeQueued) void this.cancelSupersededQueuedRuns(taskId)
+      // 助手是同步函数（体内无 await），抛错会让整个事务回滚，不会留下「改派已生效但占位还在」的半成品。
+      if (supersedeQueued) this.cancelSupersededQueuedRuns(taskId)
       this.store.run(
         `UPDATE tasks SET assignee_bot_id = ?, review_target = ?,
           status = CASE WHEN status IN ('backlog', 'blocked') THEN 'todo' ELSE status END,
@@ -444,9 +446,10 @@ export const tasksMethods = {
     })
     // 总监bot的验收/受阻处理运行本身占用任务的唯一活动运行名额，
     // 此时由 finishRun 的收尾逻辑负责重新排队执行，这里跳过。
-    // 换负责人清掉 queued 占位后名额已空：重算判定才会按新负责人重排 task_run（DSHBOTS-169）；
-    // 该路径幂等键带时间戳——task_run 是先写者赢闸，稳定键 task:<id>:assigned 会撞首次
-    // 派发留下的 delivered 行被 DO NOTHING 静默吞掉，重复改派就再也排不出运行。
+    // 换负责人清掉 queued 占位后名额已空：重算判定才会按新负责人重排 task_run（DSHBOTS-169）。
+    // 幂等键：task_run 是先写者赢闸（ON CONFLICT DO NOTHING 且撞键不再 applyOutboxRow），
+    // 稳定键 task:<id>:assigned 会在重复改派时撞上首次派发留下的 delivered 行而被静默吞掉、
+    // 排不出新运行；改派路径改用单调自增的 task.version 作后缀，确定性且跨改派不碰撞。
     const slotHeld = supersedeQueued
       ? this.store.get(
         "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
@@ -454,12 +457,13 @@ export const tasksMethods = {
       )
       : active
     if (!slotHeld) {
+      const assignedVersion = supersedeQueued ? this.taskRow(taskId).version : null
       this.enqueueOutbox({
         kind: 'task_run',
         payload: { taskId, triggerType: 'assigned' },
         projectId: task.project_id,
         taskId,
-        idempotencyKey: `task:${taskId}:assigned${supersedeQueued ? `:${Date.now()}` : ''}`,
+        idempotencyKey: `task:${taskId}:assigned${assignedVersion === null ? '' : `:v${assignedVersion}`}`,
       })
     }
     if (autoStart) void this.tick()
