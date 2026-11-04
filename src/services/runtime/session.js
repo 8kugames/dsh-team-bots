@@ -133,6 +133,7 @@ export const sessionMethods = {
               ...(before.reasoningEffort === undefined ? {} : { reasoningEffort: before.reasoningEffort }),
               error: error instanceof Error ? error.message : String(error),
               ...(meta.escape ? { escape: meta.escape } : {}),
+              ...(meta.timedOut ? { timedOut: true } : {}),
             },
           ),
         })

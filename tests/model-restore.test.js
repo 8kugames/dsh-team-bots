@@ -134,7 +134,7 @@ test('重试穷尽：warn 一次 + 审计 model_restore_failed 落库', async ()
       provider: 'anthropic',
       model: 'claude-opus',
       error: 'HMR transactions cannot be nested',
-      escape: 'scope',
+      escape: 'scope-polluted',
     })
   } finally {
     store.close()
@@ -246,6 +246,24 @@ test('逃逸路径：事务外调用走 direct，不触发 exit', async () => {
   assert.equal(hmr.exits, 0, 'store 为空时无需 exit')
 })
 
+test('逃逸路径：事务外调用走 direct，用调用方上下文而非污染的模块级 scope', async () => {
+  const hmr = createHmrStub()
+  // 模块实例出生在事务里（模块级 scope 已污染），调用点在事务外：
+  // direct 路径用调用方的干净上下文，scope 路径会落到被污染的模块级 scope。
+  const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?born-in-hmr-tx-direct'))
+  const stores = []
+  const defaults = {
+    saveSelection: async (next) => {
+      stores.push(hmr.executing.getStore())
+      return next
+    },
+  }
+  const ok = await instance.restoreDefaultModel(defaults, BEFORE, { hmr, retryBaseMs: 1 })
+  assert.equal(ok, true)
+  assert.deepEqual(stores, [undefined], 'direct 路径必须用调用方的干净上下文')
+  assert.equal(hmr.exits, 0, 'store 为空时无需 exit')
+})
+
 test('逃逸路径：出生在事务里的模块实例不再靠 scope 自愈，交给 hmr.exit', async () => {
   const hmr = createHmrStub()
   // 模拟插件经 HMR 事务加载（安装/热更路径）：模块评估期落在被 executing 标记的
@@ -292,5 +310,75 @@ test('审计口径：失败时落 escape（hmr-exit），便于判断实际走�
   assert.equal(audits.length, 1, '穷尽后只落一条审计')
   assert.equal(audits[0].meta.escape, 'hmr-exit', '审计须记录实际逃逸方式')
   assert.match(audits[0].error.message, /boom/)
+  assert.equal(warnings.length, 1)
+})
+
+test('兜底路径：hmr 存在但缺少 executing 时走 scope 路径', async () => {
+  const stores = []
+  const defaults = {
+    saveSelection: async (next) => {
+      stores.push('called')
+      return next
+    },
+  }
+  const ok = await restoreDefaultModel(defaults, BEFORE, { hmr: {}, retryBaseMs: 1 })
+  assert.equal(ok, true, '拿不到 executing 时仍应走兜底 scope')
+  assert.deepEqual(stores, ['called'])
+
+  // 非嵌套类失败：兜底 scope 本身没被污染，escape 记 scope。
+  const audits = []
+  const failed = await restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('boom') } },
+    BEFORE,
+    { hmr: {}, retryBaseMs: 1, logger: { warn() {} }, audit: (error, meta = {}) => audits.push({ error, meta }) },
+  )
+  assert.equal(failed, false)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.escape, 'scope', '非嵌套失败仍记 scope')
+})
+
+test('兜底路径：scope 自身被污染时审计记 scope-polluted，区分于干净 scope', async () => {
+  const hmr = createHmrStub()
+  // 模块实例出生在事务里 → 兜底 scope 已污染；saveSelection 走宿主那条
+  // configEditor.edit → hmr.runExclusive 的拒绝路径，错误即嵌套事务拒绝。
+  const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?born-in-hmr-tx-polluted'))
+  const audits = []
+  const defaults = {
+    saveSelection: async (next) => {
+      await hmr.runExclusive(async () => { await Promise.resolve() })
+      return next
+    },
+  }
+  const ok = await hmr.executing.run(true, () => instance.restoreDefaultModel(defaults, BEFORE, {
+    logger: { warn() {} },
+    audit: (error, meta = {}) => audits.push({ error, meta }),
+    retryBaseMs: 1,
+  }))
+  assert.equal(ok, false)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.escape, 'scope-polluted', '污染的兜底 scope 要与干净 scope 区分')
+  assert.match(audits[0].error.message, /cannot be nested/)
+})
+
+test('超时护栏：排队不落地时超时收口，落审计并标 timedOut', async () => {
+  const hmr = createHmrStub()
+  const audits = []
+  const warnings = []
+  const defaults = {
+    // 模拟排在宿主事务队列尾、迟迟不落地：永不 resolve。
+    saveSelection: () => new Promise(() => {}),
+  }
+  const ok = await hmr.executing.run(true, () => restoreDefaultModel(defaults, BEFORE, {
+    hmr,
+    logger: { warn: (message) => warnings.push(message) },
+    audit: (error, meta = {}) => audits.push({ error, meta }),
+    retryBaseMs: 1,
+    timeoutMs: 30,
+  }))
+  assert.equal(ok, false, '超时必须收口返回 false，不能挂住 selectModel 串行链')
+  assert.equal(audits.length, 1, '超时也要落一条审计')
+  assert.equal(audits[0].meta.timedOut, true, '审计须标记超时')
+  assert.equal(audits[0].meta.escape, 'hmr-exit')
+  assert.match(audits[0].error.message, /timed out after 30ms/)
   assert.equal(warnings.length, 1)
 })
