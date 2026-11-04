@@ -18,6 +18,12 @@ export const esc = (value) => String(value ?? '')
   .replaceAll('"', '&quot;').replaceAll("'", '&#39;')
 export const attr = esc
 export const pathCode = value => `<code>${esc(value).split('/').join('/<wbr>')}</code>`
+// 工作区路径的显示缩写（DSHBOTS-186）：/Users/{用户} 或 /home/{用户} 前缀替换为 '~'，
+// 其余前缀原样返回、空值归空串。仅用于展示位；复制（data-copy）、title 与请求载荷仍走完整路径。
+export const tildePath = value => {
+  const text = String(value ?? '')
+  return text ? text.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~') : ''
+}
 export const costValue = value => {
   const text = formatCost(value)
   return /^[¥$€£]/.test(text) ? `<span class="unit">${esc(text[0])}</span>${esc(text.slice(1))}` : esc(text)

@@ -1,7 +1,7 @@
 // tasks.js —— 任务面板（排序 / 分组 / 卡片 / 行）、终端面板，以及 bots / members / skills / memory / evolution 各视图。
 import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, BOT_STATUS, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, EFFORT, NAV } from './state.js'
 import { icon } from './icons.js'
-import { activeProject, actorLabel, attr, avatar, botById, duration, esc, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, runDot, timeAgo } from './util.js'
+import { activeProject, actorLabel, attr, avatar, botById, duration, esc, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, runDot, tildePath, timeAgo } from './util.js'
 import { api } from './api.js'
 import { t } from './i18n.js'
 import { refresh, startTerminalPoll, panelAttrs, render, noProject } from '../app.js'
@@ -307,7 +307,7 @@ function renderTerminal() {
           <div class="terminal-chrome">
             <span class="terminal-chrome-dots" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="terminal-chrome-label">终端</span>
-            <span class="terminal-chrome-path" title="${attr(project.workspace_path ?? '')}">${esc(project.workspace_path ?? project.name)}</span>
+            <span class="terminal-chrome-path" title="${attr(project.workspace_path ?? '')}">${esc(tildePath(project.workspace_path ?? project.name))}</span>
           </div>
           ${active ? `<div class="terminal-active-row">
             ${runDot('running')}

@@ -2,7 +2,7 @@
 // 输入区（草稿 / 图片 / 发送）在 composer.js，消息卡片在 cards.js，输入中气泡在 typing-linger.js。
 import { state, BOT_STATUS, CHAT_ACTIVE_TASK_LIMIT, CHAT_PAGE_SIZE, COLORS, COLOR_NAMES } from './state.js'
 import { icon } from './icons.js'
-import { activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatTime, memberRunDot, pathCode, runDotHtml, timeAgo, toast } from './util.js'
+import { activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatTime, memberRunDot, pathCode, runDotHtml, tildePath, timeAgo, toast } from './util.js'
 import { mdPlainSummary } from './markdown.js'
 import { t } from './i18n.js'
 import { api } from './api.js'
@@ -220,7 +220,7 @@ function renderChat() {
       <aside class="chat-side">
         <div class="side-card">
           <div class="side-card-head"><h3>${t('card.workspace')}</h3></div>
-          <div class="path-row">${pathCode(project.workspace_path)}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="${t('common.copyPath')}" aria-label="${t('common.copyPath')}">${icon('copy')}</button></div>
+          <div class="path-row">${pathCode(tildePath(project.workspace_path))}<button class="btn icon small" data-action="copy" data-copy="${attr(project.workspace_path)}" title="${t('common.copyPath')}" aria-label="${t('common.copyPath')}">${icon('copy')}</button></div>
         </div>
         <div class="side-card">
           <div class="side-card-head"><h3>${t('card.projectOwner')}</h3></div>
@@ -378,7 +378,7 @@ function renderSoloChat() {
         </div>
         <div class="side-card">
           <div class="side-card-head"><h3>${t('solo.workspace')}</h3></div>
-          <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="${t('common.copyPath')}" aria-label="${t('common.copyPath')}">${icon('copy')}</button></div>
+          <div class="path-row">${pathCode(tildePath(bot.soloWorkspace))}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="${t('common.copyPath')}" aria-label="${t('common.copyPath')}">${icon('copy')}</button></div>
         </div>
       </aside>
     </div>`
@@ -447,7 +447,7 @@ function renderSoloConfig() {
         <div class="kv"><span>长期记忆</span><strong>${bot.memoryCount}</strong></div>
         <div class="divider"></div>
         <div class="eyebrow" style="margin-bottom:6px">专属工作区</div>
-        <div class="path-row">${pathCode(bot.soloWorkspace)}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+        <div class="path-row">${pathCode(tildePath(bot.soloWorkspace))}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
         <div class="divider"></div>
         <div class="eyebrow" style="margin-bottom:9px">版本历史</div>
         ${revisions.length === 0 ? '<div class="faint">' + (state.soloDetail ? '暂无版本' : '加载中…') + '</div>' : revisions.map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span>${revision.version === bot.current_revision ? '' : `<button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}">回滚</button>`}</div>`).join('')}

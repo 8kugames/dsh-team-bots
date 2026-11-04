@@ -3,7 +3,7 @@
 import { state } from './state.js'
 import { t } from './i18n.js'
 import { icon } from './icons.js'
-import { activeBots, activeProject, attr, botById, esc, formatTime, pathCode } from './util.js'
+import { activeBots, activeProject, attr, botById, esc, formatTime, pathCode, tildePath } from './util.js'
 import { loadState } from './api.js'
 import { notifyToggleView } from './cards.js'
 import { usageBotRow, usageCurrency, usageDayPanel, usageDayTitle, usageListPanel, usageMetricCards, usageModelPanel, usagePageHead, usageProjectRow, usageRunRow, usageSection, usageSnapshot, usageWindowText } from './usage.js'
@@ -376,7 +376,7 @@ function renderSettings() {
               <div class="hint">Bots 的工作目录，可指向既有代码库；留空则用默认管理目录，切换后已有密钥会自动迁移并清理旧目录。</div>
               <div class="dir-picker" id="dir-picker-settings-production" hidden></div>
             </div>
-            <div class="path-row"><span>当前生效</span>${pathCode(project.workspace_path)}${copyPath(project.workspace_path)}</div>
+            <div class="path-row"><span>当前生效</span>${pathCode(tildePath(project.workspace_path))}${copyPath(project.workspace_path)}</div>
             <div class="path-row"><span>管理数据</span>${pathCode(project.data_path ?? '')}${copyPath(project.data_path ?? '')}</div>
           </div>
           <div class="card form-card" style="margin-top:12px">
@@ -463,7 +463,7 @@ function renderGlobal() {
       <div class="card form-card">
         <div class="card-head"><h3>DSH 路径</h3><button class="btn small" data-action="sync-skills">${icon('refresh')}重新扫描技能</button></div>
         <div class="path-row"><span>DSH 目录</span>${pathCode(data.paths.dshHome ?? '~/.dsh')}${copyPath(data.paths.dshHome ?? '')}</div>
-        <div class="path-row"><span>工作区</span>${pathCode(data.paths.workspace)}${copyPath(data.paths.workspace)}</div>
+        <div class="path-row"><span>工作区</span>${pathCode(tildePath(data.paths.workspace))}${copyPath(data.paths.workspace)}</div>
         <div class="path-row"><span>共享</span>${pathCode(data.paths.skillRoot)}${copyPath(data.paths.skillRoot)}</div>
         <div class="path-row"><span>数据</span>${pathCode(data.paths.dataDir)}${copyPath(data.paths.dataDir)}</div>
       </div>

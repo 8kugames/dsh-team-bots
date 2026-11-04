@@ -32,7 +32,7 @@ test('群聊右栏顺序：工作区 → 项目总监 → 项目成员 → 活�
 test('工作区卡内部结构不变（pathCode + 复制按钮）', () => {
   const wsBlock = /<div class="side-card">\s*<div class="side-card-head"><h3>\$\{t\('card\.workspace'\)\}<\/h3><\/div>([\s\S]*?)<\/div>/.exec(chatSide)?.[1]
   assert.ok(wsBlock, '找不到工作区卡内容')
-  assert.match(wsBlock, /pathCode\(project\.workspace_path\)/, '工作区仍显示路径')
+  assert.match(wsBlock, /pathCode\(tildePath\(project\.workspace_path\)\)/, '工作区仍显示路径（D-186 起展示位走 tildePath 缩写）')
   assert.match(wsBlock, /data-action="copy"/, '工作区仍保留复制按钮')
 })
 
