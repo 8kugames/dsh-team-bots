@@ -1,5 +1,5 @@
 // settings.js —— 设置/全局域：全局用量面板（含模型价格规则卡）、运行时效卡、运维卡、
-// 项目设置页与全局配置页（renderGlobal）。通道/密钥/关于页见 global-pages.js（DSHBOTS-197 迁出）。
+// 项目设置页与全局配置页（renderGlobal，含 DSH 路径/DSH 服务卡）。通道/密钥页见 global-pages.js。
 import { state } from './state.js'
 import { t } from './i18n.js'
 import { icon } from './icons.js'
@@ -65,7 +65,7 @@ function renderUsageGlobal() {
     )}
     ${usageSection(
       '模型价格规则',
-      '成本估算依赖这些价格规则，按每百万 token 计价；新增与编辑即时生效（DSHBOTS-197 自全局配置页迁入）。',
+      '成本估算依赖这些价格规则，按每百万 token 计价；新增与编辑即时生效。',
       renderPriceCard(),
     )}
   `
@@ -231,6 +231,46 @@ function renderOpsCard() {
     </div>`
 }
 
+// DSH 路径卡：只读展示本机 DSH 目录、工作区、共享技能根与数据目录。
+function dshPathsCard() {
+  const paths = state.data.paths ?? {}
+  const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
+  return `
+    <div class="card form-card g-card">
+      <div class="card-head"><h3>DSH 路径</h3><span class="meta">只读</span></div>
+      <div class="path-row"><span>DSH 目录</span>${pathCode(paths.dshHome ?? '~/.dsh')}${copyPath(paths.dshHome ?? '')}</div>
+      <div class="path-row"><span>工作区</span>${pathCode(tildePath(paths.workspace))}${copyPath(paths.workspace)}</div>
+      <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot)}${copyPath(paths.skillRoot)}</div>
+      <div class="path-row"><span>数据</span>${pathCode(paths.dataDir)}${copyPath(paths.dataDir)}</div>
+      <div class="hint">技能重扫入口在「技能」页；本卡只读本机路径。</div>
+    </div>`
+}
+
+// DSH 服务卡：版本检查 + 投递失败提示（投递失败 kv 落在本卡尾部）。
+function dshServiceCard() {
+  const data = state.data
+  // 「DSH 服务」卡检查结果：loadState 只换 state.data，dshUpdate 存这里不被轮询盖掉。
+  const update = state.dshUpdate
+  const latestCell = (latest, available) => latest == null
+    ? '<strong>—</strong>'
+    : available
+      ? `<strong>${esc(latest)} <span class="pill amber">可升级</span></strong>`
+      : `<strong>${esc(latest)} <span class="pill green">最新</span></strong>`
+  const outbox = data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
+  return `
+    <div class="card form-card g-card">
+      <div class="card-head">
+        <h3>DSH 服务</h3>
+        <button class="btn small" data-action="check-dsh-update">${icon('refresh')}检查更新</button>
+      </div>
+      <div class="kv"><span>dsh 当前版本</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
+      <div class="kv"><span>dsh 最新版本</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
+      <div class="kv"><span>dsh-team-bots 当前版本</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
+      <div class="kv"><span>dsh-team-bots 最新版本</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
+      ${Number(outbox.failed ?? 0) > 0 ? `<div class="kv" style="margin-top:12px"><span>投递队列</span><strong>${outbox.failed} 条消息投递失败</strong></div>` : ''}
+    </div>`
+}
+
 function renderSettings() {
   const project = activeProject()
   const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
@@ -303,7 +343,7 @@ function currentScale() {
 
 // 分组信息架构（DSHBOTS-184）：一节 = 一组 = 一个锚点；组内是 12 列槽位，
 // 槽位负责跨列排布，modal-forms 的价格卡因此不必改自己的结构。
-function gsec(index, id, title, desc, meta, body) {
+function gsec(index, id, title, desc, body) {
   return `
       <section class="gsec" id="${id}" aria-labelledby="${id}-title">
         <div class="gsec-head">
@@ -312,7 +352,6 @@ function gsec(index, id, title, desc, meta, body) {
             <h3 class="gsec-title" id="${id}-title">${title}</h3>
             <p class="gsec-desc">${desc}</p>
           </div>
-          <span class="gsec-meta">${meta}</span>
         </div>
         <div class="gsec-body">${body}</div>
       </section>`
@@ -331,14 +370,15 @@ function renderGlobal() {
         <div class="global-head-copy">
           <p class="global-eyebrow">GLOBAL CONFIGURATION</p>
           <h2 class="global-title">全局配置</h2>
-          <p class="global-desc">跨项目生效的团队设置，按「偏好 → 运行」分组，改动在卡片内就地保存。通道、密钥、版本与价格规则已分迁到各自页面（DSHBOTS-197）。</p>
+          <p class="global-desc">跨项目生效的团队设置，按「偏好 → 运行 → 关于」分组，改动在卡片内就地保存。</p>
         </div>
       </header>
       <nav class="global-nav" aria-label="配置分组导航">
         <a class="global-nav-item" href="#g-pref">偏好</a>
         <a class="global-nav-item" href="#g-runtime">运行与预算</a>
+        <a class="global-nav-item" href="#g-about">关于与系统状态</a>
       </nav>
-      ${gsec('01', 'g-pref', '偏好', '只影响这台机器上的显示方式，保存后立即生效。', '1 个模块 · 1 处保存', `
+      ${gsec('01', 'g-pref', '偏好', '只影响这台机器上的显示方式，保存后立即生效。', `
             <div class="g-slot g-slot--full">
             <div class="card form-card g-card">
               <div class="card-head">
@@ -385,7 +425,8 @@ function renderGlobal() {
               </div>
             </div>
             </div>`)}
-      ${gsec('02', 'g-runtime', '运行与预算', '影响所有项目运行的行为与开销上限：超时中止、无进展看门狗、预算与数据保留。', '2 个模块 · 2 处保存', `<div class="g-slot g-slot--half">${renderRunLimitsCard()}</div><div class="g-slot g-slot--half">${renderOpsCard()}</div>`)}
+      ${gsec('02', 'g-runtime', '运行与预算', '影响所有项目运行的行为与开销上限：超时中止、无进展看门狗、预算与数据保留。', `<div class="g-slot g-slot--half">${renderRunLimitsCard()}</div><div class="g-slot g-slot--half">${renderOpsCard()}</div>`)}
+      ${gsec('03', 'g-about', '关于与系统状态', '本机 DSH 路径、DSH 与插件版本、更新检查与消息投递队列。', `<div class="g-slot g-slot--half">${dshPathsCard()}</div><div class="g-slot g-slot--half">${dshServiceCard()}</div>`)}
     </div>
   `
 }

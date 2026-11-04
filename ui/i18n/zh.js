@@ -41,7 +41,6 @@ export default {
   'viewTitle.global': '全局配置',
   'viewTitle.channel': '通道',
   'viewTitle.secrets': '密钥管理',
-  'viewTitle.about': '关于与系统状态',
   'viewTitle.projectSettings': '项目设置',
   // 顶栏主按钮（VIEW_ACTION 的 label）
   'viewAction.tasks': '新建任务',
@@ -88,7 +87,6 @@ export default {
   'sidebar.channel': '通道',
   'sidebar.secrets': '密钥管理',
   'sidebar.globalConfig': '全局配置',
-  'sidebar.about': '关于与系统状态',
   'sidebar.switchToDsh': '切换到 DSH 原生 Web 界面',
   'sidebar.dshNative': 'DSH 原生界面',
   'sidebar.tasksActive': '${count} 个任务中',

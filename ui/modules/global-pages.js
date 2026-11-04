@@ -1,10 +1,10 @@
-// global-pages.js —— 全局一级页（DSHBOTS-197 迁移落点）：通道页、密钥页、关于与系统状态页。
-// 卡片自全局配置页原样迁入：控件、data-action / data-form 链路、设置键不变，事件仍走全局委托。
-// 版面复用 D-184 槽位体系（gsec / g-slot / global-head），不新造设计。
+// global-pages.js —— 全局一级页：通道页、密钥页。卡片自全局配置页原样迁入：
+// 控件、data-action / data-form 链路、设置键不变，事件仍走全局委托。
+// 单模块页只保留 pageHead 一层壳，标题与简介各出现一次；版面复用 D-184 槽位体系
+// （g-slot / global-head），不新造设计。
 import { state } from './state.js'
 import { icon } from './icons.js'
-import { attr, esc, formatTime, pathCode, tildePath } from './util.js'
-import { gsec } from './settings.js'
+import { attr, esc, formatTime } from './util.js'
 
 // 页头复用配置页 global-head 样式；团队统计口径在「总览」页，这里不放指标带。
 function pageHead(eyebrow, title, desc) {
@@ -31,7 +31,7 @@ function wechatCard() {
   const pillClass = wechat.phase === 'connected' ? 'green' : ['needs_reauth'].includes(wechat.phase) ? 'amber' : ''
   return `
     <div class="card form-card g-card" id="wechat-card">
-      <div class="card-head"><h3>微信通道</h3><span class="pill ${pillClass}">${phaseText[wechat.phase] ?? wechat.phase}</span></div>
+      <div class="card-head" style="justify-content:flex-end"><span class="pill ${pillClass}">${phaseText[wechat.phase] ?? wechat.phase}</span></div>
       ${wechat.adminPeerId ? `<div class="kv"><span>管理员</span><strong>${esc(String(wechat.adminPeerId).slice(0, 12))}…</strong></div>` : ''}
       ${wechat.error ? `<div class="hint" style="color:var(--coral,#e5484d)">${esc(wechat.error)}</div>` : ''}
       ${auth?.qrSvg ? `
@@ -47,7 +47,7 @@ function wechatCard() {
           ? '<button class="btn small danger" type="button" data-action="wechat-logout">退出绑定</button>'
           : '<button class="btn small" type="button" data-action="wechat-login">扫码绑定</button>'}
       </div>
-      <div class="hint">扫码授权成功后自动把授权者绑定为管理员；之后可用：状态 / 详情 web-3 / 验收 web-3 / 驳回 web-3 理由。任务完成会主动推送。</div>
+      <div class="hint">扫码授权成功后自动把授权者绑定为管理员；任务完成会主动推送。</div>
     </div>`
 }
 
@@ -58,8 +58,7 @@ function secretsCard() {
   const projects = (state.data?.projects ?? []).filter(project => project.status === 'active')
   return `
     <div class="card form-card g-card">
-      <div class="card-head"><h3>密钥管理</h3><span class="meta">${secrets.length} 条 · ${requests.length} 待审</span></div>
-      <div class="hint" style="margin:2px 0 12px">密钥加密存储；团队级密钥对所有活动项目生效，Bot 可以直接使用。</div>
+      <div class="card-head" style="justify-content:flex-end"><span class="meta">${secrets.length} 条 · ${requests.length} 待审</span></div>
       ${requests.length === 0 ? '' : `<div class="secret-block">
         ${requests.map(request => `
           <form class="secret-request" data-form="approve-secret">
@@ -119,58 +118,17 @@ function secretsCard() {
     </div>`
 }
 
-// DSH 路径卡（自配置页迁入）：「重新扫描技能」按钮去重至技能页（那里本就有同入口），此处不再放。
-function dshPathsCard() {
-  const paths = state.data.paths ?? {}
-  const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
-  return `
-    <div class="card form-card g-card">
-      <div class="card-head"><h3>DSH 路径</h3><span class="meta">只读</span></div>
-      <div class="path-row"><span>DSH 目录</span>${pathCode(paths.dshHome ?? '~/.dsh')}${copyPath(paths.dshHome ?? '')}</div>
-      <div class="path-row"><span>工作区</span>${pathCode(tildePath(paths.workspace))}${copyPath(paths.workspace)}</div>
-      <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot)}${copyPath(paths.skillRoot)}</div>
-      <div class="path-row"><span>数据</span>${pathCode(paths.dataDir)}${copyPath(paths.dataDir)}</div>
-      <div class="hint">技能重扫入口在「技能」页；本卡只读本机路径。</div>
-    </div>`
-}
-
-// DSH 服务卡（自配置页迁入）：版本检查 + 投递失败提示（自配置页「系统与运维」卡迁入）。
-function dshServiceCard() {
-  const data = state.data
-  // 「DSH 服务」卡检查结果（DSHBOTS-143）：loadState 只换 state.data，dshUpdate 存这里不被轮询盖掉。
-  const update = state.dshUpdate
-  const latestCell = (latest, available) => latest == null
-    ? '<strong>—</strong>'
-    : available
-      ? `<strong>${esc(latest)} <span class="pill amber">可升级</span></strong>`
-      : `<strong>${esc(latest)} <span class="pill green">最新</span></strong>`
-  const outbox = data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
-  return `
-    <div class="card form-card g-card">
-      <div class="card-head">
-        <h3>DSH 服务</h3>
-        <button class="btn small" data-action="check-dsh-update">${icon('refresh')}检查更新</button>
-      </div>
-      <div class="kv"><span>dsh 当前版本</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
-      <div class="kv"><span>dsh 最新版本</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
-      <div class="kv"><span>dsh-team-bots 当前版本</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
-      <div class="kv"><span>dsh-team-bots 最新版本</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
-      ${Number(outbox.failed ?? 0) > 0 ? `<div class="kv" style="margin-top:12px"><span>投递队列</span><strong>${outbox.failed} 条消息投递失败</strong></div>` : ''}
-    </div>`
-}
-
 // 通道页：微信等外部消息通道的绑定与状态。
 export function renderChannel() {
   const card = wechatCard()
   return `
     <div class="global-page">
-      ${pageHead('CHANNELS', '通道', '外部消息通道的绑定与运行状态。微信通道在服务端启用后出现在本页。')}
-      ${gsec('01', 'g-channel', '微信通道',
-        '扫码绑定后，任务与验收结果会推送到微信。',
-        '1 个模块',
-        card
+      ${pageHead('CHANNELS', '通道', '外部消息通道的绑定与运行状态。')}
+      <div class="gsec-body">
+        ${card
           ? `<div class="g-slot g-slot--two-thirds">${card}</div>`
-          : `<div class="g-slot g-slot--full"><div class="card"><div class="empty-state" style="border:0"><div class="empty-symbol">${icon('message')}</div><h3>微信通道未启用</h3><p>在服务端启用 wechat 通道后，这里会出现扫码绑定入口。</p></div></div></div>`)}
+          : `<div class="g-slot g-slot--two-thirds"><div class="card"><div class="empty-state" style="border:0"><div class="empty-symbol">${icon('message')}</div><h3>微信通道未启用</h3><p>在服务端启用 wechat 通道后，这里会出现扫码绑定入口。</p></div></div></div>`}
+      </div>
     </div>
   `
 }
@@ -180,23 +138,9 @@ export function renderSecretsPage() {
   return `
     <div class="global-page">
       ${pageHead('SECRETS', '密钥管理', '团队与项目两级密钥的加密存储，以及 Bot 发起的密钥请求审批。')}
-      ${gsec('01', 'g-secrets', '密钥',
-        '团队级密钥对所有活动项目生效；Bot 通过审批流程申请密钥值。',
-        '1 个模块',
-        `<div class="g-slot g-slot--full">${secretsCard()}</div>`)}
-    </div>
-  `
-}
-
-// 关于与系统状态页：本机 DSH 路径、版本检查与投递队列状态。
-export function renderAbout() {
-  return `
-    <div class="global-page">
-      ${pageHead('ABOUT', '关于与系统状态', '本机 DSH 路径、版本状态与消息投递队列。点「检查更新」后此处显示检查结果。')}
-      ${gsec('01', 'g-env', '环境与版本',
-        '本机路径与 DSH / 插件版本；技能重扫入口在「技能」页。',
-        '2 个模块',
-        `<div class="g-slot g-slot--half">${dshPathsCard()}</div><div class="g-slot g-slot--half">${dshServiceCard()}</div>`)}
+      <div class="gsec-body">
+        <div class="g-slot g-slot--full">${secretsCard()}</div>
+      </div>
     </div>
   `
 }

@@ -51,14 +51,14 @@ test('前端接线锁：展示位走 tildePath，data-copy/title/copyPath 保留
   assert.equal(count(chat, `data-copy="\${attr(bot.soloWorkspace ?? '')}"`), 2, '单聊两处复制按钮必须保留完整路径')
 
   const settings = read('ui/modules/settings.js')
-  // D-186 卡面口径的「当前生效」行仍在 settings.js；全局「工作区」行随 DSH 路径卡
-  // 迁到关于页（DSHBOTS-197），缩写与完整路径复制语义不变，只是换了宿主文件。
-  assert.equal(count(settings, 'pathCode(tildePath('), 1, 'settings.js 仅一处工作区展示位缩写（当前生效）')
+  // D-186 卡面口径的「当前生效」行仍在 settings.js；DSH 路径卡的「工作区」行随关于内容
+  // 回迁 settings.js（DSHBOTS-200），缩写与完整路径复制语义不变。
+  assert.equal(count(settings, 'pathCode(tildePath('), 2, 'settings.js 两处工作区展示位缩写（当前生效 + DSH 路径）')
   assert.ok(settings.includes('copyPath(project.workspace_path)'), '当前生效的复制必须保留完整路径')
+  assert.ok(settings.includes('copyPath(paths.workspace)'), '全局工作区的复制必须保留完整路径')
 
   const globalPages = read('ui/modules/global-pages.js')
-  assert.equal(count(globalPages, 'pathCode(tildePath('), 1, '关于页工作区展示位缩写（DSHBOTS-197 迁入）')
-  assert.ok(globalPages.includes('copyPath(paths.workspace)'), '全局工作区的复制必须保留完整路径')
+  assert.equal(count(globalPages, 'pathCode(tildePath('), 0, '关于内容回迁后 global-pages.js 不再有工作区展示位')
 
   const tasks = read('ui/modules/tasks.js')
   // 终端标题栏：显示文本缩写，title 悬浮仍给完整路径。

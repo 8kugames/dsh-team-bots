@@ -8,7 +8,7 @@ import { typingLingerRowsHtml, applyOptimisticTyping, pruneTypingLinger } from '
 import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, formatApprovalRemaining, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
 import { renderUsage, usageMode, usageViewTitle, usageTotals, usageWindowText, usageDayTitle, usageSnapshot, usageCurrency, usageBotRow, usageProjectRow, usageListPanel, usageRunRow, usageModelPanel, usageMetricCards, usageDayPanel, usageSection, usagePageHead, exportUsageCsv, switchUsageWindow } from './modules/usage.js'
 import { renderSettings, renderGlobal, renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './modules/settings.js'
-import { renderChannel, renderSecretsPage, renderAbout } from './modules/global-pages.js'
+import { renderChannel, renderSecretsPage } from './modules/global-pages.js'
 import { updateAutocomplete, moveAcSelection, closeAutocomplete, applyAutocomplete, currentDraft, pendingImagesFor, attachImageButton, composerImageStrip, resolveImageMediaType, addPendingImages, removePendingImage, thumbnailFallback, ensureComposerImageInput, parseFileUriList, insertTextAtCursor, hydrateMessageImageThumbs, ensureImageViewer, openMessageImage, closeImageViewer, openInlineImage, COMPOSER_AUTO_MAX_PX, composerPanelCap, applyComposerHeight, syncComposerBox, sendMessage, saveTaskFromForm } from './modules/composer.js'
 import { renderTasks, renderTerminal, renderBotsOverview, renderMembers, renderSkills, renderMemory, renderEvolution, taskGroupKey, taskChildrenKey, terminalOutputText, searchMemories, currentSkillVersion, skillVersions } from './modules/tasks.js'
 import { overlayOpen, markAppRenderPending, renderModalLayer, ensureModalRoot, noteModalScroll, flushAppRender } from './modules/modal-layer.js'
@@ -19,7 +19,7 @@ import './modules/events-click.js'
 import './modules/events-submit.js'
 import './modules/events-misc.js'
 // 全局一级视图集合：侧栏直达、无项目 tab（usage 的 global 模式另算，见 isGlobal）。
-const GLOBAL_VIEWS = new Set(['global', 'bots-overview', 'channel', 'secrets', 'about'])
+const GLOBAL_VIEWS = new Set(['global', 'bots-overview', 'channel', 'secrets'])
 const app = document.getElementById('app')
 const UI_SCALE_KEY = 'dshb:ui-scale'
 const UI_THEME_KEY = 'dshb:ui-theme'
@@ -228,7 +228,7 @@ function renderShell() {
   const activeTasks = Number(data?.activeTasks ?? 0)
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
-  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥/关于）：无项目 tab 导航，侧栏直达。
+  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。
   const isGlobal = GLOBAL_VIEWS.has(state.view) || (state.view === 'usage' && usageMode() === 'global')
   // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
   const isSolo = state.view === 'chat' && state.chatMode === 'solo'
@@ -249,7 +249,6 @@ function renderShell() {
     : state.view === 'global' ? t('viewTitle.global')
     : state.view === 'channel' ? t('viewTitle.channel')
     : state.view === 'secrets' ? t('viewTitle.secrets')
-    : state.view === 'about' ? t('viewTitle.about')
     : t('viewTitle.projectSettings')
   const title = viewTitle
   const spec = VIEW_ACTION[state.view]
@@ -349,7 +348,6 @@ function renderShell() {
           <button class="global-config ${state.view === 'global' ? 'active' : ''}" data-action="nav" data-view="global">
             ${icon('settings')}<span>${t('sidebar.globalConfig')}</span>
           </button>
-          <button class="global-config ${state.view === 'about' ? 'active' : ''}" data-action="nav" data-view="about">${icon('info')}<span>${t('sidebar.about')}</span></button>
           <a class="global-config dsh-official-link" href="/index.html" title="${t('sidebar.switchToDsh')}">
             ${icon('external')}<span>${t('sidebar.dshNative')}</span>
           </a>
@@ -608,7 +606,6 @@ function renderView() {
       case 'global': return renderGlobal()
       case 'channel': return renderChannel()
       case 'secrets': return renderSecretsPage()
-      case 'about': return renderAbout()
       case 'solo-config': return renderSoloConfig()
       case 'chat':
       default: return renderChat()

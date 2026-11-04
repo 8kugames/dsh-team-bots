@@ -115,8 +115,8 @@ test('⑧ 服务端口径：全局 / 本群 / 单聊三套 tier 齐备', () => {
 test('⑨ 全局口径用量页按全局页处理（不渲染项目 tab）', () => {
   assert.match(
     source,
-    /const GLOBAL_VIEWS = new Set\(\['global', 'bots-overview', 'channel', 'secrets', 'about'\]\)/,
-    '全局一级视图集合含迁移新增的通道/密钥/关于页（DSHBOTS-197）',
+    /const GLOBAL_VIEWS = new Set\(\['global', 'bots-overview', 'channel', 'secrets'\]\)/,
+    '全局一级视图集合含迁移新增的通道/密钥页',
   )
   assert.match(
     source,

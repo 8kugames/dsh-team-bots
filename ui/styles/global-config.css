@@ -74,10 +74,10 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
-/* 锚点命中时高亮对应分组条目（g-env 由「关于与系统状态」页复用） */
+/* 锚点命中时高亮对应分组条目 */
 .global-page:has(#g-pref:target) .global-nav-item[href="#g-pref"],
 .global-page:has(#g-runtime:target) .global-nav-item[href="#g-runtime"],
-.global-page:has(#g-env:target) .global-nav-item[href="#g-env"] {
+.global-page:has(#g-about:target) .global-nav-item[href="#g-about"] {
     background: var(--accent-wash);
     color: var(--accent-text);
 }
@@ -116,11 +116,6 @@
     color: var(--ink-3);
     font-size: var(--fs-small);
     line-height: 1.6;
-}
-.gsec-meta {
-    color: var(--ink-3);
-    font-size: var(--fs-caption);
-    white-space: nowrap;
 }
 
 /* ---------- 组内 12 列槽位 ---------- */

@@ -42,7 +42,6 @@ export default {
   'viewTitle.global': 'Global settings',
   'viewTitle.channel': 'Channels',
   'viewTitle.secrets': 'Secrets',
-  'viewTitle.about': 'About & system status',
   'viewTitle.projectSettings': 'Project settings',
   // Topbar primary button (VIEW_ACTION labels)
   'viewAction.tasks': 'New task',
@@ -89,7 +88,6 @@ export default {
   'sidebar.channel': 'Channels',
   'sidebar.secrets': 'Secrets',
   'sidebar.globalConfig': 'Global settings',
-  'sidebar.about': 'About & status',
   'sidebar.switchToDsh': 'Switch to the native DSH web UI',
   'sidebar.dshNative': 'Native DSH UI',
   'sidebar.tasksActive': '${count} tasks in progress',

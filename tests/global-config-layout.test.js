@@ -1,7 +1,7 @@
-// 全局配置页信息架构守门（DSHBOTS-184 立骨架，DSHBOTS-197 迁移收口）。
-// 迁移后契约：配置页只剩「偏好 / 运行与预算」两个核心分组，无「计划迁移」标注；
-// 微信通道、密钥、DSH 路径/服务分别落在通道页 / 密钥页 / 关于页（ui/modules/global-pages.js），
-// 模型价格规则落在全局用量页。样式细节由 tests/styles-split.test.js 兜底。
+// 全局配置页信息架构守门（DSHBOTS-184 立骨架，DSHBOTS-197 迁移出通道/密钥，DSHBOTS-200 关于内容回迁）。
+// 契约：配置页为「偏好 / 运行与预算 / 关于与系统状态」三个分组；微信通道、密钥分别落在
+// 通道页 / 密钥页（ui/modules/global-pages.js），模型价格规则落在全局用量页。
+// 样式细节由 tests/styles-split.test.js 兜底。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join, dirname } from 'node:path'
@@ -103,15 +103,15 @@ async function renderPage(module, fn, data) {
     project: null, settings: { ui_language: 'zh' },
     ...data,
   }
-  state.view = { renderGlobal: 'global', renderChannel: 'channel', renderSecretsPage: 'secrets', renderAbout: 'about', renderUsageGlobal: 'usage', renderSkills: 'skills' }[fn]
+  state.view = { renderGlobal: 'global', renderChannel: 'channel', renderSecretsPage: 'secrets', renderUsageGlobal: 'usage', renderSkills: 'skills' }[fn]
   return { html: mod[fn](), state }
 }
 
-test('配置页只剩两个核心分组，导航锚点与 section 一一对应', async () => {
+test('配置页三分组，导航锚点与 section 一一对应', async () => {
   const { html } = await renderPage('settings', 'renderGlobal')
   assert.match(html, /class="global-page"/, '页面根应为 .global-page')
   const sections = [...html.matchAll(/<section class="gsec" id="(g-[a-z]+)"/g)].map((m) => m[1])
-  assert.deepEqual(sections, ['g-pref', 'g-runtime'], '迁移后只留 偏好/运行 分组')
+  assert.deepEqual(sections, ['g-pref', 'g-runtime', 'g-about'], '配置页应为 偏好/运行/关于 三分组')
   const anchors = [...html.matchAll(/class="global-nav-item" href="#(g-[a-z]+)"/g)].map((m) => m[1])
   assert.deepEqual(anchors, sections, '导航锚点必须与分组一一对应')
   for (const id of sections) {
@@ -122,41 +122,40 @@ test('配置页只剩两个核心分组，导航锚点与 section 一一对应',
   stopTimers()
 })
 
-test('配置页分组头保留序号、标题、说明与模块计数', async () => {
+test('配置页分组头保留序号、标题与说明', async () => {
   const { html } = await renderPage('settings', 'renderGlobal')
-  for (const index of ['01', '02']) {
+  for (const index of ['01', '02', '03']) {
     assert.match(html, new RegExp(`class="gsec-index mono">${index}</`), `缺分组序号 ${index}`)
   }
-  for (const index of ['03', '04']) {
-    assert.doesNotMatch(html, new RegExp(`class="gsec-index mono">${index}</`), `分组 ${index} 已迁出不应存在`)
+  for (const index of ['04', '05']) {
+    assert.doesNotMatch(html, new RegExp(`class="gsec-index mono">${index}</`), `分组 ${index} 不应存在`)
   }
-  for (const title of ['偏好', '运行与预算']) {
+  for (const title of ['偏好', '运行与预算', '关于与系统状态']) {
     assert.ok(html.includes(title), `缺分组标题 ${title}`)
   }
   for (const title of ['环境与版本', '接入与计价']) {
     assert.ok(!html.includes(title), `分组标题 ${title} 已迁出`)
   }
   assert.match(html, /class="gsec-desc"/, '分组应有说明副行')
-  assert.match(html, /class="gsec-meta"/, '分组应有模块计数')
+  assert.doesNotMatch(html, /class="gsec-meta"/, '「N 个模块」计数属噪音，不应渲染')
   stopTimers()
 })
 
-test('配置页无迁出模块、无「计划迁移」标注、无指标带', async () => {
+test('配置页无已迁出模块、无「计划迁移」标注、无指标带', async () => {
   const { html } = await renderPage('settings', 'renderGlobal', { wechat: { enabled: true, phase: 'connected' } })
-  for (const title of ['微信通道', '密钥管理', '模型价格', 'DSH 路径', 'DSH 服务']) {
+  for (const title of ['微信通道', '密钥管理', '模型价格']) {
     assert.ok(!html.includes(`<h3>${title}</h3>`), `迁出模块 ${title} 不应留在配置页`)
   }
   assert.doesNotMatch(html, /g-move-note/, '迁移完成后不应再有 g-move-note 标注')
   assert.ok(!html.includes('计划迁移'), '页面任何位置都不应再出现「计划迁移」文案')
   assert.doesNotMatch(html, /global-metrics/, '指标带（团队统计）已迁出，与总览页去重')
   assert.doesNotMatch(html, /data-action="sync-skills"/, '重扫技能入口在技能页，配置页不放')
-  assert.doesNotMatch(html, /data-action="check-dsh-update"/, '检查更新入口在关于页')
   stopTimers()
 })
 
 test('配置页核心组交互入口完整保留', async () => {
   const { html } = await renderPage('settings', 'renderGlobal')
-  for (const action of ['save-ui-language', 'save-run-limits', 'save-settings', 'reset-scale', 'set-theme', 'toggle-notify']) {
+  for (const action of ['save-ui-language', 'save-run-limits', 'save-settings', 'reset-scale', 'set-theme', 'toggle-notify', 'check-dsh-update']) {
     assert.ok(html.includes(`data-action="${action}"`), `缺交互入口 ${action}`)
   }
   assert.match(html, /class="g-slot g-slot--/, '卡片应由槽位包裹以控制跨列')
@@ -169,8 +168,9 @@ test('通道页承载微信通道卡：未启用空态、启用后可绑定', as
   assert.doesNotMatch(empty.html, /g-move-note/, '迁移落地后不再有迁移标注')
   stopTimers()
   const enabled = await renderPage('global-pages', 'renderChannel', { wechat: { enabled: true, phase: 'unbound' } })
-  assert.match(enabled.html, /<h3>微信通道<\/h3>/, '启用后应渲染微信通道卡')
+  assert.match(enabled.html, /<h2 class="global-title">通道<\/h2>/, '单模块页只保留 pageHead 一层壳')
   assert.match(enabled.html, /data-action="wechat-login"/, '扫码绑定按钮随卡迁入')
+  assert.doesNotMatch(enabled.html, /<h3>微信通道<\/h3>/, '标题只在页头出现一次')
   stopTimers()
 })
 
@@ -179,7 +179,8 @@ test('密钥页承载密钥管理卡：列表 + 待审请求 + 保存表单', as
     secrets: [{ id: 's1', name: 'DEPLOY_TOKEN', scope: 'team', fingerprint: 'abcd1234', updatedAt: '2026-11-04T00:00:00Z' }],
     secretRequests: [{ id: 'r1', botName: 'bot', name: 'API_KEY', reason: 'why', createdAt: '2026-11-04T00:00:00Z' }],
   })
-  assert.match(html, /<h3>密钥管理<\/h3>/, '密钥管理卡应整卡迁入密钥页')
+  assert.match(html, /<h2 class="global-title">密钥管理<\/h2>/, '单模块页只保留 pageHead 一层壳')
+  assert.doesNotMatch(html, /<h3>密钥管理<\/h3>/, '标题只在页头出现一次')
   assert.match(html, /data-form="upsert-secret"/, '保存密钥表单随卡迁入')
   assert.match(html, /data-form="approve-secret"/, '待审请求批准表单随卡迁入')
   assert.match(html, /data-action="deny-secret-request"/, '拒绝按钮随卡迁入')
@@ -187,14 +188,14 @@ test('密钥页承载密钥管理卡：列表 + 待审请求 + 保存表单', as
   stopTimers()
 })
 
-test('关于页承载 DSH 路径/服务卡：检查更新 + 投递失败提示', async () => {
-  const { html } = await renderPage('global-pages', 'renderAbout', { outbox: { pending: 1, failed: 2, delivered: 10 } })
-  assert.match(html, /<h3>DSH 路径<\/h3>/, 'DSH 路径卡应迁入关于页')
-  assert.match(html, /<h3>DSH 服务<\/h3>/, 'DSH 服务卡应迁入关于页')
-  assert.match(html, /data-action="check-dsh-update"/, '检查更新按钮迁入关于页')
-  assert.match(html, /2 条消息投递失败/, '投递失败提示迁入关于页系统状态')
+test('关于内容回迁配置页第三分组：DSH 路径/服务卡 + 检查更新 + 投递失败提示', async () => {
+  const { html } = await renderPage('settings', 'renderGlobal', { outbox: { pending: 1, failed: 2, delivered: 10 } })
+  assert.match(html, /<h3>DSH 路径<\/h3>/, 'DSH 路径卡应回迁配置页')
+  assert.match(html, /<h3>DSH 服务<\/h3>/, 'DSH 服务卡应回迁配置页')
+  assert.match(html, /data-action="check-dsh-update"/, '检查更新按钮随卡回迁')
+  assert.match(html, /2 条消息投递失败/, '投递失败提示随卡回迁')
   assert.match(html, /data-action="copy"/, '路径复制按钮保留')
-  assert.doesNotMatch(html, /data-action="sync-skills"/, '重扫技能入口去重到技能页，关于页不放')
+  assert.doesNotMatch(html, /data-action="sync-skills"/, '重扫技能入口去重到技能页，配置页不放')
   stopTimers()
 })
 
