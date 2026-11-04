@@ -66,7 +66,7 @@ test('满并发时人消息运行借保底槽仍能起来 1 条，并写 human_s
   const { root, store, service, runtime, director, dev, project } = await manualSetup({ maxConcurrentRuns: 1 })
   try {
     // 占满唯一的正常槽：1 条任务运行先跑起来
-    const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/'], autoStart: true })
+    const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/x/'], autoStart: true })
     service.started = true
     await service.tick()
     assert.equal(runtime.started.length, 1, '任务运行占住正常槽')
@@ -82,7 +82,7 @@ test('满并发时人消息运行借保底槽仍能起来 1 条，并写 human_s
 test('第二条人消息运行仍排队（保底槽只放行 1 条）', async () => {
   const { root, store, service, runtime, director, dev, project } = await manualSetup({ maxConcurrentRuns: 1 })
   try {
-    const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/'], autoStart: true })
+    const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/x/'], autoStart: true })
     service.started = true
     await service.tick()
     const first = primeChatRun(service, project, dev, '@Builder 追问一')
@@ -109,8 +109,8 @@ test('满并发时机器任务运行不借保底槽', async () => {
 test('写范围冲突时借槽的人消息运行仍被拦（write 运行不绕过写闸门）', async () => {
   const { root, store, service, runtime, director, dev, project } = await manualSetup({ maxConcurrentRuns: 1 })
   try {
-    // 占住正常槽的写运行声明 src/
-    const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/'], autoStart: true })
+    // 占住正常槽的写运行声明 src/x/（DSHBOTS-168：一级目录声明派单即驳回，锚点迁到二级）
+    const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/x/'], autoStart: true })
     service.started = true
     await service.tick()
     // 人触发的写运行（单聊 kind='solo_chat' 是 write 模式，但 project_id 为空不占项目锁；
@@ -120,7 +120,7 @@ test('写范围冲突时借槽的人消息运行仍被拦（write 运行不绕�
     const first = primeChatRun(service, project, dev, '@Builder 追问')
     await service.tick()
     assert.ok(runtime.started.includes(first), '人消息借槽启动')
-    const taskB = await service.createTask({ projectId: project.id, title: '冲突任务', assigneeBotId: dev.id, writeScopes: ['src/'], autoStart: true })
+    const taskB = await service.createTask({ projectId: project.id, title: '冲突任务', assigneeBotId: dev.id, writeScopes: ['src/x/'], autoStart: true })
     await service.tick()
     const conflictRun = store.get("SELECT id, status FROM runs WHERE task_id = ? AND kind = 'task'", taskB.id)
     assert.equal(conflictRun.status, 'queued', '写范围冲突的任务仍应排队，不因保底槽被绕过')

@@ -169,8 +169,9 @@ test('集成：并发写运行范围对不上号时仍告警，嫌疑写运行�
     const project = await service.createProject({ name: 'Audit', key: 'AUD', ownerBotId: director.id, memberIds: [dev.id] })
     const dir = join(workspace, project.slug)
     execFileSync('git', ['init', '--quiet'], { cwd: dir, stdio: 'ignore' })
+    // 写范围声明到二级路径（DSHBOTS-168：一级目录声明派单即驳回，锚点从 ['src'] 迁移）
     await service.createTask({
-      projectId: project.id, title: 'Scoped write', assigneeBotId: dev.id, writeScopes: ['src'], autoStart: true,
+      projectId: project.id, title: 'Scoped write', assigneeBotId: dev.id, writeScopes: ['src/zone'], autoStart: true,
     })
     await service.sendMessage(project.id, '随便聊聊，不要改文件')
     service.started = true
@@ -180,7 +181,7 @@ test('集成：并发写运行范围对不上号时仍告警，嫌疑写运行�
     const writeRun = store.get("SELECT * FROM runs WHERE mode = 'write' AND status = 'running'")
     assert.ok(writeRun, '写运行应与只读运行并行在跑')
     await new Promise(resolve => setTimeout(resolve, 30))
-    // 脏文件落在声明范围（src/）之外，无法归因
+    // 脏文件落在声明范围（src/zone/）之外，无法归因
     await writeFile(join(dir, 'note.txt'), 'outside declared scopes\n')
     await runtime.complete(chatRun.id, 'succeeded', '好的')
 

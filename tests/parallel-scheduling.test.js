@@ -202,7 +202,7 @@ test('同项目两条写任务：一侧声明一侧未声明时保守串行', as
     const project = await service.createProject({ name: 'HalfScope', key: 'HSC', ownerBotId: director.id, memberIds: [dev.id] })
     await service.createTask({
       projectId: project.id, title: '声明了范围', assigneeBotId: dev.id,
-      writeScopes: ['src'], autoStart: true,
+      writeScopes: ['src/app.js'], autoStart: true,
     })
     await service.createTask({
       projectId: project.id, title: '没声明范围', assigneeBotId: dev.id, autoStart: true,
@@ -239,7 +239,7 @@ test('回归保护：maxConcurrentRuns=3 且写范围互不相交时，三条任
   const { root, store, service, director, dev } = await manualSetup({ maxConcurrentRuns: 3 })
   try {
     const project = await service.createProject({ name: 'Trio', key: 'TRI', ownerBotId: director.id, memberIds: [dev.id] })
-    const disjointScopes = [['ui/modules'], ['src/services'], ['tests']]
+    const disjointScopes = [['ui/modules'], ['src/services'], ['tests/unit']]
     for (const [index, writeScopes] of disjointScopes.entries()) {
       await service.createTask({
         projectId: project.id, title: `并行任务 ${index + 1}`, assigneeBotId: dev.id,
@@ -254,7 +254,7 @@ test('回归保护：maxConcurrentRuns=3 且写范围互不相交时，三条任
     assert.equal(running.length, 3, '互不相交的写范围应放行到并发上限')
     // 快照各自正确，顺序无关。
     const snapshots = running.map(run => JSON.parse(run.write_scopes)).sort()
-    assert.deepEqual(snapshots, [['src/services'], ['tests'], ['ui/modules']])
+    assert.deepEqual(snapshots, [['src/services'], ['tests/unit'], ['ui/modules']])
     // 三条同时并行应有两条并行放行事件（首条之外各记一条）。
     const eventCount = Number(store.get("SELECT COUNT(*) AS n FROM run_events WHERE type = 'run_parallel'").n)
     assert.equal(eventCount, 2, '第二、三条运行应各记一条并行放行事件')

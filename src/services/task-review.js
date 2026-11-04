@@ -71,7 +71,10 @@ export const taskReviewMethods = {
     if (actor.type !== 'user') throw forbidden('只有工作台 owner 可以修改写范围')
     const task = this.taskRow(taskId)
     if (task.status === 'done' || task.status === 'canceled') throw conflict('任务已结束，不能修改写范围')
-    const scopes = parseWriteScopes(writeScopesInput)
+    const parsedScopes = parseWriteScopes(writeScopesInput)
+    // 派单清洗（DSHBOTS-168）：与派单入口同口径——ignored 机械移除（审计挂本任务）、
+    // 一级目录驳回；清洗后为空落下方既有「写范围不能为空」拒绝。
+    const scopes = this.normalizeDispatchScopes(this.projectRow(task.project_id), parsedScopes, { actor, taskId })
     if (!scopes.length) throw badRequest('写范围不能为空：未声明的写运行会与同项目所有写运行保守串行')
     const runningWrite = this.store.get(
       "SELECT id FROM runs WHERE task_id = ? AND status = 'running' AND mode = 'write'",

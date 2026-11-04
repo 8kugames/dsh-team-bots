@@ -1,7 +1,11 @@
-// src/services/write-scopes.js —— 写范围（write scopes）纯函数
+// src/services/write-scopes.js —— 写范围（write scopes）纯函数与派单清洗助手
 // 任务可声明自己会写工作区里的哪些路径；调度器据此判断同项目两个写运行能否并行。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
+
+import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { badRequest } from '../errors.js'
 import { jsonParse } from '../util.js'
@@ -40,6 +44,33 @@ export function parseWriteScopes(input) {
   // package.json 由版本钩子机械改动（.githooks/pre-commit 每次提交 bump patch 位），
   // 不纳入写范围锁（DSHBOTS-133）：声明出口直接剥掉，新任务从源头不带它。
   return scopes.filter(scope => scope !== 'package.json')
+}
+
+// 派单清洗（DSHBOTS-168）第一步：对已归一的写范围清单按项目工作目录跑 git check-ignore，
+// 机械剔除命中忽略规则的条目——被 .gitignore 整体忽略的路径没有写保护价值，留着只会
+// 制造假声明。口径与 captureRunArtifacts 一致：--no-index 纯按规则匹配（已跟踪但被
+// ignore 的路径同样命中）、退出码 0/1 均正常；目录不存在、非 git 仓库、git 不可用或
+// 异常退出一律保守放行——清洗本身不引入新的派单失败模式，漏网路径交给闸门侧串行兜底。
+export function filterIgnoredWriteScopes(scopes, dir) {
+  if (!Array.isArray(scopes) || !scopes.length) return { kept: scopes ?? [], removed: [] }
+  if (!dir || !existsSync(join(dir, '.git'))) return { kept: scopes, removed: [] }
+  let check
+  try {
+    check = spawnSync('git', ['-c', 'core.quotePath=false', 'check-ignore', '--no-index', '--stdin'], {
+      cwd: dir,
+      timeout: 5_000,
+      encoding: 'utf8',
+      input: scopes.join('\n'),
+    })
+  } catch {
+    return { kept: scopes, removed: [] }
+  }
+  if (check.status !== 0 && check.status !== 1) return { kept: scopes, removed: [] }
+  const ignored = new Set(String(check.stdout ?? '').split('\n').filter(Boolean))
+  const kept = []
+  const removed = []
+  for (const scope of scopes) (ignored.has(scope) ? removed : kept).push(scope)
+  return { kept, removed }
 }
 
 // 兜底解析：任务描述里行首的 `写范围：a, b` 或 `write_scopes: a, b` 行（中英文冒号、

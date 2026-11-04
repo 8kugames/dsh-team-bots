@@ -146,7 +146,7 @@ test('非 owner 调用 answer_attention 被拒', async () => {
 test('taskView 透出 attention，任务阶段进入 person/answer', async () => {
   const { root, store, service, dev, project } = await setup()
   try {
-    const task = await service.createTask({ projectId: project.id, title: '带提问的任务', assigneeBotId: dev.id, writeScopes: ['src/'], autoStart: false })
+    const task = await service.createTask({ projectId: project.id, title: '带提问的任务', assigneeBotId: dev.id, writeScopes: ['src/x/'], autoStart: false })
     const runId = service.enqueueTaskRun(store.get('SELECT * FROM tasks WHERE id = ?', task.id), 'assigned', { type: 'system', id: 'system' })
     service.store.run("UPDATE runs SET status = 'running', started_at = ?, last_progress_at = ? WHERE id = ?", new Date().toISOString(), new Date().toISOString(), runId)
     await service.finishRun({

@@ -190,9 +190,9 @@ test('写范围相交但不完全相同：放行（串行正确性交给调度�
       assignee: 'Builder', title: '两个文件', write_scopes: ['src/a.js', 'src/b.js'],
     })
     assert.equal(wider.identifier, 'GATE-2')
-    // 目录前缀与文件路径相交但集合不同 → 放行
+    // 二级目录前缀与文件路径相交但集合不同 → 放行（一级目录声明已被 DSHBOTS-168 驳回，锚点迁到二级）
     const prefixed = await service.assignFromBot(sessionId, {
-      assignee: 'Builder', title: '目录范围', write_scopes: ['src'],
+      assignee: 'Builder', title: '目录范围', write_scopes: ['src/a'],
     })
     assert.equal(prefixed.identifier, 'GATE-3')
     assert.equal(taskCount(store, gate.id), 3)

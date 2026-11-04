@@ -5,7 +5,7 @@
 
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { clampNumber, id, nowIso, projectKey, TASK_ID_PATTERN, text } from '../util.js'
-import { parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
+import { filterIgnoredWriteScopes, parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 import { resolveSandboxOverride, SANDBOX_OVERRIDES } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
@@ -66,7 +66,7 @@ export const tasksMethods = {
     const status = input.status && TASK_STATUSES.has(input.status) ? input.status : (assigneeId ? 'todo' : 'backlog')
     const priority = TASK_PRIORITIES.has(input.priority) ? input.priority : 'medium'
     // 写范围：显式传参优先（含空数组 = 明确不声明）；未传时从描述的「写范围：」行兜底解析。
-    const writeScopes = input.writeScopes === undefined || input.writeScopes === null
+    const parsedScopes = input.writeScopes === undefined || input.writeScopes === null
       ? parseWriteScopesFromDescription(input.description)
       : parseWriteScopes(input.writeScopes)
     // 时效要求（DSHBOTS-125）：发布方可传交付时限（分钟）；未传/非法 = NULL，提示词不注入。
@@ -95,6 +95,9 @@ export const tasksMethods = {
     ensureTaskSandboxSchema(this.store)
     let number
     this.store.transaction(() => {
+      // 派单清洗（DSHBOTS-168）：ignored 机械移除 + 一级目录驳回，与建档同事务——
+      // 清洗后清单即落库清单（运行快照天然继承），审计挂真实 taskId 不产生孤儿行。
+      const writeScopes = this.normalizeDispatchScopes(project, parsedScopes, { actor, taskId })
       const relations = validateTaskRelations({ store: this.store, projectId: project.id, taskId, parentTaskId, blockedBy })
       number = Number(this.store.get('SELECT COALESCE(MAX(number), 0) + 1 AS n FROM tasks WHERE project_id = ?', project.id)?.n ?? 1)
       this.store.run(
@@ -619,6 +622,26 @@ export const tasksMethods = {
     }
     return null
   },
+  // 派单清洗（DSHBOTS-168）：写范围声明的程序化质量闸门，三入口共用——
+  // createTask（owner 派单路径权威清洗）、assignFromBot（经 createTask 同一清洗）、
+  // taskUpdateScopes（改卡入口）。两步：
+  // ① ignored 机械移除——命中项目 .gitignore 的条目没有写保护价值，剔除并落审计
+  //   task.scopes_normalize（removed=[...]）；全部被移除后调用方各自的「必须声明写
+  //   范围」闸门自然接管（清单为空）。非 git 目录 / git 不可用时保守放行不清洗。
+  // ② 一级目录驳回——清洗后仍不含 / 的条目（src、tests 这类整目录声明）直接拒绝：
+  //   整目录会把同项目全部写运行判为冲突锁死并发，这不是清洗能救的，必须改卡。
+  normalizeDispatchScopes(project, scopes, { actor, taskId }) {
+    const { kept, removed } = filterIgnoredWriteScopes(scopes, this.projectWorkDir(project))
+    if (removed.length) this.audit(actor, 'task.scopes_normalize', 'task', taskId, { removed })
+    const bare = kept.filter(scope => !scope.includes('/'))
+    if (bare.length) {
+      throw badRequest(
+        `写范围不能声明整目录：${bare.join('、')} —— 写范围必须声明到二级路径或具体文件，`
+        + '整目录声明会锁死同项目全部写运行。',
+      )
+    }
+    return kept
+  },
   async assignFromBot(sessionId, input) {
     const { project, actor } = this.ownerContextFor(sessionId)
     const member = this.membersOf(project.id).find(bot => bot.name.toLowerCase() === String(input.assignee ?? '').toLowerCase())
@@ -638,9 +661,12 @@ export const tasksMethods = {
     // 派单必须声明写范围（程序化闸门，不靠派单方自觉）：未声明写范围的任务其写运行会与
     // 同项目所有写运行判为冲突并保守串行，一条空范围任务就能把整队堵死。这里直接拒绝，
     // 而不是留到调度器里把并发能力悄悄吃掉。
-    const scopes = input.write_scopes === undefined || input.write_scopes === null
+    const parsedScopes = input.write_scopes === undefined || input.write_scopes === null
       ? parseWriteScopesFromDescription(input.description)
       : parseWriteScopes(input.write_scopes)
+    // 闸门按清洗后清单预判（DSHBOTS-168）：全部命中忽略规则 = 实际未声明，落上面的
+    // 拒绝。原清单透传 createTask 做权威清洗+审计（审计需真实 taskId），此处只预览不落账。
+    const scopes = filterIgnoredWriteScopes(parsedScopes, this.projectWorkDir(project)).kept
     if (!scopes.length) {
       throw badRequest(
         '派单必须声明写范围：传 write_scopes 路径数组，或在描述里写一行「写范围：a, b」。'
@@ -667,7 +693,8 @@ export const tasksMethods = {
       description: input.description,
       assigneeBotId: member.id,
       priority: input.priority,
-      writeScopes: scopes,
+      // 透传原始清单（DSHBOTS-168）：清洗+审计由 createTask 统一做（审计挂真实 taskId）。
+      writeScopes: parsedScopes,
       // 总监派单可带父子/依赖关系（snake_case 透传，createTask 内统一校验与落库）。
       parentTaskId: input.parent_task_id,
       blockedBy: input.blocked_by,
