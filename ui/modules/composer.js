@@ -554,7 +554,13 @@ function syncComposerBox(input) {
   if (button) button.disabled = input.value.trim() === '' && pendingImagesFor().length === 0
 }
 
+// 双发防护（DSHBOTS-165）：⌘Enter 按键重复、双击发送按钮、慢网下重复点击都会在出站未完成时
+// 再次进入 sendMessage，而旧实现草稿要等 api 成功才清空，同一草稿会被发出两遍。模块级在途
+// 标志收口全部入口（发送按钮 / ⌘Enter / 自动补全回车）：在途时二次触发直接返回，finally 复位。
+let sendInFlight = false
+
 async function sendMessage() {
+  if (sendInFlight) return
   const body = currentDraft(state).trim()
   const pending = pendingImagesFor()
   if (!body && pending.length === 0) return
@@ -563,27 +569,35 @@ async function sendMessage() {
     toast(t('toast.attachUnsupported'), 'error')
     return
   }
+  const solo = state.chatMode === 'solo'
+  const bot = solo ? botById(state.soloBotId) : null
+  const project = solo ? null : activeProject()
+  if (solo ? !bot : !project) return
+  // 命令类消息保留原 confirm 拦截语义：取消即整体退出，草稿与附件原样不动。
+  if (body === '/clear' && !window.confirm(solo ? `清空和 ${bot.name} 的全部对话记录？清除后不可恢复（记忆保留）。` : '清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
   // 待发图片随消息一起出站：mediaType + name + base64，字段口径与后端 normalizeImageInputs 一致。
   const images = pending.map(item => ({ mediaType: item.mediaType, name: item.name, data: item.data }))
+  const key = draftKey(state)
+  const replyTo = state.replyTo
   closeAutocomplete()
+  let sent = false
+  sendInFlight = true
   try {
-    let result
-    if (state.chatMode === 'solo') {
-      const bot = botById(state.soloBotId)
-      if (!bot) return
-      if (body === '/clear' && !window.confirm(`清空和 ${bot.name} 的全部对话记录？清除后不可恢复（记忆保留）。`)) return
-      result = await api('send_solo_message', { botId: bot.id, body, ...(images.length ? { images } : {}) })
-    } else {
-      const project = activeProject()
-      if (!project) return
-      if (body === '/clear' && !window.confirm('清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
-      // 引用回复：带上 replyTo；命令路径（/clear、/task、/remember）后端会忽略该参数。
-      result = await api('send_message', { projectId: project.id, body, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}), ...(images.length ? { images } : {}) })
-    }
-    state.chatDrafts[draftKey(state)] = ''
+    // 草稿乐观清空（原成功路径的清理前移到出站前）：窗口期内输入框已空、发送钮禁用，重复触发
+    // 无内容可出站；出站失败由下方 catch 恢复。清理发生在同一同步段，此刻上下文键与 key 相同。
+    state.chatDrafts[key] = ''
     state.replyTo = null
     state.chatAtBottom = true
     clearPendingImages()
+    render()
+    let result
+    if (solo) {
+      result = await api('send_solo_message', { botId: bot.id, body, ...(images.length ? { images } : {}) })
+    } else {
+      // 引用回复：带上 replyTo；命令路径（/clear、/task、/remember）后端会忽略该参数。
+      result = await api('send_message', { projectId: project.id, body, ...(replyTo ? { replyTo: replyTo.id } : {}), ...(images.length ? { images } : {}) })
+    }
+    sent = true
     // 排队气泡乐观渲染（DSHBOTS-150）：发送成功后立刻为被 @ 的目标 bot 立排队行，不等下一拍
     // 2.8s 轮询——被 @ 的 bot 常常在轮询到达前就答完了，气泡否则肉眼不可见。
     // 目标 bot 取后端回传的 runBots / runBot，与实际派生的运行一致，无需前端解析 @。
@@ -596,7 +610,29 @@ async function sendMessage() {
     if (result?.memory) toast(t('toast.memorySaved'), 'success')
     const input = document.getElementById('composer-input')
     input?.focus()
-  } catch {}
+  } catch (error) {
+    if (sent) {
+      // 出站已成功、只是取数/重画失败：消息本体已落库，不得恢复草稿（恢复+重发=再制造双发），
+      // 记录上下文即可，下一拍 2.8s 轮询会自然补齐数据。
+      console.warn('[composer] post-send refresh failed:', { mode: state.chatMode, body: body.slice(0, 80), error })
+    } else {
+      // 出站失败：把草稿与待发图片恢复回去供重发；错误 toast 由 api() 非 quiet 调用统一弹出，
+      // 这里不重复。恢复写进出站时的键（慢网窗口内切换会话不串写）；窗口期内新输入的草稿与
+      // 新附件保留在其后不被覆盖。
+      const typed = state.chatDrafts[key] ?? ''
+      state.chatDrafts[key] = typed ? `${body}\n${typed}` : body
+      if (!state.replyTo) state.replyTo = replyTo
+      state.pendingImages = {
+        ...(state.pendingImages ?? {}),
+        // previewUrl 已被 clearPendingImages revoke，按手上的 base64 重建预览，缩略图不死链。
+        [key]: [...pending.map(item => ({ ...item, previewUrl: base64BlobUrl(item.data, item.mediaType) })), ...(state.pendingImages?.[key] ?? [])],
+      }
+      render()
+      document.getElementById('composer-input')?.focus()
+    }
+  } finally {
+    sendInFlight = false
+  }
 }
 
 async function saveTaskFromForm(taskId) {

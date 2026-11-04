@@ -35,7 +35,9 @@ test('草稿接线：两个 composer 读 currentDraft，input 写回 map，发�
   assert.equal((source.match(/currentDraft\(state\)\.trim\(\) \|\| pendingImagesFor\(\)\.length/g) ?? []).length, 2, '群聊与单聊发送键在有草稿或有待发图片时都可点')
   assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = input\.value/)
   assert.match(source, /const body = currentDraft\(state\)\.trim\(\)/)
-  assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = ''/)
+  // DSHBOTS-165：sendMessage 改为出站前捕获当前键（失败恢复要写回同一键），清空写法随之变化。
+  assert.match(source, /const key = draftKey\(state\)\n/)
+  assert.match(source, /state\.chatDrafts\[key\] = ''/)
   assert.ok(!source.includes('state.draft'), '旧的单值 state.draft 应已全部移除')
   const soloBotCase = /case 'solo-bot': \{[\s\S]*?case 'copy':/.exec(source)?.[0]
   assert.ok(!/chatDrafts\[/.test(soloBotCase ?? ''), 'solo-bot 切换不得清空任何草稿')
