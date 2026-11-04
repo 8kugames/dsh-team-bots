@@ -542,10 +542,18 @@ function composerPanelCap(input) {
   const panel = input.closest('.chat-panel')
   return panel ? composerCap(panel.clientHeight) : COMPOSER_AUTO_MAX_PX
 }
+// composer-flicker（DSHBOTS-153）：renderShell 全量重建出的新 textarea 没有内联高度，
+// 轮询任务又常落在帧的 rAF 阶段之后，浏览器会先把「rows=2 内在高度」画出去，下一帧 rAF 里
+// applyComposerHeight 才设回目标 px——空输入即每 2.8s 一次约半像素跳变，拖高/多行草稿放大为
+// 数十像素闪一下。记住最近一次应用的 px，chat.js 的 composer 模板直接内联同值（活绑定），
+// 重建帧与稳态帧高度一致；首次渲染前为 null，模板不输出 style。
+let composerAppliedHeightPx = null
 function applyComposerHeight(input) {
   input.style.height = 'auto'
   const auto = Math.min(COMPOSER_AUTO_MAX_PX, input.scrollHeight)
-  input.style.height = `${composerHeightFor(auto, state.composerHeight, composerPanelCap(input))}px`
+  const px = composerHeightFor(auto, state.composerHeight, composerPanelCap(input))
+  input.style.height = `${px}px`
+  composerAppliedHeightPx = px
 }
 
 function syncComposerBox(input) {
@@ -656,4 +664,4 @@ async function saveTaskFromForm(taskId) {
 }
 
 
-export { AC_COMMANDS, acWordChar, detectAcToken, buildAcItems, acSources, updateAutocomplete, renderAcPopup, moveAcSelection, closeAutocomplete, applyAutocomplete, draftKey, currentDraft, IMAGE_MEDIA_TYPES, IMAGE_ACCEPT, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, IMAGE_EXT_TYPES, resolveImageMediaType, formatImageBytes, validateImageSelection, pendingImagesFor, setPendingImages, revokePreview, readFileAsBase64, base64BlobUrl, addPendingImages, removePendingImage, clearPendingImages, attachImageButton, composerImageStrip, thumbnailFallback, ensureComposerImageInput, parseFileUriList, insertTextAtCursor, renderMessageImages, messageImageThumbUrls, messageImageThumbPending, messageImageThumbUrl, hydrateMessageImageThumbs, ensureImageViewer, openMessageImage, openInlineImage, closeImageViewer, COMPOSER_AUTO_MAX_PX, COMPOSER_PANEL_RATIO, composerCap, composerHeightFor, composerPanelCap, applyComposerHeight, syncComposerBox, sendMessage, saveTaskFromForm }
+export { AC_COMMANDS, acWordChar, detectAcToken, buildAcItems, acSources, updateAutocomplete, renderAcPopup, moveAcSelection, closeAutocomplete, applyAutocomplete, draftKey, currentDraft, IMAGE_MEDIA_TYPES, IMAGE_ACCEPT, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, IMAGE_EXT_TYPES, resolveImageMediaType, formatImageBytes, validateImageSelection, pendingImagesFor, setPendingImages, revokePreview, readFileAsBase64, base64BlobUrl, addPendingImages, removePendingImage, clearPendingImages, attachImageButton, composerImageStrip, thumbnailFallback, ensureComposerImageInput, parseFileUriList, insertTextAtCursor, renderMessageImages, messageImageThumbUrls, messageImageThumbPending, messageImageThumbUrl, hydrateMessageImageThumbs, ensureImageViewer, openMessageImage, openInlineImage, closeImageViewer, COMPOSER_AUTO_MAX_PX, COMPOSER_PANEL_RATIO, composerCap, composerHeightFor, composerPanelCap, composerAppliedHeightPx, applyComposerHeight, syncComposerBox, sendMessage, saveTaskFromForm }

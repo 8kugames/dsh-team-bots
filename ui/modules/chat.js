@@ -7,7 +7,7 @@ import { mdPlainSummary } from './markdown.js'
 import { t } from './i18n.js'
 import { api } from './api.js'
 import { renderDirectMessagesCard, renderMessage } from './cards.js'
-import { attachImageButton, composerImageStrip, currentDraft, pendingImagesFor, sendMessage } from './composer.js'
+import { attachImageButton, composerAppliedHeightPx, composerImageStrip, currentDraft, pendingImagesFor, sendMessage } from './composer.js'
 import { typingLingerRowsHtml } from './typing-linger.js'
 import { effortOptions, fallbackModelOptions, modelOptions } from './modal-forms.js'
 import { sideRowStatusHtml, runStatusLabel, runKindLabel, render, noProject } from '../app.js'
@@ -201,7 +201,7 @@ function renderChat() {
             ${composerImageStrip()}
             <div class="composer-ac" id="composer-ac" role="listbox" aria-label="${t('composer.acLabel')}" hidden></div>
             <div class="composer-resizer" id="composer-resizer" title="${t('composer.resizerTitle')}" role="separator" aria-orientation="horizontal" aria-label="${t('composer.resizerTitle')}"></div>
-            <textarea id="composer-input" rows="2" placeholder="${t('composer.groupPlaceholder')}">${esc(currentDraft(state))}</textarea>
+            <textarea id="composer-input" rows="2"${composerAppliedHeightPx ? ` style="height:${composerAppliedHeightPx}px"` : ''} placeholder="${t('composer.groupPlaceholder')}">${esc(currentDraft(state))}</textarea>
             <div class="composer-bottom">
               ${attachImageButton()}
               <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> ${t('composer.sendHint')}</span>
@@ -320,7 +320,7 @@ function renderSoloChat() {
           <div class="composer-box">
             ${composerImageStrip()}
             <div class="composer-resizer" id="composer-resizer" title="${t('composer.resizerTitle')}" role="separator" aria-orientation="horizontal" aria-label="${t('composer.resizerTitle')}"></div>
-            <textarea id="composer-input" rows="2" placeholder="${t('composer.soloPlaceholder', { name: bot.name })}">${esc(currentDraft(state))}</textarea>
+            <textarea id="composer-input" rows="2"${composerAppliedHeightPx ? ` style="height:${composerAppliedHeightPx}px"` : ''} placeholder="${t('composer.soloPlaceholder', { name: bot.name })}">${esc(currentDraft(state))}</textarea>
             <div class="composer-bottom">
               ${attachImageButton()}
               <span class="composer-hint"><kbd>⌘</kbd><kbd>Enter</kbd> ${t('composer.sendHint')}</span>
