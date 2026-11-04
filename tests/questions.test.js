@@ -132,21 +132,78 @@ test('命中 bot 会话：落 pending 提问与 kind=question 消息，单选映
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('未绑定会话与单聊绑定都透传：next() 接管，不落提问', async () => {
+// DSHBOTS-190：ask_user_question 收紧为项目总监（owner bot）专属。
+// 非总监 bot 的项目群会话、单聊 bot 会话都要拿到明确拒绝文案（reject 回宿主 ask 工具结果），
+// 不能再 next() 透传——透传等于把提问落回原生界面，收紧形同虚设。
+test('权限收紧：非总监 bot 在项目群发起 ask 被明确拒绝，不落卡不透传', async () => {
   const { root, store, service } = await setup()
   try {
-    const project = await primeProject(store, service, 'Question Pass')
+    const project = await primeProject(store, service, 'Question Deny')
+    const programmer = store.get("SELECT * FROM bots WHERE name = 'programmer'")
+    assert.ok(programmer, '种子成员 bot programmer 必须在场')
+    bindSession(store, { sessionId: 'sess-member', botId: programmer.id, projectId: project.id })
+    let nexted = false
+    const { req } = makeReq({ sessionId: 'sess-member' })
+    await assert.rejects(
+      () => service.handleQuestionRequest(req, () => { nexted = true }),
+      /仅限项目总监/,
+    )
+    assert.equal(nexted, false, '拒绝路径不得透传原生界面')
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0, '不得落提问行')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0, '不得落提问卡消息')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// DSHBOTS-190 视图契约：作答后的服务端视图必须带 answered_at（=ended_at）。
+// 客户端 preserveAnsweredQuestions 以 previous.questions[].answered_at 为本地终态键，
+// 视图缺该字段时终态键丢失，下一轮旧 pending 轮询快照会把「已回答」卡闪回问题卡（D-190 症状）。
+test('作答后的服务端视图带 answered_at=ended_at：终态不被旧轮询闪回的前提', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const project = await primeProject(store, service, 'Question Stamp')
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
-    bindSession(store, { sessionId: 'sess-solo', botId: director.id, projectId: null })
-    for (const sessionId of ['sess-unknown', 'sess-solo']) {
-      let nexted = false
-      const { req } = makeReq({ sessionId })
-      const result = await service.handleQuestionRequest(req, () => { nexted = true; return { answers: [] } })
-      assert.equal(nexted, true)
-      assert.deepEqual(result, { answers: [] })
-    }
+    bindSession(store, { sessionId: 'sess-stamp', botId: director.id, projectId: project.id })
+    const { req } = makeReq({ sessionId: 'sess-stamp' })
+    ask(service, req)
+    const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
+    const view = await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['dev'] }] })
+    assert.equal(view.status, 'answered')
+    const settled = questionOf(store, row.id)
+    assert.ok(settled.ended_at, '结算必须写 ended_at')
+    assert.equal(view.answered_at, settled.ended_at, '视图 answered_at 必须暴露 ended_at，客户端终态键才不断链')
+    // pending 阶段不该有回答时间戳：只有 answered 才带。
+    assert.equal(view.remainingMs, 0)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('未绑定会话透传：next() 接管，不落提问（D-190 后仅此路径透传）', async () => {
+  const { root, store, service } = await setup()
+  try {
+    let nexted = false
+    const { req } = makeReq({ sessionId: 'sess-unknown' })
+    const result = await service.handleQuestionRequest(req, () => { nexted = true; return { answers: [] } })
+    assert.equal(nexted, true)
+    assert.deepEqual(result, { answers: [] })
     assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0)
     assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// DSHBOTS-190：单聊 bot 会话（binding 有 bot 无 project）不再透传——提问能力整体收紧为总监专属，
+// 单聊原生界面同样是 bot 可达的提问出口，必须同样拒绝并给出指引。
+test('权限收紧：单聊 bot 会话发起 ask 也被拒绝，不再透传原生界面', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    bindSession(store, { sessionId: 'sess-solo', botId: director.id, projectId: null })
+    let nexted = false
+    const { req } = makeReq({ sessionId: 'sess-solo' })
+    await assert.rejects(
+      () => service.handleQuestionRequest(req, () => { nexted = true }),
+      /仅限项目总监/,
+    )
+    assert.equal(nexted, false, '单聊 bot 不得透传原生界面')
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -383,7 +440,16 @@ test('提示词指引：群聊会话含 ask_user_question 指引，solo/task 提
     const chat = runtime.systemPromptFor({ agent: { id: 'sess-prompt-chat' } })
     assert.match(chat, /ask_user_question/, '群聊提示词应指引 ask_user_question 工具')
     assert.match(chat, /question card in the project group that only the project owner may answer/, '指引应说明卡片去向与作答权')
+    assert.match(chat, /Director-only/, 'D-190：总监指引应注明专属')
     assert.match(chat, /not in solo sessions/, '指引应写明单聊会话不可用')
+
+    // D-190：非总监成员 bot 的群聊提示词只留路由指引，不给完整用法。
+    const programmer = store.get("SELECT * FROM bots WHERE name = 'programmer'")
+    bindSession(store, { sessionId: 'sess-prompt-member', botId: programmer.id, projectId: project.id })
+    const member = runtime.systemPromptFor({ agent: { id: 'sess-prompt-member' } })
+    assert.doesNotMatch(member, /question card in the project group that only the project owner may answer/, '成员 bot 不应拿到完整用法指引')
+    assert.match(member, /director-only/, '成员 bot 应看到 director-only 路由指引')
+    assert.match(member, /hand the question to the project director bot/, '成员 bot 指引应指明转交总监发起')
 
     assert.doesNotMatch(
       runtime.systemPromptFor({ agent: { id: 'sess-prompt-solo' } }),

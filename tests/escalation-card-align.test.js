@@ -1,6 +1,7 @@
 // DSHBOTS-180：提权请求卡（审批卡骨架，cards.js .approval-ask「请求提权」）结果 badge 右对齐，
 // 对齐 D-173 审批卡按钮行口径。口径：读线上同一份 CSS 汇总（tests/ui-styles-source.js，
-// 与 readUiStyles 同函数同顺序）；范围外保护：提问卡页脚与 badge 自身规则不被顺带动。
+// 与 readUiStyles 同函数同顺序）；范围外保护：badge 自身规则不被顺带动。
+// DSHBOTS-190 起提问卡页脚已右对齐（口径移交 tests/question-card-layout.test.js 锁定）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -40,7 +41,7 @@ test('骨架前提：badge 与按钮行互斥渲染，badge 是已决态单独�
   assert.match(cardsSource, /<\/div>`\s*\n\s*:\s*`<div class="approval-foot">/, 'foot 是 pending 三元的 else 支：badge 与按钮行互斥渲染，badge 单独行右端')
 })
 
-test('范围外不受影响：提问卡页脚与 badge 自身规则保持原样', () => {
-  assert.doesNotMatch(ruleBody('.question-foot'), /justify-content/, '提问卡页脚不在本卡范围，保持左对齐')
+test('范围外不受影响：badge 自身规则保持原样', () => {
+  // 提问卡页脚自 DSHBOTS-190 起右对齐（与审批卡口径对齐），由 question-card-layout.test.js 锁定。
   assert.doesNotMatch(ruleBody('.approval-pill'), /justify-content/, 'badge 自身是 inline-flex 内容标签，不承担行对齐')
 })

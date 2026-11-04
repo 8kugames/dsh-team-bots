@@ -92,19 +92,37 @@ export const questionsMethods = {
     }, 'dsh-team: user question request binding')
   },
 
-  // waterfall 监听器：命中 bot 会话且绑定到项目才认领；单聊会话（project_id 为空）没有群聊可发卡片，透传。
+  // waterfall 监听器：DSHBOTS-190 起，提问能力收紧为项目总监（owner bot）专属。
+  // 未绑定会话无法归因，保持透传原生界面；命中 bot 会话一律先过所有权闸门，不再透传——
+  // 透传会把提问落回宿主面板，收紧形同虚设。拒绝以 rejected promise 回宿主，错误文案
+  // 即调用 bot 收到的 ask_user_question 工具结果。
   async handleQuestionRequest(req, next) {
     const sessionId = req?.agent?.session?.id
     // bindingOfSession 在 DshRuntime 原型上，服务层拿不到 this 绑定，这里直查同款 SQL。
     const binding = sessionId
       ? this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
       : undefined
-    if (!binding || !binding.project_id) return next()
+    if (!binding) return next()
+
+    if (!binding.project_id) {
+      return Promise.reject(new Error(
+        'ask_user_question 仅限项目总监 Bot 在项目群中使用；当前是单聊会话。如需向用户提问，请在项目群中由总监 Bot 发起。',
+      ))
+    }
 
     const store = this.store
     const bot = store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
     const project = store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)
-    if (!bot || !project) return next()
+    if (!bot || !project) {
+      return Promise.reject(new Error(
+        'ask_user_question 会话绑定失效，无法确认项目归属；请在项目群中由总监 Bot 发起提问。',
+      ))
+    }
+    if (project.owner_bot_id !== binding.bot_id) {
+      return Promise.reject(new Error(
+        `ask_user_question 仅限项目总监 Bot 使用；${bot.name} 不是本项目总监。需要用户决策时，请把问题交给总监 Bot 发起。`,
+      ))
+    }
 
     const items = (Array.isArray(req.questions) ? req.questions : []).map(cleanQuestionItem)
       .filter(item => item.id && item.question)
@@ -263,6 +281,11 @@ export const questionsMethods = {
     const expiresAt = Date.parse(row.expires_at)
     return {
       ...row,
+      // DSHBOTS-190：answered 终态必须暴露 answered_at（=ended_at）。客户端
+      // preserveAnsweredQuestions 以 previous.questions[].answered_at 为本地终态键——
+      // 视图缺该字段时，提交作答后的服务端终态覆盖乐观对象即丢键，下一轮旧 pending
+      // 轮询快照会把「已回答」卡闪回问题卡；提问卡 pill 的作答时间戳也读它。
+      ...(row.status === 'answered' ? { answered_at: row.ended_at } : {}),
       questions: jsonParse(row.questions, []),
       answer: jsonParse(row.answer, null),
       botName: bot?.name ?? 'Bot',

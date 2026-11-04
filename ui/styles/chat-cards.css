@@ -207,7 +207,8 @@
 .approval-menu-time { grid-area: time; color: var(--star); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .approval-menu-time.urgent { color: var(--star); }
 /* 提问卡片（DSHBOTS-116）：与审批卡片同骨架，四态中只有 pending 是强调态；已答两态回中性底。
-   圆角 12（卡）/ 8（问题块、选项）/ 6（图标徽章）/ 7（pill、进度条），间距 4-6-8-10。 */
+   圆角 12（卡）/ 8（问题块、选项）/ 6（图标徽章）/ 7（pill、进度条），间距 4-6-8-10。
+   整行化与右对齐（DSHBOTS-190）：对齐审批卡 D-173/D-180 口径——占满消息行、按钮与 pill 贴右缘。 */
 .question-card {
     border: 1px solid var(--line);
     border-left: 4px solid var(--accent);
@@ -217,8 +218,15 @@
     flex-direction: column;
     gap: 8px;
     min-width: 240px;
-    max-width: 480px;
+    max-width: 100%;
     background: var(--surface);
+}
+/* 整行化（DSHBOTS-190，同审批卡 D-173）：双类选择器压过基线 .message-body-wrap 的
+   max-width: min(640px, 82%) 与窄屏 88% 覆盖；min-width 收缩防窄屏横向滚动。 */
+.message-body-wrap.question-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: min(240px, 100%);
 }
 .question-card[data-question-status='pending'] { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
 .question-card[data-question-status='answered'] { border-left-color: var(--green); }
@@ -298,8 +306,8 @@
 .question-progress { height: 4px; border-radius: 7px; background: var(--surface-3); overflow: hidden; }
 .question-progress-fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); transition: width .6s linear; }
 .question-progress.urgent .question-progress-fill { background: var(--star); }
-.question-actions { display: flex; gap: 8px; }
-.question-foot { display: flex; align-items: center; gap: 8px; }
+.question-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.question-foot { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 .question-pill {
     display: inline-flex;
     align-items: center;

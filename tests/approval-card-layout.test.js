@@ -41,7 +41,10 @@ test('倒计时行与进度条行不随按钮行一起右对齐', () => {
   assert.doesNotMatch(ruleBody('.approval-progress'), /justify-content/, '进度条行保持左对齐，不动')
 })
 
-test('本卡只动审批卡：提问卡片仍是 480px 小卡', () => {
+test('本卡只动审批卡：提问卡已随 D-190 对齐整行化（不再是 480px 小卡）', () => {
+  // D-173 时提问卡是范围外、钉 480px 不动；DSHBOTS-190 把提问卡对齐审批卡口径，
+  // 旧的 480px 栅栏随之反转——具体规格由 tests/question-card-layout.test.js 对称锁定。
   const question = ruleBody('.question-card')
-  assert.match(question, /max-width:\s*480px/, '提问卡片不在本卡范围，保持原宽度上限')
+  assert.doesNotMatch(question, /max-width:\s*480px/, '提问卡上限已放开（D-190 对齐审批卡）')
+  assert.match(question, /max-width:\s*100%/, '提问卡与审批卡同口径：max-width 100%')
 })

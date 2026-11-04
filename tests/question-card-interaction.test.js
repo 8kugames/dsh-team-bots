@@ -362,3 +362,86 @@ test('守卫：question-option 点击对已失效（非 pending）问题不写�
   assert.ok(!stale.classList.contains('is-selected'), '陈旧按钮不得进入选中态')
   assert.deepEqual(h.apiCalls, [], '不得触发任何 api 调用')
 })
+
+// ---------- DSHBOTS-190 闪回竞态锁 ----------
+// 症状：点击授权选项提交后「已回答」闪回问题卡再闪回「已回答」。
+// 根因：提交 handler 用服务端返回的终态整体替换乐观对象（events-click.js `list[index] = updated`），
+// 而服务端 questionView 只展开 questions 表行——表内只有 ended_at 没有 answered_at 列，终态键
+// answered_at 丢失；下一轮在途旧轮询（快照仍 pending）经 loadState 写回 state.data 时，
+// preserveAnsweredQuestions 在 previous 里找不到 answered_at，不保护，pending 快照盖掉已答终态=闪回。
+// 修复：服务端视图给 answered 行补 answered_at=ended_at（src/services/questions.js questionView，
+// 契约由 tests/questions.test.js 锁定）。本测试用真实 click 链 + 真实 api.js 的
+// loadState/preserveAnsweredQuestions 驱动完整时序：提交成功（服务端契约终态替换乐观对象）→
+// 迟到的旧 pending 轮询到达 → 状态保持 answered 不闪回。
+{
+  const apiSource = readFileSync(join(root, 'ui', 'modules', 'api.js'), 'utf8')
+  const fnSource = (name) => {
+    const match = apiSource.match(new RegExp(`export (?:async )?function ${name}\\([\\s\\S]*?\\n\\}`))
+    assert.ok(match, `api.js 必须导出 ${name}（真实实现驱动，禁复制）`)
+    return match[0].replace(/^export /, '')
+  }
+  const realApiFns = (state, api) => new Function('state', 'api',
+    ['markVisibleChatRead', 'preserveDecidedApprovals', 'preserveAnsweredQuestions', 'loadState'].map(fnSource).join('\n')
+      + '\nreturn { loadState, preserveAnsweredQuestions }')(state, api)
+
+  test('竞态锁：提交作答后迟到的旧 pending 轮询不得把「已回答」闪回问题卡', async () => {
+    const h = makeHarness()
+    h.state.view = 'chat'
+    h.state.chatMode = 'group'
+    h.state.projectId = 'p1'
+    h.state.markedRead = ''
+    const els = h.mount()
+    await h.click(els.option('main'))
+
+    // 提交：api 返回服务端契约终态（questionView 形状：ended_at 为表列，answered_at 由视图补齐）。
+    const endedAt = new Date().toISOString()
+    const serverView = {
+      ...h.baseQuestion, status: 'answered', ended_at: endedAt, answered_at: endedAt,
+      answer: { answers: [{ id: 'q1', selected: ['main'] }] }, remainingMs: 0,
+    }
+    h.setApi(async () => serverView)
+    await h.click(els.submit())
+    await Promise.resolve()
+    let question = h.state.data.questions.find((entry) => entry.id === 'qst_1')
+    assert.equal(question.status, 'answered', '提交成功后终态为 answered')
+    assert.equal(question.answered_at, endedAt, '服务端终态替换乐观对象后 answered_at 仍在（终态键不断链）')
+
+    // T3：在途旧轮询此刻返回（快照抓于提交之前，服务端仍是 pending）——真实 loadState + preserve 驱动。
+    const apiFns = realApiFns(h.state, async (action, payload, opts) => {
+      h.apiCalls.push({ action, payload, opts })
+      return {
+        project: { id: 'p1' }, projects: [{ id: 'p1', status: 'active' }], messages: [],
+        questions: [{ ...h.baseQuestion, status: 'pending' }],
+        pendingQuestions: { count: 1, items: [{ ...h.baseQuestion, status: 'pending' }] },
+      }
+    })
+    await apiFns.loadState('p1', { quiet: true })
+
+    question = h.state.data.questions.find((entry) => entry.id === 'qst_1')
+    assert.equal(question.status, 'answered', '旧 pending 快照不得盖回：状态保持 answered（不闪回）')
+    assert.equal(question.answered_at, endedAt, '终态键保持服务端时间')
+    assert.equal(h.state.data.pendingQuestions.count, 0, 'pending 徽标不被旧快照顶回')
+    assert.deepEqual(h.state.data.pendingQuestions.items.map((i) => i.id), [], '已答问题不回待答清单')
+    const html = h.card.questionCardMarkup(question)
+    assert.ok(!html.includes('question-submit'), '渲染态无提交按钮（点击后状态稳定）')
+    assert.match(html, /已回答/, '渲染态出已答 pill')
+    assert.deepEqual(h.toasts, [], '全程无错误 toast')
+  })
+
+  test('竞态锁：preserveAnsweredQuestions 只认本地终态键 answered_at，缺键即不保护（契约说明）', () => {
+    const h = makeHarness()
+    const apiFns = realApiFns(h.state, async () => ({}))
+    const previous = { questions: [{ id: 'qst_1', status: 'answered', answered_at: 't1' }] }
+    const next = { questions: [{ id: 'qst_1', status: 'pending' }], pendingQuestions: { count: 1, items: [{ id: 'qst_1' }] } }
+    const kept = apiFns.preserveAnsweredQuestions(previous, JSON.parse(JSON.stringify(next)))
+    assert.equal(kept.questions[0].status, 'answered', '带 answered_at 的本地终态受保护')
+    assert.equal(kept.pendingQuestions.count, 0, '旧 pending 清单被过滤')
+    // 服务端视图缺 answered_at（修复前的形状）时 previous 无键可依——这正是 D-190 服务端
+    // 契约测试存在的原因：两端必须一起守住 answered_at 键。
+    const bare = apiFns.preserveAnsweredQuestions(
+      { questions: [{ id: 'qst_1', status: 'answered', ended_at: 't1' }] },
+      JSON.parse(JSON.stringify(next)),
+    )
+    assert.equal(bare.questions[0].status, 'pending', 'previous 缺 answered_at 时不保护（键即契约，服务端必须补键）')
+  })
+}
