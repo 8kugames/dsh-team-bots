@@ -1,6 +1,7 @@
-// 全局配置页信息架构守门（DSHBOTS-184）。
-// 本文件锁「美术重设计」的结构契约：页头指标带、锚点导航、四个分组 section、
-// 组内 12 列槽位，以及「计划迁移」占位标记。样式细节由 tests/styles-split.test.js 兜底。
+// 全局配置页信息架构守门（DSHBOTS-184 立骨架，DSHBOTS-197 迁移收口）。
+// 迁移后契约：配置页只剩「偏好 / 运行与预算」两个核心分组，无「计划迁移」标注；
+// 微信通道、密钥、DSH 路径/服务分别落在通道页 / 密钥页 / 关于页（ui/modules/global-pages.js），
+// 模型价格规则落在全局用量页。样式细节由 tests/styles-split.test.js 兜底。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join, dirname } from 'node:path'
@@ -59,7 +60,7 @@ function stubDom() {
   globalThis.Node = class {}
   globalThis.MutationObserver = class { observe() {} disconnect() {} takeRecords() { return [] } }
   globalThis.ResizeObserver = class { observe() {} disconnect() {} unobserve() {} }
-  globalThis.IntersectionObserver = class { observe() {} disconnect() {} unobserve() {} }
+  globalThis.IntersectionObserver = class { observe() {} disconnect() {} }
   globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' })
   globalThis.fetch = async () => ({ ok: true, json: async () => ({}) })
   globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0)
@@ -79,29 +80,38 @@ function stubDom() {
   }
 }
 
-async function renderGlobalWith(data) {
+// 与原版守门同款时序约束：模块 import（会触发 app.js 顶层 void init() 排队 fetch 桩）
+// 必须全部完成后再同步设置 fixture 并同步调用渲染——中间隔任何 await 边界，
+// init 里的 loadState 就会把 state.data 覆盖为桩响应（null）。
+async function renderPage(module, fn, data) {
   stubDom()
   const { state } = await import(pathToFileURL(join(root, 'ui/modules/state.js')))
-  const settings = await import(pathToFileURL(join(root, 'ui/modules/settings.js')))
-  state.view = 'global'
+  const mod = await import(pathToFileURL(join(root, `ui/modules/${module}.js`)))
   state.projectId = null
   state.data = {
     bots: [{ id: 'b1', status: 'active' }], projects: [{ id: 'p1', status: 'active' }],
     tasks: [], approvals: [], proposals: [], models: [], prices: [], priceDefaults: [],
     members: [], runs: [], skills: [{ id: 's1' }],
-    usage: { priceCount: 3 }, wechat: { enabled: false }, secrets: [],
+    usage: {
+      priceCount: 3, window: '30d', byModel: [], byBot: [], byProject: [], byDay: [],
+      reconciliation: null,
+    },
+    wechat: { enabled: false }, secrets: [], secretRequests: [],
+    outbox: { pending: 0, failed: 0, delivered: 0 },
     paths: { dshHome: '/tmp/.dsh', workspace: '/tmp/ws', skillRoot: '/tmp/skills', dataDir: '/tmp/data' },
+    dsh: { version: '0.2.284' }, pluginVersion: '0.2.284',
     project: null, settings: { ui_language: 'zh' },
     ...data,
   }
-  return settings.renderGlobal()
+  state.view = { renderGlobal: 'global', renderChannel: 'channel', renderSecretsPage: 'secrets', renderAbout: 'about', renderUsageGlobal: 'usage', renderSkills: 'skills' }[fn]
+  return { html: mod[fn](), state }
 }
 
-test('全局配置页按四个分组渲染，导航锚点与 section 一一对应', async () => {
-  const html = await renderGlobalWith()
+test('配置页只剩两个核心分组，导航锚点与 section 一一对应', async () => {
+  const { html } = await renderPage('settings', 'renderGlobal')
   assert.match(html, /class="global-page"/, '页面根应为 .global-page')
   const sections = [...html.matchAll(/<section class="gsec" id="(g-[a-z]+)"/g)].map((m) => m[1])
-  assert.deepEqual(sections, ['g-pref', 'g-runtime', 'g-env', 'g-integrations'], '分组顺序固定为 偏好/运行/环境/接入')
+  assert.deepEqual(sections, ['g-pref', 'g-runtime'], '迁移后只留 偏好/运行 分组')
   const anchors = [...html.matchAll(/class="global-nav-item" href="#(g-[a-z]+)"/g)].map((m) => m[1])
   assert.deepEqual(anchors, sections, '导航锚点必须与分组一一对应')
   for (const id of sections) {
@@ -112,55 +122,92 @@ test('全局配置页按四个分组渲染，导航锚点与 section 一一对�
   stopTimers()
 })
 
-test('分组头给出序号、标题、说明与模块计数', async () => {
-  const html = await renderGlobalWith()
-  for (const index of ['01', '02', '03', '04']) {
+test('配置页分组头保留序号、标题、说明与模块计数', async () => {
+  const { html } = await renderPage('settings', 'renderGlobal')
+  for (const index of ['01', '02']) {
     assert.match(html, new RegExp(`class="gsec-index mono">${index}</`), `缺分组序号 ${index}`)
   }
-  for (const title of ['偏好', '运行与预算', '环境与版本', '接入与计价']) {
+  for (const index of ['03', '04']) {
+    assert.doesNotMatch(html, new RegExp(`class="gsec-index mono">${index}</`), `分组 ${index} 已迁出不应存在`)
+  }
+  for (const title of ['偏好', '运行与预算']) {
     assert.ok(html.includes(title), `缺分组标题 ${title}`)
+  }
+  for (const title of ['环境与版本', '接入与计价']) {
+    assert.ok(!html.includes(title), `分组标题 ${title} 已迁出`)
   }
   assert.match(html, /class="gsec-desc"/, '分组应有说明副行')
   assert.match(html, /class="gsec-meta"/, '分组应有模块计数')
   stopTimers()
 })
 
-test('原「团队与资源」卡降级为页头指标带', async () => {
-  const html = await renderGlobalWith()
-  assert.match(html, /class="global-head"/, '应有页头')
-  assert.match(html, /class="global-metrics"/, '应有指标带')
-  assert.match(html, /class="global-metric-label">活跃 Bot</, '指标带应含活跃 Bot')
-  assert.match(html, /class="global-metric-label">待审提案</, '指标带应含待审提案')
-  assert.doesNotMatch(html, /<h3>团队与资源<\/h3>/, '不应再保留「团队与资源」卡标题')
+test('配置页无迁出模块、无「计划迁移」标注、无指标带', async () => {
+  const { html } = await renderPage('settings', 'renderGlobal', { wechat: { enabled: true, phase: 'connected' } })
+  for (const title of ['微信通道', '密钥管理', '模型价格', 'DSH 路径', 'DSH 服务']) {
+    assert.ok(!html.includes(`<h3>${title}</h3>`), `迁出模块 ${title} 不应留在配置页`)
+  }
+  assert.doesNotMatch(html, /g-move-note/, '迁移完成后不应再有 g-move-note 标注')
+  assert.ok(!html.includes('计划迁移'), '页面任何位置都不应再出现「计划迁移」文案')
+  assert.doesNotMatch(html, /global-metrics/, '指标带（团队统计）已迁出，与总览页去重')
+  assert.doesNotMatch(html, /data-action="sync-skills"/, '重扫技能入口在技能页，配置页不放')
+  assert.doesNotMatch(html, /data-action="check-dsh-update"/, '检查更新入口在关于页')
   stopTimers()
 })
 
-test('九块模块全部落进分组槽位，原有交互入口不丢', async () => {
-  const html = await renderGlobalWith()
-  for (const title of ['界面', 'DSH 路径', 'DSH 服务', '运行时效', '系统与运维', '密钥管理', '模型价格']) {
-    assert.ok(html.includes(`<h3>${title}</h3>`), `缺模块卡 ${title}`)
-  }
-  assert.match(html, /class="gsec-body"/, '分组内应是槽位网格')
-  assert.match(html, /class="g-slot g-slot--/, '卡片应由槽位包裹以控制跨列')
-  for (const action of ['save-ui-language', 'save-run-limits', 'save-settings', 'sync-skills', 'check-dsh-update']) {
+test('配置页核心组交互入口完整保留', async () => {
+  const { html } = await renderPage('settings', 'renderGlobal')
+  for (const action of ['save-ui-language', 'save-run-limits', 'save-settings', 'reset-scale', 'set-theme', 'toggle-notify']) {
     assert.ok(html.includes(`data-action="${action}"`), `缺交互入口 ${action}`)
   }
+  assert.match(html, /class="g-slot g-slot--/, '卡片应由槽位包裹以控制跨列')
   stopTimers()
 })
 
-test('待迁移模块标注「计划迁移」占位，价格卡由样式层兜底标注', async () => {
-  const html = await renderGlobalWith()
-  for (const note of ['计划迁移 · 关于页', '计划迁移 · 密钥页']) {
-    assert.ok(html.includes(note), `缺迁移标注 ${note}`)
-  }
-  assert.match(html, /class="g-move-note"/, '迁移标注应使用统一标记')
-  assert.match(html, /class="card price-card"/, '价格卡应仍在页内（样式层负责跨列与标注）')
+test('通道页承载微信通道卡：未启用空态、启用后可绑定', async () => {
+  const empty = await renderPage('global-pages', 'renderChannel')
+  assert.match(empty.html, /<h3>微信通道未启用<\/h3>/, '未启用时应显示空态引导')
+  assert.doesNotMatch(empty.html, /g-move-note/, '迁移落地后不再有迁移标注')
+  stopTimers()
+  const enabled = await renderPage('global-pages', 'renderChannel', { wechat: { enabled: true, phase: 'unbound' } })
+  assert.match(enabled.html, /<h3>微信通道<\/h3>/, '启用后应渲染微信通道卡')
+  assert.match(enabled.html, /data-action="wechat-login"/, '扫码绑定按钮随卡迁入')
   stopTimers()
 })
 
-test('微信通道启用时出现在接入分组并带迁移标注', async () => {
-  const html = await renderGlobalWith({ wechat: { enabled: true, phase: 'connected' } })
-  assert.match(html, /<h3>微信通道<\/h3>/, '启用后应渲染微信通道卡')
-  assert.ok(html.includes('计划迁移 · 通道页'), '微信通道应标注计划迁往通道页')
+test('密钥页承载密钥管理卡：列表 + 待审请求 + 保存表单', async () => {
+  const { html } = await renderPage('global-pages', 'renderSecretsPage', {
+    secrets: [{ id: 's1', name: 'DEPLOY_TOKEN', scope: 'team', fingerprint: 'abcd1234', updatedAt: '2026-11-04T00:00:00Z' }],
+    secretRequests: [{ id: 'r1', botName: 'bot', name: 'API_KEY', reason: 'why', createdAt: '2026-11-04T00:00:00Z' }],
+  })
+  assert.match(html, /<h3>密钥管理<\/h3>/, '密钥管理卡应整卡迁入密钥页')
+  assert.match(html, /data-form="upsert-secret"/, '保存密钥表单随卡迁入')
+  assert.match(html, /data-form="approve-secret"/, '待审请求批准表单随卡迁入')
+  assert.match(html, /data-action="deny-secret-request"/, '拒绝按钮随卡迁入')
+  assert.match(html, /data-action="delete-secret"/, '删除密钥按钮随卡迁入')
+  stopTimers()
+})
+
+test('关于页承载 DSH 路径/服务卡：检查更新 + 投递失败提示', async () => {
+  const { html } = await renderPage('global-pages', 'renderAbout', { outbox: { pending: 1, failed: 2, delivered: 10 } })
+  assert.match(html, /<h3>DSH 路径<\/h3>/, 'DSH 路径卡应迁入关于页')
+  assert.match(html, /<h3>DSH 服务<\/h3>/, 'DSH 服务卡应迁入关于页')
+  assert.match(html, /data-action="check-dsh-update"/, '检查更新按钮迁入关于页')
+  assert.match(html, /2 条消息投递失败/, '投递失败提示迁入关于页系统状态')
+  assert.match(html, /data-action="copy"/, '路径复制按钮保留')
+  assert.doesNotMatch(html, /data-action="sync-skills"/, '重扫技能入口去重到技能页，关于页不放')
+  stopTimers()
+})
+
+test('技能页保留重扫技能入口（自配置页去重合并的唯一入口）', async () => {
+  const { html } = await renderPage('tasks', 'renderSkills')
+  assert.match(html, /data-action="sync-skills"/, '重扫技能入口应在技能页')
+  stopTimers()
+})
+
+test('全局用量页承载模型价格规则卡，「设置价格」面板头按钮去重', async () => {
+  const { html } = await renderPage('settings', 'renderUsageGlobal')
+  assert.match(html, /usage-h2">模型价格规则<\/h2>/, '价格规则卡应落在全局用量页')
+  assert.match(html, /class="card price-card"/, '价格卡样式类保留')
+  assert.doesNotMatch(html, /设置价格/, '模型面板的「设置价格」按钮与价格卡入口去重后移除')
   stopTimers()
 })

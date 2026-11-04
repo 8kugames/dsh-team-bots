@@ -115,7 +115,12 @@ test('⑧ 服务端口径：全局 / 本群 / 单聊三套 tier 齐备', () => {
 test('⑨ 全局口径用量页按全局页处理（不渲染项目 tab）', () => {
   assert.match(
     source,
-    /const isGlobal = state\.view === 'global' \|\| state\.view === 'bots-overview' \|\| \(state\.view === 'usage' && usageMode\(\) === 'global'\)/,
+    /const GLOBAL_VIEWS = new Set\(\['global', 'bots-overview', 'channel', 'secrets', 'about'\]\)/,
+    '全局一级视图集合含迁移新增的通道/密钥/关于页（DSHBOTS-197）',
+  )
+  assert.match(
+    source,
+    /const isGlobal = GLOBAL_VIEWS\.has\(state\.view\) \|\| \(state\.view === 'usage' && usageMode\(\) === 'global'\)/,
     'isGlobal 认全局口径用量页',
   )
   assert.match(source, /\$\{isGlobal \? '' : `<div class="tabbar"/, '项目 tabbar 渲染受 isGlobal 抑制')

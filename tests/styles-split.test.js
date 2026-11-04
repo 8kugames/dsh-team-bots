@@ -84,7 +84,8 @@ test('全局配置页视觉域已登记、层叠顺序正确、且不写死色�
   assert.ok(idx > 0, 'ui/styles/global-config.css 未登记进 UI_STYLE_PARTS')
   assert.equal(UI_STYLE_PARTS[idx - 1], 'styles/settings.css', 'global-config 域必须紧跟 settings 域')
   const css = await readFile(join(ROOT, 'ui', 'styles', 'global-config.css'), 'utf8')
-  for (const selector of ['.global-page', '.global-head', '.global-nav', '.gsec', '.gsec-body', '.g-slot', '.g-move-note']) {
+  // DSHBOTS-197：迁移完成后「计划迁移」标注（.g-move-note）随之退役，不再要求存在。
+  for (const selector of ['.global-page', '.global-head', '.global-nav', '.gsec', '.gsec-body', '.g-slot']) {
     assert.ok(css.includes(selector), `global-config.css 缺少 ${selector}`)
   }
   const body = css.replace(/\/\*[\s\S]*?\*\//g, '')

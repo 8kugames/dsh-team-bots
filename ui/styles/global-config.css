@@ -1,4 +1,5 @@
-/* DSHBOTS-184 全局配置页：信息架构分组 + 明暗双主题视觉。
+/* DSHBOTS-184 全局配置页 + DSHBOTS-197 迁移落点页（global-pages.js 的通道/密钥/关于）共用：
+   信息架构分组 + 明暗双主题视觉。
    约定：颜色一律走 base.css 的 token（--surface / --line / --ink / --accent…），
    暗色与 Catppuccin 调色板都由 token 覆盖，本文件不写死任何色值。 */
 
@@ -9,12 +10,8 @@
     gap: 26px;
 }
 
-/* ---------- 页头：标题 + 团队指标带 ---------- */
+/* ---------- 页头：标题 ---------- */
 .global-head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 20px 32px;
-    align-items: end;
     padding: 22px 24px 20px;
     border: 1px solid var(--line);
     border-radius: 14px;
@@ -47,38 +44,6 @@
     line-height: 1.75;
 }
 
-/* ---------- 指标带（原「团队与资源」卡降级） ---------- */
-.global-metrics {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(78px, 1fr));
-    gap: 12px 20px;
-    padding-left: 28px;
-    border-left: 1px solid var(--line);
-}
-.global-metric {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-}
-.global-metric-label {
-    color: var(--ink-3);
-    font-size: var(--fs-caption);
-    white-space: nowrap;
-}
-.global-metric-value {
-    font-size: var(--fs-title);
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
-}
-.global-metrics-note {
-    grid-column: 1 / -1;
-    margin: 0;
-    color: var(--ink-3);
-    font-size: var(--fs-caption);
-}
-
 /* ---------- 分组导航（锚点） ---------- */
 .global-nav {
     position: sticky;
@@ -109,11 +74,10 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
-/* 锚点命中时高亮对应分组条目 */
+/* 锚点命中时高亮对应分组条目（g-env 由「关于与系统状态」页复用） */
 .global-page:has(#g-pref:target) .global-nav-item[href="#g-pref"],
 .global-page:has(#g-runtime:target) .global-nav-item[href="#g-runtime"],
-.global-page:has(#g-env:target) .global-nav-item[href="#g-env"],
-.global-page:has(#g-integrations:target) .global-nav-item[href="#g-integrations"] {
+.global-page:has(#g-env:target) .global-nav-item[href="#g-env"] {
     background: var(--accent-wash);
     color: var(--accent-text);
 }
@@ -230,34 +194,7 @@
     padding: 0;
 }
 
-/* ---------- 计划迁移标记 ---------- */
-.g-move-note,
-.gsec-body .price-card::after {
-    display: block;
-    margin-top: 14px;
-    padding-top: 10px;
-    border-top: 1px dashed color-mix(in srgb, var(--ink-3) 45%, transparent);
-    color: var(--ink-3);
-    font-size: var(--fs-caption);
-    letter-spacing: 0.02em;
-}
-.gsec-body .price-card::after {
-    content: '计划迁移 · 用量页';
-}
-
 /* ---------- 窄屏 ---------- */
-@media (max-width: 1080px) {
-    .global-head {
-        grid-template-columns: minmax(0, 1fr);
-        align-items: start;
-    }
-    .global-metrics {
-        padding-left: 0;
-        padding-top: 16px;
-        border-left: 0;
-        border-top: 1px solid var(--line);
-    }
-}
 @media (max-width: 860px) {
     .g-slot--two-thirds,
     .g-slot--half,
