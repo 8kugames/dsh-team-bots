@@ -1,0 +1,552 @@
+// 事件接线：document click 委托（原 app.js 的巨型 click 监听）。
+// 实体动作在此分派；看板/全局动作转 events-board.js。
+import { state } from './state.js'
+import { t } from './i18n.js'
+import { activeProject, botById, toast } from './util.js'
+import { api, loadState } from './api.js'
+import { closeAutocomplete, closeImageViewer, ensureComposerImageInput, openInlineImage, openMessageImage, removePendingImage, saveTaskFromForm } from './composer.js'
+import { closeDirPicker, closeModal, openBot, openModal, openSkillDetail, renderDirPicker } from './modal-forms.js'
+import { exportUsageCsv, switchUsageWindow, usageMode } from './usage.js'
+import { focusApprovalCard, focusQuestionCard, questionDraftSelection, questionSelectOption } from './cards.js'
+import { loadSoloDetail } from './chat.js'
+import { searchMemories } from './tasks.js'
+import { handleBoardAction } from './events-board.js'
+import { refresh, renderKeepingChatScroll, render, beginChatPending, endChatPending } from '../app.js'
+
+async function refreshAfterTask(taskId) {
+  await loadState(state.projectId, { quiet: true })
+  await reloadTaskModal(taskId)
+}
+
+
+document.addEventListener('click', async (event) => {
+  // 正文内嵌图（markdown <img>）没有 data-action：先于动作委托拦截，点击直接放大；
+  // 附图缩略图在 .message-bubble 外，不受此分支影响，仍走 view-message-image 进查看器。
+  const bubbleImg = event.target.closest?.('.message-bubble img')
+  if (bubbleImg) {
+    event.preventDefault()
+    openInlineImage(bubbleImg)
+    return
+  }
+  const target = event.target.closest('[data-action]')
+  if (!target) return
+  const action = target.dataset.action
+  if (action === 'modal-backdrop') {
+    if (event.target === target) closeModal()
+    return
+  }
+  try {
+    if (await handleBoardAction(action, target)) return
+    switch (action) {
+      case 'approval-decide': {
+        // 群聊审批卡片按钮：本地立即回显已决状态（不等 2.8s 轮询），请求失败回滚并提示。
+        const approvalId = target.dataset.approvalId
+        const decision = target.dataset.decision
+        if (!approvalId || !['allow', 'reject'].includes(decision)) break
+        // 幂等：同一审批正在决策中时不再发请求（按钮已 disabled，这里再挡一层）。
+        if (state.approvalDeciding.has(approvalId)) break
+        const list = state.data?.approvals ?? []
+        const index = list.findIndex(item => item.id === approvalId)
+        const previous = index >= 0 ? { ...list[index] } : null
+        const status = decision === 'allow' ? 'allowed' : 'rejected'
+        state.approvalDeciding.add(approvalId)
+        // 乐观回显：卡片立刻变已决，顶部徽标同步减一。
+        if (previous) list[index] = { ...previous, status, decided_at: new Date().toISOString(), remainingMs: 0 }
+        const pending = state.data?.pendingApprovals
+        if (pending) {
+          pending.items = (pending.items ?? []).filter(item => item.id !== approvalId)
+          pending.count = Math.max(0, Number(pending.count ?? 0) - 1)
+        }
+        render()
+        try {
+          // 用后端返回的终态覆盖乐观值（decided_at 以后端为准）。
+          const updated = await api('approval_decide', { approvalId, decision }, { quiet: true })
+          if (updated && index >= 0) list[index] = updated
+          else if (updated) list.push(updated)
+        } catch (error) {
+          // 回滚到决策前状态，避免「界面已决、后端仍 pending」的假成功。
+          if (previous && index >= 0) list[index] = previous
+          const rollback = state.data?.pendingApprovals
+          if (rollback && previous) {
+            rollback.items = [previous, ...(rollback.items ?? [])]
+            rollback.count = Number(rollback.count ?? 0) + 1
+          }
+          toast(error?.message ? `审批失败：${error.message}` : '审批失败，请重试', 'error')
+        } finally {
+          state.approvalDeciding.delete(approvalId)
+          render()
+        }
+        break
+      }
+      case 'toggle-approvals':
+        // 顶部「待处理审批」条：展开/收起跨项目明细。
+        state.approvalPanelOpen = !state.approvalPanelOpen
+        render()
+        break
+      case 'focus-approval': {
+        // 点明细跳到对应项目群聊并滚动到该审批卡（复用 focusApprovalCard）。
+        const item = (state.data?.pendingApprovals?.items ?? []).find(entry => entry.id === target.dataset.approvalId)
+        if (!item) break
+        state.approvalPanelOpen = false
+        focusApprovalCard(item)
+        break
+      }
+      case 'question-option': {
+        // 选项切换：只改本地草稿与按钮态，不整页重绘（保住同卡内其它输入框的焦点与内容）。
+        const questionId = target.dataset.questionId
+        const label = target.dataset.label
+        if (!questionId || label === undefined) break
+        const draft = state.questionDraft.get(questionId)
+        const question = (state.data?.questions ?? []).find(entry => entry.id === questionId)
+        const item = question?.questions?.find(entry => entry.id === target.dataset.itemId)
+        if (!draft || !item) break
+        const selectedOf = questionSelectOption(draft, item, label, target.dataset.multi === '1')
+        const group = target.closest('.question-options')
+        if (group) {
+          for (const btn of group.querySelectorAll('.question-option')) {
+            const on = selectedOf.has(btn.dataset.label)
+            btn.classList.toggle('is-selected', on)
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+          }
+        }
+        break
+      }
+      case 'question-submit': {
+        // 提交回答：本地草稿 + 卡片内补充说明合成宿主 {answers:[{id,selected,custom}]}。
+        const questionId = target.dataset.questionId
+        if (!questionId || state.questionAnswering.has(questionId)) break
+        const question = (state.data?.questions ?? []).find(entry => entry.id === questionId)
+        if (!question || question.status !== 'pending') break
+        const items = Array.isArray(question.questions) ? question.questions : []
+        const draft = state.questionDraft.get(questionId) ?? { selected: new Map(), custom: {} }
+        const card = target.closest('.question-card')
+        const answers = items.map(item => {
+          let custom = ''
+          if (card) {
+            for (const input of card.querySelectorAll('.question-custom')) {
+              if (input.dataset.itemId === item.id) { custom = String(input.value ?? '').trim(); break }
+            }
+          }
+          if (!custom) custom = String(draft.custom[item.id] ?? '').trim()
+          return { id: item.id, selected: Array.from(questionDraftSelection(draft, item.id)), custom: custom || undefined }
+        })
+        // 幂等 + 乐观回显：卡片立刻变已答，顶部徽标同步减一。
+        state.questionAnswering.add(questionId)
+        const list = state.data?.questions ?? []
+        const index = list.findIndex(entry => entry.id === questionId)
+        const previous = index >= 0 ? { ...list[index] } : null
+        if (previous) list[index] = { ...previous, status: 'answered', answered_at: new Date().toISOString(), answer: { answers }, remainingMs: 0 }
+        const pending = state.data?.pendingQuestions
+        if (pending) {
+          pending.items = (pending.items ?? []).filter(entry => entry.id !== questionId)
+          pending.count = Math.max(0, Number(pending.count ?? 0) - 1)
+        }
+        render()
+        try {
+          // 用后端返回的终态覆盖乐观值（answered_at 以后端为准）。
+          const updated = await api('question_answer', { questionId, answers }, { quiet: true })
+          if (updated && index >= 0) list[index] = updated
+          else if (updated) list.push(updated)
+          state.questionDraft.delete(questionId)
+        } catch (error) {
+          // 回滚到提交前状态，避免「界面已答、后端仍 pending」的假成功。
+          if (previous && index >= 0) list[index] = previous
+          const rollback = state.data?.pendingQuestions
+          if (rollback && previous) {
+            rollback.items = [previous, ...(rollback.items ?? [])]
+            rollback.count = Number(rollback.count ?? 0) + 1
+          }
+          toast(error?.message ? `回答失败：${error.message}` : '回答失败，请重试', 'error')
+        } finally {
+          state.questionAnswering.delete(questionId)
+          render()
+        }
+        break
+      }
+      case 'toggle-questions':
+        // 顶部「待回答提问」条：展开/收起跨项目明细。
+        state.questionPanelOpen = !state.questionPanelOpen
+        render()
+        break
+      case 'focus-question': {
+        // 点明细跳到对应项目群聊并滚动到该提问卡（复用 focusQuestionCard）。
+        const entry = (state.data?.pendingQuestions?.items ?? []).find(item => item.id === target.dataset.questionId)
+        if (!entry) break
+        state.questionPanelOpen = false
+        focusQuestionCard(entry)
+        break
+      }
+      case 'quote-message': {
+        // 引用回复：把目标消息挂到 composer 上方的引用条；再点同一条则取消。
+        const messageId = target.dataset.messageId
+        if (!messageId) break
+        state.replyTo = state.replyTo?.id === messageId
+          ? null
+          : { id: messageId, senderName: target.dataset.senderName ?? '', excerpt: (target.dataset.excerpt ?? '').slice(0, 120) }
+        renderKeepingChatScroll()
+        break
+      }
+      case 'cancel-reply':
+        state.replyTo = null
+        renderKeepingChatScroll()
+        break
+      case 'attach-image':
+        // 打开 body 级单例 file input，选完由 change 事件读文件（accept 已在 input 上限定四种 MIME）。
+        ensureComposerImageInput().click()
+        break
+      case 'remove-pending-image':
+        removePendingImage(target.dataset.imageKey)
+        break
+      case 'view-message-image':
+        await openMessageImage(target.dataset.imageId)
+        break
+      case 'close-image-viewer':
+        closeImageViewer()
+        break
+      case 'solo-bot': {
+        const botId = target.dataset.botId
+        if (!botId) break
+        // 从树上或 Bots 页打开 1V1 对话窗口；已在看同一个会话则不重复加载。
+        // 草稿按 solo:<botId> 分开记，切换不清空（群聊/单聊/其他 Bot 各自保留）。
+        if (state.soloBotId !== botId) {
+          state.soloBotId = botId
+          closeAutocomplete()
+        }
+        state.replyTo = null // 单聊无引用语义，跨上下文不留引用条
+        state.chatMode = 'solo'
+        state.view = 'chat'
+        // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
+        const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: 'solo', soloBotId: botId })
+        render()
+        try {
+          await loadState(state.projectId, { quiet: true })
+        } catch {
+          // 取数失败也要清标志并落回上一次可用数据，否则骨架常驻。
+        } finally {
+          endChatPending(pendingSeq)
+        }
+        render()
+        break
+      }
+      case 'copy': {
+        const value = target.dataset.copy
+        if (value) {
+          await navigator.clipboard.writeText(value).catch(() => {})
+          toast(t('toast.copied'), 'success')
+        }
+        break
+      }
+      case 'pick-dir-open': {
+        const input = document.getElementById(target.dataset.pickerFor)
+        const current = input?.value?.trim() ?? ''
+        await renderDirPicker(target.dataset.pickerFor, current.startsWith('/') ? current : '')
+        break
+      }
+      case 'pick-dir-nav': {
+        await renderDirPicker(target.dataset.pickerFor, target.dataset.path || '')
+        break
+      }
+      case 'pick-dir-up': {
+        const from = target.dataset.path || '/'
+        const parent = from.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/'
+        await renderDirPicker(target.dataset.pickerFor, parent)
+        break
+      }
+      case 'pick-dir-home': {
+        await renderDirPicker(target.dataset.pickerFor, '')
+        break
+      }
+      case 'pick-dir-choose': {
+        const input = document.getElementById(target.dataset.pickerFor)
+        if (input && target.dataset.path) {
+          input.value = target.dataset.path
+          // 程序赋值不触发 input 事件，手动把所属表单标记为未保存，暂停自动刷新直到保存。
+          input.closest('form')?.setAttribute('data-dirty', '1')
+          closeDirPicker(target.dataset.pickerFor)
+        }
+        break
+      }
+      case 'pick-dir-close': {
+        closeDirPicker(target.dataset.pickerFor)
+        break
+      }
+      case 'sync-skills': {
+        const result = await api('sync_skills', {})
+        await loadState(state.projectId, { quiet: true })
+        render()
+        toast(`已扫描 ${result.count} 个共享技能`, 'success')
+        break
+      }
+      case 'skill-detail': {
+        void openSkillDetail(String(target.dataset.slug || ''))
+        break
+      }
+      case 'toggle-skill': {
+        const project = activeProject()
+        const slug = String(target.dataset.slug || '')
+        const disabled = target.dataset.disabled === '1'
+        if (!project || !slug) break
+        await api('toggle_skill', { projectId: project.id, slug, disabled })
+        await loadState(state.projectId, { quiet: true })
+        render()
+        toast(disabled ? `已在项目「${project.name}」关闭 ${slug}` : `已在项目「${project.name}」恢复 ${slug}`, 'success')
+        break
+      }
+      case 'archive-bot': {
+        const botId = target.dataset.botId
+        const bot = botById(botId)
+        if (!bot || !window.confirm(`归档 ${bot.name}？总监关系必须先解除。`)) break
+        await api('archive_bot', { botId })
+        closeModal()
+        await refresh()
+        if (state.view === 'solo-config' && botById(botId)?.status !== 'active') {
+          state.view = 'chat'
+          state.chatMode = 'group'
+        }
+        toast('Bot 已归档', 'success')
+        break
+      }
+      case 'rollback-bot': {
+        const botId = target.dataset.botId
+        if (!window.confirm('回滚到该版本？')) break
+        await api('rollback_bot', { botId, revisionId: target.dataset.revisionId })
+        await loadState(state.projectId, { quiet: true })
+        if (state.view === 'solo-config') {
+          await loadSoloDetail()
+        } else {
+          await openBot(botId)
+        }
+        toast('已回滚并生成新版本', 'success')
+        break
+      }
+      case 'archive-project': {
+        if (!window.confirm('归档项目？项目将停止新运行，工作区文件保留。')) break
+        await api('archive_project', { projectId: target.dataset.projectId })
+        await refresh()
+        toast('项目已归档', 'success')
+        break
+      }
+      case 'reopen-project': {
+        await api('reopen_project', { projectId: target.dataset.projectId })
+        await refresh()
+        toast('项目已再开，恢复为进行中', 'success')
+        break
+      }
+      case 'remove-tracking-open': {
+        const item = (state.data?.projects ?? []).find(project => project.id === target.dataset.projectId)
+        if (!item) break
+        openModal({ type: 'remove-tracking', projectId: item.id, name: item.name, step: 1, purge: false })
+        break
+      }
+      case 'remove-tracking-step2': {
+        if (state.modal?.type !== 'remove-tracking') break
+        // 复选框状态在翻页时读取一次：第二步的确认文案与最终提交都以此为准。
+        state.modal.purge = document.getElementById('remove-tracking-purge')?.checked === true
+        state.modal.step = 2
+        render()
+        break
+      }
+      case 'remove-tracking-back': {
+        if (state.modal?.type !== 'remove-tracking') break
+        state.modal.step = 1
+        render()
+        break
+      }
+      case 'reject-task': {
+        // 驳回（DSHBOTS-141）：终态任务退回 backlog，走 transition_task 通道，与看板拖拽同口径；
+        // 后端在离开终态且仍有活跃运行时会拒绝，错误文案直接透出。
+        const taskId = target.dataset.taskId
+        const task = (state.data?.tasks ?? []).find(item => item.id === taskId)
+        if (!window.confirm(t('task.rejectConfirm', { title: task?.title ?? '' }))) break
+        try {
+          await api('transition_task', { taskId, status: 'backlog' }, { quiet: true })
+          await refreshAfterTask(taskId)
+          toast(t('task.rejectDone'), 'success')
+        } catch (error) {
+          toast(error.message || String(error), 'error')
+        }
+        break
+      }
+      case 'review-delegate': {
+        // 验收核验委派（DSHBOTS-107）：核验运行由后端派生，结论评论落任务；裁决仍走拖卡/验收。
+        const taskId = target.dataset.taskId
+        await api('task_review_delegate', { taskId })
+        await refreshAfterTask(taskId)
+        toast('已委派子代理核验，结论将写回任务评论', 'success')
+        break
+      }
+      case 'run-task': {
+        const taskId = target.dataset.taskId
+        const assignee = await saveTaskFromForm(taskId)
+        if (!assignee) {
+          toast('请先选择负责人', 'error')
+          break
+        }
+        await api('assign_task', { taskId, botId: assignee })
+        await refreshAfterTask(taskId)
+        toast('任务已进入执行队列', 'success')
+        break
+      }
+      case 'cancel-run': {
+        await api('cancel_run', { runId: target.dataset.runId })
+        await refreshAfterTask(target.dataset.taskId || state.modal?.detail?.id)
+        toast('运行已取消', 'success')
+        break
+      }
+      case 'retry-run': {
+        const run = await api('retry_run', { runId: target.dataset.runId })
+        await refreshAfterTask(run.task_id)
+        toast('已重新排队', 'success')
+        break
+      }
+      case 'open-artifact': {
+        window.open(target.dataset.url, '_blank', 'noopener')
+        break
+      }
+      case 'delete-secret': {
+        const name = target.dataset.secretName || '该密钥'
+        // DSHBOTS-106 起明文只在批准时一次性物化到数据目录，项目工作区不再有明文密钥文件；
+        // 删除即吊销：已下发的一次性运行时副本当场失效，重新使用要再走一次申请与批准。
+        if (!window.confirm(`删除密钥 ${name}？相关项目已下发的一次性运行时副本会立即失效，重新使用需再次申请。`)) break
+        await api('delete_secret', { secretId: target.dataset.secretId })
+        await refresh()
+        toast('密钥已删除', 'success')
+        break
+      }
+      case 'deny-secret-request': {
+        if (!window.confirm('拒绝该密钥请求？发起的 Bot 会在群里收到系统提示。')) break
+        await api('deny_secret_request', { requestId: target.dataset.requestId })
+        await refresh()
+        toast('已拒绝该密钥请求', 'success')
+        break
+      }
+      case 'delete-memory': {
+        if (!window.confirm('归档这条记忆？归档后不会再被 Bot 引用。')) break
+        await api('delete_memory', { memoryId: target.dataset.memoryId })
+        await refresh()
+        toast('记忆已归档', 'success')
+        break
+      }
+      case 'edit-memory': {
+        const memory = (state.data?.memories ?? []).find(item => item.id === target.dataset.memoryId)
+        if (memory) openModal({ type: 'memory', memory })
+        break
+      }
+      case 'open-invite-member': {
+        openModal({ type: 'invite-member', botId: '' })
+        break
+      }
+      case 'remove-member': {
+        const botId = target.dataset.botId
+        const name = botById(botId)?.name ?? '该成员'
+        if (!window.confirm(`确认将 ${name} 移出本项目？移除后不再接收本项目的提及与新任务。`)) break
+        await api('remove_member', { projectId: activeProject()?.id, botId })
+        await refresh()
+        toast('已移出项目', 'success')
+        break
+      }
+      case 'batch-decide-proposals': {
+        const decision = target.dataset.decision
+        const botId = target.dataset.botId
+        const items = (state.data?.proposals ?? [])
+          .filter(item => item.status === 'pending' && (item.bot_id ?? '') === botId)
+        if (items.length === 0) break
+        const bot = botById(botId)
+        const label = decision === 'approved' ? '通过并应用' : '拒绝'
+        if (!window.confirm(`确认${label} ${bot?.name ?? '未归属 Bot'} 的全部 ${items.length} 条待审提案？`)) break
+        for (const item of items) {
+          await api('decide_proposal', { proposalId: item.id, decision })
+        }
+        await refresh()
+        toast(`已批量${label} ${items.length} 条提案`, 'success')
+        break
+      }
+      case 'decide-proposal': {
+        const decision = target.dataset.decision
+        const label = decision === 'approved' ? '通过并应用' : '拒绝'
+        if (!window.confirm(`确认${label}该提案？`)) break
+        await api('decide_proposal', { proposalId: target.dataset.proposalId, decision })
+        await refresh()
+        toast(decision === 'approved' ? '提案已应用' : '提案已拒绝', 'success')
+        break
+      }
+      case 'evaluate-proposal': {
+        const verdict = target.dataset.verdict === 'fail' ? 'fail' : 'pass'
+        const notes = window.prompt('评估说明（可留空）', '') ?? ''
+        await api('evaluate_proposal', { proposalId: target.dataset.proposalId, evaluation: { verdict, notes } })
+        await refresh()
+        toast(verdict === 'pass' ? '已记录评估结论：通过' : '已记录评估结论：不通过', 'success')
+        break
+      }
+      case 'promote-proposal': {
+        if (!window.confirm('确认把灰度提案转正为全量生效？')) break
+        await api('promote_proposal', { proposalId: target.dataset.proposalId })
+        await refresh()
+        toast('提案已转正', 'success')
+        break
+      }
+      case 'usage-window':
+        await switchUsageWindow(target.dataset.window)
+        break
+      case 'usage-scope':
+        // 口径切换只属于全局视图；群聊/单聊 tab 的口径由入口固定，不接受切换。
+        if (usageMode() !== 'global') break
+        state.usageScope = target.dataset.scope
+        state.usageBot = null
+        render()
+        break
+      case 'usage-drill':
+        state.usageBot = target.dataset.botId || null
+        render()
+        break
+      case 'usage-clear-drill':
+        state.usageBot = null
+        render()
+        break
+      case 'export-usage-csv':
+        await exportUsageCsv()
+        break
+      case 'search-memories':
+        await searchMemories()
+        break
+      case 'clear-memory-search':
+        state.memoryQuery = ''
+        state.memoryResults = null
+        render()
+        break
+      case 'approve-memory':
+        await api('approve_memory', { memoryId: target.dataset.memoryId })
+        await refresh()
+        toast('记忆已通过', 'success')
+        break
+      case 'reject-memory':
+        await api('reject_memory', { memoryId: target.dataset.memoryId })
+        await refresh()
+        toast('记忆已拒绝', 'success')
+        break
+      case 'rollback-skill':
+        await api('rollback_skill', { slug: target.dataset.slug, version: target.dataset.version })
+        await refresh()
+        toast(`技能已回滚到 v${target.dataset.version}`, 'success')
+        break
+      case 'terminal-stop': {
+        await api('cancel_command', { commandId: target.dataset.commandId })
+        toast('停止信号已发送', 'success')
+        break
+      }
+      case 'terminal-fill': {
+        state.terminalDraft = target.dataset.command ?? ''
+        const cmdInput = document.getElementById('terminal-cmd-input')
+        if (cmdInput && !cmdInput.disabled) {
+          cmdInput.value = state.terminalDraft
+          cmdInput.focus()
+        }
+        break
+      }
+      default:
+        break
+    }
+  } catch (error) {
+    toast(error.message || String(error), 'error')
+  }
+})
