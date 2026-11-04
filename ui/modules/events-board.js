@@ -108,6 +108,8 @@ export async function handleBoardAction(action, target) {
       const value = document.getElementById('settings-ui-language')?.value ?? 'auto'
       await api('update_settings', { ui_language: value })
       await loadState(state.projectId)
+      // poll() 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
+      syncLanguage()
       toast(t('toast.uiLanguageSaved'), 'success')
       break
     }
