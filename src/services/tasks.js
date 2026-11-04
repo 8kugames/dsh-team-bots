@@ -14,6 +14,7 @@ import {
 } from './task-relations.js'
 // 任务工单七态派生与标签口径的唯一来源：task-stage 纯函数域（tests/task-stage.test.js 断言其判定表）。
 import { taskStage, taskStageLabel } from './task-stage.js'
+import { effectiveTaskTimeBudgetMinutes } from '../config.js'
 
 export const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 
@@ -56,6 +57,11 @@ export function ensureTaskTerminalTimeBackfill(store) {
 }
 
 export const tasksMethods = {
+  // 缺省任务预算（DSHBOTS-198）：env > 无进展看门狗（分钟）生效值 > 兜底 20，
+  // 建档补挂与重派补挂共用同一缺省链。
+  defaultTaskTimeBudget() {
+    return effectiveTaskTimeBudgetMinutes(this.config, key => this.store.setting(key))
+  },
   async createTask(input, actor = this.actor()) {
     const project = this.projectRow(input.projectId)
     if (project.status !== 'active') throw conflict('项目已归档')
@@ -69,11 +75,14 @@ export const tasksMethods = {
     const parsedScopes = input.writeScopes === undefined || input.writeScopes === null
       ? parseWriteScopesFromDescription(input.description)
       : parseWriteScopes(input.writeScopes)
-    // 时效要求（DSHBOTS-125）：发布方可传交付时限（分钟）；未传/非法 = NULL，提示词不注入。
-    // 钳制到 1..10080（一分钟到一周）：只挡垃圾值，不替发布方做取舍；0/负数视为未提。
+    // 时效要求（DSHBOTS-125）：发布方可传交付时限（分钟）；钳制到 1..10080（一分钟到一周）：
+    // 只挡垃圾值，不替发布方做取舍；0/负数视为未提。
+    // DSHBOTS-198：产品规则=每卡必有预算——未显式提时按缺省链补挂
+    // （env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > 看门狗分钟生效值 > 兜底 20），显式值优先不覆盖。
     // DSHBOTS-131：该任务派生运行的超时上限取 min(本字段, 全局 runTimeoutMs)，到期即超时中止。
     const rawTimeBudget = input.timeBudgetMinutes ?? input.time_budget_minutes
-    const timeBudgetMinutes = Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null
+    const timeBudgetMinutes = (Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null)
+      ?? this.defaultTaskTimeBudget()
     // 派发沙箱覆盖（DSHBOTS-156）：列只收合法收紧档；入参解析与「只收紧不放大」校验
     // 在派发入口 assignFromBot（对准承接 bot 的 file_policy），这里挡直写的垃圾值。
     if (input.sandboxOverride !== undefined && input.sandboxOverride !== null
@@ -392,6 +401,8 @@ export const tasksMethods = {
     )
     ensureTaskSandboxSchema(this.store)
     const sandboxTouched = sandboxOverride !== undefined
+    // 存量 NULL 预算卡补挂（DSHBOTS-198）：COALESCE 只补空，显式已设的卡不覆盖。
+    const defaultTimeBudget = this.defaultTaskTimeBudget()
     this.store.transaction(() => {
       // queued 占位清理与改派同事务（DSHBOTS-169）：SUPERSEDED 不进任务执行历史，run 事件可审计。
       // 助手是同步函数（体内无 await），抛错会让整个事务回滚，不会留下「改派已生效但占位还在」的半成品。
@@ -399,10 +410,11 @@ export const tasksMethods = {
       this.store.run(
         `UPDATE tasks SET assignee_bot_id = ?, review_target = ?,
           status = CASE WHEN status IN ('backlog', 'blocked') THEN 'todo' ELSE status END,
+          time_budget_minutes = COALESCE(time_budget_minutes, ?),
           version = version + 1, updated_at = ?${sandboxTouched ? ', sandbox_override = ?' : ''} WHERE id = ?`,
         ...(sandboxTouched
-          ? [botId, actor.type === 'bot' ? 'owner_bot' : 'user', nowIso(), sandboxOverride ?? null, taskId]
-          : [botId, actor.type === 'bot' ? 'owner_bot' : 'user', nowIso(), taskId]),
+          ? [botId, actor.type === 'bot' ? 'owner_bot' : 'user', defaultTimeBudget, nowIso(), sandboxOverride ?? null, taskId]
+          : [botId, actor.type === 'bot' ? 'owner_bot' : 'user', defaultTimeBudget, nowIso(), taskId]),
       )
       this.addTaskEvent(taskId, 'assigned', actor, {
         botId,

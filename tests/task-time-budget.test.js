@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { runMigrations } from '../src/db-migrations.js'
-import { resolveConfig, effectiveRunLimits } from '../src/config.js'
+import { resolveConfig, effectiveRunLimits, effectiveTaskTimeBudgetMinutes } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import { runTimeoutMsForTaskRun } from '../src/services/runtime/session.js'
@@ -94,7 +94,7 @@ const cleanup = async ({ root, store }) => {
 
 const rowOf = (store, id) => store.get('SELECT * FROM tasks WHERE id = ?', id)
 
-test('createTask 落库与 taskView 快照：双命名收参、缺省 NULL、越界钳制、0/负数视为未提', async () => {
+test('createTask 落库与 taskView 快照：双命名收参、缺省补 20、越界钳制、0/负数视为未提', async () => {
   const ctx = await setup()
   try {
     const { project } = await primeProject(ctx.service, ctx.store)
@@ -108,14 +108,14 @@ test('createTask 落库与 taskView 快照：双命名收参、缺省 NULL、越
     assert.equal(rowOf(ctx.store, camelCase.id).time_budget_minutes, 30, 'camelCase 入参同口径落库')
 
     const none = await ctx.service.createTask({ projectId: project.id, title: '无时效' }, actor)
-    assert.equal(rowOf(ctx.store, none.id).time_budget_minutes, null, '未传应为 NULL')
-    assert.equal(ctx.service.taskView(rowOf(ctx.store, none.id)).timeBudgetMinutes, null, 'taskView 对 NULL 透出 null')
+    assert.equal(rowOf(ctx.store, none.id).time_budget_minutes, 20, '未传应补缺省（看门狗未配置 → 仓内缺省 20）')
+    assert.equal(ctx.service.taskView(rowOf(ctx.store, none.id)).timeBudgetMinutes, 20, 'taskView 透出补挂后的缺省值')
 
     const clamped = await ctx.service.createTask({ projectId: project.id, title: '越界', time_budget_minutes: 99_999 }, actor)
     assert.equal(rowOf(ctx.store, clamped.id).time_budget_minutes, 10_080, '超上限钳到一周（10080）')
 
     const zero = await ctx.service.createTask({ projectId: project.id, title: '零值', time_budget_minutes: 0 }, actor)
-    assert.equal(rowOf(ctx.store, zero.id).time_budget_minutes, null, '0 不得钳成 1 分钟：视为未提')
+    assert.equal(rowOf(ctx.store, zero.id).time_budget_minutes, 20, '0 不得钳成 1 分钟：视为未提补缺省')
   } finally {
     await cleanup(ctx)
   }
@@ -147,6 +147,8 @@ test('提示词注入两分支：有时效注入硬口径段并写明与 runTime
     const actor = ctx.service.actor()
     const budgeted = await ctx.service.createTask({ projectId: project.id, title: '限时任务', time_budget_minutes: 30 }, actor)
     const plain = await ctx.service.createTask({ projectId: project.id, title: '普通任务' }, actor)
+    // DSHBOTS-198：建档即补缺省预算，NULL 分支只剩存量老卡——直改库置 NULL 模拟。
+    ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', plain.id)
 
     const withBudget = runtime.promptFor({
       run: { kind: 'task' }, bot: botRow, project: projectRow, task: rowOf(ctx.store, budgeted.id),
@@ -177,6 +179,8 @@ test('派生运行提示词同步时效：review/handle/memory_review 与任务�
     const actor = ctx.service.actor()
     const budgeted = await ctx.service.createTask({ projectId: project.id, title: '限时交付', time_budget_minutes: 30 }, actor)
     const plain = await ctx.service.createTask({ projectId: project.id, title: '普通交付' }, actor)
+    // 同上：NULL 分支按存量老卡口径直改库。
+    ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', plain.id)
     const at = new Date().toISOString()
     // 派生运行一律置 succeeded：one_active_run_per_task 唯一索引只挡 queued/running，
     // 同一任务下插多条派生运行做提示词断言时必须避开它。
@@ -300,6 +304,8 @@ test('startRun 启动期定格：带时效任务上限 = min(全局, budget)，�
     const actor = ctx.service.actor()
     const budgeted = await ctx.service.createTask({ projectId: project.id, title: '限时任务', time_budget_minutes: 30 }, actor)
     const plain = await ctx.service.createTask({ projectId: project.id, title: '普通任务' }, actor)
+    // DSHBOTS-198：建档即补缺省预算；「无时效沿用全局」分支只剩存量老卡，直改库置 NULL 模拟。
+    ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', plain.id)
     const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
     const runtime = new DshRuntime({ ctx: stubHost(), config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
@@ -395,6 +401,74 @@ test('budget 大于全局时按全局中止：effective timeout 取更短者', a
     assert.match(ctx.store.get('SELECT error_message FROM runs WHERE id = ?', run.id).error_message, /2 分钟/)
   } finally {
     mock.timers.reset()
+    await cleanup(ctx)
+  }
+})
+
+// DSHBOTS-198：任务卡默认带时间预算（用户 2026-11-04 拍板 A：跟随看门狗）。
+// 缺省链 = 显式 time_budget_minutes > env DSH_TEAM_TASK_TIME_BUDGET_MINUTES >
+// 无进展看门狗（分钟）生效值 > 兜底 20（看门狗未配置与配 0 关闭同值；预算不得变 0/无限）。
+test('缺省预算链：未传补 20、env 覆盖、看门狗配置覆盖、看门狗 0 兜底 20、显式不覆盖', async () => {
+  const prevEnv = process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES
+  const ctx = await setup()
+  try {
+    const { project } = await primeProject(ctx.service, ctx.store)
+    const actor = ctx.service.actor()
+    const create = (title, extra = {}) => ctx.service.createTask({ projectId: project.id, title, ...extra }, actor)
+
+    assert.equal(rowOf(ctx.store, (await create('未传')).id).time_budget_minutes, 20, '未传应补看门狗缺省生效值 20')
+
+    // env 口径与 effectiveRunLimits 同款（review-watchdog 先例）：env 显式时生效值取
+    // config——resolveConfig 启动快照已吃进 env 值，运行中后设的 env 不追溯生效的卡。
+    process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES = '45'
+    ctx.store.setSetting('stall_watchdog_minutes', '75')
+    const envSnapshot = resolveConfig({
+      workspace: join(ctx.root, 'workspace'), dataDir: join(ctx.root, 'data'),
+      skillRoot: join(ctx.root, 'workspace', '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000,
+    })
+    assert.equal(effectiveTaskTimeBudgetMinutes(envSnapshot, () => '75'), 45, 'env 显式应压过看门狗配置')
+
+    delete process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES
+    assert.equal(rowOf(ctx.store, (await create('看门狗配置')).id).time_budget_minutes, 75, '看门狗生效值应成为缺省预算')
+
+    ctx.store.setSetting('stall_watchdog_minutes', '0')
+    assert.equal(rowOf(ctx.store, (await create('看门狗关闭')).id).time_budget_minutes, 20, '看门狗 0（关闭）应回落兜底 20')
+
+    ctx.store.setSetting('stall_watchdog_minutes', '75')
+    assert.equal(
+      rowOf(ctx.store, (await create('显式优先', { time_budget_minutes: 90 })).id).time_budget_minutes, 90,
+      '显式时效不得被缺省链覆盖',
+    )
+  } finally {
+    if (prevEnv === undefined) delete process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES
+    else process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES = prevEnv
+    await cleanup(ctx)
+  }
+})
+
+test('重派补挂与预算行在场：assignTask 给 NULL 存量卡补缺省、显式卡不覆盖，缺省卡提示词带预算行', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    const actor = ctx.service.actor()
+    const legacy = await ctx.service.createTask({ projectId: project.id, title: '老卡', time_budget_minutes: 30 }, actor)
+    ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', legacy.id)
+    await ctx.service.assignTask(legacy.id, dev.id, actor, { autoStart: false })
+    assert.equal(rowOf(ctx.store, legacy.id).time_budget_minutes, 20, '重派应给 NULL 预算存量卡补缺省')
+
+    const explicit = await ctx.service.createTask({ projectId: project.id, title: '显式卡', time_budget_minutes: 90 }, actor)
+    await ctx.service.assignTask(explicit.id, dev.id, actor, { autoStart: false })
+    assert.equal(rowOf(ctx.store, explicit.id).time_budget_minutes, 90, '显式预算不得被重派覆盖')
+
+    // 产品规则：每张任务卡 prompt 都携带明确时限——缺省补挂的卡预算行必须在场。
+    const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
+    const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
+    const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
+    const prompt = runtime.promptFor({ run: { kind: 'task' }, bot: botRow, project: projectRow, task: rowOf(ctx.store, legacy.id) })
+    assert.match(prompt, /# Time budget/, '缺省补挂卡应有时效段')
+    assert.match(prompt, /within 20 minutes/, '缺省预算值 20 应注入提示词')
+    assert.match(prompt, /aborted when the budget expires/, '必须写明到期即中止')
+  } finally {
     await cleanup(ctx)
   }
 })

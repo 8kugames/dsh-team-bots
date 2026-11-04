@@ -83,6 +83,17 @@ export function effectiveRunLimits(config, getSetting = () => null) {
   }
 }
 
+// ── 任务卡缺省时间预算（DSHBOTS-198）────────────────────────────────────────
+// 产品规则：每张任务卡必有预算。缺省链 = env 显式 > 无进展看门狗（分钟）生效值 >
+// 兜底 20（看门狗未配置与配 0 关闭同值，预算不得变 0/无限）。消费点（createTask
+// 建档、assignTask 给存量 NULL 卡补挂）每次现算，改值对之后建档/派发的卡生效。
+export const TASK_TIME_BUDGET_FALLBACK_MINUTES = 20
+export function effectiveTaskTimeBudgetMinutes(config, getSetting = () => null) {
+  const env = envExplicit('DSH_TEAM_TASK_TIME_BUDGET_MINUTES')
+  const stallMinutes = Math.round(effectiveRunLimits(config, getSetting).stallTimeoutMs / 60_000)
+  return !env && stallMinutes > 0 ? stallMinutes : config.taskTimeBudgetMinutes
+}
+
 // 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > 页面保存值 >
 // 默认 256；0 = 关闭。消费点（runtime.ensureSession 复用检查）每次现算，改值对
 // 下一次会话复用生效。
@@ -168,6 +179,12 @@ export function resolveConfig(config = {}) {
     maxRunTokens: int(config.maxRunTokens ?? process.env.DSH_TEAM_MAX_RUN_TOKENS, 0, 0, 500_000_000),
     // 0 关闭：运行多久没有任何事件就判定卡住。
     stallTimeoutMs: int(config.stallTimeoutMs ?? process.env.DSH_TEAM_STALL_TIMEOUT_MS, 20 * 60_000, 0, 6 * 60 * 60_000),
+    // 任务卡缺省时间预算（DSHBOTS-198）：env 解析结果或兜底 20；生效缺省链见
+    // effectiveTaskTimeBudgetMinutes（env > 看门狗生效值 > 本兜底）。
+    taskTimeBudgetMinutes: int(
+      config.taskTimeBudgetMinutes ?? process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES,
+      TASK_TIME_BUDGET_FALLBACK_MINUTES, 1, 10_080,
+    ),
     // 会话结转阈值（DSHBOTS-145）：0 = 关闭；「轮次」口径 = runs 表按 session_id 的
     // COUNT(*)（不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实
     // 增长一致）。生效值可被全局配置页 session_rollover_turns 覆盖。

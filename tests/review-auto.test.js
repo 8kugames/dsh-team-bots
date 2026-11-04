@@ -369,6 +369,8 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
       projectId: t.project.id, title: '超长卡', assigneeBotId: t.dev.id,
       description: 'x'.repeat(9_000), postCard: false,
     })
+    // DSHBOTS-198 后建档即补缺省预算；本例锁 8K 截断管线的原始余量，直改库置 NULL 模拟存量老卡。
+    t.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', long.id)
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", long.id)
     const longView = await t.service.taskReviewDelegate(long.id, t.actor)
     const longRow = t.store.get('SELECT * FROM runs WHERE id = ?', longView.id)

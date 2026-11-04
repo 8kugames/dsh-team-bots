@@ -109,6 +109,8 @@ test('任务提示词注入纪律段：拆解义务 + 产品级子卡要求 + KE
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
     const actor = ctx.service.actor()
     const plain = await ctx.service.createTask({ projectId: project.id, title: '普通任务', writeScopes: ['src/a.js'] }, actor)
+    // DSHBOTS-198 后建档即补缺省预算；「无时效卡」分支只剩存量老卡，直改库置 NULL 模拟。
+    ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', plain.id)
     const urgentBudgeted = await ctx.service.createTask(
       { projectId: project.id, title: '紧急限时任务', priority: 'urgent', time_budget_minutes: 30, writeScopes: ['src/b.js'] },
       actor,
