@@ -120,3 +120,71 @@ test('⑧ 重设计只使用既有 token，不新增色值', () => {
   assert.match(block, /var\(--accent\)/, '条形用既有 accent token')
   assert.match(block, /var\(--star\)/, '未计价条形用既有 star token')
 })
+
+// DSHBOTS-142 用量页提示文案精简：只保留玩家能据以行动的规则信息，删纯实现口径说明。
+// 读源码断言（与本文件同模式）：旧文案不再出现、精简后的文案仍在、每条提示只占一行。
+const USAGE_PAGE_FNS = ['usageModelPanel', 'usageDayPanel', 'renderUsageGlobal', 'renderUsageDomain', 'renderUsageSolo']
+
+test('⑨ 用量页提示精简：实现口径说明已删，玩家可据以行动的信息仍在', () => {
+  // 已删 / 已改写的旧文案不再出现在源码里。
+  for (const gone of [
+    '未配置价格的成本不会按 0 计费',
+    '按日明细由服务端保留最近 14 天',
+    '服务端尚未按口径过滤明细',
+    '服务端尚未提供本群口径明细',
+    '服务端尚未提供该 Bot 的单聊口径明细',
+    '今日口径：产品时区（Asia/Shanghai）当日 0 点起。',
+    '滚动 7 天窗口，按产品时区日历日分组。',
+    '滚动 30 天窗口，按产品时区日历日分组。',
+    '至今窗口汇总全部历史；',
+  ]) {
+    assert.ok(!source.includes(gone), `旧文案「${gone}」应已移除`)
+  }
+  // 精简后的玩家视角文案仍在。
+  for (const kept of [
+    '未配置价格的调用不计入成本合计；价格按每百万 token 配置。',
+    '日历图只画最近 14 天，更早的调用计入上方汇总。',
+    '下方分组为全局数据，未按本群过滤。',
+    '该 Bot 的单聊明细暂不可用，下方分组为全局数据。',
+    '产品时区（Asia/Shanghai）当日 0 点起。',
+    '按产品时区（Asia/Shanghai）日历日分组。',
+    '汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。',
+  ]) {
+    assert.ok(source.includes(kept), `精简文案「${kept}」应保留`)
+  }
+  // 对账不一致提示可据以行动（数据可能不完整），保留不动。
+  assert.ok(source.includes('数据可能不完整'), '对账不一致提示应保留')
+  // 全局视图不再挂「服务端尚未按口径过滤」这类开发元信息（该视图本来就展示全局数据）。
+  assert.ok(!fnBody('renderUsageGlobal').includes('usage.legacy'), '全局视图不再渲染 legacy 实现说明')
+  // 单聊视图按 tier 口径判定提示：明细缺失时（分组回落全局）必须给玩家看得懂的提示。
+  assert.match(fnBody('renderUsageSolo'), /usage\.solo && tier \? ''/, '单聊提示按单聊 tier 判定')
+})
+
+test('⑩ 用量页每条提示只占一行，不堆解释', () => {
+  for (const fn of USAGE_PAGE_FNS) {
+    const body = fnBody(fn)
+    const opened = body.split('<div class="usage-note">').length - 1
+    const notes = [...body.matchAll(/<div class="usage-note">(.*?)<\/div>/g)].map((m) => m[1])
+    assert.equal(notes.length, opened, `${fn} 的提示不应跨行渲染`)
+    for (const note of notes) {
+      const text = note.replace(/\$\{[^}]*\}/g, '').trim()
+      if (!text) continue
+      assert.ok(!text.includes('\n'), `${fn} 的提示不应换行`)
+      assert.ok((text.match(/。/g) ?? []).length <= 1, `${fn} 的提示只保留一句：${text}`)
+      assert.ok(text.length <= 40, `${fn} 的提示不超过 40 字：${text}`)
+    }
+  }
+  // 按日面板的兜底说明（meta.note 缺失时）同样是一句话。
+  const fallback = '日历图只画最近 14 天，更早的调用计入上方汇总。'
+  assert.equal((fallback.match(/。/g) ?? []).length, 1, '兜底说明只保留一句')
+  assert.ok(fallback.length <= 40, '兜底说明不超过 40 字')
+  // 四档时间窗的说明同样是一句话，且不重复页面头已声明的窗口标签。
+  const meta = fnBody('usageDayPanelMeta')
+  const windowNotes = [...meta.matchAll(/note: '([^']*)'/g)].map((m) => m[1]).filter(Boolean)
+  assert.equal(windowNotes.length, 4, '四档时间窗各有一条说明')
+  for (const note of windowNotes) {
+    assert.equal((note.match(/。/g) ?? []).length, 1, `窗口说明只保留一句：${note}`)
+    assert.ok(note.length <= 40, `窗口说明不超过 40 字：${note}`)
+  }
+  assert.ok(!windowNotes.some((n) => n.includes('滚动 7 天窗口') || n.includes('滚动 30 天窗口')), '窗口说明不重复页面头的窗口标签')
+})

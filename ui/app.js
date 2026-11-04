@@ -2291,10 +2291,10 @@ function usageWindowText(usage) {
 // 按日面板的标题与说明：跟当前时间窗走；没有窗口信息时回落到旧的 14 天口径。
 function usageDayPanelMeta(usage) {
   const key = String(usage?.window?.key ?? '')
-  if (key === 'today') return { title: '今日', note: '今日口径：产品时区（Asia/Shanghai）当日 0 点起。' }
-  if (key === '7d') return { title: '近 7 天', note: '滚动 7 天窗口，按产品时区日历日分组。' }
-  if (key === '30d') return { title: '近 30 天', note: '滚动 30 天窗口，按产品时区日历日分组。' }
-  if (key === 'all') return { title: '近 30 天', note: '至今窗口汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。' }
+  if (key === 'today') return { title: '今日', note: '产品时区（Asia/Shanghai）当日 0 点起。' }
+  if (key === '7d') return { title: '近 7 天', note: '按产品时区（Asia/Shanghai）日历日分组。' }
+  if (key === '30d') return { title: '近 30 天', note: '按产品时区（Asia/Shanghai）日历日分组。' }
+  if (key === 'all') return { title: '近 30 天', note: '汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。' }
   return { title: '', note: '' }
 }
 
@@ -2310,7 +2310,7 @@ function usageSnapshot() {
   const project = raw.project ?? legacy?.project ?? null
   const solo = raw.solo ?? null
   const scope = typeof raw.scope === 'string' ? raw.scope : (project ? 'project' : 'global')
-  return { ...raw, tiers, global, project, solo, scope, legacy: Boolean(legacy) }
+  return { ...raw, tiers, global, project, solo, scope }
 }
 
 function usageTotals(scope = state.usageScope) {
@@ -2490,7 +2490,7 @@ function usageModelPanel(byModel, title, headerExtra = '', currency = 'CNY') {
   return `<div class="card usage-panel">
     <div class="card-head"><h3>${esc(title)}</h3>${headerExtra || `<span class="meta">${byModel.length} 个</span>`}</div>
     ${byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono num">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td class="usage-model-cell">${usageModelCell(item)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono num" title="${attr(usageCostText(item, currency))}">${esc(usageCostPrimaryText(item, currency))}</td></tr>`).join('')}</tbody></table>`}
-    <div class="usage-note">未配置价格的成本不会按 0 计费；价格按每百万 token 配置。</div>
+    <div class="usage-note">未配置价格的调用不计入成本合计；价格按每百万 token 配置。</div>
   </div>`
 }
 
@@ -2546,7 +2546,7 @@ function usageDayPanel(days) {
   return `<div class="card usage-panel">
     <div class="card-head"><h3>${esc(usageDayTitle(usage))}</h3>${peak && peak.totalTokens ? `<span class="meta">峰值 ${formatNumber(peak.totalTokens)} · ${esc(String(peak.day).slice(5))}</span>` : ''}</div>
     ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % labelStep === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
-    <div class="usage-note">${esc(meta.note || '按日明细由服务端保留最近 14 天；更早的调用计入上方汇总，不进这张图。')}</div>
+    <div class="usage-note">${esc(meta.note || '日历图只画最近 14 天，更早的调用计入上方汇总。')}</div>
   </div>`
 }
 
@@ -2624,7 +2624,6 @@ function renderUsageGlobal() {
   const overviewNotes = [
     unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
     Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${Number(reconciliation.mismatched)} 次运行的用量记录对不上，数据可能不完整。</div>` : '',
-    usage.legacy ? '<div class="usage-note">服务端尚未按口径过滤明细，下方分组仍是全局数据。</div>' : '',
   ].join('')
   return `
     ${usagePageHead(usage, '全局口径，不随当前群聊 / 单聊上下文变化')}
@@ -2669,7 +2668,7 @@ function renderUsageDomain() {
   const unpriced = Number(totals.unpricedCalls ?? 0)
   const overviewNotes = [
     unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
-    tier ? '' : '<div class="usage-note">服务端尚未提供本群口径明细，下方分组可能是全局数据。</div>',
+    tier ? '' : '<div class="usage-note">下方分组为全局数据，未按本群过滤。</div>',
   ].join('')
   return `
     ${usagePageHead(usage, '仅当前群聊内的用量，不含其他群聊', '本群')}
@@ -2713,7 +2712,7 @@ function renderUsageSolo() {
   const unpriced = Number(totals.unpricedCalls ?? 0)
   const overviewNotes = [
     unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
-    usage.solo ? '' : '<div class="usage-note">服务端尚未提供该 Bot 的单聊口径明细。</div>',
+    usage.solo && tier ? '' : '<div class="usage-note">该 Bot 的单聊明细暂不可用，下方分组为全局数据。</div>',
   ].join('')
   return `
     ${usagePageHead(usage, '仅该 Bot 在项目外（单聊）的用量，不含项目内调用', '该 Bot')}
