@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
 const utilSource = readFileSync(fileURLToPath(new URL('../ui/modules/util.js', import.meta.url)), 'utf8')
 const appSource = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
@@ -39,9 +40,14 @@ test('既有档位不回归：<1000 原样、k/m 档口径不变', () => {
   assert.equal(formatNumber(999_999_999), '1000.0m')
 })
 
-test('展示位统一：app.js 全部经 formatNumber、无独立 k/m 拼接；CSV 导出原始数据不经展示格式化', () => {
+test('展示位统一：ui 源码全部经 formatNumber、无独立 k/m 拼接；CSV 导出原始数据不经展示格式化', () => {
   assert.match(appSource, /import \{[^}]*formatNumber[^}]*\} from '\.\/modules\/util\.js'/)
-  assert.doesNotMatch(appSource, /\}\s*[km]\b/, 'ui/app.js 不得出现绕开 formatNumber 的模板串 k/m 计数拼接')
+  // 视图域外迁后展示位分散在 ui/modules/*，守门须覆盖整份 ui 源码；
+  // util.js 的 formatNumber/duration 是受检的格式化器本身，先排除再查绕开它们的拼接。
+  const withoutFormatters = readUiSource()
+    .replace(/\/\/ format-tokens:start[\s\S]*?\/\/ format-tokens:end/, '')
+    .replace(/export function duration\([\s\S]*?\n\}/, '')
+  assert.doesNotMatch(withoutFormatters, /\}\s*[km]\b/, 'ui 源码不得出现绕开 formatNumber 的模板串 k/m 计数拼接')
   const usageSource = readFileSync(fileURLToPath(new URL('../src/usage.js', import.meta.url)), 'utf8')
   assert.ok(!usageSource.includes('formatNumber'), 'exportUsageCsv 必须直出原始 token 列，不经展示格式化')
 })
