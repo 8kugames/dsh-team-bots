@@ -1,7 +1,7 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.2.127",
-  "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots (development on the dev branch; this branch holds release metadata only)",
+  "version": "0.2.289",
+  "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/8kugames/dsh-team-bots.git"
@@ -11,8 +11,36 @@
     "url": "https://github.com/8kugames/dsh-team-bots/issues"
   },
   "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js",
   "engines": {
     "node": ">=22.19"
+  },
+  "files": [
+    "index.js",
+    "src/",
+    "scripts/doctor.mjs",
+    "ui/",
+    "vendor/",
+    "cordis.patch.yml",
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/README.zh.md",
+    "docs/assets/",
+    "NOTICE",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "dev": "node scripts/dev-server.js",
+    "start": "node scripts/dev-server.js",
+    "doctor": "node scripts/doctor.mjs",
+    "profile:install": "node scripts/install-profile.mjs",
+    "verify:agent-team": "node scripts/verify-agent-team.mjs",
+    "backup": "node scripts/backup.mjs",
+    "restore-check": "node scripts/restore-check.mjs",
+    "load-test": "node scripts/load-test.mjs",
+    "fault-test": "node scripts/fault-test.mjs"
   },
   "keywords": [
     "dsh-plugin",
@@ -21,5 +49,10 @@
     "bots",
     "team",
     "tasks"
-  ]
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
 }

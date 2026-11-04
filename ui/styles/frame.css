@@ -1,0 +1,347 @@
+/* ---------------------------------------------------------------- Frame */
+.shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+}
+
+.sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--sidebar);
+    border-right: 1px solid var(--line);
+    padding: 14px 12px 10px;
+    z-index: 20;
+}
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 6px 14px;
+    text-decoration: none;
+    color: inherit;
+}
+.brand-mark {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    background: var(--accent-wash-2);
+    color: var(--accent-text);
+    font: 600 0.6875rem var(--mono);
+    letter-spacing: 0.01em;
+    transition: opacity 0.12s ease;
+}
+.brand:hover .brand-mark {
+    opacity: 0.85;
+}
+.brand-copy {
+    min-width: 0;
+}
+.brand-copy strong {
+    display: block;
+    font-size: var(--fs-body);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+}
+.brand-copy span {
+    display: block;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    line-height: 1.3;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+/* Tree */
+.tree {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.tree-group {
+    min-width: 0;
+}
+.side-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-2);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0 6px 6px;
+}
+.tree-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    padding: 0;
+    min-height: 24px;
+}
+.tree-toggle:hover {
+    color: var(--ink-2);
+}
+.chev {
+    width: 11px;
+    height: 11px;
+    transition: transform 0.12s ease;
+    opacity: 0.6;
+}
+.chev.open {
+    transform: rotate(90deg);
+}
+.tree-count {
+    margin-left: 1px;
+    color: var(--ink-3);
+    font: 500 var(--fs-caption) var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+.side-add {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--ink-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease;
+}
+.side-add svg {
+    width: 13px;
+    height: 13px;
+}
+.side-add:hover {
+    background: var(--hover, var(--line));
+    color: var(--ink);
+}
+
+.tree-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.tree-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 36px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-2);
+    text-align: left;
+    font-size: var(--fs-small);
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease;
+}
+.tree-item:hover {
+    background: var(--line);
+    color: var(--ink);
+}
+.tree-item.active {
+    background: var(--accent-wash);
+    color: var(--ink);
+    font-weight: 500;
+}
+.tree-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.chat-hash {
+    color: var(--ink-3);
+    font: 500 var(--fs-small) var(--mono);
+    flex: 0 0 auto;
+}
+.tree-item.active .chat-hash {
+    color: var(--accent-text);
+}
+/* 侧栏未读计数胶囊：与待审红点同族（同一 --danger 填充），一个信号只留一种形态。
+   文字用 --surface，四套主题下对比度均 ≥ 4.5:1。 */
+.unread-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: var(--danger);
+    color: var(--surface);
+    font: 600 var(--fs-caption) var(--mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+}
+/* 未读时项目名不加粗：徽标本身即强调，不再叠第二处焦点。 */
+.tree-item.has-unread {
+    font-weight: 400;
+}
+.tree-open-count {
+    color: var(--ink-3);
+    font: 500 var(--fs-small) var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+.tree-flag {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    flex: 0 0 auto;
+}
+.tree-item-wrap {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.tree-item-wrap .tree-item {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.remove-tracking-list {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    display: grid;
+    gap: 6px;
+    line-height: 1.55;
+}
+.bot-item .avatar {
+    flex: 0 0 auto;
+}
+.side-empty {
+    padding: 6px 8px 2px;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    line-height: 1.6;
+}
+
+/* Attention dot */
+.red-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: var(--danger);
+    box-shadow: 0 0 0 1.5px var(--sidebar);
+    display: inline-block;
+}
+.tab .red-dot {
+    position: static;
+    width: 5px;
+    height: 5px;
+    margin-left: 6px;
+    box-shadow: none;
+    vertical-align: middle;
+}
+
+.sidebar-bottom {
+    margin-top: auto;
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.global-config {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 36px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    position: relative;
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease;
+}
+.global-config svg {
+    width: 15px;
+    height: 15px;
+    opacity: 0.8;
+}
+.global-config:hover {
+    background: var(--line);
+    color: var(--ink);
+}
+.global-config.active {
+    background: var(--accent-wash);
+    color: var(--ink);
+    font-weight: 500;
+}
+.global-config.active svg {
+    color: var(--accent-text);
+    opacity: 1;
+}
+/* 链接复用 global-config 按钮形态（DSH 原生界面切换入口） */
+a.global-config {
+    text-decoration: none;
+}
+a.global-config.dsh-official-link {
+    color: var(--ink-3);
+}
+a.global-config.dsh-official-link:hover {
+    color: var(--ink);
+}
+.sidebar-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 0;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    white-space: nowrap;
+    overflow: hidden;
+    min-width: 0;
+}
+.sidebar-meta span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sidebar-meta .dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--green);
+    flex: 0 0 auto;
+}
+.sidebar-meta .dot.amber {
+    background: var(--star);
+}
+.sidebar-meta-sep {
+    opacity: 0.55;
+}
+

@@ -1,0 +1,233 @@
+/* ---------------------------------------------------------------- Settings and forms */
+.settings-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+    gap: 12px;
+    align-items: start;
+}
+.global-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+}
+.global-grid > * {
+    grid-column: span 4;
+}
+.global-grid > .span-12 {
+    grid-column: 1 / -1;
+}
+.form-card {
+    padding: 18px 20px;
+}
+.form-card h3 {
+    margin: 0 0 14px;
+    font-size: var(--fs-title);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.field {
+    margin-bottom: 14px;
+}
+.field > label,
+.field > .field-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    font-weight: 500;
+}
+.field .input,
+.field .select {
+    width: 100%;
+}
+.hint {
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    line-height: 1.6;
+}
+.field .hint {
+    margin-top: 6px;
+}
+.note {
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    line-height: 1.7;
+}
+.summary-link {
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--ink-3) 55%, transparent);
+    text-underline-offset: 3px;
+}
+.summary-link:hover {
+    color: var(--accent-text);
+    text-decoration-color: currentColor;
+}
+.field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+.check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 190px;
+    overflow: auto;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 5px;
+}
+.check-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    min-height: 36px;
+    padding: 0 8px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+.check-row:hover {
+    background: var(--surface);
+}
+.check-row input {
+    accent-color: var(--accent);
+    flex: 0 0 auto;
+}
+.check-row .role {
+    margin-left: auto;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+}
+.path-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+}
+.path-row.plain {
+    border-bottom: 0;
+    padding: 0;
+}
+.path-row.plain > span {
+    min-width: 0;
+    letter-spacing: 0.04em;
+}
+.path-row.plain code {
+    font-size: var(--fs-caption);
+}
+.form-card .path-row:last-of-type {
+    border-bottom: 0;
+}
+.path-row > span {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    min-width: 84px;
+    flex: 0 0 auto;
+}
+.path-row code {
+    flex: 1;
+    min-width: 0;
+    font: var(--fs-small) var(--mono);
+    color: var(--ink-2);
+    overflow-wrap: break-word;
+    word-break: normal;
+    white-space: normal;
+    direction: ltr;
+    text-align: left;
+}
+/* Thin track + small white thumb: the slider is a control, not a black bar. */
+.range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    accent-color: var(--accent);
+}
+.range::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line-2);
+}
+.range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5.5px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    box-shadow: var(--shadow-1);
+}
+.range:focus-visible::-webkit-slider-thumb {
+    border-color: var(--accent);
+}
+.range::-moz-range-track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line-2);
+}
+.range::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+}
+.scale-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+.kv {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: var(--fs-small);
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+}
+.kv:last-child {
+    border-bottom: 0;
+}
+/* Wide card: pack the definition rows so label and value stay one glance apart. */
+.kv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    column-gap: 22px;
+}
+.kv-grid .kv {
+    border-bottom: 0;
+    padding: 6px 0;
+    justify-content: flex-start;
+    gap: 10px;
+}
+.kv-grid .kv strong {
+    text-align: left;
+}
+/* Key is the label, value is the data: value must out-rank the key, not match it. */
+.kv span {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+}
+.kv strong {
+    color: var(--ink);
+    font-weight: 500;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+

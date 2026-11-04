@@ -1,0 +1,37 @@
+/* ---------------------------------------------------------------- Accessibility and panels */
+.check-row > label {
+    flex: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+/* 成本卡与其余三张 KPI 卡同字号同字重；货币符号走 .unit，金额不再降级成小字。 */
+.metric strong.metric-cost .unit {
+    color: var(--ink-2);
+    font-size: 0.72em;
+}
+.note.warn-note {
+    color: var(--ink-2);
+    border: 1px solid var(--star);
+    background: var(--star-wash);
+    border-radius: 10px;
+    padding: 9px 12px;
+}
+.skill-versions {
+    margin-top: 8px;
+}
+.skill-versions .list-meta {
+    align-items: center;
+}
+.run-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+}
+.modal:focus {
+    outline: none;
+}
+

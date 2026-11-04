@@ -1,0 +1,370 @@
+/* ---------------------------------------------------------------- Chat */
+.chat-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 20px;
+    align-items: stretch;
+    height: calc(100dvh - var(--chrome-h, 160px));
+    min-height: 480px;
+}
+.chat-layout > *,
+.chat-panel,
+.chat-side {
+    min-width: 0;
+}
+.chat-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.chat-head {
+    padding: 12px 16px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    border-bottom: 1px solid var(--line);
+}
+.chat-head > div:first-child {
+    min-width: 0;
+}
+.chat-head-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: var(--fs-body);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+}
+.chat-head-title .chat-hash {
+    font-size: var(--fs-body);
+}
+.chat-head-meta {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 1px;
+}
+.chat-head-meta .sep {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    flex: 0 0 auto;
+}
+.member-stack {
+    margin-left: auto;
+    display: flex;
+    padding-right: 2px;
+}
+.member-stack .avatar {
+    margin-left: -5px;
+    box-shadow: 0 0 0 2px var(--surface);
+}
+.member-stack .avatar:first-child {
+    margin-left: 0;
+}
+.chat-head-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.message-row {
+    display: flex;
+    gap: 10px;
+}
+.message-row.user {
+    flex-direction: row-reverse;
+}
+.message-body-wrap {
+    min-width: 0;
+    max-width: min(640px, 82%);
+}
+.message-row.user .message-body-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+.message-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 5px;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+}
+.message-meta strong {
+    color: var(--ink-2);
+    font-weight: 600;
+}
+.message-bubble {
+    color: var(--ink);
+    background: var(--surface-3);
+    border-radius: 4px 12px 12px 12px;
+    padding: 9px 13px;
+    line-height: 1.7;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    /* 气泡不许比它的容器（.message-body-wrap）更宽：引用摘要整行 nowrap 时，
+       其 min-content 会把气泡顶出容器、溢出聊天列（DSHBOTS-71）。 */
+    max-width: 100%;
+    min-width: 0;
+}
+.message-row.user .message-bubble {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-radius: 12px 4px 12px 12px;
+}
+.message-row.user .message-meta {
+    justify-content: flex-end;
+}
+.message-row.user .message-meta strong {
+    color: var(--ink-2);
+}
+/* 聊天 markdown 渲染：消息气泡与任务评论共用一套排版（richText 输出的 md HTML）。
+   只用既有 token，明暗主题各自成立；代码块走终端井（console）token。 */
+:is(.message-bubble, .comment-body) p {
+    margin: 0 0 6px;
+}
+:is(.message-bubble, .comment-body) p:last-child {
+    margin-bottom: 0;
+}
+:is(.message-bubble, .comment-body) code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--code-bg);
+    border-radius: 5px;
+    padding: 1px 5px;
+}
+:is(.message-bubble, .comment-body) pre {
+    font-family: var(--mono);
+    font-size: var(--fs-small);
+    /* 代码块复用终端井：双主题恒定的暗色面板，与工作台终端同一视觉语系。 */
+    background: var(--console-bg);
+    color: var(--console-ink);
+    border-radius: 10px;
+    padding: 10px 12px;
+    overflow: auto;
+    margin: 0 0 6px;
+}
+:is(.message-bubble, .comment-body) pre:last-child {
+    margin-bottom: 0;
+}
+:is(.message-bubble, .comment-body) pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: 1em;
+    border-radius: 0;
+}
+:is(.message-bubble, .comment-body) a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    /* bot 气泡底是 --surface-3、评论底是 --surface：--accent-text 在四套主题下
+       对比 4.22:1 ~ 8.40:1，配合下划线可读。 */
+    color: var(--accent-text);
+}
+/* 用户气泡底是 --accent，链接字必须换 --accent-ink：Catppuccin 暗色下
+   --accent-text 与 --accent 同为 #b7bdf8，链接会整段隐形（DSHBOTS-130）。 */
+.message-row.user .message-bubble a {
+    color: var(--accent-ink);
+}
+:is(.message-bubble, .comment-body) h1,
+:is(.message-bubble, .comment-body) h2,
+:is(.message-bubble, .comment-body) h3,
+:is(.message-bubble, .comment-body) h4,
+:is(.message-bubble, .comment-body) h5,
+:is(.message-bubble, .comment-body) h6 {
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 10px 0 6px;
+}
+:is(.message-bubble, .comment-body) h1:first-child,
+:is(.message-bubble, .comment-body) h2:first-child,
+:is(.message-bubble, .comment-body) h3:first-child,
+:is(.message-bubble, .comment-body) h4:first-child {
+    margin-top: 0;
+}
+:is(.message-bubble, .comment-body) h1 { font-size: 1.16em; }
+:is(.message-bubble, .comment-body) h2 { font-size: 1.08em; }
+:is(.message-bubble, .comment-body) h3 { font-size: 1em; }
+:is(.message-bubble, .comment-body) h4,
+:is(.message-bubble, .comment-body) h5,
+:is(.message-bubble, .comment-body) h6 { font-size: 0.94em; color: var(--ink-2); }
+:is(.message-bubble, .comment-body) ul,
+:is(.message-bubble, .comment-body) ol {
+    margin: 0 0 6px;
+    padding-left: 1.35em;
+}
+:is(.message-bubble, .comment-body) li {
+    margin: 2px 0;
+}
+:is(.message-bubble, .comment-body) blockquote {
+    margin: 0 0 6px;
+    padding: 4px 10px;
+    border-left: 2px solid var(--accent);
+    background: var(--code-bg);
+    border-radius: 4px 8px 8px 4px;
+    color: var(--ink-2);
+    font-size: 0.95em;
+}
+:is(.message-bubble, .comment-body) blockquote p {
+    margin: 0 0 4px;
+}
+:is(.message-bubble, .comment-body) blockquote p:last-child {
+    margin-bottom: 0;
+}
+:is(.message-bubble, .comment-body) table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 0 0 6px;
+    font-size: 0.95em;
+}
+:is(.message-bubble, .comment-body) th,
+:is(.message-bubble, .comment-body) td {
+    border: 1px solid var(--line-2);
+    padding: 4px 9px;
+    text-align: left;
+    white-space: nowrap;
+}
+:is(.message-bubble, .comment-body) th {
+    background: var(--code-bg);
+    font-weight: 600;
+}
+:is(.message-bubble, .comment-body) hr {
+    border: none;
+    border-top: 1px solid var(--line-2);
+    margin: 8px 0;
+}
+/* 工作区图片：缩略展示（不撑爆气泡），加载失败由 JS 换成文件名 chip。 */
+:is(.message-bubble, .comment-body) img {
+    display: block;
+    max-width: min(100%, 340px);
+    max-height: 320px;
+    border-radius: 8px;
+    margin: 4px 0;
+}
+/* 图片加载失败占位 chip：显示文件名，danger 语义但保持轻量。 */
+.md-img-missing {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 2px 0;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--danger-wash);
+    color: var(--danger);
+    font-size: var(--fs-caption);
+    font-family: var(--mono);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 引用块：气泡顶部的「❝ 名字：摘要」行。颜色继承气泡正文，
+   bot 气泡（surface-3）与用户气泡（accent）各自可读，明暗主题共用变量。 */
+.msg-quote {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    margin: 0 0 6px;
+    padding: 3px 8px;
+    border-left: 2px solid var(--accent);
+    background: var(--code-bg);
+    border-radius: 4px 8px 8px 4px;
+    font-size: var(--fs-small);
+    opacity: 0.88;
+    min-width: 0;
+    /* 引用块自身也不许超出气泡内容宽（DSHBOTS-71）。 */
+    max-width: 100%;
+    overflow: hidden;
+}
+.msg-quote svg {
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+    align-self: center;
+    opacity: 0.8;
+}
+.msg-quote span {
+    /* 摘要两行截断：单行 nowrap 把整条摘要挤成一行、右侧裁切（DSHBOTS-71）。
+       两行 + anywhere 换行能多露上下文，又不会撑破气泡。 */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    min-width: 0;
+}
+/* 用户气泡本身是 accent 底，引用条边线换成 accent-ink 区分。 */
+.message-row.user .msg-quote {
+    border-left-color: var(--accent-ink);
+}
+/* hover 引用/复制按钮：平时隐形，悬停消息行或键盘聚焦时出现。 */
+.msg-quote-btn,
+.msg-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+        opacity 0.12s ease,
+        color 0.12s ease,
+        background-color 0.12s ease;
+}
+.msg-quote-btn svg,
+.msg-copy-btn svg {
+    width: 14px;
+    height: 14px;
+}
+/* 复制按钮紧邻引用按钮右侧：抵掉 meta 行 8px 的 flex gap，使两者间距约 4px。 */
+.msg-copy-btn {
+    margin-left: -4px;
+}
+.message-row:hover .msg-quote-btn,
+.message-row:hover .msg-copy-btn,
+.msg-quote-btn:focus-visible,
+.msg-copy-btn:focus-visible {
+    opacity: 1;
+}
+.msg-quote-btn:hover,
+.msg-copy-btn:hover {
+    color: var(--ink);
+    background: var(--surface-2);
+}
+.message-system {
+    text-align: center;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+}

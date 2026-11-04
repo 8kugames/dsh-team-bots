@@ -1,0 +1,5 @@
+marked 15.0.7, Copyright (c) 2011-2024, Christopher Jeffrey and MarkedJS
+contributors (MIT, see LICENSE, upstream https://github.com/markedjs/marked).
+Copied from npm tarball marked-15.0.7.tgz (registry.npmjs.org). Only
+lib/marked.umd.js is kept (UMD build the plugin UI loads as a plain script
+tag); package.json and LICENSE are recorded verbatim. No source edits.

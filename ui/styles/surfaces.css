@@ -1,0 +1,106 @@
+/* ---------------------------------------------------------------- Surfaces */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow-1);
+}
+.card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.card-head h3 {
+    margin: 0;
+    font-size: var(--fs-title);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.card-head .meta {
+    color: var(--ink-3);
+    font: 500 var(--fs-caption) var(--mono);
+    letter-spacing: 0.08em;
+}
+
+/* Page bar: one quiet description line + the page's actions */
+.section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 18px;
+}
+.section-head p {
+    margin: 0;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    line-height: 1.6;
+    max-width: 68ch;
+}
+.section-head .btn-row {
+    flex: 0 0 auto;
+}
+
+.muted {
+    color: var(--ink-2);
+}
+.faint {
+    color: var(--ink-3);
+}
+.mono {
+    font-family: var(--mono);
+}
+.eyebrow {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.empty-state {
+    min-height: 260px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40px;
+    color: var(--ink-3);
+}
+.empty-symbol {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    background: var(--surface-2);
+    color: var(--ink-3);
+    display: grid;
+    place-items: center;
+    margin-bottom: 14px;
+    flex: 0 0 auto;
+}
+.empty-symbol svg {
+    width: 17px;
+    height: 17px;
+}
+.empty-state h3 {
+    margin: 0 0 6px;
+    font-size: var(--fs-title);
+    font-weight: 600;
+    color: var(--ink);
+}
+.empty-state p {
+    max-width: 32em;
+    margin: 0 0 18px;
+    font-size: var(--fs-small);
+    line-height: 1.75;
+}
+.empty-state code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    background: var(--code-bg);
+    border-radius: 5px;
+    padding: 1px 5px;
+}
+
