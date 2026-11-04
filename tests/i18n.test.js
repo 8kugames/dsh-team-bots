@@ -182,3 +182,40 @@ test('字典完整性：zh/en key 一一对应且 ≥150 项，zh 值非空', ()
     assert.ok(value.length > 0, `zh[${key}] 不应为空文案`)
   }
 })
+
+// —— ⑧ 字典占位守门（DSHBOTS-147）：t() 只替换 ${\w+}，占位写成别的形态（如 @{name}）永远原样渲染 ——
+test('字典守门：全字典不得出现 @{ 占位形态（t() 不认，会原样渲染成字面量）', () => {
+  // 源文件层面：连注释里也不许再出现 @{，避免错误形态被复制。
+  for (const rel of ['ui/i18n/zh.js', 'ui/i18n/en.js']) {
+    assert.ok(!read(rel).includes('@{'), `${rel} 全文件不得出现 @{ 占位形态`)
+  }
+  // 值层面：逐条扫描两本字典的运行时内容。
+  for (const [lang, dict] of [['zh', zh], ['en', en]]) {
+    for (const [key, value] of Object.entries(dict)) {
+      assert.ok(!value.includes('@{'), `${lang}[${key}] 占位不得写成 @{…} 形态`)
+    }
+  }
+})
+
+test('字典守门：插值占位必须是 ${\\w+} 形态，与 t() 的正则一致', () => {
+  for (const [lang, dict] of [['zh', zh], ['en', en]]) {
+    for (const [key, value] of Object.entries(dict)) {
+      for (const placeholder of value.matchAll(/\$\{([^}]*)\}/g)) {
+        assert.match(placeholder[1], /^\w+$/, `${lang}[${key}] 占位名须为 \\w+（实际 "${placeholder[1]}"），t() 的 /\\$\\{(\\w+)\\}/ 替换不到`)
+      }
+    }
+  }
+})
+
+test('字典守门：用户实证的三键 t() 实测插值成功，无 @{ 残留', () => {
+  // viewTitle.dispatch / config / usageSolo 曾整键写成 @{name} 原样渲染（DSHBOTS-147 问题①）。
+  for (const lang of ['zh', 'en']) {
+    setLanguage(lang)
+    for (const key of ['viewTitle.dispatch', 'viewTitle.config', 'viewTitle.usageSolo']) {
+      const rendered = t(key, { name: 'x' })
+      assert.ok(rendered.includes('x'), `${lang} ${key} 应完成 name 插值（实际 "${rendered}"）`)
+      assert.ok(!rendered.includes('@{'), `${lang} ${key} 不应残留 @{name} 字面量（实际 "${rendered}"）`)
+    }
+  }
+  setLanguage('zh')
+})

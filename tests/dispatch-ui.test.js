@@ -63,3 +63,14 @@ test('⑥ 子智能体卡如实描述内置能力，不造假数据', () => {
   assert.doesNotMatch(source, /待接入/, '不得再出现「待接入」占位文案')
   assert.doesNotMatch(source, /依赖 DSHBOTS-27/, '不得再出现依赖号占位文案')
 })
+
+// DSHBOTS-147 问题②（docs/review/review-redundancy.md R-1）：调度对象卡头的「配置」按钮与
+// chat-head 就近入口、顶部 tab 同屏三处重复，按审查结论删卡头按钮（③），留 tab（①）与 chat-head（②）。
+test('⑦ 调度对象卡头不再放「配置」按钮，chat-head 就近入口保留', () => {
+  const block = source.slice(source.indexOf('function renderSoloChat'), source.indexOf('async function loadSoloDetail'))
+  assert.ok(block.length > 0, '应能定位到 renderSoloChat 渲染块')
+  assert.doesNotMatch(block, /<h3>\$\{t\('solo\.dispatchTarget'\)\}<\/h3><button/, '调度对象卡头不得再带任何按钮（与 chat-head 配置入口重复）')
+  assert.match(block, /<h3>\$\{t\('solo\.dispatchTarget'\)\}<\/h3><\/div>/, '调度对象卡头应只剩标题')
+  assert.match(block, /chat-head-actions[\s\S]*?data-view="solo-config"[\s\S]*?t\('solo\.configButton'\)/, 'chat-head 右上角就近配置入口保留（R-1 ②）')
+  assert.match(source, /data-action="edit-bot" data-bot-id="\$\{attr\(bot\.id\)\}">\$\{icon\('edit'\)\}配置</, '总览 Bots 卡的全功能配置 modal 入口保留')
+})

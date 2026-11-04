@@ -876,7 +876,7 @@ function renderSoloChat() {
       </div>
       <aside class="chat-side">
         <div class="side-card">
-          <div class="side-card-head"><h3>${t('solo.dispatchTarget')}</h3><button class="btn small" data-action="nav" data-view="solo-config" title="${t('solo.openConfig')}">${t('solo.configButton')}</button></div>
+          <div class="side-card-head"><h3>${t('solo.dispatchTarget')}</h3></div>
           <div class="owner-row">
             ${avatar(bot, 'lg')}
             <div class="owner-info"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || t('solo.roleFallback'))} · ${esc(bot.modelRef ?? t('common.modelUnset'))}</span></div>
