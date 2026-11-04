@@ -54,12 +54,19 @@ export const resolveRestoreBudget = (timeoutMs) => (
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
-// 失败原因的可读形态：Error 取 message，非 Error 的抛出值（字符串等）取其字面量；
+// 失败原因的可读形态：Error 取 message，字符串取其字面量，普通对象取 JSON
+// 形态（无 message 的对象若直接 String 化只会得到 [object Object]）；
 // 没有原因时返回 undefined（不凭空造一个「未知原因」）。
 const describeCause = (error) => {
   if (error === undefined || error === null) return undefined
   const message = error?.message
-  return message === undefined ? String(error) : message
+  if (typeof message === 'string') return message
+  if (typeof error === 'string') return error
+  try {
+    const json = JSON.stringify(error)
+    if (typeof json === 'string' && json.length > 2) return json
+  } catch {}
+  return String(error)
 }
 
 // 宿主唯一发出嵌套事务拒绝的地方（dsh-hmr 的 runExclusive guard）用的原文。
@@ -148,9 +155,14 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
   })()
   // 判定来源：结构化（读得到事务标记）/ 文案启发式（读不到参照但错误原文像宿主
   // 嵌套拒绝）/ 未知（既无参照也无文案线索）。审计词表不外扩，来源只进日志。
-  let scopeJudgement = scopePolluted === null
+  // 结构化两档（structured-clean / structured-polluted）需要 executing 有 getStore
+  // 但没有 exit，宿主真实形态不会命中——生产正常态只有 hmr-exit / direct。
+  // 基准值按每次尝试重置：判定来源与 escape 同生命周期（一次尝试判成污染、
+  // 下一次换回普通失败时，日志不能还挂着上一次判定）。
+  const scopeJudgementBase = scopePolluted === null
     ? (hmr ? 'unknown-no-reference' : 'unknown-no-hmr')
     : (scopePolluted ? 'structured-polluted' : 'structured-clean')
+  let scopeJudgement = scopeJudgementBase
   // 整体预算而非每次尝试各自计时：最坏阻塞从「3×timeoutMs + 退避」压到 timeoutMs。
   // timeoutMs 非法（≤0 / NaN）时退回默认值，不给「完全无保护」留口子。
   const budgetMs = resolveRestoreBudget(timeoutMs)
@@ -197,6 +209,7 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
       } else {
         // 兜底：模块级 scope（干净与否取决于模块评估期落在哪儿）。
         escape = 'scope'
+        scopeJudgement = scopeJudgementBase
         await restoreScope.runInAsyncScope(() => withTimeout(() => defaults.saveSelection(before), remaining, onLate))
       }
       try {
@@ -232,6 +245,8 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
   try {
     // 兜底路径的判定来源进日志：结构化判定 / 文案启发式 / 未知，事后可追；
     // 审计词表不外扩（escape 保持 hmr-exit / direct / scope / scope-polluted）。
+    // 注意：宿主 HMR 参照完整（有 exit + getStore）时只走 hmr-exit / direct，
+    // 这条日志与 structured-* 判定都不可达——它们只在参照缺失/残缺的降级态出现。
     if (escape === 'scope' || escape === 'scope-polluted') {
       logger?.debug?.('dsh-team: restore default model 兜底 scope 判定来源: %s', scopeJudgement)
     }

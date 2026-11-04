@@ -608,3 +608,57 @@ test('兜底路径：失败时 debug 日志说明判定来源（结构化 / 未�
     `未知判定来源要进日志，实际：${JSON.stringify(unknown.lines)}`,
   )
 })
+
+test('兜底路径：判定来源与 escape 同生命周期，混合错误不沿用上一次判定', async () => {
+  const lines = []
+  const audits = []
+  let attempts = 0
+  // 第 1 次抛宿主嵌套拒绝原文（文案启发式判成污染），第 2 次抛普通业务错误。
+  // 判定来源必须随最后一次尝试重置，日志不能还挂着上一次判定的结论。
+  const ok = await restoreDefaultModel(
+    {
+      saveSelection: async () => {
+        attempts += 1
+        throw new Error(attempts === 1 ? 'HMR transactions cannot be nested' : 'boom')
+      },
+    },
+    BEFORE,
+    {
+      logger: { warn() {}, debug: (message, ...rest) => lines.push(`${message} ${rest.join(' ')}`.trim()) },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1,
+    },
+  )
+  assert.equal(ok, false)
+  assert.equal(attempts, RESTORE_MAX_ATTEMPTS, '首次 + 两次退避重试')
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.escape, 'scope', '最后一次尝试是普通失败，escape 应回到 scope')
+  const judgement = lines.find((line) => /判定来源/.test(line))
+  assert.ok(judgement, '兜底失败要留判定来源日志')
+  assert.ok(
+    judgement.includes('unknown-no-hmr'),
+    `判定来源须随最后一次尝试重置，实际：${judgement}`,
+  )
+  assert.ok(
+    !judgement.includes('heuristic-nested-rejection'),
+    `不得沿用上一次尝试的启发式判定，实际：${judgement}`,
+  )
+})
+
+test('失败原因：无 message 的普通对象也给出可读形态', async () => {
+  const audits = []
+  const ok = await restoreDefaultModel(
+    { saveSelection: async () => { throw { code: 'E_RESTORE', detail: 'disk full' } } },
+    BEFORE,
+    {
+      logger: { warn() {} },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1000,
+      timeoutMs: 200,
+    },
+  )
+  assert.equal(ok, false)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.cause, '{"code":"E_RESTORE","detail":"disk full"}', '普通对象按 JSON 形态记录')
+  assert.match(audits[0].error.message, /E_RESTORE/)
+})
