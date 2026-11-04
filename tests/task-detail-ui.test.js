@@ -46,7 +46,7 @@ test('运行记录渲染生效沙箱档位标签：sandboxMode 非空出「沙�
   assert.match(html, /沙箱 workspace-write/, '标签文案为「沙箱 {mode}」')
   assert.match(html, /class="pill green"/, '可写档位用既有 green 档位色')
   assert.match(html, /title="生效沙箱档位：workspace-write"/, '悬停给出档位说明')
-  assert.match(source, /run-row-meta">\$\{runClockSpan\(run\)\}\$\{sandboxPill\(run\.sandboxMode\)\}/, '任务详情运行行插入沙箱档位标签（时长槽位之后）')
+  assert.match(source, /run-row-meta">\$\{runClockSpan\(run\)\}[\s\S]*?\$\{sandboxPill\(run\.sandboxMode\)\}<\/div>/, '任务详情运行行追加沙箱档位标签（指标行末尾，不改动既有读序）')
 })
 
 test('沙箱档位为空不渲染标签（null/空串/未知档位不崩）', () => {
