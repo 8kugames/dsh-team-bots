@@ -128,3 +128,89 @@ test('标记块成对且唯一（迁移不得破坏标记块）', () => {
     assert.equal(tally.get(`${name}:end`), 1, `标记块 ${name}:end 应恰好出现一次`)
   }
 })
+
+// 把注释与字符串/模板字面量替换为等长空格（保留换行），避免正则扫到字面量里的同名标识符。
+function blankNonCode(src) {
+  const out = src.split('')
+  const blank = (from, to) => {
+    for (let k = from; k < to; k += 1) if (out[k] !== '\n') out[k] = ' '
+  }
+  let i = 0
+  while (i < src.length) {
+    const c = src[i]
+    if (c === '/' && src[i + 1] === '/') {
+      let j = i
+      while (j < src.length && src[j] !== '\n') j += 1
+      blank(i, j)
+      i = j
+    } else if (c === '/' && src[i + 1] === '*') {
+      let j = i + 2
+      while (j < src.length && !(src[j] === '*' && src[j + 1] === '/')) j += 1
+      blank(i, Math.min(j + 2, src.length))
+      i = Math.min(j + 2, src.length)
+    } else if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1
+      while (j < src.length && src[j] !== c) {
+        if (src[j] === '\\') j += 1
+        if (src[j] === '\n') break
+        j += 1
+      }
+      blank(i, Math.min(j + 1, src.length))
+      i = Math.min(j + 1, src.length)
+    } else {
+      i += 1
+    }
+  }
+  return out.join('')
+}
+
+test('跨切片调用必须有对应 import（防拆分漏 import 的 ReferenceError）', () => {
+  const provided = new Set()
+  const sources = new Map()
+  for (const name of MODULES) {
+    const src = readFileSync(join(modulesDir, name), 'utf8')
+    sources.set(name, src)
+    for (const m of src.matchAll(/^export \{([^}]*)\}/gm)) {
+      m[1].split(',').forEach((part) => {
+        const binding = part.trim().split(/\s+as\s+/).pop().trim()
+        if (binding) provided.add(binding)
+      })
+    }
+    for (const m of src.matchAll(/^export (?:async )?function\s+(\w+)/gm)) provided.add(m[1])
+  }
+  for (const m of readFileSync(join(root, 'ui/app.js'), 'utf8').matchAll(/^export \{([^}]*)\}/gm)) {
+    m[1].split(',').forEach((part) => {
+      const binding = part.trim()
+      if (binding) provided.add(binding)
+    })
+  }
+  assert.ok(provided.size > 0, '应能收集到切片导出')
+
+  for (const [name, raw] of sources) {
+    const src = blankNonCode(raw)
+    const imported = new Set()
+    for (const m of src.matchAll(/import\s+(?:\{([^}]*)\}|(\w+))(?:\s*,\s*\{([^}]*)\})?\s+from/g)) {
+      for (const group of [m[1], m[3]]) {
+        if (group) {
+          group.split(',').forEach((part) => {
+            const binding = part.trim().split(/\s+as\s+/).pop().trim()
+            if (binding) imported.add(binding)
+          })
+        }
+      }
+      if (m[2]) imported.add(m[2])
+    }
+    const local = new Set()
+    for (const m of src.matchAll(/(?:function\s*\*?|class|const|let|var)\s+(\w+)/g)) local.add(m[1])
+    const missing = new Set()
+    for (const m of src.matchAll(/(?:^|[^\w$.'"])(\w+)\s*\(/g)) {
+      const callee = m[1]
+      if (provided.has(callee) && !imported.has(callee) && !local.has(callee)) missing.add(callee)
+    }
+    assert.deepEqual(
+      [...missing],
+      [],
+      `${name} 调用了其它切片导出的 ${[...missing].join(', ')} 却没有 import——运行到该分支会 ReferenceError`,
+    )
+  }
+})
