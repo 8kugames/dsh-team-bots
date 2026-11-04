@@ -25,6 +25,11 @@
 // 更难发现。故整个恢复过程带一个整体预算（默认 10s，hooks.timeoutMs 可覆盖），
 // 超时按失败收口并落审计；护栏定时器不 unref，保证「这次恢复是进程唯一待办」
 // 时也照常触发。
+//
+// 预算语义：①退避等待被截断到剩余预算内，整体阻塞不超过预算；②预算耗尽或
+// 单次超时时，真实失败原因（最后一次非超时错误）作为 cause 保留在错误消息里，
+// 审计与 warn 不会只看到「超时」而丢掉真正的业务错误；③超时消息里的毫秒数用
+// 配置的 timeoutMs，不用剩余时间，避免审计文案抖动。
 
 import { AsyncResource } from 'node:async_hooks'
 
@@ -40,6 +45,11 @@ export const RESTORE_RETRY_BASE_MS = 250
 // 单次尝试的超时上限：正常路径毫秒级完成，10s 足以覆盖宿主 HMR 事务队列排队。
 export const RESTORE_TIMEOUT_MS = 10_000
 
+// 有效预算：非法值（≤0 / NaN）一律退回默认上限，不给「完全无保护」留口子。
+export const resolveRestoreBudget = (timeoutMs) => (
+  Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : RESTORE_TIMEOUT_MS
+)
+
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 // 宿主唯一发出嵌套事务拒绝的地方（dsh-hmr 的 runExclusive guard）用的原文。
@@ -47,12 +57,24 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const HOST_NESTED_REJECTION = /^HMR transactions cannot be nested$/
 
 // 超时错误单独标记，便于与业务失败区分（超时不再重试：重试只会再排一次队）。
+// cause 保留最后一次真实失败原因：超时/预算耗尽只是「没等到」，不是失败本身，
+// 审计与 warn 必须同时看得见真正的业务错误。
 class RestoreTimeoutError extends Error {
-  constructor(ms) {
-    super(`restore default model timed out after ${ms}ms`)
+  constructor(ms, cause) {
+    const detail = cause?.message ? ` (last error: ${cause.message})` : ''
+    super(`restore default model timed out after ${ms}ms${detail}`)
     this.name = 'RestoreTimeoutError'
     this.timedOut = true
+    if (cause) this.cause = cause
   }
+}
+
+// 迟到回调契约固化：被放弃的那条链迟到落地时只补一条日志，回调自身抛错也不许
+// 冒泡成 unhandled rejection（work.then 派生出的 promise 无人接管）。
+const notifyLate = (onLate, error) => {
+  try {
+    onLate?.(error)
+  } catch {}
 }
 
 // 给一次尝试加超时护栏。race 会给两个 promise 都挂上处理器：超时后被放弃的
@@ -62,20 +84,23 @@ class RestoreTimeoutError extends Error {
 // finally 里 clearTimeout，不会把事件循环拖住。
 // onLate：超时收口之后，被放弃的那条链迟到落地时回调，用于补一条观测日志
 // （写入其实生效了，只是审计已记失败）。
-const withTimeout = async (fn, timeoutMs, onLate) => {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return fn()
+// waitMs 是这次尝试实际可用的时间（通常是剩余预算）。护栏自己抛出的超时错误只
+// 表示「这次尝试等不到」：对外的错误消息统一在 catch 里按配置的整体预算重建，
+// 避免审计文案随剩余时间抖动。
+const withTimeout = async (fn, waitMs, onLate) => {
+  const wait = Number.isFinite(waitMs) && waitMs > 0 ? waitMs : RESTORE_TIMEOUT_MS
   let timer = null
   let expired = false
   const guard = new Promise((_, reject) => {
     timer = setTimeout(() => {
       expired = true
-      reject(new RestoreTimeoutError(timeoutMs))
-    }, timeoutMs)
+      reject(new RestoreTimeoutError(wait))
+    }, wait)
   })
   const work = Promise.resolve().then(fn)
   work.then(
-    () => { if (expired) onLate?.(null) },
-    (error) => { if (expired) onLate?.(error) },
+    () => { if (expired) notifyLate(onLate, null) },
+    (error) => { if (expired) notifyLate(onLate, error) },
   )
   try {
     return await Promise.race([work, guard])
@@ -111,22 +136,34 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
     }
   })()
   // 整体预算而非每次尝试各自计时：最坏阻塞从「3×timeoutMs + 退避」压到 timeoutMs。
-  const deadline = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Date.now() + timeoutMs : 0
+  // timeoutMs 非法（≤0 / NaN）时退回默认值，不给「完全无保护」留口子。
+  const budgetMs = resolveRestoreBudget(timeoutMs)
+  const deadline = Date.now() + budgetMs
   let lastError = null
+  // 最近一次真实的（非超时）失败原因：超时/预算耗尽只是「没等到」，审计必须同时
+  // 看得见真正的业务错误。
+  let realError = null
   let escape = 'scope'
   let timedOut = false
+  let budgetExhausted = false
   const onLate = (error) => {
     try {
       logger?.debug?.('dsh-team: restore default model 已超时收口，但恢复仍落地: %s', error ? String(error?.message ?? error) : 'ok')
     } catch {}
   }
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) await delay(retryBaseMs * (attempt * 2 - 1))
-    const remaining = deadline ? deadline - Date.now() : 0
-    if (deadline && remaining <= 0) {
+    if (attempt > 0) {
+      // 退避不得越过整体预算：否则一次恢复能阻塞 selectModel 串行链远超预算。
+      const backoff = retryBaseMs * (attempt * 2 - 1)
+      await delay(Math.max(0, Math.min(backoff, deadline - Date.now())))
+    }
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) {
       // 整体预算已用尽：按超时收口，不再发起新的尝试（再排一次队只会更久）。
-      lastError = new RestoreTimeoutError(timeoutMs)
+      // 真实失败原因挂到 cause 上，审计不会只剩一句「超时」。
+      lastError = new RestoreTimeoutError(budgetMs, realError)
       timedOut = true
+      budgetExhausted = true
       break
     }
     try {
@@ -152,9 +189,12 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
       lastError = error
       if (error?.timedOut) {
         // 调用排在宿主事务队列尾且迟迟不落地：重试只会再排一次队，直接收口。
+        // 超时只是「没等到」，真实失败原因挂到 cause 上保留。
+        lastError = new RestoreTimeoutError(budgetMs, realError)
         timedOut = true
         break
       }
+      realError = error
       if (escape === 'scope') {
         if (scopePolluted === true) {
           // 兜底 scope 自身被污染（模块评估期落在 HMR 事务里），与「scope 干净可用」
@@ -173,8 +213,15 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
   } catch {}
   try {
     // escape 落审计：便于事后判断实际走了哪条路（hmr-exit / direct / scope，
-    // 兜底 scope 被污染时记 scope-polluted）；timedOut 标记是否为排队超时。
-    audit?.(lastError, { escape, ...(timedOut ? { timedOut: true } : {}) })
+    // 兜底 scope 被污染时记 scope-polluted）；timedOut 标记是否为排队超时；
+    // budgetExhausted 标记是否整体预算用尽；cause 带上真实失败原因——超时不等于
+    // 失败原因，审计不能只剩一句「超时」。
+    audit?.(lastError, {
+      escape,
+      ...(timedOut ? { timedOut: true } : {}),
+      ...(budgetExhausted ? { budgetExhausted: true } : {}),
+      ...(timedOut && realError?.message ? { cause: realError.message } : {}),
+    })
   } catch (error) {
     try {
       logger?.warn?.('dsh-team: model restore audit failed: %s', error)

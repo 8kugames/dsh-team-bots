@@ -17,7 +17,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
-import { restoreDefaultModel, RESTORE_MAX_ATTEMPTS } from '../src/services/runtime/model-restore.js'
+import { restoreDefaultModel, RESTORE_MAX_ATTEMPTS, RESTORE_TIMEOUT_MS, resolveRestoreBudget } from '../src/services/runtime/model-restore.js'
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-model-restore-'))
@@ -471,4 +471,64 @@ test('兜底 scope 污染判定：模块出生在事务里时按结构化判定�
   assert.equal(audits.length, 1)
   assert.equal(audits[0].meta.escape, 'scope-polluted', '结构化判定应识别出 scope 被污染')
   assert.match(audits[0].error.message, /boom/)
+})
+
+test('整体预算：退避被截断到剩余预算内，预算耗尽也不丢真实失败原因', async () => {
+  const audits = []
+  const started = Date.now()
+  const ok = await restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('boom') } },
+    BEFORE,
+    {
+      logger: { warn() {} },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1000, // 退避远大于预算：必须被截断，不得整体阻塞越过预算
+      timeoutMs: 200,
+    },
+  )
+  const elapsed = Date.now() - started
+  assert.equal(ok, false)
+  assert.ok(elapsed < 1000, `退避不得越过整体预算，实际阻塞 ${elapsed}ms`)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.timedOut, true)
+  assert.equal(audits[0].meta.budgetExhausted, true, '预算耗尽要单独标记')
+  assert.equal(audits[0].meta.cause, 'boom', '审计须保留真实失败原因')
+  assert.match(audits[0].error.message, /timed out after 200ms/, '超时消息用配置的预算值，不用剩余时间')
+  assert.match(audits[0].error.message, /boom/, '错误消息里要带真实失败原因')
+})
+
+test('超时收口：排队不落地时也保留上一次的真实失败原因', async () => {
+  const audits = []
+  let calls = 0
+  const defaults = {
+    saveSelection: async () => {
+      calls += 1
+      if (calls === 1) throw new Error('boom')
+      return new Promise(() => {}) // 排在宿主事务队列尾，迟迟不落地
+    },
+  }
+  const ok = await withWatchdog(
+    restoreDefaultModel(defaults, BEFORE, {
+      logger: { warn() {} },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1,
+      timeoutMs: 150,
+    }),
+    3000,
+    '超时收口（保留真实原因）',
+  )
+  assert.equal(ok, false)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.timedOut, true)
+  assert.equal(audits[0].meta.cause, 'boom', '超时不得掩盖真实失败原因')
+  assert.match(audits[0].error.message, /timed out after 150ms/)
+  assert.match(audits[0].error.message, /boom/)
+})
+
+test('有效预算：timeoutMs 非法时退回默认上限，不给「完全无保护」留口子', () => {
+  assert.equal(resolveRestoreBudget(0), RESTORE_TIMEOUT_MS)
+  assert.equal(resolveRestoreBudget(-1), RESTORE_TIMEOUT_MS)
+  assert.equal(resolveRestoreBudget(Number.NaN), RESTORE_TIMEOUT_MS)
+  assert.equal(resolveRestoreBudget(undefined), RESTORE_TIMEOUT_MS)
+  assert.equal(resolveRestoreBudget(250), 250)
 })

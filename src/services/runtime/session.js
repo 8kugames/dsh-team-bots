@@ -163,6 +163,8 @@ export const sessionMethods = {
               error: error instanceof Error ? error.message : String(error),
               ...(meta.escape ? { escape: meta.escape } : {}),
               ...(meta.timedOut ? { timedOut: true } : {}),
+              ...(meta.budgetExhausted ? { budgetExhausted: true } : {}),
+              ...(meta.cause ? { cause: meta.cause } : {}),
             },
           ),
         })
