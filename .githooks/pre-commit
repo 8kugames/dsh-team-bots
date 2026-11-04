@@ -1,5 +1,5 @@
 #!/bin/sh
-# 每次提交把 package.json 的 patch 位 +1（见 scripts/version-bump.mjs）。
+# main 分支提交时把 package.json 的 patch 位 +1（见 scripts/version-bump.mjs），其余分支跳过。
 # 紧急/手工发版：DSH_SKIP_VERSION_BUMP=1 git commit ...
 command -v node >/dev/null 2>&1 || exit 0
 exec node "$(git rev-parse --show-toplevel)/scripts/version-bump.mjs"

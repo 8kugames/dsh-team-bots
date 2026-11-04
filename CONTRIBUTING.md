@@ -2,7 +2,7 @@
 
 ## Commit conventions
 
-- Every commit has the pre-commit hook bump the patch digit of `package.json` by one (`DSH_SKIP_VERSION_BUMP=1` skips it). **Take the committed version from `git show HEAD -- package.json`**, not from the file in the working tree.
+- Commits on `main` have the pre-commit hook bump the patch digit of `package.json` by one (`DSH_SKIP_VERSION_BUMP=1` skips it); commits on other branches such as `dev` are left untouched. **Take the committed version from `git show HEAD -- package.json`**, not from the file in the working tree.
 - Commit messages use Conventional Commits style and carry the card number, e.g. `feat(ui): 全局配置页美术重设计（DSHBOTS-184）`.
 - Commit with an exact pathspec (`git commit -- <pathspec>`), and check `git status --short` before and after, so in-flight work from other sessions never gets swept in.
 

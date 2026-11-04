@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 提交前把 package.json 的 patch 位 +1 并暂存：每次提交都留一个可追踪的版本号。
+// main 分支提交前把 package.json 的 patch 位 +1 并暂存：发版提交留一个可追踪的版本号。
+// 仅 main 生效（发版专用分支），dev 等开发分支跳过，否则 dev 每次提交都会消耗版本号。
 // 用法：node scripts/version-bump.mjs [--dry-run]
 // 跳过：DSH_SKIP_VERSION_BUMP=1（手工发版、回滚提交等场景）。
 import { execFileSync } from 'node:child_process'
@@ -13,6 +14,15 @@ const dryRun = process.argv.includes('--dry-run')
 
 function git(args, options = {}) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...options })
+}
+
+// symbolic-ref 在未提交过的仓库上也能返回当前分支名；分离 HEAD 时失败，按未知处理。
+function currentBranch() {
+  try {
+    return git(['symbolic-ref', '--short', 'HEAD']).trim()
+  } catch {
+    return ''
+  }
 }
 
 function stagedVersion() {
@@ -30,6 +40,13 @@ function nextPatch(version) {
 }
 
 if (process.env.DSH_SKIP_VERSION_BUMP === '1') {
+  process.exit(0)
+}
+
+// 仅 main 分支 bump：dev 等开发分支的提交不消耗版本号，发版 tag 才能与 commit 版本对齐。
+const branch = currentBranch()
+if (branch !== 'main') {
+  console.log(`[version] 当前分支 ${branch || '(未知)'} 非 main，跳过版本 bump`)
   process.exit(0)
 }
 
