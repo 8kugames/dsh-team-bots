@@ -6,7 +6,8 @@ import { icon } from './icons.js'
 import { CURRENCY_SYMBOL, attr, botById, costValue, esc, formatCost, formatNumber, pageProject, runDot, timeAgo, toast } from './util.js'
 import { api } from './api.js'
 import { t } from './i18n.js'
-import { renderUsageGlobal, renderUsageDomain, renderUsageSolo, render } from '../app.js'
+import { renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './settings.js'
+import { render } from '../app.js'
 
 // 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
 // 窗口状态放在模块里（不进全局 state）：只影响用量页，切换后按需向后端取该窗口快照。

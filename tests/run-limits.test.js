@@ -1,16 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig, effectiveRunLimits, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY } from '../src/config.js'
 import { TeamService } from '../src/service.js'
+import { readUiSource } from './helpers/ui-sources.js'
 
 const MIN = 60_000
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 
 // env 用例独占进程环境：用例内 set、finally 内 delete，避免串扰其他套件。
 async function withEnv(vars, fn) {

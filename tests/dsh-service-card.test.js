@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
+import { readUiSource } from './helpers/ui-sources.js'
 import { TeamService } from '../src/service.js'
 
 const require = createRequire(import.meta.url)
@@ -115,7 +116,7 @@ test('dshUpdateInfo() 回 dsh 与 dsh-team-bots 两套版本与升级标记', as
 const here = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(here, '..')
 const read = rel => readFileSync(join(rootDir, rel), 'utf8')
-const app = read('ui/app.js')
+const app = readUiSource()
 
 test('UI：热升级死按钮与 case 分支全删', () => {
   assert.ok(!app.includes('data-action="upgrade-dsh"'), '不得再有「升级并重启」按钮')
