@@ -410,10 +410,24 @@ export const tasksMethods = {
       "SELECT id, kind FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
       taskId,
     )
-    if (active && active.kind === 'task' && task.assignee_bot_id !== botId) throw conflict('任务有正在执行的运行，不能更换负责人')
+    // 换负责人闸门（DSHBOTS-169）：queued 占位运行（死队列，永远不会被领取）不是执行中，
+    // 不再阻断改派——事务内按 SUPERSEDED 口径清掉后放行；只有 running 的任务运行照旧阻断
+    // （文案不变）。同负责人重派不走此闸，行为不变。
+    const reassigning = task.assignee_bot_id !== botId
+    if (reassigning && this.store.get(
+      "SELECT id FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'running' LIMIT 1",
+      taskId,
+    )) throw conflict('任务有正在执行的运行，不能更换负责人')
+    const supersedeQueued = reassigning && !!this.store.get(
+      "SELECT id FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'queued' LIMIT 1",
+      taskId,
+    )
     ensureTaskSandboxSchema(this.store)
     const sandboxTouched = sandboxOverride !== undefined
     this.store.transaction(() => {
+      // queued 占位清理与改派同事务（DSHBOTS-169）：SUPERSEDED 不进任务执行历史，run 事件可审计。
+      // 助手体内无 await，同步跑完即返回，事务原子性不受影响。
+      if (supersedeQueued) void this.cancelSupersededQueuedRuns(taskId)
       this.store.run(
         `UPDATE tasks SET assignee_bot_id = ?, review_target = ?,
           status = CASE WHEN status IN ('backlog', 'blocked') THEN 'todo' ELSE status END,
@@ -430,13 +444,22 @@ export const tasksMethods = {
     })
     // 总监bot的验收/受阻处理运行本身占用任务的唯一活动运行名额，
     // 此时由 finishRun 的收尾逻辑负责重新排队执行，这里跳过。
-    if (!active) {
+    // 换负责人清掉 queued 占位后名额已空：重算判定才会按新负责人重排 task_run（DSHBOTS-169）；
+    // 该路径幂等键带时间戳——task_run 是先写者赢闸，稳定键 task:<id>:assigned 会撞首次
+    // 派发留下的 delivered 行被 DO NOTHING 静默吞掉，重复改派就再也排不出运行。
+    const slotHeld = supersedeQueued
+      ? this.store.get(
+        "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+        taskId,
+      )
+      : active
+    if (!slotHeld) {
       this.enqueueOutbox({
         kind: 'task_run',
         payload: { taskId, triggerType: 'assigned' },
         projectId: task.project_id,
         taskId,
-        idempotencyKey: `task:${taskId}:assigned`,
+        idempotencyKey: `task:${taskId}:assigned${supersedeQueued ? `:${Date.now()}` : ''}`,
       })
     }
     if (autoStart) void this.tick()
