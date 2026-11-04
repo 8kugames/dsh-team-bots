@@ -115,11 +115,13 @@ export const sessionMethods = {
       if (before?.provider && before?.model
         && (before.provider !== after.provider || before.model !== after.model || before.reasoningEffort !== after.reasoningEffort)) {
         // 恢复动作必须在事务之外的干净上下文执行，否则 configEditor.edit 里的
-        // hmr.runExclusive 会以「嵌套事务」直接 reject。失败由 restoreDefaultModel
-        // 有界重试并落审计 model_restore_failed，不再只 warn 吞掉。
+        // hmr.runExclusive 会以「嵌套事务」直接 reject。restoreDefaultModel 用宿主
+        // HMR 服务的 executing.exit 逃逸出事务上下文；失败由它有界重试并落审计
+        // model_restore_failed，不再只 warn 吞掉。
         await restoreDefaultModel(defaults, before, {
           logger: this.logger,
-          audit: (error) => this.store?.audit?.(
+          hmr: this.ctx.get?.('hmr'),
+          audit: (error, meta = {}) => this.store?.audit?.(
             'system',
             'system',
             'model_restore_failed',
@@ -130,6 +132,7 @@ export const sessionMethods = {
               model: before.model,
               ...(before.reasoningEffort === undefined ? {} : { reasoningEffort: before.reasoningEffort }),
               error: error instanceof Error ? error.message : String(error),
+              ...(meta.escape ? { escape: meta.escape } : {}),
             },
           ),
         })

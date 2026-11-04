@@ -2,10 +2,10 @@
 // 宿主 selectModel 会把下发模型写成默认模型，插件必须恢复运行前的默认值；恢复经
 // configEditor.edit → hmr.runExclusive，若调用点残留 HMR 事务的 AsyncLocalStorage
 // 上下文，runExclusive 会以「嵌套事务」直接 reject，恢复被 warn 吞掉。
-// DSHBOTS-163：模块本身经 HMR 事务加载/热更时，模块评估期创建的 restoreScope
-// 捕获到的就是被标记的上下文（生产审计 model_restore_failed 成簇根因）；
-// 撞嵌套拒绝时须丢弃污染 scope 自愈重捕获。经 ?query 动态 import 造独立模块
-// 实例、令其评估期落在 executing.run 窗口内，忠实模拟该加载路径。
+// DSHBOTS-175：逃逸口径改为宿主 HMR 服务的 executing.exit（exit 即
+// run(undefined, fn)，把回调及其全部 async 延续的 store 置为 undefined），
+// 事务上下文里恢复不再被嵌套拒绝；「撞嵌套就重捕 scope」的自愈删除（它在污染
+// 调用链里造出的仍是污染 scope，还把模块级干净 scope 覆盖成污染的）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -32,12 +32,19 @@ async function setup() {
 }
 
 // 忠实照抄 dsh-hmr 的 runExclusive：AsyncLocalStorage 标记事务，嵌套直接 reject。
+// exits 记录 executing.exit 被调用的次数（生产路径即用它逃逸事务上下文）。
 function createHmrStub() {
   const executing = new AsyncLocalStorage()
-  const state = { operations: Promise.resolve(), guarded: [] }
+  const state = { operations: Promise.resolve(), guarded: [], exits: 0 }
+  const exit = executing.exit.bind(executing)
+  executing.exit = (...args) => {
+    state.exits += 1
+    return exit(...args)
+  }
   return {
     executing,
     guarded: state.guarded,
+    get exits() { return state.exits },
     runExclusive(operation) {
       state.guarded.push(executing.getStore())
       if (executing.getStore()) return Promise.reject(new Error('HMR transactions cannot be nested'))
@@ -107,10 +114,11 @@ test('重试穷尽：warn 一次 + 审计 model_restore_failed 落库', async ()
     const sessionId = 'sess-retry'
     const ok = await restoreDefaultModel(defaults, BEFORE, {
       logger: { warn: (message, error) => warnings.push(`${message} ${error}`) },
-      audit: (error) => store.audit('system', 'system', 'model_restore_failed', 'session', sessionId, {
+      audit: (error, meta = {}) => store.audit('system', 'system', 'model_restore_failed', 'session', sessionId, {
         provider: BEFORE.provider,
         model: BEFORE.model,
         error: error instanceof Error ? error.message : String(error),
+        ...(meta.escape ? { escape: meta.escape } : {}),
       }),
       retryBaseMs: 1,
     })
@@ -126,6 +134,7 @@ test('重试穷尽：warn 一次 + 审计 model_restore_failed 落库', async ()
       provider: 'anthropic',
       model: 'claude-opus',
       error: 'HMR transactions cannot be nested',
+      escape: 'scope',
     })
   } finally {
     store.close()
@@ -146,10 +155,16 @@ test('selectModel 集成：残留上下文里恢复成功，且 selecting 串行
       },
     }
     const calls = []
+    const ctxNames = []
     let active = 0
     let maxActive = 0
     const ctx = {
-      get: (name) => (name === 'agentDefaultModel' ? defaults : undefined),
+      get: (name) => {
+        ctxNames.push(name)
+        if (name === 'agentDefaultModel') return defaults
+        if (name === 'hmr') return hmr
+        return undefined
+      },
       sessionController: {
         selectModel: async (arg) => {
           active += 1
@@ -186,6 +201,7 @@ test('selectModel 集成：残留上下文里恢复成功，且 selecting 串行
       assert.deepEqual(save.next, { provider: 'anthropic', model: 'claude-opus' })
     }
     assert.deepEqual(warnings, [], '恢复成功不应有告警')
+    assert.ok(ctxNames.includes('hmr'), 'session.js 必须把宿主 hmr 服务传给恢复逻辑')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'model_restore_failed'").n, 0)
   } finally {
     store.close()
@@ -193,11 +209,48 @@ test('selectModel 集成：残留上下文里恢复成功，且 selecting 串行
   }
 })
 
-test('自愈重捕获：scope 出生于 HMR 事务上下文时，丢弃重捕后恢复成功', async () => {
+test('逃逸路径：事务上下文里经 executing.exit 恢复，runExclusive 不再被嵌套拒绝', async () => {
+  const hmr = createHmrStub()
+  const stores = []
+  const defaults = {
+    saveSelection: async (next) => {
+      stores.push(hmr.executing.getStore())
+      // 真实链路：configEditor.edit → hmr.runExclusive，事务上下文里会被嵌套拒绝。
+      await hmr.runExclusive(async () => { await Promise.resolve() })
+      return next
+    },
+  }
+  const ok = await hmr.executing.run(true, async () => {
+    const restored = await restoreDefaultModel(defaults, BEFORE, { hmr, retryBaseMs: 1 })
+    assert.equal(hmr.executing.getStore(), true, '逃逸不得破坏调用方的事务上下文')
+    return restored
+  })
+  assert.equal(ok, true)
+  assert.deepEqual(stores, [undefined], 'saveSelection 必须落在事务标记之外')
+  assert.deepEqual(hmr.guarded, [undefined], 'runExclusive 看到的上下文必须是干净的')
+  assert.equal(hmr.exits, 1, '必须走 executing.exit 逃逸')
+})
+
+test('逃逸路径：事务外调用走 direct，不触发 exit', async () => {
+  const hmr = createHmrStub()
+  const stores = []
+  const defaults = {
+    saveSelection: async (next) => {
+      stores.push(hmr.executing.getStore())
+      return next
+    },
+  }
+  const ok = await restoreDefaultModel(defaults, BEFORE, { hmr, retryBaseMs: 1 })
+  assert.equal(ok, true)
+  assert.deepEqual(stores, [undefined])
+  assert.equal(hmr.exits, 0, 'store 为空时无需 exit')
+})
+
+test('逃逸路径：出生在事务里的模块实例不再靠 scope 自愈，交给 hmr.exit', async () => {
   const hmr = createHmrStub()
   // 模拟插件经 HMR 事务加载（安装/热更路径）：模块评估期落在被 executing 标记的
-  // 上下文里，模块级 restoreScope 捕获到的即被污染的上下文——生产审计
-  // model_restore_failed 成簇的根因。?query 造独立模块实例，不污染顶部干净导入。
+  // 上下文里，模块级 restoreScope 捕获到的即被污染的上下文。?query 造独立模块
+  // 实例，不污染顶部干净导入。
   const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?born-in-hmr-tx'))
   const stores = []
   const defaults = {
@@ -207,31 +260,37 @@ test('自愈重捕获：scope 出生于 HMR 事务上下文时，丢弃重捕后
       return next
     },
   }
-  const ok = await instance.restoreDefaultModel(defaults, BEFORE, { retryBaseMs: 1 })
-  assert.equal(ok, true, '出生污染的 scope 必须经一次重捕获自愈才能恢复')
-  assert.equal(instance.restoreScopeRecaptures(), 1, '恰好重捕获一次')
-  assert.equal(stores.length, 2, '首次尝试被嵌套拒绝，重试即成功')
-  assert.equal(stores[0], true, '出生污染的 scope 让第一次尝试仍落在事务标记里')
-  assert.equal(stores[1], undefined, '重捕获后的 scope 必须落在干净上下文')
+  const ok = await hmr.executing.run(true, () => instance.restoreDefaultModel(defaults, BEFORE, { hmr, retryBaseMs: 1 }))
+  assert.equal(ok, true, '污染的模块级 scope 不得再拖垮恢复')
+  assert.deepEqual(stores, [undefined], '恢复必须落在事务标记之外')
+  assert.equal(hmr.exits, 1, '必须走 executing.exit 逃逸')
+
+  // 红对照：同一个污染实例在没有 hmr 时只能靠兜底 scope，仍被事务标记拖累。
+  const blind = await hmr.executing.run(true, () => instance.restoreDefaultModel(defaults, BEFORE, {
+    retryBaseMs: 1,
+    logger: { warn() {} },
+    audit: () => {},
+  }))
+  assert.equal(blind, false, '无 hmr 时兜底 scope 无法逃出事务标记')
+  assert.equal(stores.at(-1), true, '兜底 scope 出生在事务里，事务标记仍在')
 })
 
-test('重捕获复用：成功过的 scope 保留，后续恢复不再重建', async () => {
+test('审计口径：失败时落 escape（hmr-exit），便于判断实际走了哪条路', async () => {
   const hmr = createHmrStub()
-  const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?reuse-after-heal'))
-  const stores = []
+  const audits = []
+  const warnings = []
   const defaults = {
-    saveSelection: async (next) => {
-      stores.push(hmr.executing.getStore())
-      await hmr.runExclusive(async () => { await Promise.resolve() })
-      return next
-    },
+    saveSelection: async () => { throw new Error('boom') },
   }
-  const first = await instance.restoreDefaultModel(defaults, BEFORE, { retryBaseMs: 1 })
-  assert.equal(first, true)
-  assert.equal(instance.restoreScopeRecaptures(), 1, '第一次调用自愈重捕获一次')
-  const second = await instance.restoreDefaultModel(defaults, BEFORE, { retryBaseMs: 1 })
-  assert.equal(second, true)
-  assert.equal(instance.restoreScopeRecaptures(), 1, '成功过的干净 scope 直接复用，不再重建')
-  assert.equal(stores.length, 3, '第一次 2 次尝试（污染+自愈）+ 第二次直接成功')
-  assert.equal(stores[2], undefined, '第二次调用直接落在复用的干净 scope 上')
+  const ok = await hmr.executing.run(true, () => restoreDefaultModel(defaults, BEFORE, {
+    hmr,
+    logger: { warn: (message) => warnings.push(message) },
+    audit: (error, meta = {}) => audits.push({ error, meta }),
+    retryBaseMs: 1,
+  }))
+  assert.equal(ok, false)
+  assert.equal(audits.length, 1, '穷尽后只落一条审计')
+  assert.equal(audits[0].meta.escape, 'hmr-exit', '审计须记录实际逃逸方式')
+  assert.match(audits[0].error.message, /boom/)
+  assert.equal(warnings.length, 1)
 })
