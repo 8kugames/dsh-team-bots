@@ -61,6 +61,10 @@
     --accent-wash: rgba(114, 135, 253, 0.12);
     --accent-wash-2: rgba(114, 135, 253, 0.2);
 
+    /* 「进行中」标签流光（shimmer）高光色：由 --accent 合成，零新增字面色值。
+       亮色底占比调高才看得见；暗色底在下方暗色块里压低，避免刺眼。 */
+    --task-sheen-tint: color-mix(in srgb, var(--accent) 30%, transparent);
+
     /* semantic */
     --danger: #d02f50;
     --danger-wash: rgba(208, 47, 80, 0.1);
@@ -130,6 +134,8 @@
         --accent-text: #a7b0ff;
         --accent-wash: rgba(125, 136, 248, 0.16);
         --accent-wash-2: rgba(125, 136, 248, 0.26);
+        /* 暗色底上的流光高光压低占比，避免扫过时刺眼 */
+        --task-sheen-tint: color-mix(in srgb, var(--accent) 17%, transparent);
         --danger: #ed8796;
         --danger-wash: rgba(237, 135, 150, 0.12);
         --green: #a6da95;

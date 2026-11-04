@@ -447,10 +447,39 @@
     35% { transform: rotate(-4deg) translate(-0.4px, -0.9px); }
     70% { transform: rotate(1.6deg) translate(0.3px, 0.2px); }
 }
+/* 「进行中」标签在摆动之上再叠一层流光（shimmer sheen）：周期性扫过的高光带。
+   高光色由既有 token 合成——color-mix(var(--accent), transparent)，零新增字面色值；
+   明暗两档的深浅在主题 token 处定义（--task-sheen-tint，亮色看得见、暗色不刺眼），
+   --accent 随主题（DSH / Catppuccin）自动切换。
+   扫过方式：覆盖层整体平移，渐变里的高光带随之掠过标签。只动 transform，
+   不触发布局重排；时长 2.8s 与摆动的 1.6s 错拍（非整数倍），两层动效不会
+   每次同步，看起来不机械。 */
+@keyframes task-status-sheen {
+    0% { transform: translateX(-140%); }
+    72% { transform: translateX(140%); }
+    100% { transform: translateX(140%); }
+}
 @media (prefers-reduced-motion: no-preference) {
     .task-status-live {
         transform-origin: 50% 100%;
         animation: task-status-swim 1.6s ease-in-out infinite;
+        position: relative;
+        overflow: hidden;
+    }
+    /* 扫光覆盖层不接管交互：pointer-events:none，点击仍落在标签本身；
+       overflow:hidden 把高光带裁在标签框内，不溢出到相邻文字上。 */
+    .task-status-live::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(
+            100deg,
+            transparent 18%,
+            var(--task-sheen-tint) 50%,
+            transparent 82%
+        );
+        animation: task-status-sheen 2.8s ease-in-out infinite -0.7s;
     }
 }
 .side-row strong {
