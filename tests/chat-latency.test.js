@@ -57,3 +57,29 @@ test('已读上报不挡渲染：loadState 不再 await markVisibleChatRead', ()
 test('已读上报失败可重报：markVisibleChatRead 失败回退水位', () => {
   assert.match(apiSource, /state\.markedRead = null/, '上报失败应回退水位，下一轮轮询自动重报')
 })
+
+// —— 点击路径的乐观切换（DSHBOTS-167 约束①：先出骨架，再异步取数）——
+const selectProjectBlock = source.slice(source.indexOf("case 'select-project'"), source.indexOf("case 'refresh'"))
+assert.ok(selectProjectBlock.length > 0, '找不到 select-project 分支')
+const soloBotBlock = source.slice(source.indexOf("case 'solo-bot'"), source.indexOf("case 'copy'"))
+assert.ok(soloBotBlock.length > 0, '找不到 solo-bot 分支')
+
+test('select-project：先 render 出骨架，再 await 取数', () => {
+  const renderAt = selectProjectBlock.indexOf('render()')
+  const awaitAt = selectProjectBlock.indexOf('await refresh()')
+  assert.ok(renderAt >= 0 && awaitAt >= 0, '分支内应同时存在 render() 与 await refresh()')
+  assert.ok(renderAt < awaitAt, 'render() 必须在 await 之前，点击才不至于无反馈')
+})
+
+test('solo-bot：先 render 出骨架，再 await 取数', () => {
+  const renderAt = soloBotBlock.indexOf('render()')
+  const awaitAt = soloBotBlock.indexOf('await loadState')
+  assert.ok(renderAt >= 0 && awaitAt >= 0, '分支内应同时存在 render() 与 await loadState')
+  assert.ok(renderAt < awaitAt, 'render() 必须在 await 之前，点击才不至于无反馈')
+})
+
+test('renderView：目标上下文与已加载数据错开时出骨架，不再渲染消息列表', () => {
+  assert.match(source, /function chatContextPending\(\) \{/, '缺少 chatContextPending 判定')
+  assert.match(source, /function renderView\(\) \{\s*if \(state\.view === 'chat' && chatContextPending\(\)\) return chatPendingView\(\)/, 'renderView 应在错开时直接返回骨架')
+  assert.match(source, /function chatPendingView\(\) \{/, '缺少骨架视图')
+})

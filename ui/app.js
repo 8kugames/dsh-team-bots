@@ -536,7 +536,28 @@ function render() {
   syncTerminalPoll()
 }
 
+// 乐观切换（DSHBOTS-167）：目标上下文与已加载数据是否还错开。错开 = 骨架还在等数据。
+// 用数据本身判定而非定时器，所以中途到达的轮询响应也能把骨架顶掉，不会卡住。
+function chatContextPending() {
+  const pending = state.chatPending
+  if (!pending) return false
+  const dataProject = state.data?.project?.id ?? null
+  const dataSolo = state.data?.solo?.bot?.id ?? null
+  const wantSolo = pending.chatMode === 'solo' ? (pending.soloBotId ?? null) : null
+  return pending.projectId !== dataProject || wantSolo !== dataSolo
+}
+
+// 切换中的占位视图：不读消息列表、不做 markdown 解析，只给轻量骨架，
+// 让点击立即有反馈（DSHBOTS-167）。
+function chatPendingView() {
+  return `<div class="empty-state">
+    <div class="empty-symbol">${icon('message')}</div>
+    <h3>${t('chat.loadingOlder')}</h3>
+  </div>`
+}
+
 function renderView() {
+  if (state.view === 'chat' && chatContextPending()) return chatPendingView()
   const body = (() => {
     switch (state.view) {
       case 'tasks': return renderTasks()
@@ -2078,7 +2099,14 @@ document.addEventListener('click', async (event) => {
         state.replyTo = null // 切项目即切群聊，引用不能跨项目
         state.chatMode = 'group'
         state.view = 'chat'
-        await refresh()
+        // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
+        state.chatPending = { projectId: state.projectId, chatMode: 'group', soloBotId: null }
+        render()
+        try {
+          await refresh()
+        } finally {
+          state.chatPending = null
+        }
         break
       case 'refresh':
         await refresh()
@@ -2341,7 +2369,14 @@ document.addEventListener('click', async (event) => {
         state.replyTo = null // 单聊无引用语义，跨上下文不留引用条
         state.chatMode = 'solo'
         state.view = 'chat'
-        await loadState(state.projectId, { quiet: true })
+        // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
+        state.chatPending = { projectId: state.projectId, chatMode: 'solo', soloBotId: botId }
+        render()
+        try {
+          await loadState(state.projectId, { quiet: true })
+        } finally {
+          state.chatPending = null
+        }
         render()
         break
       }

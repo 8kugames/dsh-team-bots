@@ -58,6 +58,10 @@ export const state = {
   tree: { chats: true, bots: true, archived: false },
   // 群聊已读水位：`<projectId>:<最新消息时间>`，用于避免重复上报已读。
   markedRead: null,
+  // 乐观切换（DSHBOTS-167）：点击侧栏后先出视图骨架，数据到位再落真实列表。
+  // 值为目标上下文 { projectId, chatMode, soloBotId }；renderView 在「已加载数据 ≠ 目标上下文」
+  // 时出骨架，数据到位自动落回（对 2.8s 轮询自愈，不会卡骨架）。
+  chatPending: null,
   bootError: null,
   wechatAuth: null,
   wechatPollTimer: null,
