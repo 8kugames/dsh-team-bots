@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
+import { readUiSource } from './helpers/ui-sources.js'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
@@ -127,7 +128,7 @@ test('离开终态时仍有活跃运行 → 拒绝，状态与终态时间戳不
 test('UI 接线：卡片与详情 footer 出「驳回」按钮，click 走 transition_task，文案走 i18n', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const root = join(here, '..')
-  const app = readFileSync(join(root, 'ui', 'app.js'), 'utf8')
+  const app = readUiSource()
   const zh = readFileSync(join(root, 'ui', 'i18n', 'zh.js'), 'utf8')
   const en = readFileSync(join(root, 'ui', 'i18n', 'en.js'), 'utf8')
 

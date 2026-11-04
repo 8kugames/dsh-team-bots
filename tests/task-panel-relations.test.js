@@ -2,11 +2,10 @@
 // 约定同 task-panel-grouped.test.js：ui/app.js 做源码断言，CSS 用正则抽规则体。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 const css = await uiStylesSource()
 
 function block(selector) {
