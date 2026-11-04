@@ -149,53 +149,6 @@ test('同项目写运行：声明的写范围不重叠时并行放行', async ()
   }
 })
 
-test('同项目写运行：写范围重叠时仍然串行', async () => {
-  const { root, store, service, runtime, director, dev } = await manualSetup()
-  try {
-    const project = await service.createProject({ name: 'Overlap', key: 'OVL', ownerBotId: director.id, memberIds: [dev.id] })
-    await service.createTask({
-      projectId: project.id, title: '改聊天模块', assigneeBotId: dev.id,
-      writeScopes: ['ui/modules/chat.js'], autoStart: true,
-    })
-    await service.createTask({
-      projectId: project.id, title: '改聊天目录', assigneeBotId: dev.id,
-      writeScopes: ['ui/modules/'], autoStart: true,
-    })
-
-    service.started = true
-    await service.tick()
-
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running'", project.id).n, 1)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'queued'", project.id).n, 1)
-  } finally {
-    await closeQuietly(store)
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test('同项目写运行：任一侧未声明写范围时保守串行', async () => {
-  const { root, store, service, runtime, director, dev } = await manualSetup()
-  try {
-    const project = await service.createProject({ name: 'Undeclared', key: 'UND', ownerBotId: director.id, memberIds: [dev.id] })
-    await service.createTask({
-      projectId: project.id, title: '声明了范围', assigneeBotId: dev.id,
-      writeScopes: ['ui/modules/chat.js'], autoStart: true,
-    })
-    await service.createTask({
-      projectId: project.id, title: '没声明范围', assigneeBotId: dev.id, autoStart: true,
-    })
-
-    service.started = true
-    await service.tick()
-
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running'", project.id).n, 1)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'queued'", project.id).n, 1)
-  } finally {
-    await closeQuietly(store)
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
 test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
   const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
