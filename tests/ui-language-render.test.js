@@ -127,10 +127,10 @@ test('未保存过语言时下拉回落 auto（跟随 DSH 宿主）', async () =
     bots: [], projects: [], tasks: [], approvals: [], proposals: [],
     models: [], prices: [], priceDefaults: [], members: [], runs: [],
     usage: {}, wechat: {}, secrets: [], paths: {}, project: null,
-    settings: {},
+    settings: { ui_language: '' },
   }
   const html = settings.renderGlobal()
-  assert.match(html, /value="auto" selected/, '无保存值时 auto 应选中')
-  assert.doesNotMatch(html, /value="zh" selected|value="en" selected/, '无保存值时不应选中具体语言')
+  assert.match(html, /value="auto" selected/, '未保存（空串）时 auto 应选中')
+  assert.doesNotMatch(html, /value="zh" selected|value="en" selected/, '未保存时不应选中具体语言')
   stopTimers()
 })

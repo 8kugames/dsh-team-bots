@@ -396,7 +396,8 @@ function renderGlobal() {
   const data = state.data
   const scale = currentScale()
   // 语言下拉回填保存值；'auto' = 跟随 DSH 宿主 Language 设定（未保存时也按 auto 展示）。
-  const uiLanguage = data.settings?.ui_language ?? 'auto'
+  // 用 || 而非 ??：settingsView() 对未保存键返回 ''（见 core.js），空串必须回落 auto，否则三选项都不选中。
+  const uiLanguage = data.settings?.ui_language || 'auto'
   const bots = data.bots ?? []
   const activeBots = bots.filter(bot => bot.status === 'active')
   const pending = pendingProposals()
