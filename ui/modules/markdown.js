@@ -50,8 +50,9 @@ function mdCreateRenderer(deps) {
   // 有界 LRU：命中即删了重插把最近使用的顶到尾部，超限从最旧端淘汰。
   const MD_RENDER_CACHE_MAX = 1500
   const cache = new Map()
+  // 键用 JSON 序列化而非分隔符拼接：正文里若出现分隔符，拼接会撞键。
   const cacheKey = (body, scope) =>
-    `${scope?.projectId ?? ''}\u0000${scope?.soloBotId ?? ''}\u0000${scope?.root ?? ''}\u0000${String(body ?? '')}`
+    JSON.stringify([String(body ?? ''), scope?.projectId ?? null, scope?.soloBotId ?? null, scope?.root ?? null])
   return function renderMarkdown(body, scope) {
     const key = cacheKey(body, scope)
     const hit = cache.get(key)

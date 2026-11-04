@@ -43,6 +43,7 @@ export async function markVisibleChatRead(data) {
   if (!newest) return
   const key = `${projectId}:${newest}`
   if (state.markedRead === key) return
+  const previous = state.markedRead
   state.markedRead = key
   // 本地先清零，避免下一轮轮询前徽标还挂着。
   const target = data.projects?.find(item => item.id === projectId)
@@ -51,7 +52,9 @@ export async function markVisibleChatRead(data) {
     await api('mark_chat_read', { projectId, readAt: newest }, { quiet: true })
   } catch {
     // 上报失败回退水位，下一轮轮询自动重报（DSHBOTS-167：上报不再挡渲染）。
-    state.markedRead = null
+    // 上报是 fire-and-forget，旧响应可能晚于新上报失败；只有水位仍属自己时才回退，
+    // 否则会把更新的水位（甚至别的项目的）抹掉。
+    if (state.markedRead === key) state.markedRead = previous
   }
 }
 

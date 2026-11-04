@@ -55,7 +55,9 @@ test('已读上报不挡渲染：loadState 不再 await markVisibleChatRead', ()
 })
 
 test('已读上报失败可重报：markVisibleChatRead 失败回退水位', () => {
-  assert.match(apiSource, /state\.markedRead = null/, '上报失败应回退水位，下一轮轮询自动重报')
+  assert.match(apiSource, /if \(state\.markedRead === key\) state\.markedRead = previous/, '上报失败应回退水位，下一轮轮询自动重报')
+  assert.match(apiSource, /const previous = state\.markedRead/, '回退要先存旧水位')
+  assert.doesNotMatch(apiSource, /catch \{\s*\n\s*state\.markedRead = null/, '不得无条件清空水位（会抹掉更新的上报）')
 })
 
 test('已读上报口径跟随 data：项目回退时不会标错项目', () => {
@@ -93,4 +95,74 @@ test('连续点击不闪回：先发的旧响应不得清掉新一次的骨架�
   assert.match(source, /const seq = \(state\.chatRequestSeq \+= 1\)/, '每次取数应领一个递增序号')
   assert.match(source, /if \(state\.chatPending\?\.seq === seq\) state\.chatPending = null/, '只有仍是最新一次才允许清骨架')
   assert.equal((source.match(/endChatPending\(pendingSeq\)/g) ?? []).length, 2, 'select-project 与 solo-bot 都要按序号清理')
+})
+
+test('select-project：取数失败或项目回退时补渲染，骨架不留存', () => {
+  assert.match(selectProjectBlock, /const stuckOnSkeleton = chatContextPending\(\)/, '清标志前应先记录是否还停在骨架')
+  assert.match(selectProjectBlock, /if \(stuckOnSkeleton\) render\(\)/, '停在骨架时必须补一次渲染')
+  assert.ok(
+    selectProjectBlock.indexOf('const stuckOnSkeleton') < selectProjectBlock.indexOf('endChatPending(pendingSeq)'),
+    '判定必须早于清标志，否则标志已清就判不出来了',
+  )
+})
+
+// —— 骨架状态机真跑（DSHBOTS-167）：把纯函数从源码抽出来执行，而不是只做正则匹配 ——
+const grabFn = (name) => {
+  const start = source.indexOf(`function ${name}(`)
+  assert.ok(start >= 0, `缺少 ${name}`)
+  return source.slice(start, source.indexOf('\n}', start) + 2)
+}
+const loadPendingFns = (state) => new Function(
+  'state',
+  `${grabFn('chatContextPending')}\n${grabFn('beginChatPending')}\n${grabFn('endChatPending')}\nreturn { chatContextPending, beginChatPending, endChatPending }`,
+)(state)
+
+function pendingState(overrides = {}) {
+  return { chatPending: null, chatRequestSeq: 0, chatAtBottom: false, data: { project: { id: 'p1' }, solo: null }, ...overrides }
+}
+
+test('chatContextPending：数据与目标上下文错开时出骨架，落回后自动消失', () => {
+  const state = pendingState({ chatPending: { projectId: 'p2', chatMode: 'group', soloBotId: null, seq: 1 } })
+  const { chatContextPending } = loadPendingFns(state)
+  assert.equal(chatContextPending(), true, '数据还是 p1、目标是 p2 → 应出骨架')
+  state.data = { project: { id: 'p2' }, solo: null }
+  assert.equal(chatContextPending(), false, '数据落回 p2 → 骨架消失（中途到达的轮询响应也能顶掉）')
+  state.chatPending = null
+  assert.equal(chatContextPending(), false, '无待取数时永远不出骨架')
+})
+
+test('chatContextPending：单聊按 solo.bot 判定，群聊不要求 solo', () => {
+  const state = pendingState({
+    chatPending: { projectId: 'p1', chatMode: 'solo', soloBotId: 'b9', seq: 1 },
+    data: { project: { id: 'p1' }, solo: null },
+  })
+  const { chatContextPending } = loadPendingFns(state)
+  assert.equal(chatContextPending(), true, '单聊目标 b9 但数据里没有 solo → 应出骨架')
+  state.data = { project: { id: 'p1' }, solo: { bot: { id: 'b9' } } }
+  assert.equal(chatContextPending(), false, 'solo.bot 到位 → 骨架消失')
+})
+
+test('beginChatPending/endChatPending：旧序号不得清掉新一次的骨架标志', () => {
+  const state = pendingState()
+  const { beginChatPending, endChatPending } = loadPendingFns(state)
+  const first = beginChatPending({ projectId: 'p1', chatMode: 'group', soloBotId: null })
+  const second = beginChatPending({ projectId: 'p2', chatMode: 'group', soloBotId: null })
+  assert.ok(second > first, '序号应递增')
+  endChatPending(first)
+  assert.ok(state.chatPending, '先发的旧响应不得清掉后一次的骨架标志')
+  endChatPending(second)
+  assert.equal(state.chatPending, null, '最新一次结束后骨架才清掉')
+})
+
+test('beginChatPending：换上下文才重置贴底，同一上下文重复点击不动滚动', () => {
+  const same = pendingState({ chatAtBottom: false })
+  loadPendingFns(same).beginChatPending({ projectId: 'p1', chatMode: 'group', soloBotId: null })
+  assert.equal(same.chatAtBottom, false, '同一上下文重复点击不动滚动')
+  const switched = pendingState({ chatAtBottom: false })
+  loadPendingFns(switched).beginChatPending({ projectId: 'p2', chatMode: 'group', soloBotId: null })
+  assert.equal(switched.chatAtBottom, true, '换上下文必须贴底，否则骨架渲染后用户停在新会话顶部')
+})
+
+test('markdown 缓存键用 JSON 序列化，正文里的分隔符不会撞键', () => {
+  assert.match(mdBlock, /JSON\.stringify\(/, '缓存键应序列化而非分隔符拼接')
 })
