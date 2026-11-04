@@ -13,6 +13,17 @@ export const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'gree
 
 export const botNamePattern = /^[\p{L}\p{N}_-]{1,24}$/u
 
+// solo_dir 唯一冲突时事务内重生成候选的 INSERT 尝试上限。
+const SOLO_DIR_INSERT_ATTEMPTS = 5
+
+// node:sqlite 的唯一约束错误只能按 message 判列（code 恒为 ERR_SQLITE_ERROR）：
+// 'UNIQUE constraint failed: bots.solo_dir'。返回冲突列名；非唯一约束错误返回 null。
+const uniqueColumn = (error) => {
+  const prefix = 'UNIQUE constraint failed: '
+  const message = String(error?.message ?? '')
+  return message.startsWith(prefix) ? message.slice(prefix.length).trim() : null
+}
+
 export const botsMethods = {
   async createBot(input, actor = this.actor()) {
     const name = text(input.name, 40).replace(/\s+/g, '')
@@ -39,22 +50,41 @@ export const botsMethods = {
     const instructions = text(input.instructions, 12_000)
     const color = COLORS.includes(input.color) ? input.color : 'blue'
     const filePolicy = normalizeFilePolicy(input.filePolicy)
-    const soloDir = this.soloDirFor(name, botId)
     // 先建目录再建号：目录建不出来就别留下一个单聊必然失败的 bot 行。
+    // 这里预建的是占位候选；并发同名时权威 solo_dir 在事务内重算，输家目录提交后补建。
+    const placeholder = this.soloDirFor(name, botId)
     try {
-      await this.ensureBotDir(soloDir)
+      await this.ensureBotDir(placeholder)
     } catch (error) {
       throw badRequest(`单聊工作区创建失败：${error.message}`)
     }
+    let soloDir = placeholder
     this.store.transaction(() => {
-      this.store.run(
-        `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort,
-          fallback_provider, fallback_model, fallback_effort, file_policy, solo_dir,
-          status, current_revision, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
-        botId, name, role, instructions, color, provider, model, effort,
-        fallbackProvider, fallbackModel, fallbackEffort, filePolicy, soloDir, createdAt, createdAt,
-      )
+      // 权威候选在 BEGIN IMMEDIATE 之后才生成，且与 INSERT 之间无 await：
+      // 同名并发不会双双通过查重再对撞 bots.solo_dir 唯一索引。
+      soloDir = this.soloDirFor(name, botId)
+      for (let attempt = 1; ; attempt++) {
+        try {
+          this.store.run(
+            `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort,
+              fallback_provider, fallback_model, fallback_effort, file_policy, solo_dir,
+              status, current_revision, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
+            botId, name, role, instructions, color, provider, model, effort,
+            fallbackProvider, fallbackModel, fallbackEffort, filePolicy, soloDir, createdAt, createdAt,
+          )
+          break
+        } catch (error) {
+          const column = uniqueColumn(error)
+          // 并发输掉名称查重的请求在这里拿到与名称预检一致的 conflict，而非裸 SQLITE 错误。
+          if (column === 'bots.name') throw conflict('Bot 名称已存在')
+          if (column !== 'bots.solo_dir') throw error
+          if (attempt >= SOLO_DIR_INSERT_ATTEMPTS) {
+            throw badRequest(`单聊目录分配冲突，请重试或更换 Bot 名称：${name}`)
+          }
+          soloDir = this.soloDirFor(name, botId)
+        }
+      }
       this.store.run(
         `INSERT INTO bot_revisions(id, bot_id, version, role, instructions, created_by, created_at)
          VALUES (?, ?, 1, ?, ?, ?, ?)`,
@@ -66,6 +96,14 @@ export const botsMethods = {
         file_policy: filePolicy,
       })
     })
+    // 输家目录提交后补建；失败只告警，启动期 ensureSoloWorkspaces 兜底回补。
+    if (soloDir !== placeholder) {
+      try {
+        await this.ensureBotDir(soloDir)
+      } catch (error) {
+        this.logger.warn?.(`单聊目录 ${soloDir} 补建失败：${error.message}`)
+      }
+    }
     return this.botView(this.botRow(botId))
   },
 
