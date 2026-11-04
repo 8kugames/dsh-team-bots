@@ -6,6 +6,7 @@ import { activeProject, botById, toast } from './util.js'
 import { api, loadState } from './api.js'
 import { closeAutocomplete, closeImageViewer, ensureComposerImageInput, openInlineImage, openMessageImage, removePendingImage, saveTaskFromForm } from './composer.js'
 import { closeDirPicker, closeModal, openBot, openModal, openSkillDetail, reloadTaskModal, renderDirPicker } from './modal-forms.js'
+import { renderModalLayer } from './modal-layer.js'
 import { exportUsageCsv, switchUsageWindow, usageMode } from './usage.js'
 import { focusApprovalCard, focusQuestionCard, questionDraftSelection, questionSelectOption } from './cards.js'
 import { loadSoloDetail } from './chat.js'
@@ -397,6 +398,30 @@ document.addEventListener('click', async (event) => {
         const run = await api('retry_run', { runId: target.dataset.runId })
         await refreshAfterTask(run.task_id)
         toast('已重新排队', 'success')
+        break
+      }
+      case 'edit-scopes': {
+        // 写范围编辑态（DSHBOTS-155）：只翻 modal 局部标志并同步弹窗层，不整页重建。
+        if (state.modal?.type === 'task') state.modal.editingScopes = true
+        renderModalLayer()
+        break
+      }
+      case 'cancel-scopes-edit': {
+        if (state.modal?.type === 'task') state.modal.editingScopes = false
+        renderModalLayer()
+        break
+      }
+      case 'update-scopes': {
+        // 保存走 task_update_scopes（DSHBOTS-151/155）：归一、终态/running 拒改、queued 快照同步都在
+        // 服务端裁决，失败文案（如「先等运行结束或取消」）原样透传给用户。
+        const scopes = (document.getElementById('task-write-scopes')?.value ?? '').split(/[,，、\s]+/).filter(Boolean)
+        try {
+          await api('task_update_scopes', { taskId: target.dataset.taskId, write_scopes: scopes }, { quiet: true })
+          await refreshAfterTask(target.dataset.taskId)
+          toast('写范围已更新', 'success')
+        } catch (error) {
+          toast(error.message || String(error), 'error')
+        }
         break
       }
       case 'open-artifact': {

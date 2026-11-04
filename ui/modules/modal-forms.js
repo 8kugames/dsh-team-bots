@@ -397,6 +397,20 @@ function modalTask(task) {
   // 写范围（DSHBOTS-124）：并行调度依据——同项目内两侧都声明且路径互不重叠才并行，任一未声明按保守串行。
   // 数据源是 taskView.writeScopes（src/services/tasks.js），空数组 = 未声明。
   const writeScopes = Array.isArray(task.writeScopes) ? task.writeScopes.filter(item => typeof item === 'string' && item) : []
+  // 写范围编辑态（DSHBOTS-155）：只读展示与编辑表单两态切换；编辑态挂在当前 modal 上，
+  // 保存后由 reloadTaskModal 换掉 state.modal，编辑态随之复位，不进全局轮询状态。
+  const editingScopes = state.modal?.type === 'task' && state.modal?.detail?.id === task.id && state.modal.editingScopes === true
+  // 终态卡不进编辑态——与后端 taskUpdateScopes 的终态拒改（任务已结束）同口径。
+  const scopesEditable = !['done', 'canceled'].includes(task.status)
+  const scopesView = writeScopes.length
+    ? `<div class="scope-chips">${writeScopes.map(scope => `<span class="approval-chip mono" title="${attr(scope)}">${esc(scope)}</span>`).join('')}</div>`
+    : '<div class="scope-empty">未声明（保守串行）</div>'
+  const scopesEdit = `<div class="field">
+            <label id="task-write-scopes-label" for="task-write-scopes">写范围路径</label>
+            <input class="input mono" style="width:100%" id="task-write-scopes" placeholder="逗号或空格分隔路径" value="${attr(writeScopes.join(', '))}">
+            <div class="btn-row" style="margin-top:7px"><button class="btn small primary" type="button" data-action="update-scopes" data-task-id="${attr(task.id)}">${icon('check')}保存</button><button class="btn small" type="button" data-action="cancel-scopes-edit">取消</button></div>
+            <div class="hint" style="margin-top:6px">保存后立即生效于排队中的运行；运行中的运行不受影响</div>
+          </div>`
   return modalShell({
     title: `${task.identifier} · ${task.title}`,
     // 任务阶段徽标走 taskStage 查表口径（DSHBOTS-42）：ended → stageLabel 为 null → 不显示。
@@ -418,10 +432,8 @@ function modalTask(task) {
         ${(parentTask || blockedNames.length) ? `<div class="note">${parentTask ? `父任务：${esc(parentTask.identifier)} · ${esc(parentTask.title)}` : ''}${parentTask && blockedNames.length ? ' · ' : ''}${blockedNames.length ? `被 ${blockedNames.length} 个任务阻塞：${esc(blockedNames.join('、'))}` : ''}</div>` : ''}
         <div class="scope-block">
           <div class="eyebrow" style="margin-bottom:6px">写范围</div>
-          ${writeScopes.length
-            ? `<div class="scope-chips">${writeScopes.map(scope => `<span class="approval-chip mono" title="${attr(scope)}">${esc(scope)}</span>`).join('')}</div>`
-            : '<div class="scope-empty">未声明（保守串行）</div>'}
-          <div class="hint" style="margin-top:6px">写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。</div>
+          ${editingScopes ? scopesEdit : `${scopesEditable ? `<div class="btn-row" style="margin-bottom:6px"><button class="btn small" type="button" data-action="edit-scopes" data-task-id="${attr(task.id)}">${icon('edit')}编辑</button></div>` : ''}${scopesView}
+          <div class="hint" style="margin-top:6px">写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。</div>`}
         </div>
         ${task.timeBudgetMinutes ? `<div class="scope-block">
           <div class="eyebrow" style="margin-bottom:6px">${t('taskForm.timeBudgetLabel')}</div>
