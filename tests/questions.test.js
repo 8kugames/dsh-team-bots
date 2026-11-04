@@ -359,3 +359,39 @@ test('未绑定会话仍透传：原生面板照常接管，不落提问', async
     assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+// DSHBOTS-170：群聊提示词须告知 ask_user_question（能力补全的缺口在指引不在链路），
+// 且指引边界与 questions.js 认领条件一致：项目绑定会话可用，单聊（solo）不可用。
+// task 会话同样被认领，但本卡按最小改动只在群聊分支注入指引，此处钉住该口径。
+test('提示词指引：群聊会话含 ask_user_question 指引，solo/task 提示词不含', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const project = await primeProject(store, service, 'Question Prompt')
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    store.run(
+      `INSERT INTO tasks(id, project_id, number, title, status, priority, creator_type, creator_id, created_at, updated_at)
+       VALUES ('t-prompt', ?, 9, '提问指引', 'in_progress', 'medium', 'user', 'u1', ?, ?)`,
+      project.id, now(), now(),
+    )
+    bindSession(store, { sessionId: 'sess-prompt-chat', botId: director.id, projectId: project.id })
+    bindSession(store, { sessionId: 'sess-prompt-task', botId: director.id, projectId: project.id, kind: 'task', taskId: 't-prompt' })
+    bindSession(store, { sessionId: 'sess-prompt-solo', botId: director.id, projectId: null })
+    const runtime = new DshRuntime({ ctx: { on() {} }, config: service.config, store, logger: { info() {}, warn() {}, error() {} } })
+
+    const chat = runtime.systemPromptFor({ agent: { id: 'sess-prompt-chat' } })
+    assert.match(chat, /ask_user_question/, '群聊提示词应指引 ask_user_question 工具')
+    assert.match(chat, /question card in the project group that only the project owner may answer/, '指引应说明卡片去向与作答权')
+    assert.match(chat, /not in solo sessions/, '指引应写明单聊会话不可用')
+
+    assert.doesNotMatch(
+      runtime.systemPromptFor({ agent: { id: 'sess-prompt-solo' } }),
+      /ask_user_question/,
+      'solo 会话走 soloPromptFor，不应出现 ask_user_question 指引',
+    )
+    assert.doesNotMatch(
+      runtime.systemPromptFor({ agent: { id: 'sess-prompt-task' } }),
+      /ask_user_question/,
+      '本卡口径：task 会话提示词不注入 ask_user_question 指引（认领链路不受影响）',
+    )
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

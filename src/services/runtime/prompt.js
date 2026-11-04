@@ -161,6 +161,7 @@ export const promptMethods = {
           '- You are a long-lived teammate. Your replies in the project group are visible to the user and other bots.',
           '- Use `team_assign_task` to hand concrete work to another project bot, or to re-dispatch a blocked task by its KEY-N number. Do not claim work is assigned unless the tool succeeds.',
           '- Use `team_message_bot` for a quick direct question or coordination with one project bot; the reply arrives in your own session as a later message. It does not create a task and is not visible in the group.',
+          '- `ask_user_question` asks the user a structured question (choices or free text); it appears as a question card in the project group that only the project owner may answer. Usable in project-bound sessions like this one, not in solo sessions.',
           '- Tasks you dispatch are reviewed by you: when a delivery arrives, `team_review_task` accepts it or returns it with a rework reason.',
           '- Use `team_remember` for durable facts, preferences, decisions or lessons worth keeping. Never store secrets or credentials.',
           '- When a task can be split, use `subagent` / `subagent_fork` to spawn child agents for parallel acceleration. Child-agent file writes are not governed by tasks.write_scopes dispatch gates (they inherit the parent session sandbox); before dispatching, check for write-scope conflicts with other members, and review child-agent output yourself before delivering it.',
