@@ -344,13 +344,15 @@ document.addEventListener('click', async (event) => {
         // 复选框状态在翻页时读取一次：第二步的确认文案与最终提交都以此为准。
         state.modal.purge = document.getElementById('remove-tracking-purge')?.checked === true
         state.modal.step = 2
-        render()
+        // 弹窗层只认 renderModalLayer 直调：modal 打开期间整页渲染被 D-98 遮罩闸门
+        // 拦截（app.js 只记 pending 不碰 #modal-root），误走整页路径会让翻页零响应（DSHBOTS-192）。
+        renderModalLayer()
         break
       }
       case 'remove-tracking-back': {
         if (state.modal?.type !== 'remove-tracking') break
         state.modal.step = 1
-        render()
+        renderModalLayer()
         break
       }
       case 'reject-task': {
