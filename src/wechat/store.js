@@ -41,6 +41,12 @@ export class WechatStore {
         attempts INTEGER NOT NULL DEFAULT 0,
         gave_up_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS peers (
+        peer_id TEXT PRIMARY KEY,
+        context_token TEXT NOT NULL,
+        client_id TEXT,
+        at INTEGER NOT NULL
+      );
     `)
     await this.migrateOutboxColumns()
     await this.secureFiles()
@@ -100,11 +106,38 @@ export class WechatStore {
     ).run(String(peerId), nowIso())
   }
 
-  /** 登出：凭证、cursor、管理员绑定与待发件箱一起清空，避免旧消息在下次登录后外发。 */
+  /** 会话凭证（contextToken/clientId）：每个联系人一行，入站消息即刷新（UPSERT）。
+   *  at 为该凭证最后刷新时间（epoch ms），供通道侧做过期判定。 */
+  savePeer(peerId, { contextToken, clientId, at }) {
+    if (!peerId || !contextToken) return false
+    this.db.prepare(
+      `INSERT INTO peers (peer_id, context_token, client_id, at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(peer_id) DO UPDATE SET
+         context_token = excluded.context_token,
+         client_id = excluded.client_id,
+         at = excluded.at`,
+    ).run(String(peerId), String(contextToken), clientId == null ? null : String(clientId), Number(at) || Date.now())
+    return true
+  }
+
+  loadPeers() {
+    return this.db.prepare('SELECT peer_id, context_token, client_id, at FROM peers').all()
+  }
+
+  /** 清理 N 天前最后刷新的过期会话凭证（默认 7 天，与通道侧凭证时效一致）。 */
+  purgeExpiredPeers(days = 7) {
+    const cutoff = Date.now() - Math.max(0, days) * DAY_MS
+    const result = this.db.prepare('DELETE FROM peers WHERE at < ?').run(cutoff)
+    return Number(result?.changes ?? 0)
+  }
+
+  /** 登出：凭证、cursor、管理员绑定、会话凭证与待发件箱一起清空，
+   *  避免旧消息与旧账号的会话凭证在下次登录后外发。 */
   clearCredentials() {
     this.db.prepare(
       "UPDATE channel_state SET credentials_json = NULL, cursor = '', admin_peer_id = NULL, updated_at = ? WHERE id = 1",
     ).run(nowIso())
+    this.db.prepare('DELETE FROM peers').run()
     this.db.prepare('DELETE FROM outbox').run()
   }
 

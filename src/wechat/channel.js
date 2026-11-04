@@ -9,6 +9,10 @@ const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000]
 const VERIFICATION_WAIT_MS = 180_000
 /** 已发送的出站消息默认保留 7 天，之后清理（废弃行同样按此清理）。 */
 const OUTBOX_RETENTION_DAYS = 7
+/** 会话凭证（contextToken）时效上限：最后刷新超过 7 天视为过期，
+ *  回落到「等对方发来消息」的既有可恢复路径，不报错刷屏。 */
+const PEER_TTL_DAYS = 7
+const DAY_MS = 24 * 60 * 60 * 1000
 /** 待发消息最大尝试次数（含首次发送）：达到上限仍未发出即废弃，永不补发。
  *  治理口径：历史堆积不无限重试，通道恢复后只发新事件，避免逐条补发刷屏占额度。 */
 const OUTBOX_MAX_ATTEMPTS = 3
@@ -67,6 +71,8 @@ export class WechatChannel {
     if (!this.enabled()) return
     // 启动即清理过期的已发送记录（默认保留 7 天），避免出站历史无限堆积
     this.store.purgeSentOutbox?.(OUTBOX_RETENTION_DAYS)
+    // 同步清理过期的会话凭证，避免 peers 表随时间无限堆积
+    this.store.purgeExpiredPeers?.(PEER_TTL_DAYS)
     const state = this.store.getState()
     const credentials = state?.credentials_json ? JSON.parse(state.credentials_json) : null
     if (!credentials) {
@@ -224,6 +230,8 @@ export class WechatChannel {
 
   async connect(credentials) {
     await this.stop()
+    // 读回持久化的会话凭证：重启/重连后无需对方先发消息即可主动发送（过期条目跳过）
+    this.loadPeers()
     // 本次链接建立之前的堆积一律作废不补发（历史积压治理口径）：
     // 重启恢复或换号重登都不追溯旧状态，链接之后产生的新事件才发送。
     const voided = this.store.giveUpAllPending?.() ?? 0
@@ -315,7 +323,9 @@ export class WechatChannel {
 
   async onInbound(message, transport, signal) {
     const peerId = message.senderId
-    this.peers.set(peerId, { contextToken: message.contextToken, clientId: message.clientId, at: Date.now() })
+    const peer = { contextToken: message.contextToken, clientId: message.clientId, at: Date.now() }
+    this.peers.set(peerId, peer)
+    this.persistPeer(peerId, peer)
     const admin = this.adminPeerId()
     if (!admin && this.pendingAdmin) {
       // 降级路径：本次授权会话内的第一条入站消息的发送者即管理员
@@ -346,6 +356,25 @@ export class WechatChannel {
         .catch(sendError => this.log.warn?.(`[wechat] 失败提示发送失败: ${this.errorText(sendError)}`))
       // 交给上层：这条没处理成功，cursor 不推进，下一轮还会重试
       throw error
+    }
+  }
+
+  /** 会话凭证写库：失败只降级（本进程内存凭证仍可用），不阻断消息处理与 cursor 推进。 */
+  persistPeer(peerId, peer) {
+    try {
+      this.store.savePeer?.(peerId, peer)
+    } catch (error) {
+      this.log.warn?.(`[wechat] 会话凭证写库失败: ${this.errorText(error)}`)
+    }
+  }
+
+  /** 从库读回会话凭证（connect 时调用）：过期条目跳过，回落「等对方发来消息」的既有路径。 */
+  loadPeers() {
+    const rows = this.store.loadPeers?.() ?? []
+    const cutoff = Date.now() - PEER_TTL_DAYS * DAY_MS
+    for (const row of rows) {
+      if (!row?.peer_id || !row.context_token || Number(row.at) < cutoff) continue
+      this.peers.set(row.peer_id, { contextToken: row.context_token, clientId: row.client_id, at: Number(row.at) })
     }
   }
 
