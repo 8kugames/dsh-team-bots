@@ -607,6 +607,37 @@ test('兜底路径：失败时 debug 日志说明判定来源（结构化 / 未�
     unknown.lines.some((line) => /判定来源/.test(line) && line.includes('unknown-no-hmr')),
     `未知判定来源要进日志，实际：${JSON.stringify(unknown.lines)}`,
   )
+
+  // 有 hmr 但拿不到 executing 参照 → 与「完全没有 hmr」要区分开。
+  const noReference = collect()
+  await restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('boom') } },
+    BEFORE,
+    { hmr: {}, logger: noReference.logger, audit: () => {}, retryBaseMs: 1 },
+  )
+  assert.ok(
+    noReference.lines.some((line) => /判定来源/.test(line) && line.includes('unknown-no-reference')),
+    `有 hmr 但无 executing 参照时判定来源应为 unknown-no-reference，实际：${JSON.stringify(noReference.lines)}`,
+  )
+
+  // 模块实例出生在事务里 + 残缺 hmr（有 getStore 无 exit）→ 结构化判定为污染。
+  const hmr = createHmrStub()
+  const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?born-in-hmr-tx-judgement'))
+  const polluted = collect()
+  await instance.restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('boom') } },
+    BEFORE,
+    {
+      hmr: { executing: { getStore: () => hmr.executing.getStore() } },
+      logger: polluted.logger,
+      audit: () => {},
+      retryBaseMs: 1,
+    },
+  )
+  assert.ok(
+    polluted.lines.some((line) => /判定来源/.test(line) && line.includes('structured-polluted')),
+    `模块出生于事务时判定来源应为 structured-polluted，实际：${JSON.stringify(polluted.lines)}`,
+  )
 })
 
 test('兜底路径：判定来源与 escape 同生命周期，混合错误不沿用上一次判定', async () => {
