@@ -10,7 +10,7 @@ import { WechatIlinkError } from '../wechat/commands.js'
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
 // 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
 export function wechatQrSvg(url) {
-  const makeQr = createRequire(import.meta.url)('../vendor/qrcode/qrcode.js')
+  const makeQr = createRequire(import.meta.url)('../../vendor/qrcode/qrcode.js')
   const qr = makeQr(0, 'M')
   qr.addData(url)
   qr.make()
