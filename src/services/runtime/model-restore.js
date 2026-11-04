@@ -22,7 +22,9 @@
 // 超时护栏：宿主 runExclusive 是排队执行（this.operations.then(...)），逃逸后的
 // 恢复排在宿主事务队列尾。若外层事务恰好等待本次恢复，恢复永远不返回，
 // selectModel 的串行链会被挂住，warn 与审计也都不会触发——比旧的「可见失败」
-// 更难发现。故每次尝试都带显式超时，超时按失败收口并落审计。
+// 更难发现。故整个恢复过程带一个整体预算（默认 10s，hooks.timeoutMs 可覆盖），
+// 超时按失败收口并落审计；护栏定时器不 unref，保证「这次恢复是进程唯一待办」
+// 时也照常触发。
 
 import { AsyncResource } from 'node:async_hooks'
 
@@ -40,6 +42,10 @@ export const RESTORE_TIMEOUT_MS = 10_000
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
+// 宿主唯一发出嵌套事务拒绝的地方（dsh-hmr 的 runExclusive guard）用的原文。
+// 只有整句一致才算「嵌套事务拒绝」：子串匹配会把别的业务错误误判成污染。
+const HOST_NESTED_REJECTION = /^HMR transactions cannot be nested$/
+
 // 超时错误单独标记，便于与业务失败区分（超时不再重试：重试只会再排一次队）。
 class RestoreTimeoutError extends Error {
   constructor(ms) {
@@ -51,15 +57,28 @@ class RestoreTimeoutError extends Error {
 
 // 给一次尝试加超时护栏。race 会给两个 promise 都挂上处理器：超时后被放弃的
 // 那条链即使随后 reject 也不会变成 unhandled rejection。
-const withTimeout = async (fn, timeoutMs) => {
+// 定时器不 unref：护栏必须在「这次恢复是进程唯一待办」时也照常触发，否则失败会
+// 重新变成静默（进程带着 unsettled top-level await 直接退出，什么都不落）。
+// finally 里 clearTimeout，不会把事件循环拖住。
+// onLate：超时收口之后，被放弃的那条链迟到落地时回调，用于补一条观测日志
+// （写入其实生效了，只是审计已记失败）。
+const withTimeout = async (fn, timeoutMs, onLate) => {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return fn()
   let timer = null
+  let expired = false
   const guard = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new RestoreTimeoutError(timeoutMs)), timeoutMs)
-    timer.unref?.()
+    timer = setTimeout(() => {
+      expired = true
+      reject(new RestoreTimeoutError(timeoutMs))
+    }, timeoutMs)
   })
+  const work = Promise.resolve().then(fn)
+  work.then(
+    () => { if (expired) onLate?.(null) },
+    (error) => { if (expired) onLate?.(error) },
+  )
   try {
-    return await Promise.race([Promise.resolve().then(fn), guard])
+    return await Promise.race([work, guard])
   } finally {
     if (timer) clearTimeout(timer)
   }
@@ -80,25 +99,50 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
   if (typeof defaults?.saveSelection !== 'function') return false
   const executing = hmr?.executing
   const canEscape = typeof executing?.exit === 'function' && typeof executing?.getStore === 'function'
+  // 兜底 scope 是否被污染：拿到 executing 参照时用结构化判定（在 scope 内读事务
+  // 标记，真假只看标记，不看错误文案）；拿不到参照时未知（null），此时才退回
+  // 文案启发式。结构化判定优先，避免把「文案恰好一样」误记成污染。
+  const scopePolluted = (() => {
+    if (typeof executing?.getStore !== 'function') return null
+    try {
+      return Boolean(restoreScope.runInAsyncScope(() => executing.getStore()))
+    } catch {
+      return null
+    }
+  })()
+  // 整体预算而非每次尝试各自计时：最坏阻塞从「3×timeoutMs + 退避」压到 timeoutMs。
+  const deadline = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Date.now() + timeoutMs : 0
   let lastError = null
   let escape = 'scope'
   let timedOut = false
+  const onLate = (error) => {
+    try {
+      logger?.debug?.('dsh-team: restore default model 已超时收口，但恢复仍落地: %s', error ? String(error?.message ?? error) : 'ok')
+    } catch {}
+  }
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) await delay(retryBaseMs * (attempt * 2 - 1))
+    const remaining = deadline ? deadline - Date.now() : 0
+    if (deadline && remaining <= 0) {
+      // 整体预算已用尽：按超时收口，不再发起新的尝试（再排一次队只会更久）。
+      lastError = new RestoreTimeoutError(timeoutMs)
+      timedOut = true
+      break
+    }
     try {
       if (canEscape && executing.getStore()) {
         // 事务上下文里：exit 把回调及其全部 async 延续的 store 置为 undefined，
         // runExclusive 由此看到干净上下文正常执行。
         escape = 'hmr-exit'
-        await executing.exit(() => withTimeout(() => defaults.saveSelection(before), timeoutMs))
+        await executing.exit(() => withTimeout(() => defaults.saveSelection(before), remaining, onLate))
       } else if (canEscape) {
         // 事务外：当前上下文干净，直接恢复。
         escape = 'direct'
-        await withTimeout(() => defaults.saveSelection(before), timeoutMs)
+        await withTimeout(() => defaults.saveSelection(before), remaining, onLate)
       } else {
         // 兜底：模块级 scope（干净与否取决于模块评估期落在哪儿）。
         escape = 'scope'
-        await restoreScope.runInAsyncScope(() => withTimeout(() => defaults.saveSelection(before), timeoutMs))
+        await restoreScope.runInAsyncScope(() => withTimeout(() => defaults.saveSelection(before), remaining, onLate))
       }
       try {
         logger?.debug?.('dsh-team: restore default model ok via %s', escape)
@@ -111,10 +155,16 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
         timedOut = true
         break
       }
-      if (escape === 'scope' && /cannot be nested/i.test(String(error?.message ?? ''))) {
-        // 兜底 scope 自身被污染（模块评估期落在 HMR 事务里），与「scope 干净可用」
-        // 区分开，便于事后判断是否属于已知的污染路径。
-        escape = 'scope-polluted'
+      if (escape === 'scope') {
+        if (scopePolluted === true) {
+          // 兜底 scope 自身被污染（模块评估期落在 HMR 事务里），与「scope 干净可用」
+          // 区分开，便于事后判断是否属于已知的污染路径。
+          escape = 'scope-polluted'
+        } else if (scopePolluted === null && HOST_NESTED_REJECTION.test(String(error?.message ?? ''))) {
+          // 没有结构化参照可判（拿不到 executing），才用宿主嵌套拒绝的原文做启发式
+          // 判定；文案不完全一致一律不判污染。
+          escape = 'scope-polluted'
+        }
       }
     }
   }

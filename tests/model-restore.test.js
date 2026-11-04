@@ -9,6 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { spawnSync } from 'node:child_process'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -56,6 +57,22 @@ function createHmrStub() {
 }
 
 const BEFORE = { provider: 'anthropic', model: 'claude-opus' }
+
+// 给挂死型回归兜一道测试内 watchdog：护栏一旦回退，3s 内红，而不是让整份
+// 测试文件挂到超时（挂死只表现为 cancelled，定位成本更高）。
+async function withWatchdog(promise, ms, label) {
+  let timer = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`watchdog: ${label} 未在 ${ms}ms 内收口`)), ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
 
 test('正常恢复：saveSelection 成功即返回 true，不 warn 不审计', async () => {
   const saves = []
@@ -108,7 +125,7 @@ test('重试穷尽：warn 一次 + 审计 model_restore_failed 落库', async ()
     const defaults = {
       saveSelection: async (next) => {
         attempts.push(next)
-        await hmr.runExclusive(async () => { throw new Error('HMR transactions cannot be nested') })
+        await hmr.runExclusive(async () => { throw new Error('boom') })
       },
     }
     const sessionId = 'sess-retry'
@@ -133,8 +150,8 @@ test('重试穷尽：warn 一次 + 审计 model_restore_failed 落库', async ()
     assert.deepEqual(JSON.parse(audit.data_json), {
       provider: 'anthropic',
       model: 'claude-opus',
-      error: 'HMR transactions cannot be nested',
-      escape: 'scope-polluted',
+      error: 'boom',
+      escape: 'scope',
     })
   } finally {
     store.close()
@@ -368,17 +385,90 @@ test('超时护栏：排队不落地时超时收口，落审计并标 timedOut',
     // 模拟排在宿主事务队列尾、迟迟不落地：永不 resolve。
     saveSelection: () => new Promise(() => {}),
   }
-  const ok = await hmr.executing.run(true, () => restoreDefaultModel(defaults, BEFORE, {
-    hmr,
-    logger: { warn: (message) => warnings.push(message) },
-    audit: (error, meta = {}) => audits.push({ error, meta }),
-    retryBaseMs: 1,
-    timeoutMs: 30,
-  }))
+  // 测试内 watchdog：护栏一旦被回退，这里要 3s 内红，而不是让整份测试挂死
+  // （挂死只会表现为 cancelled，定位成本更高）。
+  const ok = await withWatchdog(
+    hmr.executing.run(true, () => restoreDefaultModel(defaults, BEFORE, {
+      hmr,
+      logger: { warn: (message) => warnings.push(message) },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1,
+      timeoutMs: 30,
+    })),
+    3000,
+    '超时收口',
+  )
   assert.equal(ok, false, '超时必须收口返回 false，不能挂住 selectModel 串行链')
   assert.equal(audits.length, 1, '超时也要落一条审计')
   assert.equal(audits[0].meta.timedOut, true, '审计须标记超时')
   assert.equal(audits[0].meta.escape, 'hmr-exit')
   assert.match(audits[0].error.message, /timed out after 30ms/)
   assert.equal(warnings.length, 1)
+})
+
+test('超时护栏：进程只剩这一次待办时护栏仍触发（定时器不 unref）', async () => {
+  // 护栏定时器若被 unref，「恢复是进程唯一待办」时它不会触发：进程带着
+  // unsettled top-level await 直接退出（code 13），失败重新变成静默。
+  const moduleUrl = new URL('../src/services/runtime/model-restore.js', import.meta.url).href
+  const script = `
+import { restoreDefaultModel } from ${JSON.stringify(moduleUrl)}
+const audits = []
+const ok = await restoreDefaultModel(
+  { saveSelection: () => new Promise(() => {}) },
+  { provider: 'anthropic', model: 'claude-opus' },
+  { logger: { warn() {}, debug() {} }, audit: (error, meta) => audits.push(meta), timeoutMs: 50 },
+)
+console.log('RESULT ' + JSON.stringify({ ok, meta: audits[0] ?? null }))
+`
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    timeout: 20000,
+  })
+  assert.notEqual(result.status, 13, `子进程不应带 unsettled top-level await 退出：${result.stderr}`)
+  assert.match(result.stdout, /"ok":false/, '护栏须在进程唯一待办时照常触发并收口')
+  assert.match(result.stdout, /"timedOut":true/)
+})
+
+test('兜底 scope 污染判定：结构化判定优先，文案一致也不误判', async () => {
+  const hmr = createHmrStub()
+  const audits = []
+  // 有 executing 参照但没有 exit → 走兜底 scope 路径；模块级 scope 干净，
+  // 错误文案又恰好与宿主嵌套拒绝一致，也不能误记成 scope-polluted。
+  const failed = await restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('HMR transactions cannot be nested') } },
+    BEFORE,
+    {
+      // executing 只有 getStore（没有 exit）→ 走兜底 scope 路径，但结构化判定可用。
+      hmr: { executing: { getStore: () => hmr.executing.getStore() } },
+      logger: { warn() {} },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1,
+    },
+  )
+  assert.equal(failed, false)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.escape, 'scope', 'scope 干净时即便文案一致也不记污染')
+})
+
+test('兜底 scope 污染判定：模块出生在事务里时按结构化判定记 scope-polluted', async () => {
+  const hmr = createHmrStub()
+  // 模块实例出生在事务里 → 其模块级 scope 已被污染；即便错误只是 boom，
+  // 结构化判定（scope 内事务标记为真）也能确认污染。
+  const instance = await hmr.executing.run(true, async () => await import('../src/services/runtime/model-restore.js?born-in-hmr-tx-structured'))
+  const audits = []
+  const failed = await instance.restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('boom') } },
+    BEFORE,
+    {
+      // executing 只有 getStore（没有 exit）→ 走兜底 scope 路径，但结构化判定可用。
+      hmr: { executing: { getStore: () => hmr.executing.getStore() } },
+      logger: { warn() {} },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1,
+    },
+  )
+  assert.equal(failed, false)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.escape, 'scope-polluted', '结构化判定应识别出 scope 被污染')
+  assert.match(audits[0].error.message, /boom/)
 })
