@@ -10,8 +10,17 @@
     flex-direction: column;
     gap: 8px;
     min-width: 240px;
-    max-width: 480px;
+    max-width: 100%;
     background: var(--surface);
+}
+/* 整行化（DSHBOTS-173）：审批卡占满消息行可用宽度，右侧按钮贴行右缘，不再停在 480px 小卡上。
+   选择器带 .message-body-wrap 是为了压过基线的 max-width: min(640px, 82%) 与窄屏的 88% 覆盖——
+   它们同为单类选择器且排在本文件之后，靠源码顺序压不住，必须用双类选择器提特异性。
+   min-width 取 min(240px, 100%)：容器窄于 240px 时收缩到容器宽，窄屏不出横向滚动。 */
+.message-body-wrap.approval-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: min(240px, 100%);
 }
 .approval-card[data-approval-status='pending'] { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
 .approval-card[data-approval-status='allowed'] { border-left-color: var(--green); }
@@ -73,7 +82,7 @@
 .approval-progress { height: 4px; border-radius: 7px; background: var(--surface-3); overflow: hidden; }
 .approval-progress-fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); transition: width .6s linear; }
 .approval-progress.urgent .approval-progress-fill { background: var(--star); }
-.approval-actions { display: flex; gap: 8px; }
+.approval-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .approval-foot { display: flex; align-items: center; gap: 8px; }
 /* 已决 pill：中性字 + 状态小点（红色小点只出现在 rejected） */
 .approval-pill {
