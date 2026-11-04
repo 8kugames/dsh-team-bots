@@ -532,3 +532,79 @@ test('有效预算：timeoutMs 非法时退回默认上限，不给「完全无�
   assert.equal(resolveRestoreBudget(undefined), RESTORE_TIMEOUT_MS)
   assert.equal(resolveRestoreBudget(250), 250)
 })
+
+test('失败原因：非 Error 的抛出值也保留真实原因', async () => {
+  const audits = []
+  const ok = await restoreDefaultModel(
+    // 宿主/插件侧的抛出值不一定是 Error（字符串等），真实原因不能丢。
+    { saveSelection: async () => { throw 'boom-string' } },
+    BEFORE,
+    {
+      logger: { warn() {} },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1000, // 退避远大于预算：第二次尝试前预算即耗尽 → 走预算耗尽收口
+      timeoutMs: 200,
+    },
+  )
+  assert.equal(ok, false)
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.timedOut, true)
+  assert.equal(audits[0].meta.cause, 'boom-string', '非 Error 抛出值也要带进审计')
+  assert.match(audits[0].error.message, /boom-string/, '错误消息里要带真实失败原因')
+})
+
+test('失败原因：业务错误带 timedOut 字段不被误判成护栏超时', async () => {
+  const audits = []
+  let attempts = 0
+  const ok = await restoreDefaultModel(
+    {
+      saveSelection: async () => {
+        attempts += 1
+        throw Object.assign(new Error('business boom'), { timedOut: true })
+      },
+    },
+    BEFORE,
+    {
+      logger: { warn() {} },
+      audit: (error, meta = {}) => audits.push({ error, meta }),
+      retryBaseMs: 1,
+    },
+  )
+  assert.equal(ok, false)
+  assert.equal(attempts, RESTORE_MAX_ATTEMPTS, '业务错误要走完重试，不被当成超时直接收口')
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].meta.timedOut, undefined, '业务错误不得记成超时')
+  assert.equal(audits[0].meta.cause, undefined, '非超时不带 cause')
+  assert.match(audits[0].error.message, /business boom/)
+})
+
+test('兜底路径：失败时 debug 日志说明判定来源（结构化 / 未知）', async () => {
+  const collect = () => {
+    const lines = []
+    return { lines, logger: { warn() {}, debug: (message, ...rest) => lines.push(`${message} ${rest.join(' ')}`.trim()) } }
+  }
+
+  // 有 executing 参照（只有 getStore，没有 exit）→ 结构化判定可用且 scope 干净。
+  const structured = collect()
+  await restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('boom') } },
+    BEFORE,
+    { hmr: { executing: { getStore: () => undefined } }, logger: structured.logger, audit: () => {}, retryBaseMs: 1 },
+  )
+  assert.ok(
+    structured.lines.some((line) => /判定来源/.test(line) && line.includes('structured-clean')),
+    `结构化判定来源要进日志，实际：${JSON.stringify(structured.lines)}`,
+  )
+
+  // 完全没有 hmr 参照 → 判定来源只能是未知。
+  const unknown = collect()
+  await restoreDefaultModel(
+    { saveSelection: async () => { throw new Error('boom') } },
+    BEFORE,
+    { logger: unknown.logger, audit: () => {}, retryBaseMs: 1 },
+  )
+  assert.ok(
+    unknown.lines.some((line) => /判定来源/.test(line) && line.includes('unknown-no-hmr')),
+    `未知判定来源要进日志，实际：${JSON.stringify(unknown.lines)}`,
+  )
+})
