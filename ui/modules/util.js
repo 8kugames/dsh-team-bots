@@ -103,6 +103,22 @@ export function statusPill(status, text = STATUS[status] ?? status) {
 export function runDot(status) {
   return `<span class="run-dot ${attr(status ?? '')}" title="${attr(RUN_STATUS[status] ?? '未运行')}"></span>`
 }
+
+// sandbox-pill:start —— 生效沙箱档位的轻量标签（DSHBOTS-157）。
+// 只复用既有 pill token（绿/琥珀/紫），零新增色值；档位色只回答「这次运行能不能写」，
+// 不承载告警语义——read-only 是只读运行的常态，不做成红色。
+const SANDBOX_TONE = {
+  'read-only': 'amber',
+  'workspace-write': 'green',
+  'danger-full-access': 'violet',
+}
+
+export function sandboxPill(mode) {
+  if (!mode) return ''
+  const tone = SANDBOX_TONE[mode] ?? ''
+  return `<span class="pill ${tone}" title="${attr(`生效沙箱档位：${mode}`)}">沙箱 ${esc(mode)}</span>`
+}
+// sandbox-pill:end
 // 成员/总监状态点：红黄绿三色——空闲绿、运行中黄（且仅此态闪烁）、失败红（含限流等待）。
 // 排队中按空闲处理（绿、不闪），只有真正 running 才闪。
 export function memberRunDot(member) {

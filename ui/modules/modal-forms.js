@@ -2,7 +2,7 @@
 // 以及弹窗开关与焦点陷阱。骨架复用 modal-layer.js 的 modalShell / modalLoading / renderModalLayer。
 import { state, STATUS, STATUS_ORDER, PRIORITY, BOT_STATUS, SKILL_STATUS, RUN_STATUS, CREATOR_TYPE, EFFORT, COLORS, COLOR_NAMES } from './state.js'
 import { icon } from './icons.js'
-import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, timeAgo, toast } from './util.js'
+import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, sandboxPill, timeAgo, toast } from './util.js'
 import { api } from './api.js'
 import { mdChatScope, richText } from './markdown.js'
 import { t } from './i18n.js'
@@ -457,7 +457,7 @@ function modalTask(task) {
         ${(activeRun || latestFailed) ? `<div class="btn-row" style="margin:9px 0 2px">${activeRun ? `<button class="btn danger small" type="button" data-action="cancel-run" data-run-id="${attr(activeRun.id)}">${icon('stop')}停止运行</button>` : ''}${latestFailed ? `<button class="btn small" type="button" data-action="retry-run" data-run-id="${attr(latestFailed.id)}">${icon('refresh')}重试</button>` : ''}</div>` : ''}
         <div style="margin-top:8px">${(task.runs ?? []).length === 0 ? '<div class="note">还没有运行。</div>' : task.runs.map(run => `<div class="run-row">
           <div class="run-row-top">${runDot(run.status)}<strong>#${run.attempt}</strong><span>${esc(RUN_STATUS[run.status] ?? run.status)}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
-          <div class="run-row-meta">${runClockSpan(run)}<span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
+          <div class="run-row-meta">${runClockSpan(run)}${sandboxPill(run.sandboxMode)}<span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
           ${run.error_message ? `<div class="run-output error">${esc(run.error_message)}</div>` : ''}
           ${run.output ? `<details style="margin-top:6px"${panelAttrs(state, `run-output:${run.id}`)}><summary class="summary-link">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
           ${runArtifacts(state, run)}
