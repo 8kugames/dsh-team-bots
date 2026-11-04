@@ -5,7 +5,7 @@
 import { state } from './state.js'
 import { attr, esc } from './util.js'
 import { render, updateRunClocks } from '../app.js'
-import { modalNewProject, modalRemoveTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory } from './modal-forms.js'
+import { modalNewProject, modalRemoveTracking, modalRemoveBotTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory } from './modal-forms.js'
 
 function modalShell({ title, subtitle = '', body = '', footer = '', size = '', badge = '' }) {
   return `<div class="modal-backdrop" data-action="modal-backdrop">
@@ -36,6 +36,7 @@ function renderModal() {
   switch (modal.type) {
     case 'new-project': return modalNewProject()
     case 'remove-tracking': return modalRemoveTracking()
+    case 'bot-remove-tracking': return modalRemoveBotTracking()
     case 'new-bot': return modalBot(null)
     case 'invite-member': return modalInviteMember()
     case 'edit-bot': return modalBot(modal.detail)

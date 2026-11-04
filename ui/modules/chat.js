@@ -438,6 +438,7 @@ function renderSoloConfig() {
         <div class="btn-row">
           <button class="btn primary" type="submit" form="solo-config-form">${icon('check')}保存新版本</button>
           ${bot.status === 'active' ? `<button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档 Bot</button>` : ''}
+          ${bot.status === 'archived' ? `<button class="btn small danger" data-action="bot-remove-tracking-open" data-bot-id="${attr(bot.id)}">移除追踪</button>` : ''}
         </div>
       </div>
       <aside class="task-detail-side">

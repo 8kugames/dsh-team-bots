@@ -147,6 +147,8 @@ export const botsMethods = {
   },
   async updateBot(botId, patch, actor = this.actor()) {
     const bot = this.botRow(botId)
+    // removed 是移除追踪的终态：档案与历史仍可读，但不再接受任何修改（含 status 复活）。
+    if (bot.status === 'removed') throw badRequest('该 Bot 已移除追踪，不能再修改')
     const changes = {}
     if (patch.name !== undefined) {
       const name = text(patch.name, 40).replace(/\s+/g, '')
@@ -236,6 +238,23 @@ export const botsMethods = {
   },
   async archiveBot(botId, actor = this.actor()) {
     return this.updateBot(botId, { status: 'archived' }, actor)
+  },
+  // 移除追踪（DSHBOTS-193）：已归档 Bot 的软移除——bots.status 落 removed 终态，
+  // 工作台列表不再展示；运行记录、单聊消息、版本、记忆与单聊工作区目录全部保留。
+  async removeBotTracking(botId, input = {}, actor = this.actor()) {
+    const bot = this.botRow(botId)
+    if (bot.status !== 'archived') throw badRequest('Bot 未归档，先归档再移除追踪')
+    if (String(input.confirmName ?? '').trim() !== bot.name) throw badRequest('确认名称与 Bot 名称不一致，已拒绝移除')
+    const activeRuns = this.store.get(
+      "SELECT COUNT(*) AS count FROM runs WHERE bot_id = ? AND status IN ('queued', 'running')",
+      botId,
+    )?.count ?? 0
+    if (activeRuns > 0) throw badRequest('该 Bot 仍有排队或运行中的运行，稍后再移除')
+    this.store.transaction(() => {
+      this.store.run("UPDATE bots SET status = 'removed', updated_at = ? WHERE id = ?", nowIso(), botId)
+      this.audit(actor, 'bot.remove_tracking', 'bot', botId, { name: bot.name, soloDir: bot.solo_dir })
+    })
+    return { removed: true, name: bot.name }
   },
   async rollbackBot(botId, revisionId, actor = this.actor()) {
     const revision = this.store.get('SELECT * FROM bot_revisions WHERE id = ? AND bot_id = ?', revisionId, botId)

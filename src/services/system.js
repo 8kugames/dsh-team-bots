@@ -66,7 +66,8 @@ export const systemMethods = {
         (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'in_review' AND t.review_target = 'owner_bot') AS owner_review_tasks
       FROM projects p ORDER BY CASE p.status WHEN 'active' THEN 0 ELSE 1 END, p.updated_at DESC
     `)
-    const bots = this.store.all("SELECT * FROM bots ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at")
+    // removed = 已移除追踪（DSHBOTS-193）：数据保留但不进工作台列表（侧栏/邀请/总览统一口径）。
+    const bots = this.store.all("SELECT * FROM bots WHERE status <> 'removed' ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at")
     const unreadCounts = this.unreadChatCounts()
     let project = projectId ? this.store.get('SELECT * FROM projects WHERE id = ?', projectId) : undefined
     if (!project) project = this.store.get("SELECT * FROM projects WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1")
@@ -182,7 +183,10 @@ export const systemMethods = {
     view.secrets = this.listSecrets()
     view.secretRequests = this.listSecretRequests()
     if (soloBotId) {
-      const soloBot = this.store.get('SELECT * FROM bots WHERE id = ?', soloBotId)
+      // 移除追踪（DSHBOTS-193）后的 Bot 不再可达：他端移除、本端未导航的残留 soloBotId
+      // 不回灌 solo 视图，与列表过滤同一口径。
+      const soloBotRow = this.store.get('SELECT * FROM bots WHERE id = ?', soloBotId)
+      const soloBot = soloBotRow?.status === 'removed' ? null : soloBotRow
       if (soloBot) {
         // 归档契约（DSHBOTS-174）：默认视图（归档窗口交集，或两维全关时的 200 条回退上限）隐去的
         // 更早消息数。被隐去的都严格早于窗口最旧一条，UI 据此点亮「加载更早」入口，经 messagesPage

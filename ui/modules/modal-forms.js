@@ -100,6 +100,31 @@ function modalRemoveTracking() {
   })
 }
 
+// 已归档 Bot 的移除追踪两步确认弹窗（DSHBOTS-193）：与项目侧同构。Bot 侧为软移除——数据与
+// 工作区目录全部保留、仅停止追踪，故无 purge 复选框；第二步复用 #remove-tracking-name/
+// #remove-tracking-submit 两个 id 让 events-misc 输入门禁免改生效，且不含 form：执行按钮走
+// data-action 而非表单提交，不与项目侧 remove-tracking 表单链冲突。
+function modalRemoveBotTracking() {
+  const modal = state.modal
+  if (modal.step === 2) {
+    return modalShell({
+      title: '移除追踪 · 确认执行',
+      badge: '从列表移除',
+      subtitle: `输入 Bot 名称「${modal.name}」以确认。`,
+      body: `<div class="field"><label for="remove-tracking-name">Bot 名称</label><input class="input" style="width:100%" id="remove-tracking-name" name="confirmName" placeholder="${esc(modal.name)}" autocomplete="off" autofocus></div>
+        <div class="hint">将从工作台列表移除「${esc(modal.name)}」；运行记录、单聊消息与工作区文件全部保留，但移除后不能再恢复追踪。</div>`,
+      footer: `<button class="btn" data-action="bot-remove-tracking-back" type="button">上一步</button><button class="btn danger" type="button" id="remove-tracking-submit" data-action="bot-remove-tracking-confirm" disabled>确认移除追踪</button>`,
+    })
+  }
+  return modalShell({
+    title: '移除追踪 · 后果确认',
+    badge: '从列表移除',
+    subtitle: `将停止追踪已归档 Bot「${modal.name}」。`,
+    body: `<ul class="remove-tracking-list"><li>该 Bot 将从工作台 Bots 列表与单聊入口移除，不再显示。</li><li>运行记录、单聊消息、版本历史与专属工作区目录<strong>全部保留</strong>（不做物理删除）。</li><li>移除追踪后不能恢复，该 Bot 也不能再被修改或重新启用。</li></ul><div class="hint">这是软移除：数据只在数据库中停止展示，不清理任何文件。</div>`,
+    footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn danger" data-action="bot-remove-tracking-step2" type="button">继续</button>`,
+  })
+}
+
 // 生产目录路径选择器：逐级浏览本机目录后回填目标输入框。
 // 只改写选择器子树与目标输入框，不触发全局 render，避免重建创建表单丢掉已填内容。
 function closeDirPicker(inputId) {
@@ -770,4 +795,4 @@ function updateFallbackEffortOptions(select) {
 }
 
 
-export { modalNewProject, modalRemoveTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory, openModal, closeModal, openTask, openSkillDetail, openTrajectory, openBot, reloadTaskModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, trapModalFocus, renderDirPicker, closeDirPicker, parseFallbackFields, normalizeTimeBudgetMinutes, modelOptions, effortOptions, fallbackModelOptions, renderPriceCard }
+export { modalNewProject, modalRemoveTracking, modalRemoveBotTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory, openModal, closeModal, openTask, openSkillDetail, openTrajectory, openBot, reloadTaskModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, trapModalFocus, renderDirPicker, closeDirPicker, parseFallbackFields, normalizeTimeBudgetMinutes, modelOptions, effortOptions, fallbackModelOptions, renderPriceCard }

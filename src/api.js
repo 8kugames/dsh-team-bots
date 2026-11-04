@@ -3,7 +3,7 @@ import { exportUsageCsv } from './usage-reconcile.js'
 
 const ACTIONS = new Set([
   'health', 'state', 'messages_page', 'models', 'bot_detail',
-  'create_bot', 'update_bot', 'archive_bot', 'rollback_bot',
+  'create_bot', 'update_bot', 'archive_bot', 'rollback_bot', 'remove_bot_tracking',
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
   'mark_chat_read',
   'add_member', 'remove_member',
@@ -42,6 +42,12 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.updateBot(required(payload.botId, 'botId'), payload.patch ?? payload, actor)
     case 'archive_bot':
       return service.archiveBot(required(payload.botId, 'botId'), actor)
+    case 'remove_bot_tracking':
+      return service.removeBotTracking(
+        required(payload.botId, 'botId'),
+        { confirmName: payload.confirmName },
+        actor,
+      )
     case 'rollback_bot':
       return service.rollbackBot(required(payload.botId, 'botId'), required(payload.revisionId, 'revisionId'), actor)
     case 'create_project':

@@ -355,6 +355,42 @@ document.addEventListener('click', async (event) => {
         renderModalLayer()
         break
       }
+      case 'bot-remove-tracking-open': {
+        const bot = botById(target.dataset.botId)
+        // 仅已归档 Bot 可移除追踪（软移除，DSHBOTS-193）；未归档一律零响应。
+        if (!bot || bot.status !== 'archived') break
+        openModal({ type: 'bot-remove-tracking', botId: bot.id, name: bot.name, step: 1 })
+        break
+      }
+      case 'bot-remove-tracking-step2': {
+        if (state.modal?.type !== 'bot-remove-tracking') break
+        state.modal.step = 2
+        // 弹窗层只认 renderModalLayer 直调（D-98 遮罩闸门，同 remove-tracking 口径）。
+        renderModalLayer()
+        break
+      }
+      case 'bot-remove-tracking-back': {
+        if (state.modal?.type !== 'bot-remove-tracking') break
+        state.modal.step = 1
+        renderModalLayer()
+        break
+      }
+      case 'bot-remove-tracking-confirm': {
+        if (state.modal?.type !== 'bot-remove-tracking') break
+        const botId = state.modal.botId
+        const confirmName = document.getElementById('remove-tracking-name')?.value ?? ''
+        await api('remove_bot_tracking', { botId, confirmName })
+        closeModal()
+        // 正停在该 Bot 的单聊/配置页时回到群聊，避免引用已移除的 Bot。
+        if (state.soloBotId === botId) {
+          state.soloBotId = null
+          state.view = 'chat'
+          state.chatMode = 'group'
+        }
+        await refresh()
+        toast('已移除追踪，Bot 已从工作台列表移除', 'success')
+        break
+      }
       case 'reject-task': {
         // 驳回（DSHBOTS-141）：终态任务退回 backlog，走 transition_task 通道，与看板拖拽同口径；
         // 后端在离开终态且仍有活跃运行时会拒绝，错误文案直接透出。
