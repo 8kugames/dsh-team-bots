@@ -463,7 +463,11 @@ export const schedulerMethods = {
           if (runningScopes.some(other => writeScopesOverlap(writeScopes, other))) continue
         }
         // DSHBOTS-112：单聊读图代理运行与 solo_chat 同样不带 project_id，豁免项目闸门。
-        const needsProject = run.kind !== 'solo_chat' && !(run.kind === 'vision' && !run.project_id)
+        // DSHBOTS-145：结转摘要运行同理——单聊摘要运行不带 project_id，只有项目摘要运行
+        // 才需要项目上下文；否则 solo 摘要会被误判 MISSING_CONTEXT 直接失败。
+        const needsProject = run.kind === 'rollover_summary'
+          ? Boolean(run.project_id)
+          : run.kind !== 'solo_chat' && !(run.kind === 'vision' && !run.project_id)
         const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
         const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
         if (!bot || (needsProject && !project)) {

@@ -29,10 +29,16 @@ export const RUN_LIMIT_RANGES = {
   [STALL_WATCHDOG_KEY]: [0, 360],
 }
 
-// 保存值必须是范围内的整数分钟；非法或越界按未保存处理（回退默认），不做钳制。
+// ── 会话结转（DSHBOTS-145）─────────────────────────────────────────────────
+// 同一绑定会话累计运行轮数超过阈值后结转：先排一次 bot 自写交接摘要，摘要就绪后
+// 删旧绑定开新会话并把摘要注入新会话首条对话提示词。0 = 关闭（阈值不生效）。
+export const SESSION_ROLLOVER_TURNS_KEY = 'session_rollover_turns'
+export const SESSION_ROLLOVER_TURNS_RANGE = [0, 10_000]
+
+// 保存值必须是范围内的整数；非法或越界按未保存处理（回退默认），不做钳制。
 // 空串/null（未保存）必须先于数值化判空：Number('') 是 0，会把「未保存」误判成
-// 看门狗合法值 0（关闭）。用 Number() 而非 parseInt：parseInt('1.5') 会吞小数当 1。
-const savedMinutes = (value, range) => {
+// 合法值 0（关闭）。用 Number() 而非 parseInt：parseInt('1.5') 会吞小数当 1。
+const savedInt = (value, range) => {
   const raw = String(value ?? '').trim()
   if (raw === '') return null
   const [min, max] = range
@@ -52,8 +58,8 @@ const envExplicit = (name) => {
 export function effectiveRunLimits(config, getSetting = () => null) {
   const runEnv = envExplicit('DSH_TEAM_RUN_TIMEOUT_MS')
   const stallEnv = envExplicit('DSH_TEAM_STALL_TIMEOUT_MS')
-  const runSaved = savedMinutes(getSetting(RUN_TIMEOUT_KEY), RUN_LIMIT_RANGES[RUN_TIMEOUT_KEY])
-  const stallSaved = savedMinutes(getSetting(STALL_WATCHDOG_KEY), RUN_LIMIT_RANGES[STALL_WATCHDOG_KEY])
+  const runSaved = savedInt(getSetting(RUN_TIMEOUT_KEY), RUN_LIMIT_RANGES[RUN_TIMEOUT_KEY])
+  const stallSaved = savedInt(getSetting(STALL_WATCHDOG_KEY), RUN_LIMIT_RANGES[STALL_WATCHDOG_KEY])
   return {
     runTimeoutMs: !runEnv && runSaved !== null ? runSaved * 60_000 : config.runTimeoutMs,
     stallTimeoutMs: !stallEnv && stallSaved !== null ? stallSaved * 60_000 : config.stallTimeoutMs,
@@ -61,6 +67,19 @@ export function effectiveRunLimits(config, getSetting = () => null) {
     stallTimeoutEnv: stallEnv,
   }
 }
+
+// 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > 页面保存值 >
+// 默认 256；0 = 关闭。消费点（runtime.ensureSession 复用检查）每次现算，改值对
+// 下一次会话复用生效。
+export function effectiveSessionRolloverTurns(config, getSetting = () => null) {
+  const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_TURNS')
+  const saved = savedInt(getSetting(SESSION_ROLLOVER_TURNS_KEY), SESSION_ROLLOVER_TURNS_RANGE)
+  return !env && saved !== null ? saved : config.sessionRolloverTurns
+}
+
+// 结转摘要的 settings 键（DSHBOTS-145）：按「bot + 上下文」隔离——同一 bot 的项目会话与
+// 单聊会话各自独立结转，互不串档；单聊（无项目）用 'solo' 占位。
+export const rolloverSummaryKey = (botId, projectId) => `rollover_summary:${botId}:${projectId ?? 'solo'}`
 
 export function resolveConfig(config = {}) {
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
@@ -95,6 +114,10 @@ export function resolveConfig(config = {}) {
     maxRunTokens: int(config.maxRunTokens ?? process.env.DSH_TEAM_MAX_RUN_TOKENS, 0, 0, 500_000_000),
     // 0 关闭：运行多久没有任何事件就判定卡住。
     stallTimeoutMs: int(config.stallTimeoutMs ?? process.env.DSH_TEAM_STALL_TIMEOUT_MS, 20 * 60_000, 0, 6 * 60 * 60_000),
+    // 会话结转阈值（DSHBOTS-145）：0 = 关闭；「轮次」口径 = runs 表按 session_id 的
+    // COUNT(*)（不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实
+    // 增长一致）。生效值可被全局配置页 session_rollover_turns 覆盖。
+    sessionRolloverTurns: int(config.sessionRolloverTurns ?? process.env.DSH_TEAM_SESSION_ROLLOVER_TURNS, 256, 0, 10_000),
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。

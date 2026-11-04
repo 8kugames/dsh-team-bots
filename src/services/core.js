@@ -14,6 +14,7 @@ import { ensureQuestionSchema } from './questions.js'
 import { ensureMessageImagesSchema } from './message-images.js'
 import { ensureTaskTimesSchema, ensureTaskTerminalTimeBackfill } from './tasks.js'
 import { ensureRecoverySchema } from './recovery-schema.js'
+import { ensureRolloverSchema } from './rollover-schema.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 import { id, nowIso } from '../util.js'
 
@@ -80,6 +81,8 @@ export const coreMethods = {
       this.ensureSettings()
       // 恢复标记列由恢复域自管迁移（db.js 不加行）；列必须先在，下面的置位 UPDATE 才能写。
       ensureRecoverySchema(this.store)
+      // 结转支撑索引（DSHBOTS-145）由结转域自管迁移（db.js 不加索引）。
+      ensureRolloverSchema(this.store)
       const interrupted = this.store.all("SELECT id FROM runs WHERE status = 'running'")
       this.store.run(
         `UPDATE runs SET status = 'queued', recovery = 1, started_at = NULL, last_progress_at = NULL, session_id = NULL

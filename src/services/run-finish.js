@@ -6,6 +6,7 @@
 
 import { runUsageTotals } from '../usage.js'
 import { id, nowIso, text } from '../util.js'
+import { rolloverSummaryKey } from '../config.js'
 import {
   isQuotaExhausted,
   isRateLimitError,
@@ -150,6 +151,23 @@ export const runFinishMethods = {
     }
     if (run.kind === 'memory_review') {
       await this.completeMemoryReview(run, status === 'succeeded' ? cleanOutput : '', error)
+      if (this.rate[run.project_id]) delete this.rate[run.project_id]
+      return
+    }
+    if (run.kind === 'rollover_summary') {
+      // 结转摘要（DSHBOTS-145）：成功且有正文 → 落 settings（键按 bot + 上下文），
+      // 下一次会话复用时据此开新会话并注入；失败/空产出 → 只留痕，旧会话继续用，
+      // 阈值仍在，后续每次复用都会重试补排（active 检查保证不重复排队）。
+      if (status === 'succeeded' && cleanOutput) {
+        this.store.setSetting(rolloverSummaryKey(run.bot_id, run.project_id), cleanOutput)
+        this.insertRunEvent(runId, 'rollover_summary_ready', '交接摘要已就绪，下次复用将开新会话')
+      } else {
+        this.insertRunEvent(
+          runId,
+          'rollover_summary_failed',
+          `交接摘要未生成：${error?.message ?? '模型未返回文本'}`,
+        )
+      }
       if (this.rate[run.project_id]) delete this.rate[run.project_id]
       return
     }

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { AppError } from '../../errors.js'
 import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
-import { effectiveRunLimits } from '../../config.js'
+import { effectiveRunLimits, effectiveSessionRolloverTurns, rolloverSummaryKey } from '../../config.js'
 import { imageContentPartsForMessage } from '../message-images.js'
 import { restoreDefaultModel } from './model-restore.js'
 
@@ -155,7 +155,67 @@ export const sessionMethods = {
       return {}
     }
   },
+  // 结转判定（DSHBOTS-145）：旧会话是否该让位。返回 true 表示旧绑定已删、调用方走新建路径；
+  // false 表示继续复用旧会话。
+  // - 阈值 0 = 关闭（配置见 config.js 的 sessionRolloverTurns）；
+  // - 「轮次」口径 = runs 表按 session_id 的 COUNT(*)，不限 status——失败运行的提示词同样
+  //   已进会话历史，count-all 才与真实增长一致；
+  // - 摘要就绪（settings 有值）→ 立即结转；
+  // - 摘要未就绪 → 幂等补排一条摘要运行（不阻塞对话，摘要就绪后下一次复用自然结转）。
+  shouldRolloverSession({ bot, project, existing }) {
+    const turns = effectiveSessionRolloverTurns(this.config, key => this.store.setting(key))
+    if (turns <= 0) return false
+    const count = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0
+    if (count < turns) return false
+    if (this.store.setting(rolloverSummaryKey(bot.id, project?.id))) return true
+    const active = this.store.get(
+      "SELECT id FROM runs WHERE kind = 'rollover_summary' AND trigger_ref = ? AND status IN ('queued', 'running')",
+      existing.session_id,
+    )
+    if (!active) this.enqueueRolloverSummary({ bot, project, sessionId: existing.session_id })
+    return false
+  },
+  // 补排结转摘要运行（DSHBOTS-145）：只读运行，复用旧会话（runs.session_id 指明），
+  // 让 bot 在旧上下文里自写交接摘要（进行中任务 / 关键决定 / 未决问题）。
+  // 幂等双保险：调用前查 trigger_ref 上的 active 运行；INSERT OR IGNORE 兜住同一
+  // idempotency_key 的并发插入，避免唯一约束抛错把当前这条对话运行带崩。
+  enqueueRolloverSummary({ bot, project, sessionId }) {
+    const runId = id('run')
+    const queuedAt = new Date().toISOString()
+    const inserted = this.store.run(
+      `INSERT OR IGNORE INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, queued_at)
+       VALUES (?, ?, ?, 'rollover_summary', 'read', 'rollover_summary', ?, 'queued', 1, ?, ?, ?)`,
+      runId,
+      project?.id ?? null,
+      bot.id,
+      sessionId,
+      `rollover_summary:${sessionId}`,
+      sessionId,
+      queuedAt,
+    )
+    if (!inserted.changes) return runId
+    this.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'),
+      runId,
+      'queued',
+      '会话达到轮次阈值，排队生成交接摘要',
+      queuedAt,
+    )
+    return runId
+  },
   async ensureSession(bot, project, { run, task, sessionKind, modelOverride } = {}) {
+    // 结转摘要运行（DSHBOTS-145）：必须回到被结转的旧会话写摘要，且不能参与阈值判定——
+    // 否则摘要运行自己又会触发一次结转；solo 摘要运行也没有项目上下文，不查项目。
+    if (run?.kind === 'rollover_summary' && run.session_id) {
+      const resolved = await this.ctx.sessionController.resolveAgent(run.session_id)
+      if (!resolved?.error) {
+        this.applyFilePolicy(resolved, bot, run, task)
+        await this.selectModel(run.session_id, bot, modelOverride)
+        return run.session_id
+      }
+      this.store.run('DELETE FROM session_bindings WHERE session_id = ?', run.session_id)
+    }
     // 任务运行使用独立会话，与该项目总监会话互不阻塞；dm 运行用独立私信会话；
     // 单聊运行（solo_chat）没有项目，落在 bot 自己的 _the_bots/<dir> 专属会话；其余运行共用项目会话。
     // sessionKind 由调用方显式指定（dm_reply 投递回任务会话等跨类别场景）。
@@ -187,10 +247,19 @@ export const sessionMethods = {
     if (existing) {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
-        this.applyFilePolicy(resolved, bot, run, task)
-        await this.selectModel(existing.session_id, bot, modelOverride)
-        return existing.session_id
+        // 会话结转（DSHBOTS-145）：只对长期复用的会话（项目群聊 / 单聊）生效，任务会话与
+        // 私信会话生命周期短，不结转。超阈值且摘要已就绪 → 删旧绑定落到下方新建路径，
+        // 摘要由新会话首轮提示词注入；摘要未就绪 → 补排一次摘要运行，本轮继续复用旧会话，
+        // 不阻塞对话。
+        const rollover = kind !== 'task' && kind !== 'dm'
+          && this.shouldRolloverSession({ bot, project, existing })
+        if (!rollover) {
+          this.applyFilePolicy(resolved, bot, run, task)
+          await this.selectModel(existing.session_id, bot, modelOverride)
+          return existing.session_id
+        }
       }
+      // 会话已失效（宿主查不到）或结转判定要求开新会话：删旧绑定，落到下方新建路径。
       this.store.run('DELETE FROM session_bindings WHERE session_id = ?', existing.session_id)
     }
     const key = `${bot.id}:${solo ? 'solo' : project.id}:${kind}:${taskId ?? ''}`

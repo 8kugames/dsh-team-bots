@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
 import { id, nowIso, parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
+import { rolloverSummaryKey } from '../../config.js'
 import { readWriteScopes } from '../write-scopes.js'
 
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
@@ -308,6 +309,33 @@ export const promptMethods = {
     }
   },
 
+  // 结转摘要块（DSHBOTS-145）：新会话首轮提示词注入旧会话的交接摘要。
+  // 一次性语义（照 recovery note 手法）：读到的同时即刻清零，同一摘要只注入一次。
+  // 无摘要（未结转 / 已消费）返回空串，模板原样不变。
+  rolloverSummaryBlock(bot, project) {
+    const summary = this.store.setting(rolloverSummaryKey(bot.id, project?.id))
+    if (!summary) return ''
+    this.store.setSetting(rolloverSummaryKey(bot.id, project?.id), '')
+    return `
+
+# Handoff summary from the previous session
+${summary}`
+  },
+  // 结转摘要运行提示词（DSHBOTS-145）：在旧会话上下文里让 bot 自写交接摘要。
+  // 项目会话与单聊会话都支持（project 可为空）——bot 已在本会话里，历史无需重放。
+  rolloverSummaryPrompt({ bot, project }) {
+    const header = project
+      ? [`Project: ${project.name} (${project.key})`, `You are: ${bot.name}`].join('\n')
+      : [`You are: ${bot.name}`, 'Mode: one-on-one conversation (outside projects)'].join('\n')
+    return `${header}
+
+# Handoff summary request
+This conversation has reached its turn limit and will be rolled over to a fresh session. Write a handoff summary for the next session so work continues without losing context.
+- Write in Chinese, plain prose, at most 400 characters.
+- Cover: work in progress (what was being done and where it stopped), key decisions already made, and open questions or blockers.
+- Do not repeat the task description or anything already recorded in long-term memory.
+- Do not call any tool and do not write files. Reply with the summary text only.`
+  },
   // 单聊运行提示词：没有项目上下文，只带本会话增量新消息。
   soloRunPrompt({ bot, chatMessage, sessionId }) {
     const header = [
@@ -337,7 +365,7 @@ export const promptMethods = {
 Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.
 
 # Solo message
-${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
+${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}${this.rolloverSummaryBlock(bot)}
 
 ${recentBlock}`
   },
@@ -366,6 +394,9 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
   promptFor({ run, bot, project, task, chatMessage, sessionId }) {
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, sessionId })
     if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
+    // 结转摘要（DSHBOTS-145）：先于 header 判定——单聊摘要运行没有项目，
+    // header 直接解引用 project 会炸。
+    if (run.kind === 'rollover_summary') return this.rolloverSummaryPrompt({ run, bot, project })
     const header = [
       `Project: ${project.name} (${project.key})`,
       `Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
@@ -595,7 +626,7 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
-${quoteLine}
+${quoteLine}${this.rolloverSummaryBlock(bot, project)}
 ${recentBlock}
 
 Open tasks:
