@@ -1,13 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 // 引用摘要（DSHBOTS-71）：摘要来自消息原文前 120 字，原文可能带 markdown 记号。
 // 这里先做纯逻辑断言（剥记号），再做渲染接线与样式断言（不许撑破气泡）。
 const source = readUiSource()
-const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+const css = await uiStylesSource()
 
 // —— 引用摘要纯逻辑块（mdPlainSummary）——
 const quoteBlock = /\/\/ quote-summary:start[\s\S]*?\/\/ quote-summary:end/.exec(source)?.[0]

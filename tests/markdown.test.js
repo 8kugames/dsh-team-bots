@@ -3,10 +3,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const source = readUiSource()
 const html = readFileSync(fileURLToPath(new URL('../ui/index.html', import.meta.url)), 'utf8')
-const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+const css = await uiStylesSource()
 
 // —— markdown 渲染纯逻辑块（mdImageFileUrl / mdRewriteImageSources / mdCreateRenderer）——
 const mdBlock = /\/\/ markdown-render:start[\s\S]*?\/\/ markdown-render:end/.exec(source)?.[0]

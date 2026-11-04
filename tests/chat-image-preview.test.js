@@ -1,14 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 // DSHBOTS-80：消息图片缩略图化 + 点击放大预览（复用 image-viewer）。
 // ① 附图瓦片从「图标 + 文件名」文本条改成真缩略图（blob: URL，会话级缓存，base64 不进 DOM）；
 // ② markdown 正文内嵌 <img> 点击委托放大（复用全屏查看器，直接用现有 src）。
 const source = readUiSource()
-const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+const css = await uiStylesSource()
 
 function extractFn(regex, label) {
   const fn = regex.exec(source)?.[0]

@@ -2,12 +2,11 @@
 // ui/app.js 是浏览器 IIFE 单测跑不起来，锁住抽屉结构、两层确认弹窗、按钮标记与样式接线。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const source = readUiSource()
-const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+const css = await uiStylesSource()
 
 test('① 侧栏树尾「已归档」抽屉：默认收起 + 计数徽标', () => {
   assert.match(source, /tree: \{ chats: true, bots: true, archived: false \}/, 'tree 状态应含 archived:false 默认收起')

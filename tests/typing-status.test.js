@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
 const block = /\/\/ typing-status:start[\s\S]*?\/\/ typing-status:end/.exec(source)?.[0]
@@ -53,11 +54,11 @@ test('task、review、handle、dm、dm_reply、memory_review 与已结束运行�
   assert.deepEqual(activeTypingRuns(ended, 'chat'), [])
 })
 
-test('群聊与单聊渲染接线状态行，样式含 .typing-row 与三点跳动 keyframes', () => {
+test('群聊与单聊渲染接线状态行，样式含 .typing-row 与三点跳动 keyframes', async () => {
   assert.match(source, /typingRows\(state\.data\.runs, 'chat'\)/)
   assert.match(source, /typingRows\(runs, 'solo_chat'\)/)
   assert.match(source, /class="run-clock" data-started="\$\{attr\(row\.startedAt \?\? ''\)\}"/)
-  const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+  const css = await uiStylesSource()
   assert.match(css, /\.typing-row\s*\{/)
   assert.match(css, /\.typing-dots i\s*\{/)
   assert.match(css, /@keyframes typing-bounce/)

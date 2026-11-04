@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
 const indexHtml = readFileSync(fileURLToPath(new URL('../ui/index.html', import.meta.url)), 'utf8')
@@ -350,8 +351,8 @@ test('断言③：同类型原位刷新不重播入场动画——遮罩/面板�
 // 替换 .modal-body 的 innerHTML——这三个槽位上的任何 animation 都会随每次数据刷新重播（=
 // 闪烁）。所以入场动画若要加，只能挂在被原位保留的 .modal-backdrop / .modal 上（首挂播放
 // 一次，刷新不重播）。本断言把这条约束锁进 CSS：重建槽位的规则段不得声明 animation。
-test('断言③守门：入场动画只允许挂在原位保留的遮罩/面板上，刷新会重建的槽位禁用 animation', () => {
-  const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+test('断言③守门：入场动画只允许挂在原位保留的遮罩/面板上，刷新会重建的槽位禁用 animation', async () => {
+  const css = await uiStylesSource()
   const rebuiltSlots = ['modal-head', 'modal-foot', 'modal-body', 'modal-close', 'modal-loading']
   for (const sel of rebuiltSlots) {
     const rules = css.match(new RegExp(`\\.${sel}\\b[^{}]*\\{[^}]*\\}`, 'g')) ?? []

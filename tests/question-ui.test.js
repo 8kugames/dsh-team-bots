@@ -7,11 +7,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const uiSource = readUiSource()
-const stylesSource = readFileSync(join(root, 'ui', 'styles.css'), 'utf8')
+const stylesSource = await uiStylesSource()
 const utilSource = readFileSync(join(root, 'ui', 'modules', 'util.js'), 'utf8')
 
 const markerBlock = (name) => {

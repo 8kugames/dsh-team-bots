@@ -8,6 +8,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 class StubRuntime {
   setCompletionHandler() {}
@@ -161,10 +162,9 @@ test('参数校验：scope 二选一、游标缺一不可', async () => {
 // UI 源码断言：锁住 ui/app.js 里分片加载的接线不被无意拆断（DSHBOTS-33 UI 重放）。
 // 先剔行注释再断言顺序，防止「注释里的字也能让断言通过」的假锁（6040ea5 教训）。
 test('UI 接线：标记块存在、渲染/分发/样式接通、顺序正确', async () => {
-  const { readFile } = await import('node:fs/promises')
   const app = readUiSource()
   const bare = app.replace(/\/\/[^\n]*/g, '')
-  const css = await readFile('ui/styles.css', 'utf8')
+  const css = await uiStylesSource()
 
   // ① 标记块齐全（标记本身是行注释，须在原文定位），五个 helper 都在剔注释后的块内。
   const start = app.indexOf('chat-pagination:start')

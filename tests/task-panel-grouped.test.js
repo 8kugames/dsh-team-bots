@@ -3,12 +3,11 @@
 // 约定：ui/app.js 是浏览器 IIFE，按本项目 UI 惯例做源码断言；CSS 沿用正则抽规则体。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const source = readUiSource()
-const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+const css = await uiStylesSource()
 
 function block(selector) {
   const re = new RegExp(`${selector.replace(/[.[\]()]/g, ch => `\\${ch}`)}\\s*\\{([^}]*)\\}`)

@@ -4,17 +4,19 @@
 //   @keyframes task-status-swim { 0%,100% none / 35% rotate(-4deg) / 70% rotate(1.6deg) }
 // 硬约束三条：①动效只挂在「进行中」标签上；②无障碍闸门——只有
 // prefers-reduced-motion: no-preference 时才启用（对齐宿主做法）；③只用 transform，
-// 不引发重排、不新增色值。本文件读 ui/styles.css 与 ui/app.js 真源做断言（仓库先例：
+// 不引发重排、不新增色值。本文件读页面 CSS 汇总真源（ui/styles/* 拼接，DSHBOTS-160）
+// 与 ui/app.js 真源做断言（仓库先例：
 // tests/message-link-contrast.test.js、tests/question-ui.test.js），不复制一份样式到测试里。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
-const css = readFileSync(join(root, 'ui', 'styles.css'), 'utf8')
+const css = await uiStylesSource()
 const app = readFileSync(join(root, 'ui', 'app.js'), 'utf8')
 const zh = readFileSync(join(root, 'ui', 'i18n', 'zh.js'), 'utf8')
 

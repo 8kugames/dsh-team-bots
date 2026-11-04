@@ -9,6 +9,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { handleAction } from '../src/api.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 class StubRuntime {
   constructor() {
@@ -107,9 +108,9 @@ test('已读水位不得越过服务端最新消息（否则会吞掉新消息�
   }
 })
 
-test('侧栏徽标：未读与待审红点互斥，计数封顶 99+', () => {
+test('侧栏徽标：未读与待审红点互斥，计数封顶 99+', async () => {
   const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
-  const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+  const css = await uiStylesSource()
   assert.match(source, /const unread = Number\(item\.unreadCount \?\? 0\)/, '侧栏读未读数')
   assert.match(source, /unread === 1[\s\S]*?<span class="red-dot" title="\$\{t\('tree\.unreadOne'\)\}">/, '1 条用红点')
   assert.match(source, /unread > 99 \? '99\+' : unread/, '计数封顶 99+')

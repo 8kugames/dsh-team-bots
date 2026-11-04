@@ -5,9 +5,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const app = readUiSource()
-const css = readFileSync(new URL('../ui/styles.css', import.meta.url), 'utf8')
+const css = await uiStylesSource()
 const tasksService = readFileSync(new URL('../src/services/tasks.js', import.meta.url), 'utf8')
 
 /** 取出 modalTask 函数体（到列首的函数收尾为止）并剔掉行注释。 */

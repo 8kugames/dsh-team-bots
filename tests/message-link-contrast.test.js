@@ -2,17 +2,18 @@
 // 根因是全局 `a { color: var(--accent-text) }` 与用户气泡底色 --accent 同色系
 // （Catppuccin 暗色下两者同为 #b7bdf8，对比 1.00:1）。修法是给气泡内链接一条
 // 独立配色规则：用户气泡用 --accent-ink，bot 气泡与评论用 --accent-text。
-// 本文件读 ui/styles.css 真源做断言（仓库先例：tests/question-ui.test.js 等），
+// 本文件读页面 CSS 汇总真源（ui/styles/* 拼接，DSHBOTS-160，与线上 styles() 同口径）
+// 做断言（仓库先例：tests/question-ui.test.js 等），
 // 并按 WCAG 2.1 实算四套主题下的对比度，不复制一份色值到测试里。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
-const css = readFileSync(join(root, 'ui', 'styles.css'), 'utf8')
+const css = await uiStylesSource()
 
 // ---- CSS 解析小工具（够用即可，不引第三方依赖） -----------------------------
 

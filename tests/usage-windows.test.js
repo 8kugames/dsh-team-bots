@@ -13,6 +13,7 @@ import {
   usageSnapshot,
 } from '../src/usage.js'
 import { exportUsageCsv } from '../src/usage-reconcile.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 // DSHBOTS-121 用量页时间窗：今日 / 7 日 / 30 日 / 至今 四档。
 // 后端口径：今日 = 产品时区（默认 Asia/Shanghai）当日 0 点起；7 日 / 30 日 = 滚动窗口；
@@ -24,7 +25,7 @@ const NOW = Date.parse('2026-11-03T12:00:00.000Z')
 const DAY_MS = 86_400_000
 
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
-const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+const css = await uiStylesSource()
 const apiSource = readFileSync(fileURLToPath(new URL('../src/api.js', import.meta.url)), 'utf8')
 
 async function withStore(fn) {

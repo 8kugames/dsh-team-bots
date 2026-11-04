@@ -4,11 +4,11 @@
 // CSS 规则断言沿用 tests/ui-button-semantics.test.js 的正则抽取法。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { readUiSource } from './helpers/ui-sources.js'
+import { uiStylesSource } from './ui-styles-source.js'
 
 const app = readUiSource()
-const css = readFileSync(new URL('../ui/styles.css', import.meta.url), 'utf8')
+const css = await uiStylesSource()
 
 /** 定位 `// <marker>:start` 到 `// <marker>:end` 的原始块，再剔块内行注释。 */
 function block(marker) {
