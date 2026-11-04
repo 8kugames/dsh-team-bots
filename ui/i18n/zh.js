@@ -203,6 +203,11 @@ export default {
   'taskForm.timeBudgetPlaceholder': '选填，留空不设',
   'task.timeBudgetValue': '${minutes} 分钟',
   'task.timeBudgetNote': '硬性时限：到期运行将被中止；与全局运行超时取更短者',
+  // 任务驳回（DSHBOTS-141）：终态任务退回待规划
+  'task.rejectAction': '驳回',
+  'task.rejectTitle': '把已完成/已取消的任务退回待规划，终态时间戳会清空',
+  'task.rejectConfirm': '确定把「${title}」驳回退回待规划？',
+  'task.rejectDone': '已驳回，任务退回待规划',
   // 高频 toast
   'toast.copied': '已复制',
   'toast.wechatConnected': '微信通道已连接',

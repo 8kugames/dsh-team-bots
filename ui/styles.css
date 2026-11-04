@@ -3034,6 +3034,31 @@ a.global-config.dsh-official-link:hover {
     color: var(--ink);
     background: var(--surface-2);
 }
+/* 终态任务卡的驳回按钮（DSHBOTS-141）：与折叠按钮同高的幽灵小按钮，hover 转 danger 提示不可逆。 */
+.task-reject {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 18px;
+    padding: 0 5px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-3);
+    font: var(--fs-caption) var(--sans);
+    line-height: 1;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+.task-reject:hover {
+    color: var(--danger);
+    border-color: var(--danger-wash);
+    background: var(--danger-wash);
+}
+.task-reject svg {
+    width: 12px;
+    height: 12px;
+}
 /* 依赖徽标：被未完成的任务挡住时出现在卡片底行。 */
 .task-deps-badge {
     display: inline-flex;

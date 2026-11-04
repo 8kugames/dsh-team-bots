@@ -1716,6 +1716,7 @@ function renderTaskCard(task, options = {}) {
       <span class="task-run-label${stage.stage === 'person' ? ' task-stage-person' : ''}">${runLabel}</span>
       ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
       ${endAt ? `<span class="task-end-time" title="${attr(endAt)}">${icon('check')} ${formatTime(endAt)}</span>` : ''}
+      ${['done', 'canceled'].includes(task.status) ? `<button type="button" class="task-reject" data-action="reject-task" data-task-id="${attr(task.id)}" title="${t('task.rejectTitle')}">${icon('reply')}${t('task.rejectAction')}</button>` : ''}
       ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}
     </div>
   </article>`
@@ -3618,7 +3619,7 @@ function modalTask(task) {
         ${(task.dependencies ?? []).length ? `<div class="divider"></div><div class="eyebrow" style="margin-bottom:7px">依赖</div>${task.dependencies.map(dep => `<div class="kv"><span>${esc(dep.title)}</span><strong>${esc(STATUS[dep.status] ?? dep.status)}</strong></div>`).join('')}` : ''}
       </aside>
     </div>`,
-    footer: `<button class="btn" data-action="close-modal">关闭</button><button class="btn" type="button" data-action="derive-subtask" data-task-id="${attr(task.id)}" title="以本任务为父任务新建子任务">${icon('branch')}派生子任务</button>${task.status === 'in_review' ? `<button class="btn" type="button" data-action="review-delegate" data-task-id="${attr(task.id)}" title="委派总监 Bot 的子代理并行核验交付，结论写回任务评论，裁决仍由您执行">${icon('spark')}子代理核验</button>` : ''}<button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button><button class="btn primary" type="submit" form="task-form">${icon('check')}保存</button>`,
+    footer: `<button class="btn" data-action="close-modal">关闭</button>${['done', 'canceled'].includes(task.status) ? `<button class="btn danger" type="button" data-action="reject-task" data-task-id="${attr(task.id)}" title="${t('task.rejectTitle')}">${icon('reply')}${t('task.rejectAction')}</button>` : ''}<button class="btn" type="button" data-action="derive-subtask" data-task-id="${attr(task.id)}" title="以本任务为父任务新建子任务">${icon('branch')}派生子任务</button>${task.status === 'in_review' ? `<button class="btn" type="button" data-action="review-delegate" data-task-id="${attr(task.id)}" title="委派总监 Bot 的子代理并行核验交付，结论写回任务评论，裁决仍由您执行">${icon('spark')}子代理核验</button>` : ''}<button class="btn" type="button" data-action="run-task" data-task-id="${attr(task.id)}">${icon('play')}保存并运行</button><button class="btn primary" type="submit" form="task-form">${icon('check')}保存</button>`,
   })
 }
 
@@ -5100,6 +5101,21 @@ document.addEventListener('click', async (event) => {
         if (state.modal?.type !== 'remove-tracking') break
         state.modal.step = 1
         render()
+        break
+      }
+      case 'reject-task': {
+        // 驳回（DSHBOTS-141）：终态任务退回 backlog，走 transition_task 通道，与看板拖拽同口径；
+        // 后端在离开终态且仍有活跃运行时会拒绝，错误文案直接透出。
+        const taskId = target.dataset.taskId
+        const task = (state.data?.tasks ?? []).find(item => item.id === taskId)
+        if (!window.confirm(t('task.rejectConfirm', { title: task?.title ?? '' }))) break
+        try {
+          await api('transition_task', { taskId, status: 'backlog' }, { quiet: true })
+          await refreshAfterTask(taskId)
+          toast(t('task.rejectDone'), 'success')
+        } catch (error) {
+          toast(error.message || String(error), 'error')
+        }
         break
       }
       case 'review-delegate': {

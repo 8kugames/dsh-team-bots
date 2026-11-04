@@ -204,6 +204,11 @@ export default {
   'taskForm.timeBudgetPlaceholder': 'Optional; leave blank for none',
   'task.timeBudgetValue': '${minutes} min',
   'task.timeBudgetNote': 'Hard limit: the run is aborted on expiry; the shorter of this budget and the global run timeout applies',
+  // Task rejection (DSHBOTS-141): terminal tasks back to backlog
+  'task.rejectAction': 'Reject',
+  'task.rejectTitle': 'Move a done/canceled task back to the backlog; terminal timestamps are cleared',
+  'task.rejectConfirm': 'Move "${title}" back to the backlog?',
+  'task.rejectDone': 'Rejected; task moved back to the backlog',
   // High-frequency toasts
   'toast.copied': 'Copied',
   'toast.wechatConnected': 'WeChat channel connected',

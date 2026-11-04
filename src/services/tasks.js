@@ -24,8 +24,10 @@ export const TRANSITIONS = {
   in_progress: new Set(['todo', 'blocked', 'in_review', 'canceled']),
   blocked: new Set(['todo', 'in_progress', 'canceled']),
   in_review: new Set(['in_progress', 'done', 'canceled']),
-  done: new Set(['todo']),
-  canceled: new Set(['todo']),
+  // 终态回流：done/canceled → backlog 是「驳回」（旧板 task-6 口径），→ todo 是「重新派单」，
+  // 两条路径都在这里放行；离开终态时的活跃运行守卫见 updateTask。
+  done: new Set(['todo', 'backlog']),
+  canceled: new Set(['todo', 'backlog']),
 }
 
 // task-stage 域已拆至 src/services/task-stage.js（工单七态判定表 + 标签口径唯一来源），
@@ -245,6 +247,16 @@ export const tasksMethods = {
     if (patch.status !== undefined) {
       if (!TASK_STATUSES.has(patch.status)) throw badRequest('任务状态无效')
       this.assertTransition(task.status, patch.status)
+      // 离开终态的活跃运行守卫：终态任务上可能还挂着未结束的派生运行（核验/受阻处理），
+      // 直接驳回/重开会让任务状态与运行事实脱节，先要求把运行停干净。
+      // 口径沿用 spawnReviewDelegate / assignTask 的活跃运行判定（queued/running 即算）。
+      if (['done', 'canceled'].includes(task.status) && !['done', 'canceled'].includes(patch.status)) {
+        const active = this.store.get(
+          "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+          taskId,
+        )
+        if (active) throw conflict('任务还有运行在排队或执行，请先停止再变更状态')
+      }
       updates.status = patch.status
       // 终态时间戳对称维护：进 done/canceled 各写对应列，离开任一终态即清空，两列互斥。
       updates.completed_at = patch.status === 'done' ? nowIso() : null
