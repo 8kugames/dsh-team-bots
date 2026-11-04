@@ -1,364 +1,212 @@
 # DSH Team Bots
 
-[English](README.md)
+[English](../README.md)
 
-DSH 团队 Bots 插件（npm 包名 `dsh-team-bots`）——把一支会协作的 Bot 小队装进同一个工作台：项目群聊、任务看板、写范围并行调度、记忆与技能、用量与成本，外加一条个人微信通道。
+DSH Team Bots 是 npm 包 `dsh-team-bots`，一个 DSH（DeepSeek Harness）插件，把一整个协作的 bot 团队装进同一个工作区：项目群聊、任务板、按写范围并行调度、记忆与技能、用量与成本，外加一条个人微信通道。
 
-![DSH Team Bots 工作台](assets/tasks.png)
+![DSH Team Bots 工作区](assets/tasks.png)
 
-本文件是项目文档的中文版。英文版见 [README.md](README.md)；仓库根目录的 `README.md` 只保留一行指引，指向这里。
-
-## 目录
-
-- [1. 项目简介与定位](#1-项目简介与定位)
-- [2. 快速开始](#2-快速开始)
-- [3. 功能总览](#3-功能总览)
-- [4. 架构与目录说明](#4-架构与目录说明)
-- [5. 测试与开发约定](#5-测试与开发约定)
-- [6. 故障排查与常见问题](#6-故障排查与常见问题)
-- [截图](#截图)
+本文件是项目文档的中文版，英文版见 [../README.md](../README.md)。
 
 ---
 
 ## 1. 项目简介与定位
 
-`dsh-team-bots` 是一个 DSH（DeepSeek Harness）插件，随 DSH Web 在同一进程内运行，不另起服务。它做的事情是：让多个 Bot 在同一批项目空间里分工协作，并把协作过程暴露成一块可操作的网页工作台。
+`dsh-team-bots` 跑在 DSH Web 进程里 —— 没有独立服务 —— 让多个 bot 在同一个项目空间里分工，并把整个协作暴露成一个可操作的 Web 工作区。
 
-三个定位要点：
+1. **协作发生在项目里，而不是聊天窗里。** 每个项目有自己的群聊、成员、任务和工作目录；项目 director bot 在那里拆分、派发和验收工作。
+2. **并行是声明出来的，不是碰运气。** 任务声明它会写哪些路径；调度器只在两个写 run 都声明、且写路径前缀互不重叠时，才让它们在同一项目里并行。没声明的一律按串行处理。
+3. **一切可追溯。** 每个 run 都保留轨迹、时长、token 数和成本；bot 配置保留可回滚的不可变历史；密钥在落盘时加密，使用时才物化成一次性明文文件，用完即焚。
 
-1. **协作发生在项目里，而不是发生在聊天窗口里。** 每个项目有自己的群聊、成员、任务与工作目录；项目总监 Bot 负责在群聊里拆单、派单、验收。
-2. **并行靠声明，不靠运气。** 任务可以声明自己要写哪些路径，调度器据此判定同项目的两个写运行能否并行：两侧都声明且路径前缀互不重叠才放行，任一未声明按保守串行处理。
-3. **一切可回溯。** 每次运行有轨迹、耗时、token 与成本；Bot 配置有不可变历史可回滚；密钥只以密文落库，使用时物化成一次性明文文件，用完即焚。
-
-仓库自身的形态：`index.js` 是插件装配入口，`src/` 是服务端与调度，`ui/` 是工作台前端，`tests/` 是守门测试，`docs/` 放设计方案、评审记录与截图。
+仓库结构：`index.js` 是插件入口，`src/` 是服务端与调度器，`ui/` 是工作区前端，`tests/` 是守门测试，`docs/` 是设计稿、评审记录和截图。
 
 ---
 
 ## 2. 快速开始
 
----
+### 2.1 环境要求与安装
 
-### 2.1 环境要求
-
-| 项目 | 要求 |
-| --- | --- |
-| Node.js | ≥ 22.19（见 `package.json` 的 `engines`） |
-| DSH CLI | 已安装，`dsh --version` 可自查 |
-| 插件形态 | 随 DSH Web 进程内运行，无独立进程、无独立端口 |
-
----
-
-### 2.2 安装到 DSH profile
+Node.js ≥ 22.19（见 `package.json` 的 `engines`），并装好 DSH CLI（`dsh --version`）；插件跑在 DSH Web 进程里，没有独立进程和端口。
 
 ```sh
 cd <repo>
 npm pack                                        # 产出 dsh-team-bots-<version>.tgz
 dsh plugin --profile <name> add ./dsh-team-bots-<version>.tgz
-dsh --profile <name>                             # 从启动日志读取 dsh web 的带 token 入口
+dsh --profile <name>                             # 从启动日志里读带 token 的 dsh web 入口
 ```
 
----
-
-### 2.3 一键重装（profile 是快照）
+### 2.2 重装与本地预览
 
 ```sh
-npm run profile:install -- --profile <name>     # 不带 --profile 时装进 team-bots
+npm run profile:install -- --profile <name>     # 省略 --profile 时装进 team-bots
+npm run dev                                     # 本地预览 http://127.0.0.1:4317，假 runtime
 ```
 
-这条命令把当前仓库 `npm pack` 到仓库内 `.dist/`，再用 `dsh plugin add` 重装进目标 profile，并改写该 profile 的 patch 文件触发一次 recomposition——效果等同于重启 DSH，但不用停进程。
+`profile:install` 把仓库打包进 `.dist/`，用 `dsh plugin add` 重装，并重写 profile 的 patch 文件以触发重组。**profile 里的插件文件是快照，DSH 不会自动加载替换后的文件**：改了代码必须重装，否则页面会卡在「connecting to the team space」。团队数据与 profile 解耦：数据目录只由 `DSH_TEAM_WORKSPACE` / `DSH_TEAM_DATA` 决定。预览服务器用的是假 DSH runtime —— **不做鉴权、不动 DSH 配置、不可用于生产**；端口可用 `PORT` 覆盖。
 
-**这一点最容易踩坑：profile 里的插件文件是快照，DSH 不会自动加载被替换的文件。** 改完代码后必须重装（`npm run profile:install`），否则线上仍在跑旧代码，页面会停在「正在连接团队空间」。
+### 2.3 数据、密钥与技能放在哪
 
-团队数据与 profile 解耦：数据目录只由 `DSH_TEAM_WORKSPACE` / `DSH_TEAM_DATA` 决定，换 profile 安装或并存多份安装，读写的都是同一份数据。
+数据位于 `DSH_TEAM_DATA`（缺省 `<workspace>/.data`，工作区根目录 `DSH_TEAM_WORKSPACE`，缺省 `~/.dsh/workspace/team-bots`）：`team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/`、`messages/` 和 `secrets-runtime/`（TTL 到期即焚）。备份时请把 `secret.key` 一起带走 —— 没有它，已有的密文永远解不开。表结构变更走 `src/db-migrations.js` 的幂等迁移。技能来自固定在 `~/.agents/skills` 的共享池，以及项目本地的 `<project>/.agents/skills`、`<project>/.claude/skills`、`<project>/.codex/skills`。
 
----
+常用变量的模板在 `.env.example`；**不要把 `.env` 放在仓库根目录**，否则 `DSH_*` 会漏进 `npm test` 和 `npm run dev`。
 
-### 2.4 本地预览
-
-```sh
-npm run dev        # http://127.0.0.1:4317，假 runtime，数据写在仓库 .dev/ 下
-```
-
-预览服务使用假的 DSH runtime，**没有认证、不动任何 DSH 配置、不能用于生产**。端口可用 `PORT` 覆盖。
-
----
-
-### 2.5 数据、密钥与技能放在哪
-
-| 内容 | 位置 |
-| --- | --- |
-| 团队工作区根 | `DSH_TEAM_WORKSPACE`，缺省 `~/.dsh/workspace/team-bots` |
-| 团队数据目录 | `DSH_TEAM_DATA`，缺省 `<工作区>/.data` |
-| 主数据库 | `<数据目录>/team.sqlite` |
-| 微信通道库 | `<数据目录>/wechat-channel.sqlite` |
-| 密钥主密钥文件 | `<数据目录>/secret.key`（备份必须一起带走，缺了既有密文解不开） |
-| 长期记忆 / 消息附件 | `<数据目录>/memory/`、`<数据目录>/messages/` |
-| 一次性密钥运行时文件 | `<数据目录>/secrets-runtime/`，TTL 到期即焚 |
-| 共享技能池 | 固定在 `~/.agents/skills`，与本机其他 agent 工具共用同一目录 |
-| 项目自带技能 | `<项目>/.agents/skills`、`<项目>/.claude/skills`、`<项目>/.codex/skills` |
-
-常用变量的模板见仓库根目录 `.env.example`。请用 direnv 或编辑器 dotenv 插件导出，**不要在仓库根目录放 `.env`**——那会把 `DSH_*` 带进 `npm test` 与 `npm run dev`。
-
----
-
-### 2.6 访问入口与自动登录
+### 2.4 访问入口与常用环境变量
 
 ```text
-http://<host>:<port>/                     自动登录，直达团队工作台
-http://<host>:<port>/api/dsh-team/ui      DSH Team Bots 工作台（直连）
-http://<host>:<port>/index.html           DSH 原生 Web 界面
+http://<host>:<port>/                     自动登录，直接进入团队工作区
+http://<host>:<port>/api/dsh-team/ui      DSH Team Bots 工作区（直达）
+http://<host>:<port>/index.html           DSH 原生 Web UI
 ```
 
-首次打开首页会用当前启动 token 兑换一枚 30 天登录 Cookie 并跳转到工作台，无需手动步骤。自动登录意味着**能连上该端口的人即获得 owner 访问权限**，服务只应监听本机或受信任网络；对外提供服务必须走 HTTPS 反向代理并正确转发 Host 与 WebSocket。
+首次访问首页会用当前启动 token 换一张 30 天登录 cookie。自动登录意味着**任何能访问到端口的人都是 owner**，所以请只监听本机或可信网络；要公网暴露，需要一个正确转发 Host 与 WebSocket 的 HTTPS 反向代理。
 
----
-
-### 2.7 常用环境变量
-
-缺省值取自 `src/config.js`（配置解析链路：显式 env > 页面保存值 > 代码缺省）。页面保存值可被同名 env 覆盖。
-
-| 变量 | 缺省 | 作用 |
-| --- | --- | --- |
-| `DSH_TEAM_WORKSPACE` | `~/.dsh/workspace/team-bots` | 团队工作区根目录 |
-| `DSH_TEAM_DATA` | `<工作区>/.data` | 团队数据库与运行记录 |
-| `DSH_TEAM_MAX_RUNS` | `6` | 全局并发运行上限（1–16） |
-| `DSH_TEAM_RUN_TIMEOUT_MS` | `3600000` | 单个运行的硬超时（30 秒–6 小时） |
-| `DSH_TEAM_MAX_RUN_TOKENS` | `0` | 单运行 token 上限，0 关闭 |
-| `DSH_TEAM_STALL_TIMEOUT_MS` | `1200000` | 多久没有新事件判定卡住，0 关闭 |
-| `DSH_TEAM_SESSION_ROLLOVER_TURNS` | `256` | 同一绑定会话累计轮数超过阈值即结转，0 关闭 |
-| `DSH_TEAM_CHAT_MAX_CHARS` | `800` | 群聊回复压缩上限（完整交付始终进任务评论） |
-| `DSH_TEAM_APPROVAL_TIMEOUT_MS` | `180000` | 提权审批等待窗口，到时自动回 rejected |
-| `DSH_TEAM_QUESTION_TIMEOUT_MS` | `180000` | 提问转接等待窗口 |
-| `DSH_TEAM_SECRETS_TTL_MS` | `1800000` | 一次性密钥运行时文件的存活窗口 |
-| `DSH_TEAM_DM_ARCHIVE_DAYS` / `DSH_TEAM_DM_KEEP_RECENT` | `7` / `100` | 单聊归档过滤：天数与条数取交集 |
-| `DSH_TEAM_UI_LANGUAGE` | `auto` | 界面语言：`auto` 跟随 DSH 宿主，`zh` / `en` 显式覆盖 |
-| `DSH_TEAM_SECRET_KEY` | — | 密钥主密钥（64 位十六进制） |
-| `DSH_TEAM_MODEL_PRICES` | — | 模型价格 JSON 数组（每百万 token），覆盖内置默认 |
-| `DSH_TEAM_AGENT_TEAM` | `0` | 启用原生 Agent Teams 层 |
-| `DSH_TEAM_MAX_TEAMMATES` | `3` | 单支队伍队友数上限（1–8） |
-| `DSH_TEAM_WECHAT` | `0` | 个人微信通道（扫码授权后生效） |
-| `DSH_TEAM_VISION_PROXY_PROVIDER` / `DSH_TEAM_VISION_PROXY_MODEL` | — | 读图代理模型：主模型无视觉能力时派生的只读转写模型 |
-| `DSH_TEAM_AUTO_REVIEW_DELEGATE` | `true` | 交付进入待验收时自动派生子代理核验运行 |
-| `DSH_TEAM_CODE_HYGIENE_EXTS` | 内置白名单 | 代码卫生扫描的扩展名覆盖 |
-| `DSH_TEAM_USAGE_SNAPSHOT_CACHE_MS` | `30000` | 用量快照 TTL 缓存 |
-| `DSH_TEAM_CATALOG_STALE_MS` | `300000` | 模型目录 stale-while-revalidate 窗口 |
+缺省值来自 `src/config.js`（解析顺序：显式 env > 页面保存值 > 代码缺省）。常用变量：`DSH_TEAM_MAX_RUNS`（6）、`DSH_TEAM_RUN_TIMEOUT_MS`（3600000）、`DSH_TEAM_MAX_RUN_TOKENS`（0）、`DSH_TEAM_APPROVAL_TIMEOUT_MS`（180000）、`DSH_TEAM_SECRETS_TTL_MS`（1800000）、`DSH_TEAM_UI_LANGUAGE`（`auto`）、`DSH_TEAM_AGENT_TEAM` / `DSH_TEAM_MAX_TEAMMATES`（0 / 3）、`DSH_TEAM_WECHAT`（0）、`DSH_TEAM_SECRET_KEY`。完整清单和每个缺省值都在 `src/config.js`。
 
 ---
 
 ## 3. 功能总览
 
-**项目群聊**：每个项目一间群聊和一位项目总监 Bot。支持普通消息、`@Bot`、`/task @Bot 标题`、`/remember`、`/clear`；输入 `/` 或 `@` 弹出命令、技能与成员补全。群聊只放结论，完整交付进任务评论。
-
-**任务看板**：Linear 风格面板，按状态分组，父子任务树、优先级与负责人、评论直投运行中的会话、拖拽流转；任务详情内联展示交付产物与运行列表。
-
-**写范围并行调度**：任务声明自己要写的路径后，同项目的两个写运行按声明范围判定——范围互不重叠即可并行，重叠或有一方未声明则串行。写运行彼此独立，任务与群聊互不阻塞。
-
-**记忆与技能池**：Bot 级与项目级长期记忆；任务交付后派生一次记忆审查运行（`memory_review` 控制，群聊回复另受 `chat_memory_review` 控制），抽取出的可复用事实进待审队列由人复核。共享技能池固定在 `~/.agents/skills`，项目还能自带技能目录；技能变更走提案审批并保留可回滚快照。
-
-**版本化进化与团队工具**：角色、模型、强度与技能变更走提案审批，Bot 配置保留不可变历史可回滚。插件注册七个团队工具：`team_assign_task`、`team_review_task`、`team_remember`、`team_recall`、`team_propose_evolution`、`team_message_bot`、`team_request_secret`，Bot 之间可直接私信协作。
-
-**密钥管道**：密钥 AES-256-GCM 加密落库；批准后一次性物化到数据目录（**不进项目工作区**），任务运行结束或 TTL 到期即焚；消息与运行输出一律掩码为 `$名称`。
-
-**用量与成本**：全局 / 项目 / Bot 三档口径归集 token、调用次数、成本与运行时长；成本按可配置的模型价格计算，未配置价格的调用不按 0 计费。支持明细导出 CSV 与月度对账。
-
-**审批与提问**：Bot 请求提权或需要人回答问题时，转成工作台里的卡片；审批有等待窗口，超时自动回 rejected；提问到期保留卡片可补答。
-
-**终端**：项目内可交互终端，命令有硬超时，可实时 tail 与取消；历史落库。
-
-**个人微信通道**：扫码授权后把任务动态推到微信，并支持一套纯文本指令面（见 4.4）。
-
-**代码卫生**：项目可约定单文件行数上限（缺省 800 行），每轮运行收尾扫描工作区源码文件，超标即向项目群发一条【系统指令】，要求总监安排拆分卡。
+- **项目群聊：** 每个项目一个群聊、一个 director bot。支持纯文本、`@Bot`、`/task @Bot <标题>`、`/remember` 和 `/clear`，`/` 与 `@` 可补全命令、技能和成员。结论留在聊天里，完整交付走任务评论。
+- **任务板：** Linear 风格、按状态分组的面板，带父子树、优先级与负责人，评论会送进正在跑的会话，支持拖拽流转，行内展示交付物和 run 列表。
+- **按写范围并行调度：** 由声明的写范围决定同一项目的两个写 run 能否同时跑；写 run 彼此独立，任务和聊天互不阻塞。
+- **记忆与技能池：** bot 级和项目级长期记忆，带人工审核队列；共享技能池固定在 `~/.agents/skills`，项目可追加自己的技能目录；技能变更走提案审批并保留回滚快照。
+- **版本化演进与团队工具：** 角色、模型、强度和技能变更走提案审批，bot 配置保留不可变、可回滚的历史。插件注册了任务派发、评审、记忆、召回、演进提案、bot 间直发消息和密钥申请等团队工具。
+- **密钥流水线：** 落盘用 AES-256-GCM；审批通过后物化到数据目录（**不是项目工作区**），run 结束或 TTL 到期即焚；消息和 run 输出里始终以 `$<name>` 掩码。
+- **用量与成本：** token、调用次数、成本和运行时长按全局、项目、bot 三级汇总；成本来自可配置的模型价格，未配置价格的调用不按 0 计费；支持 CSV 导出和月度对账。
+- **审批、提问与终端：** 提权或要人回答的请求变成工作区卡片 —— 审批超时变 `rejected`，提问过期后仍可回答。每个项目有一个交互式终端，带硬超时、实时 tail、取消和持久历史。
+- **微信通道与代码卫生：** 扫码授权后推送任务，外加纯文本命令面（见 4.4）；每个项目有行数上限（缺省 800），每个 run 结束时扫描，超限文件触发一条【系统指令】请 director 派拆分卡。
 
 ---
 
 ## 4. 架构与目录说明
 
----
-
 ### 4.1 装配链路
 
-`index.js` 的 `apply(ctx, config)` 是唯一入口，顺序即依赖顺序：
+`index.js` 里的 `apply(ctx, config)` 是唯一入口，其顺序就是依赖顺序：
 
 ```
-resolveConfig(config)      → src/config.js      解析 env / 注入配置，得到缺省化后的配置
+resolveConfig(config)      → src/config.js      解析 env / 注入配置，套上缺省值
 openDatabase(dbPath)       → src/db.js          打开并迁移 SQLite
-new TeamService(...)       → src/service.js     领域门面（方法由 src/services/* 挂载）
-new DshRuntime(...)        → src/runtime.js     宿主 runtime 适配（提示词、会话、模型恢复）
-installTeamTools(...)      → src/tools.js       注册七个团队工具
-installSkillProvider(...)  → src/skills.js      技能池接入
+new TeamService(...)       → src/service.js     领域门面（方法挂载自 src/services/*）
+new DshRuntime(...)        → src/runtime.js     宿主 runtime 适配器（提示、会话、模型恢复）
+installTeamTools(...)      → src/tools.js       注册团队工具
+installSkillProvider(...)  → src/skills.js      接上技能池
 installHttp(...)           → src/http.js        HTTP 路由与 UI 静态切片
 ```
 
-服务初始化是异步的：`service.initialize()` 完成建库与播种（默认 Bot 与伙伴）后才 `service.start()` 拉起调度器。
-
----
+`service.initialize()` 先建库、播种缺省 bot 与 buddy，之后 `service.start()` 才拉起调度器。
 
 ### 4.2 `src/` 目录
 
 | 路径 | 职责 |
 | --- | --- |
-| `index.js` | 插件入口与装配 |
-| `src/config.js` | 配置解析：env / 页面保存值 / 代码缺省的三级优先级 |
+| `index.js`、`src/config.js` | 插件入口；配置解析（env / 页面保存值 / 代码缺省） |
 | `src/db.js`、`src/db-migrations.js` | SQLite 访问与幂等迁移（新增列可重复执行） |
-| `src/service.js` | `TeamService` 门面；领域方法由 `src/services/*` 通过 `defineMethods` 挂到原型上 |
-| `src/services/` | 领域方法体：bots、projects、chat、tasks、runs、scheduler、memory、secrets、proposals、terminal、usage、system、wechat、approvals、questions、hygiene、model-fallback、write-scopes、file-policy 等 |
-| `src/runtime.js`、`src/services/runtime/` | 宿主适配：提示词组装、会话生命周期、模型恢复、轨迹 |
-| `src/http.js` | HTTP 路由、UI 静态切片、`UI_STYLE_PARTS` 样式拼接表 |
-| `src/api.js` | `POST /api/dsh-team/api` 单入口的动作分发 |
-| `src/tools.js` | 团队工具注册 |
-| `src/botmsg.js` | `team_message_bot` 的 Bot 间私信：幂等落库与投递提示词拼装 |
-| `src/skill-parse.js` | 技能包（`SKILL.md`）解析：frontmatter 优先，缺失时回退目录名与正文首段 |
-| `src/wechat/` | 微信通道：`channel.js`（连接与推送）、`commands.js`（指令面）、`store.js`（outbox 与状态） |
-| `src/secrets.js`、`src/services/secrets.js` | 密钥加密、物化与掩码 |
-| `src/pricing.js`、`src/usage.js`、`src/usage-reconcile.js` | 价格表、用量归集与对账 |
-| `src/skills.js`、`src/project-skills.js` | 技能池与项目技能扫描 |
-| `src/seed-bots.js`、`src/updater.js`、`src/paths.js`、`src/util.js`、`src/errors.js` | 种子 Bot、更新检查、路径边界、通用工具、错误类型 |
-
----
+| `src/service.js`、`src/services/` | `TeamService` 门面及其领域方法：bots、projects、chat、tasks、runs、scheduler、memory、secrets、proposals、terminal、usage、system、wechat、approvals、questions、hygiene、write-scopes 等 |
+| `src/runtime.js`、`src/services/runtime/` | 宿主适配器：提示词组装、会话生命周期、模型恢复、轨迹 |
+| `src/http.js`、`src/api.js`、`src/tools.js`、`src/botmsg.js`、`src/skill-parse.js` | HTTP 路由与 UI 切片、`POST /api/dsh-team/api` 分发入口、团队工具、bot 间消息、技能包解析 |
+| `src/wechat/`、`src/secrets.js`、`src/pricing.js`、`src/usage*.js`、`src/skills*.js`、`src/seed-bots.js`、`src/updater.js`、`src/paths.js`、`src/util.js`、`src/errors.js` | 微信通道、密钥加解密、定价与用量、技能池、种子 bot、更新检查、路径边界、工具函数、错误类型 |
 
 ### 4.3 `ui/` 目录
 
-前端是原生 ES module，没有构建步骤，按切片直接从 HTTP 路由加载。
-
-| 路径 | 说明 |
-| --- | --- |
-| `ui/index.html` | 页面壳：样式单 link、vendor 脚本、模块入口 |
-| `ui/app.js` | 应用入口与渲染骨架，784 行（受 800 行铁律约束） |
-| `ui/modules/` | **20 个模块域**：`state`、`api`、`util`、`icons`、`markdown`、`i18n`、`typing-linger`、`cards`、`usage`、`settings`、`composer`、`tasks`、`modal-layer`、`modal-forms`、`chat`、`solo-archive`、`events-board`、`events-click`、`events-submit`、`events-misc`。每个切片经 `/api/dsh-team/modules/<file>` 路由单独加载，跨切片引用一律走显式 `import` |
-| `ui/styles/` | **21 个样式域**：`base`、`boot`、`frame`、`main`、`buttons`、`surfaces`、`avatars`、`chat`、`chat-cards`、`chat-composer`、`chat-images`、`tasks`、`cards`、`usage`、`settings`、`global-config`、`modal`、`toast`、`a11y`、`wide`、`terminal` |
-| `ui/i18n/zh.js`、`ui/i18n/en.js` | 界面字典 |
+前端是纯 ES 模块，无构建步骤，每个切片由 HTTP 路由直接加载。`ui/modules/` 每个领域一个模块（state、api、chat、tasks、modal-layer、modal-forms、events-* 等），`ui/styles/` 每个领域一个 CSS 文件；`ui/i18n/{zh,en}.js` 是界面字典。
 
 两条硬约定：
 
-1. **样式分片必须登记。** 拼接顺序由 `src/http.js` 的 `UI_STYLE_PARTS` 决定，新增样式文件必须同时在表里登记；登记顺序即层叠顺序，登记表的完整性由 `tests/styles-split.test.js` 守门。
-2. **800 行铁律。** `ui/styles/*.css` 与 `ui/app.js` 单文件均须 < 800 行，超过就要按职责拆到新域文件。
-
----
+1. **样式切片必须注册。** 拼接顺序由 `src/http.js` 的 `UI_STYLE_PARTS` 决定，所以新增样式文件必须同步注册；`tests/styles-split.test.js` 守着这张表的完整性。
+2. **800 行铁律。** `ui/styles/*.css` 和 `ui/app.js` 每个文件都保持在 800 行以内；超了就按职责拆成新的领域文件。
 
 ### 4.4 微信通道
 
-通道默认关闭（`DSH_TEAM_WECHAT=0`），扫码授权后生效。指令面是纯文本，`帮助 / help / ?` 可随时拉取：
+通道缺省关闭（`DSH_TEAM_WECHAT=0`），扫码授权后启用。命令面是纯文本，随时可用 `帮助 / help / ?` 唤出：
 
-| 指令 | 作用 |
+| 命令 | 作用 |
 | --- | --- |
-| `帮助` / `help` / `?` | 查看指令帮助 |
-| `状态` | 概览各项目与待验收任务 |
-| `验收 <任务号> [评语]` | 通过验收，如 `验收 web-3 做得好` |
-| `驳回 <任务号> <理由>` | 退回重做，理由必填 |
-| `详情 <任务号>` | 查看任务卡片与最近评论 |
-| `q` | 列出可派单的项目 key |
-| `<key>: <消息>` | 转发消息到项目群聊由总监安排，如 `web: 上线新版官网` |
+| `帮助` / `help` / `?` | 显示命令帮助 |
+| `状态` | 项目与待验收任务总览 |
+| `验收 <任务号> [评语]` | 验收交付，如 `验收 web-3 做得好` |
+| `驳回 <任务号> <原因>` | 打回重做，原因必填 |
+| `详情 <任务号>` | 显示任务卡与最新评论 |
+| `q` | 列出可指派的项目 key |
+| `<key>: <消息>` | 转发消息到项目群聊交 director 安排，如 `web: 上线新版官网` |
 
-推送走本地 outbox，有三条与「微信漏推/不补发」直接相关的语义边界：
+推送走本地 outbox，三条边界解释了「微信没收到推送」：
 
-- 通道连接建立（进程重启或换号重登）之前堆积的待发项一律作废，不补发；同一连接期内的瞬断重连不算新链接，不作废存量。
-- 单条待发最多尝试 3 次（`OUTBOX_MAX_ATTEMPTS`），达限即废弃、永不补发；不可重试的错误直接废弃。
-- 同一轮多条推送会合并成一次发送（合批窗口 1.5 秒，最多回显最旧 5 条原文）；**恰 1 条时不合并**。
+- 连接建立之前堆积的条目（重启，或换账号重新登录）会被丢弃、永不重发；同一连接周期内的短暂重连不会清空队列。
+- 队列中的条目最多尝试三次（`OUTBOX_MAX_ATTEMPTS`），之后彻底丢弃；不可重试的错误立即丢弃。
+- 同一轮的多条推送会合并成一次发送（1.5 秒批量窗口，最多回显最旧的 5 条原文）；单条不合并。
 
-排查时先看 `outbox.attempts`（重试计数，持久化，进程重启不归零）与 `gave_up_at`（废弃时间）：这两个字段有值即说明是被设计性丢弃的，不是 bug。
-
----
-
-### 4.5 数据与迁移
-
-主库是 SQLite，schema 变更一律走 `src/db-migrations.js` 的幂等迁移（`PRAGMA table_info` 判列后再补），旧库直接升级，不需要手工重建。数据备份请连同 `secret.key` 一起带走。
+排查时看 `outbox.attempts` 和 `gave_up_at`：任一有值都说明该条目是被设计丢弃的，不是 bug。
 
 ---
 
 ## 5. 测试与开发约定
-
----
 
 ### 5.1 常用命令
 
 ```sh
 npm test                        # node --test "tests/*.test.js"
 npm run dev                     # 本地预览（假 runtime）
-npm run doctor                  # 检查 Node/DSH 版本与工作区、技能池路径的可写性
+npm run doctor                  # 检查 Node/DSH 版本，以及工作区与技能池路径的可写性
 npm run profile:install         # 打包并重装进 profile（缺省 team-bots）
-npm run verify:agent-team       # 校验 Agent Teams 层接线
 npm run backup                  # 备份团队数据
-npm run restore-check           # 备份可恢复性校验
-npm run load-test               # 负载压测
-npm run fault-test              # 故障注入
+npm run restore-check           # 检查备份能否恢复
 ```
-
----
 
 ### 5.2 守门测试
 
-`tests/` 下有 154 个 `*.test.js`，除功能用例外还钉住若干架构约定：
+`tests/` 每个功能域一个 `*.test.js`，另有几条架构约定的钉子：
 
-- `tests/styles-split.test.js`：`UI_STYLE_PARTS` 与 `ui/styles/` 目录一一对应（无孤儿、无缺件、无重复）、单文件 < 800 行、线上与预览共用同一份样式汇总、拼接零漂移。
-- `tests/code-hygiene.test.js`：代码卫生的行数约定语义（缺省 800、判定线 = 上限 × 110%、限值 0 关闭、同一超标去重、回落达标后可再告警）。
-- 跨切片 `import` 守门与 token-format 守门覆盖整份 `ui/` 源码：切片拆分后漏 import 会让页面停在 boot screen，这类失败必须由守门提前拦下。
-
----
+- `tests/styles-split.test.js`：`UI_STYLE_PARTS` 与 `ui/styles/` 目录一一对应（无孤儿、无缺项、无重复），每个文件不超 800 行，拼接结果零漂移。
+- `tests/code-hygiene.test.js`：行数上限语义（缺省 800，判定线为上限 × 110 %，0 关闭，每次违规一条提醒，文件回落到上限以下后再次违规才再提醒）。
+- 跨切片 `import` 守卫和 token 格式守卫覆盖整个 `ui/` 源码树：切片拆分后漏掉 import 会让页面卡在启动屏，这类失败被提前拦下。
 
 ### 5.3 提交约定
 
-- 每次提交由 pre-commit 钩子把 `package.json` 的 patch 位 +1（`DSH_SKIP_VERSION_BUMP=1` 可跳过，用于回滚或手工发版）。**提交后的版本号以 `git show HEAD -- package.json` 为准**，不要以工作区文件为准。
-- 提交信息用 Conventional Commits 风格并带卡号，例如 `feat(ui): 全局配置页美术重设计（DSHBOTS-184）`。
-- 路径精确提交（`git commit -- <pathspec>`），只认自己写范围内的文件，不把工作树里别人的在途改动卷进来。
-- 工作区里常有其他会话的脏文件，提交前后用 `git status --short` 核对。
-
----
+- 每次提交都会由 pre-commit 钩子把 `package.json` 的 patch 位加一（`DSH_SKIP_VERSION_BUMP=1` 可跳过）。**提交后的版本以 `git show HEAD -- package.json` 为准**，不要看工作区里的文件。
+- 提交信息用 Conventional Commits 风格并带上卡片号，如 `feat(ui): 全局配置页美术重设计（DSHBOTS-184）`。
+- 用精确 pathspec 提交（`git commit -- <pathspec>`），提交前后都看 `git status --short`，避免把其他会话的在途工作卷进来。
 
 ### 5.4 CI
 
-push `v*` tag 触发发布工作流（`.github/workflows/publish.yml`）：拉取依赖后跑全量 `npm test`，全绿才 `npm publish` 到 registry.npmjs.org。
+推送 `v*` tag 触发发布工作流（`.github/workflows/publish.yml`）：装依赖、跑完整 `npm test`，全绿才发布到 registry.npmjs.org。
 
 ---
 
 ## 6. 故障排查与常见问题
 
 **Q：改了代码，页面还是旧的？**
-profile 里的插件文件是快照，不会被自动热更。跑 `npm run profile:install -- --profile <名字>` 重装。页面停在「正在连接团队空间」通常也是这个原因（模块切片路由没装上）。
+profile 里的插件文件是快照，不会热加载。用 `npm run profile:install -- --profile <name>` 重装。页面卡在「connecting to the team space」通常也是同一个原因。
 
-**Q：数据存在哪里？换台机器怎么带走？**
-`<DSH_TEAM_DATA>` 目录下是 `team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/`、`messages/`。用 `npm run backup` 备份，**别漏 `secret.key`**——缺了它既有的密文就再也解不开。
+**Q：数据在哪，怎么搬到另一台机器？**
+`<DSH_TEAM_DATA>` 下有 `team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/` 和 `messages/`。用 `npm run backup` 备份，**不要把 `secret.key` 落下** —— 没有它，已有密文永远解不开。
 
 **Q：微信没收到推送？**
-先看 `outbox.attempts` 与 `gave_up_at`：有值说明是设计性丢弃（连接建立前堆积、重试 3 次超限、不可重试错误），不是漏发；没有值说明还在待发队列里。
+先看 `outbox.attempts` 和 `gave_up_at`：有值说明条目是被设计丢弃的，不是漏发；没值说明还在队列里。
 
-**Q：项目群里冒出「代码卫生告警」是什么？**
-每轮运行收尾会扫描项目工作区里的源码文件，超过项目约定的单文件行数上限（缺省 800，判定线 880）就发一条【系统指令】要求总监安排拆分卡。把项目设置里的行数约定调大或设为 0 可以关闭。
+**Q：项目聊天里的「代码卫生」提醒是什么？**
+每个 run 结束时会扫描项目工作区里的源文件，超过项目行数上限（缺省 800，判定线 880）的文件会触发一条【系统指令】请 director 派拆分卡。可在项目设置里调高上限，或设为 0 关闭检查。
 
 **Q：全局配置页上的「计划迁移 · 目标页」是什么意思？**
-该模块的功能迁移还没落地，这里只是视觉标注，不要按已迁移理解。迁移完成后本页会删掉对应模块与该标注。
+该模块的功能迁移还没落地 —— 这只是视觉标注，不要读成「已迁移」。
 
-**Q：切 English 之后还有中文，是 bug 吗？**
-已知缺口。界面语言下拉本身已生效，但设置页与全局配置页的卡片标题、说明等主体文案仍大量硬编码中文，完整 i18n 尚未覆盖。
-
-**Q：能公网开放吗？**
-插件不自带沙箱：Bot 会话在 DSH 的 `danger-full-access` 下以当前用户身份执行命令，能读写该用户可达的一切文件；`<工作区>/{project}` 只是逻辑隔离，不是强沙箱。加上首页自动登录（能访问端口即 owner），公网开放必须走 HTTPS 反向代理并自行加鉴权，互不信任的团队不要共用同一个 DSH 实例与工作区。
+**Q：能暴露到公网吗？**
+插件本身不带沙箱：bot 会话以当前用户身份跑在 DSH 的 `danger-full-access` 下。加上自动登录（能访问端口就是 owner），公网暴露需要 HTTPS 反向代理和自有鉴权；互不信任的团队不应共用同一个 DSH 实例和工作区。
 
 ---
 
 ## 截图
 
-任务面板按状态分组，左侧是项目群聊与 Bot 列表：
-
-![任务面板](assets/tasks.png)
-
-用量统计包含汇总窗口、近 14 天明细、分模型 / 分 Bot / 分项目拆分与 CSV 导出：
+用量统计带汇总窗口、最近 14 天明细、按模型 / 按 bot / 按项目拆分和 CSV 导出：
 
 ![用量统计](assets/usage.png)
 
-同一页面的暗色主题：
-
-![暗色用量统计](assets/usage-dark.png)
-
-全局配置页把团队级卡片、运行预算、DSH 路径、密钥与模型价格收在一起：
+全局配置页汇总团队级卡片、运行预算、DSH 路径、密钥和模型价格：
 
 ![全局配置](assets/global-config-light.png)
-
-同一页面的暗色主题：
-
-![暗色全局配置](assets/global-config-dark.png)
 
 ---
 
 ## License
 
-Apache-2.0，见仓库根目录的 `LICENSE` 与 `NOTICE`。
+Apache-2.0，见仓库根目录的 `LICENSE` 和 `NOTICE`。
