@@ -448,8 +448,9 @@ export const tasksMethods = {
     // 此时由 finishRun 的收尾逻辑负责重新排队执行，这里跳过。
     // 换负责人清掉 queued 占位后名额已空：重算判定才会按新负责人重排 task_run（DSHBOTS-169）。
     // 幂等键：task_run 是先写者赢闸（ON CONFLICT DO NOTHING 且撞键不再 applyOutboxRow），
-    // 稳定键 task:<id>:assigned 会在重复改派时撞上首次派发留下的 delivered 行而被静默吞掉、
-    // 排不出新运行；改派路径改用单调自增的 task.version 作后缀，确定性且跨改派不碰撞。
+    // 稳定键 task:<id>:assigned 会在再次改派时撞上历史 delivered 行而被静默吞掉、排不出新运行
+    // （不限清 queued 占位场景，无活跃运行的改派同样会写键）。凡换负责人一律带事务内单调自增
+    // 的 task.version 后缀（确定性、跨改派不碰撞）；同负责人重派保持稳定键，slotHeld 已提供幂等。
     const slotHeld = supersedeQueued
       ? this.store.get(
         "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
@@ -457,7 +458,7 @@ export const tasksMethods = {
       )
       : active
     if (!slotHeld) {
-      const assignedVersion = supersedeQueued ? this.taskRow(taskId).version : null
+      const assignedVersion = reassigning ? this.taskRow(taskId).version : null
       this.enqueueOutbox({
         kind: 'task_run',
         payload: { taskId, triggerType: 'assigned' },

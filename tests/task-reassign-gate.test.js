@@ -160,3 +160,36 @@ test('同负责人重派：queued 占位不清理、不另排新运行', async (
     await cleanup(root, store)
   }
 })
+
+test('无活跃运行的改派：库中已有历史 delivered 稳定键行仍排得出新运行', async () => {
+  // R1 返工：任务 blocked/in_review → 改派给 B（无活跃运行，写稳定键）→ B 跑完仍非 todo/in_progress
+  // → 再改派给 C 时稳定键撞历史 delivered 行被先写者赢吞掉，C 收不到运行。钉死任何换负责人都带 version 后缀。
+  const { root, store, service, dev, artist, project } = await setup()
+  try {
+    const task = await service.createTask({
+      projectId: project.id, title: '无活跃运行改派', assigneeBotId: dev.id, writeScopes: ['ui/modules'], autoStart: false,
+    })
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ?", task.id).n, 0, '任务无任何运行')
+    const seededAt = new Date().toISOString()
+    store.run(
+      `INSERT INTO outbox(id, kind, project_id, task_id, idempotency_key, payload_json, status, attempts, available_at, created_at, delivered_at)
+       VALUES('obx-seed-assigned', 'task_run', ?, ?, ?, '{}', 'delivered', 1, ?, ?, ?)`,
+      project.id, task.id, `task:${task.id}:assigned`, seededAt, seededAt, seededAt,
+    )
+
+    const view = await service.assignTask(task.id, artist.id, userActor(service))
+
+    assert.equal(view.assigneeBotId ?? view.assignee_bot_id ?? artist.id, artist.id, '负责人已换成 artist')
+    const actives = activeTaskRuns(store, task.id)
+    assert.equal(actives.length, 1, '新运行未被稳定键的先写者赢吞掉')
+    assert.equal(actives[0].status, 'queued', '新运行已入队')
+    assert.equal(actives[0].bot_id, artist.id, '新运行归新负责人')
+    assert.equal(
+      store.get('SELECT status FROM outbox WHERE id = ?', 'obx-seed-assigned').status,
+      'delivered',
+      '历史 delivered 行原样保留',
+    )
+  } finally {
+    await cleanup(root, store)
+  }
+})
