@@ -26,6 +26,7 @@ import { taskNotifyMethods } from './services/task-notify.js'
 import { taskReviewMethods } from './services/task-review.js'
 import { runsMethods } from './services/runs.js'
 import { runFinishMethods } from './services/run-finish.js'
+import { hygieneMethods } from './services/hygiene.js'
 import { modelFallbackMethods } from './services/model-fallback.js'
 import { schedulerMethods } from './services/scheduler.js'
 import { memoryMethods } from './services/memory.js'
@@ -89,6 +90,7 @@ defineMethods(TeamService.prototype, [
   taskReviewMethods,
   runsMethods,
   runFinishMethods,
+  hygieneMethods,
   modelFallbackMethods,
   schedulerMethods,
   memoryMethods,

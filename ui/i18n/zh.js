@@ -215,6 +215,10 @@ export default {
   'settings.uiLanguageEn': 'English',
   'settings.uiLanguageHint': '自动 = 跟随 DSH 宿主 Language 设定。',
   'settings.uiLanguageSave': '保存界面语言',
+  // 项目配置：代码卫生（DSHBOTS-172）：单文件行数约定
+  'settings.codeHygieneTitle': '代码卫生',
+  'settings.codeHygieneLimit': '单文件行数上限',
+  'settings.codeHygieneHint': '约定每个源码文件的最大行数（默认 800，0 = 关闭检查）。每轮运行结束扫描项目工作区，文件超过上限的 110% 即在群聊发系统指令，要求项目总监安排拆分卡。',
   // 高频 toast
   'toast.copied': '已复制',
   'toast.wechatConnected': '微信通道已连接',

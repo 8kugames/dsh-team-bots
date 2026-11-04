@@ -51,6 +51,16 @@ const envExplicit = (name) => {
   return raw !== undefined && String(raw).trim() !== ''
 }
 
+// 代码卫生（DSHBOTS-172）：扫描扩展名白名单覆盖。逗号/空格/分号分隔（如 "js,ts,lua"），
+// 数组注入（测试）同样接受；空 = 用 services/hygiene.js 的默认白名单。行数上限是项目级
+// 设置（projects.code_hygiene_limit_lines），不经全局配置。
+const parseExtList = (value) => {
+  if (Array.isArray(value)) return value.map(ext => String(ext ?? '').trim()).filter(Boolean)
+  const raw = String(value ?? '').trim()
+  if (!raw) return []
+  return raw.split(/[\s,;]+/).map(ext => ext.trim()).filter(Boolean)
+}
+
 // 运行时效生效值：env 显式设置 > 页面保存值 > 默认。config 值在 resolveConfig
 // 里已含 env/注入解析结果，env 显式时直接采用；run*Env/stall*Env 标志供 UI 提示
 // 「环境变量已覆盖」。消费点（runtime 运行启动、service.reapStalledRuns）每次
@@ -184,6 +194,8 @@ export function resolveConfig(config = {}) {
     // （与手动「子代理核验」按钮同一入口）。总监裁决不受影响：owner_bot 卡在核验运行
     // 结束后再触发总监验收；user 卡核验结论写回评论，裁决仍归工作台 owner。
     autoReviewDelegate: bool(config.autoReviewDelegate ?? process.env.DSH_TEAM_AUTO_REVIEW_DELEGATE, true),
+    // 代码卫生（DSHBOTS-172）：扫描扩展名白名单覆盖（默认白名单见 services/hygiene.js）。
+    codeHygieneExts: parseExtList(config.codeHygieneExts ?? process.env.DSH_TEAM_CODE_HYGIENE_EXTS),
     schedulerIntervalMs: int(config.schedulerIntervalMs, 1_500, 250, 30_000),
     modelCacheMs: int(config.modelCacheMs, 8_000, 0, 120_000),
     // 用量快照缓存：state() 每轮轮询都跑 30d 全口径聚合（生产库实测约 500ms），

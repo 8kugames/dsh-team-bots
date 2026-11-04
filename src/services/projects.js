@@ -304,6 +304,8 @@ export const projectsMethods = {
     }
     if (patch.tokenBudget !== undefined) updates.token_budget = clampNumber(patch.tokenBudget, 0, 1e15, null)
     if (patch.costBudget !== undefined) updates.cost_budget = clampNumber(patch.costBudget, 0, 1e12, null)
+    // 单文件行数约定（DSHBOTS-172）：NULL = 默认 800，0 = 关闭；读取口径见 services/hygiene.js。
+    if (patch.codeHygieneLimitLines !== undefined) updates.code_hygiene_limit_lines = clampNumber(patch.codeHygieneLimitLines, 0, 100_000, null)
     let productionDirChanged = false
     if (patch.productionDir !== undefined) {
       updates.production_dir = await this.resolveProductionDir(patch.productionDir)

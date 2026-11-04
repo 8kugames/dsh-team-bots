@@ -216,6 +216,10 @@ export default {
   'settings.uiLanguageEn': 'English',
   'settings.uiLanguageHint': 'Auto = follow the DSH host language setting.',
   'settings.uiLanguageSave': 'Save language',
+  // Project config: code hygiene (DSHBOTS-172): per-file line limit
+  'settings.codeHygieneTitle': 'Code hygiene',
+  'settings.codeHygieneLimit': 'Per-file line limit',
+  'settings.codeHygieneHint': 'Agreed maximum lines per source file (default 800, 0 = disable). After every run, the project workspace is scanned; any file exceeding 110% of the limit triggers a system directive in the group chat asking the director to schedule a split task.',
   // High-frequency toasts
   'toast.copied': 'Copied',
   'toast.wechatConnected': 'WeChat channel connected',

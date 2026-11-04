@@ -117,6 +117,7 @@ export function runMigrations(db) {
   recordMigration(db, 'runs_artifacts')
   recordMigration(db, 'run_trajectory')
   recordMigration(db, 'projects_production_dir')
+  recordMigration(db, 'projects_code_hygiene_limit_lines')
   recordMigration(db, 'terminal_commands')
   recordMigration(db, 'messages_reply_to')
   recordMigration(db, 'bots_file_policy')
@@ -182,9 +183,11 @@ function migrateTasks(db) {
 
 // projects.disabled_skills 存项目内关闭的技能 slug JSON 数组。
 // projects.production_dir 存项目生产目录（bots 的 cwd）；NULL 表示用默认 <工作区>/{slug}。
+// projects.code_hygiene_limit_lines 存单文件行数约定（DSHBOTS-172）；NULL = 默认 800，0 = 关闭。
 function migrateProjects(db) {
   addColumn(db, 'projects', 'disabled_skills', "TEXT NOT NULL DEFAULT '[]'")
   addColumn(db, 'projects', 'production_dir', 'TEXT')
+  addColumn(db, 'projects', 'code_hygiene_limit_lines', 'INTEGER')
 }
 
 // 记忆的来源引用、审批人、版本号与派生路径。

@@ -83,6 +83,9 @@ export const runFinishMethods = {
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
     )
+    // DSHBOTS-172 代码卫生：每轮运行结束扫一次项目工作区行数约定，超标即发系统指令告警
+    // （去重与阈值见 hygiene.js）；扫描自身全量兜错，不阻塞收尾主流程。
+    this.runCodeHygieneScan(project, runId)
     // DSHBOTS-106 一次性密钥：项目内 task 运行一结束（成功/失败都算）即焚该项目的运行时
     // 密钥文件。放在分派主体之前，不受下方任何提前 return 影响。
     if (run.kind === 'task' && run.project_id) {

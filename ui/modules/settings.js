@@ -358,6 +358,14 @@ function renderSettings() {
             </div>
             <div class="hint">超出预算时项目会提示预算已用尽。成本预算与模型价格使用同一币种计价。</div>
           </div>
+          <div class="card form-card" style="margin-top:12px">
+            <div class="card-head"><h3>${t('settings.codeHygieneTitle')}</h3></div>
+            <div class="field">
+              <label id="settings-code-hygiene-label" for="settings-code-hygiene">${t('settings.codeHygieneLimit')}</label>
+              <input class="input mono" style="text-align:right" type="number" min="0" max="100000" id="settings-code-hygiene" name="codeHygieneLimitLines" value="${project.code_hygiene_limit_lines ?? ''}" placeholder="800">
+              <div class="hint">${t('settings.codeHygieneHint')}</div>
+            </div>
+          </div>
         </div>
         <div>
           <div class="card form-card">

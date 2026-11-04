@@ -209,6 +209,7 @@ document.addEventListener('submit', async (event) => {
           replyMode: payload.replyMode,
           tokenBudget: payload.tokenBudget === '' ? null : Number(payload.tokenBudget),
           costBudget: payload.costBudget === '' ? null : Number(payload.costBudget),
+          codeHygieneLimitLines: payload.codeHygieneLimitLines === '' ? null : Number(payload.codeHygieneLimitLines),
           productionDir: String(payload.productionDir ?? ''),
         },
       })
