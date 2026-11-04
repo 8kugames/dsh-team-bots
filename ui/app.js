@@ -2043,6 +2043,15 @@ document.addEventListener('click', async (event) => {
         toast('系统设置已保存', 'success')
         break
       }
+      // 界面语言（DSHBOTS-162）：保存后 loadState 拿回新的 state.language，
+      // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
+      case 'save-ui-language': {
+        const value = document.getElementById('settings-ui-language')?.value ?? 'auto'
+        await api('update_settings', { ui_language: value })
+        await loadState(state.projectId)
+        toast(t('toast.uiLanguageSaved'), 'success')
+        break
+      }
       case 'save-run-limits': {
         const value = id => document.getElementById(id)?.value ?? ''
         await api('update_settings', {
@@ -2374,6 +2383,8 @@ document.addEventListener('click', async (event) => {
         render()
         try {
           await loadState(state.projectId, { quiet: true })
+        } catch {
+          // 取数失败也要清标志并落回上一次可用数据，否则骨架常驻。
         } finally {
           state.chatPending = null
         }
