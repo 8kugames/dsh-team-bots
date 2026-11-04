@@ -21,6 +21,7 @@ import { botsMethods } from './services/bots.js'
 import { projectsMethods } from './services/projects.js'
 import { chatMethods } from './services/chat.js'
 import { tasksMethods } from './services/tasks.js'
+import { taskReviewMethods } from './services/task-review.js'
 import { runsMethods } from './services/runs.js'
 import { runFinishMethods } from './services/run-finish.js'
 import { modelFallbackMethods } from './services/model-fallback.js'
@@ -82,6 +83,7 @@ defineMethods(TeamService.prototype, [
   projectsMethods,
   chatMethods,
   tasksMethods,
+  taskReviewMethods,
   runsMethods,
   runFinishMethods,
   modelFallbackMethods,
