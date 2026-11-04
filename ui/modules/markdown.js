@@ -44,9 +44,27 @@ function mdCreateRenderer(deps) {
       node.setAttribute('rel', 'noopener noreferrer')
     })
   }
+  // 记忆缓存（DSHBOTS-167）：同一条正文 + 同一个 scope 只解析一次。
+  // 整页重建每 2.8s 一次、点击切换再重建，200 条长消息若不缓存，每次都要重跑
+  // marked + DOMPurify（实测 3.2KB 单条 ≈6.6ms，200 条可达秒级主线程阻塞）。
+  // 有界 LRU：命中即删了重插把最近使用的顶到尾部，超限从最旧端淘汰。
+  const MD_RENDER_CACHE_MAX = 1500
+  const cache = new Map()
+  const cacheKey = (body, scope) =>
+    `${scope?.projectId ?? ''}\u0000${scope?.soloBotId ?? ''}\u0000${scope?.root ?? ''}\u0000${String(body ?? '')}`
   return function renderMarkdown(body, scope) {
+    const key = cacheKey(body, scope)
+    const hit = cache.get(key)
+    if (hit !== undefined) {
+      cache.delete(key)
+      cache.set(key, hit)
+      return hit
+    }
     const html = marked.parse(mdRewriteImageSources(body, scope), { gfm: true, breaks: true })
-    return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+    const safe = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+    cache.set(key, safe)
+    if (cache.size > MD_RENDER_CACHE_MAX) cache.delete(cache.keys().next().value)
+    return safe
   }
 }
 // markdown-render:end

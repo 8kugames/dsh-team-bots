@@ -47,7 +47,10 @@ export async function markVisibleChatRead(data) {
   if (target) target.unreadCount = 0
   try {
     await api('mark_chat_read', { projectId, readAt: newest }, { quiet: true })
-  } catch {}
+  } catch {
+    // 上报失败回退水位，下一轮轮询自动重报（DSHBOTS-167：上报不再挡渲染）。
+    state.markedRead = null
+  }
 }
 
 // 轮询竞态保护（DSHBOTS-102）：本地已决的审批不被早于决策的 pending 响应盖回。
@@ -98,7 +101,9 @@ export async function loadState(projectId = state.projectId, { quiet = false } =
   // 仅单聊场景携带 soloBotId，避免把单聊口径的 runs/memories 泄漏进群聊视图。
   const data = preserveAnsweredQuestions(state.data, preserveDecidedApprovals(state.data, await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet })))
   state.data = data
-  await markVisibleChatRead(data)
+  // 已读上报不挡渲染（DSHBOTS-167）：本地水位与徽标在调用瞬间即生效（函数体首段同步执行），
+  // 服务端上报即发即走；失败由 markVisibleChatRead 内部回退 markedRead，下一轮轮询自动重报。
+  void markVisibleChatRead(data).catch(() => {})
   if (!state.projectId || !data.projects.some(project => project.id === state.projectId)) {
     state.projectId = data.project?.id ?? data.projects.find(project => project.status === 'active')?.id ?? null
   }
