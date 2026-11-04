@@ -105,6 +105,11 @@ test('每个 ui/modules/*.js 行数 <800（800 行铁律）', () => {
   }
 })
 
+test('ui/app.js 行数 <800（本卡验收线，拆分后不得回涨）', () => {
+  const lines = readFileSync(join(root, 'ui/app.js'), 'utf8').split('\n').length
+  assert.ok(lines < 800, `ui/app.js ${lines} 行，超过 800 行铁律`)
+})
+
 test('标记块成对且唯一（迁移不得破坏标记块）', () => {
   const source =
     readFileSync(join(root, 'ui/app.js'), 'utf8') +
