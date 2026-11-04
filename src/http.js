@@ -132,6 +132,8 @@ export function installHttp(ctx, service, logger = console) {
   }
   const script = async () => response(await readFile(join(UI, 'app.js'), 'utf8'), 'text/javascript; charset=utf-8')
   // ES module 切片（DSHBOTS-15）：app.js 的 import 依赖逐文件注册（bridge 路由为精确路径）。
+  // 不变量：ui 侧每个被 import 的切片都要有一条精确路由，漏一条 = 浏览器模块图断裂 =
+  // app.js 永不执行 = 工作台卡在「正在连接团队空间」。覆盖锁见 tests/ui-module-routes.test.js。
   const moduleScript = (name) => async () => response(
     await readFile(join(UI, 'modules', name)), 'text/javascript; charset=utf-8',
   )
@@ -163,6 +165,10 @@ export function installHttp(ctx, service, logger = console) {
   route('/api/dsh-team/modules/markdown.js', ['GET'], moduleScript('markdown.js'))
   route('/api/dsh-team/modules/api.js', ['GET'], moduleScript('api.js'))
   route('/api/dsh-team/modules/i18n.js', ['GET'], moduleScript('i18n.js'))
+  route('/api/dsh-team/modules/typing-linger.js', ['GET'], moduleScript('typing-linger.js'))
+  route('/api/dsh-team/modules/cards.js', ['GET'], moduleScript('cards.js'))
+  route('/api/dsh-team/modules/usage.js', ['GET'], moduleScript('usage.js'))
+  route('/api/dsh-team/modules/settings.js', ['GET'], moduleScript('settings.js'))
   route('/api/dsh-team/i18n/zh.js', ['GET'], i18nDict('zh.js'))
   route('/api/dsh-team/i18n/en.js', ['GET'], i18nDict('en.js'))
   route('/api/dsh-team/styles.css', ['GET'], styles)
