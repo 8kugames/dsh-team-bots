@@ -2,10 +2,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
 // DSHBOTS-56 用量信息架构：侧栏入口纯全局（与群聊/单聊上下文零耦合），
 // 群聊/单聊 NAV 各自恢复「用量」tab（内容严格限本群/本 bot）。读源码断言（与 workbench-ia 同模式）。
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 // NAV/SOLO_NAV 已拆到 modules/state.js（DSHBOTS-15），从模块源码读取。
 const stateSource = readFileSync(fileURLToPath(new URL('../ui/modules/state.js', import.meta.url)), 'utf8')
 

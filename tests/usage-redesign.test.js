@@ -1,13 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
 
 // DSHBOTS-81 用量统计页重设计：群聊 / 单聊 / 全局三态共用一套视觉骨架。
 // 读源码断言（与 usage-convergence 同模式），锁住：标题层级、KPI 口径、数值列对齐、
 // 成本写法统一、窗口口径单一、项目行不露 raw id、只用既有 token。
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 const css = await uiStylesSource()
 // 用量页新增样式块（骨架 + 列表 + 图例），断言只在这一段内做，避免整份 CSS 进失败输出。
 const usageCss = css.slice(css.indexOf('/* 用量页骨架'), css.indexOf('.day-bars'))
