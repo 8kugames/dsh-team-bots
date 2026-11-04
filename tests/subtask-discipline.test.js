@@ -125,10 +125,10 @@ test('任务提示词注入纪律段：拆解义务 + 产品级子卡要求 + KE
       '纪律段必须排在任务卡字段块之前（静态段前置原则）',
     )
     assert.match(plainPrompt, /team_assign_task[\s\S]*parent_task_id/, '应指示用 team_assign_task 传 parent_task_id 立子卡')
-    assert.match(plainPrompt, /收口条件/, '应覆盖「新收口条件」触发口径')
-    assert.match(plainPrompt, /通用能力、完整测试、真实落库/, '子卡应要求产品级实现')
-    assert.match(plainPrompt, /禁止临时补丁或为单次场景写死/, '应禁止临时补丁与场景写死')
-    assert.match(plainPrompt, /能.*做完的不拆|一次做完的不拆/, '应约束能一次做完的不拆')
+    assert.match(plainPrompt, /new closing conditions/, '应覆盖「新收口条件」触发口径')
+    assert.match(plainPrompt, /general capability, full tests, real persistence/, '子卡应要求产品级实现')
+    assert.match(plainPrompt, /no throwaway patches/, '应禁止临时补丁与场景写死')
+    assert.match(plainPrompt, /Do not split what one run can finish/, '应约束能一次做完的不拆')
     assert.match(plainPrompt, /KEY-N/, '应要求收工报告列出子卡 KEY-N 清单')
     assert.ok(!plainPrompt.includes('# Time budget'), '普通卡不应误入时效段')
     assert.ok(!plainPrompt.includes('# Urgent exemption'), '普通卡不应误入紧急豁免段')
@@ -139,6 +139,41 @@ test('任务提示词注入纪律段：拆解义务 + 产品级子卡要求 + KE
       assert.ok(mixed.includes(marker), `混合卡应同时含 ${marker}`)
     }
     assert.match(mixed, /within 30 minutes/, '时效段数值不受纪律段影响')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('注入指令段恒英文守门：纪律/豁免/恢复/时效段无中文残留，纪律段词数 ≤140', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await seedProject(ctx.service, ctx.store)
+    const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
+    const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
+    const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
+    const actor = ctx.service.actor()
+    const urgentBudgeted = await ctx.service.createTask(
+      { projectId: project.id, title: '紧急限时任务', priority: 'urgent', time_budget_minutes: 30, writeScopes: ['src/b.js'] },
+      actor,
+    )
+    // recovery=1 的 urgent 限时卡：纪律/时效/豁免/恢复四段并存，逐段抽块断言。
+    // 这些是注入给 bot 的机器可读指令段，用户口径要求恒英文（中文界面下亦然）；
+    // UI 可见文案走 t() 翻译管线，不在此守门范围。
+    const prompt = runtime.promptFor({
+      run: { kind: 'task', recovery: 1 },
+      bot: botRow, project: projectRow, task: rowOf(ctx.store, urgentBudgeted.id),
+    })
+    const blockBody = (header) => {
+      const m = prompt.match(new RegExp(`# ${header}\\n([\\s\\S]*?)(?=\\n\\n# |\\n\\nDo the task|$)`))
+      return m ? m[1] : ''
+    }
+    for (const header of ['Subtask discipline', 'Time budget', 'Urgent exemption', 'Recovery note']) {
+      const body = blockBody(header)
+      assert.ok(body, `${header} 段应在场`)
+      assert.ok(!/[\u4e00-\u9fff]/.test(body), `${header} 段正文必须恒英文，不得回退中文`)
+    }
+    const words = blockBody('Subtask discipline').trim().split(/\s+/).length
+    assert.ok(words <= 140, `纪律段词数上限 140（实测 ${words}）`)
   } finally {
     await cleanup(ctx)
   }

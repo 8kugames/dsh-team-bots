@@ -85,7 +85,7 @@ test('任务派发分支：纪律段+交付样板+parallel 全部先于每卡字
       '# Recovery note',
     ], '任务派发分支')
     // 交付样板两段紧随纪律段：静态区内部相对顺序同样锁定，防止段内漂移。
-    assertAscending(prompt, ['收工报告会自动落为本任务评论', 'Do the task in the project workspace'], '静态区内部')
+    assertAscending(prompt, ['List every subtask KEY-N in the closing report', 'Do the task in the project workspace'], '静态区内部')
   } finally { await t.close() }
 })
 

@@ -203,10 +203,10 @@ test('chat 运行提示词包含引用上下文行（含 m_ 短 id 与 200 字�
     const projectRow = store.get('SELECT * FROM projects WHERE id = ?', project.id)
     const prompt = runtime.promptFor({ run: { kind: 'chat' }, bot: botRow, project: projectRow, task: null, chatMessage: userMessage })
 
-    assert.ok(prompt.includes('用户引用了 Builder 的消息'), '提示词应包含引用行')
+    assert.ok(prompt.includes("The user quoted Builder's message"), '提示词应包含引用行')
     assert.ok(prompt.includes(`[m_${botMessageId.slice(-6)}]`), '引用行应带 m_ 短 id 供 team_recall')
     // Recent context 也会带同一条消息（前 240 字），因此只对引用行本身断言 200 字截断。
-    const quoteExcerpt = /用户引用了 Builder 的消息 \[m_\w+\]：(.*)/.exec(prompt)?.[1]
+    const quoteExcerpt = /The user quoted Builder's message \[m_\w+\]: (.*)/.exec(prompt)?.[1]
     assert.equal(quoteExcerpt, longBody.slice(0, 200), '引用行摘要应恰为正文前 200 字')
   } finally {
     await closeQuietly(store)

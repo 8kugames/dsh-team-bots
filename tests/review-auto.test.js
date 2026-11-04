@@ -377,7 +377,7 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
       run: longRow, bot: t.director, project: t.project, task: longTask,
       chatMessage: null, sessionId: 's-trunc-long',
     })
-    assert.ok(longPrompt.includes('[任务描述共 9000 字符，超过 8000 已截断'), '截断必须注明')
+    assert.ok(longPrompt.includes('[Task description is 9000 characters, over the 8000 limit'), '截断必须注明')
     assert.ok(!longPrompt.includes('x'.repeat(8_100)), '超出部分确实未进提示词')
     assert.ok(longPrompt.length < 10_000, '提示词总量受控，不再有 400 超长风险')
 
@@ -394,7 +394,7 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
       chatMessage: null, sessionId: 's-trunc-short',
     })
     assert.ok(shortPrompt.includes('实现登录页。'), '短描述全文保留')
-    assert.ok(!shortPrompt.includes('已截断'), '短描述不出现截断注明')
+    assert.ok(!shortPrompt.includes('Task description is'), '短描述不出现截断注明')
   } finally { await t.close() }
 })
 
@@ -426,7 +426,7 @@ test('owner review 提示词超长防护：8K 截断同口径，保底字段在�
       run: ownerRow, bot: t.director, project: t.project, task: longTask,
       chatMessage: null, sessionId: 's-owner-trunc-long',
     })
-    assert.ok(longPrompt.includes('[任务描述共 9000 字符，超过 8000 已截断'), '截断必须注明')
+    assert.ok(longPrompt.includes('[Task description is 9000 characters, over the 8000 limit'), '截断必须注明')
     assert.ok(!longPrompt.includes('x'.repeat(8_100)), '超出部分确实未进提示词')
     assert.ok(longPrompt.length < 10_000, '提示词总量受控，不再有 400 超长风险')
     assert.ok(longPrompt.includes('Title: 超长验收卡'), '保底字段：标题')
@@ -447,7 +447,7 @@ test('owner review 提示词超长防护：8K 截断同口径，保底字段在�
       chatMessage: null, sessionId: 's-owner-trunc-short',
     })
     assert.ok(shortPrompt.includes('实现注册页。'), '短描述全文保留')
-    assert.ok(!shortPrompt.includes('已截断'), '短描述不出现截断注明')
+    assert.ok(!shortPrompt.includes('Task description is'), '短描述不出现截断注明')
   } finally { await t.close() }
 })
 
@@ -474,7 +474,7 @@ test('handle 提示词超长防护：8K 截断同口径，保底字段与失败�
       run: handleRow, bot: t.director, project: t.project, task: longTask,
       chatMessage: null, sessionId: 's-handle-trunc-long',
     })
-    assert.ok(longPrompt.includes('[任务描述共 9000 字符，超过 8000 已截断'), '截断必须注明')
+    assert.ok(longPrompt.includes('[Task description is 9000 characters, over the 8000 limit'), '截断必须注明')
     assert.ok(!longPrompt.includes('y'.repeat(8_100)), '超出部分确实未进提示词')
     assert.ok(longPrompt.length < 10_000, '提示词总量受控，不再有 400 超长风险')
     assert.ok(longPrompt.includes('Title: 超长受阻卡'), '保底字段：标题')
@@ -496,7 +496,7 @@ test('handle 提示词超长防护：8K 截断同口径，保底字段与失败�
       chatMessage: null, sessionId: 's-handle-trunc-short',
     })
     assert.ok(shortPrompt.includes('修复支付回调。'), '短描述全文保留')
-    assert.ok(!shortPrompt.includes('已截断'), '短描述不出现截断注明')
+    assert.ok(!shortPrompt.includes('Task description is'), '短描述不出现截断注明')
   } finally { await t.close() }
 })
 

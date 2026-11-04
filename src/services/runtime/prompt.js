@@ -62,7 +62,7 @@ const sessionIdOf = context => context?.agent?.id ?? context?.session?.id ?? con
 function truncateTaskDescription(raw) {
   const text = raw || '(no description)'
   return text.length > 8_000
-    ? `${text.slice(0, 8_000)}\n\n[任务描述共 ${text.length} 字符，超过 8000 已截断；超出部分未展示，结论请注明基于截断后的描述]`
+    ? `${text.slice(0, 8_000)}\n\n[Task description is ${text.length} characters, over the 8000 limit; it is truncated here — the hidden remainder is not shown, so base your conclusions on the truncated description and say so]`
     : text
 }
 
@@ -383,10 +383,10 @@ ${recentBlock}`
 The user message below carries images that ${bot.name}'s main model cannot see. Your only job: transcribe every attached image into Chinese.
 
 Transcription requirements:
-- 输出中文，按图片顺序逐张编号（图片 1、图片 2……），一张一小节。
-- 每张包含：【类型】截图/照片/图表等；【主体】画面主要内容；【文字】图中出现的全部文字（保持原文；长文可摘要，但关键数字、路径、命令、报错必须逐字保留）；【细节】颜色、布局、状态等对理解有用的信息。
-- 只描述看得见的内容，不推测画面之外的信息；看不清的部分明确说「看不清」。
-- 不要调用任何工具，不要写入文件；直接输出转写正文，不要用代码块包裹整个回复。
+- Write in Chinese. Number the images in order (图片 1、图片 2, …), one subsection per image.
+- Each subsection: 【类型】 screenshot/photo/chart etc.; 【主体】 the main content; 【文字】 every piece of text in the image (verbatim; long text may be summarized, but key numbers, paths, commands and errors must be kept verbatim); 【细节】 colors, layout, state and anything else useful for understanding.
+- Describe only what is visible; do not guess beyond the frame. For unreadable parts say 「看不清」 explicitly.
+- Do not call any tools and do not write files; output the transcription text directly, without wrapping the whole reply in a code fence.
 
 Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
 ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
@@ -555,14 +555,14 @@ ${(sourceRun?.output ?? '').slice(0, 4000)}`
       const urgentExemptionBlock = task.priority === 'urgent' ? `
 
 # Urgent exemption
-本任务为紧急任务，豁免车道排队纪律：无需等待其他任务的文件车道让位，立即开工；若工作区存在同文件在途改动，先 git status 记录现场、只圈本卡文件提交，不得 add/checkout/stash 他人改动。` : ''
+This task is urgent and exempt from lane queuing discipline: start immediately, without waiting for other tasks' file lanes to clear. If in-flight edits to the same files exist in the workspace, first run git status to record the scene, then commit only this card's files by exact pathspec — never add/checkout/stash others' changes.` : ''
       // subtask-discipline:start —— 子任务拆解纪律（DSHBOTS-132）：把「主项未完成/新收口条件 →
       // 立产品级子卡」从总监口头纪律升级为产品能力。所有任务卡无条件注入，与时效段（D-125）、
       // 紧急豁免段（D-126）互不干扰：本段不读 priority/time_budget，后两者不读本段。
       const subtaskDisciplineBlock = `
 
 # Subtask discipline
-收工前自查拆解义务：本任务若一次做不完（含撞限额只能交半成品），或实现中发现新的收口条件（测试缺口、连带修复、后续产品化项），必须立即用 team_assign_task 派子卡并传 parent_task_id 挂到本任务下，同时在群里报备；不得把未完成事项留在评论里口头建议而不落卡。子卡一律按产品级实现：通用能力、完整测试、真实落库，禁止临时补丁或为单次场景写死。能在本次收工前做完的不拆。子卡创建后，在本任务的收工报告里列出全部子卡 KEY-N 清单（收工报告会自动落为本任务评论）。`
+Before closing: if this task cannot be finished in one run (e.g. quota-capped partial delivery) or new closing conditions emerge (test gaps, coupled fixes, later productization), immediately file subtasks via team_assign_task with parent_task_id and report in the group — never leave follow-ups as verbal suggestions without cards. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.`
       // subtask-discipline:end
       // recovery note（DSHBOTS-135）：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
       // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
@@ -570,7 +570,7 @@ ${(sourceRun?.output ?? '').slice(0, 4000)}`
       const recoveryNoteBlock = Number(run?.recovery) === 1 ? `
 
 # Recovery note
-上次执行因宿主重启中断。先检查工作区与 git 状态核实现状，再从中断点继续；已执行过的外部动作（提交/发布/消息）不要重复。` : ''
+The previous run was interrupted by a host restart. Check the workspace and git status first to verify the current state, then resume from where it stopped; do not repeat external actions already performed (commits/publishes/messages).` : ''
       const parallel = this.config.agentTeam ? `
 
 # Parallel work inside this task
@@ -637,11 +637,11 @@ ${taskList}`
   quotedLineFor(chatMessage) {
     if (!chatMessage?.reply_to_id) return ''
     const quoted = this.store.get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', chatMessage.reply_to_id)
-    if (!quoted) return '\n(用户引用的消息已不存在)\n'
+    if (!quoted) return '\n(The quoted message no longer exists.)\n'
     const senderName = quoted.sender_type === 'bot'
       ? this.store.get('SELECT name FROM bots WHERE id = ?', quoted.sender_id)?.name ?? `bot:${quoted.sender_id}`
       : `${quoted.sender_type}:${quoted.sender_id}`
     const excerpt = quoted.body.slice(0, 200)
-    return `\n用户引用了 ${senderName} 的消息 [m_${quoted.id.slice(-6)}]：${excerpt}\n`
+    return `\nThe user quoted ${senderName}'s message [m_${quoted.id.slice(-6)}]: ${excerpt}\n`
   },
 }

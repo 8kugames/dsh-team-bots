@@ -108,15 +108,15 @@ test('提示词注入：urgent 任务卡注入豁免指令（车道豁免 + git 
     const promptOf = (row) => runtime.promptFor({ run: { kind: 'task' }, bot: botRow, project: projectRow, task: row })
     const urgentPrompt = promptOf(taskRow(ctx.store, urgent.id))
     assert.match(urgentPrompt, /# Urgent exemption/, 'urgent 卡应有豁免段标题')
-    assert.match(urgentPrompt, /豁免车道排队纪律/, '应注入用户口径的豁免声明')
-    assert.match(urgentPrompt, /立即开工/, '应指示立即开工')
+    assert.match(urgentPrompt, /exempt from lane queuing discipline/, '应注入用户口径的豁免声明')
+    assert.match(urgentPrompt, /start immediately/, '应指示立即开工')
     assert.match(urgentPrompt, /git status/, '应注入现场纪律：先 git status 记录现场')
-    assert.match(urgentPrompt, /不得 add\/checkout\/stash 他人改动/, '应注入只圈本卡文件的提交纪律')
+    assert.match(urgentPrompt, /never add\/checkout\/stash others' changes/, '应注入只圈本卡文件的提交纪律')
 
     for (const row of [taskRow(ctx.store, high.id), taskRow(ctx.store, medium.id)]) {
       const prompt = promptOf(row)
       assert.ok(!prompt.includes('# Urgent exemption'), '非 urgent 不得注入豁免段')
-      assert.ok(!prompt.includes('豁免车道排队纪律'), '非 urgent 不得出现豁免文案')
+      assert.ok(!prompt.includes('exempt from lane queuing discipline'), '非 urgent 不得出现豁免文案')
     }
   } finally {
     await cleanup(ctx)

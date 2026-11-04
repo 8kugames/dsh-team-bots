@@ -340,8 +340,8 @@ test('转写提示词：中文结构化要求 + 原文引用 + 禁工具，群�
     assert.match(groupPrompt, /Project: Vision \(VIS\)/)
     assert.ok(groupPrompt.includes('看看这张截图'), '携带原文正文')
     assert.ok(groupPrompt.includes('【类型】') && groupPrompt.includes('【主体】') && groupPrompt.includes('【文字】'), '中文结构化字段')
-    assert.ok(groupPrompt.includes('按图片顺序逐张编号'), '逐张编号')
-    assert.ok(groupPrompt.includes('不要调用任何工具'), '禁工具')
+    assert.ok(groupPrompt.includes('one subsection per image'), '逐张编号')
+    assert.ok(groupPrompt.includes('Do not call any tools'), '禁工具')
     // 单聊态：project 为 null，header 退到 one-on-one，不触碰 project.name。
     const soloPrompt = t.promptRuntime.promptFor({
       run: { ...vision, project_id: null }, bot: t.dev, project: null, task: null,

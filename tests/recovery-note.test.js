@@ -127,7 +127,7 @@ test('任务提示词注入两分支：recovery=1 注入恢复块，recovery=0 �
     const flagged = runtime.promptFor({ run: runRowOf(ctx.store, 'run-flag'), bot: dev, project, task: taskRow })
     assert.ok(flagged.includes('# Recovery note'), '置位的运行应注入恢复块标题')
     assert.ok(
-      flagged.includes('上次执行因宿主重启中断。先检查工作区与 git 状态核实现状，再从中断点继续；已执行过的外部动作（提交/发布/消息）不要重复。'),
+      flagged.includes('The previous run was interrupted by a host restart. Check the workspace and git status first to verify the current state, then resume from where it stopped; do not repeat external actions already performed (commits/publishes/messages).'),
       '恢复提醒文案应逐字对齐口径',
     )
 
