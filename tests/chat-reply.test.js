@@ -1,8 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
@@ -10,6 +8,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import { uiStylesSource } from './ui-styles-source.js'
+import { readUiSource } from './helpers/ui-sources.js'
 
 class FakeRuntime {
   constructor(service) {
@@ -216,7 +215,7 @@ test('chat 运行提示词包含引用上下文行（含 m_ 短 id 与 200 字�
 
 // UI 按 tests/ac.test.js 的读源码断言先例：引用按钮、引用条、气泡引用块的关键标记存在。
 test('UI 源码包含引用回复的关键标记', async () => {
-  const appSource = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+  const appSource = readUiSource()
   const styleSource = await uiStylesSource()
 
   // hover 引用按钮 + 点击动作

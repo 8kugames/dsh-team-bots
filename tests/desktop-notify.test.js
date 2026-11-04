@@ -1,11 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 const block = /\/\/ desktop-notify:start[\s\S]*?\/\/ desktop-notify:end/.exec(source)?.[0]
-assert.ok(block, 'ui/app.js 缺少 desktop-notify 标记块')
+assert.ok(block, 'ui 源码缺少 desktop-notify 标记块')
 
 // 以注入桩的方式执行 marker 块：块内只依赖 Notification/document/window/localStorage/state/refresh/render。
 function loadBlock({ Notification = undefined, hidden = true, focused = false, stored = null } = {}) {
