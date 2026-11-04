@@ -61,6 +61,17 @@ export const OFFICIAL_UI_SWITCH_ROWS = [
   },
 ]
 
+// ui/styles.css 组件域拆分（DSHBOTS-160）：单文件按 Section 域拆到 ui/styles/*.css，
+// 本表是拼接顺序的唯一真源（线上 installHttp 与 scripts/dev-server.js 共用同一
+// readUiStyles），顺序即层叠语义——base 的变量声明在最前、wide 的媒体覆盖在后，
+// 不得重排。过渡态保留 styles.css 承载未拆域，拆分完成后由 styles/* 完全取代。
+export const UI_STYLE_PARTS = ['styles.css', 'styles/terminal.css']
+
+export const readUiStyles = async () => {
+  const parts = await Promise.all(UI_STYLE_PARTS.map((part) => readFile(join(UI, part), 'utf8')))
+  return parts.join('')
+}
+
 const response = (body, type, status = 200, extra = {}) => new Response(body, {
   status,
   headers: {
@@ -104,7 +115,9 @@ export function installHttp(ctx, service, logger = console) {
   const i18nDict = (name) => async () => response(
     await readFile(join(UI, 'i18n', name)), 'text/javascript; charset=utf-8',
   )
-  const styles = async () => response(await readFile(join(UI, 'styles.css'), 'utf8'), 'text/css; charset=utf-8')
+  // styles 汇总直出（DSHBOTS-160）：路由、MIME、缓存语义与拆分前完全一致，
+  // 仅读取口径改为 readUiStyles 按 UI_STYLE_PARTS 拼接。
+  const styles = async () => response(await readUiStyles(), 'text/css; charset=utf-8')
   const font = (weight) => async () => response(
     await readFile(join(UI, 'fonts', `inter-${weight}.woff2`)),
     'font/woff2', 200, { 'cache-control': 'public, max-age=604800' },

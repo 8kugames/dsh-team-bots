@@ -11,6 +11,7 @@ import { openDatabase } from '../src/db.js'
 import { handleAction } from '../src/api.js'
 import { TeamService } from '../src/service.js'
 import { recordUsage } from '../src/usage.js'
+import { readUiStyles } from '../src/http.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PORT = Number(process.env.PORT || 4317)
@@ -94,7 +95,8 @@ async function main() {
           .replaceAll('{{language}}', 'auto'))
       }
       if (req.method === 'GET' && url.pathname === '/api/dsh-team/styles.css') {
-        return send(res, 200, 'text/css; charset=utf-8', await readFile(join(ROOT, 'ui', 'styles.css')))
+        // 与线上同口径（DSHBOTS-160）：走 src/http.js 的 readUiStyles 汇总，双侧永不漂移。
+        return send(res, 200, 'text/css; charset=utf-8', await readUiStyles())
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/dsh-team/fonts/')) {
         const font = url.pathname.slice('/api/dsh-team/fonts/'.length)

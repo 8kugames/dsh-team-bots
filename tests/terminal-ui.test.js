@@ -2,10 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { uiStylesSource } from './ui-styles-source.js'
 
 // 按 tests/ac.test.js 的先例：读 ui/app.js 源码做关键标记断言（不跑浏览器）。
 const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
-const css = readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8')
+// CSS 断言走汇总口径（DSHBOTS-160）：ui/styles/*.css 拼接后与线上 styles() 完全一致。
+const css = await uiStylesSource()
 // NAV/SOLO_NAV 已拆到 modules/state.js（DSHBOTS-15），从模块源码读取。
 const stateSource = readFileSync(fileURLToPath(new URL('../ui/modules/state.js', import.meta.url)), 'utf8')
 
