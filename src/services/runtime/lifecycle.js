@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { recordUsage } from '../../usage.js'
 import { nowIso, sha256, stripLeakedToolMarkup } from '../../util.js'
+import { detectDshRuntimeVersion } from '../../updater.js'
 import { contentText, reasonOf } from './trajectory.js'
 import { convertImagesForUpload, toImageContentParts } from '../message-images.js'
 
@@ -355,7 +356,7 @@ export const lifecycleMethods = {
     return {
       native: true,
       profile: process.env.DSH_PROFILE || 'team-bots',
-      version: process.env.DSH_RUNTIME_VERSION || 'unknown',
+      version: detectDshRuntimeVersion(process.env, process.argv[1]),
       toolCount: tools.length,
       toolNames: tools,
       modelProviderCount: new Set((this.modelsCache.value ?? []).map(item => item.provider)).size,

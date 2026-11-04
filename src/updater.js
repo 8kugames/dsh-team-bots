@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+
 const registry = (process.env.NPM_REGISTRY || 'https://registry.npmjs.org/').replace(/\/+$/, '')
 // 每个包一条缓存：{ at, version }，5 分钟内复用。
 const registryCache = new Map()
@@ -72,4 +75,35 @@ export function latestTeamBotsVersion(opts = {}) {
 
 export function validTargetVersion(version) {
   return typeof version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)
+}
+
+// 从宿主入口向上探测 package.json 的目录级数上限（含起始目录）：覆盖
+// …/@deepseek-ai/dsh/bin/*.js 到包根（2 级）余量充足，又不至于在无关目录树里捡到别的包。
+const HOST_PACKAGE_LEVELS = 6
+
+// dsh 宿主运行时版本探测链（DSHBOTS-146）：宿主进程从不设置 DSH_RUNTIME_VERSION，
+// env-only 读取恒 unknown。三级回退：
+// ① env.DSH_RUNTIME_VERSION（宿主将来可能提供，保留）；
+// ② 从宿主入口脚本（process.argv[1]，如 …/@deepseek-ai/dsh/bin/*.js）逐级向上
+//    最多 HOST_PACKAGE_LEVELS 级找最近的 package.json 读 version；
+// ③ 仍拿不到返回 'unknown'。env/argv1 注入式传参（显式传 undefined 即视为缺省），
+// 测试不依赖真实宿主。
+export function detectDshRuntimeVersion(env, argv1) {
+  const fromEnv = typeof env?.DSH_RUNTIME_VERSION === 'string' ? env.DSH_RUNTIME_VERSION.trim() : ''
+  if (fromEnv) return fromEnv
+  if (argv1) {
+    let dir = dirname(resolve(String(argv1)))
+    for (let level = 0; level < HOST_PACKAGE_LEVELS; level += 1) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+        if (typeof pkg?.version === 'string' && pkg.version) return pkg.version
+      } catch {
+        // 本级没有 package.json、不可读或 JSON 损坏：视为未命中，继续向上。
+      }
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+  return 'unknown'
 }

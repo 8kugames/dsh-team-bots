@@ -6,7 +6,7 @@
 import { createRequire } from 'node:module'
 import { AppError, badRequest, conflict, hotUpgradeUnsupported } from '../errors.js'
 import { usageSnapshot } from '../usage.js'
-import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion } from '../updater.js'
+import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion, detectDshRuntimeVersion } from '../updater.js'
 import { skillSnapshot } from '../skills.js'
 import { projectSkillRoots } from '../project-skills.js'
 import { resolveDshUiLanguage } from './locale.js'
@@ -296,7 +296,8 @@ export const systemMethods = {
     return this.runtime?.catalog(force) ?? []
   },
   async dshUpdateInfo() {
-    const current = process.env.DSH_RUNTIME_VERSION || 'unknown'
+    // 探测链（DSHBOTS-146）：env → argv[1] 向上找宿主 package.json → unknown。
+    const current = detectDshRuntimeVersion(process.env, process.argv[1])
     let latest
     let pluginLatest
     try {
@@ -326,7 +327,7 @@ export const systemMethods = {
     if (Number(active) > 0) {
       throw conflict(`当前还有 ${active} 个排队或运行中的任务，请先停止后再升级 DSH`)
     }
-    const current = process.env.DSH_RUNTIME_VERSION || 'unknown'
+    const current = detectDshRuntimeVersion(process.env, process.argv[1])
     const latest = await latestDshVersion({ force: true }).catch(error => {
       throw new AppError('DSH_REGISTRY_UNAVAILABLE', `无法查询 DSH 最新版本：${error.message}`, 502)
     })
