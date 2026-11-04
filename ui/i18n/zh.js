@@ -213,6 +213,8 @@ export default {
   'settings.uiLanguageAuto': '自动',
   'settings.uiLanguageZh': '中文',
   'settings.uiLanguageEn': 'English',
+  'settings.uiLanguageHint': '自动 = 跟随 DSH 宿主 Language 设定。',
+  'settings.uiLanguageSave': '保存界面语言',
   // 高频 toast
   'toast.copied': '已复制',
   'toast.wechatConnected': '微信通道已连接',
@@ -224,4 +226,5 @@ export default {
   'toast.chatCleared': '已清空 ${count} 条消息',
   'toast.memorySaved': '已写入 Bot 记忆',
   'toast.languageSwitched': '界面语言已切换',
+  'toast.uiLanguageSaved': '界面语言已保存',
 }

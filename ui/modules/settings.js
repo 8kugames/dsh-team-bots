@@ -1,6 +1,7 @@
 // settings.js —— 设置/全局域：全局视图的用量面板、运行上限卡、运维卡、微信卡、密钥卡、
 // 设置页与总览渲染（renderGlobal）。用量面板骨架复用同域外的用量 helper（ui/modules/usage.js）。
 import { state } from './state.js'
+import { t } from './i18n.js'
 import { icon } from './icons.js'
 import { activeBots, activeProject, attr, botById, esc, formatTime, pathCode } from './util.js'
 import { loadState } from './api.js'
@@ -394,6 +395,8 @@ function currentScale() {
 function renderGlobal() {
   const data = state.data
   const scale = currentScale()
+  // 语言下拉回填保存值；'auto' = 跟随 DSH 宿主 Language 设定（未保存时也按 auto 展示）。
+  const uiLanguage = data.settings?.ui_language ?? 'auto'
   const bots = data.bots ?? []
   const activeBots = bots.filter(bot => bot.status === 'active')
   const pending = pendingProposals()
@@ -433,8 +436,20 @@ function renderGlobal() {
           <div><button class="btn small" type="button" data-action="toggle-notify" aria-labelledby="desktop-notify-label" aria-pressed="${notify.on ? 'true' : 'false'}"${notify.disabled ? ' disabled' : ''}>${esc(notify.label)}</button></div>
           <div class="hint">${esc(notify.hint)}</div>
         </div>
+        <div class="field">
+          <label id="settings-ui-language-label" for="settings-ui-language">${t('settings.uiLanguage')}</label>
+          <select class="select" id="settings-ui-language" name="ui_language">
+            <option value="auto" ${uiLanguage === 'auto' ? 'selected' : ''}>${esc(t('settings.uiLanguageAuto'))}</option>
+            <option value="zh" ${uiLanguage === 'zh' ? 'selected' : ''}>${esc(t('settings.uiLanguageZh'))}</option>
+            <option value="en" ${uiLanguage === 'en' ? 'selected' : ''}>${esc(t('settings.uiLanguageEn'))}</option>
+          </select>
+          <div class="hint">${esc(t('settings.uiLanguageHint'))}</div>
+        </div>
         <div class="kv"><span>缩放范围</span><strong>100% – 140%</strong></div>
-        <div class="kv"><span>偏好存储</span><strong>本地浏览器</strong></div>
+        <div class="kv"><span>偏好存储</span><strong>本地浏览器（语言除外）</strong></div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn small primary" type="button" data-action="save-ui-language">${esc(t('settings.uiLanguageSave'))}</button>
+        </div>
       </div>
       <div class="card form-card">
         <div class="card-head"><h3>DSH 路径</h3><button class="btn small" data-action="sync-skills">${icon('refresh')}重新扫描技能</button></div>

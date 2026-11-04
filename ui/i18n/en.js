@@ -214,6 +214,8 @@ export default {
   'settings.uiLanguageAuto': 'Auto',
   'settings.uiLanguageZh': '中文',
   'settings.uiLanguageEn': 'English',
+  'settings.uiLanguageHint': 'Auto = follow the DSH host language setting.',
+  'settings.uiLanguageSave': 'Save language',
   // High-frequency toasts
   'toast.copied': 'Copied',
   'toast.wechatConnected': 'WeChat channel connected',
@@ -225,4 +227,5 @@ export default {
   'toast.chatCleared': 'Cleared ${count} messages',
   'toast.memorySaved': 'Bot memory saved',
   'toast.languageSwitched': 'UI language switched',
+  'toast.uiLanguageSaved': 'UI language saved',
 }
