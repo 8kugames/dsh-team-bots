@@ -87,3 +87,10 @@ test('renderView：目标上下文与已加载数据错开时出骨架，不再�
   assert.match(source, /function renderView\(\) \{\s*if \(state\.view === 'chat' && chatContextPending\(\)\) return chatPendingView\(\)/, 'renderView 应在错开时直接返回骨架')
   assert.match(source, /function chatPendingView\(\) \{/, '缺少骨架视图')
 })
+
+test('连续点击不闪回：先发的旧响应不得清掉新一次的骨架标志', () => {
+  assert.match(source, /function beginChatPending\(pending\) \{/, '缺少取数序号登记')
+  assert.match(source, /const seq = \(state\.chatRequestSeq \+= 1\)/, '每次取数应领一个递增序号')
+  assert.match(source, /if \(state\.chatPending\?\.seq === seq\) state\.chatPending = null/, '只有仍是最新一次才允许清骨架')
+  assert.equal((source.match(/endChatPending\(pendingSeq\)/g) ?? []).length, 2, 'select-project 与 solo-bot 都要按序号清理')
+})

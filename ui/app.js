@@ -547,6 +547,19 @@ function chatContextPending() {
   return pending.projectId !== dataProject || wantSolo !== dataSolo
 }
 
+// 开始一次乐观取数：登记目标上下文并领一个序号（DSHBOTS-167）。
+function beginChatPending(pending) {
+  const seq = (state.chatRequestSeq += 1)
+  state.chatPending = { ...pending, seq }
+  return seq
+}
+
+// 结束一次乐观取数：只有仍是最新一次才清骨架。连续点击时先发的旧响应若把标志清掉，
+// 界面会在新数据到达前闪回上一个上下文，所以必须按序号判定。
+function endChatPending(seq) {
+  if (state.chatPending?.seq === seq) state.chatPending = null
+}
+
 // 切换中的占位视图：不读消息列表、不做 markdown 解析，只给轻量骨架，
 // 让点击立即有反馈（DSHBOTS-167）。
 function chatPendingView() {
@@ -2109,12 +2122,12 @@ document.addEventListener('click', async (event) => {
         state.chatMode = 'group'
         state.view = 'chat'
         // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
-        state.chatPending = { projectId: state.projectId, chatMode: 'group', soloBotId: null }
+        const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: 'group', soloBotId: null })
         render()
         try {
           await refresh()
         } finally {
-          state.chatPending = null
+          endChatPending(pendingSeq)
         }
         break
       case 'refresh':
@@ -2379,14 +2392,14 @@ document.addEventListener('click', async (event) => {
         state.chatMode = 'solo'
         state.view = 'chat'
         // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
-        state.chatPending = { projectId: state.projectId, chatMode: 'solo', soloBotId: botId }
+        const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: 'solo', soloBotId: botId })
         render()
         try {
           await loadState(state.projectId, { quiet: true })
         } catch {
           // 取数失败也要清标志并落回上一次可用数据，否则骨架常驻。
         } finally {
-          state.chatPending = null
+          endChatPending(pendingSeq)
         }
         render()
         break
