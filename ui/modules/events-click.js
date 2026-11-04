@@ -300,10 +300,7 @@ document.addEventListener('click', async (event) => {
         await api('archive_bot', { botId })
         closeModal()
         await refresh()
-        if (state.view === 'solo-config' && botById(botId)?.status !== 'active') {
-          state.view = 'chat'
-          state.chatMode = 'group'
-        }
+        // 归档后留在当前页：solo-config 会随即切到 archived 分支，露出「移除追踪」入口。
         toast('Bot 已归档', 'success')
         break
       }
@@ -381,8 +378,9 @@ document.addEventListener('click', async (event) => {
         const confirmName = document.getElementById('remove-tracking-name')?.value ?? ''
         await api('remove_bot_tracking', { botId, confirmName })
         closeModal()
-        // 正停在该 Bot 的单聊/配置页时回到群聊，避免引用已移除的 Bot。
-        if (state.soloBotId === botId) {
+        // 正停在该 Bot 的单聊/配置页时回到群聊，避免引用已移除的 Bot；
+        // 其他页面（如总览 bots 页）仅清理跳过，不传送视图。
+        if (state.soloBotId === botId && (state.view === 'solo-config' || (state.view === 'chat' && state.chatMode === 'solo'))) {
           state.soloBotId = null
           state.view = 'chat'
           state.chatMode = 'group'
