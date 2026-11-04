@@ -167,6 +167,12 @@
     z-index: 30;
     max-height: 60vh;
     overflow-y: auto;
+    /* 滚动区提升为合成层（DSHBOTS-187）：.approval-menu 经 .approval-banner 渲染在
+       .main-head（sticky + backdrop-filter: saturate(140%) blur(12px)）子树内，未合成的
+       纵向滚动走主线程，滚动期间祖先链被反复重录，带滤镜的顶栏表面随之被重算重栅格
+       （与 DSHBOTS-166 的 .modal-body 同机制）。提升后滚动内容在自有层位移，
+       顶栏滤镜不参与滚动期重录。 */
+    will-change: transform;
     padding: 6px;
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -348,6 +354,12 @@
     z-index: 30;
     max-height: 60vh;
     overflow-y: auto;
+    /* 滚动区提升为合成层（DSHBOTS-187）：.question-menu 经 .question-banner 渲染在
+       .main-head（sticky + backdrop-filter: saturate(140%) blur(12px)）子树内，未合成的
+       纵向滚动走主线程，滚动期间祖先链被反复重录，带滤镜的顶栏表面随之被重算重栅格
+       （与 DSHBOTS-166 的 .modal-body 同机制）。提升后滚动内容在自有层位移，
+       顶栏滤镜不参与滚动期重录。 */
+    will-change: transform;
     padding: 6px;
     border: 1px solid var(--line);
     border-radius: 10px;
