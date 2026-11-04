@@ -238,6 +238,29 @@ test('接线：画气泡行时对齐台账、1s 定时器到期摘除气泡，�
   assert.match(source, /typingRows\(runs, 'solo_chat'\)/)
 })
 
+test('终态驻留行的秒表冻结在运行结束时刻：显示这次运行真正花了多久，不在驻留几秒里继续往上跳', () => {
+  const optimistic = api.addOptimisticTypingBubble(new Map(), {
+    kind: 'chat', scope: GROUP_SCOPE, botId: 'b1', botName: 'Alpha', now: 1000,
+  })
+  const ledger = api.reconcileTypingBubbles(optimistic, {
+    runs: [chatRun({ status: 'succeeded', started_at: '2026-01-01T00:00:01Z', ended_at: '2026-01-01T00:00:03Z' })],
+    messages: { chat: [] },
+    scope: GROUP_SCOPE,
+    now: 5000,
+  })
+  const bubble = ledger.get('chat:group:p1:b1')
+  assert.equal(bubble.startedAt, '2026-01-01T00:00:01Z')
+  assert.equal(bubble.endedAt, '2026-01-01T00:00:03Z')
+  // 渲染层：驻留行秒表是静态文本（不带 data-started，1s 定时器不会改它），排队行仍实时走动
+  const htmlBody = /function typingLingerRowsHtml\([\s\S]*?\n\}/.exec(source)?.[0]
+  assert.ok(htmlBody, '未找到 typingLingerRowsHtml')
+  const clock = /const clock = lingering\s*\? `([^`]*)`\s*:\s*`([^`]*)`/.exec(htmlBody)
+  assert.ok(clock, '未找到驻留/排队两套秒表')
+  assert.match(clock[1], /duration\(bubble\.startedAt, bubble\.endedAt/)
+  assert.doesNotMatch(clock[1], /data-started/, '驻留行秒表须冻结，不能被 1s 定时器改写')
+  assert.match(clock[2], /data-started/, '排队行秒表照旧实时走动')
+})
+
 test('上一轮的终态运行不劫持本轮乐观气泡：气泡继续显示排队中', () => {
   const base = Date.parse('2026-01-01T00:00:00Z')
   const optimistic = api.addOptimisticTypingBubble(new Map(), {

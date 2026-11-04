@@ -157,7 +157,17 @@ function reconcileTypingBubbles(ledger, { runs = [], messages = {}, scope = '', 
       }
       // ③ 真实运行进入终态：同拍已有真实回复就跳过驻留，否则驻留到 lingerUntil 再淡出移除。
       if (hasReplyForRun(typingMessagesFor(messages, bubble.kind), run.id ?? bubble.runId, bubble.botId, bubble.since)) continue
-      next.set(key, { ...bubble, status: run.status, runId: run.id ?? bubble.runId, optimistic: false, lingerUntil: now + lingerMs })
+      // 耗时起点与终点取运行本身：驻留行的秒表冻结在运行结束时刻，显示的是这次运行真正花了多久，
+      // 不会在驻留的几秒里继续往上跳。
+      next.set(key, {
+        ...bubble,
+        status: run.status,
+        runId: run.id ?? bubble.runId,
+        startedAt: run.started_at ?? run.queued_at ?? bubble.startedAt,
+        endedAt: run.ended_at ?? null,
+        optimistic: false,
+        lingerUntil: now + lingerMs,
+      })
       continue
     }
     // ④ 其余（乐观气泡、运行已不在列表里的活跃气泡）：按 TTL 兜底丢弃，不留长驻状态。
@@ -209,12 +219,17 @@ function typingLingerRowsHtml(kind, runs = state.data?.runs ?? []) {
     const lingering = Boolean(bubble.lingerUntil)
     const text = lingering ? runStatusLabel(bubble.status) : t('chat.typingQueued')
     const style = lingering ? ` style="opacity:${typingLingerOpacity(bubble, now).toFixed(3)};transition:opacity ${TYPING_LINGER_FADE_MS}ms linear"` : ''
+    // 驻留行（终态）的秒表冻结在运行结束时刻：静态文本、不带 data-started，1s 定时器不会改它；
+    // 排队行（乐观）照旧走 data-started 实时走动。
+    const clock = lingering
+      ? `<span class="run-clock">${esc(duration(bubble.startedAt, bubble.endedAt ?? undefined))}</span>`
+      : `<span class="run-clock" data-started="${attr(bubble.startedAt ?? '')}">${duration(bubble.startedAt)}</span>`
     return `<div class="typing-row${lingering ? ' typing-row-linger' : ''}" data-bubble-key="${attr(bubble.key)}"${lingering ? ` data-linger-until="${bubble.lingerUntil}"` : ''}${style}>
       ${avatar(bot, 'sm')}
       ${lingering ? '' : '<span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>'}
       <strong class="typing-name">${esc(bubble.botName)}</strong>
       <span class="typing-text">${esc(text)}</span>
-      <span class="run-clock" data-started="${attr(bubble.startedAt ?? '')}">${duration(bubble.startedAt)}</span>
+      ${clock}
     </div>`
   }).join('')
 }
