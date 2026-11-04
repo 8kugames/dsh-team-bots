@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
-import { exportUsageCsv, recordUsage, setPrice, usageSnapshot } from '../src/usage.js'
+import { recordUsage, usageSnapshot } from '../src/usage.js'
+import { exportUsageCsv, setPrice } from '../src/usage-reconcile.js'
 
 // 用量成本追认（DSHBOTS-115）：入库时没命中价目的历史明细，在价目配齐后按当前价目
 // 回溯补算——聚合结果即全量，「成本为部分值」随之消失；已计价明细仍用入库算死的成本。

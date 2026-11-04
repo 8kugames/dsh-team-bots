@@ -8,7 +8,8 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
-import { recordUsage, reconcileUsage, applyRetention, exportUsageCsv } from '../src/usage.js'
+import { recordUsage } from '../src/usage.js'
+import { applyRetention, exportUsageCsv, reconcileUsage } from '../src/usage-reconcile.js'
 import { publishSkill, readCurrentPointer } from '../src/skills.js'
 
 class FakeRuntime {

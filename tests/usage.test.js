@@ -4,15 +4,13 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
+import { reconciliationSummary, recordUsage, usageSnapshot } from '../src/usage.js'
 import {
   applyRetention,
   exportUsageCsv,
-  recordUsage,
   reconcileUsage,
-  reconciliationSummary,
   setPrice,
-  usageSnapshot,
-} from '../src/usage.js'
+} from '../src/usage-reconcile.js'
 
 // 用量统计与对账口径的回归测试：保留期清理、过期 vs 丢失、零用量分档、未计价计数、对账记录清理。
 

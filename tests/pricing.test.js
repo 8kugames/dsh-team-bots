@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { DEFAULT_MODEL_PRICES, effectivePrice, normalizePriceEntry, resolveModelPrices, seedModelPrices } from '../src/pricing.js'
-import { recordUsage, setPrice, usageSnapshot } from '../src/usage.js'
+import { recordUsage, usageSnapshot } from '../src/usage.js'
+import { setPrice } from '../src/usage-reconcile.js'
 
 async function db() {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-team-price-'))
