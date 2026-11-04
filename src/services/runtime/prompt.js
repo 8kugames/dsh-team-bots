@@ -2,6 +2,10 @@
 // 按运行类型拼装系统提示词、单聊提示词与引用行，并套用文件权限档位。
 // 本文件只放方法体，方法挂到 DshRuntime 原型上（见 src/runtime.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
+//
+// 模板段序原则：各运行提示词一律「静态指令段前置、每卡/每消息变化字段后置」。
+// 前缀缓存按最长公共前缀匹配，静态段在变体之后会导致跨卡派发在描述处分叉、
+// 固定段吃不到缓存。调整任一模板段顺序时必须保持该原则（tests/prompt-prefix-order.test.js 守门）。
 
 import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
@@ -304,12 +308,12 @@ export const promptMethods = {
       : (incremental ? 'No new messages since your last turn.' : 'No recent conversation.')
     return `${header}
 
+Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.
+
 # Solo message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
 
-${recentBlock}
-
-Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.`
+${recentBlock}`
   },
   // 读图代理运行提示词（DSHBOTS-112）：代理模型把消息附图转写成中文结构化文本，
   // 供无视觉能力的主模型在后续轮次消费。图片分片由 startRun 随首条 prompt 自动
@@ -324,14 +328,14 @@ Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatRe
 # Image transcription request
 The user message below carries images that ${bot.name}'s main model cannot see. Your only job: transcribe every attached image into Chinese.
 
-Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
-${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}
-
 Transcription requirements:
 - 输出中文，按图片顺序逐张编号（图片 1、图片 2……），一张一小节。
 - 每张包含：【类型】截图/照片/图表等；【主体】画面主要内容；【文字】图中出现的全部文字（保持原文；长文可摘要，但关键数字、路径、命令、报错必须逐字保留）；【细节】颜色、布局、状态等对理解有用的信息。
 - 只描述看得见的内容，不推测画面之外的信息；看不清的部分明确说「看不清」。
-- 不要调用任何工具，不要写入文件；直接输出转写正文，不要用代码块包裹整个回复。`
+- 不要调用任何工具，不要写入文件；直接输出转写正文，不要用代码块包裹整个回复。
+
+Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
+${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
   },
   promptFor({ run, bot, project, task, chatMessage, sessionId }) {
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, sessionId })
@@ -376,36 +380,36 @@ The effective timeout is the smaller of this budget and the global run timeout (
         if (run.trigger_type === 'review_delegate') {
           return `${header}
 
+The owner delegated the acceptance verification of this delivered task to you. Verify the delivery report item by item; do not redo the work and do not make the final call:
+- Scope: compare what the delivery report says was changed against the declared write scopes below; flag any out-of-scope change.
+- Target tests: run only the test files this task names (for example node --test <files>), not the whole suite — full-suite numbers are the deliverer's responsibility on a clean tree. If the read-only sandbox blocks a check, say so explicitly instead of skipping it.
+- Red verification: design at least one negative check (a change that should make the target tests fail) and state the expected number of red cases; when the sandbox forbids mutating files, give the exact command and the reasoned prediction.
+- Conclusion: a recommendation of 建议 accept or 建议 return with reasons tied to the evidence below.
+
+Run the independent checks in parallel using your subagent/subagent_fork tools, then merge their findings into one verdict. Do NOT call team_review_task and do NOT change the task status — the verdict belongs to the owner.
+
+Your final reply is recorded as a task comment automatically. It MUST start with 「子代理核验：」 and carry the recommendation plus reasons. Reply in the user's language.
+
 # Subagent verification for task ${project.key}-${task.number}
 Title: ${task.title}
 Status: ${task.status}
 Declared write scopes: ${declaredScopes}
 Description:
-${description}${threads}${timeBudgetBlockFor(task)}
-
-The owner delegated the acceptance verification of this delivered task to you. Verify the delivery report item by item; do not redo the work and do not make the final call:
-- Scope: compare what the delivery report says was changed against the declared write scopes above; flag any out-of-scope change.
-- Target tests: run only the test files this task names (for example node --test <files>), not the whole suite — full-suite numbers are the deliverer's responsibility on a clean tree. If the read-only sandbox blocks a check, say so explicitly instead of skipping it.
-- Red verification: design at least one negative check (a change that should make the target tests fail) and state the expected number of red cases; when the sandbox forbids mutating files, give the exact command and the reasoned prediction.
-- Conclusion: a recommendation of 建议 accept or 建议 return with reasons tied to the evidence above.
-
-Run the independent checks in parallel using your subagent/subagent_fork tools, then merge their findings into one verdict. Do NOT call team_review_task and do NOT change the task status — the verdict belongs to the owner.
-
-Your final reply is recorded as a task comment automatically. It MUST start with 「子代理核验：」 and carry the recommendation plus reasons. Reply in the user's language.`
+${description}${threads}${timeBudgetBlockFor(task)}`
         }
         return `${header}
+
+As the project owner, review the delivered result below against the task description. Check the delivery report claims when needed (files exist, tests pass). Then decide:
+- If the work is acceptable, call team_review_task with decision "accept".
+- If it needs rework, call team_review_task with decision "return" and a concrete rework reason in comment.
+Do not redo the task yourself, and do not start parallel work here. Reply in the user's language with a short verdict.
 
 # Review delivery for task ${project.key}-${task.number}
 Title: ${task.title}
 Status: ${task.status}
 Declared write scopes: ${declaredScopes}
 Description:
-${description}${threads}${timeBudgetBlockFor(task)}
-
-As the project owner, review the delivered result above against the task description. Check the delivery report claims when needed (files exist, tests pass). Then decide:
-- If the work is acceptable, call team_review_task with decision "accept".
-- If it needs rework, call team_review_task with decision "return" and a concrete rework reason in comment.
-Do not redo the task yourself, and do not start parallel work here. Reply in the user's language with a short verdict.`
+${description}${threads}${timeBudgetBlockFor(task)}`
       }
       const failure = this.store.get(
         "SELECT error_code, error_message FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'failed' ORDER BY ended_at DESC LIMIT 1",
@@ -413,18 +417,18 @@ Do not redo the task yourself, and do not start parallel work here. Reply in the
       )
       return `${header}
 
+As the project owner, handle this blocked task:
+- If it is worth retrying, call team_assign_task with task "${project.key}-${task.number}" and assignee (the same bot to retry, or a different bot).
+- If it needs the user's decision (scope change, missing access, repeated failures), do not re-dispatch; reply in the group explaining what you need from the user.
+Avoid re-dispatching more than once without progress. Reply in the user's language with a short verdict.
+
 # Blocked task ${project.key}-${task.number} needs your handling
 Title: ${task.title}
 Status: ${task.status}
 Declared write scopes: ${declaredScopes}
 Description:
 ${description}${threads}${timeBudgetBlockFor(task)}
-Last failure: ${failure?.error_message ?? 'unknown'}
-
-As the project owner, handle this blocked task:
-- If it is worth retrying, call team_assign_task with task "${project.key}-${task.number}" and assignee (the same bot to retry, or a different bot).
-- If it needs the user's decision (scope change, missing access, repeated failures), do not re-dispatch; reply in the group explaining what you need from the user.
-Avoid re-dispatching more than once without progress. Reply in the user's language with a short verdict.`
+Last failure: ${failure?.error_message ?? 'unknown'}`
     }
     if (run.kind === 'dm' || run.kind === 'dm_reply') {
       const message = run.trigger_ref
@@ -454,10 +458,6 @@ Avoid re-dispatching more than once without progress. Reply in the user's langua
         return `${header}
 
 # Memory review for a finished task
-Task: ${sourceTask ? `${project.key}-${sourceTask.number} ${sourceTask.title}` : '(unknown task)'}
-Delivery output:
-${(sourceRun.output ?? '').slice(0, 6000)}${timeBudgetBlockFor(sourceTask)}
-
 Extract the durable facts worth remembering for later runs. Reply with a JSON array only, no prose and no code fence. Each item:
 {"scope":"bot|project|team","topic":"short label","content":"one durable fact","confidence":0.0-1.0}
 Rules:
@@ -465,7 +465,11 @@ Rules:
 - Only durable facts: decisions, constraints, conventions, preferences, recurring pitfalls. Skip transient steps, file listings, and anything already stated in the task description.
 - Never store secrets, tokens, credentials or personal data.
 - Use confidence 0.5-0.7 for inferences and 0.8-1.0 for facts stated explicitly in the output.
-- Return [] when nothing is worth remembering.`
+- Return [] when nothing is worth remembering.
+
+Task: ${sourceTask ? `${project.key}-${sourceTask.number} ${sourceTask.title}` : '(unknown task)'}
+Delivery output:
+${(sourceRun.output ?? '').slice(0, 6000)}${timeBudgetBlockFor(sourceTask)}`
       }
       const userMessage = sourceRun?.trigger_ref
         ? this.store.get('SELECT body FROM messages WHERE id = ?', sourceRun.trigger_ref)
@@ -473,18 +477,18 @@ Rules:
       return `${header}
 
 # Memory review for a finished chat reply
-User message:
-${(userMessage?.body ?? '(missing)').slice(0, 2000)}
-Your reply:
-${(sourceRun?.output ?? '').slice(0, 4000)}
-
 Extract the durable facts worth remembering from this exchange. Reply with a JSON array only, no prose and no code fence. Each item:
 {"scope":"bot|project","topic":"short label","content":"one durable fact","confidence":0.0-1.0}
 Rules:
 - Only durable facts: user preferences, project decisions, constraints, conventions. Skip small talk, transient questions and one-off answers.
 - Never store secrets, tokens, credentials or personal data.
 - Use confidence 0.5-0.7 for inferences and 0.8-1.0 for facts stated explicitly.
-- Return [] when nothing is worth remembering. Chat replies rarely need more than one entry.`
+- Return [] when nothing is worth remembering. Chat replies rarely need more than one entry.
+
+User message:
+${(userMessage?.body ?? '(missing)').slice(0, 2000)}
+Your reply:
+${(sourceRun?.output ?? '').slice(0, 4000)}`
     }
     if (task) {
       // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
@@ -518,17 +522,17 @@ Rules:
 - Record every part on the shared task board with team_task_create and a disjoint write_scope. Never let two members edit the same path.
 - Before delivering: list_agents, then wait_agent until nothing is running, then merge their results into your report.
 - The checkout is shared and unlocked. If a teammate reports a conflicting edit, resolve it yourself instead of retrying blindly.` : ''
-      return `${header}
+      return `${header}${subtaskDisciplineBlock}
+
+Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
+When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.${parallel}
 
 # Assigned task ${project.key}-${task.number}
 Title: ${task.title}
 Priority: ${task.priority}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}${parallel}${timeBudgetBlock}${urgentExemptionBlock}${subtaskDisciplineBlock}${recoveryNoteBlock}
-
-Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
-When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.`
+${task.description || '(no description)'}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}`
     }
     const { rows: recent, incremental } = this.watermarkWindow({
       sessionId,
@@ -561,15 +565,15 @@ When the deliverable includes images, put the files in the workspace and referen
     const quoteLine = this.quotedLineFor(chatMessage)
     return `${header}
 
+Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.
+
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
 ${quoteLine}
 ${recentBlock}
 
 Open tasks:
-${taskList}
-
-Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.`
+${taskList}`
   },
 
   // 引用行：正文控制在 200 字内；bot 发送者查名字，其余回退 sender_type:sender_id 展示。

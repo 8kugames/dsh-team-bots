@@ -118,6 +118,12 @@ test('任务提示词注入纪律段：拆解义务 + 产品级子卡要求 + KE
 
     const plainPrompt = promptOf(plain)
     assert.match(plainPrompt, /# Subtask discipline/, '所有任务卡都应注入纪律段标题')
+    // DSHBOTS-152 段序守门：纪律段属于全局静态段，必须先于每卡变化的「# Assigned task」字段块，
+    // 否则跨卡派发在描述处分叉、静态段吃不到前缀缓存（详见 tests/prompt-prefix-order.test.js）。
+    assert.ok(
+      plainPrompt.indexOf('# Subtask discipline') < plainPrompt.indexOf('# Assigned task'),
+      '纪律段必须排在任务卡字段块之前（静态段前置原则）',
+    )
     assert.match(plainPrompt, /team_assign_task[\s\S]*parent_task_id/, '应指示用 team_assign_task 传 parent_task_id 立子卡')
     assert.match(plainPrompt, /收口条件/, '应覆盖「新收口条件」触发口径')
     assert.match(plainPrompt, /通用能力、完整测试、真实落库/, '子卡应要求产品级实现')
