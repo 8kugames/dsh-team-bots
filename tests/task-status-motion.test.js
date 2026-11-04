@@ -13,11 +13,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { uiStylesSource } from './ui-styles-source.js'
+import { readUiSource } from './helpers/ui-sources.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const css = await uiStylesSource()
-const app = readFileSync(join(root, 'ui', 'app.js'), 'utf8')
+const app = readUiSource()
 const zh = readFileSync(join(root, 'ui', 'i18n', 'zh.js'), 'utf8')
 
 // 注释里可能带花括号，先剥掉再配平。

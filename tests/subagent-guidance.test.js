@@ -3,11 +3,12 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 test('dispatch page subagent card describes real capability, no placeholder', () => {
-  const app = fs.readFileSync(path.join(root, 'ui/app.js'), 'utf8')
+  const app = readUiSource()
   assert.doesNotMatch(app, /待接入/)
   assert.doesNotMatch(app, /依赖 DSHBOTS-27/)
   assert.match(app, /<h3>\$\{t\('solo\.subagents'\)\}<\/h3>/)

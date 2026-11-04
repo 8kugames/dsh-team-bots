@@ -173,6 +173,7 @@ export function installHttp(ctx, service, logger = console) {
   route('/api/dsh-team/modules/tasks.js', ['GET'], moduleScript('tasks.js'))
   route('/api/dsh-team/modules/modal-layer.js', ['GET'], moduleScript('modal-layer.js'))
   route('/api/dsh-team/modules/modal-forms.js', ['GET'], moduleScript('modal-forms.js'))
+  route('/api/dsh-team/modules/chat.js', ['GET'], moduleScript('chat.js'))
   route('/api/dsh-team/i18n/zh.js', ['GET'], i18nDict('zh.js'))
   route('/api/dsh-team/i18n/en.js', ['GET'], i18nDict('en.js'))
   route('/api/dsh-team/styles.css', ['GET'], styles)
