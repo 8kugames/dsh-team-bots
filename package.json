@@ -1,6 +1,6 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.2.277",
+  "version": "0.2.278",
   "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
   "repository": {
     "type": "git",
@@ -25,6 +25,7 @@
     "cordis.patch.yml",
     "README.md",
     "docs/README.md",
+    "docs/README.zh.md",
     "docs/assets/",
     "NOTICE",
     "LICENSE"
