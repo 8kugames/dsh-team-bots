@@ -11,6 +11,7 @@ import { attachImageButton, composerAppliedHeightPx, composerImageStrip, current
 import { typingLingerRowsHtml } from './typing-linger.js'
 import { effortOptions, fallbackModelOptions, modelOptions } from './modal-forms.js'
 import { sideRowStatusHtml, runStatusLabel, runKindLabel, render, noProject } from '../app.js'
+import { soloArchivedHasMore } from './solo-archive.js'
 
 // typing-status:start —— 消息流末尾「Bot 响应中」状态行的纯逻辑（tests/typing-status.test.js 抽取此块断言）
 // 只认 chat / solo_chat 的活跃运行；task、review、handle、dm、dm_reply、memory_review 与已结束运行一律不出行。
@@ -64,10 +65,16 @@ function mergedChatMessages(latest) {
 }
 
 // 未翻过页且首屏已满页时也可能还有更早历史——显示按钮探一页，由 hasMore 收敛。
+// 单聊（DSHBOTS-174）：归档窗口过滤后首屏恒小于 CHAT_PAGE_SIZE，旧阈值永不满足；入口改看后端
+// archived.hasMore 契约（solo-archive.js），且需 mergedCount>0 作游标锚点（首屏空则无锚可翻）；
+// 旧后端无契约时回退旧阈值。群聊条件不变。
 function canLoadOlder(mergedCount) {
   const key = chatKey()
   const bucket = state.chatOlder.key === key ? state.chatOlder : null
-  if (!bucket) return mergedCount >= CHAT_PAGE_SIZE
+  if (!bucket) {
+    if (state.chatMode === 'solo') return (mergedCount > 0 && soloArchivedHasMore()) || mergedCount >= CHAT_PAGE_SIZE
+    return mergedCount >= CHAT_PAGE_SIZE
+  }
   if (bucket.loading || !bucket.hasMore) return false
   return true
 }

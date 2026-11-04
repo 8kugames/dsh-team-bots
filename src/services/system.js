@@ -184,14 +184,21 @@ export const systemMethods = {
     if (soloBotId) {
       const soloBot = this.store.get('SELECT * FROM bots WHERE id = ?', soloBotId)
       if (soloBot) {
+        // 归档契约（DSHBOTS-174）：默认视图（归档窗口交集，或两维全关时的 200 条回退上限）隐去的
+        // 更早消息数。被隐去的都严格早于窗口最旧一条，UI 据此点亮「加载更早」入口，经 messagesPage
+        // 游标必可翻回；无隐去时 count=0 / hasMore=false，入口不出现。
+        const soloWindow = soloVisibleMessages(this.store, soloBot.id, {
+          days: this.config.dmArchiveDays,
+          keep: this.config.dmKeepRecent,
+        })
+        const soloTotal = Number(this.store.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', soloBot.id)?.count ?? 0)
+        const archivedCount = Math.max(0, soloTotal - soloWindow.length)
         view.solo = {
           bot: this.botView(soloBot),
           // 默认视图走归档窗口（DSHBOTS-171）：只留「最近 dmKeepRecent 条 且 dmArchiveDays
           // 天内」交集，超出即隐去；被归档消息经 messagesPage 游标翻页仍可查回。
-          messages: soloVisibleMessages(this.store, soloBot.id, {
-            days: this.config.dmArchiveDays,
-            keep: this.config.dmKeepRecent,
-          }).map(message => this.soloMessageView(message)),
+          messages: soloWindow.map(message => this.soloMessageView(message)),
+          archived: { count: archivedCount, hasMore: archivedCount > 0 },
           runs: this.store.all(
             "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 30",
             soloBot.id,
