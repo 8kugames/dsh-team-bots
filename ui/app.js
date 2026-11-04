@@ -3102,6 +3102,22 @@ function renderModal() {
 // innerHTML 只替换其内部，弹窗滚动位与正在编辑的输入焦点不被拆掉；内容未变时零 DOM 操作。
 let lastModalHtml = ''
 
+// 滚动守卫（DSHBOTS-154）：modal-body 滚动进行中（最近 100ms 内有滚动事件，见模块尾的
+// 捕获阶段 scroll 监听）不替换正文——原位补丁虽保留节点与 scrollTop，但整段子树重建在
+// 滚动中肉眼可见。延后到滚动停止后补拍；关闭弹窗与首次挂载不延后（见 renderModalLayer 内闸门）。
+let modalScrollAt = -1e9
+let modalPatchTimer = null
+function modalScrollRecent() {
+  return performance.now() - modalScrollAt < 100
+}
+function scheduleModalPatch() {
+  if (modalPatchTimer) return
+  modalPatchTimer = setTimeout(() => {
+    modalPatchTimer = null
+    renderModalLayer()
+  }, 120)
+}
+
 // overlay-render（DSHBOTS-98）：#modal-root 弹窗与 body 级 #image-viewer 同属半透明遮罩，
 // 遮罩打开期间 #app 的全量重绘肉眼可见（闪烁）。轮询照常取数但跳过重建并记 pending，
 // 遮罩关闭时 flushAppRender 补一次渲染追平最新 state。三个符号留在 modal-layer 块内：
@@ -3135,6 +3151,13 @@ function renderModalLayer() {
   const root = ensureModalRoot()
   const html = renderModal()
   if (html === lastModalHtml) return
+  // 滚动守卫闸门（DSHBOTS-154）：同一弹窗的刷新在 modal-body 滚动进行中延后——延后期间
+  // lastModalHtml 不更新，滚动停止后 scheduleModalPatch 重入时仍能识别「内容变了」并补拍。
+  // 关闭（html 为空，须立即清层）与首次挂载（root 尚无遮罩，无旧内容可闪）不延后。
+  if (html && root.firstElementChild?.classList?.contains('modal-backdrop') && modalScrollRecent()) {
+    scheduleModalPatch()
+    return
+  }
   lastModalHtml = html
   // 关弹窗转换（有弹窗 → 无弹窗）：清层前补上遮罩期间被跳过的 #app 渲染（DSHBOTS-98）。
   if (!html) flushAppRender()
@@ -3145,6 +3168,8 @@ function renderModalLayer() {
   const prevBackdrop = root.firstElementChild
   if (!prevBackdrop?.classList?.contains('modal-backdrop')) {
     root.innerHTML = html
+    // 秒级时钟占位水化（DSHBOTS-154）：占位符不能等 1s 定时器，挂载即补真实时长。
+    if (typeof updateRunClocks === 'function') updateRunClocks(root)
     return
   }
   const stage = document.createElement('div')
@@ -3154,6 +3179,7 @@ function renderModalLayer() {
   const prevPanel = prevBackdrop.firstElementChild
   if (!freshBackdrop || !freshPanel || !prevPanel) {
     root.innerHTML = html
+    if (typeof updateRunClocks === 'function') updateRunClocks(root)
     return
   }
   const prevBody = prevPanel.querySelector('.modal-body')
@@ -3181,6 +3207,7 @@ function renderModalLayer() {
   }
   prevPanel.className = freshPanel.className
   prevPanel.setAttribute('aria-label', freshPanel.getAttribute('aria-label') ?? '')
+  if (typeof updateRunClocks === 'function') updateRunClocks(root)
 }
 // modal-layer:end
 
@@ -3545,6 +3572,17 @@ function modalTrajectory(detail, runId) {
   })
 }
 
+// 运行行时长（DSHBOTS-154）：running 运行的 duration 无 end、按 Date.now() 计，每秒都变。
+// 直接嵌进 modal html 会让 reloadTaskModal 的字符串比对必然不相等 → 正文整段重建（滚动中
+// 肉眼可见）。改为稳定占位 + data-started，挂载后由 updateRunClocks 定点刷新文本——与消息流
+// typing 行同一通道（区别：那边随 #app 全量重建渲染、初值可以直接是 duration，这里必须稳定）。
+function runClockSpan(run) {
+  if (run.status === 'running' && run.started_at) {
+    return `<span class="run-clock" data-started="${attr(run.started_at)}">…</span>`
+  }
+  return `<span>${esc(duration(run.started_at, run.ended_at))}</span>`
+}
+
 function modalTask(task) {
   if (!task) return modalLoading('任务')
   const project = activeProject()
@@ -3607,7 +3645,7 @@ function modalTask(task) {
         ${(activeRun || latestFailed) ? `<div class="btn-row" style="margin:9px 0 2px">${activeRun ? `<button class="btn danger small" type="button" data-action="cancel-run" data-run-id="${attr(activeRun.id)}">${icon('stop')}停止运行</button>` : ''}${latestFailed ? `<button class="btn small" type="button" data-action="retry-run" data-run-id="${attr(latestFailed.id)}">${icon('refresh')}重试</button>` : ''}</div>` : ''}
         <div style="margin-top:8px">${(task.runs ?? []).length === 0 ? '<div class="note">还没有运行。</div>' : task.runs.map(run => `<div class="run-row">
           <div class="run-row-top">${runDot(run.status)}<strong>#${run.attempt}</strong><span>${esc(RUN_STATUS[run.status] ?? run.status)}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
-          <div class="run-row-meta"><span>${esc(duration(run.started_at, run.ended_at))}</span><span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
+          <div class="run-row-meta">${runClockSpan(run)}<span>${formatNumber(run.usage_input + run.usage_output)} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
           ${run.error_message ? `<div class="run-output error">${esc(run.error_message)}</div>` : ''}
           ${run.output ? `<details style="margin-top:6px"${panelAttrs(state, `run-output:${run.id}`)}><summary class="summary-link">查看输出</summary><div class="run-output">${esc(run.output)}</div></details>` : ''}
           ${runArtifacts(state, run)}
@@ -5903,6 +5941,15 @@ window.addEventListener('wheel', event => {
   event.preventDefault()
 }, { passive: false })
 
+// modal 滚动守卫信号源（DSHBOTS-154）：scroll 不冒泡但走捕获可及，window 捕获阶段记
+// modal-body 滚动时间戳，renderModalLayer 据此在滚动进行中延后正文补丁（见 modal-layer 块）。
+window.addEventListener('scroll', event => {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  if (!target.closest?.('.modal-body')) return
+  modalScrollAt = performance.now()
+}, { capture: true, passive: true })
+
 // 顶部待审明细菜单（DSHBOTS-102）：点击菜单外任意处收起；面板关着时直接返回，不额外渲染。
 document.addEventListener('click', (event) => {
   if (!state.approvalPanelOpen) return
@@ -5943,11 +5990,18 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void poll()
 })
 
-setInterval(() => { void poll() }, 2800)
-setInterval(() => {
-  for (const el of document.querySelectorAll('.run-clock[data-started]')) {
+// 秒级时钟定点刷新（DSHBOTS-154 抽出共用）：消息流 typing 行、调度页运行行与任务弹窗
+// 运行行（runClockSpan 产出的占位）同一通道——只改 textContent，不重建节点。renderModalLayer
+// 挂载/补丁后同步调用一次，占位符不会等满 1s 才补上真实时长。
+function updateRunClocks(root = document) {
+  for (const el of root.querySelectorAll('.run-clock[data-started]')) {
     el.textContent = duration(el.dataset.started)
   }
+}
+
+setInterval(() => { void poll() }, 2800)
+setInterval(() => {
+  updateRunClocks()
   // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
   for (const el of document.querySelectorAll('.approval-clock[data-expires], .approval-menu-time[data-expires]')) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
