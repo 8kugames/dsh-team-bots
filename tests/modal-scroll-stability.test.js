@@ -1,8 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
 
 const source = readUiSource()
+const modalCss = readFileSync(fileURLToPath(new URL('../ui/styles/modal.css', import.meta.url)), 'utf8')
 
 // —— DSHBOTS-154：任务详情 modal 滚动稳定性 ——
 // 取证结论（CDP 活体）：2.8s 轮询期间 renderModalLayer 根本不被调（render() 的遮罩闸门
@@ -183,4 +186,35 @@ test('时钟通道：1s 定时器与 renderModalLayer 共用 updateRunClocks，�
   const layerSrc = /function renderModalLayer\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   const hydrations = layerSrc.match(/if \(typeof updateRunClocks === 'function'\) updateRunClocks\(root\)/g) ?? []
   assert.equal(hydrations.length, 3, '三条写入路径（首挂/兜底整写/原位补丁）挂载即水化占位，不等 1s 定时器')
+})
+
+// —— DSHBOTS-166：滚动区合成层化（闪烁根因修复）——
+// 取证结论（CDP Tracing + 真 GPU）：D-154 的 DOM 侧修复已上线且生效（滚动期 DOM 零写入），
+// 但滚动容器 .modal-body 未被合成 → 滚动走主线程 → 每一帧都要重录祖先链。实测 250px 滚动
+// 产生 37 次全视口级 Paint（#document 与带 backdrop-filter 的 .modal-backdrop 各一次，单次
+// 8.2M 设备像素），空闲对照为 0 次 → 闪烁来自合成层重算（backdrop-filter 表面逐帧重算 +
+// 面板内容逐帧重栅格），与 DOM 写入无关（DSHBOTS-98 已有同机制先例：遮罩下底页滚动即全屏闪烁）。
+// 修复：.modal-body 提升为合成层（will-change: transform），滚动内容在自有层位移，祖先链
+// 不再逐帧重录——实测该变体下 .modal-backdrop 从每帧 Paint 名单中消失。
+const cssRule = (selector) => {
+  const m = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(modalCss)
+  assert.ok(m, `ui/styles/modal.css 缺少 ${selector} 规则`)
+  // 去掉注释再断言：注释里出现过的属性名不算实际声明
+  return m[1].replace(/\/\*[\s\S]*?\*\//g, '')
+}
+
+test('滚动区合成层：.modal-body 提升为合成层（will-change: transform），滚动不再逐帧重录遮罩祖先', () => {
+  const body = cssRule('.modal-body')
+  assert.match(body, /will-change:\s*transform/, '.modal-body 必须是合成层：未合成时滚动走主线程，每帧重录带 backdrop-filter 的遮罩祖先')
+})
+
+test('视觉口径不变：backdrop-filter 仍留在 .modal-backdrop，滚动区不得自带 filter（防双层滤镜与额外重算）', () => {
+  const backdrop = cssRule('.modal-backdrop')
+  const body = cssRule('.modal-body')
+  assert.match(backdrop, /backdrop-filter:\s*blur\(2px\)/, '遮罩的模糊仍在 .modal-backdrop（视觉口径不变）')
+  assert.doesNotMatch(body, /backdrop-filter|filter\s*:/, '.modal-body 不得自带 filter：滚动子树里的滤镜会把每帧重算搬回滚动内容上')
+})
+
+test('滚动区合成层不改变滚动串联口径：overscroll-behavior: contain 仍在（DSHBOTS-98 底层滚动锁）', () => {
+  assert.match(cssRule('.modal-body'), /overscroll-behavior:\s*contain/, '面板滚到尽头不得把滚动串到底层页面')
 })
