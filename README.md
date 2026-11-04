@@ -42,7 +42,7 @@ npm run profile:install -- --profile <name>     # installs into team-bots when -
 npm run dev                                     # local preview at http://127.0.0.1:4317, fake runtime
 ```
 
-`profile:install` packs the repository into `.dist/`, reinstalls it with `dsh plugin add`, and rewrites the profile patch file to trigger a recomposition. **Plugin files inside a profile are a snapshot and DSH does not pick up replaced files on its own**: after changing code you must reinstall, or the page sticks at "connecting to the team space". Team data is decoupled from the profile: `DSH_TEAM_WORKSPACE` / `DSH_TEAM_DATA` alone decide the data directory. The preview server uses a fake DSH runtime — **no authentication, no DSH configuration touched, not for production**; override the port with `PORT`.
+`profile:install` packs the repository and reinstalls the plugin into a profile. **Plugin files inside a profile are a snapshot and DSH does not pick up replaced files on its own**: after changing code you must reinstall, or the page sticks at "connecting to the team space". Team data is decoupled from the profile: `DSH_TEAM_WORKSPACE` / `DSH_TEAM_DATA` alone decide the data directory. The preview server uses a fake DSH runtime — **no authentication, no DSH configuration touched, not for production**; override the port with `PORT`.
 
 ### 2.3 Data, secrets and skills
 
@@ -60,7 +60,7 @@ http://<host>:<port>/index.html           the native DSH web UI
 
 The first visit to the home page exchanges the current startup token for a 30-day login cookie. Auto-login means **anyone who can reach the port becomes owner**, so listen on the local machine or a trusted network; public exposure needs an HTTPS reverse proxy that forwards Host and WebSocket correctly.
 
-Defaults come from `src/config.js` (resolution order: explicit env > value saved on the page > code default). Common variables: `DSH_TEAM_MAX_RUNS` (6), `DSH_TEAM_RUN_TIMEOUT_MS` (3600000), `DSH_TEAM_MAX_RUN_TOKENS` (0), `DSH_TEAM_APPROVAL_TIMEOUT_MS` (180000), `DSH_TEAM_SECRETS_TTL_MS` (1800000), `DSH_TEAM_UI_LANGUAGE` (`auto`), `DSH_TEAM_AGENT_TEAM` / `DSH_TEAM_MAX_TEAMMATES` (0 / 3), `DSH_TEAM_WECHAT` (0), `DSH_TEAM_SECRET_KEY`. The full list and every default live in `src/config.js`.
+The two paths that matter are `DSH_TEAM_WORKSPACE` (team workspace root) and `DSH_TEAM_DATA` (team database and run records); every other variable, its default and its resolution order (explicit env > value saved on the page > code default) live in `src/config.js`.
 
 ---
 
@@ -82,39 +82,20 @@ Defaults come from `src/config.js` (resolution order: explicit env > value saved
 
 ### 4.1 Wiring
 
-`apply(ctx, config)` in `index.js` is the only entry point, and its order is the dependency order:
-
-```
-resolveConfig(config)      → src/config.js      parse env / injected config into a defaulted config
-openDatabase(dbPath)       → src/db.js          open and migrate SQLite
-new TeamService(...)       → src/service.js     domain facade (methods mounted from src/services/*)
-new DshRuntime(...)        → src/runtime.js     host runtime adapter (prompts, sessions, model recovery)
-installTeamTools(...)      → src/tools.js       register the team tools
-installSkillProvider(...)  → src/skills.js      wire the skill pool
-installHttp(...)           → src/http.js        HTTP routes and UI static slices
-```
-
-`service.initialize()` creates the database and seeds the default bots and buddies first; only then does `service.start()` bring up the scheduler.
+`apply(ctx, config)` in `index.js` is the only entry point, and it assembles the layers in dependency order — configuration, database, domain service, host runtime, team tools, skill pool, HTTP. `service.initialize()` then creates the database and seeds the default bots and buddies before `service.start()` brings up the scheduler.
 
 ### 4.2 The `src/` directory
 
 | Path | Responsibility |
 | --- | --- |
-| `index.js`, `src/config.js` | plugin entry point; configuration resolution (env / page-saved value / code default) |
-| `src/db.js`, `src/db-migrations.js` | SQLite access and idempotent migrations (a new column can be added repeatedly) |
-| `src/service.js`, `src/services/` | the `TeamService` facade and its domain methods: bots, projects, chat, tasks, runs, scheduler, memory, secrets, proposals, terminal, usage, system, wechat, approvals, questions, hygiene, write-scopes, and more |
-| `src/runtime.js`, `src/services/runtime/` | host adapter: prompt assembly, session lifecycle, model recovery, trajectories |
-| `src/http.js`, `src/api.js`, `src/tools.js`, `src/botmsg.js`, `src/skill-parse.js` | HTTP routes and UI slices, the `POST /api/dsh-team/api` dispatch entry, team tools, bot-to-bot messages, skill package parsing |
-| `src/wechat/`, `src/secrets.js`, `src/pricing.js`, `src/usage*.js`, `src/skills*.js`, `src/seed-bots.js`, `src/updater.js`, `src/paths.js`, `src/util.js`, `src/errors.js` | WeChat channel, secret crypto, pricing and usage, skill pools, seed bots, update check, path boundaries, utilities, error types |
+| `index.js`, `src/config.js`, `src/db.js`, `src/db-migrations.js` | plugin entry point; configuration resolution; SQLite access and idempotent migrations |
+| `src/service.js`, `src/services/`, `src/runtime.js`, `src/services/runtime/` | the `TeamService` facade and its domain methods; the host adapter (prompts, sessions, model recovery, trajectories) |
+| `src/http.js`, `src/api.js`, `src/tools.js`, `src/botmsg.js`, `src/skill-parse.js` | HTTP routes and UI slices; the `/api/dsh-team/api` dispatch entry; team tools; bot-to-bot messages; skill parsing |
+| `src/wechat/`, `src/secrets.js`, `src/pricing.js`, `src/usage*.js`, `src/skills*.js`, `src/seed-bots.js`, `src/updater.js`, `src/paths.js`, `src/util.js`, `src/errors.js` | WeChat channel; secret crypto; pricing and usage; skill pools; seed bots; update check; path boundaries; utilities; error types |
 
 ### 4.3 The `ui/` directory
 
-The frontend is plain ES modules with no build step; every slice is loaded straight from an HTTP route. `ui/modules/` holds one module per domain (state, api, chat, tasks, modal-layer, modal-forms, events-*, and more) and `ui/styles/` one CSS file per domain; `ui/i18n/{zh,en}.js` hold the interface dictionaries.
-
-Two hard conventions:
-
-1. **Style slices must be registered.** The concatenation order is decided by `UI_STYLE_PARTS` in `src/http.js`, so a new style file must be registered there too; `tests/styles-split.test.js` guards the table's completeness.
-2. **The 800-line rule.** Both `ui/styles/*.css` and `ui/app.js` stay under 800 lines per file; beyond that, split by responsibility into new domain files.
+The frontend is plain ES modules with no build step; every slice is loaded straight from an HTTP route. `ui/modules/` holds one module per domain, `ui/styles/` one CSS file per domain, and `ui/i18n/{zh,en}.js` the interface dictionaries. Contribution rules for this tree (style-slice registration, the 800-line limit) are in `CONTRIBUTING.md`.
 
 ### 4.4 The WeChat channel
 
@@ -130,13 +111,7 @@ The channel is off by default (`DSH_TEAM_WECHAT=0`) and becomes active after QR 
 | `q` | list the project keys that can be assigned |
 | `<key>: <message>` | forward a message into the project chat for the director to arrange, e.g. `web: 上线新版官网` |
 
-Pushes go through a local outbox with three boundaries that explain "WeChat missed the push":
-
-- Items piled up before the connection was established (a restart, or a re-login under a new account) are discarded and never resent; a transient reconnect inside one connection epoch does not void the queue.
-- A queued item is attempted at most three times (`OUTBOX_MAX_ATTEMPTS`), then discarded for good; a non-retryable error is discarded immediately.
-- Several pushes in the same round are merged into one send (a 1.5 s batching window, echoing at most the 5 oldest originals); a single item is not merged.
-
-When investigating, look at `outbox.attempts` and `gave_up_at`: a value in either means the item was dropped by design, not by a bug.
+Pushes go through a local outbox; its discard policy (retry budget, batching window, connection-epoch retention) is defined in `src/wechat/channel.js`. When investigating a missed push, `outbox.attempts` and `gave_up_at` tell you whether the item was dropped by design or is still queued.
 
 ---
 
@@ -153,21 +128,11 @@ npm run backup                  # back up the team data
 npm run restore-check           # check that a backup can be restored
 ```
 
-### 5.2 Guard tests
+### 5.2 Guard tests and commit conventions
 
-`tests/` holds one `*.test.js` per feature domain, plus the pins for several architectural conventions:
+`npm test` covers every feature domain plus the architectural pins. The guard-test details, the commit conventions and the `ui/` contribution rules are in `CONTRIBUTING.md`.
 
-- `tests/styles-split.test.js`: `UI_STYLE_PARTS` corresponds one-to-one with the `ui/styles/` directory (no orphans, no missing entries, no duplicates), each file stays under 800 lines, and the concatenation has zero drift.
-- `tests/code-hygiene.test.js`: the line-limit semantics (800 by default, judgement line at limit × 110 %, 0 disables it, one alert per violation, a fresh alert after the file falls back under the limit).
-- Cross-slice `import` guards and token-format guards cover the whole `ui/` source tree: a missing import after a slice split leaves the page on the boot screen, so this class of failure is caught in advance.
-
-### 5.3 Commit conventions
-
-- Every commit has the pre-commit hook bump the patch digit of `package.json` by one (`DSH_SKIP_VERSION_BUMP=1` skips it). **Take the committed version from `git show HEAD -- package.json`**, not from the file in the working tree.
-- Commit messages use Conventional Commits style and carry the card number, e.g. `feat(ui): 全局配置页美术重设计（DSHBOTS-184）`.
-- Commit with an exact pathspec (`git commit -- <pathspec>`), and check `git status --short` before and after, so in-flight work from other sessions never gets swept in.
-
-### 5.4 CI
+### 5.3 CI
 
 Pushing a `v*` tag triggers the publish workflow (`.github/workflows/publish.yml`): it installs dependencies, runs the full `npm test`, and only publishes to registry.npmjs.org when everything is green.
 
@@ -187,9 +152,6 @@ Look at `outbox.attempts` and `gave_up_at` first: a value means the item was dro
 **Q: What is the "code hygiene" alert in the project chat?**
 At the end of every run the source files in the project workspace are scanned, and a file over the project's line limit (800 by default, judgement line 880) triggers one 【系统指令】 asking the director to schedule a split card. Raise the limit in the project settings, or set it to 0 to switch the check off.
 
-**Q: What does "planned migration · target page" on the global configuration page mean?**
-The functional migration of that module has not landed yet — this is only a visual annotation, so do not read it as "already migrated".
-
 **Q: Can it be exposed to the public internet?**
 The plugin ships no sandbox: bot sessions run under DSH's `danger-full-access` as the current user. Together with auto-login (reaching the port means owner), public exposure requires an HTTPS reverse proxy and your own authentication; teams that do not trust each other should not share one DSH instance and workspace.
 
@@ -201,7 +163,7 @@ Usage stats carry the summary window, the last 14 days of detail, a per-model / 
 
 ![Usage stats](docs/assets/usage.png)
 
-The global configuration page gathers the team-level cards, the run budget, the DSH paths, the secrets and the model prices:
+The global configuration page keeps only the core groups — preferences, run limits and ops; channels, secrets, version status and pricing rules live on their own top-level pages:
 
 ![Global configuration](docs/assets/global-config-light.png)
 
