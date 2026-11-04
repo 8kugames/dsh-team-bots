@@ -4,8 +4,6 @@
 
 DSH team bots plugin (`dsh-team-bots`): run a crew of collaborating bots inside DSH — project chat, task dispatch, write-scope scheduling, terminal and usage stats, all in one workspace.
 
-![Project chat](docs/assets/chat.png)
-
 ## Features
 
 - **Project chat**: every project gets its own group chat and a project director bot. Supports plain messages, `@Bot`, `/task @Bot title`, `/remember`, `/clear`; typing `/` or `@` opens completion for commands, skills and members.
@@ -82,8 +80,6 @@ Usage stats separate the summary window from the last 14 days of detail, with co
 ![Usage stats](docs/assets/usage.png)
 
 Dark mode:
-
-![Dark project chat](docs/assets/chat-dark.png)
 
 ![Dark usage stats](docs/assets/usage-dark.png)
 

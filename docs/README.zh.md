@@ -4,8 +4,6 @@
 
 DSH 团队 Bots 插件（`dsh-team-bots`）：在 DSH 里组织一支会协作的 Bot 小队——项目群聊、任务派发、写范围并行调度、终端与用量统计都装在同一个工作台里。
 
-![群聊主界面](assets/chat.png)
-
 ## 核心特性
 
 - **项目群聊**：每个项目一间群聊和一位项目总监 Bot。支持普通消息、`@Bot`、`/task @Bot 标题`、`/remember`、`/clear`，输入 `/` 或 `@` 弹出命令、技能与成员补全。
@@ -82,8 +80,6 @@ CI：push `v*` tag 自动发 npm——工作流跑全量测试，全绿后发布
 ![用量统计](assets/usage.png)
 
 暗色模式：
-
-![暗色群聊](assets/chat-dark.png)
 
 ![暗色用量统计](assets/usage-dark.png)
 
