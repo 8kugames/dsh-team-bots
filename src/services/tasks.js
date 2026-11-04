@@ -7,6 +7,8 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { clampNumber, id, nowIso, projectKey, TASK_ID_PATTERN, text } from '../util.js'
 import { parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
+import { resolveSandboxOverride, SANDBOX_OVERRIDES } from './file-policy.js'
+import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 import {
   ensureTaskRelationsSchema, normalizeBlockedByInput, taskDepsView, validateTaskRelations,
 } from './task-relations.js'
@@ -72,6 +74,13 @@ export const tasksMethods = {
     // DSHBOTS-131：该任务派生运行的超时上限取 min(本字段, 全局 runTimeoutMs)，到期即超时中止。
     const rawTimeBudget = input.timeBudgetMinutes ?? input.time_budget_minutes
     const timeBudgetMinutes = Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null
+    // 派发沙箱覆盖（DSHBOTS-156）：列只收合法收紧档；入参解析与「只收紧不放大」校验
+    // 在派发入口 assignFromBot（对准承接 bot 的 file_policy），这里挡直写的垃圾值。
+    if (input.sandboxOverride !== undefined && input.sandboxOverride !== null
+      && !SANDBOX_OVERRIDES.includes(input.sandboxOverride)) {
+      throw badRequest(`沙箱覆盖无效，允许值：${SANDBOX_OVERRIDES.join(' / ')}`)
+    }
+    const sandboxOverride = input.sandboxOverride ?? null
     const taskId = id('task')
     const createdAt = nowIso()
     // 终态时间在创建时补齐（DSHBOTS-69）：以 done/canceled 建档的任务终态列取同一 createdAt，
@@ -83,6 +92,7 @@ export const tasksMethods = {
     const parentTaskId = input.parentTaskId ?? input.parent_task_id ?? null
     const blockedBy = normalizeBlockedByInput(input.blockedBy ?? input.blocked_by)
     ensureTaskRelationsSchema(this.store)
+    ensureTaskSandboxSchema(this.store)
     let number
     this.store.transaction(() => {
       const relations = validateTaskRelations({ store: this.store, projectId: project.id, taskId, parentTaskId, blockedBy })
@@ -90,15 +100,16 @@ export const tasksMethods = {
       this.store.run(
         `INSERT INTO tasks(id, project_id, number, title, description, status, priority, assignee_bot_id,
           creator_type, creator_id, review_target, source_message_id, parent_id, parent_task_id, blocked_by, position, due_at, estimate,
-          time_budget_minutes, write_scopes, version, created_at, updated_at, completed_at, canceled_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          time_budget_minutes, write_scopes, sandbox_override, version, created_at, updated_at, completed_at, canceled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         taskId, project.id, number, title, text(input.description, 40_000), status, priority,
         assigneeId, actor.type, actor.id, actor.type === 'bot' ? 'owner_bot' : 'user',
         input.sourceMessageId ?? null, input.parentId ?? null,
         relations.parentTaskId, JSON.stringify(relations.blockedBy),
         Number.isFinite(Number(input.position)) ? Number(input.position) : number,
         input.dueAt ? new Date(input.dueAt).toISOString() : null,
-        clampNumber(input.estimate, 0, 1000, null), timeBudgetMinutes, JSON.stringify(writeScopes), createdAt, createdAt,
+        clampNumber(input.estimate, 0, 1000, null), timeBudgetMinutes, JSON.stringify(writeScopes),
+        sandboxOverride, createdAt, createdAt,
         completedAt, canceledAt,
       )
       for (const label of Array.isArray(input.labels) ? input.labels.slice(0, 12) : []) {
@@ -386,7 +397,9 @@ export const tasksMethods = {
     if (from === to) return
     if (!TRANSITIONS[from]?.has(to)) throw conflict(`任务不能从 ${from} 变为 ${to}`)
   },
-  async assignTask(taskId, botId, actor = this.actor(), { autoStart = true } = {}) {
+  // sandboxOverride 选项（DSHBOTS-156）：undefined=不动（重派未传 sandbox 时保留旧覆盖）；
+  // null=显式清掉回落 bot 配置档（重派传 sandbox='inherit'）；字符串=收紧档（派发入口已校验）。
+  async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride } = {}) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
     this.assertMember(project.id, botId)
@@ -395,15 +408,22 @@ export const tasksMethods = {
       taskId,
     )
     if (active && active.kind === 'task' && task.assignee_bot_id !== botId) throw conflict('任务有正在执行的运行，不能更换负责人')
+    ensureTaskSandboxSchema(this.store)
+    const sandboxTouched = sandboxOverride !== undefined
     this.store.transaction(() => {
       this.store.run(
         `UPDATE tasks SET assignee_bot_id = ?, review_target = ?,
           status = CASE WHEN status IN ('backlog', 'blocked') THEN 'todo' ELSE status END,
-          version = version + 1, updated_at = ? WHERE id = ?`,
-        botId, actor.type === 'bot' ? 'owner_bot' : 'user', nowIso(), taskId,
+          version = version + 1, updated_at = ?${sandboxTouched ? ', sandbox_override = ?' : ''} WHERE id = ?`,
+        ...(sandboxTouched
+          ? [botId, actor.type === 'bot' ? 'owner_bot' : 'user', nowIso(), sandboxOverride ?? null, taskId]
+          : [botId, actor.type === 'bot' ? 'owner_bot' : 'user', nowIso(), taskId]),
       )
-      this.addTaskEvent(taskId, 'assigned', actor, { botId })
-      this.audit(actor, 'task.assign', 'task', taskId, { botId })
+      this.addTaskEvent(taskId, 'assigned', actor, {
+        botId,
+        ...(sandboxTouched && { sandbox: sandboxOverride ?? 'inherit' }),
+      })
+      this.audit(actor, 'task.assign', 'task', taskId, { botId, ...(sandboxTouched && { sandbox: sandboxOverride ?? 'inherit' }) })
     })
     // 总监bot的验收/受阻处理运行本身占用任务的唯一活动运行名额，
     // 此时由 finishRun 的收尾逻辑负责重新排队执行，这里跳过。
@@ -603,10 +623,15 @@ export const tasksMethods = {
     const { project, actor } = this.ownerContextFor(sessionId)
     const member = this.membersOf(project.id).find(bot => bot.name.toLowerCase() === String(input.assignee ?? '').toLowerCase())
     if (!member) throw badRequest(`项目中没有 Bot ${input.assignee}`)
+    // 派发沙箱覆盖（DSHBOTS-156）：可选 sandbox 只收紧不放大，校验对准承接 bot 的配置档；
+    // 缺省 = 跟随 bot 配置（新卡 NULL/重派保留旧值），'inherit' 显式回落 bot 配置（重派清覆盖）。
+    const sandboxOverride = input.sandbox === undefined
+      ? undefined
+      : resolveSandboxOverride(this.botRow(member.id), input.sandbox)
     if (input.taskId || input.task) {
       const task = this.resolveBotTask(project, input.taskId ?? input.task)
       if (['done', 'canceled'].includes(task.status)) throw conflict(`任务 ${project.key}-${task.number} 已结束，不能重派`)
-      const updated = await this.assignTask(task.id, member.id, actor, { autoStart: false })
+      const updated = await this.assignTask(task.id, member.id, actor, { autoStart: false, sandboxOverride })
       void this.tick()
       return updated
     }
@@ -650,6 +675,7 @@ export const tasksMethods = {
       timeBudgetMinutes: input.time_budget_minutes ?? input.timeBudgetMinutes,
       // 紧急豁免共用车道报备（DSHBOTS-126）：urgent 放行同写范围派单时，创建消息注明与哪张在办卡共用车道。
       laneShareTask: urgentExempt && duplicate ? `${project.key}-${duplicate.number}` : null,
+      sandboxOverride,
       autoStart: true,
       postCard: true,
     }, actor)

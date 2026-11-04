@@ -187,7 +187,7 @@ export const sessionMethods = {
     if (existing) {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
-        this.applyFilePolicy(resolved, bot, run)
+        this.applyFilePolicy(resolved, bot, run, task)
         await this.selectModel(existing.session_id, bot, modelOverride)
         return existing.session_id
       }
@@ -220,7 +220,7 @@ export const sessionMethods = {
           try { this.ctx.sessionTitle.rename(liveSession, title) } catch {}
         }
       }
-      this.applyFilePolicy(agent, bot, run)
+      this.applyFilePolicy(agent, bot, run, task)
       this.store.run(
         `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?)

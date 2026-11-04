@@ -9,7 +9,7 @@
 
 import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
-import { parseDisabledSkills } from '../../util.js'
+import { id, nowIso, parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { readWriteScopes } from '../write-scopes.js'
 
@@ -34,6 +34,23 @@ export const NOISE_SYSTEM_BODY = /^(已写入.+记忆。|任务 \S+ 验收通过
 // run 为空（无运行上下文的会话建立）保持 bot.file_policy 现行为。
 export function sandboxModeForRun(run, bot) {
   return run && run.mode !== 'write' ? 'read-only' : bot?.file_policy
+}
+
+// 生效沙箱档（DSHBOTS-156）：任务派发可选 sandbox 覆盖后的最终口径，run_events 与视图共用。
+// - 非 write 运行恒 read-only（来源 run_type）：覆盖只作用于任务写运行，dm_reply 回投
+//   任务会话等读运行不得因任务带覆盖而放宽只读；
+// - 写运行取 tasks.sandbox_override（来源 override），且只在不比 bot 配置档更宽时生效
+//   （只收紧不放大：运行侧兜底，防旁路落库的旧覆盖在换负责人后放大权限）；
+// - 其余回落 bot.file_policy（来源 bot_config）；run 为空保持 bot.file_policy 现行为。
+// 覆盖或配置档不合法（不在 SANDBOX_MODES）时不采用，落 bot_config 由 applyFilePolicy 拦截。
+export function effectiveSandbox(run, bot, task) {
+  if (run && run.mode !== 'write') return { mode: 'read-only', source: 'run_type' }
+  const override = task?.sandbox_override
+  const policyRank = SANDBOX_MODES.indexOf(bot?.file_policy)
+  if (SANDBOX_MODES.includes(override) && SANDBOX_MODES.indexOf(override) <= policyRank) {
+    return { mode: override, source: 'override' }
+  }
+  return { mode: bot?.file_policy, source: 'bot_config' }
 }
 
 const sessionIdOf = context => context?.agent?.id ?? context?.session?.id ?? context?.sessionId
@@ -229,13 +246,22 @@ export const promptMethods = {
     ].filter(Boolean).join('\n')
   },
 
-  // 把按运行类型收紧后的档位（sandboxModeForRun）写成宿主 session 的文件沙箱覆盖。
+  // 把按运行类型收紧后的档位（effectiveSandbox）写成宿主 session 的文件沙箱覆盖。
   // 宿主原生写路径 setSandboxMode(session, mode) 就是 session.append('sandbox/mode', { mode })，
   // 这里等价直调（插件不依赖宿主包），事件 log-only、replay 持久、下次受限调用生效。
   // 会话已是目标档位就不重复追加；设置失败只告警不阻断会话（沙箱回落宿主默认）。
-  applyFilePolicy(agent, bot, run) {
-    const mode = sandboxModeForRun(run, bot)
+  // DSHBOTS-156：档位口径含任务派发覆盖（只收紧不放大）；带运行上下文时把生效档与来源
+  // 落 run_events（type='sandbox_mode'，复用会话也每次留档——run_events 是运行时间线，
+  // 每条运行都该有自己的一档记录，与 sandbox/mode 追加的去重无关）。
+  applyFilePolicy(agent, bot, run, task) {
+    const { mode, source } = effectiveSandbox(run, bot, task)
     if (!SANDBOX_MODES.includes(mode)) return
+    if (run?.id) {
+      this.store.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), run.id, 'sandbox_mode', `沙箱档位 ${mode}（来源：${source}）`, nowIso(),
+      )
+    }
     const liveSession = agent?.agent?.session ?? agent?.session
     if (!liveSession?.append) return
     try {

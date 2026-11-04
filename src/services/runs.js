@@ -13,6 +13,7 @@ import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, sha256, text } from '../util.js'
 import { readWriteScopes, writeScopePathsOverlap } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
+import { effectiveSandbox } from './runtime/prompt.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 
 // ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
@@ -511,8 +512,8 @@ if (run.kind === 'dm_reply') {
     this.logger.warn?.('dsh-team: read-only run %s changed the workspace', run.id)
   },
   runView(run) {
-    const bot = this.store.get('SELECT name, provider, model, fallback_provider, fallback_model FROM bots WHERE id = ?', run.bot_id)
-    const task = run.task_id ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', run.task_id) : undefined
+    const bot = this.store.get('SELECT name, provider, model, fallback_provider, fallback_model, file_policy FROM bots WHERE id = ?', run.bot_id)
+    const task = run.task_id ? this.store.get('SELECT number, title, sandbox_override FROM tasks WHERE id = ?', run.task_id) : undefined
     const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
     // recovery 是重启恢复的内部瞬态标记（置位→注入→清零），不属于 API 视图，随 attention_json 一并剥出。
     const { write_scopes: rawScopes, attention_json: attentionJson, recovery: _recovery, ...rest } = run
@@ -526,6 +527,9 @@ if (run.kind === 'dm_reply') {
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,
       writeScopes: readWriteScopes(rawScopes),
+      // 生效沙箱档（DSHBOTS-156）：非 write 运行恒 read-only，任务写运行取派发覆盖（只收紧）或 bot 配置档。
+      // 口径唯一来源 effectiveSandbox，与起会话落 run_events 的档位一致。
+      sandboxMode: effectiveSandbox(run, bot, task).mode ?? null,
       // 备用模型标记：configured=配了备用，applied=这条运行走了备用，
       // degraded=主模型不可用且配了备用但这条没走（自动切换只对任务运行生效）。
       modelFallback: {
