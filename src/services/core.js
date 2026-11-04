@@ -3,7 +3,7 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
-import { effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY } from '../config.js'
+import { effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES } from '../config.js'
 import { badRequest, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
@@ -167,6 +167,7 @@ export const coreMethods = {
       'retention_usage_days', 'retention_run_event_days', 'retention_message_days',
       'memory_review', 'chat_memory_review',
       RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY,
+      UI_LANGUAGE_KEY,
     ]
     const values = {}
     for (const key of keys) values[key] = this.store.setting(key, '')
@@ -215,6 +216,14 @@ export const coreMethods = {
         throw badRequest(`${key} 必须是 ${min}–${max} 的整数分钟`)
       }
       values[key] = String(num)
+    }
+    // UI 语言（DSHBOTS-162）：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
+    // 非法输入 badRequest，不静默钳制（与运行时效同口径）；外部写入的非法值由
+    // effectiveUiLanguage 收敛回 'auto'。
+    if (values[UI_LANGUAGE_KEY] !== undefined) {
+      const raw = values[UI_LANGUAGE_KEY].toLowerCase()
+      if (!UI_LANGUAGE_VALUES.includes(raw)) throw badRequest(`${UI_LANGUAGE_KEY} 必须是 ${UI_LANGUAGE_VALUES.join('/')}`)
+      values[UI_LANGUAGE_KEY] = raw
     }
     this.store.transaction(() => {
       for (const [key, value] of Object.entries(values)) this.store.setSetting(key, value)

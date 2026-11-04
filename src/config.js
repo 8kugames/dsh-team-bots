@@ -81,6 +81,33 @@ export function effectiveSessionRolloverTurns(config, getSetting = () => null) {
 // 单聊会话各自独立结转，互不串档；单聊（无项目）用 'solo' 占位。
 export const rolloverSummaryKey = (botId, projectId) => `rollover_summary:${botId}:${projectId ?? 'solo'}`
 
+// ── UI 语言（DSHBOTS-162）─────────────────────────────────────────────────
+// 全局配置页语言下拉：auto = 跟随 DSH 宿主设定（缺省），zh/en = 显式覆盖。
+// env DSH_TEAM_UI_LANGUAGE 可覆盖页面保存值（不强制）。
+export const UI_LANGUAGE_KEY = 'ui_language'
+export const UI_LANGUAGE_VALUES = ['auto', 'zh', 'en']
+
+// 收敛到合法取值；非法/空一律回 'auto'（= 跟随宿主）。
+const normalizeUiLanguage = (value) => {
+  const raw = String(value ?? '').trim().toLowerCase()
+  return UI_LANGUAGE_VALUES.includes(raw) ? raw : 'auto'
+}
+
+// 保存值必须是合法取值；非法/空按未保存处理（回退默认），不做钳制。
+const savedUiLanguage = (value) => {
+  const raw = String(value ?? '').trim().toLowerCase()
+  return UI_LANGUAGE_VALUES.includes(raw) ? raw : null
+}
+
+// UI 语言生效值：env 显式合法值 > 页面保存值 > 默认。'auto' 语义 = 跟随 DSH 宿主，
+// 交 resolveDshUiLanguage 三级兜底（loader → patch 文件 → navigator）。
+export function effectiveUiLanguage(config, getSetting = () => null) {
+  const envRaw = String(process.env.DSH_TEAM_UI_LANGUAGE ?? '').trim().toLowerCase()
+  const envValue = UI_LANGUAGE_VALUES.includes(envRaw) ? envRaw : null
+  const saved = savedUiLanguage(getSetting(UI_LANGUAGE_KEY))
+  return envValue ?? saved ?? config.uiLanguage
+}
+
 export function resolveConfig(config = {}) {
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
   const workspace = resolve(config.workspace || defaultWorkspace())
@@ -118,6 +145,9 @@ export function resolveConfig(config = {}) {
     // COUNT(*)（不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实
     // 增长一致）。生效值可被全局配置页 session_rollover_turns 覆盖。
     sessionRolloverTurns: int(config.sessionRolloverTurns ?? process.env.DSH_TEAM_SESSION_ROLLOVER_TURNS, 256, 0, 10_000),
+    // UI 语言（DSHBOTS-162）：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
+    // 生效值由全局配置页 ui_language 覆盖，解析见 effectiveUiLanguage。
+    uiLanguage: normalizeUiLanguage(config.uiLanguage ?? process.env.DSH_TEAM_UI_LANGUAGE ?? 'auto'),
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。

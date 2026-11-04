@@ -9,7 +9,8 @@ import { usageSnapshot } from '../usage.js'
 import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion, detectDshRuntimeVersion } from '../updater.js'
 import { skillSnapshot } from '../skills.js'
 import { projectSkillRoots } from '../project-skills.js'
-import { resolveDshUiLanguage } from './locale.js'
+import { resolveUiLanguage } from './locale.js'
+import { effectiveUiLanguage } from '../config.js'
 import { nowIso } from '../util.js'
 
 // 插件自身版本：进程启动时从部署副本 package.json 定格，即当前生效版本。
@@ -83,11 +84,13 @@ export const systemMethods = {
       // 本插件（dsh-team-bots）部署生效版：与 health().version 同源。
       pluginVersion: PLUGIN_VERSION,
       // UI 语言（DSHBOTS-120）：与 http.js page() 的 {{language}} 注入同源
-      // （loader 直读 → patch 文件 → 'auto' 交浏览器），state 轮询据此热切换字典包。
-      language: await resolveDshUiLanguage({
+      // （页面保存值 zh/en > loader 直读 → patch 文件 → 'auto' 交浏览器），
+      // state 轮询据此热切换字典包。
+      language: await resolveUiLanguage({
         loader: this.runtime?.ctx?.get?.('loader'),
         dshHome: this.config.dshHome,
         profile: process.env.DSH_PROFILE || 'team-bots',
+        uiLanguage: effectiveUiLanguage(this.config, key => this.store.setting(key)),
       }),
       // 每个 provider+model 只保留最新一条生效价格；历史版本不在这里展开。
       prices: this.latestPrices(),

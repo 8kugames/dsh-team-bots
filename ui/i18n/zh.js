@@ -208,6 +208,11 @@ export default {
   'task.rejectTitle': '把已完成/已取消的任务退回待规划，终态时间戳会清空',
   'task.rejectConfirm': '确定把「${title}」驳回退回待规划？',
   'task.rejectDone': '已驳回，任务退回待规划',
+  // 全局配置：UI 语言（DSHBOTS-162）；auto = 跟随 DSH 宿主设定
+  'settings.uiLanguage': '界面语言',
+  'settings.uiLanguageAuto': '自动',
+  'settings.uiLanguageZh': '中文',
+  'settings.uiLanguageEn': 'English',
   // 高频 toast
   'toast.copied': '已复制',
   'toast.wechatConnected': '微信通道已连接',

@@ -102,3 +102,12 @@ export async function resolveDshUiLanguage({ loader = null, dshHome = null, prof
   }
   return 'auto'
 }
+
+// 页面生效值 → UI 语言的收敛（DSHBOTS-162）：
+// 'zh'/'en' 显式生效直接采用；'auto'（含未设定/非法）一律交回 DSH 宿主解析链
+// （loader → patch 文件 → 'auto' 交浏览器 navigator）。
+export async function resolveUiLanguage({ loader = null, dshHome = null, profile = '', uiLanguage = 'auto' } = {}) {
+  const explicit = clampLocaleId(uiLanguage)
+  if (explicit) return explicit
+  return resolveDshUiLanguage({ loader, dshHome, profile })
+}

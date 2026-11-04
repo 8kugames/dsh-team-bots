@@ -150,7 +150,8 @@ test('normalizeLanguage：auto/空跟随 navigator 前缀，非法缺省 zh', ()
 test('注入接线：http.js {{language}} 占位与 i18n 模块路由', () => {
   const http = read('src/http.js')
   assert.match(http, /replaceAll\('\{\{language\}\}', language\)/, 'page() 应注入 {{language}}')
-  assert.match(http, /resolveDshUiLanguage\(\{\s*loader: ctx\.get\('loader'\)/, '优先同进程 loader 直读')
+  assert.match(http, /resolveUiLanguage\(\{\s*loader: ctx\.get\('loader'\)/, '经 resolveUiLanguage 收敛（页面保存值 > 宿主解析）')
+  assert.match(http, /effectiveUiLanguage\(service\.config/, '页面保存值经 effectiveUiLanguage 读取')
   assert.match(http, /modules\/i18n\.js', \['GET'\], moduleScript\('i18n\.js'\)/, 'ui/modules/i18n.js 应有模块路由')
   assert.match(http, /i18n\/zh\.js', \['GET'\], i18nDict\('zh\.js'\)/, 'ui/i18n/zh.js 应有路由')
   assert.match(http, /i18n\/en\.js', \['GET'\], i18nDict\('en\.js'\)/, 'ui/i18n/en.js 应有路由')
@@ -160,7 +161,8 @@ test('注入接线：index.html data-dsh-language 与 system.js state.language �
   const html = read('ui/index.html')
   assert.match(html, /data-dsh-language="\{\{language\}\}"/, 'html 标签应带 language 占位')
   const sys = read('src/services/system.js')
-  assert.match(sys, /language: await resolveDshUiLanguage\(/, 'state() 顶层应透传 language')
+  assert.match(sys, /language: await resolveUiLanguage\(/, 'state() 顶层应透传 language')
+  assert.match(sys, /effectiveUiLanguage\(this\.config/, '页面保存值经 effectiveUiLanguage 读取')
 })
 
 test('注入接线：app.js boot 接线与热切换 syncLanguage', () => {
