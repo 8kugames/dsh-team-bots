@@ -4,6 +4,7 @@ import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botB
 import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
+import { typingLingerRowsHtml, applyOptimisticTyping, pruneTypingLinger } from './modules/typing-linger.js'
 const app = document.getElementById('app')
 const UI_SCALE_KEY = 'dshb:ui-scale'
 const UI_THEME_KEY = 'dshb:ui-theme'
@@ -735,6 +736,7 @@ function renderChat() {
             <p>${t('chat.emptyBody')}</p>
           </div>` : messages.map(renderMessage).join('')}
           ${typingRows(state.data.runs, 'chat')}
+          ${typingLingerRowsHtml('chat', state.data.runs)}
         </div>
         ${renderDirectMessagesCard()}
                   <div class="composer">
@@ -860,6 +862,7 @@ function renderSoloChat() {
             <p>${t('solo.emptyBody')}</p>
           </div>` : messages.map(renderMessage).join('')}
           ${typingRows(runs, 'solo_chat')}
+          ${typingLingerRowsHtml('solo_chat', runs)}
         </div>
         <div class="composer">
           <div class="composer-box">
@@ -4537,7 +4540,13 @@ async function sendMessage() {
     state.replyTo = null
     state.chatAtBottom = true
     clearPendingImages()
+    // 排队气泡乐观渲染（DSHBOTS-150）：发送成功后立刻为被 @ 的目标 bot 立排队行，不等下一拍
+    // 2.8s 轮询——被 @ 的 bot 常常在轮询到达前就答完了，气泡否则肉眼不可见。
+    // 目标 bot 取后端回传的 runBots / runBot，与实际派生的运行一致，无需前端解析 @。
+    applyOptimisticTyping(result, state.chatMode === 'solo' ? 'solo_chat' : 'chat')
+    render()
     await loadState(state.projectId, { quiet: true })
+    // 取数后重画：真实运行接管乐观气泡（按 run id，不重复画），终态转驻留或同拍有回复直接撤掉。
     render()
     if (body === '/clear') toast(t('toast.chatCleared', { count: result.cleared }), 'success')
     if (result?.memory) toast(t('toast.memorySaved'), 'success')
@@ -6002,6 +6011,8 @@ function updateRunClocks(root = document) {
 setInterval(() => { void poll() }, 2800)
 setInterval(() => {
   updateRunClocks()
+  // 终态气泡到期摘除与淡出刷新（DSHBOTS-150）：只动气泡节点，不整页重建（不打断输入中的草稿）。
+  pruneTypingLinger()
   // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
   for (const el of document.querySelectorAll('.approval-clock[data-expires], .approval-menu-time[data-expires]')) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
@@ -6046,7 +6057,7 @@ void init()
 // DSHBOTS-15 批次3：IIFE 包裹已拆除（模块作用域等价于原 IIFE 私有作用域，模块天然 strict）。
 // 以下导出仅供后续批次外迁的 ui/modules/*.js 反向依赖（调用期解析）；随各域搬出逐步收缩。
 export { app, UI_SCALE_KEY, UI_THEME_KEY, savedScale, startWechatPoll, stopWechatPoll, startTerminalPoll, stopTerminalPoll, syncTerminalPoll, updateTerminalDom, bootError, isTyping, pendingProposals, tabDot, renderShell, syncChromeHeight, renderKeepingChatScroll, panelKey, isPanelOpen, panelOpenAttr }
-export { applyPanelToggle, panelAttrs, lastRenderedView, captureViewScroll, restoreViewScroll, CHAT_BOTTOM_THRESHOLD, nextChatAtBottom, render, renderView, noProject, activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote }
+export { applyPanelToggle, panelAttrs, lastRenderedView, captureViewScroll, restoreViewScroll, CHAT_BOTTOM_THRESHOLD, nextChatAtBottom, render, renderView, noProject, activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote, runStatusLabel }
 export { dispatchTaskRow, dispatchRunRow, renderSoloChat, renderSoloConfig, APPROVAL_STATUS, renderApprovalCard, renderMessage, DM_STATUS, DM_STATUS_TONE, renderDirectMessagesCard, TASK_PRIORITY_WEIGHT, TASK_PRIORITY_DEFAULT, taskPriorityKey, taskPriorityWeight, compareTasksByPriority, sortTasksByPriority, TASK_SORTS, sortTasksForPanel, TASK_TIME_RANGES, taskEndsOutsideRange }
 export { formatApprovalRemaining, approvalUrgent, approvalBadgeText, approvalBannerView, approvalExpiresMs, approvalRemainingFrom }
 export { QUESTION_STATUS, questionBadgeText, questionBannerView, questionBannerSummary, questionCardMarkup, renderQuestionCard, formatQuestionCountdown, questionUrgent, questionExpiresMs, questionRemainingFrom }
