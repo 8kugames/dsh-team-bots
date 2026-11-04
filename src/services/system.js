@@ -3,13 +3,18 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
+import { createRequire } from 'node:module'
 import { AppError, badRequest, conflict, hotUpgradeUnsupported } from '../errors.js'
 import { usageSnapshot } from '../usage.js'
-import { latestDshVersion, compareVersions, validTargetVersion } from '../updater.js'
+import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion } from '../updater.js'
 import { skillSnapshot } from '../skills.js'
 import { projectSkillRoots } from '../project-skills.js'
 import { resolveDshUiLanguage } from './locale.js'
 import { nowIso } from '../util.js'
+
+// 插件自身版本：进程启动时从部署副本 package.json 定格，即当前生效版本。
+// health() 与「DSH 服务」卡展示同源（DSHBOTS-143）。
+const PLUGIN_VERSION = String(createRequire(import.meta.url)('../../package.json').version ?? 'unknown')
 
 
 
@@ -75,6 +80,8 @@ export const systemMethods = {
         home: this.config.dshHome,
         ...this.runtime?.capabilityInfo?.() ?? {},
       },
+      // 本插件（dsh-team-bots）部署生效版：与 health().version 同源。
+      pluginVersion: PLUGIN_VERSION,
       // UI 语言（DSHBOTS-120）：与 http.js page() 的 {{language}} 注入同源
       // （loader 直读 → patch 文件 → 'auto' 交浏览器），state 轮询据此热切换字典包。
       language: await resolveDshUiLanguage({
@@ -291,16 +298,23 @@ export const systemMethods = {
   async dshUpdateInfo() {
     const current = process.env.DSH_RUNTIME_VERSION || 'unknown'
     let latest
+    let pluginLatest
     try {
-      latest = await latestDshVersion({ force: true })
+      ;[latest, pluginLatest] = await Promise.all([
+        latestDshVersion({ force: true }),
+        latestTeamBotsVersion({ force: true }),
+      ])
     } catch (error) {
-      throw new AppError('DSH_REGISTRY_UNAVAILABLE', `无法查询 DSH 最新版本：${error.message}`, 502)
+      throw new AppError('DSH_REGISTRY_UNAVAILABLE', `无法查询最新版本：${error.message}`, 502)
     }
     return {
       current,
       latest,
+      pluginCurrent: PLUGIN_VERSION,
+      pluginLatest,
       profile: process.env.DSH_PROFILE || 'team-bots',
       updateAvailable: current !== 'unknown' && compareVersions(latest, current) > 0,
+      pluginUpdateAvailable: compareVersions(pluginLatest, PLUGIN_VERSION) > 0,
       checkedAt: nowIso(),
     }
   },
@@ -340,7 +354,7 @@ export const systemMethods = {
     await this.initialize()
     return {
       ok: true,
-      version: '0.2.0',
+      version: PLUGIN_VERSION,
       ready: true,
       bots: this.store.get('SELECT COUNT(*) AS count FROM bots')?.count ?? 0,
       projects: this.store.get('SELECT COUNT(*) AS count FROM projects')?.count ?? 0,

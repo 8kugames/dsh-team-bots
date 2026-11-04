@@ -1,5 +1,6 @@
 const registry = (process.env.NPM_REGISTRY || 'https://registry.npmjs.org/').replace(/\/+$/, '')
-let cache
+// 每个包一条缓存：{ at, version }，5 分钟内复用。
+const registryCache = new Map()
 
 const parseVersion = (version) => {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(version))
@@ -44,9 +45,10 @@ export const compareVersions = (left, right) => {
 export const isNonAlpha = version => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)
   && !/(?:^|[-.])alpha(?:[-.]|$)/i.test(version)
 
-export async function latestDshVersion({ force = false } = {}) {
-  if (!force && cache && Date.now() - cache.at < 5 * 60_000) return cache.version
-  const response = await fetch(`${registry}/@deepseek-ai%2Fdsh`, {
+async function latestRegistryVersion(pkg, { force = false } = {}) {
+  const cached = registryCache.get(pkg)
+  if (!force && cached && Date.now() - cached.at < 5 * 60_000) return cached.version
+  const response = await fetch(`${registry}/${encodeURIComponent(pkg)}`, {
     headers: { accept: 'application/vnd.npm.install-v1+json, application/json' },
     signal: AbortSignal.timeout(20_000),
   })
@@ -54,9 +56,18 @@ export async function latestDshVersion({ force = false } = {}) {
   const data = await response.json()
   const versions = Object.keys(data.versions ?? {}).filter(isNonAlpha).sort(compareVersions)
   const version = versions.at(-1) ?? data['dist-tags']?.latest
-  if (!version || !isNonAlpha(version)) throw new Error('npm registry 中没有可用的非 alpha DSH 版本')
-  cache = { at: Date.now(), version }
+  if (!version || !isNonAlpha(version)) throw new Error(`npm registry 中没有可用的非 alpha ${pkg} 版本`)
+  registryCache.set(pkg, { at: Date.now(), version })
   return version
+}
+
+export function latestDshVersion(opts = {}) {
+  return latestRegistryVersion('@deepseek-ai/dsh', opts)
+}
+
+// dsh-team-bots（本插件）在 npm 的最新正式版：与 dsh 同口径过滤 alpha。
+export function latestTeamBotsVersion(opts = {}) {
+  return latestRegistryVersion('dsh-team-bots', opts)
 }
 
 export function validTargetVersion(version) {

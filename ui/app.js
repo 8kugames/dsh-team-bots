@@ -2982,6 +2982,13 @@ function renderGlobal() {
   const pending = pendingProposals()
   const notify = notifyToggleView()
   const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
+  // 「DSH 服务」卡检查结果（DSHBOTS-143）：loadState 只换 state.data，dshUpdate 存这里不被轮询盖掉。
+  const update = state.dshUpdate
+  const latestCell = (latest, available) => latest == null
+    ? '<strong>—</strong>'
+    : available
+      ? `<strong>${esc(latest)} <span class="pill amber">可升级</span></strong>`
+      : `<strong>${esc(latest)} <span class="pill green">最新</span></strong>`
   return `
     <div class="global-grid">
       <div class="card form-card">
@@ -3020,15 +3027,11 @@ function renderGlobal() {
         <div class="path-row"><span>数据</span>${pathCode(data.paths.dataDir)}${copyPath(data.paths.dataDir)}</div>
       </div>
       <div class="card form-card">
-        <div class="card-head"><h3>DSH 服务</h3></div>
-        <div class="btn-row" style="margin-top:12px">
-          <button class="btn" data-action="check-dsh-update">${icon('refresh')}检查更新</button>
-          <button class="btn" data-action="reboot-dsh">仅重启 DSH</button>
-        </div>
-        <div class="btn-row split">
-          <button class="btn danger" data-action="upgrade-dsh">升级并重启</button>
-        </div>
-        <div class="usage-note">有排队或运行中任务时会拒绝升级。</div>
+        <div class="card-head"><h3>DSH 服务</h3><button class="btn small" data-action="check-dsh-update">${icon('refresh')}检查更新</button></div>
+        <div class="kv"><span>dsh 当前版本</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
+        <div class="kv"><span>dsh 最新版本</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
+        <div class="kv"><span>dsh-team-bots 当前版本</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
+        <div class="kv"><span>dsh-team-bots 最新版本</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
       </div>
       <div class="card form-card" style="grid-column:1/-1">
         <div class="card-head"><h3>团队与资源</h3></div>
@@ -4653,28 +4656,8 @@ document.addEventListener('click', async (event) => {
         break
       }
       case 'check-dsh-update': {
-        const info = await api('dsh_update_info', {})
-        toast(info.updateAvailable
-          ? `当前 ${info.current}，可升级到 ${info.latest}`
-          : `已是可用的最新版本 ${info.current}`, 'success')
-        break
-      }
-      case 'upgrade-dsh': {
-        if (!window.confirm('升级 DSH 会短暂中断服务。确认继续？')) break
-        const info = await api('upgrade_dsh', {})
-        if (info.upToDate) {
-          toast(`当前 ${info.current} 已是可用的最新版本`, 'success')
-          break
-        }
-        toast(`正在升级到 ${info.target}，服务将在约 1 秒后重启…`, 'success')
-        setTimeout(() => location.reload(), 9000)
-        break
-      }
-      case 'reboot-dsh': {
-        if (!window.confirm('重启会短暂中断 DSH 和团队 Bot 运行。确认继续？')) break
-        await api('reboot_dsh', {})
-        toast('DSH 正在重启，页面将在完成后自动重载…', 'success')
-        setTimeout(() => location.reload(), 7000)
+        state.dshUpdate = await api('dsh_update_info', {})
+        render()
         break
       }
       case 'wechat-login': {
