@@ -2668,7 +2668,7 @@ function renderUsageDomain() {
   const unpriced = Number(totals.unpricedCalls ?? 0)
   const overviewNotes = [
     unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
-    tier ? '' : '<div class="usage-note">下方分组为全局数据，未按本群过滤。</div>',
+    tier ? '' : '<div class="usage-note">下方分组明细暂不可用，上方汇总仍按本群统计。</div>',
   ].join('')
   return `
     ${usagePageHead(usage, '仅当前群聊内的用量，不含其他群聊', '本群')}
@@ -2712,7 +2712,7 @@ function renderUsageSolo() {
   const unpriced = Number(totals.unpricedCalls ?? 0)
   const overviewNotes = [
     unpriced > 0 ? `<div class="note warn-note">${unpriced} 次调用未配置价格，成本为部分值。</div>` : '',
-    usage.solo && tier ? '' : '<div class="usage-note">该 Bot 的单聊明细暂不可用，下方分组为全局数据。</div>',
+    usage.solo && tier ? '' : '<div class="usage-note">该 Bot 的单聊明细暂不可用。</div>',
   ].join('')
   return `
     ${usagePageHead(usage, '仅该 Bot 在项目外（单聊）的用量，不含项目内调用', '该 Bot')}
