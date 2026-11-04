@@ -147,6 +147,9 @@ export const tasksMethods = {
         idempotencyKey: `task:${taskId}:task_created`,
       })
     }
+    // 微信推送闭环（DSHBOTS-182 增补）：创建成功即推一条（KEY-N/标题/派给谁），
+    // 与完成推送同锚定一次性事件（创建是单次 INSERT），交付节点仍不推。
+    this.notifyTaskCreated(this.taskRow(taskId))
     void this.tick()
     return this.taskView(this.taskRow(taskId))
   },
@@ -313,49 +316,12 @@ export const tasksMethods = {
     if (updates.status === 'in_progress' && task.status !== 'in_progress') {
       this.notifyTaskStarted(this.taskRow(taskId), { triggerType: options.startTriggerType ?? 'task_started' })
     }
-    return this.taskView(this.taskRow(taskId))
-  },
-  // 任务开始通知与开工入队（DSHBOTS-100）：「任务进入进行中」的唯一落点。
-  // 幂等口径：已有活跃运行时不重复入队、不重复发消息（不能对已经在跑的任务再喊一次开始）；
-  // 没有负责人时不发消息也不入队（没人可通知、也没人可开工）。
-  // 先入队后发消息：入队失败时宁可没有消息，也不留一条指向空转的「开始」。
-  notifyTaskStarted(task, { triggerType = 'task_started' } = {}) {
-    const assigneeId = task.assignee_bot_id
-    if (!assigneeId) return null
-    const active = this.store.get(
-      "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
-      task.id,
-    )
-    if (active) return null
-    // 负责人 bot 行缺失（数据异常）时整体跳过：通知与开工都指不到人，
-    // 也不能让通知失败反过来把已经落库的状态变更顶掉。
-    const bot = this.store.get('SELECT name FROM bots WHERE id = ?', assigneeId)
-    if (!bot) return null
-    const project = this.projectRow(task.project_id)
-    const identifier = `${project.key}-${task.number}`
-    try {
-      this.enqueueOutbox({
-        kind: 'task_run',
-        payload: { taskId: task.id, triggerType },
-        projectId: task.project_id,
-        taskId: task.id,
-        idempotencyKey: `task:${task.id}:${triggerType}:${Date.now()}`,
-      })
-      this.insertMessage({
-        projectId: task.project_id,
-        senderType: 'system',
-        senderId: 'system',
-        taskId: task.id,
-        body: `任务 ${identifier} 已开始（${bot.name}）。`,
-        mentions: [assigneeId],
-      })
-    } catch (error) {
-      // 状态变更已经落库，通知/开工失败不能反过来把整次 update_task 打挂（用户会看到报错但状态已变）。
-      this.logger.warn?.('dsh-team: 任务开始通知失败 %s: %s', identifier, error?.message ?? error)
-      return null
+    // 微信推送收敛（DSHBOTS-182）：只在任务真正完成（→done 转换）时推一条，
+    // 全部 done 转换路径都经 updateTask 收口在此；done→done 不构成转换，天然不重复推。
+    if (updates.status === 'done' && task.status !== 'done') {
+      this.notifyTaskDone(this.taskRow(taskId))
     }
-    void this.tick()
-    return { taskId: task.id, triggerType }
+    return this.taskView(this.taskRow(taskId))
   },
   // 写占用释放（DSHBOTS-73，用户口径）：写范围占用只看「进行中」的任务，
   // 任务一旦离开「进行中」就立刻解除占用/锁定——中止它名下仍在跑/排队的写运行，

@@ -258,7 +258,8 @@ export const runFinishMethods = {
           taskId: task.id,
           runId,
         })
-        this.wechat?.notify(`任务 ${project.key}-${task.number}《${task.title}》${ownerReview ? '已交付，等待总监验收' : '已完成，待您验收'}。回复「详情 ${project.key}-${task.number}」查看，回复「验收 ${project.key}-${task.number}」通过。`)
+        // 微信推送不锚交付节点（DSHBOTS-182）：只在任务真正完成（→done 转换）时推一条，
+        // 统一落点见 tasks.js 的 notifyTaskDone；交付后的群消息与验收指令不受影响。
         this.enqueueOutbox({
           kind: 'memory_review',
           payload: { taskId: task.id, sourceRunId: runId },
