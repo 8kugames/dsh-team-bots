@@ -31,7 +31,9 @@ export async function api(action, payload = {}, { quiet = false } = {}) {
 // 只在群聊视图上报；切到任务/设置等 tab 不算数。
 export async function markVisibleChatRead(data) {
   if (state.view !== 'chat' || state.chatMode === 'solo') return
-  const projectId = state.projectId
+  // 上报口径跟 data 走：loadState 在「当前项目已不在返回列表」时会回退到别的项目，
+  // 此时 data.messages 属于 data.project，仍用 state.projectId 会把别的项目标成已读。
+  const projectId = data?.project?.id ?? state.projectId
   if (!projectId) return
   const messages = data?.messages ?? []
   let newest = ''

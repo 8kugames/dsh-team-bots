@@ -58,6 +58,10 @@ test('已读上报失败可重报：markVisibleChatRead 失败回退水位', () 
   assert.match(apiSource, /state\.markedRead = null/, '上报失败应回退水位，下一轮轮询自动重报')
 })
 
+test('已读上报口径跟随 data：项目回退时不会标错项目', () => {
+  assert.match(apiSource, /const projectId = data\?\.project\?\.id \?\? state\.projectId/, '上报项目必须取 data.project.id，回退到别的项目时才不会标错')
+})
+
 // —— 点击路径的乐观切换（DSHBOTS-167 约束①：先出骨架，再异步取数）——
 const selectProjectBlock = source.slice(source.indexOf("case 'select-project'"), source.indexOf("case 'refresh'"))
 assert.ok(selectProjectBlock.length > 0, '找不到 select-project 分支')
