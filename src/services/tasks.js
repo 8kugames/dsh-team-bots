@@ -716,6 +716,41 @@ export const tasksMethods = {
     return this.runView(this.runRow(runId))
   },
 
+  // 写范围修改（DSHBOTS-151）：owner-only 编辑任务的写范围声明，并把排队中的写运行快照一并刷新——
+  // 调度闸门消费的是入队时的运行快照（enqueueTaskRun），只改任务表不改快照对下一拍调度无效。
+  // running 写运行拒改：其快照正被闸门与执行中的会话消费，强改会制造「声明与执行不符」。
+  async taskUpdateScopes(taskId, writeScopesInput, actor = this.actor()) {
+    if (actor.type !== 'user') throw forbidden('只有工作台 owner 可以修改写范围')
+    const task = this.taskRow(taskId)
+    if (task.status === 'done' || task.status === 'canceled') throw conflict('任务已结束，不能修改写范围')
+    const scopes = parseWriteScopes(writeScopesInput)
+    if (!scopes.length) throw badRequest('写范围不能为空：未声明的写运行会与同项目所有写运行保守串行')
+    const runningWrite = this.store.get(
+      "SELECT id FROM runs WHERE task_id = ? AND status = 'running' AND mode = 'write'",
+      taskId,
+    )
+    if (runningWrite) throw badRequest('任务有运行中的写运行，先等运行结束或取消，再修改写范围')
+    const queuedWrites = this.store.all(
+      "SELECT id FROM runs WHERE task_id = ? AND status = 'queued' AND mode = 'write'",
+      taskId,
+    )
+    const from = readWriteScopes(task.write_scopes)
+    const serialized = JSON.stringify(scopes)
+    this.store.transaction(() => {
+      this.store.run(
+        'UPDATE tasks SET write_scopes = ?, version = version + 1, updated_at = ? WHERE id = ?',
+        serialized, nowIso(), taskId,
+      )
+      for (const run of queuedWrites) {
+        this.store.run('UPDATE runs SET write_scopes = ? WHERE id = ?', serialized, run.id)
+        this.insertRunEvent(run.id, 'scopes_updated', `写范围修改同步快照：${from.join('、') || '未声明'} → ${scopes.join('、')}`)
+      }
+      this.addTaskEvent(taskId, 'scopes_updated', actor, { from, to: scopes })
+      this.audit(actor, 'task.scopes_update', 'task', taskId, { from, to: scopes })
+    })
+    return this.taskView(this.taskRow(taskId))
+  },
+
   // 核验委派共享入口（DSHBOTS-113）：手动按钮（taskReviewDelegate）与交付后自动委派
   // （review_delegate_auto outbox）走同一实现，守卫（待验收状态 / 可用总监 / one_active
   // 幂等复看）与运行形态（kind='review', mode='read', trigger='review_delegate'）完全一致。

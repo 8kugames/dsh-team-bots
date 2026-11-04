@@ -7,7 +7,7 @@ const ACTIONS = new Set([
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
   'mark_chat_read',
   'add_member', 'remove_member',
-  'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail', 'task_review_delegate',
+  'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail', 'task_review_delegate', 'task_update_scopes',
   'retry_run', 'cancel_run', 'run_trajectory', 'answer_attention',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
@@ -79,6 +79,10 @@ export async function handleAction(service, action, payload = {}, actor) {
       return service.createTask({ ...payload, projectId: required(payload.projectId, 'projectId') }, actor)
     case 'update_task':
       return service.updateTask(required(payload.taskId, 'taskId'), payload.patch ?? payload, actor)
+    // 写范围修改（DSHBOTS-151）：owner-only 由服务层守卫（actor.type!=='user' 拒绝），
+    // 与 task_review_delegate 同口径；write_scopes/writeScopes 双口径收参（与 createTask 一致）。
+    case 'task_update_scopes':
+      return service.taskUpdateScopes(required(payload.taskId, 'taskId'), payload.write_scopes ?? payload.writeScopes, actor)
     case 'assign_task':
       return service.assignTask(required(payload.taskId, 'taskId'), required(payload.botId, 'botId'), actor)
     case 'transition_task':
