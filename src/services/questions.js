@@ -1,6 +1,8 @@
 // DSHBOTS-116 群聊提问：宿主 user-questions/request waterfall 的插件侧应答器。
 // 只认领 session_bindings 命中且绑定到项目的 bot 会话；其余 next() 透传（人类会话提问继续走原生界面）。
 // 应答权仅项目负责人（type=user）持有，bot 一律 forbidden 不能自答；pending 之外拒绝重复应答，动作写审计。
+// DSHBOTS-177：宿主 timed 前台等待到期（ASK_TIMED_OUT abort）不杀卡——条目保持可答至插件
+// questionTimeoutMs 窗口，窗口内迟到作答经宿主 userQuestions.answer 回投原 agent；其余 abort 立即失效。
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 approvals.js 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, jsonParse, nowIso, text as textValue } from '../util.js'
@@ -150,13 +152,19 @@ export const questionsMethods = {
     return new Promise((resolve, reject) => {
       this.questionPending ??= new Map()
       const timer = setTimeout(() => {
-        // 插件侧超时：当轮 reject（宿主约束：应答不能跨轮次持久化后补答），条目置 timeout。
+        // 插件侧超时=可答窗口关闭：当轮 reject、条目置 timeout（timed 断开后的迟到作答同样在此截止）。
         this.settleQuestion(questionId, 'timeout', null, null, 'ask_user_question timed out before the user answered')
       }, timeoutMs)
       this.questionPending.set(questionId, { resolve, reject, timer })
-      // 宿主侧中止（前台等待窗口结束/轮次取消）：条目置 expired，不向宿主补答；迟到应答宿主会丢弃。
+      // 宿主侧中止分两种：timed 前台等待到期（reason.code === 'ASK_TIMED_OUT'）宿主语义是
+      // {pending:true}、问题保持可答（迟到答案以 answer_to_pending_question 回投）——只断开
+      // 前台等待，卡片活到插件窗口；轮次取消/断连等其它 abort 没有迟到作答路径，立即失效。
       req.signal?.addEventListener('abort', () => {
-        this.settleQuestion(questionId, 'expired', null, null, 'ask_user_question aborted')
+        if (req.signal.reason?.code === 'ASK_TIMED_OUT' && req.agent && callId) {
+          this.detachQuestionWait(questionId, req.agent, callId)
+        } else {
+          this.settleQuestion(questionId, 'expired', null, null, 'ask_user_question aborted')
+        }
       }, { once: true })
     })
   },
@@ -175,11 +183,49 @@ export const questionsMethods = {
       status, hostAnswer ? JSON.stringify(hostAnswer) : null, answeredBy ?? null, nowIso(), questionId,
     )
     if (!pending) return
-    if (hostAnswer) pending.resolve(hostAnswer)
-    else if (reason) pending.reject(new Error(reason))
+    if (hostAnswer) {
+      pending.resolve(hostAnswer)
+      // timed 断开后的迟到答案：前台 promise 早已 settle（这里的 resolve 是静默 no-op），
+      // 答案改经宿主 userQuestions.answer 回投原 agent（见 detachQuestionWait）。
+      pending.lateAnswer?.(hostAnswer)
+    } else if (reason) {
+      pending.reject(new Error(reason))
+    }
     // 终态审计：超时/中止都不是人的动作，归因 system；已答由 answerQuestion 单独审计（带答案内容）。
     if (status === 'timeout' || status === 'expired') {
       this.audit({ type: 'system', id: 'system' }, `question.${status}`, 'question', questionId, { reason })
+    }
+  },
+
+  // 宿主 timed 前台等待到期（ASK_TIMED_OUT abort）：宿主把本次 rejection 映射成 {pending:true}，
+  // 问题在宿主侧仍是 continued、可迟到作答。这里只断开前台等待（宿主 ask 无信号竞态，不 settle
+  // 就挂死），问题行保持 pending、插件窗口计时器继续走；窗口内迟到作答经 deliverLateAnswer
+  // 以 answer_to_pending_question user message 回投原 agent。
+  detachQuestionWait(questionId, agent, callId) {
+    const pending = this.questionPending?.get(questionId)
+    if (!pending) return
+    pending.lateAnswer = hostAnswer => this.deliverLateAnswer(questionId, agent, callId, hostAnswer)
+    pending.reject(new Error('ask_user_question foreground wait timed out; question stays answerable'))
+  },
+
+  // 迟到答案回投：宿主前台等待已断开后用户才作答，waterfall promise 早已 settle，答案只能经
+  // 宿主 userQuestions.answer(agent, callId, answers) steer 回原 agent。run 已结束
+  // （CALLER_NOT_LIVE 等抛错）或宿主不再认领（返回 false）时投递失败——答案已照常落库置
+  // answered，这里只补审计，不改状态、不向作答方抛错。
+  async deliverLateAnswer(questionId, agent, callId, hostAnswer) {
+    try {
+      const userQuestions = this.runtime?.ctx?.get?.('userQuestions')
+      if (!userQuestions || typeof userQuestions.answer !== 'function') {
+        throw new Error('userQuestions service unavailable')
+      }
+      const accepted = await userQuestions.answer(agent, callId, hostAnswer)
+      if (accepted !== true) throw new Error('question no longer answerable at host')
+      this.audit({ type: 'system', id: 'system' }, 'question.steer', 'question', questionId, { callId })
+    } catch (error) {
+      this.audit({ type: 'system', id: 'system' }, 'question.steer_failed', 'question', questionId, {
+        callId,
+        reason: error?.message ?? String(error),
+      })
     }
   },
 

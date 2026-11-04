@@ -47,6 +47,8 @@ class FakeCordisCtx {
     }
     return next()
   }
+  // 宿主服务可达性桩：deliverLateAnswer 经 ctx.get('userQuestions') 取回投服务。
+  get(name) { return (this.services ?? {})[name] }
 }
 
 const now = () => new Date().toISOString()
@@ -394,4 +396,143 @@ test('提示词指引：群聊会话含 ask_user_question 指引，solo/task 提
       '本卡口径：task 会话提示词不注入 ask_user_question 指引（认领链路不受影响）',
     )
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// DSHBOTS-177：宿主 timed 前台等待到期（ASK_TIMED_OUT abort）宿主语义是 {pending:true}、
+// 问题保持可答——插件不得杀卡；窗口内迟到作答经宿主 userQuestions.answer 回投原 agent。
+test('timed abort：前台等待断开但条目保持可答，迟到答案经 userQuestions.answer 回投', async () => {
+  const ctx = new FakeCordisCtx()
+  const answerCalls = []
+  ctx.services = { userQuestions: { answer: async (...args) => { answerCalls.push(args); return true } } }
+  const { root, store, service } = await setup({ ctx })
+  try {
+    const project = await primeProject(store, service, 'Question Timed')
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    bindSession(store, { sessionId: 'sess-timed', botId: director.id, projectId: project.id })
+    const { req, controller } = makeReq({ sessionId: 'sess-timed' })
+    req.wait = { callId: 'call-timed-1', timed: true }
+    const outcome = ask(service, req)
+    const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
+    assert.equal(row.call_id, 'call-timed-1')
+    // 宿主 askTimed 到期：signal 以 ASK_TIMED_OUT reason abort（UserQuestionError 实例或序列化 record 同形）。
+    controller.abort({ name: 'UserQuestionError', message: 'ask_user_question timed out before the user answered', code: 'ASK_TIMED_OUT' })
+    await assert.rejects(() => outcome, /foreground wait timed out/)
+    // 卡片不死：条目仍 pending（未写 expired 审计），窗口内可答。
+    assert.equal(questionOf(store, row.id).status, 'pending')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'question.expired' AND target_id = ?", row.id).n, 0)
+    const view = await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['dev'] }] })
+    assert.equal(view.status, 'answered')
+    // 迟到答案回投：answer(agent, callId, {answers})，agent 即认领时请求里的 agent。
+    await sleep(5)
+    assert.equal(answerCalls.length, 1)
+    assert.equal(answerCalls[0][0], req.agent)
+    assert.equal(answerCalls[0][1], 'call-timed-1')
+    assert.deepEqual(answerCalls[0][2], { answers: [{ id: 'q1', selected: ['dev'] }] })
+    assert.ok(store.get("SELECT * FROM audit_log WHERE action = 'question.steer' AND target_id = ?", row.id))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('timed abort 后窗口到点：条目置 timeout，迟到应答 conflict，不回投', async () => {
+  const ctx = new FakeCordisCtx()
+  const answerCalls = []
+  ctx.services = { userQuestions: { answer: async (...args) => { answerCalls.push(args); return true } } }
+  const { root, store, service } = await setup({ ctx })
+  try {
+    const project = await primeProject(store, service, 'Question Timed Window')
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    bindSession(store, { sessionId: 'sess-timed-win', botId: director.id, projectId: project.id })
+    service.config.questionTimeoutMs = 40
+    const { req, controller } = makeReq({ sessionId: 'sess-timed-win' })
+    req.wait = { callId: 'call-timed-2', timed: true }
+    const outcome = ask(service, req)
+    const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
+    controller.abort({ name: 'UserQuestionError', message: 'ask_user_question timed out before the user answered', code: 'ASK_TIMED_OUT' })
+    await assert.rejects(() => outcome, /foreground wait timed out/)
+    assert.equal(questionOf(store, row.id).status, 'pending')
+    // 插件可答窗口（questionTimeoutMs）到点后不可答。
+    await sleep(90)
+    assert.equal(questionOf(store, row.id).status, 'timeout')
+    assert.ok(store.get("SELECT * FROM audit_log WHERE action = 'question.timeout' AND target_id = ?", row.id))
+    await assert.rejects(() => service.answerQuestion(row.id, { answers: [] }), /已处理/)
+    assert.equal(answerCalls.length, 0)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('非 timed abort（其它 reason code / 无 reason / 缺 callId）一律立即置 expired', async () => {
+  const scenarios = [
+    {
+      label: 'timed 请求遇到非 ASK_TIMED_OUT reason（轮次取消）',
+      wait: () => ({ callId: 'call-plain', timed: true }),
+      abort: controller => controller.abort({ name: 'UserQuestionError', message: 'ask_user_question was aborted before the user answered', code: 'ASK_ABORTED' }),
+    },
+    {
+      label: '无 reason 的裸 abort',
+      wait: () => ({ callId: 'call-plain' }),
+      abort: controller => controller.abort(),
+    },
+    {
+      label: 'ASK_TIMED_OUT reason 但请求未带 callId',
+      wait: () => null,
+      abort: controller => controller.abort({ name: 'UserQuestionError', message: 'ask_user_question timed out before the user answered', code: 'ASK_TIMED_OUT' }),
+    },
+  ]
+  for (const scenario of scenarios) {
+    const ctx = new FakeCordisCtx()
+    const answerCalls = []
+    ctx.services = { userQuestions: { answer: async (...args) => { answerCalls.push(args); return true } } }
+    const { root, store, service } = await setup({ ctx })
+    try {
+      const project = await primeProject(store, service, 'Question Not Timed')
+      const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+      bindSession(store, { sessionId: 'sess-not-timed', botId: director.id, projectId: project.id })
+      const { req, controller } = makeReq({ sessionId: 'sess-not-timed' })
+      const wait = scenario.wait()
+      if (wait) req.wait = wait
+      const outcome = ask(service, req)
+      const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
+      scenario.abort(controller)
+      await assert.rejects(() => outcome, /aborted/)
+      assert.equal(questionOf(store, row.id).status, 'expired', scenario.label)
+      assert.ok(store.get("SELECT * FROM audit_log WHERE action = 'question.expired' AND target_id = ?", row.id), scenario.label)
+      await assert.rejects(() => service.answerQuestion(row.id, { answers: [] }), /已处理/)
+      assert.equal(answerCalls.length, 0, scenario.label)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  }
+})
+
+test('迟到回投失败（run 已结束/宿主不再认领）：答案仍落库 answered，审计 steer_failed，不向作答方抛错', async () => {
+  for (const behavior of [
+    {
+      label: 'answer 抛 CALLER_NOT_LIVE（run 已结束）',
+      answer: async () => {
+        const error = new Error('human interaction requires the exact live calling agent')
+        error.code = 'CALLER_NOT_LIVE'
+        throw error
+      },
+    },
+    { label: 'answer 返回 false（宿主不再认领）', answer: async () => false },
+  ]) {
+    const ctx = new FakeCordisCtx()
+    ctx.services = { userQuestions: { answer: behavior.answer } }
+    const { root, store, service } = await setup({ ctx })
+    try {
+      const project = await primeProject(store, service, 'Question Steer Fail')
+      const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+      bindSession(store, { sessionId: 'sess-steer-fail', botId: director.id, projectId: project.id })
+      const { req, controller } = makeReq({ sessionId: 'sess-steer-fail' })
+      req.wait = { callId: 'call-steer-fail', timed: true }
+      const outcome = ask(service, req)
+      const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
+      controller.abort({ name: 'UserQuestionError', message: 'ask_user_question timed out before the user answered', code: 'ASK_TIMED_OUT' })
+      await assert.rejects(() => outcome, /foreground wait timed out/)
+      // 投递失败不影响作答结果：行照常 answered，answerQuestion 不抛错。
+      const view = await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['main'] }] })
+      assert.equal(view.status, 'answered', behavior.label)
+      await sleep(5)
+      assert.equal(questionOf(store, row.id).status, 'answered', behavior.label)
+      const failed = store.get("SELECT * FROM audit_log WHERE action = 'question.steer_failed' AND target_id = ?", row.id)
+      assert.ok(failed, behavior.label)
+      assert.ok(failed.data_json.includes('call-steer-fail'), behavior.label)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  }
 })
