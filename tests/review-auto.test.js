@@ -398,6 +398,108 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
   } finally { await t.close() }
 })
 
+// DSHBOTS-140：owner review（review_requested）与 handle（blocked_handoff）分支与
+// review_delegate 共用同一 8K 截断管线——超长描述不再全文拼装（防 400 Prompt exceeds
+// max length 重演）；标题/状态/写范围/最近交付评论开头是截断点外的保底字段，恒在场。
+function insertDeliveryComment(t, taskId, body) {
+  t.store.run(
+    'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    `task_c_${taskId.slice(-6)}_${Math.random().toString(36).slice(2, 6)}`,
+    taskId, 'bot', t.dev.id, body, new Date().toISOString(),
+  )
+}
+
+test('owner review 提示词超长防护：8K 截断同口径，保底字段在场，短描述不截断', async () => {
+  const t = await setup()
+  try {
+    const long = await t.service.createTask({
+      projectId: t.project.id, title: '超长验收卡', assigneeBotId: t.dev.id,
+      description: 'x'.repeat(9_000), writeScopes: ['src/login/'], postCard: false,
+    })
+    insertDeliveryComment(t, long.id, '交付报告：登录页完成，测试 2/2 绿，改动 src/login/ 三文件。')
+    t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", long.id)
+    const ownerRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(long.id), 'review')
+    const ownerRow = t.store.get('SELECT * FROM runs WHERE id = ?', ownerRunId)
+    assert.equal(ownerRow.trigger_type, 'review_requested', 'owner review 运行形态')
+    const longTask = t.store.get('SELECT * FROM tasks WHERE id = ?', long.id)
+    const longPrompt = t.promptRuntime.promptFor({
+      run: ownerRow, bot: t.director, project: t.project, task: longTask,
+      chatMessage: null, sessionId: 's-owner-trunc-long',
+    })
+    assert.ok(longPrompt.includes('[任务描述共 9000 字符，超过 8000 已截断'), '截断必须注明')
+    assert.ok(!longPrompt.includes('x'.repeat(8_100)), '超出部分确实未进提示词')
+    assert.ok(longPrompt.length < 10_000, '提示词总量受控，不再有 400 超长风险')
+    assert.ok(longPrompt.includes('Title: 超长验收卡'), '保底字段：标题')
+    assert.ok(longPrompt.includes('Status: in_review'), '保底字段：状态')
+    assert.ok(longPrompt.includes('Declared write scopes: src/login'), '保底字段：写范围')
+    assert.ok(longPrompt.includes('交付报告：登录页完成，测试 2/2 绿'), '保底字段：最近交付评论开头')
+
+    const short = await t.service.createTask({
+      projectId: t.project.id, title: '短验收卡', assigneeBotId: t.dev.id,
+      description: '实现注册页。', postCard: false,
+    })
+    t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", short.id)
+    const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'review')
+    const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
+    const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
+    const shortPrompt = t.promptRuntime.promptFor({
+      run: shortRow, bot: t.director, project: t.project, task: shortTask,
+      chatMessage: null, sessionId: 's-owner-trunc-short',
+    })
+    assert.ok(shortPrompt.includes('实现注册页。'), '短描述全文保留')
+    assert.ok(!shortPrompt.includes('已截断'), '短描述不出现截断注明')
+  } finally { await t.close() }
+})
+
+test('handle 提示词超长防护：8K 截断同口径，保底字段与失败原因在场，短描述不截断', async () => {
+  const t = await setup()
+  try {
+    const long = await t.service.createTask({
+      projectId: t.project.id, title: '超长受阻卡', assigneeBotId: t.dev.id,
+      description: 'y'.repeat(9_000), writeScopes: ['src/pay/'], postCard: false,
+    })
+    insertDeliveryComment(t, long.id, '受阻说明：支付网关沙箱一直 502，重试三次未恢复。')
+    const failedRunId = t.service.enqueueTaskRun(t.service.taskRow(long.id), 'task_started', { type: 'bot', id: t.dev.id })
+    t.store.run(
+      "UPDATE runs SET status = 'failed', error_code = 'E_UPSTREAM', error_message = 'gateway 502', ended_at = ? WHERE id = ?",
+      new Date().toISOString(), failedRunId,
+    )
+    t.store.run("UPDATE tasks SET status = 'blocked' WHERE id = ?", long.id)
+    const handleRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(long.id), 'handle')
+    const handleRow = t.store.get('SELECT * FROM runs WHERE id = ?', handleRunId)
+    assert.equal(handleRow.kind, 'handle', 'handle 运行形态')
+    assert.equal(handleRow.trigger_type, 'blocked_handoff', 'handle 触发口径')
+    const longTask = t.store.get('SELECT * FROM tasks WHERE id = ?', long.id)
+    const longPrompt = t.promptRuntime.promptFor({
+      run: handleRow, bot: t.director, project: t.project, task: longTask,
+      chatMessage: null, sessionId: 's-handle-trunc-long',
+    })
+    assert.ok(longPrompt.includes('[任务描述共 9000 字符，超过 8000 已截断'), '截断必须注明')
+    assert.ok(!longPrompt.includes('y'.repeat(8_100)), '超出部分确实未进提示词')
+    assert.ok(longPrompt.length < 10_000, '提示词总量受控，不再有 400 超长风险')
+    assert.ok(longPrompt.includes('Title: 超长受阻卡'), '保底字段：标题')
+    assert.ok(longPrompt.includes('Status: blocked'), '保底字段：状态')
+    assert.ok(longPrompt.includes('Declared write scopes: src/pay'), '保底字段：写范围')
+    assert.ok(longPrompt.includes('受阻说明：支付网关沙箱一直 502'), '保底字段：最近交付评论开头')
+    assert.ok(longPrompt.includes('Last failure: gateway 502'), '失败原因仍在描述之后')
+
+    const short = await t.service.createTask({
+      projectId: t.project.id, title: '短受阻卡', assigneeBotId: t.dev.id,
+      description: '修复支付回调。', postCard: false,
+    })
+    t.store.run("UPDATE tasks SET status = 'blocked' WHERE id = ?", short.id)
+    const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'handle')
+    const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
+    const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
+    const shortPrompt = t.promptRuntime.promptFor({
+      run: shortRow, bot: t.director, project: t.project, task: shortTask,
+      chatMessage: null, sessionId: 's-handle-trunc-short',
+    })
+    assert.ok(shortPrompt.includes('修复支付回调。'), '短描述全文保留')
+    assert.ok(!shortPrompt.includes('已截断'), '短描述不出现截断注明')
+  } finally { await t.close() }
+})
+
 test('approvalTimeoutMs 默认 180_000，DSH_TEAM_APPROVAL_TIMEOUT_MS 可覆盖', async () => {
   const saved = process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS
   try {

@@ -34,6 +34,16 @@ export function sandboxModeForRun(run, bot) {
 
 const sessionIdOf = context => context?.agent?.id ?? context?.session?.id ?? context?.sessionId
 
+// 任务描述超长截断管线（DSHBOTS-113，事故 m_33bddb；DSHBOTS-140 起三条任务派生分支共用）：
+// 任务全文拼进提示词可能顶爆 400 上下文，超过 8K 字符截断并注明，消费方据此只基于
+// 截断内可见的部分下结论并声明盲区；标题/状态/写范围/任务评论在截断点之外恒在场。
+function truncateTaskDescription(raw) {
+  const text = raw || '(no description)'
+  return text.length > 8_000
+    ? `${text.slice(0, 8_000)}\n\n[任务描述共 ${text.length} 字符，超过 8000 已截断；超出部分未展示，结论请注明基于截断后的描述]`
+    : text
+}
+
 export const promptMethods = {
   // system 区会话级冻结（D-85 方案 B）：首次求值后按 session id 缓存字节，
   // 同会话后续每次宿主 assemble 都命中缓存，保证 system 区逐字节稳定，
@@ -355,23 +365,21 @@ Plan the depth of your work accordingly. If you judge the task cannot be finishe
 The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).` : ''
     }
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
+      // 超长防护（DSHBOTS-113，事故 m_33bddb；DSHBOTS-140 扩到 owner review / handle）：
+      // 三条分支共用 truncateTaskDescription 的同一截断点与盲区口径。
+      const writeScopes = readWriteScopes(task.write_scopes)
+      const declaredScopes = writeScopes.length ? writeScopes.join(', ') : '(none declared)'
+      const description = truncateTaskDescription(task.description)
       if (run.kind === 'review') {
         // 委派核验模板（DSHBOTS-107 review-verification）：核验工作由 subagent 并行完成，
         // 结论以「子代理核验：」开头落任务评论（finishRun 自动写回），不代 owner 裁决。
         if (run.trigger_type === 'review_delegate') {
-          const writeScopes = readWriteScopes(task.write_scopes)
-          // 超长防护（DSHBOTS-113，事故 m_33bddb）：任务全文拼进提示词可能顶爆 400 上下文，
-          // 超过 8K 字符截断并注明，核验子代理据此只核验截断内可见的部分并声明盲区。
-          const rawDescription = task.description || '(no description)'
-          const description = rawDescription.length > 8_000
-            ? `${rawDescription.slice(0, 8_000)}\n\n[任务描述共 ${rawDescription.length} 字符，超过 8000 已截断；超出部分未展示，核验结论请注明基于截断后的描述]`
-            : rawDescription
           return `${header}
 
 # Subagent verification for task ${project.key}-${task.number}
 Title: ${task.title}
 Status: ${task.status}
-Declared write scopes: ${writeScopes.length ? writeScopes.join(', ') : '(none declared)'}
+Declared write scopes: ${declaredScopes}
 Description:
 ${description}${threads}${timeBudgetBlockFor(task)}
 
@@ -390,8 +398,9 @@ Your final reply is recorded as a task comment automatically. It MUST start with
 # Review delivery for task ${project.key}-${task.number}
 Title: ${task.title}
 Status: ${task.status}
+Declared write scopes: ${declaredScopes}
 Description:
-${task.description || '(no description)'}${threads}${timeBudgetBlockFor(task)}
+${description}${threads}${timeBudgetBlockFor(task)}
 
 As the project owner, review the delivered result above against the task description. Check the delivery report claims when needed (files exist, tests pass). Then decide:
 - If the work is acceptable, call team_review_task with decision "accept".
@@ -407,8 +416,9 @@ Do not redo the task yourself, and do not start parallel work here. Reply in the
 # Blocked task ${project.key}-${task.number} needs your handling
 Title: ${task.title}
 Status: ${task.status}
+Declared write scopes: ${declaredScopes}
 Description:
-${task.description || '(no description)'}${threads}${timeBudgetBlockFor(task)}
+${description}${threads}${timeBudgetBlockFor(task)}
 Last failure: ${failure?.error_message ?? 'unknown'}
 
 As the project owner, handle this blocked task:
