@@ -29,6 +29,11 @@ export const RUN_LIMIT_RANGES = {
   [STALL_WATCHDOG_KEY]: [0, 360],
 }
 
+// ── 验收滞留守门（DSHBOTS-194）─────────────────────────────────────────────
+// in_review 任务超阈值分钟无新评论且无关联 run 活动 = 验收滞留；0 = 关闭守门。
+export const REVIEW_IDLE_MINUTES_KEY = 'review_idle_minutes'
+export const REVIEW_IDLE_MINUTES_RANGE = [0, 1440]
+
 // ── 会话结转（DSHBOTS-145）─────────────────────────────────────────────────
 // 同一绑定会话累计运行轮数超过阈值后结转：先排一次 bot 自写交接摘要，摘要就绪后
 // 删旧绑定开新会话并把摘要注入新会话首条对话提示词。0 = 关闭（阈值不生效）。
@@ -85,6 +90,18 @@ export function effectiveSessionRolloverTurns(config, getSetting = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_TURNS')
   const saved = savedInt(getSetting(SESSION_ROLLOVER_TURNS_KEY), SESSION_ROLLOVER_TURNS_RANGE)
   return !env && saved !== null ? saved : config.sessionRolloverTurns
+}
+
+// 验收滞留阈值生效值（DSHBOTS-194）：优先级与会话结转一致——env 显式 > 保存值 >
+// 默认 30 分钟；0 = 关闭。消费点（scheduler 验收守门、runLimitsView 透出）每次
+// 现算，改值对下一轮扫描生效；env 标志供 UI 提示「环境变量已覆盖」。
+export function effectiveReviewIdleMinutes(config, getSetting = () => null) {
+  const env = envExplicit('DSH_TEAM_REVIEW_IDLE_MINUTES')
+  const saved = savedInt(getSetting(REVIEW_IDLE_MINUTES_KEY), REVIEW_IDLE_MINUTES_RANGE)
+  return {
+    minutes: !env && saved !== null ? saved : config.reviewIdleMinutes,
+    env,
+  }
 }
 
 // 结转摘要的 settings 键（DSHBOTS-145）：按「bot + 上下文」隔离——同一 bot 的项目会话与
@@ -155,6 +172,9 @@ export function resolveConfig(config = {}) {
     // COUNT(*)（不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实
     // 增长一致）。生效值可被全局配置页 session_rollover_turns 覆盖。
     sessionRolloverTurns: int(config.sessionRolloverTurns ?? process.env.DSH_TEAM_SESSION_ROLLOVER_TURNS, 256, 0, 10_000),
+    // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超此分钟数 = 滞留。生效值可被
+    // 全局设置 review_idle_minutes 覆盖（effectiveReviewIdleMinutes），0 = 关闭。
+    reviewIdleMinutes: int(config.reviewIdleMinutes ?? process.env.DSH_TEAM_REVIEW_IDLE_MINUTES, 30, 0, 1440),
     // UI 语言（DSHBOTS-162）：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
     // 生效值由全局配置页 ui_language 覆盖，解析见 effectiveUiLanguage。
     uiLanguage: normalizeUiLanguage(config.uiLanguage ?? process.env.DSH_TEAM_UI_LANGUAGE ?? 'auto'),

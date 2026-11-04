@@ -10,6 +10,7 @@ import { id, jsonParse, nowIso, text } from '../util.js'
 import { MAX_RATE_LIMIT_RETRIES, RATE_LIMIT_CODES, isQuotaExhausted } from './backoff.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
+import { runReviewWatchdog } from './review-watchdog.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
@@ -408,6 +409,9 @@ export const schedulerMethods = {
       this.retryExpiredPlanWaits()
       // 陈旧排队运行守卫（DSHBOTS-110）：先于候选查询清掉任务已终态的 queued 任务运行。
       this.cancelStaleQueuedTaskRuns()
+      // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超阈值即注入 owner 系统提醒；
+      // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
+      runReviewWatchdog(this)
       const activeRows = this.store.all(
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。

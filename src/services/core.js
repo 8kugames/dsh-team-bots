@@ -3,7 +3,7 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
-import { effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES } from '../config.js'
+import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES } from '../config.js'
 import { badRequest, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
@@ -178,11 +178,14 @@ export const coreMethods = {
   // 生效值与保存值分开：inputs 回填保存值，卡头显示生效值。
   runLimitsView() {
     const limits = effectiveRunLimits(this.config, key => this.store.setting(key))
+    // 验收滞留阈值（DSHBOTS-194）随行透出：任务卡滞留 badge 据此着色，与后端守门同源。
+    const { minutes: reviewIdleMinutes } = effectiveReviewIdleMinutes(this.config, key => this.store.setting(key))
     return {
       runTimeoutMinutes: Math.round(limits.runTimeoutMs / 60_000),
       stallTimeoutMinutes: Math.round(limits.stallTimeoutMs / 60_000),
       runTimeoutEnv: limits.runTimeoutEnv,
       stallTimeoutEnv: limits.stallTimeoutEnv,
+      reviewIdleMinutes,
     }
   },
   updateSettings(patch, actor = this.actor()) {
