@@ -443,7 +443,7 @@ function renderGlobal() {
       <header class="global-head">
         <div class="global-head-copy">
           <p class="global-eyebrow">GLOBAL CONFIGURATION</p>
-          <h2 class="global-title">团队级配置</h2>
+          <h2 class="global-title">全局配置</h2>
           <p class="global-desc">跨项目生效的团队设置，按「偏好 → 运行 → 环境 → 接入」分组。改动即时生效的项在卡片内就地保存；标了「计划迁移」的模块在迁移完成前仍在本页可用。</p>
         </div>
         <div class="global-metrics">
