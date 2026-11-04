@@ -83,7 +83,7 @@
 .approval-progress-fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); transition: width .6s linear; }
 .approval-progress.urgent .approval-progress-fill { background: var(--star); }
 .approval-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.approval-foot { display: flex; align-items: center; gap: 8px; }
+.approval-foot { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 /* 已决 pill：中性字 + 状态小点（红色小点只出现在 rejected） */
 .approval-pill {
     display: inline-flex;
