@@ -2,7 +2,7 @@
 // 覆盖对账摘要、价目设置、月度用量、运行明细对账、保留期清理与 CSV 导出。
 // 用量明细记录、聚合与窗口解析见 ./usage.js。
 
-import { BUDGET_CURRENCY, aggregateUsage, costForTokens, filterClause, resolveUsageWindow } from './usage.js'
+import { BUDGET_CURRENCY, aggregateUsage, clearUsageSnapshotCache, costForTokens, filterClause, resolveUsageWindow } from './usage.js'
 import { currentPriceMap, lookupPrice } from './pricing.js'
 import { id, nowIso } from './util.js'
 
@@ -40,6 +40,7 @@ export function setPrice(store, input) {
        output_per_mtok = ?, currency = ? WHERE id = ?`,
       ...vals, existing.id,
     )
+    clearUsageSnapshotCache()
     return existing.id
   }
   const priceId = id('price')
@@ -48,6 +49,7 @@ export function setPrice(store, input) {
        output_per_mtok, currency, effective_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     priceId, provider, model, ...vals, effectiveAt,
   )
+  clearUsageSnapshotCache()
   return priceId
 }
 
@@ -146,6 +148,8 @@ export function reconcileUsage(store, { days = 30, expiredBefore = null } = {}) 
       summary.checkedAt,
     )
   }
+  // 对账写回后立即失效快照缓存：否则页面会拿旧对账摘要显示 30s，用户会以为对账没生效。
+  clearUsageSnapshotCache()
   return summary
 }
 
@@ -188,6 +192,8 @@ export function applyRetention(store, {
     removed.reconciliationRecords = store.run('DELETE FROM usage_reconciliation WHERE checked_at < ?', before).changes
     removed.reconciliation = { removed: removed.reconciliationRecords, before }
   }
+  // 保留期清理会删明细与对账记录，清缓存避免页面继续显示已删数据。
+  clearUsageSnapshotCache()
   return removed
 }
 

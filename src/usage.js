@@ -552,7 +552,75 @@ function windowSpanDays(store, window) {
   return Math.max(1, Math.ceil((Date.now() - from) / DAY_MS))
 }
 
+// —— 用量快照缓存 ——
+// state() 每 2.8s 轮询一次，每次都跑 30d 全口径聚合（生产库实测约 500ms）。
+// 这里加一层 TTL 缓存：同一组参数在 TTL 内直接复用，把 state() 从 ~750ms 拉回几十毫秒。
+//
+// 口径：用量页默认最多滞后 30s；明细 / 对账 / 价目任一变更会立即失效缓存。
+// 失效有两条通道，缺一不可：
+//   1) 显式：写回方在改完数据后调 clearUsageSnapshotCache()
+//      （usage-reconcile.js 的 setPrice / reconcileUsage / applyRetention）。
+//   2) 兜底：缓存项带「数据版本」，每次先算版本号，与缓存项不同就直接重算。
+//      版本由三张会被写回的表推导，用于兜住漏挂钩子的路径（含 UPDATE 不改时间戳的情形，
+//      例如 pricing.js 的 seedModelPrices 只 INSERT 新行、不改已有行的时间戳）。
+const SNAPSHOT_CACHE_TTL_MS = 30_000
+const SNAPSHOT_CACHE_MAX = 8
+
+// 缓存按 store 分桶：测试里每个用例一个临时库，共用一张表会串味。
+const snapshotCaches = new WeakMap()
+const liveSnapshotCaches = new Set()
+
+function cacheFor(store) {
+  let cache = snapshotCaches.get(store)
+  if (!cache) {
+    cache = new Map()
+    snapshotCaches.set(store, cache)
+    liveSnapshotCaches.add(cache)
+  }
+  return cache
+}
+
+function snapshotCacheKey(projectId, days, budgetCurrency, soloBotId, options) {
+  return JSON.stringify([
+    projectId ?? null,
+    days,
+    budgetCurrency,
+    soloBotId ?? null,
+    options.window ?? null,
+    options.timeZone ?? null,
+    options.now ?? null,
+  ])
+}
+
+function snapshotDataVersion(store) {
+  const events = store.get('SELECT COUNT(*) AS n, MAX(rowid) AS maxId FROM usage_events') ?? {}
+  const recon = store.get('SELECT COUNT(*) AS n, MAX(checked_at) AS checkedAt FROM usage_reconciliation') ?? {}
+  const prices = store.get('SELECT COUNT(*) AS n, MAX(effective_at) AS effectiveAt FROM model_prices') ?? {}
+  return [events.n, events.maxId, recon.n, recon.checkedAt, prices.n, prices.effectiveAt].join(':')
+}
+
+// 写回方在改完明细 / 对账 / 价目后调用；测试也用它隔离用例。
+export function clearUsageSnapshotCache() {
+  for (const cache of liveSnapshotCaches) cache.clear()
+}
+
 export function usageSnapshot(store, projectId, days = 30, options = {}) {
+  const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
+  const soloBotId = options.soloBotId ?? null
+  const ttl = Number.isFinite(options.cacheTtlMs) ? options.cacheTtlMs : SNAPSHOT_CACHE_TTL_MS
+  const key = snapshotCacheKey(projectId, days, budgetCurrency, soloBotId, options)
+  const version = snapshotDataVersion(store)
+  const cache = cacheFor(store)
+  const hit = cache.get(key)
+  if (hit && hit.version === version && ttl > 0 && Date.now() - hit.at < ttl) return hit.value
+  const value = computeUsageSnapshot(store, projectId, days, { ...options, currency: budgetCurrency, soloBotId })
+  cache.set(key, { version, at: Date.now(), value })
+  // 有界：正常调用参数组合有限，仍兜底按插入序淘汰最旧项，防无界增长。
+  while (cache.size > SNAPSHOT_CACHE_MAX) cache.delete(cache.keys().next().value)
+  return value
+}
+
+function computeUsageSnapshot(store, projectId, days = 30, options = {}) {
   const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const soloBotId = options.soloBotId ?? null
   // 时间窗口径（DSHBOTS-121）：传 window 走四档窗口；不传时沿用旧的「近 N 天」滚动窗口。

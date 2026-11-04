@@ -93,7 +93,7 @@ export const systemMethods = {
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
       revisions: {},
       // 用量快照默认按 30 日窗口（DSHBOTS-121）：与页面默认档一致，其余三档按需单独取。
-      usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null, window: '30d' }),
+      usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null, window: '30d', cacheTtlMs: this.config.usageSnapshotCacheMs }),
       settings: this.settingsView(),
       runLimits: this.runLimitsView(),
       // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。

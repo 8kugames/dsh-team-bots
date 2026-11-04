@@ -186,6 +186,13 @@ export function resolveConfig(config = {}) {
     autoReviewDelegate: bool(config.autoReviewDelegate ?? process.env.DSH_TEAM_AUTO_REVIEW_DELEGATE, true),
     schedulerIntervalMs: int(config.schedulerIntervalMs, 1_500, 250, 30_000),
     modelCacheMs: int(config.modelCacheMs, 8_000, 0, 120_000),
+    // 用量快照缓存：state() 每轮轮询都跑 30d 全口径聚合（生产库实测约 500ms），
+    // 这里做 TTL 缓存把 state() 拉回几十毫秒。0 = 关闭缓存（每次重算）。
+    // 用量页默认最多滞后 30s；明细 / 对账 / 价目写回会立即失效缓存。
+    usageSnapshotCacheMs: int(config.usageSnapshotCacheMs ?? process.env.DSH_TEAM_USAGE_SNAPSHOT_CACHE_MS, 30_000, 0, 300_000),
+    // 模型目录 stale-while-revalidate：stale 但在该窗口内立即返回旧值并后台刷新，
+    // 避免 catalog 过期时逐 provider 串行 listModels 阻塞 state()。0 = 关闭 SWR（回到旧语义）。
+    catalogStaleMs: int(config.catalogStaleMs ?? process.env.DSH_TEAM_CATALOG_STALE_MS, 300_000, 0, 3_600_000),
     // 终端命令硬超时：默认 120s；测试可注入更短值（下限 500ms）。
     terminalTimeoutMs: int(config.terminalTimeoutMs, 120_000, 500, 600_000),
     seedOwnerName: String(config.seedOwnerName ?? SEED_OWNER.name).slice(0, 40),

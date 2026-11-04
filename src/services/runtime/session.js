@@ -34,52 +34,81 @@ export const sessionMethods = {
     return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
   },
   async catalog(force = false) {
-    if (!force && Date.now() - this.modelsCache.at < this.config.modelCacheMs) return this.modelsCache.value
-    const value = []
-    try {
-      const providers = this.ctx.llm?.listProviders?.() ?? []
-      for (const provider of providers) {
-        let models = []
-        try {
-          models = await this.ctx.llm.listModels(provider.id)
-        } catch {
-          continue
-        }
-        for (const model of models ?? []) {
-          let efforts = []
-          let defaultEffort
-          let contextWindow
-          let maxTokens
-          try {
-            const info = await this.ctx.llm.resolveModelInfo?.(provider.id, model.id)
-            efforts = (info?.reasoning?.efforts ?? []).map(effort => ({
-              id: effort.id,
-              name: effort.name ?? effort.id,
-              description: effort.description,
-            }))
-            defaultEffort = info?.reasoning?.defaultEffort
-            // listModels 条目不含窗口/输出上限；resolveModelInfo 才是这两个字段的来源。
-            contextWindow = info?.context?.contextWindow
-            maxTokens = info?.defaultMaxTokens
-          } catch {}
-          value.push({
-            ref: `${provider.id}/${model.id}`,
-            provider: provider.id,
-            providerName: provider.name ?? provider.id,
-            model: model.id,
-            name: model.name ?? model.id,
-            contextWindow,
-            maxTokens,
-            efforts,
-            defaultEffort,
-          })
-        }
+    const age = Date.now() - this.modelsCache.at
+    if (!force) {
+      if (age < this.config.modelCacheMs) return this.modelsCache.value
+      // stale-while-revalidate：目录已过期但仍在 stale 窗口内时，先用旧值应答、后台刷新。
+      // 否则每次 state() 轮询撞上过期都会去逐 provider 串行 listModels（真实网络调用），
+      // 那是点击路径上秒级波动的主因。
+      const staleMs = this.config.catalogStaleMs
+      if (staleMs > 0 && age < this.config.modelCacheMs + staleMs) {
+        void this.refreshCatalog()
+        return this.modelsCache.value
       }
-    } catch (error) {
-      this.logger.warn?.('dsh-team: model catalog unavailable: %s', error)
     }
-    this.modelsCache = { at: Date.now(), value }
-    return value
+    return this.refreshCatalog()
+  },
+  async refreshCatalog() {
+    // 并发去重：多个 state() 同时撞上过期时只跑一次刷新。
+    if (this.modelsRefreshing) return this.modelsRefreshing
+    this.modelsRefreshing = (async () => {
+      const value = []
+      let okProviders = 0
+      try {
+        const providers = this.ctx.llm?.listProviders?.() ?? []
+        for (const provider of providers) {
+          let models = []
+          try {
+            models = await this.ctx.llm.listModels(provider.id)
+            okProviders += 1
+          } catch {
+            continue
+          }
+          for (const model of models ?? []) {
+            let efforts = []
+            let defaultEffort
+            let contextWindow
+            let maxTokens
+            try {
+              const info = await this.ctx.llm.resolveModelInfo?.(provider.id, model.id)
+              efforts = (info?.reasoning?.efforts ?? []).map(effort => ({
+                id: effort.id,
+                name: effort.name ?? effort.id,
+                description: effort.description,
+              }))
+              defaultEffort = info?.reasoning?.defaultEffort
+              // listModels 条目不含窗口/输出上限；resolveModelInfo 才是这两个字段的来源。
+              contextWindow = info?.context?.contextWindow
+              maxTokens = info?.defaultMaxTokens
+            } catch {}
+            value.push({
+              ref: `${provider.id}/${model.id}`,
+              provider: provider.id,
+              providerName: provider.name ?? provider.id,
+              model: model.id,
+              name: model.name ?? model.id,
+              contextWindow,
+              maxTokens,
+              efforts,
+              defaultEffort,
+            })
+          }
+        }
+      } catch (error) {
+        this.logger.warn?.('dsh-team: model catalog unavailable: %s', error)
+      }
+      // 刷新失败（或全部 provider 都没取到）时保留旧目录：一次网络抖动就把模型列表清成 []
+      // 会让整页模型选择器空掉。
+      const failed = okProviders === 0
+      if (failed && this.modelsCache.value.length > 0) {
+        this.logger.warn?.('dsh-team: model catalog refresh failed, keeping the previous list')
+      } else {
+        this.modelsCache = { at: Date.now(), value }
+      }
+      this.modelsRefreshing = null
+      return this.modelsCache.value
+    })()
+    return this.modelsRefreshing
   },
   async validateBotConfig({ provider, model, effort }) {
     if (!provider && !model) return
