@@ -150,6 +150,11 @@ export function resolveConfig(config = {}) {
     uiLanguage: normalizeUiLanguage(config.uiLanguage ?? process.env.DSH_TEAM_UI_LANGUAGE ?? 'auto'),
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
+    // 私信自动归档（DSHBOTS-171）：单聊默认视图只留「每 bot 最近 keep 条 且 days 天内」的
+    // 交集，超出任一阈值即归档（默认视图隐去，数据保留，messagesPage 翻页仍可查回）。
+    // 0 = 关闭该维过滤。
+    dmArchiveDays: int(config.dmArchiveDays ?? process.env.DSH_TEAM_DM_ARCHIVE_DAYS, 7, 0, 3650),
+    dmKeepRecent: int(config.dmKeepRecent ?? process.env.DSH_TEAM_DM_KEEP_RECENT, 100, 0, 10_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。
     approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 180_000, 5_000, 3_600_000),
     // 提问转接超时（DSHBOTS-116）：与审批同默认 180s，最短 5s、最长 1 小时。

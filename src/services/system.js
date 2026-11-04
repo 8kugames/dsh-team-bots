@@ -17,6 +17,44 @@ import { nowIso } from '../util.js'
 // health() 与「DSH 服务」卡展示同源（DSHBOTS-143）。
 const PLUGIN_VERSION = String(createRequire(import.meta.url)('../../package.json').version ?? 'unknown')
 
+// 单聊默认视图在关闭条数维（dmKeepRecent=0）时的回退上限，保持 state 历史口径：
+// 归档过滤关闭也不能让每次轮询拖全量历史。
+const SOLO_VIEW_FALLBACK_LIMIT = 200
+
+/**
+ * 私信默认视图的归档窗口取数（DSHBOTS-171）。
+ *
+ * 窗口模式（无游标，state 默认视图）：只保留「每 bot 最近 keep 条 且 created_at
+ * 不早于 days 天前」的交集，超出任一阈值即归档。归档不是删除——翻页模式仍可查回。
+ * cutoff 写在 LIMIT 之前，保证两维是交集而非先截再滤；任一维为 0 即关闭该维。
+ * 返回升序原始行数组。
+ *
+ * 翻页模式（带 beforeCreatedAt/beforeId 游标，messagesPage）：取「严格早于游标」的
+ * 最近 limit 条，不过归档窗口；第 limit+1 条仅作 hasMore 探位。返回 { messages, hasMore }。
+ */
+function soloVisibleMessages(store, botId, { days = 0, keep = 0, beforeCreatedAt = null, beforeId = null, limit = null } = {}) {
+  if (beforeCreatedAt && beforeId) {
+    const pageSize = Math.max(1, Math.min(200, Number.isFinite(Number(limit)) && limit ? Math.trunc(Number(limit)) : 200))
+    const rows = store.all(
+      `SELECT * FROM solo_messages
+       WHERE bot_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+      botId, beforeCreatedAt, beforeCreatedAt, beforeId, pageSize + 1,
+    )
+    return { messages: rows.slice(0, pageSize).reverse(), hasMore: rows.length > pageSize }
+  }
+  const cutoff = days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : null
+  const take = keep > 0 ? keep : SOLO_VIEW_FALLBACK_LIMIT
+  // 内层按索引序 DESC 取窗口，外层翻回 ASC；id 平序兜底同毫秒消息。
+  return store.all(
+    cutoff
+      ? 'SELECT * FROM (SELECT * FROM solo_messages WHERE bot_id = ? AND created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at ASC, id ASC'
+      : 'SELECT * FROM (SELECT * FROM solo_messages WHERE bot_id = ? ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at ASC, id ASC',
+    ...(cutoff ? [botId, cutoff, take] : [botId, take]),
+  )
+}
+
 
 
 export const systemMethods = {
@@ -148,10 +186,12 @@ export const systemMethods = {
       if (soloBot) {
         view.solo = {
           bot: this.botView(soloBot),
-          messages: this.store.all(
-            `SELECT * FROM (SELECT * FROM solo_messages WHERE bot_id = ? ORDER BY created_at DESC LIMIT 200) ORDER BY created_at ASC`,
-            soloBot.id,
-          ).map(message => this.soloMessageView(message)),
+          // 默认视图走归档窗口（DSHBOTS-171）：只留「最近 dmKeepRecent 条 且 dmArchiveDays
+          // 天内」交集，超出即隐去；被归档消息经 messagesPage 游标翻页仍可查回。
+          messages: soloVisibleMessages(this.store, soloBot.id, {
+            days: this.config.dmArchiveDays,
+            keep: this.config.dmKeepRecent,
+          }).map(message => this.soloMessageView(message)),
           runs: this.store.all(
             "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 30",
             soloBot.id,
@@ -261,22 +301,28 @@ export const systemMethods = {
     if (isGroup === isSolo) throw badRequest('projectId 与 soloBotId 必须二选一')
     if (!beforeCreatedAt || !beforeId) throw badRequest('缺少游标：beforeCreatedAt 与 beforeId 必须同时提供')
     const pageSize = Math.max(1, Math.min(200, Number.isFinite(Number(limit)) && limit ? Math.trunc(Number(limit)) : 200))
-    const table = isGroup ? 'messages' : 'solo_messages'
-    const scopeSql = isGroup ? 'project_id = ?' : 'bot_id = ?'
-    const scopeArg = isGroup ? projectId : soloBotId
+    // 单聊分页与默认视图同源取数（DSHBOTS-171）：翻页不过归档窗口，被归档的更早消息
+    // 仍可见——「归档」只是默认视图隐去，不是删除。群聊保持原口径，不受私信归档影响。
+    if (isSolo) {
+      const page = soloVisibleMessages(this.store, soloBotId, { beforeCreatedAt, beforeId, limit: pageSize })
+      return {
+        messages: page.messages.map(row => this.soloMessageView(row)),
+        hasMore: page.hasMore,
+      }
+    }
     // 游标口径：取「严格早于游标」的最近 pageSize 条（第 pageSize+1 条仅作 hasMore 探位，不进结果）。
     // 先按 DESC 取回、slice 掉探位行、再翻回 ASC——顺序不能反，否则会丢掉紧邻游标的那条。
     const rows = this.store.all(
-      `SELECT * FROM ${table}
-       WHERE ${scopeSql} AND (created_at < ? OR (created_at = ? AND id < ?))
+      `SELECT * FROM messages
+       WHERE project_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
        ORDER BY created_at DESC, id DESC
        LIMIT ?`,
-      scopeArg, beforeCreatedAt, beforeCreatedAt, beforeId, pageSize + 1,
+      projectId, beforeCreatedAt, beforeCreatedAt, beforeId, pageSize + 1,
     )
     const hasMore = rows.length > pageSize
     const page = rows.slice(0, pageSize).reverse()
     return {
-      messages: page.map(row => (isGroup ? this.messageView(row) : this.soloMessageView(row))),
+      messages: page.map(row => this.messageView(row)),
       hasMore,
     }
   },
