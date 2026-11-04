@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
 // DSHBOTS-70：粘贴截图与文件路径（纯前端口径——不扫目录、不加服务端接口、不读文件系统）。
 // 锁定四件事：①parseFileUriList 只从剪贴板文本还原 file:// 绝对路径（uri-list 语法 + text/plain 兜底）；
@@ -9,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 // ③paste 分发走 document 级委托且只认领 #composer-input（纯文本粘贴行为不变）；
 // ④受支持图片走 addPendingImages；不支持类型无路径时插文件名 + toast「浏览器未提供完整路径」，不静默不编造。
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 
 // composer-paste 标记块（纯函数区）：标记行本身是注释，求值区从 start 行之后取到 end 行之前，
 // 避免把 start 标记行的尾巴（—— 说明文字）当成裸代码带进 new Function。

@@ -7,7 +7,8 @@ import { attr, avatar, botById, esc, formatTime } from './util.js'
 import { icon } from './icons.js'
 import { mdChatScope, mdPlainSummary, richText } from './markdown.js'
 import { t } from './i18n.js'
-import { refresh, panelAttrs, render, renderMessageImages } from '../app.js'
+import { renderMessageImages } from './composer.js'
+import { refresh, panelAttrs, render } from '../app.js'
 
 // ===== approval-card:start 审批卡片（DSHBOTS-32 UI）=====
 // ===== approval-ux:start 审批交互（DSHBOTS-102）=====

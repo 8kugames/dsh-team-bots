@@ -169,6 +169,7 @@ export function installHttp(ctx, service, logger = console) {
   route('/api/dsh-team/modules/cards.js', ['GET'], moduleScript('cards.js'))
   route('/api/dsh-team/modules/usage.js', ['GET'], moduleScript('usage.js'))
   route('/api/dsh-team/modules/settings.js', ['GET'], moduleScript('settings.js'))
+  route('/api/dsh-team/modules/composer.js', ['GET'], moduleScript('composer.js'))
   route('/api/dsh-team/i18n/zh.js', ['GET'], i18nDict('zh.js'))
   route('/api/dsh-team/i18n/en.js', ['GET'], i18nDict('en.js'))
   route('/api/dsh-team/styles.css', ['GET'], styles)

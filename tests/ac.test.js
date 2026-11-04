@@ -1,9 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readUiSource } from './helpers/ui-sources.js'
 
-const source = readFileSync(fileURLToPath(new URL('../ui/app.js', import.meta.url)), 'utf8')
+const source = readUiSource()
 const block = /\/\/ ac-core:start[\s\S]*?\/\/ ac-core:end/.exec(source)?.[0]
 assert.ok(block, 'ui/app.js 缺少 ac-core 标记块')
 
