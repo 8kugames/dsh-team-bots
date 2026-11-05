@@ -176,19 +176,21 @@ function renderRunLimitsCard() {
     limits.runTimeoutEnv ? 'DSH_TEAM_RUN_TIMEOUT_MS' : '',
     limits.stallTimeoutEnv ? 'DSH_TEAM_STALL_TIMEOUT_MS' : '',
   ].filter(Boolean).join(' / ')
-  const stallText = limits.stallTimeoutMinutes === 0 ? '看门狗关闭' : `${limits.stallTimeoutMinutes ?? 30} 分钟看门狗`
+  const stallText = limits.stallTimeoutMinutes === 0
+    ? t('global.stallOff')
+    : t('global.stallMinutes', { minutes: limits.stallTimeoutMinutes ?? 30 })
   return `
     <div class="card form-card g-card">
-      <div class="card-head"><h3>运行时效</h3><span class="meta">当前生效 ${limits.runTimeoutMinutes ?? 120} 分钟超时 / ${stallText}</span></div>
+      <div class="card-head"><h3>${t('global.cardRunLimits')}</h3><span class="meta">${t('global.runLimitsCurrent', { timeout: limits.runTimeoutMinutes ?? 120, stall: stallText })}</span></div>
       <div class="field-row">
-        <div class="field"><label id="settings-run-timeout-label" for="settings-run-timeout">超时中止（分钟）</label><input class="input mono" style="text-align:right" type="number" min="1" max="360" id="settings-run-timeout" name="run_timeout_minutes" value="${attr(runValue)}"></div>
-        <div class="field"><label id="settings-stall-watchdog-label" for="settings-stall-watchdog">无进展看门狗（分钟）</label><input class="input mono" style="text-align:right" type="number" min="0" max="360" id="settings-stall-watchdog" name="stall_watchdog_minutes" value="${attr(stallValue)}"></div>
+        <div class="field"><label id="settings-run-timeout-label" for="settings-run-timeout">${t('global.runTimeoutLabel')}</label><input class="input mono" style="text-align:right" type="number" min="1" max="360" id="settings-run-timeout" name="run_timeout_minutes" value="${attr(runValue)}"></div>
+        <div class="field"><label id="settings-stall-watchdog-label" for="settings-stall-watchdog">${t('global.stallWatchdogLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="360" id="settings-stall-watchdog" name="stall_watchdog_minutes" value="${attr(stallValue)}"></div>
       </div>
-      <div class="hint">超时中止 = 单次运行的最长时长（1–360 分钟）；无进展看门狗 = 运行多久没有任何输出即判定卡住（0–360 分钟，0 为关闭）。</div>
-      <div class="hint">新值只对之后启动的运行生效，进行中的运行不追溯。</div>
-      ${envNames ? `<div class="hint">环境变量 ${envNames} 已显式设置，对应项以环境变量为准，页面保存值不生效。</div>` : ''}
+      <div class="hint">${t('global.runLimitsHint1')}</div>
+      <div class="hint">${t('global.runLimitsHint2')}</div>
+      ${envNames ? `<div class="hint">${t('global.runLimitsEnv', { names: envNames })}</div>` : ''}
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn small" type="button" data-action="save-run-limits">保存运行时效</button>
+        <button class="btn small" type="button" data-action="save-run-limits">${t('global.saveRunLimits')}</button>
       </div>
     </div>`
 }
@@ -199,34 +201,34 @@ function renderOpsCard() {
   const num = value => (value === '' || value === undefined || value === null ? '' : String(value))
   return `
     <div class="card form-card g-card">
-      <div class="card-head"><h3>系统与运维</h3></div>
+      <div class="card-head"><h3>${t('global.cardOps')}</h3></div>
       <div class="field-row">
         <div class="field">
-          <label id="settings-currency-label" for="settings-currency">预算币种</label>
+          <label id="settings-currency-label" for="settings-currency">${t('global.budgetCurrency')}</label>
           <select class="select" id="settings-currency" name="budget_currency">
             ${['CNY', 'USD'].map(code => `<option value="${code}" ${code === currency ? 'selected' : ''}>${code}</option>`).join('')}
           </select>
         </div>
         <div class="field">
-          <label id="settings-memory-review-label" for="settings-memory-review">记忆自动审查</label>
+          <label id="settings-memory-review-label" for="settings-memory-review">${t('global.memoryReview')}</label>
           <select class="select" id="settings-memory-review" name="memory_review">
-            <option value="1" ${settings.memory_review !== '0' ? 'selected' : ''}>开启</option>
-            <option value="0" ${settings.memory_review === '0' ? 'selected' : ''}>关闭</option>
+            <option value="1" ${settings.memory_review !== '0' ? 'selected' : ''}>${t('global.on')}</option>
+            <option value="0" ${settings.memory_review === '0' ? 'selected' : ''}>${t('global.off')}</option>
           </select>
         </div>
       </div>
       <div class="field-row">
-        <div class="field"><label id="settings-global-token-budget-label" for="settings-global-token-budget">全局 Token 预算</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-global-token-budget" name="global_token_budget" value="${attr(num(settings.global_token_budget))}" placeholder="不限制"></div>
-        <div class="field"><label id="settings-global-cost-budget-label" for="settings-global-cost-budget">全局成本预算</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" id="settings-global-cost-budget" name="global_cost_budget" value="${attr(num(settings.global_cost_budget))}" placeholder="不限制"></div>
+        <div class="field"><label id="settings-global-token-budget-label" for="settings-global-token-budget">${t('global.tokenBudget')}</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-global-token-budget" name="global_token_budget" value="${attr(num(settings.global_token_budget))}" placeholder="${t('global.unlimited')}"></div>
+        <div class="field"><label id="settings-global-cost-budget-label" for="settings-global-cost-budget">${t('global.costBudget')}</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" id="settings-global-cost-budget" name="global_cost_budget" value="${attr(num(settings.global_cost_budget))}" placeholder="${t('global.unlimited')}"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label id="settings-retention-usage-label" for="settings-retention-usage">用量保留天数</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-usage" name="retention_usage_days" value="${attr(num(settings.retention_usage_days))}" placeholder="永久"></div>
-        <div class="field"><label id="settings-retention-run-label" for="settings-retention-run">运行事件保留天数</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-run" name="retention_run_event_days" value="${attr(num(settings.retention_run_event_days))}" placeholder="永久"></div>
+        <div class="field"><label id="settings-retention-usage-label" for="settings-retention-usage">${t('global.retentionUsage')}</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-usage" name="retention_usage_days" value="${attr(num(settings.retention_usage_days))}" placeholder="${t('global.forever')}"></div>
+        <div class="field"><label id="settings-retention-run-label" for="settings-retention-run">${t('global.retentionRun')}</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-run" name="retention_run_event_days" value="${attr(num(settings.retention_run_event_days))}" placeholder="${t('global.forever')}"></div>
       </div>
-      <div class="field"><label id="settings-retention-message-label" for="settings-retention-message">消息保留天数</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-message" name="retention_message_days" value="${attr(num(settings.retention_message_days))}" placeholder="永久"></div>
-      <div class="hint">全局预算对所有项目生效；保留天数按天清理过期用量、运行事件与消息，0 表示永久保留。</div>
+      <div class="field"><label id="settings-retention-message-label" for="settings-retention-message">${t('global.retentionMessage')}</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-retention-message" name="retention_message_days" value="${attr(num(settings.retention_message_days))}" placeholder="${t('global.forever')}"></div>
+      <div class="hint">${t('global.opsHint')}</div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn small" type="button" data-action="save-settings">保存系统设置</button>
+        <button class="btn small" type="button" data-action="save-settings">${t('global.saveSettings')}</button>
       </div>
     </div>`
 }
@@ -234,15 +236,15 @@ function renderOpsCard() {
 // DSH 路径卡：只读展示本机 DSH 目录、工作区、共享技能根与数据目录。
 function dshPathsCard() {
   const paths = state.data.paths ?? {}
-  const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
+  const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="${t('common.copyPath')}" aria-label="${t('common.copyPath')}">${icon('copy')}</button>`
   return `
     <div class="card form-card g-card">
-      <div class="card-head"><h3>DSH 路径</h3><span class="meta">只读</span></div>
-      <div class="path-row"><span>DSH 目录</span>${pathCode(paths.dshHome ?? '~/.dsh')}${copyPath(paths.dshHome ?? '')}</div>
-      <div class="path-row"><span>工作区</span>${pathCode(tildePath(paths.workspace))}${copyPath(paths.workspace)}</div>
-      <div class="path-row"><span>共享</span>${pathCode(paths.skillRoot)}${copyPath(paths.skillRoot)}</div>
-      <div class="path-row"><span>数据</span>${pathCode(paths.dataDir)}${copyPath(paths.dataDir)}</div>
-      <div class="hint">技能重扫入口在「技能」页；本卡只读本机路径。</div>
+      <div class="card-head"><h3>${t('global.cardDshPaths')}</h3><span class="meta">${t('global.readonly')}</span></div>
+      <div class="path-row"><span>${t('global.pathDshHome')}</span>${pathCode(paths.dshHome ?? '~/.dsh')}${copyPath(paths.dshHome ?? '')}</div>
+      <div class="path-row"><span>${t('global.pathWorkspace')}</span>${pathCode(tildePath(paths.workspace))}${copyPath(paths.workspace)}</div>
+      <div class="path-row"><span>${t('global.pathSkills')}</span>${pathCode(paths.skillRoot)}${copyPath(paths.skillRoot)}</div>
+      <div class="path-row"><span>${t('global.pathData')}</span>${pathCode(paths.dataDir)}${copyPath(paths.dataDir)}</div>
+      <div class="hint">${t('global.dshPathsHint')}</div>
     </div>`
 }
 
@@ -254,20 +256,20 @@ function dshServiceCard() {
   const latestCell = (latest, available) => latest == null
     ? '<strong>—</strong>'
     : available
-      ? `<strong>${esc(latest)} <span class="pill amber">可升级</span></strong>`
-      : `<strong>${esc(latest)} <span class="pill green">最新</span></strong>`
+      ? `<strong>${esc(latest)} <span class="pill amber">${t('global.upgradable')}</span></strong>`
+      : `<strong>${esc(latest)} <span class="pill green">${t('global.latest')}</span></strong>`
   const outbox = data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
   return `
     <div class="card form-card g-card">
       <div class="card-head">
-        <h3>DSH 服务</h3>
-        <button class="btn small" data-action="check-dsh-update">${icon('refresh')}检查更新</button>
+        <h3>${t('global.cardDshService')}</h3>
+        <button class="btn small" data-action="check-dsh-update">${icon('refresh')}${t('global.checkUpdate')}</button>
       </div>
-      <div class="kv"><span>dsh 当前版本</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
-      <div class="kv"><span>dsh 最新版本</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
-      <div class="kv"><span>dsh-team-bots 当前版本</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
-      <div class="kv"><span>dsh-team-bots 最新版本</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
-      ${Number(outbox.failed ?? 0) > 0 ? `<div class="kv" style="margin-top:12px"><span>投递队列</span><strong>${outbox.failed} 条消息投递失败</strong></div>` : ''}
+      <div class="kv"><span>${t('global.dshCurrentVersion')}</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
+      <div class="kv"><span>${t('global.dshLatestVersion')}</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
+      <div class="kv"><span>${t('global.pluginCurrentVersion')}</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
+      <div class="kv"><span>${t('global.pluginLatestVersion')}</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
+      ${Number(outbox.failed ?? 0) > 0 ? `<div class="kv" style="margin-top:12px"><span>${t('global.outboxQueue')}</span><strong>${t('global.outboxFailed', { count: outbox.failed })}</strong></div>` : ''}
     </div>`
 }
 
@@ -369,33 +371,33 @@ function renderGlobal() {
       <header class="global-head">
         <div class="global-head-copy">
           <p class="global-eyebrow">GLOBAL CONFIGURATION</p>
-          <h2 class="global-title">全局配置</h2>
-          <p class="global-desc">跨项目生效的团队设置，按「偏好 → 运行 → 关于」分组，改动在卡片内就地保存。</p>
+          <h2 class="global-title">${t('global.title')}</h2>
+          <p class="global-desc">${t('global.desc')}</p>
         </div>
       </header>
-      <nav class="global-nav" aria-label="配置分组导航">
-        <a class="global-nav-item" href="#g-pref">偏好</a>
-        <a class="global-nav-item" href="#g-runtime">运行与预算</a>
-        <a class="global-nav-item" href="#g-about">关于与系统状态</a>
+      <nav class="global-nav" aria-label="${t('global.navLabel')}">
+        <a class="global-nav-item" href="#g-pref">${t('global.groupPref')}</a>
+        <a class="global-nav-item" href="#g-runtime">${t('global.groupRuntime')}</a>
+        <a class="global-nav-item" href="#g-about">${t('global.groupAbout')}</a>
       </nav>
-      ${gsec('01', 'g-pref', '偏好', '只影响这台机器上的显示方式，保存后立即生效。', `
+      ${gsec('01', 'g-pref', t('global.groupPref'), t('global.groupPrefDesc'), `
             <div class="g-slot g-slot--full">
             <div class="card form-card g-card">
               <div class="card-head">
-                <h3>界面</h3>
-                <div class="btn-row"><button class="btn small" type="button" data-action="reset-scale">${icon('refresh')}重置</button></div>
+                <h3>${t('global.cardUi')}</h3>
+                <div class="btn-row"><button class="btn small" type="button" data-action="reset-scale">${icon('refresh')}${t('global.reset')}</button></div>
               </div>
               <div class="g-fields">
                 <div class="field">
-                  <label id="ui-scale-label" for="ui-scale">界面字号 <span class="mono" id="ui-scale-value">${Math.round(scale * 100)}%</span></label>
+                  <label id="ui-scale-label" for="ui-scale">${t('global.uiScale')} <span class="mono" id="ui-scale-value">${Math.round(scale * 100)}%</span></label>
                   <input type="range" id="ui-scale" class="range" min="1" max="1.4" step="0.05" value="${scale}">
                   <div class="scale-row">
-                    <span class="faint">小</span>
-                    <span class="faint" style="margin-left:auto">大</span>
+                    <span class="faint">${t('global.uiScaleSmall')}</span>
+                    <span class="faint" style="margin-left:auto">${t('global.uiScaleLarge')}</span>
                   </div>
                 </div>
                 <div class="field">
-                  <span class="field-label" id="ui-theme-label">配色</span>
+                  <span class="field-label" id="ui-theme-label">${t('global.theme')}</span>
                   <div class="seg" role="group" aria-labelledby="ui-theme-label">
                     <button data-action="set-theme" data-theme="dsh" aria-pressed="${state.theme === 'dsh'}">DSH</button>
                     <button data-action="set-theme" data-theme="catppuccin" aria-pressed="${state.theme === 'catppuccin'}">Catppuccin</button>
@@ -403,8 +405,8 @@ function renderGlobal() {
                 </div>
                 <div class="field">
                   <span class="field-label" id="desktop-notify-label">桌面通知</span>
-                  <div><button class="btn small" type="button" data-action="toggle-notify" aria-labelledby="desktop-notify-label" aria-pressed="${notify.on ? 'true' : 'false'}"${notify.disabled ? ' disabled' : ''}>${esc(notify.label)}</button></div>
-                  <div class="hint">${esc(notify.hint)}</div>
+                  <div><button class="btn small" type="button" data-action="toggle-notify" aria-labelledby="desktop-notify-label" aria-pressed="${notify.on ? 'true' : 'false'}"${notify.disabled ? ' disabled' : ''}>${esc(t(notify.label))}</button></div>
+                  <div class="hint">${esc(t(notify.hint))}</div>
                 </div>
                 <div class="field">
                   <label id="settings-ui-language-label" for="settings-ui-language">${t('settings.uiLanguage')}</label>
@@ -418,15 +420,15 @@ function renderGlobal() {
               </div>
               <div class="g-foot">
                 <div class="g-kvs">
-                  <div class="kv"><span>缩放范围</span><strong>100% – 140%</strong></div>
-                  <div class="kv"><span>偏好存储</span><strong>本地浏览器（语言除外）</strong></div>
+                  <div class="kv"><span>${t('global.scaleRange')}</span><strong>100% – 140%</strong></div>
+                  <div class="kv"><span>${t('global.prefStorage')}</span><strong>${t('global.prefStorageValue')}</strong></div>
                 </div>
                 <div class="btn-row"><button class="btn small primary" type="button" data-action="save-ui-language">${esc(t('settings.uiLanguageSave'))}</button></div>
               </div>
             </div>
             </div>`)}
-      ${gsec('02', 'g-runtime', '运行与预算', '影响所有项目运行的行为与开销上限：超时中止、无进展看门狗、预算与数据保留。', `<div class="g-slot g-slot--half">${renderRunLimitsCard()}</div><div class="g-slot g-slot--half">${renderOpsCard()}</div>`)}
-      ${gsec('03', 'g-about', '关于与系统状态', '本机 DSH 路径、DSH 与插件版本、更新检查与消息投递队列。', `<div class="g-slot g-slot--half">${dshPathsCard()}</div><div class="g-slot g-slot--half">${dshServiceCard()}</div>`)}
+      ${gsec('02', 'g-runtime', t('global.groupRuntime'), t('global.groupRuntimeDesc'), `<div class="g-slot g-slot--half">${renderRunLimitsCard()}</div><div class="g-slot g-slot--half">${renderOpsCard()}</div>`)}
+      ${gsec('03', 'g-about', t('global.groupAbout'), t('global.groupAboutDesc'), `<div class="g-slot g-slot--half">${dshPathsCard()}</div><div class="g-slot g-slot--half">${dshServiceCard()}</div>`)}
     </div>
   `
 }
