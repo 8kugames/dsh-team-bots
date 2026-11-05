@@ -484,7 +484,6 @@ export default {
   'global.runTimeoutLabel': 'Timeout abort (minutes)',
   'global.stallWatchdogLabel': 'No-progress watchdog (minutes)',
   'global.runLimitsHint1': 'Timeout abort = the maximum duration of a single run (1–360 minutes); no-progress watchdog = how long a run may produce no output before it is considered stuck (0–360 minutes, 0 disables it).',
-  'global.runLimitsHint2': 'New values apply only to runs started afterwards; runs already in progress are not affected.',
   'global.runLimitsEnv': 'Environment variable(s) ${names} are set explicitly; those items follow the environment and values saved on this page are ignored.',
   'global.saveRunLimits': 'Save run limits',
   'global.cardOps': 'System & operations',
@@ -514,7 +513,6 @@ export default {
   'global.dshLatestVersion': 'dsh latest version',
   'global.pluginCurrentVersion': 'dsh-team-bots current version',
   'global.pluginLatestVersion': 'dsh-team-bots latest version',
-  'global.upgradable': 'Update available',
   'global.latest': 'Up to date',
   'global.outboxQueue': 'Delivery queue',
   'global.outboxFailed': '${count} messages failed to deliver',
@@ -527,4 +525,6 @@ export default {
   '已关闭': 'Off',
   '未开启': 'Off',
   '开启后新审批到达时弹系统桌面通知。': 'Once enabled, system desktop notifications appear when a new approval arrives.',
+  '新值只对之后启动的运行生效，进行中的运行不追溯。': 'New values apply only to runs started afterwards; runs already in progress are not affected.',
+  '可升级': 'Update available',
 }

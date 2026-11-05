@@ -483,7 +483,6 @@ export default {
   'global.runTimeoutLabel': '超时中止（分钟）',
   'global.stallWatchdogLabel': '无进展看门狗（分钟）',
   'global.runLimitsHint1': '超时中止 = 单次运行的最长时长（1–360 分钟）；无进展看门狗 = 运行多久没有任何输出即判定卡住（0–360 分钟，0 为关闭）。',
-  'global.runLimitsHint2': '新值只对之后启动的运行生效，进行中的运行不追溯。',
   'global.runLimitsEnv': '环境变量 ${names} 已显式设置，对应项以环境变量为准，页面保存值不生效。',
   'global.saveRunLimits': '保存运行时效',
   'global.cardOps': '系统与运维',
@@ -513,7 +512,6 @@ export default {
   'global.dshLatestVersion': 'dsh 最新版本',
   'global.pluginCurrentVersion': 'dsh-team-bots 当前版本',
   'global.pluginLatestVersion': 'dsh-team-bots 最新版本',
-  'global.upgradable': '可升级',
   'global.latest': '最新',
   'global.outboxQueue': '投递队列',
   'global.outboxFailed': '${count} 条消息投递失败',
@@ -526,4 +524,6 @@ export default {
   '已关闭': '已关闭',
   '未开启': '未开启',
   '开启后新审批到达时弹系统桌面通知。': '开启后新审批到达时弹系统桌面通知。',
+  '新值只对之后启动的运行生效，进行中的运行不追溯。': '新值只对之后启动的运行生效，进行中的运行不追溯。',
+  '可升级': '可升级',
 }

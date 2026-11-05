@@ -187,7 +187,7 @@ function renderRunLimitsCard() {
         <div class="field"><label id="settings-stall-watchdog-label" for="settings-stall-watchdog">${t('global.stallWatchdogLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="360" id="settings-stall-watchdog" name="stall_watchdog_minutes" value="${attr(stallValue)}"></div>
       </div>
       <div class="hint">${t('global.runLimitsHint1')}</div>
-      <div class="hint">${t('global.runLimitsHint2')}</div>
+      <div class="hint">${t('新值只对之后启动的运行生效，进行中的运行不追溯。')}</div>
       ${envNames ? `<div class="hint">${t('global.runLimitsEnv', { names: envNames })}</div>` : ''}
       <div class="btn-row" style="margin-top:12px">
         <button class="btn small" type="button" data-action="save-run-limits">${t('global.saveRunLimits')}</button>
@@ -256,7 +256,7 @@ function dshServiceCard() {
   const latestCell = (latest, available) => latest == null
     ? '<strong>—</strong>'
     : available
-      ? `<strong>${esc(latest)} <span class="pill amber">${t('global.upgradable')}</span></strong>`
+      ? `<strong>${esc(latest)} <span class="pill amber">${t('可升级')}</span></strong>`
       : `<strong>${esc(latest)} <span class="pill green">${t('global.latest')}</span></strong>`
   const outbox = data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
   return `
