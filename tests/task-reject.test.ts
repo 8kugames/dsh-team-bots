@@ -8,13 +8,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { readUiSource } from './helpers/ui-sources.js'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
+import zh from '../ui/i18n/zh.js'
+import en from '../ui/i18n/en.js'
 
 // startRun 只记账不回调完成：任务 run 停在 running（本卡用例不依赖运行生命周期，仅作运行时替身）。
 class HoldingRuntime {
@@ -127,11 +127,7 @@ test('离开终态时仍有活跃运行 → 拒绝，状态与终态时间戳不
 })
 
 test('UI 接线：卡片与详情 footer 出「驳回」按钮，click 走 transition_task，文案走 i18n', () => {
-  const here = dirname(fileURLToPath(import.meta.url))
-  const root = join(here, '..')
   const app = readUiSource()
-  const zh = readFileSync(join(root, 'ui', 'i18n', 'zh.js'), 'utf8')
-  const en = readFileSync(join(root, 'ui', 'i18n', 'en.js'), 'utf8')
 
   // 两处渲染点（卡片 foot + 详情 footer）都以 done/canceled 为条件，且共用同一 action 名。
   const rejectButtons = app.match(/data-action="reject-task"/g) ?? []
@@ -145,9 +141,9 @@ test('UI 接线：卡片与详情 footer 出「驳回」按钮，click 走 trans
   assert.match(rejectCase.slice(0, 900), /api\('transition_task',\s*\{\s*taskId,\s*status:\s*'backlog'/, '驳回应走 transition_task 通道')
 
   // 文案走 i18n，不硬编码：zh/en 两侧都要有这四个 key。
-  for (const dict of [zh, en]) {
+  for (const [name, dict] of Object.entries({ zh, en })) {
     for (const key of ['task.rejectAction', 'task.rejectTitle', 'task.rejectConfirm', 'task.rejectDone']) {
-      assert.ok(dict.includes(`'${key}':`), `i18n 缺 key：${key}`)
+      assert.ok(key in dict, `${name} i18n 缺 key：${key}`)
     }
   }
 })

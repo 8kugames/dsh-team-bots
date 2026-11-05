@@ -3,12 +3,11 @@
 // 先剔行注释再断言，防止「断言写进注释里」的假锁。归一纯函数用 time-budget 标记块抽取后裸执行。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { readUiSource } from './helpers/ui-sources.js'
+import zh from '../ui/i18n/zh.js'
+import en from '../ui/i18n/en.js'
 
 const app = readUiSource()
-const zh = readFileSync(new URL('../ui/i18n/zh.js', import.meta.url), 'utf8')
-const en = readFileSync(new URL('../ui/i18n/en.js', import.meta.url), 'utf8')
 
 /** 取出某个函数体（到列首的函数收尾为止）并剔掉行注释。 */
 function functionBody(source, signature) {
@@ -46,7 +45,7 @@ test('新建任务表单含「时效要求（分钟）」可选数字输入框�
     '时效字段所在行用自适应三列版式（窄屏自动折行，不留空位）',
   )
   // 字典值必须是「选填，留空不设」口径。
-  assert.match(zh, /'taskForm\.timeBudgetPlaceholder': '选填，留空不设'/, '中文 placeholder 注明选填留空不设')
+  assert.equal(zh['taskForm.timeBudgetPlaceholder'], '选填，留空不设', '中文 placeholder 注明选填留空不设')
 })
 
 test('时效归一：空串/0/负数/非数字 → null（提交时整键不传），正数取整数分钟', () => {
@@ -96,14 +95,14 @@ test('任务详情 modal：时效行条件渲染——有值显示「X 分钟」
   assert.match(body, /<div class="hint"[^>]*>\$\{t\('task\.timeBudgetNote'\)\}<\/div>/, '时效行下挂小字说明')
   // 行位置：与「写范围」同一信息层（在评论区之前）。
   assert.ok(body.indexOf('task.timeBudgetMinutes ?') < body.indexOf('>\$\{t\("评论"\)\}<'), '时效行应与写范围同层，位于评论区之前')
-  assert.match(zh, /'task\.timeBudgetValue': '\$\{minutes\} 分钟'/, '中文时效值文案带分钟数插值')
-  assert.match(zh, /'task\.timeBudgetNote': '硬性时限：到期运行将被中止；与全局运行超时取更短者'/, '中文小字说明口径与卡面一致')
+  assert.equal(zh['task.timeBudgetValue'], '${minutes} 分钟', '中文时效值文案带分钟数插值')
+  assert.equal(zh['task.timeBudgetNote'], '硬性时限：到期运行将被中止；与全局运行超时取更短者', '中文小字说明口径与卡面一致')
 })
 
 test('i18n：zh/en 各含时效相关 key，且中英 key 集合一致', () => {
   const keys = ['taskForm.timeBudgetLabel', 'taskForm.timeBudgetPlaceholder', 'task.timeBudgetValue', 'task.timeBudgetNote']
-  const zhKeys = new Set([...zh.matchAll(/'([^']+)':/g)].map(m => m[1]))
-  const enKeys = new Set([...en.matchAll(/'([^']+)':/g)].map(m => m[1]))
+  const zhKeys = new Set(Object.keys(zh))
+  const enKeys = new Set(Object.keys(en))
   for (const key of keys) {
     assert.ok(zhKeys.has(key), `zh 缺 key：${key}`)
     assert.ok(enKeys.has(key), `en 缺 key：${key}`)

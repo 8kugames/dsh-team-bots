@@ -11,6 +11,7 @@ import { join, posix, dirname } from 'node:path'
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const UI = join(ROOT, 'ui')
 const MODULES_DIR = join(UI, 'modules')
+const I18N_DIR = join(UI, 'i18n')
 const http = readFileSync(join(ROOT, 'src/http.js'), 'utf8')
 
 // app.js 挂在 /api/dsh-team/，modules/*.js 挂在 /api/dsh-team/modules/，
@@ -28,6 +29,15 @@ function collectImportedSlices() {
         file: `modules/${name}`,
         urlPath: `modules/${name}`,
         source: readFileSync(join(MODULES_DIR, name), 'utf8'),
+      })),
+    // DSHBOTS-233：词表按域拆分后，i18n 聚合入口相对导入域切片，同样纳入覆盖锁。
+    ...readdirSync(I18N_DIR)
+      .filter((name) => name.endsWith('.js'))
+      .sort()
+      .map((name) => ({
+        file: `i18n/${name}`,
+        urlPath: `i18n/${name}`,
+        source: readFileSync(join(I18N_DIR, name), 'utf8'),
       })),
   ]
   const slices = new Map()

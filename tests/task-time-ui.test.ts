@@ -4,13 +4,12 @@
 // CSS 规则断言沿用 tests/ui-button-semantics.test.js 的正则抽取法。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
+import zh from '../ui/i18n/zh.js'
 
 const app = readUiSource()
 const css = await uiStylesSource()
-const zh = readFileSync(new URL('../ui/i18n/zh.js', import.meta.url), 'utf8')
 
 /** 定位 `// <marker>:start` 到 `// <marker>:end` 的原始块，再剔块内行注释。 */
 function block(marker) {
@@ -41,8 +40,8 @@ test('新增枚举「今天」与「近 30 天」：1d 按自然日 00:00 起算
   assert.match(app, /<option value="1d" \$\{state\.taskFilter\.timeRange === '1d' \? 'selected' : ''\}>\$\{t\('task\.timeToday'\)\}<\/option>/)
   assert.match(app, /<option value="30d" \$\{state\.taskFilter\.timeRange === '30d' \? 'selected' : ''\}>\$\{t\('task\.time30d'\)\}<\/option>/)
   // 词表值锁既有口径：1d=今天、30d=近 30 天（标签走 i18n，不再写死在源码里）
-  assert.match(zh, /'task\.timeToday': '今天'/)
-  assert.match(zh, /'task\.time30d': '近 30 天'/)
+  assert.equal(zh['task.timeToday'], '今天')
+  assert.equal(zh['task.time30d'], '近 30 天')
 })
 
 test('filteredTasks：timeRange 条件已接入且在 search 之前', () => {
@@ -60,7 +59,7 @@ test('筛选器 UI：timeRange select 存在、默认近 7 天、有全部出口
   assert.match(app, /<option value="7d"/)
   assert.match(app, /<option value="all"/)
   assert.match(app, /<option value="7d" \$\{state\.taskFilter\.timeRange === '7d' \? 'selected' : ''\}>\$\{t\('task\.time7d'\)\}<\/option>/)
-  assert.match(zh, /'task\.time7d': '近 7 天'/)
+  assert.equal(zh['task.time7d'], '近 7 天')
   assert.match(app, /taskFilter: \{ status: 'all', assignee: 'all', search: '', timeRange: '7d' \}/)
   // filtering 标志要感知 timeRange：默认 7d 未收窄时不误报「筛选中」之外的空态文案
   assert.match(app, /state\.taskFilter\.timeRange !== 'all'/)

@@ -3,9 +3,9 @@
 // 单测里跑不起来，就锁住关键文案、结构与数据接线。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
+import zhDict from '../ui/i18n/zh.js'
+import enDict from '../ui/i18n/en.js'
 
 const source = readUiSource()
 
@@ -54,10 +54,15 @@ test('⑤ 运行行复用 run-clock 与 duration，且调度视图不新增定�
 
 test('⑥ 子智能体卡如实描述内置能力，不造假数据', () => {
   // DSHBOTS-120 起文案进字典：接线在 app.js（t 调用），实质内容锁在 zh/en 字典值里。
-  const zhDict = readFileSync(fileURLToPath(new URL('../ui/i18n/zh.js', import.meta.url)), 'utf8')
-  const enDict = readFileSync(fileURLToPath(new URL('../ui/i18n/en.js', import.meta.url)), 'utf8')
-  assert.match(zhDict, /bot 会话已内置 subagent \/ subagent_fork \/ workflow 工具/, '中文字典应如实描述已内置的子智能体工具')
-  assert.match(enDict, /subagent \/ subagent_fork \/ workflow/, '英文字典同样如实描述')
+  // DSHBOTS-233 词表按域拆分后，字典值经聚合入口导入，不再从 zh.js 文件文本断言。
+  assert.ok(
+    zhDict['solo.subagentsBody'].includes('bot 会话已内置 subagent / subagent_fork / workflow 工具'),
+    '中文字典应如实描述已内置的子智能体工具',
+  )
+  assert.ok(
+    enDict['solo.subagentsBody'].includes('subagent / subagent_fork / workflow'),
+    '英文字典同样如实描述',
+  )
   const card = /<h3>\$\{t\('solo\.subagents'\)\}<\/h3><\/div>\s*<div class="faint">\$\{t\('solo\.subagentsBody'\)\}<\/div>/.exec(source)
   assert.ok(card, '子智能体卡应保持标题 + 一行说明的结构，没有列表')
   assert.doesNotMatch(source, /待接入/, '不得再出现「待接入」占位文案')

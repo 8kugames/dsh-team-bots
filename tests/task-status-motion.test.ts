@@ -11,15 +11,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
 import { uiStylesSource } from './ui-styles-source.js'
 import { readUiSource } from './helpers/ui-sources.js'
+import zh from '../ui/i18n/zh.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const css = await uiStylesSource()
 const app = readUiSource()
-const zh = readFileSync(join(root, 'ui', 'i18n', 'zh.js'), 'utf8')
 
 // 注释里可能带花括号，先剥掉再配平。
 const bare = css.replace(/\/\*[\s\S]*?\*\//g, '')
@@ -114,7 +113,7 @@ test('挂载点：只有「进行中」标签挂 .task-status-live，且所有�
 })
 
 test('「进行中」文案仍由 i18n 提供（动效不改动文案本身）', () => {
-  assert.match(zh, /'status\.in_progress':\s*'进行中'/, '中文「进行中」文案缺失')
+  assert.equal(zh['status.in_progress'], '进行中', '中文「进行中」文案缺失')
   // 标签文案走 statusLabel() → t('status.' + status)，动效没有把文案写死进模板。
   assert.match(app, /sideRowStatusHtml[\s\S]{0,400}esc\(statusLabel\(status\)\)/, '状态标签文案应走 statusLabel（i18n）')
 })
