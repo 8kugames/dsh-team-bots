@@ -1,7 +1,7 @@
 // usage.js —— 用量域（DSHBOTS-121/56）：时间窗快照、用量页与全局视图的用量面板。
 // 时间窗状态（usageWindowKey/Cache/Loading/Request）只服务本域，随本文件迁移；
 // 切换窗口的入口逻辑 switchUsageWindow 一并迁入（原在 app.js 的 click 委托里）。
-import { state, NAV, RUN_STATUS } from './state.js'
+import { state, NAV, RUN_STATUS, labelText } from './state.js'
 import { icon } from './icons.js'
 import { CURRENCY_SYMBOL, attr, botById, costValue, esc, formatCost, formatNumber, pageProject, runDot, timeAgo, toast } from './util.js'
 import { api } from './api.js'
@@ -48,25 +48,25 @@ function usageWindowData() {
 // 当前窗口的一句话口径说明。
 function usageWindowText(usage) {
   const window = usage?.window ?? null
-  if (!window) return `近 ${Number(usage?.days ?? 30) || 30} 天`
-  if (window.key === 'today') return '今日（产品时区当日 0 点起）'
-  if (window.key === '7d') return '近 7 天（滚动窗口）'
-  if (window.key === '30d') return '近 30 天（滚动窗口）'
-  return '至今（自最早一条明细起，不设下界）'
+  if (!window) return t('usage.windowTextFallback', { days: Number(usage?.days ?? 30) || 30 })
+  if (window.key === 'today') return t('usage.windowTextToday')
+  if (window.key === '7d') return t('usage.windowText7d')
+  if (window.key === '30d') return t('usage.windowText30d')
+  return t('usage.windowTextAll')
 }
 
 // 按日面板的标题与说明：跟当前时间窗走；没有窗口信息时回落到旧的 14 天口径。
 function usageDayPanelMeta(usage) {
   const key = String(usage?.window?.key ?? '')
-  if (key === 'today') return { title: '今日', note: '产品时区（Asia/Shanghai）当日 0 点起。' }
-  if (key === '7d') return { title: '近 7 天', note: '按产品时区（Asia/Shanghai）日历日分组。' }
-  if (key === '30d') return { title: '近 30 天', note: '按产品时区（Asia/Shanghai）日历日分组。' }
-  if (key === 'all') return { title: '近 30 天', note: '汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。' }
+  if (key === 'today') return { title: t('usage.dayTitleToday'), note: '产品时区（Asia/Shanghai）当日 0 点起。' }
+  if (key === '7d') return { title: t('usage.dayTitle7d'), note: '按产品时区（Asia/Shanghai）日历日分组。' }
+  if (key === '30d') return { title: t('usage.dayTitle30d'), note: '按产品时区（Asia/Shanghai）日历日分组。' }
+  if (key === 'all') return { title: t('usage.dayTitle30d'), note: '汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。' }
   return { title: '', note: '' }
 }
 
 function usageDayTitle(usage) {
-  return usageDayPanelMeta(usage).title || '近 14 天'
+  return usageDayPanelMeta(usage).title || t('近 14 天')
 }
 
 function usageSnapshot() {
@@ -121,7 +121,7 @@ function usageCostParts(totals, currency) {
 // 成本文本：符号 + 金额；多币种时主币种在前，其余币种跟在后面（不再用 'CNY x / USD y'）。
 function usageCostText(totals, currency) {
   const parts = usageCostParts(totals, currency)
-  if (!parts.code) return '未配置'
+  if (!parts.code) return t('usage.costUnconfigured')
   const main = `${parts.symbol.trim()}${formatAmount(parts.amount)}`
   if (!parts.others.length) return main
   return `${main} + ${parts.others.map(other => `${other.code} ${formatAmount(other.amount)}`).join(' + ')}`
@@ -130,7 +130,7 @@ function usageCostText(totals, currency) {
 // 成本单元格只放主币种金额（保证列宽固定不折行），完整多币种金额进 title。
 function usageCostPrimaryText(totals, currency) {
   const parts = usageCostParts(totals, currency)
-  if (!parts.code) return '未配置'
+  if (!parts.code) return t('usage.costUnconfigured')
   return formatCost(parts.amount, parts.code)
 }
 
@@ -145,7 +145,7 @@ async function exportUsageCsv() {
   if (mode === 'solo' && state.soloBotId) payload.soloBotId = state.soloBotId
   const result = await api('export_usage_csv', payload)
   const csv = String(result?.csv ?? '')
-  if (!csv) throw new Error('导出内容为空，请稍后重试。')
+  if (!csv) throw new Error(t('usage.exportEmpty'))
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -155,7 +155,7 @@ async function exportUsageCsv() {
   link.click()
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
-  toast('CSV 已导出', 'success')
+  toast(t('usage.exported'), 'success')
 }
 
 // 用量页三态（DSHBOTS-56）：侧栏入口=全局视图（与群聊/单聊上下文零耦合）；
@@ -187,7 +187,7 @@ function usageRowCells(item, label, hint, max, currency) {
   const fill = tokens > 0 ? `<span class="usage-fill${unpriced > 0 ? ' partial' : ''}" style="width:${ratio}%"></span>` : ''
   const cost = usageCostPrimaryText(item, currency)
   const costFull = usageCostText(item, currency)
-  const costTitle = unpriced > 0 ? `${costFull}（含 ${unpriced} 次未计价调用，成本为部分值）` : costFull
+  const costTitle = unpriced > 0 ? `${costFull}${t('usage.partialCostSuffix', { count: unpriced })}` : costFull
   return `<span class="usage-col-name" title="${attr(label + hint)}">${esc(label)}</span>
     <span class="usage-track">${fill}</span>
     <span class="usage-col-num">${formatNumber(tokens)}</span>
@@ -202,16 +202,16 @@ function usageBarRow(item, label, max, currency, hint = '') {
 // 分 bot 行：drillable=true 时可点击查看该 bot 的运行记录。
 function usageBotRow(item, max, drillable, currency) {
   const botId = item.botId ?? item.id ?? ''
-  const name = String(item.name ?? botById(botId)?.name ?? '').trim() || '未知 Bot'
+  const name = String(item.name ?? botById(botId)?.name ?? '').trim() || t('usage.unknownBot')
   const cells = usageRowCells(item, name, '', max, currency)
   if (!drillable) return `<div class="usage-row">${cells}</div>`
   const active = state.usageBot === botId
-  return `<button type="button" class="usage-row usage-row-action${active ? ' active' : ''}" data-action="usage-drill" data-bot-id="${attr(botId)}" aria-pressed="${active}" title="查看该 Bot 在本群的运行记录">${cells}</button>`
+  return `<button type="button" class="usage-row usage-row-action${active ? ' active' : ''}" data-action="usage-drill" data-bot-id="${attr(botId)}" aria-pressed="${active}" title="${t('usage.drillTitle')}">${cells}</button>`
 }
 
 // 分项目行：行首只显示项目名/项目 key，不再回落到 prj_ raw id（D-67 P1-6），原始 id 只进 title。
 function usageProjectRow(item, max, currency) {
-  const label = String(item.name ?? item.key ?? '').trim() || '未命名项目'
+  const label = String(item.name ?? item.key ?? '').trim() || t('未命名项目')
   const hint = item.projectId ? ` · ${item.projectId}` : ''
   return usageBarRow(item, label, max, currency, hint)
 }
@@ -219,28 +219,28 @@ function usageProjectRow(item, max, currency) {
 // 分布列表面板：表头给出列名与单位，行内只放数值。
 function usageListPanel(title, rows, nameLabel) {
   return `<div class="card usage-panel">
-    <div class="card-head"><h3>${esc(title)}</h3><span class="meta">${rows.length} 个</span></div>
-    ${rows.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<div class="usage-list">
+    <div class="card-head"><h3>${esc(title)}</h3><span class="meta">${t('usage.count', { count: rows.length })}</span></div>
+    ${rows.length === 0 ? `<div class="faint">${t('usage.empty')}</div>` : `<div class="usage-list">
       <div class="usage-list-head">
         <span class="usage-col-name">${esc(nameLabel)}</span>
-        <span class="usage-col-bar">tokens 占比</span>
-        <span class="usage-col-num">tokens</span>
-        <span class="usage-col-num">调用</span>
-        <span class="usage-col-num">成本</span>
+        <span class="usage-col-bar">${t('tokens 占比')}</span>
+        <span class="usage-col-num">${t('tokens')}</span>
+        <span class="usage-col-num">${t('调用')}</span>
+        <span class="usage-col-num">${t('成本')}</span>
       </div>
       ${rows.join('')}
     </div>
     <div class="usage-legend">
-      <span class="usage-legend-item"><i class="usage-swatch"></i>已计价用量</span>
-      <span class="usage-legend-item"><i class="usage-swatch star"></i>含未计价调用</span>
-      <span class="usage-legend-item"><i class="usage-swatch empty"></i>零用量</span>
+      <span class="usage-legend-item"><i class="usage-swatch"></i>${t('usage.legendPriced')}</span>
+      <span class="usage-legend-item"><i class="usage-swatch star"></i>${t('usage.legendPartial')}</span>
+      <span class="usage-legend-item"><i class="usage-swatch empty"></i>${t('usage.legendZero')}</span>
     </div>`}
   </div>`
 }
 
 function usageRunRow(run) {
   return `<div class="run-row">
-    <div class="run-row-top">${runDot(run.status)}<strong class="mono">${esc(String(run.id ?? '').slice(0, 8))}</strong><span>${esc(RUN_STATUS[run.status] ?? run.status)}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
+    <div class="run-row-top">${runDot(run.status)}<strong class="mono">${esc(String(run.id ?? '').slice(0, 8))}</strong><span>${esc(labelText(RUN_STATUS, run.status, 'runStatus.'))}</span><span style="margin-left:auto">${esc(timeAgo(run.queued_at))}</span></div>
     <div class="run-row-meta"><span>${esc(run.kind || '—')}</span><span>${formatNumber(Number(run.usage_input ?? 0) + Number(run.usage_output ?? 0))} tok</span>${run.usage_cost !== null && run.usage_cost !== undefined ? `<span>${formatCost(run.usage_cost)}</span>` : ''}</div>
   </div>`
 }
@@ -248,16 +248,16 @@ function usageRunRow(run) {
 // 同一模型名可能分属不同 provider（src/usage.js 按 provider+model 分组），用暗色标签区分。
 function usageModelCell(item) {
   const provider = String(item.provider ?? '').trim()
-  const model = String(item.model ?? '').trim() || '未知模型'
+  const model = String(item.model ?? '').trim() || t('usage.unknownModel')
   const tag = provider ? `<span class="usage-tag">${esc(provider)}</span>` : ''
   return `${tag}<span class="usage-model-name" title="${attr(model)}">${esc(model)}</span>`
 }
 
 function usageModelPanel(byModel, title, headerExtra = '', currency = 'CNY') {
   return `<div class="card usage-panel">
-    <div class="card-head"><h3>${esc(title)}</h3>${headerExtra || `<span class="meta">${byModel.length} 个</span>`}</div>
-    ${byModel.length === 0 ? '<div class="faint">暂无调用记录。</div>' : `<table class="usage-table"><thead><tr><th class="eyebrow mono">模型</th><th class="eyebrow mono num">调用</th><th class="eyebrow mono num">tokens</th><th class="eyebrow mono num">成本</th></tr></thead><tbody>${byModel.map(item => `<tr><td class="usage-model-cell">${usageModelCell(item)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono num" title="${attr(usageCostText(item, currency))}">${esc(usageCostPrimaryText(item, currency))}</td></tr>`).join('')}</tbody></table>`}
-    <div class="usage-note">未配置价格的调用不计入成本合计；价格按每百万 token 配置。</div>
+    <div class="card-head"><h3>${esc(title)}</h3>${headerExtra || `<span class="meta">${t('usage.count', { count: byModel.length })}</span>`}</div>
+    ${byModel.length === 0 ? `<div class="faint">${t('usage.empty')}</div>` : `<table class="usage-table"><thead><tr><th class="eyebrow mono">${t('模型')}</th><th class="eyebrow mono num">${t('调用')}</th><th class="eyebrow mono num">${t('tokens')}</th><th class="eyebrow mono num">${t('成本')}</th></tr></thead><tbody>${byModel.map(item => `<tr><td class="usage-model-cell">${usageModelCell(item)}</td><td class="mono num">${formatNumber(item.calls)}</td><td class="mono num">${formatNumber(item.totalTokens)}</td><td class="mono num" title="${attr(usageCostText(item, currency))}">${esc(usageCostPrimaryText(item, currency))}</td></tr>`).join('')}</tbody></table>`}
+    <div class="usage-note">${t('未配置价格的调用不计入成本合计；价格按每百万 token 配置。')}</div>
   </div>`
 }
 
@@ -274,31 +274,31 @@ function usageMetricCards(totals, scopeLabel, usage) {
   const perCall = calls > 0 ? totalTokens / calls : 0
   const costValue = cost.code
     ? `<span class="unit">${esc(cost.symbol.trim())}</span>${esc(formatAmount(cost.amount))}`
-    : '未配置'
+    : t('usage.costUnconfigured')
   const costMeta = [
-    ...cost.others.map(other => `另有 ${other.code} ${formatAmount(other.amount)}`),
-    usage.priceCount ? `${usage.priceCount} 条价格规则` : '尚未配置模型价格',
+    ...cost.others.map(other => t('usage.costOther', { code: other.code, amount: formatAmount(other.amount) })),
+    usage.priceCount ? t('usage.priceRules', { count: usage.priceCount }) : t('usage.priceMissing'),
   ].join(' · ')
   return `<div class="metric-grid">
     <div class="card metric">
-      <span class="metric-label">总 tokens（${esc(scopeLabel)}）</span>
+      <span class="metric-label">${t('总 tokens（${scope}）', { scope: scopeLabel })}</span>
       <strong>${formatNumber(totalTokens)}</strong>
-      <small class="mono">入 ${formatNumber(totals.inputTokens)} · 出 ${formatNumber(totals.outputTokens)} · 缓存读 ${formatNumber(totals.cacheReadTokens)}</small>
+      <small class="mono">${t('usage.totalTokensMeta', { input: formatNumber(totals.inputTokens), output: formatNumber(totals.outputTokens), cache: formatNumber(totals.cacheReadTokens) })}</small>
     </div>
     <div class="card metric">
-      <span class="metric-label">调用次数（${esc(scopeLabel)}）</span>
+      <span class="metric-label">${t('调用次数（${scope}）', { scope: scopeLabel })}</span>
       <strong>${formatNumber(calls)}</strong>
-      <small class="mono">平均每次 ${formatNumber(perCall)} tokens</small>
+      <small class="mono">${t('usage.perCall', { value: formatNumber(perCall) })}</small>
     </div>
     <div class="card metric">
-      <span class="metric-label">总成本（${esc(scopeLabel)}）</span>
+      <span class="metric-label">${t('总成本（${scope}）', { scope: scopeLabel })}</span>
       <strong class="metric-cost">${costValue}</strong>
       <small class="mono">${esc(costMeta)}</small>
     </div>
     <div class="card metric">
-      <span class="metric-label">日均 tokens（${esc(scopeLabel)}）</span>
+      <span class="metric-label">${t('日均 tokens（${scope}）', { scope: scopeLabel })}</span>
       <strong>${formatNumber(dailyTokens)}</strong>
-      <small class="mono">按 ${spanDays} 天汇总窗口折算</small>
+      <small class="mono">${t('usage.dailyMeta', { days: spanDays })}</small>
     </div>
   </div>`
 }
@@ -311,9 +311,9 @@ function usageDayPanel(days) {
   // 日期轴标签密度：柱子越多列越窄，标签按固定步长取，否则「MM/DD」会被列宽截成「10」。
   const labelStep = days.length > 20 ? 6 : 3
   return `<div class="card usage-panel">
-    <div class="card-head"><h3>${esc(usageDayTitle(usage))}</h3>${peak && peak.totalTokens ? `<span class="meta">峰值 ${formatNumber(peak.totalTokens)} · ${esc(String(peak.day).slice(5))}</span>` : ''}</div>
-    ${days.length === 0 ? '<div class="faint">暂无按日数据。</div>' : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % labelStep === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
-    <div class="usage-note">${esc(meta.note || '日历图只画最近 14 天，更早的调用计入上方汇总。')}</div>
+    <div class="card-head"><h3>${esc(usageDayTitle(usage))}</h3>${peak && peak.totalTokens ? `<span class="meta">${t('usage.dayPeak', { value: formatNumber(peak.totalTokens), day: String(peak.day).slice(5) })}</span>` : ''}</div>
+    ${days.length === 0 ? `<div class="faint">${t('usage.dayEmpty')}</div>` : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % labelStep === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
+    <div class="usage-note">${esc(t(meta.note || '日历图只画最近 14 天，更早的调用计入上方汇总。'))}</div>
   </div>`
 }
 
@@ -338,15 +338,15 @@ function usagePageHead(usage, scopeText, exportLabel = '') {
   return `<div class="section-head usage-page-head">
     <div class="usage-head-meta">
       <div class="usage-window-row">
-        <span class="usage-window">汇总窗口</span>
-        <div class="seg" role="group" aria-label="汇总窗口">
-          ${USAGE_WINDOWS.map(item => `<button data-action="usage-window" data-window="${item.key}" aria-pressed="${usageWindowKey === item.key}"${usageWindowLoading ? ' disabled' : ''}>${esc(item.label)}</button>`).join('')}
+        <span class="usage-window">${t('汇总窗口')}</span>
+        <div class="seg" role="group" aria-label="${t('汇总窗口')}">
+          ${USAGE_WINDOWS.map(item => `<button data-action="usage-window" data-window="${item.key}" aria-pressed="${usageWindowKey === item.key}"${usageWindowLoading ? ' disabled' : ''}>${t(item.label)}</button>`).join('')}
         </div>
       </div>
-      <span class="usage-head-desc">${esc(scopeText)} · 当前窗口 ${esc(windowText)}${usageWindowLoading ? ' · 载入中…' : ''}</span>
+      <span class="usage-head-desc">${t('usage.headDesc', { scope: scopeText, window: windowText, loading: usageWindowLoading ? t('usage.loading') : '' })}</span>
     </div>
     <div class="btn-row">
-      <button class="btn" data-action="export-usage-csv">${icon('download')}导出 CSV${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
+      <button class="btn" data-action="export-usage-csv">${icon('download')}${t('usage.exportCsv')}${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
     </div>
   </div>`
 }

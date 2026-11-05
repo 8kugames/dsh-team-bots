@@ -457,7 +457,7 @@ function modalTask(task) {
         ${(parentTask || blockedNames.length) ? `<div class="note">${parentTask ? `父任务：${esc(parentTask.identifier)} · ${esc(parentTask.title)}` : ''}${parentTask && blockedNames.length ? ' · ' : ''}${blockedNames.length ? `被 ${blockedNames.length} 个任务阻塞：${esc(blockedNames.join('、'))}` : ''}</div>` : ''}
         <div class="scope-block">
           <div class="eyebrow" style="margin-bottom:6px">写范围</div>
-          ${editingScopes ? scopesEdit : `${scopesEditable ? `<div class="btn-row" style="margin-bottom:6px"><button class="btn small" type="button" data-action="edit-scopes" data-task-id="${attr(task.id)}">${icon('edit')}编辑</button></div>` : ''}${scopesView}
+          ${editingScopes ? scopesEdit : `${scopesEditable ? `<div class="btn-row" style="margin-bottom:6px"><button class="btn small" type="button" data-action="edit-scopes" data-task-id="${attr(task.id)}">${icon('edit')}${t('price.edit')}</button></div>` : ''}${scopesView}
           <div class="hint" style="margin-top:6px">写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。</div>`}
         </div>
         ${task.timeBudgetMinutes ? `<div class="scope-block">
@@ -567,8 +567,8 @@ function modalPrice(seed: TeamActionPayload = {}) {
   const providers = [...new Set((state.data?.models ?? []).map(item => item.provider))]
   const fallback = defaultPriceFor(seed.model)
   const hint = fallback
-    ? `配置默认：缓存读 ${fallback.cacheReadPerMtok} / 输入 ${fallback.inputPerMtok} / 输出 ${fallback.outputPerMtok} ${fallback.currency}（每百万 token）`
-    : '价格为每百万 token。供应商留空表示匹配任意供应商。'
+    ? t('price.hintDefault', { cacheRead: fallback.cacheReadPerMtok, input: fallback.inputPerMtok, output: fallback.outputPerMtok, currency: fallback.currency })
+    : t('price.hintCustom')
   const overridden = Boolean(editing && fallback) && (
     Number(seed.cache_read_per_mtok) !== Number(fallback.cacheReadPerMtok)
     || Number(seed.input_per_mtok) !== Number(fallback.inputPerMtok)
@@ -576,20 +576,20 @@ function modalPrice(seed: TeamActionPayload = {}) {
     || String(seed.currency ?? fallback.currency).toUpperCase() !== String(fallback.currency).toUpperCase()
   )
   return modalShell({
-    title: editing ? `编辑价格 · ${seed.model}` : '设置模型价格',
-    subtitle: '保存后仅影响后续调用。',
+    title: editing ? t('price.modalEdit', { model: seed.model }) : t('price.modalAdd'),
+    subtitle: t('price.modalSubtitle'),
     badge: '',
     body: `<form data-form="save-price" id="modal-form">
-      <div class="field-row"><div class="field"><label id="price-provider-label" for="price-provider">模型供应商</label><input class="input mono" style="width:100%" id="price-provider" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="留空 = 匹配任意供应商"></div><div class="field"><label id="price-model-label" for="price-model">模型名</label><input class="input mono" style="width:100%" id="price-model" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
-      <div class="field-row"><div class="field"><label id="price-input-label" for="price-input">输入</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-input" name="inputPerMtok" required value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? '')}" placeholder="2"></div><div class="field"><label id="price-output-label" for="price-output">输出</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-output" name="outputPerMtok" required value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? '')}" placeholder="8"></div></div>
-      <div class="field-row"><div class="field"><label id="price-cache-read-label" for="price-cache-read">缓存读</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-read" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? '')}" placeholder="0.2"></div><div class="field"><label id="price-cache-write-label" for="price-cache-write">缓存写</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-write" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? '')}" placeholder="0"></div></div>
-      <div class="field"><label id="price-currency-label" for="price-currency">币种</label><input class="input mono" style="width:100%" id="price-currency" name="currency" value="${attr(seed.currency ?? fallback?.currency ?? 'CNY')}" placeholder="CNY"></div>
+      <div class="field-row"><div class="field"><label id="price-provider-label" for="price-provider">${t('price.providerLabel')}</label><input class="input mono" style="width:100%" id="price-provider" name="provider" list="price-providers" value="${attr(seed.provider ?? '')}" placeholder="${t('price.providerPlaceholder')}"></div><div class="field"><label id="price-model-label" for="price-model">${t('price.modelLabel')}</label><input class="input mono" style="width:100%" id="price-model" name="model" list="price-models" value="${attr(seed.model ?? '')}" placeholder="deepseek-flash" required autofocus></div></div>
+      <div class="field-row"><div class="field"><label id="price-input-label" for="price-input">${t('price.inputLabel')}</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-input" name="inputPerMtok" required value="${attr(seed.input_per_mtok ?? fallback?.inputPerMtok ?? '')}" placeholder="2"></div><div class="field"><label id="price-output-label" for="price-output">${t('price.outputLabel')}</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-output" name="outputPerMtok" required value="${attr(seed.output_per_mtok ?? fallback?.outputPerMtok ?? '')}" placeholder="8"></div></div>
+      <div class="field-row"><div class="field"><label id="price-cache-read-label" for="price-cache-read">${t('price.cacheReadLabel')}</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-read" name="cacheReadPerMtok" value="${attr(seed.cache_read_per_mtok ?? fallback?.cacheReadPerMtok ?? '')}" placeholder="0.2"></div><div class="field"><label id="price-cache-write-label" for="price-cache-write">${t('price.cacheWriteLabel')}</label><input class="input" style="width:100%" type="number" min="0" step="0.0001" id="price-cache-write" name="cacheWritePerMtok" value="${attr(seed.cache_write_per_mtok ?? fallback?.cacheWritePerMtok ?? '')}" placeholder="0"></div></div>
+      <div class="field"><label id="price-currency-label" for="price-currency">${t('price.currencyLabel')}</label><input class="input mono" style="width:100%" id="price-currency" name="currency" value="${attr(seed.currency ?? fallback?.currency ?? 'CNY')}" placeholder="CNY"></div>
       <div class="hint">${esc(hint)}</div>
-      ${overridden ? `<div class="btn-row"><button class="btn danger" type="button" data-action="reset-price" data-model="${attr(seed.model)}" data-provider="${attr(seed.provider ?? '')}">恢复默认价格</button></div>` : ''}
+      ${overridden ? `<div class="btn-row"><button class="btn danger" type="button" data-action="reset-price" data-model="${attr(seed.model)}" data-provider="${attr(seed.provider ?? '')}">${t('price.reset')}</button></div>` : ''}
       <datalist id="price-models">${knownModels.map(model => `<option value="${attr(model)}"></option>`).join('')}</datalist>
       <datalist id="price-providers">${providers.map(provider => `<option value="${attr(provider)}"></option>`).join('')}</datalist>
     </form>`,
-    footer: `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" type="submit" form="modal-form">${icon('check')}保存价格</button>`,
+    footer: `<button class="btn" data-action="close-modal">${t('price.cancel')}</button><button class="btn primary" type="submit" form="modal-form">${icon('check')}${t('price.save')}</button>`,
   })
 }
 
@@ -604,9 +604,9 @@ function renderPriceCard() {
       && Number(price.cache_write_per_mtok) === Number(fallback.cacheWritePerMtok)
       && Number(price.input_per_mtok) === Number(fallback.inputPerMtok)
       && Number(price.output_per_mtok) === Number(fallback.outputPerMtok)
-    const provider = price.provider ? price.provider : '任意供应商'
+    const provider = price.provider ? price.provider : t('price.anyProvider')
     return `<tr>
-      <td class="price-model">${esc(price.model)}<span class="pill ${builtin ? 'green' : 'violet'}">${builtin ? '内置' : '自定义'}</span></td>
+      <td class="price-model">${esc(price.model)}<span class="pill ${builtin ? 'green' : 'violet'}">${builtin ? t('price.builtin') : t('price.custom')}</span></td>
       <td class="num mono">${esc(price.cache_read_per_mtok)}</td>
       <td class="num mono">${esc(price.input_per_mtok)}</td>
       <td class="num mono">${esc(price.output_per_mtok)}</td>
@@ -618,27 +618,27 @@ function renderPriceCard() {
   const body = prices.length
     ? `<table class="usage-table price-table">
         <thead><tr>
-          <th class="eyebrow mono">模型</th>
-          <th class="eyebrow mono num">缓存读</th>
-          <th class="eyebrow mono num">输入</th>
-          <th class="eyebrow mono num">输出</th>
-          <th class="eyebrow mono">币种</th>
-          <th class="eyebrow mono">供应商</th>
+          <th class="eyebrow mono">${t('模型')}</th>
+          <th class="eyebrow mono num">${t('price.colCacheRead')}</th>
+          <th class="eyebrow mono num">${t('price.colInput')}</th>
+          <th class="eyebrow mono num">${t('price.colOutput')}</th>
+          <th class="eyebrow mono">${t('price.colCurrency')}</th>
+          <th class="eyebrow mono">${t('price.colProvider')}</th>
           <th class="eyebrow mono num"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>`
-    : `<div class="empty-state"><div class="empty-symbol">${icon('chart')}</div><h3>还没有价格规则</h3><p>新增一条模型价格，成本估算才会生效。</p></div>`
+    : `<div class="empty-state"><div class="empty-symbol">${icon('chart')}</div><h3>${t('price.emptyTitle')}</h3><p>${t('price.emptyDesc')}</p></div>`
   return `<div class="card price-card">
     <div class="card-head">
-      <h3>模型价格</h3>
+      <h3>${t('price.title')}</h3>
       <div class="btn-row">
-        <span class="meta">${prices.length} 条规则</span>
-        <button class="btn" data-action="new-price">${icon('plus')}新增</button>
+        <span class="meta">${t('price.rulesCount', { count: prices.length })}</span>
+        <button class="btn" data-action="new-price">${icon('plus')}${t('price.add')}</button>
       </div>
     </div>
     ${body}
-    <div class="usage-note">价格为每百万 token。在「编辑」里可以还原配置默认值。${missing.length ? `配置中但未生效：${missing.map(item => esc(item.model)).join('、')}。` : ''}</div>
+    <div class="usage-note">${t('price.note')}${missing.length ? t('price.noteMissing', { models: missing.map(item => esc(item.model)).join(t('price.modelSeparator')) }) : ''}</div>
   </div>`
 }
 
