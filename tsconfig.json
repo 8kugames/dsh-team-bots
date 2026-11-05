@@ -21,6 +21,7 @@
     "ui/**/*.ts",
     "scripts/**/*.ts",
     "scripts/**/*.mts",
+    "tests/**/*.ts",
     "types/**/*.d.ts"
   ],
   "exclude": ["node_modules", ".dev", ".dist", ".tmp", ".preview"]

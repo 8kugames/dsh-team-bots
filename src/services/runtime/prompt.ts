@@ -259,7 +259,7 @@ export const promptMethods = {
   // DSHBOTS-156：档位口径含任务派发覆盖（只收紧不放大）；带运行上下文时把生效档与来源
   // 落 run_events（type='sandbox_mode'，复用会话也每次留档——run_events 是运行时间线，
   // 每条运行都该有自己的一档记录，与 sandbox/mode 追加的去重无关）。
-  applyFilePolicy(agent, bot, run, task) {
+  applyFilePolicy(agent, bot, run?, task?) {
     const { mode, source } = effectiveSandbox(run, bot, task)
     if (!SANDBOX_MODES.includes(mode)) return
     if (run?.id) {
@@ -396,7 +396,7 @@ Transcription requirements:
 Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
 ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
   },
-  promptFor({ run, bot, project, task, chatMessage, sessionId }) {
+  promptFor({ run, bot, project, task, chatMessage, sessionId }: { run: any; bot: any; project?: any; task?: any; chatMessage?: any; sessionId?: any }) {
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, sessionId })
     if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
     // 结转摘要（DSHBOTS-145）：先于 header 判定——单聊摘要运行没有项目，

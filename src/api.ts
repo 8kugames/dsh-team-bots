@@ -22,7 +22,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
 
-export async function handleAction(service, action: TeamActionName, payload: TeamActionPayload = {}, actor) {
+export async function handleAction(service, action: TeamActionName, payload: TeamActionPayload = {}, actor?) {
   if (!ACTIONS.has(action)) throw new AppError('UNKNOWN_ACTION', `未知操作 ${action}`, 404)
   switch (action) {
     case 'health':

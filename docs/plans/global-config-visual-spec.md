@@ -64,7 +64,7 @@
 
 ## 6. 明暗双主题自查
 
-取证：`scripts/dev-server.js` 预览服务（PORT 4318）+ Chrome headless CDP（`Emulation.setEmulatedMedia` 切 `prefers-color-scheme`，`--force-dark-mode` 无效），1440×1000 视口，整页截图 1440×2749。
+取证：`scripts/dev-server.mjs` 预览服务（PORT 4318）+ Chrome headless CDP（`Emulation.setEmulatedMedia` 切 `prefers-color-scheme`，`--force-dark-mode` 无效），1440×1000 视口，整页截图 1440×2749。
 
 - 明色：[global-config-light.png](../assets/global-config-light.png)
 - 暗色：[global-config-dark.png](../assets/global-config-dark.png)

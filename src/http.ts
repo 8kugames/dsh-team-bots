@@ -63,7 +63,7 @@ export const OFFICIAL_UI_SWITCH_ROWS = [
 ]
 
 // ui/styles.css 组件域拆分（DSHBOTS-160）：5626 行巨石按 Section 域拆到 ui/styles/*.css，
-// 每文件 <800 行。本表是拼接顺序的唯一真源（线上 installHttp 与 scripts/dev-server.js
+// 每文件 <800 行。本表是拼接顺序的唯一真源（线上 installHttp 与 scripts/dev-server.mjs
 // 共用同一 readUiStyles），顺序即层叠语义——base 的变量声明在最前、wide 的媒体覆盖在
 // 后，不得重排。
 export const UI_STYLE_PARTS = [

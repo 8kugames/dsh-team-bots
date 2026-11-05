@@ -9,7 +9,7 @@ import { stripTypeScriptTypes } from 'node:module'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const ENTRY = join(ROOT, 'index.ts')
-const DIRS = ['src', 'ui', 'scripts'].map(name => join(ROOT, name))
+const DIRS = ['src', 'ui', 'scripts', 'tests'].map(name => join(ROOT, name))
 
 function* sources(path) {
   for (const entry of readdirSync(path, { withFileTypes: true })) {

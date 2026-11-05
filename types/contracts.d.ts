@@ -80,6 +80,10 @@ interface TeamActionPayload {
   decision?: string
   status?: string
   value?: string
+  description?: string
+  ownerBotId?: string
+  path?: string
+  productionDir?: string
   model?: string
   provider?: string
   currency?: string

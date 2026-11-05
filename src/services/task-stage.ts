@@ -13,6 +13,10 @@
 // 终态（done/canceled）一律 ended、不渲染任何徽标——即使任务上还挂着遗留运行
 // （回归锁：「已完成」列出现过「已取消/运行中」标签的历史 bug）。
 
+// attention 在多数调用点不传（无待答提问），标记为可选；用重载签名而非行内注解，
+// 保证擦除产物里实现行仍是 `export function taskStage(task, latestRun, attention) {`
+// （tests/task-stage.test.ts 对该行做逐字源码断言）。
+export function taskStage(task: any, latestRun: any, attention?: any): { stage: string; action?: string };
 export function taskStage(task, latestRun, attention) {
   if (task?.status === 'done' || task?.status === 'canceled') return { stage: 'ended' }
   // 有待回答的结构化提问：无论任务处于哪个状态，先在等人回答。

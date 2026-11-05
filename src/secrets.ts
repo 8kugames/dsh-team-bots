@@ -100,7 +100,7 @@ export class SecretBox {
  * tightened to 0600; if the mode is still too wide afterwards (or cannot be
  * changed at all), the caller is told the file is unsafe to read.
  */
-export function enforceSecretKeyFilePermissions(keyFile, io = { chmod: chmodSync, stat: statSync }) {
+export function enforceSecretKeyFilePermissions(keyFile, io: { chmod: (path: string, mode: number) => void; stat: (path: string) => { mode: number } } = { chmod: chmodSync, stat: statSync }) {
   const mode = io.stat(keyFile).mode & 0o777
   if ((mode & 0o077) === 0) return
   try {

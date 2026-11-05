@@ -49,7 +49,7 @@ export const runFinishMethods = {
     })
     return true
   },
-  async finishRun({ runId, status, output, error, attention }) {
+  async finishRun({ runId, status, output, error, attention }: { runId: any; status: any; output: any; error?: any; attention?: any }) {
     const run = this.runRow(runId)
     if (!['running', 'queued'].includes(run.status)) return
     ensureAttentionSchema(this.store)

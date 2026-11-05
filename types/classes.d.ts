@@ -2,8 +2,9 @@
 // 这是纯类型文件：不产生运行时代码，且 .d.ts 已被 scripts/build.mjs 排除。
 //
 // 源码里 TeamService / DshRuntime 的业务方法由 defineMethods 动态挂到 prototype，
-// 构造函数里的 this.xxx 赋值在 TS 下也需要显式字段声明；这里用模块增强一并补齐，
-// 只声明 tsc 实际报错的那些成员，不给类加索引签名、不改任何运行行为。
+// 构造函数里的 this.xxx 赋值在 TS 下也需要显式字段声明；这里用模块增强补齐字段，
+// 并通过 extends 把 defineMethods 传入的域方法对象的真实签名合并进类接口。
+// 不给类加索引签名、不给方法写 (...args: any[]) => any、不改任何运行行为。
 
 import type { Store } from '../src/db.js'
 import type { AppError } from '../src/errors.js'
@@ -13,6 +14,48 @@ import type { TeamService } from '../src/service.js'
 import type { WechatChannel } from '../src/wechat/channel.js'
 import type { WechatBusinessError } from '../src/wechat/commands.js'
 import type { WechatStore } from '../src/wechat/store.js'
+
+// 业务域方法由 defineMethods 挂到 prototype 上。与其逐个手抄签名，直接把
+// defineMethods 传入的那些域方法对象的真实类型交叉合并进类接口：方法名、参数名、
+// 参数与返回类型全部来自实现本身，既精确又不会随域文件改动而漂移。
+import { botsMethods } from '../src/services/bots.js'
+import { projectsMethods } from '../src/services/projects.js'
+import { chatMethods } from '../src/services/chat.js'
+import { tasksMethods } from '../src/services/tasks.js'
+import { taskNotifyMethods } from '../src/services/task-notify.js'
+import { taskReviewMethods } from '../src/services/task-review.js'
+import { runsMethods } from '../src/services/runs.js'
+import { runFinishMethods } from '../src/services/run-finish.js'
+import { hygieneMethods } from '../src/services/hygiene.js'
+import { modelFallbackMethods } from '../src/services/model-fallback.js'
+import { schedulerMethods } from '../src/services/scheduler.js'
+import { memoryMethods } from '../src/services/memory.js'
+import { secretsMethods } from '../src/services/secrets.js'
+import { proposalsMethods } from '../src/services/proposals.js'
+import { terminalMethods } from '../src/services/terminal.js'
+import { usageMethods } from '../src/services/usage.js'
+import { systemMethods } from '../src/services/system.js'
+import { wechatMethods } from '../src/services/wechat.js'
+import { approvalsMethods } from '../src/services/approvals.js'
+import { questionsMethods } from '../src/services/questions.js'
+import { coreMethods } from '../src/services/core.js'
+import { promptMethods } from '../src/services/runtime/prompt.js'
+import { sessionMethods } from '../src/services/runtime/session.js'
+import { trajectoryMethods } from '../src/services/runtime/trajectory.js'
+import { lifecycleMethods } from '../src/services/runtime/lifecycle.js'
+
+type TeamServiceMethods =
+  & typeof botsMethods & typeof projectsMethods & typeof chatMethods
+  & typeof tasksMethods & typeof taskNotifyMethods & typeof taskReviewMethods
+  & typeof runsMethods & typeof runFinishMethods & typeof hygieneMethods
+  & typeof modelFallbackMethods & typeof schedulerMethods & typeof memoryMethods
+  & typeof secretsMethods & typeof proposalsMethods & typeof terminalMethods
+  & typeof usageMethods & typeof systemMethods & typeof wechatMethods
+  & typeof approvalsMethods & typeof questionsMethods & typeof coreMethods
+
+type DshRuntimeMethods =
+  & typeof promptMethods & typeof sessionMethods
+  & typeof trajectoryMethods & typeof lifecycleMethods
 
 // ---------------------------------------------------------------------------
 // 局部辅助类型（模块内私有，不导出）
@@ -127,7 +170,7 @@ declare module '../src/wechat/commands.js' {
 // DshRuntime（src/runtime.js）
 // ---------------------------------------------------------------------------
 declare module '../src/runtime.js' {
-  interface DshRuntime {
+  interface DshRuntime extends DshRuntimeMethods {
     ctx: DshContext
     config: TeamConfig
     store: Store
@@ -144,9 +187,6 @@ declare module '../src/runtime.js' {
     selecting: Promise<void>
     completionHandler: ((result: unknown) => unknown) | null
     attached: boolean
-
-    // 由 services/runtime/lifecycle.js 挂到 prototype 上的方法。
-    attach(): void
   }
 }
 
@@ -154,7 +194,7 @@ declare module '../src/runtime.js' {
 // TeamService（src/service.js）
 // ---------------------------------------------------------------------------
 declare module '../src/service.js' {
-  interface TeamService {
+  interface TeamService extends TeamServiceMethods {
     store: Store
     config: TeamConfig
     logger: DshLogger
@@ -172,33 +212,6 @@ declare module '../src/service.js' {
     terminalActive: Map<string, unknown>
     /** index.js 里 service.initialize().then(...).catch(...) 的启动 Promise。 */
     boot: Promise<unknown> | null
-
-    // 由 services/*.js 挂到 prototype 上、且被 tsc 报错的成员。
-    attachRuntime(runtime: unknown): void
-    initialize(): Promise<unknown>
-    start(): void
-    stop(): void
-    tick(): Promise<void>
-    reapStalledRuns(): Promise<void>
-    createBot(input: unknown, actor?: unknown): Promise<DbRow>
-    createProject(input: unknown, actor?: unknown): Promise<DbRow>
-    createTask(input: unknown, actor?: unknown): Promise<DbRow>
-    sendMessage(
-      projectId: unknown,
-      bodyInput: unknown,
-      actor?: unknown,
-      replyTo?: unknown,
-      imagesInput?: unknown,
-    ): Promise<unknown>
-    enqueueTaskRun(task: unknown, triggerType: unknown, actor: unknown): unknown
-    resolveTaskByIdentifier(identifier: unknown): { project: DbRow; task: DbRow }
-    applyReview(
-      task: unknown,
-      project: unknown,
-      decision: unknown,
-      comment: unknown,
-      actor: unknown,
-    ): Promise<DbRow>
   }
 }
 

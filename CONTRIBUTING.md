@@ -8,14 +8,14 @@
 
 ## Guard tests
 
-`tests/` holds one `*.test.js` per feature domain, plus the pins for several architectural conventions:
+`tests/` holds one `*.test.ts` per feature domain, plus the pins for several architectural conventions. `npm test` still runs the generated `tests/*.test.js`, so the test glob never changes.
 
-- `tests/styles-split.test.js`: `UI_STYLE_PARTS` corresponds one-to-one with the `ui/styles/` directory (no orphans, no missing entries, no duplicates), each file stays under 800 lines, and the concatenation has zero drift.
-- `tests/code-hygiene.test.js`: the line-limit semantics (800 by default, judgement line at limit × 110 %, 0 disables it, one alert per violation, a fresh alert after the file falls back under the limit).
+- `tests/styles-split.test.ts`: `UI_STYLE_PARTS` corresponds one-to-one with the `ui/styles/` directory (no orphans, no missing entries, no duplicates), each file stays under 800 lines, and the concatenation has zero drift.
+- `tests/code-hygiene.test.ts`: the line-limit semantics (800 by default, judgement line at limit × 110 %, 0 disables it, one alert per violation, a fresh alert after the file falls back under the limit).
 - Cross-slice `import` guards and token-format guards cover the whole `ui/` source tree: a missing import after a slice split leaves the page on the boot screen, so this class of failure is caught in advance.
 
 ## `ui/` contribution rules
 
-1. **Style slices must be registered.** The concatenation order is decided by `UI_STYLE_PARTS` in `src/http.ts`, so a new style file must be registered there too; `tests/styles-split.test.js` guards the table's completeness.
+1. **Style slices must be registered.** The concatenation order is decided by `UI_STYLE_PARTS` in `src/http.ts`, so a new style file must be registered there too; `tests/styles-split.test.ts` guards the table's completeness.
 2. **The 800-line rule.** Both `ui/styles/*.css` and `ui/app.ts` stay under 800 lines per file; beyond that, split by responsibility into new domain files.
-3. **Edit `.ts`, never the generated `.js`.** `npm run build` erases types in place and writes the sibling `.js`/`.mjs` that DSH and the browser actually load; `pretest`, `prepack`, `predev` and `prestart` run it automatically. `npm run typecheck` checks the TypeScript sources. Keep imports written with `.js` specifiers so the emitted paths stay unchanged.
+3. **Edit `.ts`, never the generated `.js`.** `npm run build` erases types in place and writes the sibling `.js`/`.mjs` that DSH, the browser and `node --test` actually load; `pretest`, `prepack`, `predev` and `prestart` run it automatically. This covers `index.ts`, `src/`, `ui/`, `scripts/` and `tests/`. `npm run typecheck` checks every TypeScript source including the tests. Keep imports written with `.js` specifiers so the emitted paths stay unchanged. Generated `.js` outside `scripts/` are untracked build outputs (see `.gitignore`); in `scripts/` the sources are `.ts`/`.mts` and the generated `.mjs` are committed, with `scripts/build.mjs` as the only hand-written `.mjs`.

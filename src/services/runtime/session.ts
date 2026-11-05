@@ -356,7 +356,7 @@ export const sessionMethods = {
       this.sessionCreates.delete(key)
     }
   },
-  async startRun({ run, bot, project, task, chatMessage, sessionKind }) {
+  async startRun({ run, bot, project, task, chatMessage, sessionKind }: { run: any; bot: any; project: any; task: any; chatMessage?: any; sessionKind: any }) {
     if (!this.ctx?.sessionController) throw new AppError('DSH_UNAVAILABLE', 'DSH Session 服务不可用')
     // 备用模型覆盖：派生运行在 runs 行里带 model_* 三列，指明这条运行改用备用模型下发。
     // 不带 override 的运行照旧走 Bot 主模型——「运行结束自动回退」就靠这条默认路径实现。

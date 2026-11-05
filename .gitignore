@@ -7,3 +7,7 @@ workspace
 .DS_Store
 .env
 package-lock.json
+/index.js
+src/**/*.js
+ui/**/*.js
+tests/**/*.js
