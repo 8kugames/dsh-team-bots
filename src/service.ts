@@ -25,6 +25,7 @@ import { chatMethods } from './services/chat.js'
 import { tasksMethods } from './services/tasks.js'
 import { taskNotifyMethods } from './services/task-notify.js'
 import { taskReviewMethods } from './services/task-review.js'
+import { reviewWatchdogMethods } from './services/review-watchdog.js'
 import { runsMethods } from './services/runs.js'
 import { runFinishMethods } from './services/run-finish.js'
 import { hygieneMethods } from './services/hygiene.js'
@@ -87,6 +88,7 @@ defineMethods(TeamService.prototype, [
   tasksMethods,
   taskNotifyMethods,
   taskReviewMethods,
+  reviewWatchdogMethods,
   runsMethods,
   runFinishMethods,
   hygieneMethods,

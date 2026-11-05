@@ -205,6 +205,9 @@ export const tasksMethods = {
       stage,
       stageLabel: taskStageLabel(stage),
       reviewStatus: this.taskReviewStatus(task),
+      // 验收滞留同源视图（DSHBOTS-235）：锚点/阈值/最近判定由 review-watchdog 域统一供出，
+      // UI badge 与后端守门同一口径（H3），面板据此展示三档判定与依据。
+      reviewIdle: task.status === 'in_review' ? this.reviewIdleView(task) : null,
     }
   },
 
