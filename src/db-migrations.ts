@@ -132,6 +132,7 @@ export function runMigrations(db) {
   recordMigration(db, 'solo_message_cards')
   recordMigration(db, 'bots_avatar_seed')
   recordMigration(db, 'runs_merged_messages')
+  migrateBotQuota(db)
   // 验收守门索引（DSHBOTS-235）：扫描按 task_id 关联查 task_comments / runs，
   // 旧库无对应索引时每卡全表扫；对新库空转（SCHEMA 已建）。
   db.exec(`
@@ -290,6 +291,28 @@ function migrateSoloMessageCards(db) {
 // 两个 bot 可能指向同一个工作目录互相覆盖。补一个部分唯一索引把这种状态挡住。
 // 老库里若已有重复目录名，这里不改名：改名等于把 bot 指向另一个工作目录，比缺约束更难收拾，
 // 只告警让使用者自己改名或合并。
+// bot 额度墙状态（DSHBOTS-241）：新库由 SCHEMA 建表，这里只对旧库补建。
+function migrateBotQuota(db) {
+  if (!columnsOf(db, 'bots').includes('fallback_model')) return
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bot_quota (
+      bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'ok',
+      exhausted_at TEXT,
+      reset_at TEXT,
+      reset_source TEXT,
+      released_at TEXT,
+      released_by TEXT,
+      error_code TEXT,
+      error_message TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(bot_id, provider)
+    );
+  `)
+  recordMigration(db, 'bot_quota')
+}
+
 function migrateSoloDirUnique(db) {
   if (!columnsOf(db, 'bots').includes('solo_dir')) return
   try {

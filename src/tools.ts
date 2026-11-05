@@ -39,6 +39,7 @@ export const DIRECTOR_ONLY_TOOLS = [
   'team_memory_list',
   'team_memory_write',
   'team_memory_cleanup',
+  'team_release_bot_quota',
 ] as const
 
 // 门控：agentTeam 开启且 bot 类型支持（项目内 active bot，成员与总监均可用）。
@@ -318,6 +319,25 @@ export function installTeamTools(ctx, service) {
       const cleaned = result.cleaned.map(item => `"${item.topic}"`).join(', ') || 'none'
       const missed = result.missed.length ? ` Not found (skipped): ${result.missed.map(topic => `"${topic}"`).join(', ')}.` : ''
       return `Archived ${result.archived} ${result.archived === 1 ? 'entry' : 'entries'}: ${cleaned}.${missed}`
+    },
+  })
+
+  ctx.tools.register({
+    name: 'team_release_bot_quota',
+    description: 'Clear a bot\'s provider quota-exhausted state immediately so its queued task runs dispatch again now, instead of waiting for the provider\'s reset time. Use when the provider says the quota already reset, or the bot must work before the recorded reset time. Idempotent: releasing an already-clear bot is a no-op. Director-only; the human owner can do the same from the bot detail panel.',
+    parameters: {
+      type: 'object',
+      properties: {
+        bot: { type: 'string', description: 'Bot id or exact bot name whose quota state should be cleared' },
+      },
+      required: ['bot'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const view = service.releaseBotQuotaFromBot(sessionId, args.bot)
+      return `Cleared quota state for ${view.name ?? args.bot}.`
     },
   })
 

@@ -23,12 +23,13 @@ import { projectsMethods } from '../src/services/projects.js'
 import { chatMethods } from '../src/services/chat.js'
 import { tasksMethods } from '../src/services/tasks.js'
 import { taskNotifyMethods } from '../src/services/task-notify.js'
-import { notifyMethods } from '../src/services/notify.js'
 import { taskReviewMethods } from '../src/services/task-review.js'
+import { notifyMethods } from '../src/services/notify.js'
 import { runsMethods } from '../src/services/runs.js'
 import { runFinishMethods } from '../src/services/run-finish.js'
 import { hygieneMethods } from '../src/services/hygiene.js'
 import { modelFallbackMethods } from '../src/services/model-fallback.js'
+import { botQuotaMethods } from '../src/services/bot-quota.js'
 import { schedulerMethods } from '../src/services/scheduler.js'
 import { memoryMethods } from '../src/services/memory.js'
 import { secretsMethods } from '../src/services/secrets.js'
@@ -50,7 +51,7 @@ type TeamServiceMethods =
   & typeof tasksMethods & typeof taskNotifyMethods & typeof taskReviewMethods
   & typeof notifyMethods
   & typeof runsMethods & typeof runFinishMethods & typeof hygieneMethods
-  & typeof modelFallbackMethods & typeof schedulerMethods & typeof memoryMethods
+  & typeof modelFallbackMethods & typeof botQuotaMethods & typeof schedulerMethods & typeof memoryMethods
   & typeof secretsMethods & typeof proposalsMethods & typeof terminalMethods
   & typeof usageMethods & typeof systemMethods & typeof wechatMethods
   & typeof approvalsMethods & typeof questionsMethods & typeof coreMethods

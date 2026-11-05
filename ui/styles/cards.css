@@ -120,6 +120,26 @@
 .bot-status.archived::before {
     background: var(--line-2);
 }
+/* Quota exhaustion reads as a state, not a second status chip: quiet text with a warning dot. */
+.quota-badge {
+    margin-left: 8px;
+    padding: 1px 7px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    font: 500 var(--fs-caption) var(--sans);
+    letter-spacing: 0.08em;
+    color: var(--ink-3);
+}
+.quota-badge::before {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: var(--red, #d64545);
+    vertical-align: 1px;
+}
 
 .list-card {
     overflow: hidden;

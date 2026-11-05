@@ -1,7 +1,7 @@
-// src/services/run-finish.js —— 运行收尾与交付派发域
+// src/services/run-finish.ts —— 运行收尾与交付派发域
 // 运行结束后的用量记账、限流退避、attention 落库，以及按运行类别分发的后续动作
 // （任务交付与退回重派、私信回信、群聊/单聊回复、模型备用切换、失败转总监处理）。
-// 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
+// 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.ts 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { runUsageTotals } from '../usage.js'
@@ -84,6 +84,30 @@ export const runFinishMethods = {
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
     )
+    // DSHBOTS-241：撞 provider 额度墙时记录该 bot 的额度状态（含恢复时间），
+    // 供派发前路由（耗尽期走备用模型/排队）与 UI 手动解除；审计 bot.quota_exhausted。
+    // DSHBOTS-246：事件与状态记录同条件——只有真撞墙才写「额度耗尽」，成功运行或
+    // 非额度失败一律不记，否则每个 run 收尾都污染一条额度耗尽时间线。
+    if (quotaExhausted && run.bot_id && bot) {
+      const effectiveProvider = run.model_provider || bot.provider
+      if (effectiveProvider) {
+        const quotaRecorded = this.recordBotQuotaExhaustion({
+          botId: run.bot_id,
+          provider: effectiveProvider,
+          errorCode: error?.code ?? null,
+          errorMessage: error?.message ?? '',
+          retryAfterMs: Number(error?.retryAfterMs) > 0 ? Number(error.retryAfterMs) : null,
+        })
+        if (quotaRecorded) {
+          const resetNote = quotaRecorded.resetAt ? `，预计 ${quotaRecorded.resetAt} 恢复` : ''
+          this.insertRunEvent(
+            runId,
+            'quota_exhausted',
+            `额度耗尽（${quotaRecorded.provider}）${resetNote}，耗尽期内新任务改走备用模型或排队等待`,
+          )
+        }
+      }
+    }
     // DSHBOTS-172 代码卫生：每轮运行结束扫一次项目工作区行数约定，超标即发系统指令告警
     // （去重与阈值见 hygiene.js）；扫描自身全量兜错，不阻塞收尾主流程。
     this.runCodeHygieneScan(project, runId)

@@ -177,6 +177,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   route('/api/dsh-team/modules/modal-layer.js', ['GET'], moduleScript('modal-layer.js'))
   route('/api/dsh-team/modules/dom-morph.js', ['GET'], moduleScript('dom-morph.js'))
   route('/api/dsh-team/modules/modal-forms.js', ['GET'], moduleScript('modal-forms.js'))
+  route('/api/dsh-team/modules/bot-quota.js', ['GET'], moduleScript('bot-quota.js'))
   route('/api/dsh-team/modules/chat.js', ['GET'], moduleScript('chat.js'))
   route('/api/dsh-team/modules/solo-archive.js', ['GET'], moduleScript('solo-archive.js'))
   route('/api/dsh-team/modules/events-board.js', ['GET'], moduleScript('events-board.js'))

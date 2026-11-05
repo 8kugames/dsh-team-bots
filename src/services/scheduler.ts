@@ -588,6 +588,26 @@ export const schedulerMethods = {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'UNAVAILABLE', message: '项目或 Bot 不可用' } })
           continue
         }
+        // DSHBOTS-241 额度闸门：主 provider 仍在耗尽期、且本次没走备用模型的任务运行不领取——
+        // 留 queued，恢复时间过后下一拍自动回主模型（避免每拍撞同一堵墙）。
+        // 走备用的运行（model_provider 非空）不受此闸影响，主备两套额度各自独立。
+        if (run.kind === 'task' && !run.model_provider) {
+          const quota = this.botQuotaState(run.bot_id, bot.provider)
+          if (quota?.exhausted) {
+            const alreadyNoted = this.store.get(
+              "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_wait'",
+              run.id,
+            )
+            if (!alreadyNoted) {
+              this.insertRunEvent(
+                run.id,
+                'quota_wait',
+                `额度耗尽（${quota.provider}），恢复时间 ${quota.resetAt ?? '未知'} 前暂缓领取`,
+              )
+            }
+            continue
+          }
+        }
         const budgetError = this.budgetError(needsProject ? project : null)
         if (budgetError) {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'BUDGET_EXCEEDED', message: budgetError } })

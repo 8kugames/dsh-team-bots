@@ -315,6 +315,7 @@ export const botsMethods = {
       modelRef: bot.provider && bot.model ? `${bot.provider}/${bot.model}` : null,
       fallbackModelRef: bot.fallback_provider && bot.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null,
       fallbackConfigured: Boolean(bot.fallback_provider && bot.fallback_model),
+      quota: this.botQuotaView(bot),
       soloDir: bot.solo_dir ?? null,
       soloWorkspace: bot.solo_dir ? join(this.config.workspace, '_the_bots', bot.solo_dir) : null,
       memoryCount: Number(memoryCount),

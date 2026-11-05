@@ -302,6 +302,21 @@ document.addEventListener('click', async (event) => {
         toast(t("Bot 已归档"), 'success')
         break
       }
+      case 'release-bot-quota': {
+        const botId = target.dataset.botId
+        const bot = botById(botId)
+        if (!bot) break
+        if (!window.confirm(t("立即恢复该 Bot 的派发？不等额度恢复时间。"))) break
+        await api('release_bot_quota', { botId })
+        await loadState(state.projectId, { quiet: true })
+        if (state.view === 'solo-config') {
+          await loadSoloDetail()
+        } else {
+          await openBot(botId)
+        }
+        toast(t("额度耗尽已解除"), 'success')
+        break
+      }
       case 'roll-avatar':
       case 'toggle-avatar': {
         const botId = target.dataset.botId

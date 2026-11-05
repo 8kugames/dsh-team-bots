@@ -172,4 +172,18 @@ export default {
   "选定此目录": "Choose this folder",
   "项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个": "${totalCount} tasks in this project · ${hiddenCount} hidden",
   "项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个": "${totalCount} tasks in this project; the current filter, time window or list limit hides ${hiddenCount}",
+  // DSHBOTS-241：bot 额度墙状态与手动解除
+  "额度状态": "Quota status",
+  "额度": "Quota",
+  "额度耗尽": "Quota exhausted",
+  "额度正常": "Quota available",
+  "预计恢复": "Resets at",
+  "同样耗尽": "Also exhausted",
+  "解除额度耗尽": "Clear quota exhaustion",
+  "立即恢复该 Bot 的派发？不等额度恢复时间。": "Resume this bot's dispatch now? This ignores the recorded quota reset time.",
+  "额度耗尽已解除": "Quota exhaustion cleared",
+  // DSHBOTS-246: keys added by the full t() literal audit
+  "主模型": "Primary model",
+  "：": ": ",
+  "）": ")",
 }

@@ -8,6 +8,7 @@ import { currentSkillVersion, skillVersions, taskUsageBlock } from './tasks.js'
 import { ensureComposerImageInput, ensureImageViewer } from './composer.js'
 import { app, refresh, panelAttrs, render, updateRunClocks } from '../app.js'
 import { modalShell, modalLoading, renderModalLayer } from './modal-layer.js'
+import { botQuotaBlock } from './bot-quota.js'
 
 function modelOptions(provider, model) {
   const models = state.data?.models ?? []
@@ -236,6 +237,7 @@ function modalBot(detail) {
         <div class="kv"><span>${t("成功 / 失败")}</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
         <div class="kv"><span>${t("长期记忆")}</span><strong>${bot.memoryCount}</strong></div>
         <div class="kv"><span>${t("状态")}</span><strong>${esc(BOT_STATUS[bot.status] ?? bot.status)}</strong></div>
+        ${botQuotaBlock(bot)}
         <div class="usage-note">${t("模型或强度变更会在下一次运行时生效，不会中断当前运行。")}</div>
       </aside>` : ''}
     </div>`,

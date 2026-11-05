@@ -31,6 +31,7 @@ type ReviewDecision = 'accept' | 'return'
 type TeamActionName =
   | 'health' | 'state' | 'messages_page' | 'models' | 'bot_detail'
   | 'create_bot' | 'update_bot' | 'archive_bot' | 'rollback_bot' | 'remove_bot_tracking'
+  | 'release_bot_quota'
   | 'create_project' | 'update_project' | 'archive_project' | 'reopen_project' | 'remove_project_tracking' | 'browse_dirs'
   | 'mark_chat_read' | 'add_member' | 'remove_member'
   | 'send_message' | 'send_solo_message' | 'get_message_image' | 'create_task' | 'update_task'

@@ -603,16 +603,40 @@ export const tasksMethods = {
     const createdAt = nowIso()
     // 写范围在入队时快照：任务后续改声明不影响已排队的运行。
     const writeScopes = JSON.stringify(readWriteScopes(task.write_scopes))
+    // DSHBOTS-241：额度耗尽期内派发不撞墙——主 provider 耗尽时直接走备用模型；
+    // 未配备用或备用同样耗尽则留 queued 等恢复（调度器按额度状态放行，恢复后自动回主模型）。
+    const bot = this.store.get(
+      'SELECT id, provider, fallback_provider, fallback_model, fallback_effort FROM bots WHERE id = ?',
+      task.assignee_bot_id,
+    )
+    const routing = this.quotaRoutingForBot(bot)
+    const fallbackProvider = routing.mode === 'fallback' ? routing.provider : null
+    const fallbackModel = routing.mode === 'fallback' ? routing.model : null
+    const fallbackEffort = routing.mode === 'fallback' ? routing.effort : null
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, write_scopes, queued_at)
-       VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?, ?)`,
-      runId, task.project_id, task.assignee_bot_id, task.id, triggerType, task.id, `task:${task.id}:${Date.now()}:${runId}`, writeScopes, createdAt,
+        attempt, idempotency_key, write_scopes, model_provider, model_model, model_effort, queued_at)
+       VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?, ?, ?, ?, ?)`,
+      runId, task.project_id, task.assignee_bot_id, task.id, triggerType, task.id,
+      `task:${task.id}:${Date.now()}:${runId}`, writeScopes, fallbackProvider, fallbackModel, fallbackEffort, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued', `由 ${actor.type}:${actor.id} 触发`, createdAt,
     )
+    if (routing.mode === 'fallback') {
+      this.insertRunEvent(
+        runId,
+        'quota_fallback',
+        `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref}（预计 ${this.botQuotaState(bot.id, bot.provider)?.resetAt ?? '未知'} 恢复）`,
+      )
+    } else if (routing.mode === 'wait') {
+      this.insertRunEvent(
+        runId,
+        'quota_wait',
+        `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`,
+      )
+    }
     if (triggerType === 'board_resume') {
       this.insertRunEvent(runId, 'board_resume', '看板拖入执行中，系统指令自动开工')
     }

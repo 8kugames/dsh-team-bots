@@ -31,6 +31,7 @@ import { runsMethods } from './services/runs.js'
 import { runFinishMethods } from './services/run-finish.js'
 import { hygieneMethods } from './services/hygiene.js'
 import { modelFallbackMethods } from './services/model-fallback.js'
+import { botQuotaMethods } from './services/bot-quota.js'
 import { schedulerMethods } from './services/scheduler.js'
 import { memoryMethods } from './services/memory.js'
 import { secretsMethods } from './services/secrets.js'
@@ -95,6 +96,7 @@ defineMethods(TeamService.prototype, [
   runFinishMethods,
   hygieneMethods,
   modelFallbackMethods,
+  botQuotaMethods,
   schedulerMethods,
   memoryMethods,
   secretsMethods,

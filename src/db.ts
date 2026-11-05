@@ -46,6 +46,24 @@ CREATE TABLE IF NOT EXISTS bots (
   updated_at TEXT NOT NULL
 );
 
+-- bot_quota：bot 的 provider 额度墙状态，按 (bot, provider) 各存一套——主备 provider
+-- 是两套独立额度，互不顶替。state: exhausted（耗尽期内）→ ok（人工解除或恢复后）。
+-- reset_at 由反馈消息解析或保守兜底得出；读状态时按当前时刻惰性判定，不落库回填。
+CREATE TABLE IF NOT EXISTS bot_quota (
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'ok',
+  exhausted_at TEXT,
+  reset_at TEXT,
+  reset_source TEXT,
+  released_at TEXT,
+  released_by TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(bot_id, provider)
+);
+
 CREATE TABLE IF NOT EXISTS bot_revisions (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
