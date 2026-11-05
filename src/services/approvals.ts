@@ -88,6 +88,20 @@ export function toolTargetOf(arguments_) {
 // pre-execute 目标缓存上限：只记最近若干次调用的目标，防长会话里无界增长。
 const APPROVAL_TARGET_CACHE_LIMIT = 200
 
+// 来源定位字段（DSHBOTS-240）：审批行 → 来源群聊（项目名/KEY）+ 任务 ID/标识/标题。
+// 列表查询用 JOIN 一次取齐（approvalsPending / approvalsForProject / approvalsForBot 共用），
+// 避免逐行 N+1；缺任务时任务字段留空，不猜。
+function approvalSourceFields(row) {
+  const key = row.project_key ?? ''
+  return {
+    projectName: row.project_name ?? '',
+    projectKey: key,
+    taskId: row.task_id ?? null,
+    taskIdentifier: row.task_id ? `${row.task_project_key ?? key ?? 'T'}-${row.task_number}` : null,
+    taskTitle: row.task_title ?? null,
+  }
+}
+
 export const approvalsMethods = {
   // 由 core.attachRuntime 调用：注册宿主事件。runtime.ctx 不存在（测试桩）时跳过注册，
   // 但 pending Map 无条件初始化——handleApprovalRequest 直调（测试）也依赖它。
@@ -260,32 +274,55 @@ export const approvalsMethods = {
   },
 
   // state 视图的待审批条目：pending 在前（按创建时间倒序），已决的跟在后面供卡片回显结果。
+  // 来源定位字段同 approvalsPending（DSHBOTS-240）：桌面通知与顶部通知共用同一套取数口径。
   approvalsForProject(projectId) {
     const rows = this.store.all(
-      `SELECT * FROM approvals WHERE project_id = ?
-       ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 30`,
+      `SELECT a.*, p.name AS project_name, p.key AS project_key,
+              t.id AS task_id, t.number AS task_number, t.title AS task_title, tp.key AS task_project_key
+       FROM approvals a
+       LEFT JOIN projects p ON p.id = a.project_id
+       LEFT JOIN runs r ON r.id = a.run_id
+       LEFT JOIN tasks t ON t.id = r.task_id
+       LEFT JOIN projects tp ON tp.id = t.project_id
+       WHERE a.project_id = ?
+       ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END, a.created_at DESC LIMIT 30`,
       projectId,
     )
-    return rows.map(row => this.approvalView(row))
+    return rows.map(row => ({ ...this.approvalView(row), ...approvalSourceFields(row) }))
   },
 
   // 单聊视图的待审批条目（DSHBOTS-218）：口径与 approvalsForProject 一致，按 bot 取项目外条目。
   approvalsForBot(botId) {
     const rows = this.store.all(
-      `SELECT * FROM approvals WHERE project_id IS NULL AND bot_id = ?
-       ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 30`,
+      `SELECT a.*, p.name AS project_name, p.key AS project_key,
+              t.id AS task_id, t.number AS task_number, t.title AS task_title, tp.key AS task_project_key
+       FROM approvals a
+       LEFT JOIN projects p ON p.id = a.project_id
+       LEFT JOIN runs r ON r.id = a.run_id
+       LEFT JOIN tasks t ON t.id = r.task_id
+       LEFT JOIN projects tp ON tp.id = t.project_id
+       WHERE a.project_id IS NULL AND a.bot_id = ?
+       ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END, a.created_at DESC LIMIT 30`,
       botId,
     )
-    return rows.map(row => this.approvalView(row))
+    return rows.map(row => ({ ...this.approvalView(row), ...approvalSourceFields(row) }))
   },
 
   // 全局待审视图（DSHBOTS-102）：跨项目聚合 status='pending'，按创建时间倒序。
   // count 是全库 pending 总数（徽标口径，已决一律不计），items 最多 50 条供顶部入口列明细。
   // 明细带项目名，用户不在该项目群聊页也能看到「谁、在哪个项目、要什么、还剩多久」。
   // scope 区分项目群聊 / 单聊（DSHBOTS-218）：顶部入口据此决定点击后跳哪个会话。
+  // 来源定位（DSHBOTS-240）：额外带项目 key 与任务标识/标题——顶部跨会话审批通知要让
+  // owner 不跳转就能判断「该批谁」。run_id → runs.task_id → tasks 两次主键连接，缺任务留空。
   approvalsPending(limit = 50) {
     const rows = this.store.all(
-      `SELECT a.*, p.name AS project_name FROM approvals a LEFT JOIN projects p ON p.id = a.project_id
+      `SELECT a.*, p.name AS project_name, p.key AS project_key,
+              t.id AS task_id, t.number AS task_number, t.title AS task_title, tp.key AS task_project_key
+       FROM approvals a
+       LEFT JOIN projects p ON p.id = a.project_id
+       LEFT JOIN runs r ON r.id = a.run_id
+       LEFT JOIN tasks t ON t.id = r.task_id
+       LEFT JOIN projects tp ON tp.id = t.project_id
        WHERE a.status = 'pending' ORDER BY a.created_at DESC LIMIT ?`,
       limit,
     )
@@ -294,7 +331,7 @@ export const approvalsMethods = {
       count,
       items: rows.map(row => ({
         ...this.approvalView(row),
-        projectName: row.project_name ?? '',
+        ...approvalSourceFields(row),
       })),
     }
   },

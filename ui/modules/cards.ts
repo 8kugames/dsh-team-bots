@@ -82,9 +82,24 @@ function approvalTargetChip(approval, summary) {
   const guessed = approvalPath(summary)
   return guessed ? { text: guessed, title: guessed } : null
 }
-// 卡片 HTML：头部（图标 + 角色 + 工具/路径 chip）、正文、页脚三段；五态共用同一骨架。
+// 来源定位行（DSHBOTS-240）：仅当条目带来源信息时出现——顶部跨会话审批通知需要
+// 「来源群聊（项目名/KEY）+ 任务 ID + 任务名」定位，让 owner 不跳转即可判断该批谁。
+// 群聊卡片不传 showSource，来源行整段不出现（同会话里项目名冗余，任务信息由群上下文承担）。
+function approvalSourceLine(approval) {
+  const key = String(approval?.projectKey ?? '').trim()
+  const name = String(approval?.projectName ?? '').trim()
+  const scope = key
+    ? (name ? `${name} · ${key}` : key)
+    : (name || (approval?.scope === 'solo' ? t("单聊") : ''))
+  const task = String(approval?.taskIdentifier ?? '').trim()
+  const title = String(approval?.taskTitle ?? '').trim()
+  if (!scope && !task) return ''
+  const taskText = task ? (title ? `${task} ${title}` : task) : ''
+  return `<div class="approval-source">${scope ? `<span class="approval-source-scope">${esc(scope)}</span>` : ''}${taskText ? `<span class="approval-source-task">${esc(taskText)}</span>` : ''}</div>`
+}
+// 卡片 HTML：头部（图标 + 角色 + 工具/路径 chip）、来源定位行、正文、页脚四段；五态共用同一骨架。
 // pending 页脚是倒计时 + 进度条 + 双按钮；已决四态页脚只有状态 pill。
-function approvalCardMarkup(approval, deciding = false) {
+function approvalCardMarkup(approval, deciding = false, showSource = false) {
   const status = String(approval.status ?? '')
   const pending = status === 'pending'
   const summary = approval.display_reason || approval.reason || t("（无说明）")
@@ -107,6 +122,7 @@ function approvalCardMarkup(approval, deciding = false) {
           <div class="approval-tools"><span class="approval-chip mono">${esc(approval.tool_name)}</span>${target ? `<span class="approval-chip mono approval-chip-path" title="${attr(target.title)}">${esc(target.text)}</span>` : ''}</div>
         </div>
       </div>
+      ${showSource ? approvalSourceLine(approval) : ''}
       <div class="approval-summary">${esc(summary)}</div>
       ${pending
         ? `<div class="approval-countdown${urgent ? ' urgent' : ''}" data-expires="${expiresAt}">${icon('clock')}<span class="approval-clock${approvalUrgent(approval.remainingMs) ? ' urgent' : ''}" data-expires="${expiresAt}">${esc(formatApprovalCountdown(approval.remainingMs))}</span></div>
@@ -330,9 +346,9 @@ function focusQuestionCard(question) {
     .catch(() => {})
 }
 
-// 跨项目待审入口（DSHBOTS-102）：工作台顶部一条窄条，只计 pending，99+ 封顶；
-// 展开后列明细（项目 / bot / 工具 / 摘要 / 剩余时间），点条目跳到对应项目并滚动到该卡片。
-// 不在顶部重复渲染完整卡片：卡片带理由/作用域/按钮，多项目并发会把窄条撑高、挤走工作区。
+// 跨项目待审入口（DSHBOTS-102）：工作台顶部一条窄条，只计 pending，99+ 封顶。
+// 展开后直接渲染审批卡（DSHBOTS-240）：与群内审批卡同一组件、同一五态骨架，含「允许一次/拒绝」
+// 按钮，可在通知内直接决策；点卡片非按钮区仍跳到对应会话（与内联按钮并存）。
 function approvalBannerView(pendingApprovals) {
   const count = Number(pendingApprovals?.count ?? 0)
   if (count <= 0) return ''
@@ -343,14 +359,11 @@ function approvalBannerView(pendingApprovals) {
             <span class="unread-badge">${approvalBadgeText(count)}</span>
             ${icon('chevron', `chev${state.approvalPanelOpen ? ' open' : ''}`)}
           </button>
-          ${state.approvalPanelOpen ? `<div class="approval-menu" role="menu">
+          ${state.approvalPanelOpen ? `<div class="approval-menu">
             ${items.length === 0 ? `<div class="approval-menu-empty">${t("暂无明细")}</div>` : items.map(item => `
-              <button class="approval-menu-item" role="menuitem" data-action="focus-approval" data-approval-id="${attr(item.id)}">
-                <span class="approval-menu-project">${esc(cardScopeLabel(item))}</span>
-                <span class="approval-menu-line">${esc(item.botName || 'Bot')} · ${esc(item.tool_name || t("工具"))}</span>
-                <span class="approval-menu-summary">${esc(item.display_reason || item.reason || '')}</span>
-                <span class="approval-menu-time" data-expires="${approvalExpiresMs(item.expires_at)}">${esc(formatApprovalRemaining(item.remainingMs))}</span>
-              </button>`).join('')}
+              <div class="approval-menu-card" data-action="focus-approval" data-approval-id="${attr(item.id)}">
+                ${approvalCardMarkup(item, state.approvalDeciding?.has(item.id) ?? false, true)}
+              </div>`).join('')}
           </div>` : ''}
         </div>`
 }
@@ -409,7 +422,17 @@ function notifyToggleView() {
 function approvalNotifyBody(approval) {
   const head = `${approval.botName ?? 'Bot'} ${t("请求使用")} ${approval.tool_name ?? t("工具")}`
   const summary = approval.display_reason || approval.reason || ''
-  const text = summary ? t("${head}：${summary}", { head: head, summary: summary }) : head
+  // 来源定位（DSHBOTS-240）：桌面通知（气泡态）正文前缀带来源群聊（项目名/KEY）+ 任务 ID/任务名，
+  // 让 owner 在通知里即可判断该批谁；无来源字段时保持原文案逐字不变。
+  const source = [
+    approval.projectKey
+      ? (approval.projectName ? `${approval.projectName} · ${approval.projectKey}` : approval.projectKey)
+      : (approval.scope === 'solo' ? t("单聊") : ''),
+    approval.taskIdentifier ? (approval.taskTitle ? `${approval.taskIdentifier} ${approval.taskTitle}` : approval.taskIdentifier) : '',
+  ].filter(Boolean).join(' · ')
+  const text = source
+    ? t("${source}｜${head}：${summary}", { source: source, head: head, summary: summary })
+    : (summary ? t("${head}：${summary}", { head: head, summary: summary }) : head)
   return text.length > 120 ? `${text.slice(0, 119)}…` : text
 }
 

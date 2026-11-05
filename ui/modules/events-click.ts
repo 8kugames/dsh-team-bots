@@ -38,7 +38,9 @@ document.addEventListener('click', async (event) => {
     if (await handleBoardAction(action, target)) return
     switch (action) {
       case 'approval-decide': {
-        // 群聊审批卡片按钮：本地立即回显已决状态（不等 2.8s 轮询），请求失败回滚并提示。
+        // 审批卡片按钮：本地立即回显已决状态（不等 2.8s 轮询），请求失败回滚并提示。
+        // 按钮可能来自项目内卡片（state.data.approvals）或顶部跨会话通知（pendingApprovals.items），
+        // 两处都可能是按钮所在，各记一份原位快照用于失败回滚。
         const approvalId = target.dataset.approvalId
         const decision = target.dataset.decision
         if (!approvalId || !['allow', 'reject'].includes(decision)) break
@@ -46,27 +48,28 @@ document.addEventListener('click', async (event) => {
         if (state.approvalDeciding.has(approvalId)) break
         const list = state.data?.approvals ?? []
         const index = list.findIndex(item => item.id === approvalId)
-        const previous = index >= 0 ? { ...list[index] } : null
+        const pending = state.data?.pendingApprovals
+        const pendingIndex = pending?.items?.findIndex(item => item.id === approvalId) ?? -1
+        const previous = index >= 0 ? { ...list[index] } : (pendingIndex >= 0 ? { ...pending.items[pendingIndex] } : null)
         const status = decision === 'allow' ? 'allowed' : 'rejected'
         state.approvalDeciding.add(approvalId)
         // 乐观回显：卡片立刻变已决，顶部徽标同步减一。
-        if (previous) list[index] = { ...previous, status, decided_at: new Date().toISOString(), remainingMs: 0 }
-        const pending = state.data?.pendingApprovals
+        if (previous && index >= 0) list[index] = { ...previous, status, decided_at: new Date().toISOString(), remainingMs: 0 }
         if (pending) {
           pending.items = (pending.items ?? []).filter(item => item.id !== approvalId)
           pending.count = Math.max(0, Number(pending.count ?? 0) - 1)
         }
         render()
         try {
-          // 用后端返回的终态覆盖乐观值（decided_at 以后端为准）。
+          // 用后端返回的终态覆盖乐观值（decided_at 以后端为准）；仅项目内卡片回写项目列表，
+          // 顶部通知条目已由上面的 filter 移出，不再往项目列表里推（避免跨项目幻影卡片）。
           const updated = await api('approval_decide', { approvalId, decision }, { quiet: true })
           if (updated && index >= 0) list[index] = updated
-          else if (updated) list.push(updated)
         } catch (error: any) {
           // 回滚到决策前状态，避免「界面已决、后端仍 pending」的假成功。
           if (previous && index >= 0) list[index] = previous
-          const rollback = state.data?.pendingApprovals
-          if (rollback && previous) {
+          const rollback = pending
+          if (rollback && previous && pendingIndex >= 0) {
             rollback.items = [previous, ...(rollback.items ?? [])]
             rollback.count = Number(rollback.count ?? 0) + 1
           }

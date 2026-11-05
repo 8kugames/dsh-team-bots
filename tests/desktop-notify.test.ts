@@ -142,3 +142,19 @@ test('渲染与轮询接线：全局配置开关、点击 case、poll 隐藏静�
   // 审批卡带 id 定位锚点（通知点击滚动定位用）
   assert.match(source, /approval-card" data-approval-status="\$\{attr\(approval\.status\)\}" data-approval-id="\$\{attr\(approval\.id\)\}"/)
 })
+
+test('通知正文带来源群聊与任务定位（DSHBOTS-240）：无来源字段时原文案逐字不变', () => {
+  const harness = loadBlock({ Notification: undefined })
+  const withSource = harness.approvalNotifyBody({
+    botName: 'Alpha', tool_name: 'Bash', display_reason: '运行构建脚本',
+    projectName: 'DSHbots', projectKey: 'DSHBOTS', taskIdentifier: 'DSHBOTS-240', taskTitle: '越权审批通知增强',
+  })
+  assert.match(withSource, /DSHbots · DSHBOTS · DSHBOTS-240 越权审批通知增强｜Alpha 请求使用 Bash：运行构建脚本/, '来源群聊 + 任务 ID/任务名前置')
+  // 既有文案口径不回退：无来源字段时仍是「<bot> 请求使用 <tool>：<说明>」。
+  assert.equal(
+    harness.approvalNotifyBody({ botName: 'Alpha', tool_name: 'Bash', display_reason: '运行构建脚本' }),
+    'Alpha 请求使用 Bash：运行构建脚本',
+  )
+  // 点击气泡跳转能力保留：onclick 仍聚焦窗口并跳对应会话。
+  assert.match(source, /notification\.onclick = \(\) => \{ window\.focus\(\); focusApprovalCard\(approval\); notification\.close\(\) \}/)
+})

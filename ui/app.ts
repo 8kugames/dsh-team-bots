@@ -5,7 +5,7 @@ import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
 import { typingLingerRowsHtml, applyOptimisticTyping, pruneTypingLinger } from './modules/typing-linger.js'
-import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, formatApprovalRemaining, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
+import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
 import { renderUsage, usageMode, usageViewTitle, usageTotals } from './modules/usage.js'
 import { renderSettings, renderGlobal, renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './modules/settings.js'
 import { renderChannel, renderSecretsPage } from './modules/global-pages.js'
@@ -751,10 +751,10 @@ setInterval(() => {
   // 终态气泡到期摘除与淡出刷新（DSHBOTS-150）：只动气泡节点，不整页重建（不打断输入中的草稿）。
   pruneTypingLinger()
   // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
-  for (const el of document.querySelectorAll('.approval-clock[data-expires], .approval-menu-time[data-expires]') as NodeListOf<HTMLElement>) {
+  // 群聊卡片与顶部通知卡片共用同一张审批卡组件，都挂 .approval-clock。
+  for (const el of document.querySelectorAll('.approval-clock[data-expires]') as NodeListOf<HTMLElement>) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
-    // 卡片内 .approval-clock 用 V2 倒计时文案（剩余 X 分 Y 秒），顶部窄条沿用「X 分后自动拒绝」。
-    el.textContent = el.classList.contains('approval-menu-time') ? formatApprovalRemaining(remaining) : formatApprovalCountdown(remaining)
+    el.textContent = formatApprovalCountdown(remaining)
     el.classList.toggle('urgent', approvalUrgent(remaining))
   }
   // 卡片倒计时外层：图标随临期转黄（DSHBOTS-108）。

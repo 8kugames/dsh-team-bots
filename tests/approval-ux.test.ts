@@ -210,7 +210,7 @@ test('超时可见：秒级倒计时文案与临期阈值', () => {
   assert.equal(ux.approvalUrgent(0), true)
   // 卡片挂 data-expires，1s 定时器只改文本不整卡重绘。
   assert.match(uiSource, /class="approval-clock\$\{approvalUrgent\(approval\.remainingMs\) \? ' urgent' : ''\}" data-expires="\$\{expiresAt\}"/)
-  assert.match(uiSource, /querySelectorAll\('\.approval-clock\[data-expires\], \.approval-menu-time\[data-expires\]'\)/)
+  assert.match(uiSource, /querySelectorAll\('\.approval-clock\[data-expires\]'\)/)
   assert.match(uiSource, /el\.classList\.toggle\('urgent', approvalUrgent\(remaining\)\)/)
 })
 
