@@ -2,9 +2,17 @@
 // 覆盖：①七条指令（/? /keys /bots /states /detail /reject /tr）解析与路由；
 // ②/reject 缺理由拒绝；③未知 /xxx 回简短帮助提示；④权限门（非 admin 对写操作 /reject /tr 拒绝，
 // 只读指令不设门）；⑤无前缀消息仍走 director 对话链路（D-208 行为不动）。
+// DSHBOTS-257 守门：⑥写指令权限门 fail-closed（未传 ctx / 未显式 isAdmin=true 即拒）；
+// ⑦/detail 指派名走真 TeamService 解析（临时库），不靠桩直造 assigneeName 字段。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { handleCommand } from '../src/wechat/commands.js'
+import { openDatabase } from '../src/db.js'
+import { resolveConfig } from '../src/config.js'
+import { TeamService } from '../src/service.js'
 
 const SERVICE_STUB = (): any => ({
   stateView() {
@@ -107,6 +115,69 @@ test('权限门：非 admin 对写操作（/reject /tr）拒绝，只读指令�
   assert.ok((await handleCommand(service, '/states', MEMBER_CTX)).includes('web-5'))
   assert.ok((await handleCommand(service, '/detail web-5', MEMBER_CTX)).includes('写登录页'))
   assert.ok((await handleCommand(service, '/keys', MEMBER_CTX)).includes('web'))
+})
+
+test('权限门 fail-closed：未传 ctx 或未显式 isAdmin=true 拒绝写指令，只读照常放行（DSHBOTS-257）', async () => {
+  const service = SERVICE_STUB()
+  assert.ok((await handleCommand(service, '/reject web-5 差')).includes('仅限管理员'), '未传 ctx 必须拒绝写指令')
+  assert.ok((await handleCommand(service, '/tr web 干活')).includes('仅限管理员'), '未传 ctx 必须拒绝 /tr')
+  assert.ok(
+    (await handleCommand(service, '/tr web 干活', { boundKey: 'web', bind() {} })).includes('仅限管理员'),
+    'ctx 未显式 isAdmin=true 不得视为管理员',
+  )
+  assert.equal(service.seen, null, '写操作被拒后不得触达 service')
+  assert.equal(service.chatted, null, '/tr 被拒后不得进入直达路由')
+
+  // 只读指令不设门：无 ctx 也能查
+  assert.ok((await handleCommand(service, '/states')).includes('web-5'))
+  assert.ok((await handleCommand(service, '/detail web-5')).includes('写登录页'))
+  assert.ok((await handleCommand(service, '/keys')).includes('web'))
+})
+
+// DSHBOTS-257 守门①：/detail 指派名走真 TeamService（临时库）解析——taskViewByIdentifier
+// 按 assignee_bot_id 产出 assigneeName，不靠桩直造字段（此前生产恒显「暂未指派」的回归）。
+class RealServiceRuntime {
+  setCompletionHandler() {}
+  async catalog() { return [] }
+  async validateBotConfig() {}
+  async startRun({ run }) { return `session-${run.id}` }
+  async cancelRun() { return true }
+}
+
+test('/detail 指派名走真 service 解析：已指派显示 bot 名，未指派显示暂未指派（DSHBOTS-257）', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-wechat-detail-'))
+  const workspace = join(root, 'workspace')
+  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
+  const config = resolveConfig({
+    workspace,
+    dataDir: join(root, 'data'),
+    skillRoot: join(workspace, '.agents'),
+    modelCacheMs: 0,
+    schedulerIntervalMs: 60_000,
+  })
+  const store = openDatabase(config.dbPath)
+  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
+  service.attachRuntime(new RealServiceRuntime())
+  await service.initialize()
+  service.started = true
+  ;(service as any).wechat = { notify() {}, status: () => ({ adminPeerId: 'wx_admin_peer' }) }
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    await service.createProject({ name: 'Detail Demo', key: 'DETAIL', ownerBotId: director.id })
+    const projectId = store.get("SELECT id FROM projects WHERE key = 'DETAIL'").id
+    await service.createTask({ projectId, title: '写登录页', assigneeBotId: director.id, postCard: false })
+    await service.createTask({ projectId, title: '未指派卡', postCard: false })
+
+    const assigned = await handleCommand(service, '/detail DETAIL-1')
+    assert.ok(assigned.includes('指派 director'), `已指派卡应显示 bot 名：${assigned}`)
+    assert.ok(!assigned.includes('暂未指派'), '已指派卡不得回退为暂未指派')
+
+    const unassigned = await handleCommand(service, '/detail DETAIL-2')
+    assert.ok(unassigned.includes('暂未指派'), `未指派卡显示暂未指派：${unassigned}`)
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('无前缀消息仍走 director 对话链路，不被固定指令截获', async () => {

@@ -342,6 +342,8 @@ export class WechatChannel {
       const reply = await handleCommand(this.service, message.text, {
         boundKey: this.store.getDirectProjectKey?.() ?? null,
         bind: key => this.store.saveDirectProjectKey?.(key),
+        // 上方已校验 peerId === admin（非管理员消息整条忽略），显式带过 fail-closed 命令门
+        isAdmin: true,
       })
       await this.sendTo(peerId, reply, signal)
     } catch (error) {

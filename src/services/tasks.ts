@@ -834,6 +834,9 @@ export const tasksMethods = {
     const { task } = this.resolveTaskByIdentifier(identifier)
     return {
       ...this.taskView(task),
+      // 指派者名（DSHBOTS-257）：/detail 卡片直读 assigneeName，在此按 assignee_bot_id
+      // 解析（同 task-notify 口径），不进 taskView 列表热路径（每卡一次 bots 查询）。
+      assigneeName: task.assignee_bot_id ? this.botRow(task.assignee_bot_id)?.name ?? null : null,
       comments: this.store.all(
         'SELECT author_type, author_id, body, created_at FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 3',
         task.id,

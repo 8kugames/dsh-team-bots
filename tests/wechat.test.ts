@@ -101,10 +101,10 @@ test('wechat commands /? /states /detail /reject 路由（DSHBOTS-249）', async
   assert.ok(detail.includes('指派 Builder'), '详情应带指派')
 
   assert.ok((await handleCommand(service, '/detail bad-id')).includes('任务号格式'))
-  const rejected = await handleCommand(service, '/reject web-5 首页样式崩了')
+  const rejected = await handleCommand(service, '/reject web-5 首页样式崩了', { isAdmin: true })
   assert.ok(rejected.includes('已驳回 web-5'))
   assert.deepEqual(service.seen, { identifier: 'web-5', decision: 'return', comment: '首页样式崩了' })
-  assert.ok((await handleCommand(service, '/reject web-5')).includes('必须带理由'))
+  assert.ok((await handleCommand(service, '/reject web-5', { isAdmin: true })).includes('必须带理由'))
 })
 
 test('wechat commands /detail /reject 正文里任务号可无空格分隔', async () => {
@@ -114,7 +114,7 @@ test('wechat commands /detail /reject 正文里任务号可无空格分隔', asy
   const reply = await handleCommand(service, '/detail 请看 web-5')
   assert.ok(reply.includes('写登录页'))
 
-  const returned = await handleCommand(service, '/reject web-5 样式崩了')
+  const returned = await handleCommand(service, '/reject web-5 样式崩了', { isAdmin: true })
   assert.ok(returned.includes('已驳回 web-5'))
   assert.equal(service.seen.comment, '样式崩了')
 
@@ -583,16 +583,16 @@ test('wechat commands /keys 列出项目 key，空列表给空态文案', async 
 
 test('wechat commands /tr 显式转发命中：按 key 调 wechatChat 并回执；冒号/空格写法都容忍', async () => {
   const service = DISPATCH_STUB()
-  const reply = await handleCommand(service, '/tr web 上线新版官网')
+  const reply = await handleCommand(service, '/tr web 上线新版官网', { isAdmin: true })
   assert.ok(reply.includes('已直达【Web】'))
   assert.deepEqual(service.chatted, { key: 'WEB', body: '上线新版官网' })
 
   // 全角冒号、key 大小写、消息里再含冒号只切第一段
-  const reply2 = await handleCommand(service, '/tr WEB：改导航样式，备注：今晚发')
+  const reply2 = await handleCommand(service, '/tr WEB：改导航样式，备注：今晚发', { isAdmin: true })
   assert.ok(reply2.includes('已直达【Web】'))
   assert.deepEqual(service.chatted, { key: 'WEB', body: '改导航样式，备注：今晚发' })
 
-  const colon = await handleCommand(service, '/tr web: 冒号写法也直达')
+  const colon = await handleCommand(service, '/tr web: 冒号写法也直达', { isAdmin: true })
   assert.ok(colon.includes('已直达【Web】'))
   assert.deepEqual(service.chatted, { key: 'WEB', body: '冒号写法也直达' })
 })
@@ -611,7 +611,7 @@ test('wechat commands 自由文本一律走 director solo：原 <key>: 派单写
 
 test('wechat commands /tr 未命中 key 给出可选项目列表提示', async () => {
   const service = DISPATCH_STUB()
-  const reply = await handleCommand(service, '/tr nope 干活')
+  const reply = await handleCommand(service, '/tr nope 干活', { isAdmin: true })
   assert.ok(reply.includes('没有找到项目 NOPE'))
   assert.ok(reply.includes('可选的项目'))
   assert.ok(reply.includes('web'), '提示里应带可用 key 列表')
@@ -650,7 +650,7 @@ test('wechat commands 固定指令照旧：/states /reject /detail 路由不变'
   const service = SERVICE_STUB()
   const states = await handleCommand(service, '/states')
   assert.ok(states.includes('web-5 [in_review] 等验收'))
-  assert.ok((await handleCommand(service, '/reject web-5 差')).includes('已驳回 web-5'))
+  assert.ok((await handleCommand(service, '/reject web-5 差', { isAdmin: true })).includes('已驳回 web-5'))
   assert.ok((await handleCommand(service, '/detail web-5')).includes('写登录页'))
   // 非指令文本不再回「未识别」，直达路由由 wechatChat 承接（258 后一律 director solo）
   const free = await handleCommand(SERVICE_STUB(), 'foo')
@@ -688,7 +688,7 @@ test('wechat 直达真 service：消息以用户身份插入项目会话并触�
 
     // 小写 key 也要命中（COLLATE NOCASE 同 resolveTaskByIdentifier 口径）；
     // /tr 是唯一显式转发进项目的通道（DSHBOTS-258）
-    const reply = await handleCommand(service, '/tr dispatch 上线新版官网')
+    const reply = await handleCommand(service, '/tr dispatch 上线新版官网', { isAdmin: true })
     assert.ok(reply.includes('已直达【Dispatch Demo】'))
 
     const message = store.get("SELECT * FROM messages WHERE body = '上线新版官网'")

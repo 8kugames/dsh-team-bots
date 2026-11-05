@@ -46,7 +46,7 @@ function directorReceipt(bot) {
  * 旧触发式指令（帮助/状态/验收/驳回/详情/q）已全部收编进 / 前缀指令集——触发词
  * 与无前缀对话路径冲突（任何中文首词都可能被当成指令拦截），本卡一并收口移除。
  * ctx（DSHBOTS-208，通道侧传入）：{ boundKey: 当前绑定项目 key | null,
- * bind(key): 路由成功后更新绑定, isAdmin: 发送者是否管理员（默认 true 兼容旧调用） }。
+ * bind(key): 路由成功后更新绑定, isAdmin: 发送者是否管理员（写操作 fail-closed：未显式 true 即拒） }。
  * 权限分档（DSHBOTS-249 口径②）：只读指令（/? /keys /bots /states /detail）对
  * 群成员开放；写操作（/reject /tr）走 admin-peer 门（与 答/批 同口径）——通道侧
  * 非管理员消息本就被忽略，ctx.isAdmin 供群聊场景复用同一命令层。
@@ -107,8 +107,8 @@ async function handleFixedCommand(service, body, ctx) {
   const verb = slash[1].toLowerCase()
   const rest = String(slash[2] ?? '').trim()
 
-  // 写操作权限门：非 admin 一律拒绝（只读指令不设门）。
-  if (ADMIN_VERBS.has(verb) && ctx?.isAdmin === false) return adminDenied()
+  // 写操作权限门（fail-closed）：未显式 isAdmin=true 一律拒绝（只读指令不设门）。
+  if (ADMIN_VERBS.has(verb) && ctx?.isAdmin !== true) return adminDenied()
 
   if (verb === '?') return helpText()
 
