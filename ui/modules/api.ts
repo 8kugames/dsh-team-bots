@@ -1,5 +1,6 @@
 import { state } from './state.js'
 import { toast } from './util.js'
+import { t } from './i18n.js'
 
 export async function api(action, payload = {}, { quiet = false } = {}) {
   state.busy += 1
@@ -14,8 +15,8 @@ export async function api(action, payload = {}, { quiet = false } = {}) {
     try { body = await response.json() } catch { body = null }
     if (!response.ok || !body?.ok) {
       const message = body?.error?.message ?? (response.status === 401 || response.status === 403
-        ? '登录状态已失效，请回到 DSH Web 登录后重新打开。'
-        : '请求失败，请稍后重试。')
+        ? t("登录状态已失效，请回到 DSH Web 登录后重新打开。")
+        : t("请求失败，请稍后重试。"))
       throw new Error(message)
     }
     return body.data

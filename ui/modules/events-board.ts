@@ -1,5 +1,3 @@
-// 事件接线：看板/全局动作（原 app.js click 委托的 board 段）。
-// 自带 switch，未命中返回 false；命中即处理并返回 true。
 import { state } from './state.js'
 import { t } from './i18n.js'
 import { activeProject, applyUiScale, applyUiTheme, toast } from './util.js'
@@ -99,7 +97,7 @@ export async function handleBoardAction(action, target) {
       }
       await api('update_settings', patch)
       await loadState(state.projectId)
-      toast('系统设置已保存', 'success')
+      toast(t("系统设置已保存"), 'success')
       break
     }
     // 界面语言（DSHBOTS-162）：保存后 loadState 拿回新的 state.language，
@@ -120,13 +118,13 @@ export async function handleBoardAction(action, target) {
         stall_watchdog_minutes: value('settings-stall-watchdog'),
       })
       await loadState(state.projectId)
-      toast('运行时效已保存', 'success')
+      toast(t("运行时效已保存"), 'success')
       break
     }
     case 'reconcile-usage': {
       const result = await api('reconcile_usage', {})
       const reconciliation = result?.reconciliation ?? {}
-      toast(`对账完成：检查 ${reconciliation.runsChecked ?? 0} 个运行，差异 ${reconciliation.mismatched ?? 0} 个`, 'success')
+      toast(`${t("对账完成：检查")} ${reconciliation.runsChecked ?? 0} ${t("个运行，差异")} ${reconciliation.mismatched ?? 0} ${t("个")}`, 'success')
       await loadState(state.projectId)
       break
     }
@@ -138,7 +136,7 @@ export async function handleBoardAction(action, target) {
     case 'wechat-login': {
       const result = await api('wechat_login', {})
       state.wechatAuth = { qrSvg: result.qrSvg, qrCodeUrl: result.qrCodeUrl }
-      toast('二维码已生成，请用微信扫码', 'success')
+      toast(t("二维码已生成，请用微信扫码"), 'success')
       startWechatPoll()
       render()
       break
@@ -146,22 +144,22 @@ export async function handleBoardAction(action, target) {
     case 'wechat-code': {
       const code = (document.getElementById('wechat-code') as HTMLInputElement | null)?.value?.trim()
       if (!code) {
-        toast('请输入微信验证码', 'error')
+        toast(t("请输入微信验证码"), 'error')
         break
       }
       await api('wechat_code', { code })
       state.wechatAuth = null
-      toast('验证码已提交', 'success')
+      toast(t("验证码已提交"), 'success')
       startWechatPoll()
       break
     }
     case 'wechat-logout': {
-      if (!window.confirm('退出绑定后需要重新扫码才能恢复推送。确认退出？')) break
+      if (!window.confirm(t("退出绑定后需要重新扫码才能恢复推送。确认退出？"))) break
       await api('wechat_logout', {})
       state.wechatAuth = null
       stopWechatPoll()
       await refresh({ quiet: true })
-      toast('已退出微信绑定', 'success')
+      toast(t("已退出微信绑定"), 'success')
       break
     }
     case 'select-project':
@@ -196,7 +194,7 @@ export async function handleBoardAction(action, target) {
       break
     case 'new-task': {
       if (!activeProject()) {
-        toast('请先创建项目', 'error')
+        toast(t("请先创建项目"), 'error')
         break
       }
       openModal({ type: 'new-task' })
@@ -206,12 +204,12 @@ export async function handleBoardAction(action, target) {
     // 任何任务都可派生（子任务同样可以作为父任务），不加额外限制。
     case 'derive-subtask': {
       if (!activeProject()) {
-        toast('请先创建项目', 'error')
+        toast(t("请先创建项目"), 'error')
         break
       }
       const parentId = target.dataset.taskId || ''
       if (!parentId || !(state.data?.tasks ?? []).some(task => task.id === parentId)) {
-        toast('父任务不存在或已刷新，请重试', 'error')
+        toast(t("父任务不存在或已刷新，请重试"), 'error')
         break
       }
       openModal({ type: 'new-task', parentTaskId: parentId })
@@ -219,14 +217,14 @@ export async function handleBoardAction(action, target) {
     }
     case 'new-memory':
       if (!activeProject()) {
-        toast('请先创建项目', 'error')
+        toast(t("请先创建项目"), 'error')
         break
       }
       openModal({ type: 'memory', memory: null })
       break
     case 'new-proposal':
       if (!activeProject()) {
-        toast('请先创建项目', 'error')
+        toast(t("请先创建项目"), 'error')
         break
       }
       openModal({ type: 'proposal', kind: target.dataset.kind || 'bot_update' })
@@ -243,12 +241,12 @@ export async function handleBoardAction(action, target) {
     }
     case 'reset-price': {
       const model = target.dataset.model
-      if (!window.confirm(`把 ${model} 的价格恢复为配置默认值？`)) break
+      if (!window.confirm(t("把 ${model} 的价格恢复为配置默认值？", { model: model }))) break
       await api('reset_price', { provider: target.dataset.provider ?? '', model })
       closeModal()
       await loadState(state.projectId, { quiet: true })
       render()
-      toast(`${model} 已恢复默认价格`, 'success')
+      toast(t("${model} 已恢复默认价格", { model: model }), 'success')
       break
     }
     case 'open-task':

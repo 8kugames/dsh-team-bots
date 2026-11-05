@@ -1,6 +1,3 @@
-// usage.js —— 用量域（DSHBOTS-121/56）：时间窗快照、用量页与全局视图的用量面板。
-// 时间窗状态（usageWindowKey/Cache/Loading/Request）只服务本域，随本文件迁移；
-// 切换窗口的入口逻辑 switchUsageWindow 一并迁入（原在 app.js 的 click 委托里）。
 import { state, NAV, RUN_STATUS, labelText } from './state.js'
 import { icon } from './icons.js'
 import { CURRENCY_SYMBOL, attr, botById, costValue, esc, formatCost, formatNumber, pageProject, runDot, timeAgo, toast } from './util.js'
@@ -18,10 +15,10 @@ let usageWindowLoading = false
 let usageWindowRequest = 0
 
 const USAGE_WINDOWS = [
-  { key: 'today', label: '今日' },
-  { key: '7d', label: '7 日' },
-  { key: '30d', label: '30 日' },
-  { key: 'all', label: '至今' },
+  { key: 'today', label: 'usage.window.today' },
+  { key: '7d', label: 'usage.window.7d' },
+  { key: '30d', label: 'usage.window.30d' },
+  { key: 'all', label: 'usage.window.all' },
 ]
 
 // 时间窗取数上下文：跟页面口径一致——全局不带项目，单聊带 bot，本群带项目。
@@ -59,10 +56,10 @@ function usageWindowText(usage) {
 // 按日面板的标题与说明：跟当前时间窗走；没有窗口信息时回落到旧的 14 天口径。
 function usageDayPanelMeta(usage) {
   const key = String(usage?.window?.key ?? '')
-  if (key === 'today') return { title: t('usage.dayTitleToday'), note: '产品时区（Asia/Shanghai）当日 0 点起。' }
-  if (key === '7d') return { title: t('usage.dayTitle7d'), note: '按产品时区（Asia/Shanghai）日历日分组。' }
-  if (key === '30d') return { title: t('usage.dayTitle30d'), note: '按产品时区（Asia/Shanghai）日历日分组。' }
-  if (key === 'all') return { title: t('usage.dayTitle30d'), note: '汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。' }
+  if (key === 'today') return { title: t('usage.dayTitleToday'), note: t("产品时区（Asia/Shanghai）当日 0 点起。") }
+  if (key === '7d') return { title: t('usage.dayTitle7d'), note: t("按产品时区（Asia/Shanghai）日历日分组。") }
+  if (key === '30d') return { title: t('usage.dayTitle30d'), note: t("按产品时区（Asia/Shanghai）日历日分组。") }
+  if (key === 'all') return { title: t('usage.dayTitle30d'), note: t("汇总全部历史；日历图只画最近 30 天，更早的调用计入上方汇总。") }
   return { title: '', note: '' }
 }
 
@@ -314,7 +311,7 @@ function usageDayPanel(days) {
   return `<div class="card usage-panel">
     <div class="card-head"><h3>${esc(usageDayTitle(usage))}</h3>${peak && peak.totalTokens ? `<span class="meta">${t('usage.dayPeak', { value: formatNumber(peak.totalTokens), day: String(peak.day).slice(5) })}</span>` : ''}</div>
     ${days.length === 0 ? `<div class="faint">${t('usage.dayEmpty')}</div>` : `<div class="day-bars">${days.map(day => `<div class="day-bar${day.totalTokens ? '' : ' zero'}" style="height:${Math.max(3, (day.totalTokens ?? 0) / maxDay * 100)}%" title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens"></div>`).join('')}</div><div class="day-axis">${days.map((day, index) => `<span title="${esc(day.day)} · ${formatNumber(day.totalTokens)} tokens">${index === 0 || index === days.length - 1 || index % labelStep === 0 ? esc(String(day.day).slice(5).replace('-', '/')) : ''}</span>`).join('')}</div>`}
-    <div class="usage-note">${esc(t(meta.note || '日历图只画最近 14 天，更早的调用计入上方汇总。'))}</div>
+    <div class="usage-note">${esc(t(meta.note || t("日历图只画最近 14 天，更早的调用计入上方汇总。")))}</div>
   </div>`
 }
 
@@ -335,7 +332,7 @@ function usagePageHead(usage, scopeText, exportLabel = '') {
         </div>
       </div>
       <div class="btn-row">
-        <button class="btn" data-action="export-usage-csv">${icon('download')}${t('usage.exportCsv')}${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
+        <button class="btn" data-action="export-usage-csv">${icon('download')}${t('usage.exportCsv')}${exportLabel ? t("（${exportLabel}）", { exportLabel: esc(exportLabel) }) : ''}</button>
         ${usageMode() === 'global' ? refreshAction() : ''}
       </div>`
   return pageHead('USAGE', usageViewTitle(), t('usage.headDesc', { scope: scopeText, window: windowText, loading: usageWindowLoading ? t('usage.loading') : '' }), actions)

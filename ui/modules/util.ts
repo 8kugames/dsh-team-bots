@@ -1,5 +1,5 @@
-// 通用工具函数：转义、格式化、状态徽标与 toast。依赖 state.js 的运行态与枚举。
 import { state, STATUS, RUN_STATUS, FILE_POLICY, DEFAULT_FILE_POLICY } from './state.js'
+import { t } from './i18n.js'
 
 const toastRoot = document.getElementById('toast-root')
 export function applyUiScale(value) {
@@ -39,11 +39,11 @@ export function actorLabel(raw) {
   const sep = value.indexOf(':')
   const type = sep >= 0 ? value.slice(0, sep) : ''
   const id = sep >= 0 ? value.slice(sep + 1) : value
-  if (type === 'user' || (!type && (id === 'user' || id === 'owner'))) return state.data?.me?.name || '用户'
+  if (type === 'user' || (!type && (id === 'user' || id === 'owner'))) return state.data?.me?.name || t("用户")
   if (type === 'bot' || (!type && id.startsWith('bot_'))) {
     const bot = botById(id)
-    if (bot) return `${bot.name}·${bot.role || '成员'}`
-    return `已删除 Bot · ${shortRefId(id)}`
+    if (bot) return `${bot.name}·${bot.role || t("成员")}`
+    return t("已删除 Bot · ${id}", { id: shortRefId(id) })
   }
   return value
 }
@@ -66,7 +66,7 @@ export function formatNumber(value) {
 // format-tokens:end
 export const CURRENCY_SYMBOL = { CNY: '¥', RMB: '¥', USD: '$', EUR: '€', JPY: '¥' }
 export function formatCost(value, currency = 'CNY') {
-  if (value === null || value === undefined) return '未配置'
+  if (value === null || value === undefined) return t("未配置")
   const code = String(currency || 'CNY').toUpperCase()
   const symbol = CURRENCY_SYMBOL[code] ?? `${code} `
   if (value === 0) return `${symbol}0.00`
@@ -77,10 +77,10 @@ export function timeAgo(value) {
   if (!value) return '—'
   const ms = Date.now() - new Date(value).getTime()
   if (!Number.isFinite(ms)) return '—'
-  if (ms < 45_000) return '刚刚'
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} 分钟前`
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)} 小时前`
-  if (ms < 7 * 86_400_000) return `${Math.floor(ms / 86_400_000)} 天前`
+  if (ms < 45_000) return t("刚刚")
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} ${t("分钟前")}`
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)} ${t("小时前")}`
+  if (ms < 7 * 86_400_000) return `${Math.floor(ms / 86_400_000)} ${t("天前")}`
   return new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 export function formatTime(value) {
@@ -95,19 +95,52 @@ export function duration(start, end?) {
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
 }
+// avatar:start —— 头像取字与渲染的唯一出口（DSHBOTS-221 收敛点，散点内联一律改调这里）。
+// initials：英文名取首二字母大写；非英文（CJK 等）取首字——单字居中不换行，修复两字竖排撑破头像块。
 export function initials(name) {
   const text = String(name ?? '?').trim()
-  return /^[A-Za-z]/.test(text) ? text.slice(0, 2).toUpperCase() : text.slice(0, 2)
+  return /^[A-Za-z]/.test(text) ? text.slice(0, 2).toUpperCase() : text.slice(0, 1)
 }
+// identicon：GitHub 风格 5x5 镜像对称像素块头像（零依赖，纯 SVG 字符串内联）。
+// seed 先过 FNV-1a 32 位散列，再逐位 xorshift 取随机：左半 3 列 × 5 行每位独立 50% 填充，
+// 右两列沿中轴镜像；同 seed 同图。颜色不进 seed——沿用外层 .avatar 色类的 var(--av)。
+export function identiconSvg(seed) {
+  let hash = 0x811c9dc5
+  const text = String(seed ?? '')
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  const next = () => {
+    hash ^= hash << 13; hash >>>= 0
+    hash ^= hash >>> 17
+    hash ^= hash << 5; hash >>>= 0
+    return hash / 4294967296
+  }
+  let rects = ''
+  for (let row = 0; row < 5; row++) {
+    const left = [next() < 0.5, next() < 0.5, next() < 0.5]
+    const cells = [left[0], left[1], left[2], left[1], left[0]]
+    for (let col = 0; col < 5; col++) {
+      if (cells[col]) rects += `<rect x="${col}" y="${row}" width="1" height="1"/>`
+    }
+  }
+  return `<svg class="identicon" viewBox="0 0 5 5" fill="var(--av, var(--c-gray))" aria-hidden="true">${rects}</svg>`
+}
+// roll 用的随机种子：字母数字短串，满足服务端 avatarSeedPattern 校验。
+export const avatarSeedRandom = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
 export function avatar(bot, size = '') {
-  return `<div class="avatar ${attr(bot?.color ?? 'gray')} ${size}">${esc(initials(bot?.name ?? '?'))}</div>`
+  const seed = bot?.avatar_seed
+  const content = seed ? identiconSvg(seed) : esc(initials(bot?.name ?? '?'))
+  return `<div class="avatar ${attr(bot?.color ?? 'gray')} ${size}">${content}</div>`
 }
+// avatar:end
 export function statusPill(status, text = STATUS[status] ?? status) {
   const tone = status === 'done' ? 'green' : status === 'blocked' || status === 'canceled' ? 'red' : status === 'in_review' ? 'violet' : status === 'in_progress' ? 'amber' : ''
   return `<span class="pill ${tone}">${esc(text)}</span>`
 }
 export function runDot(status) {
-  return `<span class="run-dot ${attr(status ?? '')}" title="${attr(RUN_STATUS[status] ?? '未运行')}"></span>`
+  return `<span class="run-dot ${attr(status ?? '')}" title="${attr(RUN_STATUS[status] ?? t("未运行"))}"></span>`
 }
 
 // sandbox-pill:start —— 生效沙箱档位的轻量标签（DSHBOTS-157）。
@@ -122,7 +155,7 @@ const SANDBOX_TONE = {
 export function sandboxPill(mode) {
   if (!mode) return ''
   const tone = SANDBOX_TONE[mode] ?? ''
-  return `<span class="pill ${tone}" title="${attr(`生效沙箱档位：${mode}`)}">沙箱 ${esc(mode)}</span>`
+  return `<span class="pill ${tone}" title="${attr(t("生效沙箱档位：${mode}", { mode: mode }))}">${t("沙箱")} ${esc(mode)}</span>`
 }
 // sandbox-pill:end
 // 成员/总监状态点：红黄绿三色——空闲绿、运行中黄（且仅此态闪烁）、失败红（含限流等待）。
@@ -133,25 +166,25 @@ export function memberRunDot(member) {
   const waitMin = member?.retry_wait_seconds ? Math.max(1, Math.round(member.retry_wait_seconds / 60)) : null
   if (status === 'running') {
     return phase === 'running'
-      ? { cls: 'running', status: 'running', text: '运行中' }
-      : { cls: 'idle', status: 'queued', text: '排队中（按空闲计）' }
+      ? { cls: 'running', status: 'running', text: t("运行中") }
+      : { cls: 'idle', status: 'queued', text: t("排队中（按空闲计）") }
   }
-  if (status === 'plan_wait') return { cls: 'plan-wait', status: 'plan_wait', text: `限流等待，约 ${waitMin} 分钟后自动重试` }
-  if (status === 'failed') return { cls: 'failed', status: 'failed', text: '最近运行失败' }
-  return { cls: 'idle', status: 'idle', text: '空闲' }
+  if (status === 'plan_wait') return { cls: 'plan-wait', status: 'plan_wait', text: t("限流等待，约 ${waitMin} 分钟后自动重试", { waitMin: waitMin }) }
+  if (status === 'failed') return { cls: 'failed', status: 'failed', text: t("最近运行失败") }
+  return { cls: 'idle', status: 'idle', text: t("空闲") }
 }
 export function runDotHtml(dot) {
   return `<span class="run-dot ${dot.cls}" data-status="${dot.status}" title="${esc(dot.text)}" aria-label="${esc(dot.text)}"></span>`
 }
 // 卡片底部的状态短标签（完整说明仍在 run-dot 的 title 里）。
-export const MEMBER_STATUS_TEXT = { idle: '空闲', running: '运行中', queued: '排队中', plan_wait: '限流等待', failed: '运行失败' }
+export const MEMBER_STATUS_TEXT = { idle: t("空闲"), running: t("运行中"), queued: t("排队中"), plan_wait: t("限流等待"), failed: t("运行失败") }
 export function memorySource(source) {
   const value = String(source ?? '')
-  if (!value) return '手动写入'
-  if (value === 'chat-command') return '群聊指令'
-  if (value.startsWith('run:')) return '运行沉淀'
-  if (value.startsWith('session:')) return '会话沉淀'
-  return '自动沉淀'
+  if (!value) return t("手动写入")
+  if (value === 'chat-command') return t("群聊指令")
+  if (value.startsWith('run:')) return t("运行沉淀")
+  if (value.startsWith('session:')) return t("会话沉淀")
+  return t("自动沉淀")
 }
 
 export function filePolicyOptions(current) {

@@ -1,5 +1,3 @@
-// chat.js —— 聊天域：群聊 / 单聊消息流渲染、输入中状态行、历史分片加载、单聊详情与配置页。
-// 输入区（草稿 / 图片 / 发送）在 composer.js，消息卡片在 cards.js，输入中气泡在 typing-linger.js。
 import { state, BOT_STATUS, CHAT_ACTIVE_TASK_LIMIT, CHAT_PAGE_SIZE, COLORS, COLOR_NAMES } from './state.js'
 import { icon } from './icons.js'
 import { activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatTime, memberRunDot, pathCode, runDotHtml, tildePath, timeAgo, toast } from './util.js'
@@ -23,7 +21,7 @@ function activeTypingRuns(runs, kind) {
       botId: run.bot_id,
       botName: run.botName ?? 'Bot',
       status: run.status,
-      text: run.status === 'queued' ? '排队等待回复…' : '正在思考与回复…',
+      text: run.status === 'queued' ? t("排队等待回复…") : t("正在思考与回复…"),
       // 耗时起点：未开始运行的从排队时刻起算
       startedAt: run.started_at ?? run.queued_at,
     }))
@@ -274,7 +272,7 @@ function dispatchRunRow(run) {
   return `<div class="side-row" title="${esc(`${runKindLabel(run.kind)} · ${runStatusLabel(run.status)}`)}">
     <span class="run-dot ${attr(run.status ?? '')}"></span>
     <strong>${esc(runKindLabel(run.kind) ?? '')}</strong>
-    <span class="side-row-title">${esc(run.projectKey == null || run.projectKey === '单聊' ? t('common.soloChat') : run.projectKey)}</span>
+    <span class="side-row-title">${esc(run.projectKey == null || run.projectKey === t("单聊") ? t('common.soloChat') : run.projectKey)}</span>
     <span class="run-clock" data-started="${attr(started)}">${duration(started)}</span>
   </div>`
 }
@@ -403,9 +401,9 @@ function renderSoloConfig() {
   if (!bot) {
     return `<div class="empty-state">
       <div class="empty-symbol">${icon('bot')}</div>
-      <h3>还没有选择 Bot</h3>
-      <p>从左侧 Bots 树点一个 Bot 进入调度页，再点「配置」来到这里。</p>
-      <button class="btn primary" data-action="nav" data-view="chat">返回对话</button>
+      <h3>${t("还没有选择")} Bot</h3>
+      <p>${t("从左侧 Bots 树点一个 Bot 进入调度页，再点「配置」来到这里。")}</p>
+      <button class="btn primary" data-action="nav" data-view="chat">${t("返回对话")}</button>
     </div>`
   }
   const revisions = state.soloDetail?.revisions ?? []
@@ -414,45 +412,45 @@ function renderSoloConfig() {
       <div class="card config-card">
         <div class="owner-row" style="margin-bottom:16px">
           ${avatar(bot, 'lg')}
-          <div class="owner-info"><strong style="font-size:var(--fs-title)">${esc(bot.name)}</strong><span>${esc(bot.role || '团队成员')} · ${esc(bot.modelRef ?? '未配置模型')} · ${esc(BOT_STATUS[bot.status] ?? bot.status)}</span></div>
+          <div class="owner-info"><strong style="font-size:var(--fs-title)">${esc(bot.name)}</strong><span>${esc(bot.role || t("团队成员"))} · ${esc(bot.modelRef ?? t("未配置模型"))} · ${esc(BOT_STATUS[bot.status] ?? bot.status)}</span></div>
         </div>
         <form data-form="update-bot" id="solo-config-form">
           <input type="hidden" name="botId" value="${attr(bot.id)}">
           <div class="field-row">
-            <div class="field"><label for="solo-bot-name">名称</label><input class="input" style="width:100%" id="solo-bot-name" name="name" value="${attr(bot.name)}" placeholder="例如：Builder" required maxlength="24"></div>
-            <div class="field"><label for="solo-bot-role">角色标签</label><input class="input" style="width:100%" id="solo-bot-role" name="role" value="${attr(bot.role ?? '')}" placeholder="例如：开发" maxlength="24"></div>
+            <div class="field"><label for="solo-bot-name">${t("名称")}</label><input class="input" style="width:100%" id="solo-bot-name" name="name" value="${attr(bot.name)}" placeholder="${t("例如：")}Builder" required maxlength="24"></div>
+            <div class="field"><label for="solo-bot-role">${t("角色标签")}</label><input class="input" style="width:100%" id="solo-bot-role" name="role" value="${attr(bot.role ?? '')}" placeholder="${t("例如：开发")}" maxlength="24"></div>
           </div>
           <div class="field-row">
-            <div class="field"><label for="solo-bot-model">模型</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
-            <div class="field"><label for="solo-bot-effort">推理强度</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
-            <div class="field"><label for="solo-bot-file-policy">文件权限</label><select class="select" style="width:100%" id="solo-bot-file-policy" name="filePolicy" title="Bot 会话内文件操作的沙箱边界，下次运行生效">${filePolicyOptions(bot.file_policy)}</select></div>
+            <div class="field"><label for="solo-bot-model">${t("模型")}</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
+            <div class="field"><label for="solo-bot-effort">${t("推理强度")}</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
+            <div class="field"><label for="solo-bot-file-policy">${t("文件权限")}</label><select class="select" style="width:100%" id="solo-bot-file-policy" name="filePolicy" title="Bot ${t("会话内文件操作的沙箱边界，下次运行生效")}">${filePolicyOptions(bot.file_policy)}</select></div>
           </div>
           <div class="field-row">
-            <div class="field"><label for="solo-bot-fallback-model">备用模型</label><select class="select" style="width:100%" id="solo-bot-fallback-model" name="fallbackModelRef" data-fallback-model-select title="主模型不可用时自动接手的备用模型，留空 = 不启用">${fallbackModelOptions(bot.fallbackModelRef ?? '')}</select></div>
-            <div class="field"><label for="solo-bot-fallback-effort">备用推理强度</label><select class="select" style="width:100%" id="solo-bot-fallback-effort" name="fallbackEffort" data-fallback-effort-select>${effortOptions(bot.fallbackModelRef ?? '', bot.fallback_effort)}</select></div>
+            <div class="field"><label for="solo-bot-fallback-model">${t("备用模型")}</label><select class="select" style="width:100%" id="solo-bot-fallback-model" name="fallbackModelRef" data-fallback-model-select title="${t("主模型不可用时自动接手的备用模型，留空")} = ${t("不启用")}">${fallbackModelOptions(bot.fallbackModelRef ?? '')}</select></div>
+            <div class="field"><label for="solo-bot-fallback-effort">${t("备用推理强度")}</label><select class="select" style="width:100%" id="solo-bot-fallback-effort" name="fallbackEffort" data-fallback-effort-select>${effortOptions(bot.fallbackModelRef ?? '', bot.fallback_effort)}</select></div>
           </div>
-          <div class="field"><span class="field-label" id="solo-bot-color-label">外观颜色</span><div class="swatch-row" role="radiogroup" aria-labelledby="solo-bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div></div>
-          <div class="field"><label for="solo-bot-instructions">角色指令</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="12" placeholder="说明职责、工作方式、边界和交付标准">${esc(bot.instructions ?? '')}</textarea></div>
+          <div class="field"><span class="field-label" id="solo-bot-color-label">${t("外观颜色")}</span><div class="swatch-row" role="radiogroup" aria-labelledby="solo-bot-color-label">${COLORS.map(color => `<label class="swatch" title="${COLOR_NAMES[color] ?? color}"><input type="radio" name="color" value="${color}" aria-label="${COLOR_NAMES[color] ?? color}" ${(bot.color ?? COLORS[0]) === color ? 'checked' : ''}><span class="swatch-dot ${color}"></span></label>`).join('')}</div><div class="avatar-roll-row"><span class="faint">${t("像素头像")}</span><button class="btn small" type="button" data-action="roll-avatar" data-bot-id="${attr(bot.id)}">roll</button><button class="btn small" type="button" data-action="toggle-avatar" data-bot-id="${attr(bot.id)}">${bot.avatar_seed ? t("停用") : t("启用")}</button></div></div>
+          <div class="field"><label for="solo-bot-instructions">${t("角色指令")}</label><textarea class="textarea" style="width:100%" id="solo-bot-instructions" name="instructions" rows="12" placeholder="${t("说明职责、工作方式、边界和交付标准")}">${esc(bot.instructions ?? '')}</textarea></div>
         </form>
         <div class="divider"></div>
         <div class="btn-row">
-          <button class="btn primary" type="submit" form="solo-config-form">${icon('check')}保存新版本</button>
-          ${bot.status === 'active' ? `<button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档 Bot</button>` : ''}
-          ${bot.status === 'archived' ? `<button class="btn small danger" data-action="bot-remove-tracking-open" data-bot-id="${attr(bot.id)}">移除追踪</button>` : ''}
+          <button class="btn primary" type="submit" form="solo-config-form">${icon('check')}${t("保存新版本")}</button>
+          ${bot.status === 'active' ? `<button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">${t("归档")} Bot</button>` : ''}
+          ${bot.status === 'archived' ? `<button class="btn small danger" data-action="bot-remove-tracking-open" data-bot-id="${attr(bot.id)}">${t("移除追踪")}</button>` : ''}
         </div>
       </div>
       <aside class="task-detail-side">
-        <div class="eyebrow" style="margin-bottom:9px">运行统计</div>
-        <div class="kv"><span>运行次数</span><strong>${bot.stats.runs}</strong></div>
-        <div class="kv"><span>成功 / 失败</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
-        <div class="kv"><span>长期记忆</span><strong>${bot.memoryCount}</strong></div>
+        <div class="eyebrow" style="margin-bottom:9px">${t("运行统计")}</div>
+        <div class="kv"><span>${t("运行次数")}</span><strong>${bot.stats.runs}</strong></div>
+        <div class="kv"><span>${t("成功 / 失败")}</span><strong>${bot.stats.succeeded} / ${bot.stats.failed}</strong></div>
+        <div class="kv"><span>${t("长期记忆")}</span><strong>${bot.memoryCount}</strong></div>
         <div class="divider"></div>
-        <div class="eyebrow" style="margin-bottom:6px">专属工作区</div>
-        <div class="path-row">${pathCode(tildePath(bot.soloWorkspace))}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="复制路径" aria-label="复制路径">${icon('copy')}</button></div>
+        <div class="eyebrow" style="margin-bottom:6px">${t("专属工作区")}</div>
+        <div class="path-row">${pathCode(tildePath(bot.soloWorkspace))}<button class="btn icon small" data-action="copy" data-copy="${attr(bot.soloWorkspace ?? '')}" title="${t("复制路径")}" aria-label="${t("复制路径")}">${icon('copy')}</button></div>
         <div class="divider"></div>
-        <div class="eyebrow" style="margin-bottom:9px">版本历史</div>
-        ${revisions.length === 0 ? '<div class="faint">' + (state.soloDetail ? '暂无版本' : '加载中…') + '</div>' : revisions.map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span>${revision.version === bot.current_revision ? '' : `<button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}">回滚</button>`}</div>`).join('')}
-        <div class="usage-note">模型或强度变更会在下一次运行时生效，不会中断当前运行。</div>
+        <div class="eyebrow" style="margin-bottom:9px">${t("版本历史")}</div>
+        ${revisions.length === 0 ? '<div class="faint">' + (state.soloDetail ? t("暂无版本") : t("加载中…")) + '</div>' : revisions.map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span>${revision.version === bot.current_revision ? '' : `<button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}">${t("回滚")}</button>`}</div>`).join('')}
+        <div class="usage-note">${t("模型或强度变更会在下一次运行时生效，不会中断当前运行。")}</div>
       </aside>
     </div>`
 }

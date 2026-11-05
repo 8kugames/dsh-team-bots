@@ -1,4 +1,3 @@
-// 事件接线：输入/键盘/粘贴/滚动/拖拽等零散监听（原 app.js 的 misc 段）。
 import { state, STATUS } from './state.js'
 import { icon } from './icons.js'
 import { applyUiScale, toast } from './util.js'
@@ -8,6 +7,7 @@ import { questionDraftOf } from './cards.js'
 import { searchMemories } from './tasks.js'
 import { closeModal, trapModalFocus, updateEffortOptions, updateFallbackEffortOptions } from './modal-forms.js'
 import { UI_SCALE_KEY, renderShell, renderKeepingChatScroll, panelKey, applyPanelToggle, nextChatAtBottom, render, refresh } from '../app.js'
+import { t } from './i18n.js'
 
 document.addEventListener('input', (event) => {
   const el = event.target as HTMLInputElement
@@ -172,8 +172,8 @@ document.addEventListener('paste', (event) => {
   if (paths.length > 0) {
     insertTextAtCursor(input, paths.join('\n'))
   } else {
-    insertTextAtCursor(input, files.map(file => file.name || '未命名文件').join('\n'))
-    toast('浏览器未提供完整路径', 'error')
+    insertTextAtCursor(input, files.map(file => file.name || t("未命名文件")).join('\n'))
+    toast(t("浏览器未提供完整路径"), 'error')
   }
 })
 
@@ -299,7 +299,7 @@ document.addEventListener('drop', async (event) => {
   try {
     await api('transition_task', { taskId, status })
     await refresh()
-    toast(`任务已移动到 ${STATUS[status]}`, 'success')
+    toast(`${t("任务已移动到")} ${STATUS[status]}`, 'success')
   } catch (error: any) {
     toast(error.message || String(error), 'error')
   }

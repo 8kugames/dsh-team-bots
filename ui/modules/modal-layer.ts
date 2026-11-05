@@ -1,18 +1,15 @@
-// modal-layer.js —— modal 层机制与骨架：modalShell / modalLoading / renderModal 分派，
-// 以及 modal-layer 标记块（#modal-root 与 #app 解耦的独立渲染层）。
-// appRenderPending / modalScrollAt 两个可变状态由本模块持有，app.js 侧只经 setter 写入
-// （ESM 的 import 绑定不能跨模块赋值）。
 import { state } from './state.js'
 import { attr, esc } from './util.js'
 import { render, updateRunClocks } from '../app.js'
 import { modalNewProject, modalRemoveTracking, modalRemoveBotTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory } from './modal-forms.js'
+import { t } from './i18n.js'
 
 function modalShell({ title, subtitle = '', body = '', footer = '', size = '', badge = '' }) {
   return `<div class="modal-backdrop" data-action="modal-backdrop">
     <div class="modal ${size}" role="dialog" aria-modal="true" aria-label="${attr(title)}" tabindex="-1">
       <div class="modal-head">
         <div class="modal-head-main">${badge ? `<div class="eyebrow">${badge}</div>` : ''}<h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div>
-        <button class="modal-close" data-action="close-modal" aria-label="关闭">×</button>
+        <button class="modal-close" data-action="close-modal" aria-label="${t("关闭")}">×</button>
       </div>
       <div class="modal-body">${body}</div>
       ${footer ? `<div class="modal-foot">${footer}</div>` : ''}
@@ -23,8 +20,8 @@ function modalShell({ title, subtitle = '', body = '', footer = '', size = '', b
 function modalLoading(title) {
   return modalShell({
     title,
-    body: '<div class="modal-loading"><div class="boot-mark sm">DSH</div><div>正在读取数据…</div></div>',
-    footer: '<button class="btn" data-action="close-modal">关闭</button>',
+    body: `<div class="modal-loading"><div class="boot-mark sm">DSH</div><div>${t("正在读取数据")}…</div></div>`,
+    footer: `<button class="btn" data-action="close-modal">${t("关闭")}</button>`,
     size: 'small',
   })
 }
@@ -32,7 +29,7 @@ function modalLoading(title) {
 function renderModal() {
   const modal = state.modal
   if (!modal) return ''
-  if (modal.loading) return modalLoading(modal.title || '加载中')
+  if (modal.loading) return modalLoading(modal.title || t("加载中"))
   switch (modal.type) {
     case 'new-project': return modalNewProject()
     case 'remove-tracking': return modalRemoveTracking()

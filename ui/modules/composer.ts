@@ -1,8 +1,6 @@
-// composer.js —— 输入区域：@ 自动补全、草稿、图片附件、消息图片渲染与查看器、
-// 输入框高度自适应、发送消息与任务表单提交。
 import { state } from './state.js'
 import { icon } from './icons.js'
-import { activeProject, attr, avatar, botById, esc, initials, toast } from './util.js'
+import { activeProject, attr, avatar, botById, esc, toast } from './util.js'
 import { api, loadState } from './api.js'
 import { applyOptimisticTyping } from './typing-linger.js'
 import { t } from './i18n.js'
@@ -11,9 +9,9 @@ import { flushAppRender } from './modal-layer.js'
 
 // ac-core:start —— 输入框 / 与 @ 自动补全的纯逻辑（tests/ac.test.js 抽取此块断言）
 const AC_COMMANDS = [
-  { kind: 'command', label: '/task', title: '派任务', desc: '创建任务并排队执行：/task @成员 标题', insert: '/task @', then: 'mention' },
-  { kind: 'command', label: '/remember', title: '写项目记忆', desc: '写入项目级记忆：/remember 内容', insert: '/remember ' },
-  { kind: 'command', label: '/clear', title: '清空聊天', desc: '清空本群全部聊天记录（任务与记忆保留）', insert: '/clear' },
+  { kind: 'command', label: '/task', title: t("派任务"), desc: t("创建任务并排队执行：/task @成员 标题"), insert: '/task @', then: 'mention' },
+  { kind: 'command', label: '/remember', title: t("写项目记忆"), desc: t("写入项目级记忆：/remember 内容"), insert: '/remember ' },
+  { kind: 'command', label: '/clear', title: t("清空聊天"), desc: t("清空本群全部聊天记录（任务与记忆保留）"), insert: '/clear' },
 ]
 const acWordChar = (ch) => ch !== undefined && !/[\s@/]/.test(ch)
 
@@ -47,14 +45,14 @@ function buildAcItems(mode, query, sources) {
     for (const skill of sources.skills ?? []) {
       if (hit(skill.slug) || hit(skill.name)) items.push({
         kind: 'skill', label: `/${skill.slug}`, title: skill.name || skill.slug,
-        desc: skill.description || '共享技能', insert: `/${skill.slug} `,
+        desc: skill.description || t("共享技能"), insert: `/${skill.slug} `,
       })
     }
   } else {
     for (const member of sources.members ?? []) {
       if (hit(member.name) || hit(member.role)) items.push({
         kind: 'member', label: `@${member.name}`, title: member.name, color: member.color,
-        desc: member.owner ? `总监 · ${member.role || '成员'}` : (member.role || '成员'),
+        desc: member.owner ? `${t("总监")} · ${member.role || t("成员")}` : (member.role || t("成员")),
         insert: `@${member.name} `,
       })
     }
@@ -104,13 +102,13 @@ function renderAcPopup(popup, session) {
   }
   popup.innerHTML = session.items.map((item, index) => {
     const glyph = item.kind === 'member'
-      ? `<span class="avatar sm ${attr(item.color || 'gray')}">${esc(initials(item.title))}</span>`
+      ? avatar({ name: item.title, color: item.color }, 'sm')
       : `<span class="composer-ac-glyph">${icon(item.kind === 'skill' ? 'spark' : 'terminal')}</span>`
     return `<button type="button" class="composer-ac-item${index === session.selected ? ' active' : ''}" role="option" aria-selected="${index === session.selected}" data-ac-idx="${index}" id="composer-ac-item-${index}">
       ${glyph}
       <span class="composer-ac-text"><strong>${esc(item.label)}</strong><span>${esc(item.desc)}</span></span>
     </button>`
-  }).join('') + `<div class="composer-ac-hint">↑↓ 选择 · Enter 或 Tab 插入 · Esc 关闭</div>`
+  }).join('') + `<div class="composer-ac-hint">↑↓ ${t("选择 · Enter 或 Tab 插入 · Esc 关闭")}</div>`
   popup.hidden = false
   const active = popup.querySelector('.composer-ac-item.active')
   if (active && input) input.setAttribute('aria-activedescendant', active.id)
@@ -186,16 +184,16 @@ function validateImageSelection(files, existingCount = 0) {
     const name = file?.name ?? ''
     const mediaType = resolveImageMediaType(file?.type, name)
     if (!mediaType) {
-      rejected.push({ name, reason: '仅支持 PNG / JPEG / GIF / WebP 格式' })
+      rejected.push({ name, reason: t("仅支持 PNG / JPEG / GIF / WebP 格式") })
       continue
     }
     const bytes = Number(file?.size) || 0
     if (bytes > MAX_IMAGE_BYTES) {
-      rejected.push({ name, reason: '单张图片不能超过 5MB' })
+      rejected.push({ name, reason: t("单张图片不能超过 5MB") })
       continue
     }
     if (count >= MAX_IMAGES_PER_MESSAGE) {
-      rejected.push({ name, reason: `一条消息最多 ${MAX_IMAGES_PER_MESSAGE} 张图片` })
+      rejected.push({ name, reason: t("一条消息最多 ${MAX_IMAGES_PER_MESSAGE} 张图片", { MAX_IMAGES_PER_MESSAGE: MAX_IMAGES_PER_MESSAGE }) })
       continue
     }
     count += 1
@@ -233,7 +231,7 @@ function readFileAsBase64(file) {
       const comma = result.indexOf(',')
       resolve(comma >= 0 ? result.slice(comma + 1) : result)
     }
-    reader.onerror = () => reject(new Error('读取失败'))
+    reader.onerror = () => reject(new Error(t("读取失败")))
     reader.readAsDataURL(file)
   })
 }
@@ -315,7 +313,7 @@ function thumbnailFallback(name, iconHtml, doc = document) {
   glyph.innerHTML = iconHtml
   const label = doc.createElement('span')
   label.className = 'image-thumb-fallback-name'
-  label.textContent = String(name || '图片预览不可用')
+  label.textContent = String(name || t("图片预览不可用"))
   wrap.append(glyph, label)
   return wrap
 }
@@ -412,11 +410,11 @@ function renderMessageImages(images) {
   return `<div class="msg-images">${list.map(image => {
     const thumbUrl = messageImageThumbUrls.get(image.id) ?? ''
     return `
-    <button type="button" class="msg-image-tile" data-action="view-message-image" data-image-id="${attr(image.id)}" title="${attr(image.name || '查看原图')}">
+    <button type="button" class="msg-image-tile" data-action="view-message-image" data-image-id="${attr(image.id)}" title="${attr(image.name || t("查看原图"))}">
       ${thumbUrl
-        ? `<img class="msg-image-thumb" src="${attr(thumbUrl)}" alt="${attr(image.name || '图片')}" />`
+        ? `<img class="msg-image-thumb" src="${attr(thumbUrl)}" alt="${attr(image.name || t("图片"))}" />`
         : `<span class="msg-image-icon">${icon('image')}</span>`}
-      <span class="msg-image-meta"><span class="msg-image-name">${esc(image.name || '图片')}</span><span class="msg-image-size">${esc(formatImageBytes(image.bytes))}</span></span>
+      <span class="msg-image-meta"><span class="msg-image-name">${esc(image.name || t("图片"))}</span><span class="msg-image-size">${esc(formatImageBytes(image.bytes))}</span></span>
     </button>`
   }).join('')}</div>`
 }
@@ -433,7 +431,7 @@ async function hydrateMessageImageThumbs(root = document) {
       if (!tile.isConnected || tile.querySelector('.msg-image-thumb')) return
       const img = document.createElement('img')
       img.className = 'msg-image-thumb'
-      img.alt = tile.querySelector('.msg-image-name')?.textContent || '图片'
+      img.alt = tile.querySelector('.msg-image-name')?.textContent || t("图片")
       img.src = url
       tile.querySelector('.msg-image-icon')?.replaceWith(img)
     } catch {}
@@ -449,11 +447,11 @@ function ensureImageViewer() {
   el.id = 'image-viewer'
   el.hidden = true
   el.innerHTML = `<div class="image-viewer-backdrop" data-action="close-image-viewer"></div>
-    <div class="image-viewer-panel" role="dialog" aria-modal="true" aria-label="图片预览">
+    <div class="image-viewer-panel" role="dialog" aria-modal="true" aria-label="${t("图片预览")}">
       <div class="image-viewer-head">
         <strong id="image-viewer-name"></strong>
         <span class="faint" id="image-viewer-size"></span>
-        <button type="button" class="image-viewer-close" data-action="close-image-viewer" title="关闭" aria-label="关闭图片预览">${icon('close')}</button>
+        <button type="button" class="image-viewer-close" data-action="close-image-viewer" title="${t("关闭")}" aria-label="${t("关闭图片预览")}">${icon('close')}</button>
       </div>
       <div class="image-viewer-body" id="image-viewer-body"></div>
     </div>`
@@ -468,21 +466,21 @@ async function openMessageImage(imageId) {
   const nameEl = document.getElementById('image-viewer-name')
   const sizeEl = document.getElementById('image-viewer-size')
   viewer.hidden = false
-  body.textContent = '图片加载中…'
+  body.textContent = t("图片加载中…")
   if (nameEl) nameEl.textContent = ''
   if (sizeEl) sizeEl.textContent = ''
   try {
     const image = await api('get_message_image', { imageId }, { quiet: true })
-    if (nameEl) nameEl.textContent = image.name || '图片'
+    if (nameEl) nameEl.textContent = image.name || t("图片")
     if (sizeEl) sizeEl.textContent = formatImageBytes(image.bytes)
     body.textContent = ''
     const img = document.createElement('img')
     img.className = 'image-viewer-img'
-    img.alt = image.name || '图片'
+    img.alt = image.name || t("图片")
     img.src = base64BlobUrl(image.data, image.mediaType)
     body.appendChild(img)
   } catch (error: any) {
-    body.textContent = error?.message || '图片加载失败'
+    body.textContent = error?.message || t("图片加载失败")
   }
 }
 
@@ -514,7 +512,7 @@ function openInlineImage(img) {
       name = url.searchParams.get('path')?.split('/').pop() ?? url.pathname.split('/').pop() ?? ''
     } catch { name = '' }
   }
-  if (!name) name = '图片'
+  if (!name) name = t("图片")
   document.getElementById('image-viewer-name').textContent = name
   document.getElementById('image-viewer-size').textContent = ''
   viewer.hidden = false
@@ -583,7 +581,7 @@ async function sendMessage() {
   const project = solo ? null : activeProject()
   if (solo ? !bot : !project) return
   // 命令类消息保留原 confirm 拦截语义：取消即整体退出，草稿与附件原样不动。
-  if (body === '/clear' && !window.confirm(solo ? `清空和 ${bot.name} 的全部对话记录？清除后不可恢复（记忆保留）。` : '清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。')) return
+  if (body === '/clear' && !window.confirm(solo ? `${t("清空和")} ${bot.name} ${t("的全部对话记录？清除后不可恢复（记忆保留）。")}` : t("清空本群全部聊天记录？清除后不可恢复（任务与记忆保留）。"))) return
   // 待发图片随消息一起出站：mediaType + name + base64，字段口径与后端 normalizeImageInputs 一致。
   const images = pending.map(item => ({ mediaType: item.mediaType, name: item.name, data: item.data }))
   const key = draftKey(state)
@@ -646,7 +644,7 @@ async function sendMessage() {
 
 async function saveTaskFromForm(taskId) {
   const form = document.getElementById('task-form') as HTMLFormElement
-  if (!form) throw new Error('保存失败，请重试。')
+  if (!form) throw new Error(t("保存失败，请重试。"))
   const formData = new FormData(form)
   const assignee = formData.get('assigneeBotId')
   await api('update_task', {

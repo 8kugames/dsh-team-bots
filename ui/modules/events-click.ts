@@ -1,8 +1,6 @@
-// 事件接线：document click 委托（原 app.js 的巨型 click 监听）。
-// 实体动作在此分派；看板/全局动作转 events-board.js。
 import { state } from './state.js'
 import { t } from './i18n.js'
-import { activeProject, botById, toast } from './util.js'
+import { activeProject, avatarSeedRandom, botById, toast } from './util.js'
 import { api, loadState } from './api.js'
 import { closeAutocomplete, closeImageViewer, ensureComposerImageInput, openInlineImage, openMessageImage, removePendingImage, saveTaskFromForm } from './composer.js'
 import { closeDirPicker, closeModal, openBot, openModal, openSkillDetail, reloadTaskModal, renderDirPicker } from './modal-forms.js'
@@ -72,7 +70,7 @@ document.addEventListener('click', async (event) => {
             rollback.items = [previous, ...(rollback.items ?? [])]
             rollback.count = Number(rollback.count ?? 0) + 1
           }
-          toast(error?.message ? `审批失败：${error.message}` : '审批失败，请重试', 'error')
+          toast(error?.message ? `${t("审批失败：")}${error.message}` : t("审批失败，请重试"), 'error')
         } finally {
           state.approvalDeciding.delete(approvalId)
           render()
@@ -157,7 +155,7 @@ document.addEventListener('click', async (event) => {
             rollback.items = [previous, ...(rollback.items ?? [])]
             rollback.count = Number(rollback.count ?? 0) + 1
           }
-          toast(error?.message ? `回答失败：${error.message}` : '回答失败，请重试', 'error')
+          toast(error?.message ? `${t("回答失败：")}${error.message}` : t("回答失败，请重试"), 'error')
         } finally {
           state.questionAnswering.delete(questionId)
           render()
@@ -275,7 +273,7 @@ document.addEventListener('click', async (event) => {
         const result = await api('sync_skills', {})
         await loadState(state.projectId, { quiet: true })
         render()
-        toast(`已扫描 ${result.count} 个共享技能`, 'success')
+        toast(`${t("已扫描")} ${result.count} ${t("个共享技能")}`, 'success')
         break
       }
       case 'skill-detail': {
@@ -290,23 +288,39 @@ document.addEventListener('click', async (event) => {
         await api('toggle_skill', { projectId: project.id, slug, disabled })
         await loadState(state.projectId, { quiet: true })
         render()
-        toast(disabled ? `已在项目「${project.name}」关闭 ${slug}` : `已在项目「${project.name}」恢复 ${slug}`, 'success')
+        toast(disabled ? `${t("已在项目「")}${project.name}${t("」关闭")} ${slug}` : `${t("已在项目「")}${project.name}${t("」恢复")} ${slug}`, 'success')
         break
       }
       case 'archive-bot': {
         const botId = target.dataset.botId
         const bot = botById(botId)
-        if (!bot || !window.confirm(`归档 ${bot.name}？总监关系必须先解除。`)) break
+        if (!bot || !window.confirm(`${t("归档")} ${bot.name}${t("？总监关系必须先解除。")}`)) break
         await api('archive_bot', { botId })
         closeModal()
         await refresh()
         // 归档后留在当前页：solo-config 会随即切到 archived 分支，露出「移除追踪」入口。
-        toast('Bot 已归档', 'success')
+        toast(t("Bot 已归档"), 'success')
+        break
+      }
+      case 'roll-avatar':
+      case 'toggle-avatar': {
+        const botId = target.dataset.botId
+        // roll = 随机新种子（未启用即启用）；toggle = 按当前状态翻转，关闭回落首字/首字母头像。
+        const on = Boolean(botById(botId)?.avatar_seed)
+        const seed = action === 'roll-avatar' || !on ? avatarSeedRandom() : null
+        await api('update_bot', { botId, patch: { avatarSeed: seed } })
+        await loadState(state.projectId, { quiet: true })
+        if (state.view === 'solo-config') {
+          await loadSoloDetail()
+        } else {
+          await openBot(botId)
+        }
+        toast(seed ? t("像素头像已更新") : t("已切回文字头像"), 'success')
         break
       }
       case 'rollback-bot': {
         const botId = target.dataset.botId
-        if (!window.confirm('回滚到该版本？')) break
+        if (!window.confirm(t("回滚到该版本？"))) break
         await api('rollback_bot', { botId, revisionId: target.dataset.revisionId })
         await loadState(state.projectId, { quiet: true })
         if (state.view === 'solo-config') {
@@ -314,20 +328,20 @@ document.addEventListener('click', async (event) => {
         } else {
           await openBot(botId)
         }
-        toast('已回滚并生成新版本', 'success')
+        toast(t("已回滚并生成新版本"), 'success')
         break
       }
       case 'archive-project': {
-        if (!window.confirm('归档项目？项目将停止新运行，工作区文件保留。')) break
+        if (!window.confirm(t("归档项目？项目将停止新运行，工作区文件保留。"))) break
         await api('archive_project', { projectId: target.dataset.projectId })
         await refresh()
-        toast('项目已归档', 'success')
+        toast(t("项目已归档"), 'success')
         break
       }
       case 'reopen-project': {
         await api('reopen_project', { projectId: target.dataset.projectId })
         await refresh()
-        toast('项目已再开，恢复为进行中', 'success')
+        toast(t("项目已再开，恢复为进行中"), 'success')
         break
       }
       case 'remove-tracking-open': {
@@ -386,7 +400,7 @@ document.addEventListener('click', async (event) => {
           state.chatMode = 'group'
         }
         await refresh()
-        toast('已移除追踪，Bot 已从工作台列表移除', 'success')
+        toast(t("已移除追踪，Bot 已从工作台列表移除"), 'success')
         break
       }
       case 'reject-task': {
@@ -409,31 +423,31 @@ document.addEventListener('click', async (event) => {
         const taskId = target.dataset.taskId
         await api('task_review_delegate', { taskId })
         await refreshAfterTask(taskId)
-        toast('已委派子代理核验，结论将写回任务评论', 'success')
+        toast(t("已委派子代理核验，结论将写回任务评论"), 'success')
         break
       }
       case 'run-task': {
         const taskId = target.dataset.taskId
         const assignee = await saveTaskFromForm(taskId)
         if (!assignee) {
-          toast('请先选择负责人', 'error')
+          toast(t("请先选择负责人"), 'error')
           break
         }
         await api('assign_task', { taskId, botId: assignee })
         await refreshAfterTask(taskId)
-        toast('任务已进入执行队列', 'success')
+        toast(t("任务已进入执行队列"), 'success')
         break
       }
       case 'cancel-run': {
         await api('cancel_run', { runId: target.dataset.runId })
         await refreshAfterTask(target.dataset.taskId || state.modal?.detail?.id)
-        toast('运行已取消', 'success')
+        toast(t("运行已取消"), 'success')
         break
       }
       case 'retry-run': {
         const run = await api('retry_run', { runId: target.dataset.runId })
         await refreshAfterTask(run.task_id)
-        toast('已重新排队', 'success')
+        toast(t("已重新排队"), 'success')
         break
       }
       case 'edit-scopes': {
@@ -454,7 +468,7 @@ document.addEventListener('click', async (event) => {
         try {
           await api('task_update_scopes', { taskId: target.dataset.taskId, write_scopes: scopes }, { quiet: true })
           await refreshAfterTask(target.dataset.taskId)
-          toast('写范围已更新', 'success')
+          toast(t("写范围已更新"), 'success')
         } catch (error: any) {
           toast(error.message || String(error), 'error')
         }
@@ -465,27 +479,27 @@ document.addEventListener('click', async (event) => {
         break
       }
       case 'delete-secret': {
-        const name = target.dataset.secretName || '该密钥'
+        const name = target.dataset.secretName || t("该密钥")
         // DSHBOTS-106 起明文只在批准时一次性物化到数据目录，项目工作区不再有明文密钥文件；
         // 删除即吊销：已下发的一次性运行时副本当场失效，重新使用要再走一次申请与批准。
-        if (!window.confirm(`删除密钥 ${name}？相关项目已下发的一次性运行时副本会立即失效，重新使用需再次申请。`)) break
+        if (!window.confirm(t("删除密钥 ${name}？相关项目已下发的一次性运行时副本会立即失效，重新使用需再次申请。", { name: name }))) break
         await api('delete_secret', { secretId: target.dataset.secretId })
         await refresh()
-        toast('密钥已删除', 'success')
+        toast(t("密钥已删除"), 'success')
         break
       }
       case 'deny-secret-request': {
-        if (!window.confirm('拒绝该密钥请求？发起的 Bot 会在群里收到系统提示。')) break
+        if (!window.confirm(t("拒绝该密钥请求？发起的 Bot 会在群里收到系统提示。"))) break
         await api('deny_secret_request', { requestId: target.dataset.requestId })
         await refresh()
-        toast('已拒绝该密钥请求', 'success')
+        toast(t("已拒绝该密钥请求"), 'success')
         break
       }
       case 'delete-memory': {
-        if (!window.confirm('归档这条记忆？归档后不会再被 Bot 引用。')) break
+        if (!window.confirm(t("归档这条记忆？归档后不会再被 Bot 引用。"))) break
         await api('delete_memory', { memoryId: target.dataset.memoryId })
         await refresh()
-        toast('记忆已归档', 'success')
+        toast(t("记忆已归档"), 'success')
         break
       }
       case 'edit-memory': {
@@ -499,11 +513,11 @@ document.addEventListener('click', async (event) => {
       }
       case 'remove-member': {
         const botId = target.dataset.botId
-        const name = botById(botId)?.name ?? '该成员'
-        if (!window.confirm(`确认将 ${name} 移出本项目？移除后不再接收本项目的提及与新任务。`)) break
+        const name = botById(botId)?.name ?? t("该成员")
+        if (!window.confirm(t("确认将 ${name} 移出本项目？移除后不再接收本项目的提及与新任务。", { name: name }))) break
         await api('remove_member', { projectId: activeProject()?.id, botId })
         await refresh()
-        toast('已移出项目', 'success')
+        toast(t("已移出项目"), 'success')
         break
       }
       case 'batch-decide-proposals': {
@@ -513,37 +527,37 @@ document.addEventListener('click', async (event) => {
           .filter(item => item.status === 'pending' && (item.bot_id ?? '') === botId)
         if (items.length === 0) break
         const bot = botById(botId)
-        const label = decision === 'approved' ? '通过并应用' : '拒绝'
-        if (!window.confirm(`确认${label} ${bot?.name ?? '未归属 Bot'} 的全部 ${items.length} 条待审提案？`)) break
+        const label = decision === 'approved' ? t("通过并应用") : t("拒绝")
+        if (!window.confirm(`${t("确认")}${label} ${bot?.name ?? t("未归属 Bot")} ${t("的全部")} ${items.length} ${t("条待审提案？")}`)) break
         for (const item of items) {
           await api('decide_proposal', { proposalId: item.id, decision })
         }
         await refresh()
-        toast(`已批量${label} ${items.length} 条提案`, 'success')
+        toast(`${t("已批量")}${label} ${items.length} ${t("条提案")}`, 'success')
         break
       }
       case 'decide-proposal': {
         const decision = target.dataset.decision
-        const label = decision === 'approved' ? '通过并应用' : '拒绝'
-        if (!window.confirm(`确认${label}该提案？`)) break
+        const label = decision === 'approved' ? t("通过并应用") : t("拒绝")
+        if (!window.confirm(t("确认${label}该提案？", { label: label }))) break
         await api('decide_proposal', { proposalId: target.dataset.proposalId, decision })
         await refresh()
-        toast(decision === 'approved' ? '提案已应用' : '提案已拒绝', 'success')
+        toast(decision === 'approved' ? t("提案已应用") : t("提案已拒绝"), 'success')
         break
       }
       case 'evaluate-proposal': {
         const verdict = target.dataset.verdict === 'fail' ? 'fail' : 'pass'
-        const notes = window.prompt('评估说明（可留空）', '') ?? ''
+        const notes = window.prompt(t("评估说明（可留空）"), '') ?? ''
         await api('evaluate_proposal', { proposalId: target.dataset.proposalId, evaluation: { verdict, notes } })
         await refresh()
-        toast(verdict === 'pass' ? '已记录评估结论：通过' : '已记录评估结论：不通过', 'success')
+        toast(verdict === 'pass' ? t("已记录评估结论：通过") : t("已记录评估结论：不通过"), 'success')
         break
       }
       case 'promote-proposal': {
-        if (!window.confirm('确认把灰度提案转正为全量生效？')) break
+        if (!window.confirm(t("确认把灰度提案转正为全量生效？"))) break
         await api('promote_proposal', { proposalId: target.dataset.proposalId })
         await refresh()
-        toast('提案已转正', 'success')
+        toast(t("提案已转正"), 'success')
         break
       }
       case 'usage-window':
@@ -578,21 +592,21 @@ document.addEventListener('click', async (event) => {
       case 'approve-memory':
         await api('approve_memory', { memoryId: target.dataset.memoryId })
         await refresh()
-        toast('记忆已通过', 'success')
+        toast(t("记忆已通过"), 'success')
         break
       case 'reject-memory':
         await api('reject_memory', { memoryId: target.dataset.memoryId })
         await refresh()
-        toast('记忆已拒绝', 'success')
+        toast(t("记忆已拒绝"), 'success')
         break
       case 'rollback-skill':
         await api('rollback_skill', { slug: target.dataset.slug, version: target.dataset.version })
         await refresh()
-        toast(`技能已回滚到 v${target.dataset.version}`, 'success')
+        toast(`${t("技能已回滚到")} v${target.dataset.version}`, 'success')
         break
       case 'terminal-stop': {
         await api('cancel_command', { commandId: target.dataset.commandId })
-        toast('停止信号已发送', 'success')
+        toast(t("停止信号已发送"), 'success')
         break
       }
       case 'terminal-fill': {

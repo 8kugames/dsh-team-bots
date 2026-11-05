@@ -1,4 +1,3 @@
-// 事件接线：document submit 委托（原 app.js 的表单提交监听）。
 import { state } from './state.js'
 import { activeProject, toast } from './util.js'
 import { api, loadState } from './api.js'
@@ -6,6 +5,7 @@ import { closeModal, normalizeTimeBudgetMinutes, openTask, parseFallbackFields, 
 import { saveTaskFromForm } from './composer.js'
 import { loadSoloDetail } from './chat.js'
 import { refresh, startTerminalPoll, render, formPayload } from '../app.js'
+import { t } from './i18n.js'
 
 document.addEventListener('submit', async (event) => {
   const form = (event.target as any).closest('form[data-form]')
@@ -27,7 +27,7 @@ document.addEventListener('submit', async (event) => {
       state.projectId = result.id
       state.view = 'chat'
       await refresh()
-      toast('项目已创建', 'success')
+      toast(t("项目已创建"), 'success')
       return
     }
     if (type === 'remove-tracking') {
@@ -44,7 +44,7 @@ document.addEventListener('submit', async (event) => {
         state.view = 'chat'
       }
       await refresh()
-      toast('已移除追踪，管理数据已清理', 'success')
+      toast(t("已移除追踪，管理数据已清理"), 'success')
       return
     }
     if (type === 'create-bot' || type === 'update-bot') {
@@ -69,10 +69,10 @@ document.addEventListener('submit', async (event) => {
       }
       if (type === 'create-bot') {
         await api('create_bot', common)
-        toast('Bot 已创建', 'success')
+        toast(t("Bot 已创建"), 'success')
       } else {
         await api('update_bot', { botId: payload.botId, patch: common })
-        toast('Bot 配置已更新', 'success')
+        toast(t("Bot 配置已更新"), 'success')
       }
       closeModal()
       await refresh()
@@ -83,13 +83,13 @@ document.addEventListener('submit', async (event) => {
       const botId = String(payload.botId || '')
       // 未选人时不提交，弹窗保持打开（零变更）。
       if (!botId) {
-        toast('请先选择一个 Bot', 'error')
+        toast(t("请先选择一个 Bot"), 'error')
         return
       }
       await api('add_member', { projectId: activeProject()?.id, botId })
       closeModal()
       await refresh()
-      toast('已邀请加入项目', 'success')
+      toast(t("已邀请加入项目"), 'success')
       return
     }
     if (type === 'create-task') {
@@ -112,7 +112,7 @@ document.addEventListener('submit', async (event) => {
       closeModal()
       await loadState(state.projectId, { quiet: true })
       render()
-      toast(`已创建 ${task.identifier}`, 'success')
+      toast(`${t("已创建")} ${task.identifier}`, 'success')
       await openTask(task.id)
       return
     }
@@ -121,14 +121,14 @@ document.addEventListener('submit', async (event) => {
       await saveTaskFromForm(taskId)
       await loadState(state.projectId, { quiet: true })
       await reloadTaskModal(taskId)
-      toast('任务已保存', 'success')
+      toast(t("任务已保存"), 'success')
       return
     }
     if (type === 'add-comment') {
       const comment = await api('add_comment', { taskId: payload.taskId, body: payload.body })
       await loadState(state.projectId, { quiet: true })
       await reloadTaskModal(payload.taskId)
-      toast(comment?.steered ? '评论已直通执行中的会话' : '评论已添加', 'success')
+      toast(comment?.steered ? t("评论已直通执行中的会话") : t("评论已添加"), 'success')
       return
     }
     if (type === 'create-memory') {
@@ -141,7 +141,7 @@ document.addEventListener('submit', async (event) => {
       })
       closeModal()
       await refresh()
-      toast('记忆已写入', 'success')
+      toast(t("记忆已写入"), 'success')
       return
     }
     if (type === 'update-memory') {
@@ -152,7 +152,7 @@ document.addEventListener('submit', async (event) => {
       })
       closeModal()
       await refresh()
-      toast('记忆已更新', 'success')
+      toast(t("记忆已更新"), 'success')
       return
     }
     if (type === 'create-proposal') {
@@ -174,16 +174,16 @@ document.addEventListener('submit', async (event) => {
           }
           : { instructions: payload.instructions },
       })
-      if (kind === 'skill' && !payload.content) throw new Error('技能内容不能为空')
+      if (kind === 'skill' && !payload.content) throw new Error(t("技能内容不能为空"))
       closeModal()
       await refresh()
-      toast('提案已提交审批', 'success')
+      toast(t("提案已提交审批"), 'success')
       return
     }
     if (type === 'save-price') {
-      if (!String(payload.model ?? '').trim()) throw new Error('模型不能为空')
+      if (!String(payload.model ?? '').trim()) throw new Error(t("模型不能为空"))
       const price = value => (String(value ?? '').trim() === '' ? 0 : Number(value))
-      if ([payload.inputPerMtok, payload.outputPerMtok, payload.cacheReadPerMtok, payload.cacheWritePerMtok].some(value => Number.isNaN(price(value)))) throw new Error('价格需要是数字')
+      if ([payload.inputPerMtok, payload.outputPerMtok, payload.cacheReadPerMtok, payload.cacheWritePerMtok].some(value => Number.isNaN(price(value)))) throw new Error(t("价格需要是数字"))
       await api('save_price', {
         provider: payload.provider ?? '',
         model: payload.model,
@@ -195,7 +195,7 @@ document.addEventListener('submit', async (event) => {
       })
       closeModal()
       await refresh()
-      toast('模型价格已保存，新调用将按此计价', 'success')
+      toast(t("模型价格已保存，新调用将按此计价"), 'success')
       return
     }
     if (type === 'save-project') {
@@ -214,13 +214,13 @@ document.addEventListener('submit', async (event) => {
         },
       })
       await refresh()
-      toast('项目设置已保存', 'success')
+      toast(t("项目设置已保存"), 'success')
       return
     }
     if (type === 'upsert-secret') {
       const scope = payload.scope === 'team' ? 'team' : 'project'
-      if (scope === 'project' && !payload.projectId) throw new Error('项目级密钥必须选择项目')
-      if (String(payload.value ?? '').length < 8) throw new Error('密钥值至少 8 个字符')
+      if (scope === 'project' && !payload.projectId) throw new Error(t("项目级密钥必须选择项目"))
+      if (String(payload.value ?? '').length < 8) throw new Error(t("密钥值至少 8 个字符"))
       await api('upsert_secret', {
         scope,
         projectId: scope === 'project' ? payload.projectId : null,
@@ -229,19 +229,19 @@ document.addEventListener('submit', async (event) => {
         value: payload.value,
       })
       await refresh()
-      toast('密钥已保存', 'success')
+      toast(t("密钥已保存"), 'success')
       return
     }
     if (type === 'approve-secret') {
-      if (String(payload.value ?? '').length < 8) throw new Error('密钥值至少 8 个字符')
+      if (String(payload.value ?? '').length < 8) throw new Error(t("密钥值至少 8 个字符"))
       await api('approve_secret_request', { requestId: payload.requestId, value: payload.value })
       await refresh()
-      toast('密钥请求已批准并物化', 'success')
+      toast(t("密钥请求已批准并物化"), 'success')
       return
     }
     if (type === 'terminal-run') {
       const command = String(payload.command ?? '').trim()
-      if (!command) throw new Error('命令不能为空')
+      if (!command) throw new Error(t("命令不能为空"))
       await api('run_command', { projectId: payload.projectId, command })
       state.terminalDraft = ''
       await loadState(state.projectId, { quiet: true })

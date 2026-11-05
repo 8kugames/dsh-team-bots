@@ -1,5 +1,3 @@
-// settings.js —— 设置/全局域：全局用量面板（含模型价格规则卡）、运行时效卡、运维卡、
-// 项目设置页与全局配置页（renderGlobal，含 DSH 路径/DSH 服务卡）。通道/密钥页见 global-pages.js。
 import { state } from './state.js'
 import { t } from './i18n.js'
 import { icon } from './icons.js'
@@ -280,7 +278,7 @@ function dshServiceCard() {
 
 function renderSettings() {
   const project = activeProject()
-  const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="复制路径" aria-label="复制路径">${icon('copy')}</button>`
+  const copyPath = value => `<button class="btn icon small" type="button" data-action="copy" data-copy="${attr(value)}" title="${t("复制路径")}" aria-label="${t("复制路径")}">${icon('copy')}</button>`
   if (!project) return noProject()
   const members = activeBots()
   const owner = botById(project.owner_bot_id)
@@ -289,22 +287,22 @@ function renderSettings() {
       <div class="settings-grid">
         <div>
           <div class="card form-card">
-            <div class="card-head"><h3>项目资料</h3><span class="meta">${esc(project.key ?? project.id)}</span></div>
+            <div class="card-head"><h3>${t("项目资料")}</h3><span class="meta">${esc(project.key ?? project.id)}</span></div>
             <input type="hidden" name="projectId" value="${attr(project.id)}">
-            <div class="field"><label id="settings-name-label" for="settings-name">项目名称</label><input class="input" id="settings-name" name="name" value="${attr(project.name)}" maxlength="80"></div>
-            <div class="field"><label id="settings-description-label" for="settings-description">项目描述</label><textarea class="textarea" id="settings-description" name="description">${esc(project.description || '')}</textarea></div>
+            <div class="field"><label id="settings-name-label" for="settings-name">${t("项目名称")}</label><input class="input" id="settings-name" name="name" value="${attr(project.name)}" maxlength="80"></div>
+            <div class="field"><label id="settings-description-label" for="settings-description">${t("项目描述")}</label><textarea class="textarea" id="settings-description" name="description">${esc(project.description || '')}</textarea></div>
             <div class="field-row">
-              <div class="field"><label id="settings-owner-label" for="settings-owner">总监 Bot</label><select class="select" id="settings-owner" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
-              <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">群聊回复模式</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>总监优先</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>全员响应</option></select></div>
+              <div class="field"><label id="settings-owner-label" for="settings-owner">${t("总监")} Bot</label><select class="select" id="settings-owner" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
+              <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">${t("群聊回复模式")}</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>${t("总监优先")}</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>${t("全员响应")}</option></select></div>
             </div>
           </div>
           <div class="card form-card" style="margin-top:12px">
-            <div class="card-head"><h3>月度预算</h3></div>
+            <div class="card-head"><h3>${t("月度预算")}</h3></div>
             <div class="field-row">
-              <div class="field"><label id="settings-token-budget-label" for="settings-token-budget">Token 预算</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-token-budget" name="tokenBudget" value="${project.token_budget ?? ''}" placeholder="不限制"></div>
-              <div class="field"><label id="settings-cost-budget-label" for="settings-cost-budget">成本预算</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" id="settings-cost-budget" name="costBudget" value="${project.cost_budget ?? ''}" placeholder="不限制"></div>
+              <div class="field"><label id="settings-token-budget-label" for="settings-token-budget">Token ${t("预算")}</label><input class="input mono" style="text-align:right" type="number" min="0" id="settings-token-budget" name="tokenBudget" value="${project.token_budget ?? ''}" placeholder="${t("不限制")}"></div>
+              <div class="field"><label id="settings-cost-budget-label" for="settings-cost-budget">${t("成本预算")}</label><input class="input mono" style="text-align:right" type="number" min="0" step="0.01" id="settings-cost-budget" name="costBudget" value="${project.cost_budget ?? ''}" placeholder="${t("不限制")}"></div>
             </div>
-            <div class="hint">超出预算时项目会提示预算已用尽。成本预算与模型价格使用同一币种计价。</div>
+            <div class="hint">${t("超出预算时项目会提示预算已用尽。成本预算与模型价格使用同一币种计价。")}</div>
           </div>
           <div class="card form-card" style="margin-top:12px">
             <div class="card-head"><h3>${t('settings.codeHygieneTitle')}</h3></div>
@@ -317,25 +315,25 @@ function renderSettings() {
         </div>
         <div>
           <div class="card form-card">
-            <div class="card-head"><h3>工作区路径</h3></div>
+            <div class="card-head"><h3>${t("工作区路径")}</h3></div>
             <div class="field">
-              <label id="settings-production-label" for="settings-production">生产目录</label>
-              <div style="display:flex;gap:8px"><input class="input mono" style="flex:1" id="settings-production" name="productionDir" value="${attr(project.production_dir ?? '')}" placeholder="/Users/you/repos/my-game（可选）"><button class="btn" type="button" data-action="pick-dir-open" data-picker-for="settings-production">${icon('folder')}选择</button></div>
-              <div class="hint">Bots 的工作目录，可指向既有代码库；留空则用默认管理目录，切换后已有密钥会自动迁移并清理旧目录。</div>
+              <label id="settings-production-label" for="settings-production">${t("生产目录")}</label>
+              <div style="display:flex;gap:8px"><input class="input mono" style="flex:1" id="settings-production" name="productionDir" value="${attr(project.production_dir ?? '')}" placeholder="/Users/you/repos/my-game${t("（可选）")}"><button class="btn" type="button" data-action="pick-dir-open" data-picker-for="settings-production">${icon('folder')}${t("选择")}</button></div>
+              <div class="hint">Bots ${t("的工作目录，可指向既有代码库；留空则用默认管理目录，切换后已有密钥会自动迁移并清理旧目录。")}</div>
               <div class="dir-picker" id="dir-picker-settings-production" hidden></div>
             </div>
-            <div class="path-row"><span>当前生效</span>${pathCode(tildePath(project.workspace_path))}${copyPath(project.workspace_path)}</div>
-            <div class="path-row"><span>管理数据</span>${pathCode(project.data_path ?? '')}${copyPath(project.data_path ?? '')}</div>
+            <div class="path-row"><span>${t("当前生效")}</span>${pathCode(tildePath(project.workspace_path))}${copyPath(project.workspace_path)}</div>
+            <div class="path-row"><span>${t("管理数据")}</span>${pathCode(project.data_path ?? '')}${copyPath(project.data_path ?? '')}</div>
           </div>
           <div class="card form-card" style="margin-top:12px">
-            <div class="card-head"><h3>项目状态</h3>${project.status === 'active' ? '<span class="pill green">运行中</span>' : '<span class="pill amber">已归档</span>'}</div>
-            <div class="kv"><span>总监</span><strong>${esc(owner?.name ?? '未设置')}</strong></div>
-            <div class="kv"><span>任务总数</span><strong>${project.stats.tasks}</strong></div>
-            <div class="kv"><span>运行总数</span><strong>${project.stats.runs}</strong></div>
+            <div class="card-head"><h3>${t("项目状态")}</h3>${project.status === 'active' ? `<span class="pill green">${t("运行中")}</span>` : `<span class="pill amber">${t("已归档")}</span>`}</div>
+            <div class="kv"><span>${t("总监")}</span><strong>${esc(owner?.name ?? t("未设置"))}</strong></div>
+            <div class="kv"><span>${t("任务总数")}</span><strong>${project.stats.tasks}</strong></div>
+            <div class="kv"><span>${t("运行总数")}</span><strong>${project.stats.runs}</strong></div>
             ${project.status === 'active'
-              ? `<div class="btn-row settings-danger-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small danger" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">归档项目</button></div>`
-              : `<div class="hint" style="margin-top:10px">已归档项目停止新运行，工作区文件保留。项目再开会恢复为进行中；移除追踪会清理本项目的管理数据。</div>
-                <div class="btn-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small" type="button" data-action="remove-tracking-open" data-project-id="${attr(project.id)}" data-project-name="${attr(project.name)}">移除追踪</button><button class="btn small primary" type="button" data-action="reopen-project" data-project-id="${attr(project.id)}">项目再开</button></div>`}
+              ? `<div class="btn-row settings-danger-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small danger" type="button" data-action="archive-project" data-project-id="${attr(project.id)}">${t("归档项目")}</button></div>`
+              : `<div class="hint" style="margin-top:10px">${t("已归档项目停止新运行，工作区文件保留。项目再开会恢复为进行中；移除追踪会清理本项目的管理数据。")}</div>
+                <div class="btn-row" style="margin-top:12px;justify-content:flex-end"><button class="btn small" type="button" data-action="remove-tracking-open" data-project-id="${attr(project.id)}" data-project-name="${attr(project.name)}">${t("移除追踪")}</button><button class="btn small primary" type="button" data-action="reopen-project" data-project-id="${attr(project.id)}">${t("项目再开")}</button></div>`}
           </div>
         </div>
       </div>
