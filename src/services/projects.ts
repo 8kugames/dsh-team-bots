@@ -158,6 +158,30 @@ export const projectsMethods = {
     return bot
   },
 
+  // 成员会话上下文（DSHBOTS-229）：项目群内任意成员 bot 可用；非项目成员、单聊会话一律 forbidden。
+  // 与 ownerContextFor 同口径，但不要求总监身份。
+  memberContextFor(sessionId) {
+    const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+    if (!binding || !binding.project_id) throw forbidden('只有项目群中的 Bot 可以执行该操作')
+    const project = this.projectRow(binding.project_id)
+    const bot = this.assertMember(project.id, binding.bot_id)
+    return { binding, project, bot, actor: { type: 'bot', id: binding.bot_id } }
+  },
+
+  // 成员查询工具入口（DSHBOTS-229）：项目群内任意成员可查本项目名单/角色/状态。
+  // 数据源是 membersOf（本项目成员表），不触其他项目数据；输出纯文本。
+  listMembersFromBot(sessionId) {
+    const { project, bot } = this.memberContextFor(sessionId)
+    const members = this.membersOf(project.id)
+    const lines = members.map(member => {
+      const tags = [`${member.name}`, member.id === bot.id ? '（你）' : '', `项目角色 ${member.member_role}`]
+      if (member.bot_role) tags.push(`职责 ${member.bot_role}`)
+      tags.push(`状态 ${member.status}`)
+      return `- ${tags.filter(Boolean).join('，')}`
+    })
+    return [`项目 ${project.key} 成员（${members.length}）：`, ...lines].join('\n')
+  },
+
   // 项目生产目录：显式指定的外部目录优先（Bot 的 cwd、密钥物化、产物清单），
   // 未指定时与 <工作区>/{slug} 管理目录一致。
   projectWorkDir(project) {

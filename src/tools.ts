@@ -99,6 +99,18 @@ export function installTeamTools(ctx, service) {
     },
   })
 
+  // DSHBOTS-229：成员查询——项目群内任意成员可查本项目名单/角色/状态。
+  ctx.tools.register({
+    name: 'team_list_members',
+    description: 'List the bots in this project group with their project role, job role and status. Any bot in the project group may use this. The result is limited to this project\'s members; it never exposes other projects\' data.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      return service.listMembersFromBot(sessionId)
+    },
+  })
+
   ctx.tools.register({
     name: 'team_recall',
     description: 'Expand one truncated context item by its reference id. Accepts a message id (m_xxxxxx), a task comment id (c_xxxxxx), a run id (run_xxxxxx), or a task number such as DEMO-7. Returns the full stored text for that project only.',
