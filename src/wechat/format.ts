@@ -1,50 +1,35 @@
-// src/wechat/format.ts —— 微信出站消息排版层（纯文本，DSHBOTS-211）
-// 通道全部回程/回执文案在此集中格式化：emoji 状态标记、分段、分隔线、关键标识前置。
+// src/wechat/format.ts —— 微信出站消息排版层（纯文本，DSHBOTS-217）
+// 通道全部回程/回执文案在此集中格式化：分段、分隔线、缩进、关键标识前置。
 // 只改样式不改语义（状态码、任务号、标题、指派等信息原样保留）；
 // 消费点（commands / channel / run-finish / task-notify / service.wechatReview）
-// 只传数据不拼文案，后续调样式只动本文件。微信不渲染 markdown，
-// 出站虽仍有 filterWechatMarkdown 兜底，排版只用纯文本安全字符。
+// 只传数据不拼文案，后续调样式只动本文件。
+// 排版一律纯文本，不用 emoji（D-211 实机验收驳回口径）：状态一律写成 [状态码] 纯文字。
 
-/** 纯文本分隔线：区分消息头与正文（emoji 与长划线不会被 markdown 过滤洗掉）。 */
+/** 纯文本分隔线：区分消息头与正文。 */
 export const RULE = '———————————————'
 
 /** 合批摘要的明细行数上限：超过只保留最旧 N 条原文，其余汇总。 */
 export const DIGEST_DETAIL_LINES = 5
 
-/** 任务状态 → 行首标记；状态码原文保留在行内，标记只是视觉锚点。 */
-const STATUS_MARKS = {
-  todo: '☐',
-  in_progress: '▶️',
-  in_review: '👀',
-  blocked: '⛔',
-  done: '✅',
-  canceled: '✖️',
-}
-
-export function statusMark(status) {
-  return STATUS_MARKS[String(status ?? '')] ?? '·'
-}
-
-/** 帮助：指令逐条带标记，说明自由文本直达。 */
+/** 帮助：指令逐条说明，自由文本直达。 */
 export function helpText() {
   return [
-    '📖 可用指令',
-    '',
+    '可用指令：',
     '  帮助 / help / ?        查看本帮助',
-    '  📋 状态                概览各项目与待验收任务',
-    '  ✅ 验收 <任务号> [评语]  通过验收，如：验收 web-3 做得好',
-    '  ↩️ 驳回 <任务号> <理由>  退回重做，理由必填',
-    '  🔍 详情 <任务号>        查看任务卡片',
-    '  🗂 q                   列出项目 key',
-    '  📨 <key>: <消息>        指定项目并直达其总监，如：web: 上线新版官网',
+    '  状态                   概览各项目与待验收任务',
+    '  验收 <任务号> [评语]     通过验收，如：验收 web-3 做得好',
+    '  驳回 <任务号> <理由>     退回重做，理由必填',
+    '  详情 <任务号>           查看任务卡片',
+    '  q                      列出项目 key',
+    '  <key>: <消息>           指定项目并直达其总监，如：web: 上线新版官网',
     '',
-    '💬 其余任意消息直接发给当前项目的总监，回复会推送到微信。',
+    '其余任意消息直接发给当前项目的总监，回复会推送到微信。',
   ].join('\n')
 }
 
-/** 状态视图：项目分组 + 任务行（任务号前置、状态标记行首）。 */
+/** 状态视图：项目分组 + 任务行（任务号前置，状态用 [状态码] 纯文字）。 */
 export function statusView(projects) {
-  const lines = ['📋 进行中的任务', '']
+  const lines = ['进行中的任务']
   let any = false
   for (const project of projects ?? []) {
     const open = (project.tasks ?? []).filter(task => task.status !== 'done' && task.status !== 'canceled')
@@ -52,18 +37,18 @@ export function statusView(projects) {
     any = true
     lines.push(`【${project.name || project.key}】`)
     for (const task of open.slice(0, 10)) {
-      lines.push(`  ${statusMark(task.status)} ${project.key}-${task.number} [${task.status}] ${task.title}`)
+      lines.push(`  ${project.key}-${task.number} [${task.status}] ${task.title}`)
     }
   }
-  return any ? lines.join('\n') : '📋 当前没有进行中的任务。'
+  return any ? lines.join('\n') : '当前没有进行中的任务。'
 }
 
-/** 任务详情：卡片头 + 最近评论（各评论空行分段）。 */
+/** 任务详情：卡片头 + 最近评论（各评论空行分段，正文缩进两格）。 */
 export function taskDetail(view) {
-  const lines = [`🔍 ${view.identifier} [${view.status}] ${view.title}`]
+  const lines = [`${view.identifier} [${view.status}] ${view.title}`]
   for (const comment of (view.comments ?? []).slice(-3)) {
-    lines.push('', `  💬 ${comment.author_type}:${comment.author_id} ${comment.created_at}`)
-    lines.push(`    ${String(comment.body).slice(0, 200)}`)
+    lines.push('', `— ${comment.author_type}:${comment.author_id} ${comment.created_at}`)
+    lines.push(`  ${String(comment.body).slice(0, 200)}`)
   }
   return lines.join('\n')
 }
@@ -71,8 +56,8 @@ export function taskDetail(view) {
 /** 可选项目清单（q 指令与直达未命中提示共用）。 */
 export function projectList(projects) {
   const list = projects ?? []
-  if (!list.length) return '🗂 当前没有可选的项目。'
-  const lines = ['🗂 可选的项目']
+  if (!list.length) return '当前没有可选的项目。'
+  const lines = ['可选的项目：']
   for (const project of list) {
     lines.push(`  ${project.key}${project.name && project.name !== project.key ? `  ${project.name}` : ''}`)
   }
@@ -83,48 +68,48 @@ export function projectList(projects) {
 export function connectedReceipt(project, via) {
   const name = project.name || project.key
   return via === 'dispatch'
-    ? `🔗 已直达【${name}】总监\n💬 直接发消息即可继续对话，回复会推送到微信。`
-    : `🔗 已连接【${name}】总监\n💬 直接发消息即可，回复会推送到这里；换项目用「<key>: <消息>」。`
+    ? `已直达【${name}】总监，之后的回复会推送到微信；直接发消息即可继续对话。`
+    : `已连接【${name}】总监，直接发消息即可，回复会推送到这里；换项目用「<key>: <消息>」。`
 }
 
 /** 项目无可定向总监。 */
 export function noOwner(project) {
-  return `⚠️ 项目【${project.name || project.key}】没有可用的总监 Bot，无法直达。`
+  return `项目【${project.name || project.key}】没有可用的总监 Bot，无法直达。`
 }
 
 /** 未选定直达项目：引导先指定一次，附项目清单。 */
 export function needPickProject(projects) {
   return [
-    '📌 还没有选定直达的项目，先用「<key>: <消息>」指定一次，之后的消息就会直接发给该项目的总监。',
+    '还没有选定直达的项目，先用「<key>: <消息>」指定一次，之后的消息就会直接发给该项目的总监。',
     projectList(projects),
   ].join('\n')
 }
 
 /** 显式 key 未命中。 */
 export function projectNotFound(key, projects) {
-  return `⚠️ 没有找到项目 ${key}。${projectList(projects)}`
+  return `没有找到项目 ${key}。${projectList(projects)}`
 }
 
 /** 任务指令正文里没有合法任务号。 */
 export function badTaskId() {
-  return `⚠️ 任务号格式不对：正文里没有形如 web-3 的任务号。${helpText()}`
+  return `任务号格式不对：正文里没有形如 web-3 的任务号。${helpText()}`
 }
 
 /** 驳回缺理由。 */
 export function needReturnReason() {
-  return '⚠️ 驳回必须带理由：驳回 web-3 理由文字。'
+  return '驳回必须带理由：驳回 web-3 理由文字。'
 }
 
 /** 验收/驳回指令回执（accept | return）。 */
 export function reviewResult(identifier, title, decision) {
   return decision === 'accept'
-    ? `✅ ${identifier}《${title}》已验收通过。`
-    : `↩️ ${identifier}《${title}》已退回重做。`
+    ? `${identifier}《${title}》已验收通过。`
+    : `${identifier}《${title}》已退回重做。`
 }
 
-/** 直达对话回程推送：总监回复（或失败提示）推回管理员微信。 */
+/** 直达对话回程推送：总监回复（或失败提示）推回管理员微信；失败用 [失败] 纯文字标头。 */
 export function chatReply(botName, body, failed = false) {
-  return `${failed ? '⚠️' : '💬'} ${botName}\n${RULE}\n${body}`
+  return `${failed ? '[失败] ' : ''}${botName}\n${RULE}\n${body}`
 }
 
 /** 提问/审批的微信短 token：取 id 末 6 位（库内唯一性由项目绑定 + pending 收敛）。 */
@@ -178,20 +163,20 @@ export function answerHelp() {
   return '请按格式答复：答 <token> <选项或文字>；多个问题用「;」分隔，如：答 abc123 1:选项一;2:补充说明。'
 }
 
-/** 任务创建推送。 */
+/** 任务创建推送：任务号前置，指派与详情入口逐行列出。 */
 export function taskCreated(identifier, title, assignee) {
   return [
-    `🆕 ${identifier}《${title}》已创建`,
-    `👤 ${assignee ? `派给 ${assignee}` : '暂未指派'}`,
-    `📖 回复「详情 ${identifier}」查看`,
+    `${identifier}《${title}》已创建`,
+    `指派 ${assignee || '暂未指派'}`,
+    `回复「详情 ${identifier}」查看`,
   ].join('\n')
 }
 
 /** 任务完成推送。 */
 export function taskDone(identifier, title) {
   return [
-    `✅ ${identifier}《${title}》已完成`,
-    `📖 回复「详情 ${identifier}」查看`,
+    `${identifier}《${title}》已完成`,
+    `回复「详情 ${identifier}」查看`,
   ].join('\n')
 }
 
@@ -199,17 +184,17 @@ export function taskDone(identifier, title) {
 export function batchDigest(items) {
   const shown = items.slice(0, DIGEST_DETAIL_LINES)
   const rest = items.length - shown.length
-  const lines = [`📣 任务动态 ${items.length} 条`, RULE, ...shown.map(item => item.text)]
-  if (rest > 0) lines.push(`⋯ 其余 ${rest} 项`)
+  const lines = [`任务动态 ${items.length} 条`, RULE, ...shown.map(item => item.text)]
+  if (rest > 0) lines.push(`其余 ${rest} 项`)
   return lines.join('\n')
 }
 
 /** 管理员绑定欢迎。 */
 export function welcomeAdmin() {
-  return '👋 已绑定为本团队管理员\n📖 回复「帮助」查看指令'
+  return '已绑定为本团队管理员\n回复「帮助」查看指令'
 }
 
 /** 用户侧通用失败提示（具体错误只进日志）。 */
 export function failureText() {
-  return '⚠️ 消息处理失败，稍后重试'
+  return '消息处理失败，稍后重试'
 }

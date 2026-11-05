@@ -5,6 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WechatStore } from '../src/wechat/store.js'
 import { extractTaskId, handleCommand, isRetryable, outboundChunks, WechatBusinessError, WechatIlinkError } from '../src/wechat/commands.js'
+import {
+  answerFailed, answerHelp, answerReceipt, approvalCard, badTaskId, batchDigest, chatReply,
+  connectedReceipt, failureText, helpText, needPickProject, needReturnReason, noOwner,
+  projectList, projectNotFound, questionCard, reviewResult, statusView, taskCreated,
+  taskDone, taskDetail, welcomeAdmin,
+} from '../src/wechat/format.js'
 import { WechatChannel } from '../src/wechat/channel.js'
 import { TASK_ID_PATTERN } from '../src/util.js'
 import { AppError } from '../src/errors.js'
@@ -543,7 +549,7 @@ test('wechat commands help/help 大小写变体都出帮助', async () => {
 test('wechat commands q 列出可选项目 key，空列表给空态文案', async () => {
   const service = DISPATCH_STUB()
   const reply = await handleCommand(service, 'q')
-  assert.ok(reply.startsWith('🗂 可选的项目'))
+  assert.ok(reply.startsWith('可选的项目：'))
   assert.ok(reply.includes('  web  Web'), 'key 与名称都应出现')
   assert.ok(reply.includes('  bot'), '无名称项目只列 key')
   assert.equal((await handleCommand(service, 'Q')), reply, '大小写不敏感')
@@ -672,13 +678,13 @@ test('wechat 直达真 service：消息以用户身份插入项目会话并触�
     assert.equal(freeRun.trigger_type, 'wechat')
 
     // 回程：微信直达运行结束，bot 回复推回管理员；普通群聊运行不推
-    // DSHBOTS-211 回程排版：头部标记 + 分隔线（chatReply），语义内容不变。
+    // DSHBOTS-217 回程排版：bot 名 + 分隔线（chatReply），失败加 [失败] 纯文字标头。
     const pushed: string[] = []
     ;(service as any).wechat = { notify(text: string) { pushed.push(text) } }
     await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
-    assert.deepEqual(pushed, ['💬 director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
+    assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
     await service.finishRun({ runId: freeRun.id, status: 'failed', error: { message: '模型超时' } } as any)
-    assert.equal(pushed.at(-1), '⚠️ director\n———————————————\n运行失败：模型超时', '失败提示同样推回')
+    assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败：模型超时', '失败提示同样推回')
 
     await service.sendMessage(store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id, '工作台普通群聊消息', { type: 'user', id: service.localUserId })
     const uiRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", store.get("SELECT id FROM messages WHERE body = '工作台普通群聊消息'").id)
@@ -707,4 +713,45 @@ test('wechat store 直达项目绑定：保存/读取随通道持久化，登出
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+// DSHBOTS-217：微信出站一律纯文本，全部排版函数渲染结果不得含 emoji/符号标记。
+const NO_EMOJI = /[\u{1F000}-\u{1FAFF}\u{2500}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}]/u
+
+test('wechat 排版纯文本：全部 format 渲染结果无 emoji', () => {
+  const project = { key: 'web', name: 'Web' }
+  const samples = [
+    helpText(),
+    statusView([{ key: 'web', name: 'Web', tasks: [{ number: 3, status: 'in_progress', title: '写登录页' }] }]),
+    statusView([]),
+    taskDetail({
+      identifier: 'web-3', status: 'in_progress', title: '写登录页',
+      comments: [{ author_type: 'user', author_id: 'admin', created_at: '2026-11-05 14:00', body: '做得好' }],
+    }),
+    projectList([project, { key: 'bot', name: '' }]),
+    projectList([]),
+    connectedReceipt(project, 'dispatch'),
+    connectedReceipt(project, 'bind'),
+    noOwner(project),
+    needPickProject([{ key: 'a' }, { key: 'b' }]),
+    projectNotFound('NOPE', [project]),
+    badTaskId(),
+    needReturnReason(),
+    reviewResult('web-3', '写登录页', 'accept'),
+    reviewResult('web-3', '写登录页', 'return'),
+    chatReply('director', '收到，我来安排上线。'),
+    chatReply('director', '运行失败：模型超时', true),
+    questionCard('Web', 'director', [{ question: '用哪个方案？', options: [{ label: '方案一' }, { label: '方案二' }] }], 'abc123'),
+    approvalCard('Web', 'director', 'bash', '需要执行命令', 'abc123'),
+    answerReceipt('abc123', '已记录'),
+    answerFailed('abc123', '没有匹配的待答提问'),
+    answerHelp(),
+    taskCreated('web-3', '写登录页', 'Builder'),
+    taskCreated('web-3', '写登录页', ''),
+    taskDone('web-3', '写登录页'),
+    batchDigest([{ text: 'web-1《甲》已完成' }, { text: 'web-2《乙》已完成' }]),
+    welcomeAdmin(),
+    failureText(),
+  ]
+  for (const text of samples) assert.ok(!NO_EMOJI.test(text), `排版不得含 emoji/符号标记：\n${text}`)
 })
