@@ -2,14 +2,15 @@
 // 覆盖：阈值未触发/触发、摘要未就绪继续复用旧会话（含幂等补排）、摘要就绪删旧绑定走新建、
 // 新会话首轮提示词注入摘要一次且清零后不重复注入、0=关闭、task/dm 不结转、
 // 摘要运行路由回旧会话、finishRun 成功落库/失败留痕、单聊（无项目）结转、
-// 支撑索引迁移幂等、executeRun→摘要提示词→finishRun→下次复用开新会话的完整链路。
+// 支撑索引迁移幂等、executeRun→摘要提示词→finishRun→下次复用开新会话的完整链路、
+// 消费闸（DSHBOTS-213）：非结转顶替会话的普通轮次不得消费摘要，阈值再触发直接结转不重排。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
-import { resolveConfig, rolloverSummaryKey } from '../src/config.js'
+import { resolveConfig, rolloverPendingKey, rolloverSummaryKey } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import { ensureRolloverSchema, ROLLOVER_MIGRATION } from '../src/services/rollover-schema.js'
@@ -174,6 +175,8 @@ test('新会话首轮提示词注入摘要块一次，清零后不重复注入',
     const { dev, project } = await primeProject(ctx.service, ctx.store)
     const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
     ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '交接摘要正文。')
+    // 结转路径开新会话时会写入 pending 标记（见 ensureSession），此处按同口径预置。
+    ctx.store.setSetting(rolloverPendingKey(dev.id, project.id), 'sess-new-1')
 
     const first = runtime.promptFor({ run: { kind: 'chat' }, bot: dev, project, chatMessage: { body: '在吗' }, sessionId: 'sess-new-1' })
     assert.ok(first.includes('# Handoff summary from the previous session'), '首轮应注入摘要块')
@@ -182,6 +185,35 @@ test('新会话首轮提示词注入摘要块一次，清零后不重复注入',
 
     const second = runtime.promptFor({ run: { kind: 'chat' }, bot: dev, project, chatMessage: { body: '继续' }, sessionId: 'sess-new-1' })
     assert.ok(!second.includes('# Handoff summary from the previous session'), '清零后不得重复注入')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('消费闸：非结转顶替会话的普通轮次不消费摘要，阈值再触发直接结转不重排摘要运行', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    // 场景还原（生产 11-04 实发）：旧会话摘要已就绪，但绑定已被非结转路径顶替成替身会话。
+    ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '旧会话交接摘要。')
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-replacement' })
+
+    // 替身会话远低于阈值的普通聊天轮：不得注入、不得清零摘要。
+    const ordinary = runtime.promptFor({ run: { kind: 'chat' }, bot: dev, project, chatMessage: { body: '在吗' }, sessionId: 'sess-replacement' })
+    assert.ok(!ordinary.includes('# Handoff summary from the previous session'), '非结转顶替会话的普通轮次不得注入摘要')
+    assert.equal(ctx.store.setting(rolloverSummaryKey(dev.id, project.id)), '旧会话交接摘要。', '摘要不得被提前清零')
+
+    // 替身会话超阈值后复用：摘要仍在 → 直接结转开新会话，不重排摘要运行。
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-replacement', count: TURNS })
+    const rolled = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    assert.equal(rolled, 'sess-new-1', '摘要就绪应直接结转')
+    assert.equal(rolloverRuns(ctx.store).length, 0, '不得重排摘要运行')
+    assert.equal(ctx.store.setting(rolloverPendingKey(dev.id, project.id)), 'sess-new-1', '结转应登记新会话为注入目标')
+
+    const first = runtime.promptFor({ run: { kind: 'chat' }, bot: dev, project, chatMessage: { body: '继续' }, sessionId: rolled })
+    assert.ok(first.includes('旧会话交接摘要。'), '结转新会话首轮应注入摘要')
+    assert.equal(ctx.store.setting(rolloverSummaryKey(dev.id, project.id)), '', '注入后应即刻清零')
   } finally {
     await cleanup(ctx)
   }

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { AppError } from '../../errors.js'
 import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
-import { effectiveRunLimits, effectiveSessionRolloverTurns, rolloverSummaryKey } from '../../config.js'
+import { effectiveRunLimits, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { imageContentPartsForMessage } from '../message-images.js'
 import { restoreDefaultModel } from './model-restore.js'
 
@@ -279,6 +279,7 @@ export const sessionMethods = {
           project.id,
           kind,
         )
+    let rolledOver = false
     if (existing) {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
@@ -288,6 +289,7 @@ export const sessionMethods = {
         // 不阻塞对话。
         const rollover = kind !== 'task' && kind !== 'dm'
           && this.shouldRolloverSession({ bot, project, existing })
+        rolledOver = rollover
         if (!rollover) {
           this.applyFilePolicy(resolved, bot, run, task)
           await this.selectModel(existing.session_id, bot, modelOverride)
@@ -336,6 +338,9 @@ export const sessionMethods = {
         taskId,
         new Date().toISOString(),
       )
+      // 结转消费闸（DSHBOTS-213）：新会话成为摘要的唯一注入目标——否则旧会话在摘要就绪
+      // 前后被非结转路径顶替（如宿主重启失效）时，替身会话的普通轮次会把摘要提前消费掉。
+      if (rolledOver) this.store.setSetting(rolloverPendingKey(bot.id, solo ? null : project.id), sessionId)
       await this.selectModel(sessionId, bot, modelOverride)
       // 挂到 DSH 原生工作区分组（可选增强）：registry 经 ctx.get 读取，宿主未装就整体跳过；
       // 挂载失败只在 workspace-groups 内 warn，绝不影响会话返回与运行。

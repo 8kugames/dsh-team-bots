@@ -119,6 +119,10 @@ export function effectiveReviewIdleMinutes(config, getSetting: (key: string) => 
 // 单聊会话各自独立结转，互不串档；单聊（无项目）用 'solo' 占位。
 export const rolloverSummaryKey = (botId, projectId) => `rollover_summary:${botId}:${projectId ?? 'solo'}`
 
+// 结转摘要的待注入目标会话键（DSHBOTS-213）：结转开新会话时记录新会话 id，摘要只允许被
+// 该目标会话的提示词消费，防止被其他会话的普通轮次提前清零。
+export const rolloverPendingKey = (botId, projectId) => `rollover_pending:${botId}:${projectId ?? 'solo'}`
+
 // ── UI 语言（DSHBOTS-162）─────────────────────────────────────────────────
 // 全局配置页语言下拉：auto = 跟随 DSH 宿主设定（缺省），zh/en = 显式覆盖。
 // env DSH_TEAM_UI_LANGUAGE 可覆盖页面保存值（不强制）。

@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
 import { id, nowIso, parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
-import { rolloverSummaryKey } from '../../config.js'
+import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { readWriteScopes } from '../write-scopes.js'
 
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
@@ -316,11 +316,14 @@ export const promptMethods = {
 
   // 结转摘要块（DSHBOTS-145）：新会话首轮提示词注入旧会话的交接摘要。
   // 一次性语义（照 recovery note 手法）：读到的同时即刻清零，同一摘要只注入一次。
-  // 无摘要（未结转 / 已消费）返回空串，模板原样不变。
-  rolloverSummaryBlock(bot, project) {
+  // 消费闸（DSHBOTS-213）：仅当本轮会话就是结转新建的目标会话（pending 标记命中）才消费；
+  // 无摘要或目标不是本会话时返回空串，摘要保留到真正的结转，防止被无关轮次提前清零。
+  rolloverSummaryBlock(bot, project, sessionId) {
     const summary = this.store.setting(rolloverSummaryKey(bot.id, project?.id))
     if (!summary) return ''
+    if (this.store.setting(rolloverPendingKey(bot.id, project?.id)) !== sessionId) return ''
     this.store.setSetting(rolloverSummaryKey(bot.id, project?.id), '')
+    this.store.setSetting(rolloverPendingKey(bot.id, project?.id), '')
     return `
 
 # Handoff summary from the previous session
@@ -370,7 +373,7 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
 Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.
 
 # Solo message
-${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}${this.rolloverSummaryBlock(bot)}
+${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}${this.rolloverSummaryBlock(bot, null, sessionId)}
 
 ${recentBlock}`
   },
@@ -642,7 +645,7 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
-${quoteLine}${this.rolloverSummaryBlock(bot, project)}
+${quoteLine}${this.rolloverSummaryBlock(bot, project, sessionId)}
 ${recentBlock}
 
 Open tasks:
