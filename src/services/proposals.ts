@@ -92,7 +92,8 @@ export const proposalsMethods = {
     }
   },
 
-  // 评估：提案必须先有评估结论，结论为 pass 才允许批准。
+  // 评估：记录对提案的评估结论，供审批参考与留痕；评估不是审批的前置条件，
+  // 人工批准/拒绝即最终决定（评估人与审批人是同一用户，两步门槛只会造成死锁）。
   async evaluateProposal(proposalId, evaluation, actor = this.actor()) {
     const proposal = this.store.get('SELECT * FROM proposals WHERE id = ?', proposalId)
     if (!proposal) throw notFound('提案不存在')
@@ -114,10 +115,8 @@ export const proposalsMethods = {
     if (!proposal) throw notFound('提案不存在')
     if (proposal.status !== 'pending') throw conflict('提案已处理')
     const payload = jsonParse(proposal.payload_json, {})
-    const evaluation = jsonParse(proposal.evaluation_json, {})
     const canary = jsonParse(proposal.canary_json, null)
     if (decision === 'approved') {
-      if (evaluation?.verdict !== 'pass') throw conflict('提案缺少通过的评估结果，请先完成评估')
       const applied = await this.applyProposal(proposal, payload, canary, actor)
       const nextStatus = applied.canary ? 'canary' : 'approved'
       this.store.run(

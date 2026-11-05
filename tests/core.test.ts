@@ -411,9 +411,7 @@ test('skill proposal approval publishes into shared skill pool', async () => {
       kind: 'skill', projectId: project.id, title: 'Add deploy skill', rationale: 'Repeated deploy work',
       payload: { slug: 'deploy-check', name: 'Deploy check', description: 'Check deployment', version: '1.0.0', content: '# Deploy check\n\nRun smoke tests.' },
     }, actor)
-    // 没有评估结论时不允许直接批准。
-    await assert.rejects(() => service.decideProposal(proposal.id, 'approved', actor), /评估/)
-    await service.evaluateProposal(proposal.id, { verdict: 'pass', notes: '内容可执行' }, actor)
+    // 评估缺失可直接批准（DSHBOTS-224：评估不再是审批前置条件），批准后技能入共享池。
     const approved = await service.decideProposal(proposal.id, 'approved', actor)
     assert.equal(approved.status, 'approved')
     const state = await service.state(project.id)

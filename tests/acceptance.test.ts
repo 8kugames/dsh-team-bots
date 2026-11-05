@@ -207,23 +207,32 @@ test('低置信度记忆进入待审队列，批准后生效', async () => {
   }
 })
 
-test('提案必须先有通过的评估才能批准', async () => {
+test('提案缺少评估结论可通过或拒绝，不再死锁（DSHBOTS-224）', async () => {
   const { root, store, service, director } = await setup()
   try {
     const actor = { type: 'user', id: service.localUserId }
     const project = await service.createProject({ name: 'Prop', key: 'PRP', ownerBotId: director.id })
-    const proposal = await service.createProposal({
-      kind: 'skill', projectId: project.id, title: '新增技能', rationale: '重复劳动',
-      payload: { slug: 'gate-skill', name: 'Gate', description: 'Gate skill', version: '1.0.0', content: '# Gate' },
+    const makeProposal = (slug, title) => service.createProposal({
+      kind: 'skill', projectId: project.id, title, rationale: '重复劳动',
+      payload: { slug, name: 'Gate', description: 'Gate skill', version: '1.0.0', content: '# Gate' },
     }, actor)
-    await assert.rejects(() => service.decideProposal(proposal.id, 'approved', actor), /评估/)
-    await service.evaluateProposal(proposal.id, { verdict: 'fail', notes: '内容不完整' }, actor)
-    await assert.rejects(() => service.decideProposal(proposal.id, 'approved', actor), /评估/)
-    await service.evaluateProposal(proposal.id, { verdict: 'pass', notes: '已补全' }, actor)
+    // 评估缺失（verdict=pending）不阻断批准：人工批准即最终门，评估仅留痕。
+    const proposal = await makeProposal('gate-skill', '新增技能')
     const approved = await service.decideProposal(proposal.id, 'approved', actor)
     assert.equal(approved.status, 'approved')
-    assert.equal(approved.evaluation.verdict, 'pass')
+    assert.equal(approved.evaluation.verdict, 'pending')
     assert.equal(approved.diff.version.to, '1.0.0')
+    // 评估缺失同样不阻断拒绝。
+    const second = await makeProposal('gate-skill-2', '再增技能')
+    const rejected = await service.decideProposal(second.id, 'rejected', actor)
+    assert.equal(rejected.status, 'rejected')
+    // fail 评估只是参考留痕：人工仍可改判通过（评估人=审批人，无职责分离可守）。
+    const third = await makeProposal('gate-skill-3', '三增技能')
+    await service.evaluateProposal(third.id, { verdict: 'fail', notes: '内容不完整' }, actor)
+    const overridden = await service.decideProposal(third.id, 'approved', actor)
+    assert.equal(overridden.status, 'approved')
+    assert.equal(overridden.evaluation.verdict, 'fail')
+    assert.equal(overridden.evaluation.notes, '内容不完整')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
