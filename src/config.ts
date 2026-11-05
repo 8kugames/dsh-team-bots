@@ -221,7 +221,8 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
       512 * 1024, 0, 5 * 1024 * 1024,
     ),
     // 原生 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
-    agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, false),
+    // 缺省开启（DSHBOTS-230）：默认部署即注入并行拆分引导；显式传 0/false 可关闭。
+    agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, true),
     maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 3, 1, 8),
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。
     routerPreset: String(config.routerPreset ?? process.env.DSH_TEAM_ROUTER_PRESET ?? '').trim(),

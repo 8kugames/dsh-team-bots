@@ -575,7 +575,8 @@ This task is urgent and exempt from lane queuing discipline: start immediately, 
 Before closing: if this task cannot be finished in one run (e.g. quota-capped partial delivery) or new closing conditions emerge (test gaps, coupled fixes, later productization), immediately file subtasks via team_assign_task with parent_task_id and report in the group — never leave follow-ups as verbal suggestions without cards. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.`
       // subtask-discipline:end
       // splitting-guidance:start —— 提速拆分引导（DSHBOTS-212）。根因调查结论：此前唯一讲并行拆分
-      // 的段（下方 parallel）被 config.agentTeam 默认关闭，纪律段只覆盖「做不完再兜底立卡」，
+      // 的段（下方 parallel）被 config.agentTeam 缺省关闭（DSHBOTS-230 起缺省开启，parallel 段
+      // 默认可见），纪律段只覆盖「做不完再兜底立卡」，
       // 执行 bot 又无派单权限（team_assign_task 仅总监可用），三条叠加导致拆分使用率为零。
       // 本段补齐「何时拆、怎么拆」：拆分判据（独立部分 + 写范围不相交 + 拆后合并成本更低，
       // 即 C_removed > C_introduced 的白话口径）+ 角色现实（无权限就在交付报告里提拆分方案）。
