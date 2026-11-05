@@ -227,6 +227,81 @@ test('提问进入终态或窗口过期后，超龄运行照常被看门狗回�
   }
 })
 
+test('审批 pending 未过期时，等待人类决策的运行不计入 stall', async () => {
+  const { root, store, service, runtime, director, dev } = await setup({ stallTimeoutMs: 30_000, approvalTimeoutMs: 180_000 })
+  try {
+    const project = await service.createProject({ name: 'AskApprove', key: 'SAP', ownerBotId: director.id, memberIds: [dev.id] })
+    const task = await service.createTask({ projectId: project.id, title: 'Wait for approval', assigneeBotId: dev.id, autoStart: true })
+    service.started = true
+    await service.tick()
+    const run = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task'", task.id)
+    assert.equal(run.status, 'running')
+
+    // 伪造“很久没有事件”+ 一条 pending 未过期审批（用户正决策）
+    store.run('UPDATE runs SET last_progress_at = ? WHERE id = ?', new Date(Date.now() - 10 * 60_000).toISOString(), run.id)
+    store.run(
+      `INSERT INTO approvals(id, project_id, run_id, bot_id, tool_name, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, 'write_file', 'pending', ?, ?)`,
+      'apr_open', project.id, run.id, dev.id,
+      new Date().toISOString(), new Date(Date.now() + 120_000).toISOString(),
+    )
+    await service.tick()
+
+    assert.equal(store.get('SELECT status FROM runs WHERE id = ?', run.id).status, 'running')
+    assert.deepEqual(runtime.cancelled, [])
+    assert.equal(store.get("SELECT status FROM tasks WHERE id = ?", task.id).status, 'in_progress')
+    assert.equal(store.get("SELECT status FROM approvals WHERE id = 'apr_open'").status, 'pending')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('审批进入终态或窗口过期后，超龄运行照常被看门狗回收', async () => {
+  const { root, store, service, runtime, director, dev } = await setup({ stallTimeoutMs: 30_000, approvalTimeoutMs: 180_000 })
+  try {
+    // 两个项目各挂一条超龄 run（同项目未声明写范围的写运行会保守串行，第二条起不了跑）：
+    // A 挂已批准（终态）审批、expires_at 还在未来；B 挂泄漏 pending（窗口已过）。
+    const projectA = await service.createProject({ name: 'ApproveDone', key: 'APD', ownerBotId: director.id, memberIds: [dev.id] })
+    const projectB = await service.createProject({ name: 'ApproveLeak', key: 'APL', ownerBotId: director.id, memberIds: [dev.id] })
+    const taskA = await service.createTask({ projectId: projectA.id, title: 'Approved', assigneeBotId: dev.id, autoStart: true })
+    const taskB = await service.createTask({ projectId: projectB.id, title: 'Leaked pending', assigneeBotId: dev.id, autoStart: true })
+    service.started = true
+    await service.tick()
+    const runA = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task'", taskA.id)
+    const runB = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task'", taskB.id)
+    assert.equal(runA.status, 'running')
+    assert.equal(runB.status, 'running')
+
+    store.run('UPDATE runs SET last_progress_at = ? WHERE id IN (?, ?)',
+      new Date(Date.now() - 10 * 60_000).toISOString(), runA.id, runB.id)
+    store.run(
+      `INSERT INTO approvals(id, project_id, run_id, bot_id, tool_name, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, 'write_file', 'approved', ?, ?)`,
+      'apr_done', projectA.id, runA.id, dev.id,
+      new Date().toISOString(), new Date(Date.now() + 120_000).toISOString(),
+    )
+    store.run(
+      `INSERT INTO approvals(id, project_id, run_id, bot_id, tool_name, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, 'write_file', 'pending', ?, ?)`,
+      'apr_leak', projectB.id, runB.id, dev.id,
+      new Date(Date.now() - 5 * 60_000).toISOString(), new Date(Date.now() - 60_000).toISOString(),
+    )
+    await service.tick()
+
+    const reapedA = store.get('SELECT * FROM runs WHERE id = ?', runA.id)
+    const reapedB = store.get('SELECT * FROM runs WHERE id = ?', runB.id)
+    assert.equal(reapedA.status, 'failed')
+    assert.equal(reapedA.error_code, 'RUN_STALLED')
+    assert.equal(reapedB.status, 'failed')
+    assert.equal(reapedB.error_code, 'RUN_STALLED')
+    assert.deepEqual(runtime.cancelled.sort(), [runA.id, runB.id].sort())
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('群聊只放结论，完整交付留在任务评论', async () => {
   const { root, store, service, runtime, director, dev } = await setup({ chatReplyMaxChars: 120 })
   try {

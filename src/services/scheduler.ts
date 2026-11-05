@@ -304,14 +304,20 @@ export const schedulerMethods = {
     // 存在 run_id 匹配且未过 expires_at 的 pending 提问时豁免；豁免期被提问窗口
     // （questionTimeoutMs，默认 180s）自然封顶：窗口一过（提问置 timeout/answered 或残留
     // pending 的 expires_at 已过）超龄 run 下一拍照常回收，泄漏 pending 不可能永久豁免。
+    // DSHBOTS-222：审批与提问同口径——等待审批中的 run 同样没有进展事件，pending 审批
+    // 未过 expires_at 时一并豁免；豁免期被审批窗口（approvalTimeoutMs）自然封顶。
     const stalled = this.store.all(
       `SELECT id, kind, started_at, last_progress_at FROM runs
        WHERE status = 'running' AND COALESCE(last_progress_at, started_at) < ?
          AND NOT EXISTS(
            SELECT 1 FROM questions q
            WHERE q.run_id = runs.id AND q.status = 'pending' AND q.expires_at > ?
+         )
+         AND NOT EXISTS(
+           SELECT 1 FROM approvals a
+           WHERE a.run_id = runs.id AND a.status = 'pending' AND a.expires_at > ?
          )`,
-      cutoff, nowIso(),
+      cutoff, nowIso(), nowIso(),
     )
     for (const run of stalled) {
       this.logger.warn?.('dsh-team: run %s made no progress since %s', run.id, run.last_progress_at ?? run.started_at)
