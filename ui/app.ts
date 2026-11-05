@@ -1,6 +1,6 @@
 import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, COLORS, COLOR_NAMES, BOT_STATUS, RUN_STATUS, RUN_KIND, CHAT_PAGE_SIZE, CHAT_ACTIVE_TASK_LIMIT, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, CREATOR_TYPE, EFFORT, FILE_POLICY, DEFAULT_FILE_POLICY, VIEW_ACTION, NAV, SOLO_NAV } from './modules/state.js'
 import { icon } from './modules/icons.js'
-import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, initials, avatar, statusPill, runDot, memberRunDot, runDotHtml, MEMBER_STATUS_TEXT, memorySource, toast, filePolicyOptions } from './modules/util.js'
+import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, avatar, statusPill, runDot, memberRunDot, runDotHtml, MEMBER_STATUS_TEXT, memorySource, toast, filePolicyOptions } from './modules/util.js'
 import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
@@ -312,7 +312,7 @@ function renderShell() {
             ${state.tree.bots ? `<div class="tree-list">
               ${bots.length === 0 ? `<div class="side-empty">${t('tree.botsEmpty')}</div>` : bots.map(bot => `
                 <button class="tree-item bot-item ${state.view === 'chat' && state.chatMode === 'solo' && bot.id === state.soloBotId ? 'active' : ''}" data-action="${bot.status === 'active' ? 'solo-bot' : 'edit-bot'}" data-bot-id="${attr(bot.id)}" title="${esc(bot.name)} · ${esc(bot.role || t('common.member'))} · ${esc(bot.modelRef ?? t('common.modelUnset'))}">
-                  <span class="avatar sm ${attr(bot.color ?? 'gray')}">${esc(initials(bot.name))}</span>
+                  ${avatar(bot, 'sm')}
                   <span class="tree-item-name">${esc(bot.name)}</span>
                   ${bot.openTasks > 0 ? `<span class="tree-open-count">${bot.openTasks}</span>` : ''}
                   ${bot.status !== 'active' ? `<span class="tree-flag">${t('common.archived')}</span>` : ''}

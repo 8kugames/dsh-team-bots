@@ -13,6 +13,9 @@ export const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'gree
 
 export const botNamePattern = /^[\p{L}\p{N}_-]{1,24}$/u
 
+// 像素块头像种子（DSHBOTS-221）：客户端 roll 生成的随机短串，落库驱动同 seed 同图渲染。
+export const avatarSeedPattern = /^[\w-]{1,64}$/
+
 // solo_dir 唯一冲突时事务内重生成候选的 INSERT 尝试上限。
 const SOLO_DIR_INSERT_ATTEMPTS = 5
 
@@ -160,6 +163,12 @@ export const botsMethods = {
     if (patch.role !== undefined) changes.role = text(patch.role, 24)
     if (patch.instructions !== undefined) changes.instructions = text(patch.instructions, 12_000)
     if (patch.color !== undefined && COLORS.includes(patch.color)) changes.color = patch.color
+    // 像素块头像：null/空串 = 关闭（回落首字母/首字头像）；非空须为安全短串（roll 随机生成）。
+    if (patch.avatarSeed !== undefined) {
+      const seed = patch.avatarSeed === null ? '' : String(patch.avatarSeed).trim()
+      if (seed && !avatarSeedPattern.test(seed)) throw badRequest('头像种子格式无效')
+      changes.avatar_seed = seed || null
+    }
     if (patch.filePolicy !== undefined) {
       const filePolicy = normalizeFilePolicy(patch.filePolicy)
       if (filePolicy !== bot.file_policy) changes.file_policy = filePolicy

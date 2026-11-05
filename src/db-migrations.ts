@@ -129,6 +129,7 @@ export function runMigrations(db) {
   recordMigration(db, 'runs_model_override')
   recordMigration(db, 'chat_reads')
   recordMigration(db, 'solo_message_cards')
+  recordMigration(db, 'bots_avatar_seed')
   return { ftsEnabled }
 }
 
@@ -157,6 +158,8 @@ function migrateBots(db) {
   addColumn(db, 'bots', 'fallback_provider', 'TEXT')
   addColumn(db, 'bots', 'fallback_model', 'TEXT')
   addColumn(db, 'bots', 'fallback_effort', 'TEXT')
+  // bots.avatar_seed：像素块头像（identicon）种子；NULL = 首字母/首字头像，非空 = 像素块头像。
+  addColumn(db, 'bots', 'avatar_seed', 'TEXT')
 }
 
 // run.mode 区分写入型与只读型运行：同一项目同时只允许一个写运行，只读运行可并行。

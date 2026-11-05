@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS bots (
   role TEXT NOT NULL DEFAULT '',
   instructions TEXT NOT NULL DEFAULT '',
   color TEXT NOT NULL DEFAULT 'blue',
+  avatar_seed TEXT,
   provider TEXT,
   model TEXT,
   effort TEXT,
