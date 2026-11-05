@@ -3,6 +3,47 @@ const stringOutput = {
   render: (_args, value) => [{ type: 'text', text: String(value ?? '') }],
 }
 
+// DSHBOTS-238：子代理/智能体团队能力全员化。
+// 「生成子代理/组建临时团队」能力由宿主 preset 注册（subagent/subagent_fork/workflow 与
+// spawn_teammate 等团队工具），插件侧只声明其可用清单与门控，不重复注册。
+export const SUBAGENT_GENERATION_TOOLS = [
+  'subagent',
+  'subagent_fork',
+  'workflow',
+  'spawn_teammate',
+  'send_message',
+  'list_agents',
+  'wait_agent',
+  'interrupt_agent',
+  'team_task_create',
+  'team_task_list',
+  'team_task_get',
+  'team_task_update',
+] as const
+
+// 总监专权工具：服务层 ownerContextFor 已做权威校验，本清单用于工具层兜底与守门测试。
+export const DIRECTOR_ONLY_TOOLS = ['team_assign_task', 'team_review_task'] as const
+
+// 门控：agentTeam 开启且 bot 类型支持（项目内 active bot，成员与总监均可用）。
+export function subagentCapabilityEnabledFor(bot, config) {
+  return Boolean(config?.agentTeam) && Boolean(bot?.id) && bot.status !== 'removed'
+}
+
+// 工具层兜底（DSHBOTS-238）：成员 bot 隐藏总监专权工具，避免「误调被拒后才知情」；
+// 子代理生成工具由 preset 全局注册，成员 bot 默认可见，无需额外放行。
+// resolved 为 sessionController.resolveAgent 的返回（{ agent } 或 { error }）。
+export function applyBotToolPolicy(resolved, { isOwner, logger }: { isOwner: boolean; logger?: { warn?: (...args: unknown[]) => void } }) {
+  if (isOwner) return
+  const restrict = resolved?.agent?.ctx?.tools?.restrict
+  if (typeof restrict !== 'function') return
+  try {
+    restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })
+  } catch (error: any) {
+    // 工具层兜底失败不阻断会话：服务层 ownerContextFor 仍是权威闸门。
+    logger?.warn?.(`dsh-team: 应用成员 bot 工具策略失败：${error?.message ?? error}`)
+  }
+}
+
 export function installTeamTools(ctx, service) {
   if (!ctx.tools?.register) return
 

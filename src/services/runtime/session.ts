@@ -10,6 +10,7 @@ import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from
 import { effectiveRunLimits, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { imageContentPartsForMessage } from '../message-images.js'
 import { restoreDefaultModel } from './model-restore.js'
+import { applyBotToolPolicy } from '../../tools.js'
 
 export const EFFORT_FALLBACK = (bot) => bot.effort || undefined
 
@@ -240,12 +241,16 @@ export const sessionMethods = {
     return runId
   },
   async ensureSession(bot, project, { run, task, sessionKind, modelOverride } = {} as any) {
+    // DSHBOTS-238：成员 bot 工具层兜底——隐藏总监专权工具（子代理生成工具由 preset 全局
+    // 注册，成员默认可见）。仅作用于项目绑定会话；solo 无项目上下文，本策略自然不触发。
+    const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
     // 结转摘要运行（DSHBOTS-145）：必须回到被结转的旧会话写摘要，且不能参与阈值判定——
     // 否则摘要运行自己又会触发一次结转；solo 摘要运行也没有项目上下文，不查项目。
     if (run?.kind === 'rollover_summary' && run.session_id) {
       const resolved = await this.ctx.sessionController.resolveAgent(run.session_id)
       if (!resolved?.error) {
         this.applyFilePolicy(resolved, bot, run, task)
+        applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
         await this.selectModel(run.session_id, bot, modelOverride)
         return run.session_id
       }
@@ -292,6 +297,7 @@ export const sessionMethods = {
         rolledOver = rollover
         if (!rollover) {
           this.applyFilePolicy(resolved, bot, run, task)
+          applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
           await this.selectModel(existing.session_id, bot, modelOverride)
           return existing.session_id
         }
@@ -327,6 +333,7 @@ export const sessionMethods = {
         }
       }
       this.applyFilePolicy(agent, bot, run, task)
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
       this.store.run(
         `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?)

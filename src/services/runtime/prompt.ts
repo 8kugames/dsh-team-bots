@@ -158,21 +158,34 @@ export const promptMethods = {
           '- Commits, deploys and anything irreversible wait for the owner bot or the user.',
           '- Use `team_remember` only for durable lessons from this task. Never store secrets or credentials.',
         ]
-      : [
-          '- You are a long-lived teammate. Your replies in the project group are visible to the user and other bots.',
-          '- Use `team_assign_task` to hand concrete work to another project bot, or to re-dispatch a blocked task by its KEY-N number. Do not claim work is assigned unless the tool succeeds.',
-          '- Use `team_message_bot` for a quick direct question or coordination with one project bot; the reply arrives in your own session as a later message. It does not create a task and is not visible in the group.',
-          // DSHBOTS-190：ask_user_question 收紧为项目总监专属——owner 给完整指引（注明专属），
-          // 非 owner 只留一句路由指引，防止成员 bot 误调被拒后才知情。
-          owner
-            ? '- `ask_user_question` asks the user a structured question (choices or free text); it appears as a question card in the project group that only the project owner may answer. Director-only: you are this project\'s director bot, the only one allowed to call it; usable in project-bound sessions like this one, not in solo sessions.'
-            : '- `ask_user_question` is director-only: member bots cannot call it. When you need the user to decide something, hand the question to the project director bot to raise instead of calling the tool yourself.',
-          '- Tasks you dispatch are reviewed by you: when a delivery arrives, `team_review_task` accepts it or returns it with a rework reason.',
-          '- Use `team_remember` for durable facts, preferences, decisions or lessons worth keeping. Never store secrets or credentials.',
-          '- When a task can be split, use `subagent` / `subagent_fork` to spawn child agents for parallel acceleration. Child-agent file writes are not governed by tasks.write_scopes dispatch gates (they inherit the parent session sandbox); before dispatching, check for write-scope conflicts with other members, and review child-agent output yourself before delivering it.',
-          '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
-          '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
-        ]
+      : owner
+        ? [
+            '- You are a long-lived teammate. Your replies in the project group are visible to the user and other bots.',
+            '- Use `team_assign_task` to hand concrete work to another project bot, or to re-dispatch a blocked task by its KEY-N number. Do not claim work is assigned unless the tool succeeds.',
+            '- Use `team_message_bot` for a quick direct question or coordination with one project bot; the reply arrives in your own session as a later message. It does not create a task and is not visible in the group.',
+            '- `ask_user_question` asks the user a structured question (choices or free text); it appears as a question card in the project group that only the project owner may answer. Director-only: you are this project\'s director bot, the only one allowed to call it; usable in project-bound sessions like this one, not in solo sessions.',
+            '- Tasks you dispatch are reviewed by you: when a delivery arrives, `team_review_task` accepts it or returns it with a rework reason.',
+            '- Use `team_remember` for durable facts, preferences, decisions or lessons worth keeping. Never store secrets or credentials.',
+            '- When a task can be split, use `subagent` / `subagent_fork` to spawn child agents for parallel acceleration. Child-agent file writes are not governed by tasks.write_scopes dispatch gates (they inherit the parent session sandbox); before dispatching, check for write-scope conflicts with other members, and review child-agent output yourself before delivering it.',
+            '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
+            '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
+          ]
+        : [
+            '- You are a long-lived teammate. Your replies in the project group are visible to the user and other bots.',
+            '- `team_assign_task` and `team_review_task` are director-only: member bots cannot call them. To get work dispatched, re-dispatched or reviewed, ask the project director bot in the group.',
+            '- Use `team_message_bot` for a quick direct question or coordination with one project bot; the reply arrives in your own session as a later message. It does not create a task and is not visible in the group.',
+            '- `ask_user_question` is director-only: member bots cannot call it. When you need the user to decide something, hand the question to the project director bot to raise instead of calling the tool yourself.',
+            '- Use `team_remember` for durable facts, preferences, decisions or lessons worth keeping. Never store secrets or credentials.',
+            '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
+            '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
+          ]
+    // DSHBOTS-238：成员 bot 子代理并行指引（静态段，前缀缓存区）。
+    // 「生成子代理/组建临时团队」能力由宿主 preset 全局注册（subagent / subagent_fork /
+    // spawn_teammate 等），成员 bot 默认可见；本段只补「何时拆、怎么汇总」的使用口径。
+    // agentTeam 关闭时不注入，与运行提示词的 # Parallel work 段同一门控。
+    const memberSubagentGuide = !owner && this.config.agentTeam ? `
+# Subagent parallelization
+You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates (\`spawn_teammate\`) to parallelize independent work inside your own task. Split only when the task has two or more independent parts with disjoint write scopes; small or single-file work, do it yourself. Before delivering, merge their results into your report and review their output yourself. Child-agent writes inherit your session sandbox and are not governed by the task write-scope gates — check for conflicts with other members first.` : ''
     const teamRules = ['## How this team works', ...collaborationRules, secretRule, ...sharedRules, ...projectSkillRules].join('\n')
     return [
       '# Team bot identity',
@@ -188,6 +201,7 @@ export const promptMethods = {
       roleLine,
       '',
       teamRules,
+      memberSubagentGuide,
     ].filter(Boolean).join('\n')
   },
 
