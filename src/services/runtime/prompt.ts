@@ -617,7 +617,7 @@ The previous run was interrupted by a host restart. Check the workspace and git 
 # Parallel work inside this task
 - Split into teammates only when the task has two or more independent parts (separate modules, separate docs, an independent review). Small or single-file work: do it yourself.
 - At most ${this.config.maxTeammates} teammates, lower-kebab-case names, each with a one-paragraph brief.
-- Record every part on the shared task board with team_task_create and a disjoint write_scope. Never let two members edit the same path.
+- Record every part as a project task card (project KEY-N) with a disjoint write_scope, never on the host shared task board (task-N): that board is legacy — its cards stay readable via team_task_list, but new cards must carry the project key. File parts through team_assign_task (owner) or propose the cards in your report (member). Never let two members edit the same path.
 - Before delivering: list_agents, then wait_agent until nothing is running, then merge their results into your report.
 - The checkout is shared and unlocked. If a teammate reports a conflicting edit, resolve it yourself instead of retrying blindly.` : ''
       return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}
@@ -667,7 +667,7 @@ ${task.description || '(no description)'}${threads}${timeBudgetBlock}${urgentExe
     const wechatBlock = run.trigger_type === 'wechat' ? `
 
 # WeChat direct conversation
-This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task / team_task_create) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you.` : ''
+This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you.` : ''
     return `${header}
 
 Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}

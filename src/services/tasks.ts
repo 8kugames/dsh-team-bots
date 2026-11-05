@@ -64,6 +64,11 @@ export const tasksMethods = {
     return effectiveTaskTimeBudgetMinutes(this.config, key => this.store.setting(key))
   },
   async createTask(input, actor = this.actor()) {
+    // DSHBOTS-237：建卡强制项目编号（项目 KEY-N）。无项目语境直接报错引导，
+    // 不再允许脱离项目建卡（共享板 task-N 口径废弃：存量可读，新建一律走项目编号）。
+    if (input.projectId === undefined || input.projectId === null || String(input.projectId).trim() === '') {
+      throw badRequest('建卡必须归属项目：请指定项目后再建卡，任务卡编号统一为「项目 KEY-N」（如 DSHBOTS-1），不再支持无项目的共享板建卡')
+    }
     const project = this.projectRow(input.projectId)
     if (project.status !== 'active') throw conflict('项目已归档')
     const title = text(input.title, 240)

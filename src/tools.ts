@@ -6,6 +6,9 @@ const stringOutput = {
 // DSHBOTS-238：子代理/智能体团队能力全员化。
 // 「生成子代理/组建临时团队」能力由宿主 preset 注册（subagent/subagent_fork/workflow 与
 // spawn_teammate 等团队工具），插件侧只声明其可用清单与门控，不重复注册。
+// DSHBOTS-237：共享板建卡废弃——宿主共享板的建卡工具（task-N 无项目编号卡）
+// 不再作为成员能力宣告，新建卡一律走项目编号（team_assign_task 派单链，KEY-N）；
+// 存量共享板卡可读不可新建，list/get/update 保留读取与流转能力。
 export const SUBAGENT_GENERATION_TOOLS = [
   'subagent',
   'subagent_fork',
@@ -15,7 +18,6 @@ export const SUBAGENT_GENERATION_TOOLS = [
   'list_agents',
   'wait_agent',
   'interrupt_agent',
-  'team_task_create',
   'team_task_list',
   'team_task_get',
   'team_task_update',
