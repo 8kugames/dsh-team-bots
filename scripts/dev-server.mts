@@ -111,6 +111,13 @@ async function main() {
         if (!/^[\w-]+\.js$/.test(mod)) return send(res, 404, 'text/plain', 'Not found')
         return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, 'ui', 'modules', mod)))
       }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/dsh-team/i18n/')) {
+        // DSHBOTS-233：词表按域拆分后，聚合入口相对导入 ui/i18n/<lang>/<domain>.js，
+        // 预览侧与线上同构按前缀兜底；zh.js/en.js 仍走下方 STATIC_SLICES 精确表。
+        const rest = url.pathname.slice('/api/dsh-team/i18n/'.length)
+        if (!/^[\w-]+\/[\w-]+\.js$/.test(rest)) return send(res, 404, 'text/plain', 'Not found')
+        return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, 'ui', 'i18n', rest)))
+      }
       if (req.method === 'GET') {
         const slice = STATIC_SLICES.get(url.pathname)
         if (slice) return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, slice)))
