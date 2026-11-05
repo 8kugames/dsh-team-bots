@@ -1,5 +1,5 @@
 // tasks.js —— 任务面板（排序 / 分组 / 卡片 / 行）、终端面板，以及 bots / members / skills / memory / evolution 各视图。
-import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, BOT_STATUS, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, EFFORT, NAV } from './state.js'
+import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, BOT_STATUS, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, EFFORT, NAV, labelText } from './state.js'
 import { icon } from './icons.js'
 import { activeProject, actorLabel, attr, avatar, botById, duration, esc, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, runDot, tildePath, timeAgo } from './util.js'
 import { api } from './api.js'
@@ -34,13 +34,14 @@ function sortTasksByPriority(tasks) {
 // 应用点在 renderTaskRows 建树前，父子挂载按 parent_task_id 组装，顺序变化不会拆散树。
 // 完成时间排序只有终态任务参与（done→completed_at、canceled→canceled_at，复用 taskTerminalTime）；
 // 非终态与缺时间戳的终态没有时间基准，两个方向都排在末尾，不穿插、不当 0 排最前。
+// 排序项只带 i18n 键，文案在渲染时按当前语言取（切换语言后重渲染即更新）。
 const TASK_SORTS = [
-  { value: 'created_desc', label: '创建时间 新→旧' },
-  { value: 'created_asc', label: '创建时间 旧→新' },
-  { value: 'completed_desc', label: '完成时间 新→旧' },
-  { value: 'completed_asc', label: '完成时间 旧→新' },
-  { value: 'priority_desc', label: '优先级 高→低' },
-  { value: 'priority_asc', label: '优先级 低→高' },
+  { value: 'created_desc', key: 'task.sortCreatedDesc' },
+  { value: 'created_asc', key: 'task.sortCreatedAsc' },
+  { value: 'completed_desc', key: 'task.sortCompletedDesc' },
+  { value: 'completed_asc', key: 'task.sortCompletedAsc' },
+  { value: 'priority_desc', key: 'task.sortPriorityDesc' },
+  { value: 'priority_asc', key: 'task.sortPriorityAsc' },
 ]
 function sortTasksForPanel(tasks, mode = state.taskSort) {
   const list = [...(tasks ?? [])]
@@ -117,25 +118,25 @@ function renderTasks() {
   const hiddenCount = Math.max(0, totalCount - shownCount)
   return `
     <div class="section-head">
-      <p>拖拽任务行切换状态，点组头可折叠分组。</p>
+      <p>${t('task.dragHint')}</p>
       <div class="board-toolbar" style="margin:0">
-        <input class="input search" id="task-search" placeholder="搜索任务、编号或标签" aria-label="搜索任务、编号或标签" value="${attr(state.taskFilter.search)}">
+        <input class="input search" id="task-search" placeholder="${t('task.searchPlaceholder')}" aria-label="${t('task.searchPlaceholder')}" value="${attr(state.taskFilter.search)}">
         <select class="select" data-task-filter="status">
-          <option value="all">全部状态</option>
-          ${STATUS_ORDER.map(status => `<option value="${status}" ${state.taskFilter.status === status ? 'selected' : ''}>${STATUS[status]}</option>`).join('')}
+          <option value="all">${t('task.filterAllStatus')}</option>
+          ${STATUS_ORDER.map(status => `<option value="${status}" ${state.taskFilter.status === status ? 'selected' : ''}>${esc(labelText(STATUS, status, 'status.'))}</option>`).join('')}
         </select>
         <select class="select" data-task-filter="assignee">
-          <option value="all">全部成员</option>
+          <option value="all">${t('task.filterAllMembers')}</option>
           ${members.map(member => `<option value="${attr(member.id)}" ${state.taskFilter.assignee === member.id ? 'selected' : ''}>${esc(member.name)}</option>`).join('')}
         </select>
-        <select class="select" data-task-filter="timeRange" aria-label="按终态时间筛选">
-          <option value="1d" ${state.taskFilter.timeRange === '1d' ? 'selected' : ''}>今天</option>
-          <option value="7d" ${state.taskFilter.timeRange === '7d' ? 'selected' : ''}>近 7 天</option>
-          <option value="30d" ${state.taskFilter.timeRange === '30d' ? 'selected' : ''}>近 30 天</option>
-          <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>全部时间</option>
+        <select class="select" data-task-filter="timeRange" aria-label="${t('task.filterTimeLabel')}">
+          <option value="1d" ${state.taskFilter.timeRange === '1d' ? 'selected' : ''}>${t('task.timeToday')}</option>
+          <option value="7d" ${state.taskFilter.timeRange === '7d' ? 'selected' : ''}>${t('task.time7d')}</option>
+          <option value="30d" ${state.taskFilter.timeRange === '30d' ? 'selected' : ''}>${t('task.time30d')}</option>
+          <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>${t('task.timeAll')}</option>
         </select>
-        <select class="select" data-task-sort aria-label="任务排序" title="组内排序：不影响分组与父子层级">
-          ${TASK_SORTS.map(sort => `<option value="${sort.value}" ${state.taskSort === sort.value ? 'selected' : ''}>${sort.label}</option>`).join('')}
+        <select class="select" data-task-sort aria-label="任务排序" title="${t('task.sortTitle')}">
+          ${TASK_SORTS.map(sort => `<option value="${sort.value}" ${state.taskSort === sort.value ? 'selected' : ''}>${t(sort.key)}</option>`).join('')}
         </select>
         <span class="tag">${shownCount} 个任务</span>
         ${hiddenCount > 0 ? `<span class="faint" title="项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>` : ''}
@@ -143,8 +144,8 @@ function renderTasks() {
     </div>
     ${tasks.length === 0 ? `<div class="empty-state">
       <div class="empty-symbol">${icon('board')}</div>
-      <h3>${filtering ? '没有匹配的任务' : '任务面板还是空的'}</h3>
-      <button class="btn" data-action="new-task">${icon('plus')}新建任务</button>
+      <h3>${t(filtering ? 'task.emptyFiltered' : 'task.empty')}</h3>
+      <button class="btn" data-action="new-task">${icon('plus')}${t('viewAction.tasks')}</button>
     </div>` : `<div class="board board-list">
       ${STATUS_ORDER.map(status => renderTaskGroup(status, tasks.filter(task => task.status === status))).join('')}
     </div>`}
@@ -166,9 +167,9 @@ function renderTaskGroup(status, tasks) {
   const body = tasks.length === 0 ? '' : renderTaskRows(tasks)
   return `<section class="column task-group${expanded ? '' : ' collapsed'}" data-drop-status="${status}">
     <div class="column-head task-group-head">
-      <button type="button" class="task-group-toggle" data-action="toggle-task-group" data-status="${attr(status)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? '折叠' : '展开'}${esc(STATUS[status])}分组">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>
+      <button type="button" class="task-group-toggle" data-action="toggle-task-group" data-status="${attr(status)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? t('task.collapse') : t('task.expand')}${esc(labelText(STATUS, status, 'status.'))}${t('task.groupSuffix')}">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>
       <span class="column-dot ${status}"></span>
-      <strong>${STATUS[status]}</strong>
+      <strong>${labelText(STATUS, status, 'status.')}</strong>
       <span class="column-count">${tasks.length}</span>
     </div>
     ${expanded && body ? `<div class="task-group-body" data-panel="${attr(key)}">${body}</div>` : ''}
@@ -179,7 +180,7 @@ function renderTaskGroup(status, tasks) {
 // 颜色沿用现有状态色 token（与分组头圆点同色表），形状靠 CSS 画，无需额外图标资源。
 function taskStatusIcon(task) {
   const status = task?.status ?? 'todo'
-  const label = STATUS[status] ?? status
+  const label = labelText(STATUS, status, 'status.')
   return `<span class="task-status-icon ${attr(status)}" title="${attr(label)}" aria-label="${attr(label)}">${status === 'done' ? icon('check') : ''}</span>`
 }
 
@@ -187,7 +188,8 @@ function taskStatusIcon(task) {
 function taskPriorityIcon(task) {
   const key = taskPriorityKey(task?.priority)
   const label = PRIORITY[key] ?? key
-  return `<span class="task-priority ${key}" title="优先级：${esc(label)}" aria-label="优先级：${esc(label)}">${icon('priority')}</span>`
+  const text = label === key ? key : t('priority.' + key)
+  return `<span class="task-priority ${key}" title="${t('task.priorityTitle', { label: text })}" aria-label="${t('task.priorityTitle', { label: text })}">${icon('priority')}</span>`
 }
 
 // task-card:start —— 任务行（DSHBOTS-58，参照 Linear）：紧凑单行 —— 状态图标 + 优先级图标 + 编号 + 标题 + 右簇（标签/依赖/运行态/终态时间/头像）。
@@ -208,7 +210,7 @@ function reviewIdleBadge(task) {
   if (idleMs < minutes * 60_000) return ''
   const tier = idleMs >= minutes * 120_000 ? 'red' : 'amber'
   const iso = new Date(Math.max(...anchors)).toISOString()
-  return `<span class="pill ${tier}" title="验收静置已超 ${minutes} 分钟，请尽快收口">滞留&nbsp;<span class="run-clock" data-started="${attr(iso)}">${duration(iso)}</span></span>`
+  return `<span class="pill ${tier}" title="${t('task.reviewIdleTitle', { minutes })}">${t('task.reviewIdle')}&nbsp;<span class="run-clock" data-started="${attr(iso)}">${duration(iso)}</span></span>`
 }
 function renderTaskCard(task, options: TaskCardOptions = {}) {
   const depth = Number(options.depth ?? 0)
@@ -221,10 +223,10 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
   const runLabel = ended ? '' : task.stageLabel ?? ''
   const tags = []
   if (task.status === 'in_review') {
-    tags.push(task.review_target === 'owner_bot' ? '总监验收中' : '待您验收')
+    tags.push(task.review_target === 'owner_bot' ? t('task.reviewOwner') : t('task.reviewYou'))
     // 核验可见性（DSHBOTS-113）：自动/手动核验的状态标记——未核验/失败亮出，防止静默漏审。
-    if (task.reviewStatus === 'pending') tags.push('核验中')
-    else if (task.reviewStatus !== 'done') tags.push('未核验')
+    if (task.reviewStatus === 'pending') tags.push(t('task.reviewPending'))
+    else if (task.reviewStatus !== 'done') tags.push(t('task.reviewUnverified'))
   }
   for (const label of task.labels ?? []) tags.push(label)
   const isRunning = stage.stage === 'working' && !stage.action
@@ -238,7 +240,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
     ${taskStatusIcon(task)}
     ${taskPriorityIcon(task)}
     <div class="task-card-top">
-      ${childCount > 0 ? `<button type="button" class="task-children-toggle" data-action="toggle-task-children" data-task-id="${attr(task.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? '折叠' : '展开'}${childCount} 个子任务">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>` : ''}
+      ${childCount > 0 ? `<button type="button" class="task-children-toggle" data-action="toggle-task-children" data-task-id="${attr(task.id)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? t('task.collapse') : t('task.expand')}${childCount} ${t('task.childrenSuffix')}">${icon('chevron', `chev${expanded ? ' open' : ''}`)}</button>` : ''}
       <span class="task-id">${esc(task.identifier)}</span>
     </div>
     <div class="task-card-title" title="${attr(task.title)}">${esc(task.title)}</div>

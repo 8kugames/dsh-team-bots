@@ -1,5 +1,7 @@
 // 全局状态与枚举常量表：state 对象（URL 初始 view/project 在此解析）与导航表。
 // task-group:<status> 面板 key 的预置循环在 app.js 入口执行（依赖 tasks 侧的 taskGroupKey）。
+import { t } from './i18n.js'
+
 const params = new URLSearchParams(location.search)
 const initialView = params.get('view')
 
@@ -112,6 +114,12 @@ export const CREATOR_TYPE = { bot: 'Bot', user: '用户' }
 export const EFFORT = { minimal: '最低', low: '低', medium: '中', high: '高', max: '最高' }
 export const FILE_POLICY = { 'read-only': '只读', 'workspace-write': '工作区内修改', 'danger-full-access': '完全访问' }
 export const DEFAULT_FILE_POLICY = 'workspace-write'
+
+// 标签表翻译：表内命中 → t(前缀 + 键)，未命中回退键名本身（未知枚举不静默吞）。
+// 各视图展示状态/优先级等枚举时统一走这里，避免硬编码中文字面量绕过 i18n。
+export function labelText(table, key, prefix) {
+  return Object.prototype.hasOwnProperty.call(table, key) ? t(`${prefix}${key}`) : key
+}
 
 // The one action in the top-right belongs to the page you are on.
 export const VIEW_ACTION = {
