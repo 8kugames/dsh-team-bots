@@ -74,7 +74,7 @@ export const tasksMethods = {
     const title = text(input.title, 240)
     if (!title) throw badRequest('任务标题不能为空')
     const assigneeId = input.assigneeBotId || null
-    if (assigneeId) this.assertMember(project.id, assigneeId)
+    if (assigneeId) this.assertDispatchTarget(project.id, assigneeId)
     const status = input.status && TASK_STATUSES.has(input.status) ? input.status : (assigneeId ? 'todo' : 'backlog')
     const priority = TASK_PRIORITIES.has(input.priority) ? input.priority : 'medium'
     // 写范围：显式传参优先（含空数组 = 明确不声明）；未传时从描述的「写范围：」行兜底解析。
@@ -271,7 +271,7 @@ export const tasksMethods = {
       updates.priority = patch.priority
     }
     if (patch.assigneeBotId !== undefined) {
-      if (patch.assigneeBotId) this.assertMember(task.project_id, patch.assigneeBotId)
+      if (patch.assigneeBotId) this.assertDispatchTarget(task.project_id, patch.assigneeBotId)
       updates.assignee_bot_id = patch.assigneeBotId || null
     }
     if (patch.position !== undefined) updates.position = Number(patch.position) || 0
@@ -398,12 +398,19 @@ export const tasksMethods = {
     if (from === to) return
     if (!TRANSITIONS[from]?.has(to)) throw conflict(`任务不能从 ${from} 变为 ${to}`)
   },
+  // 派发门禁（DSHBOTS-262）：暂停中的 Bot 不接新卡——新建派单、改派、重派一律拒绝，
+  // 先恢复（bot status → active）再派；归档/移除等其余不可用态沿用 assertMember 既有口径。
+  assertDispatchTarget(projectId, botId) {
+    const bot = this.store.get('SELECT name, status FROM bots WHERE id = ?', botId)
+    if (bot?.status === 'paused') throw badRequest(`Bot ${bot.name} 已暂停，先恢复再派卡`)
+    this.assertMember(projectId, botId)
+  },
   // sandboxOverride 选项（DSHBOTS-156）：undefined=不动（重派未传 sandbox 时保留旧覆盖）；
   // null=显式清掉回落 bot 配置档（重派传 sandbox='inherit'）；字符串=收紧档（派发入口已校验）。
   async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride } = {} as any) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
-    this.assertMember(project.id, botId)
+    this.assertDispatchTarget(project.id, botId)
     const active = this.store.get(
       "SELECT id, kind FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
       taskId,
@@ -606,9 +613,12 @@ export const tasksMethods = {
     // DSHBOTS-241：额度耗尽期内派发不撞墙——主 provider 耗尽时直接走备用模型；
     // 未配备用或备用同样耗尽则留 queued 等恢复（调度器按额度状态放行，恢复后自动回主模型）。
     const bot = this.store.get(
-      'SELECT id, provider, fallback_provider, fallback_model, fallback_effort FROM bots WHERE id = ?',
+      'SELECT id, status, provider, fallback_provider, fallback_model, fallback_effort FROM bots WHERE id = ?',
       task.assignee_bot_id,
     )
+    // 暂停/归档的负责人不创建任务运行（DSHBOTS-262）：派发入口已拒绝，这里兜住
+    // 「入队后负责人被暂停」的 pending task_run 补投——静默丢弃，口径同 chat_run 的 apply 闸门。
+    if (!bot || bot.status !== 'active') return null
     const routing = this.quotaRoutingForBot(bot)
     const fallbackProvider = routing.mode === 'fallback' ? routing.provider : null
     const fallbackModel = routing.mode === 'fallback' ? routing.model : null

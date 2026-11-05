@@ -32,6 +32,9 @@ export const notifyMethods = {
       .find(member => member.name.toLowerCase() === name.toLowerCase())
     if (!target) throw notFound(`项目 ${project.name} 里没有叫 ${memberName} 的成员 Bot`)
     if (target.id === from.id) throw badRequest('不能给自己发通知')
+    // 暂停/不可用目标不投递（DSHBOTS-262）：通知即唤醒信号，暂停中先恢复再通知。
+    if (target.status === 'paused') throw badRequest(`Bot ${target.name} 已暂停，先恢复再通知`)
+    if (target.status !== 'active') throw badRequest(`Bot ${target.name} 当前不可用（${target.status}）`)
     const notice = `【通知】${from.name}：${body}`
     const messageId = this.insertMessage({
       projectId: project.id,
@@ -72,6 +75,12 @@ export const notifyMethods = {
   async notifyTaskFromBot({ project, from, ref, body }) {
     const task = this.resolveBotTask(project, ref)
     const identifier = `${project.key}-${task.number}`
+    // 负责人暂停/不可用时提醒不投递（DSHBOTS-262）：提醒即唤醒信号，暂停中先恢复再提醒。
+    if (task.assignee_bot_id) {
+      const assignee = this.store.get('SELECT name, status FROM bots WHERE id = ?', task.assignee_bot_id)
+      if (assignee?.status === 'paused') throw badRequest(`任务 ${identifier} 负责人 ${assignee.name} 已暂停，先恢复再提醒`)
+      if (!assignee || assignee.status !== 'active') throw badRequest(`任务 ${identifier} 负责人当前不可用`)
+    }
     const notice = `【任务提醒】${from.name}：${body}`
     const messageId = this.insertMessage({
       projectId: project.id,
