@@ -7,6 +7,8 @@
 //   A 可验证交付：交付报告（最近一次成功 task 运行的 output）含 commit，且该 commit
 //     已验证在项目 dev 分支上，且报告含「全量/全部测试通过」证据 → 自动 accept；
 //   B 交付方无响应：最近一次 task 运行已中止/死亡（failed/canceled）且此后无进展 → 自动 return；
+//     失败 run 之后出现更新的「建议 accept」核验结论时降级 C 仅提醒（时序上较新的合格证据
+//     不被自动退回盖过，但也绝不因此自动 accept）；
 //   C 不可判定：仅系统提醒（owner_bot 卡同时排总监验收运行，H1），滞留达 2×阈值二次催办升级语气（H2）。
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -41,19 +43,38 @@ const COMMIT_CANDIDATE_RE = /\b[0-9a-f]{7,40}\b/g
 const TESTS_GREEN_RE = /(?:全量|全部|所有|all)\s*(?:测试|用例|tests?)[^\n]{0,80}?(?:通过|全绿|绿|pass(?:ed)?)|(\d+)\s*\/\s*\1[^\n]{0,40}?(?:通过|全绿|绿|pass(?:ed)?)/i
 const COMMIT_VERIFY_LIMIT = 5
 
+// 核验结论是否明确建议 accept（A 档核验证据链同口径；混入「建议 return」时不算）。
+const advisesAccept = (conclusion: string) =>
+  conclusion.includes('建议 accept') && !conclusion.includes('建议 return')
+
+// later 是否在时间上严格晚于 earlier（任一端缺失/不可解析按 false：降级只在正证据下发生，
+// 时间序无法判定时保持原判定，不因缺时间戳而放宽或收紧）。
+const strictlyAfter = (later, earlier) => {
+  const laterMs = later ? new Date(later).getTime() : NaN
+  const earlierMs = earlier ? new Date(earlier).getTime() : NaN
+  return Number.isFinite(laterMs) && Number.isFinite(earlierMs) && laterMs > earlierMs
+}
+
 // 三档判定（纯函数，证据注入便于测试）：
-//   latestTaskRun：该卡最近一次 task 运行（SUPERSEDED 清理标记除外）；report：最近一次成功
-//   task 运行的 output（交付报告）；reviewConclusion：最近一次成功核验委派运行的结论（以
-//   「子代理核验：」开头、含「建议 accept/return」，用户拍板：核验结论+证据链是自动收口的
-//   合法证据源）；verifyCommitOnDev：sha → 是否已在 dev 上（null = 无法验证）。
+//   latestTaskRun / latestTaskRunAt：该卡最近一次 task 运行及其活动时间（SUPERSEDED 清理
+//   标记除外）；report：最近一次成功 task 运行的 output（交付报告）；reviewConclusion /
+//   reviewConcludedAt：最近一次成功核验委派运行的结论及其结束时间（以「子代理核验：」开头、
+//   含「建议 accept/return」，用户拍板：核验结论+证据链是自动收口的合法证据源）；
+//   verifyCommitOnDev：sha → 是否已在 dev 上（null = 无法验证）。
 //   A 的两条证据链：①交付报告 commit 已验证在 dev + 测试绿；②子代理核验结论明确建议 accept。
-export function classifyDelivery({ report = '', latestTaskRun = null, reviewConclusion = '', verifyCommitOnDev = null }) {
+export function classifyDelivery({ report = '', latestTaskRun = null, latestTaskRunAt = null, reviewConclusion = '', reviewConcludedAt = null, verifyCommitOnDev = null }) {
   if (latestTaskRun && ['failed', 'canceled'].includes(latestTaskRun.status)) {
     const why = latestTaskRun.status === 'failed' ? '失败' : '已中止'
+    // B 压 A 时序降级：失败 run 之后出现更新的「建议 accept」核验结论，说明其后实际发生了
+    // 被认可的进展，B 档「此后无进展」前提被推翻——降级 C 仅提醒，不自动 return 盖过较新
+    // 的合格证据；方向保守，绝不因此自动 accept，裁决交还 owner。
+    if (advisesAccept(reviewConclusion) && strictlyAfter(reviewConcludedAt, latestTaskRunAt)) {
+      return { verdict: 'C', basis: `交付方运行${why}后有更新的核验结论建议 accept，时序冲突不自动退回（仅提醒）` }
+    }
     const code = latestTaskRun.error_code ? `（${latestTaskRun.error_code}）` : ''
     return { verdict: 'B', basis: `交付方运行${why}${code}后无进展` }
   }
-  if (reviewConclusion.includes('建议 accept') && !reviewConclusion.includes('建议 return')) {
+  if (advisesAccept(reviewConclusion)) {
     return { verdict: 'A', basis: `子代理核验结论建议 accept（依据=核验证据）` }
   }
   if (latestTaskRun?.status === 'succeeded' && report) {
@@ -108,7 +129,8 @@ const alertedTier = (value) => {
 
 const judgeCard = (service, row) => {
   const latestTaskRun = service.store.get(
-    `SELECT id, status, error_code FROM runs WHERE task_id = ? AND kind = 'task'
+    `SELECT id, status, error_code, COALESCE(ended_at, queued_at) AS last_activity_at
+       FROM runs WHERE task_id = ? AND kind = 'task'
        AND COALESCE(error_code, '') <> 'SUPERSEDED'
      ORDER BY COALESCE(ended_at, queued_at) DESC LIMIT 1`,
     row.id,
@@ -119,9 +141,10 @@ const judgeCard = (service, row) => {
      ORDER BY ended_at DESC LIMIT 1`,
     row.id,
   )
-  // 子代理核验结论（DSHBOTS-235 用户拍板）：最近一次成功核验委派运行的 output。
+  // 子代理核验结论（DSHBOTS-235 用户拍板）：最近一次成功核验委派运行的 output（含结束时间，
+  // 供 B 压 A 时序降级比较「建议 accept」是否晚于失败 run）。
   const review = service.store.get(
-    `SELECT output FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND status = 'succeeded'
+    `SELECT output, ended_at FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND status = 'succeeded'
      ORDER BY ended_at DESC LIMIT 1`,
     row.id,
   )
@@ -129,7 +152,14 @@ const judgeCard = (service, row) => {
   const verify = report
     ? commitOnDevVerifier(service.projectWorkDir(service.projectRow(row.project_id)))
     : null
-  return classifyDelivery({ report, latestTaskRun, reviewConclusion: review?.output ?? '', verifyCommitOnDev: verify })
+  return classifyDelivery({
+    report,
+    latestTaskRun,
+    latestTaskRunAt: latestTaskRun?.last_activity_at ?? null,
+    reviewConclusion: review?.output ?? '',
+    reviewConcludedAt: review?.ended_at ?? null,
+    verifyCommitOnDev: verify,
+  })
 }
 
 // 自动收口动作：applyReview 是验收/退回的单一触发点（状态流转、通知、消息全走它）；

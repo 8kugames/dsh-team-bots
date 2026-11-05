@@ -375,6 +375,32 @@ test('规则 B 的 SUPERSEDED 剔除防线：最新 task run 仅清理标记 →
   assert.equal(verdict.verdict, 'C')
 })
 
+test('B 压 A 时序降级：失败 run 后有更新的建议 accept 核验 → 降级 C 仅提醒；核验早于失败 run 仍 B 自动退回', async (t) => {
+  const { root, store, service } = await setup()
+  t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }) })
+  silenceWatchdog(service)
+  const { project, director } = await seedProject(service)
+  const downgraded = await service.createTask({ projectId: project.id, title: '时序降级', status: 'in_review', assigneeBotId: director.id })
+  store.run('UPDATE tasks SET updated_at = ? WHERE id = ?', minutesAgoIso(50), downgraded.id)
+  seedTaskRun(service, downgraded, 45, director.id, { status: 'failed' })
+  seedReviewDelegate(service, downgraded, 35, director.id, '子代理核验：失败后重跑，守门全绿，建议 accept。')
+  const stillB = await service.createTask({ projectId: project.id, title: '旧核验不算进展', status: 'in_review', assigneeBotId: director.id })
+  store.run('UPDATE tasks SET updated_at = ? WHERE id = ?', minutesAgoIso(50), stillB.id)
+  seedTaskRun(service, stillB, 45, director.id, { status: 'failed' })
+  seedReviewDelegate(service, stillB, 55, director.id, '子代理核验：建议 accept。')
+  primeThreshold(service, '')
+  runReviewWatchdog(service)
+  await settle()
+  assert.equal(service.taskRow(downgraded.id).status, 'in_review', '较新的建议 accept 不被失败 run 盖过：不自动退回')
+  assert.equal(autoCloseAudits(store, downgraded.id).length, 0)
+  assert.equal(systemAlerts(store, project.id).length, 1, '降级后照常提醒')
+  const verdict = alertedMap(store)[downgraded.id]
+  assert.equal(verdict.verdict, 'C', 'B 降级 C 仅提醒（绝不因此自动 accept）')
+  assert.ok(verdict.basis.includes('建议 accept'), '降级依据说明时序冲突')
+  assert.equal(service.taskRow(stillB.id).status, 'in_progress', '核验结论早于失败 run：仍 B 自动退回')
+  assert.equal(autoCloseAudits(store, stillB.id).length, 1)
+})
+
 test('开关关闭：review_auto_close=0 时 A/B 证据齐全也只提醒不自动（行为回到 D-194）', async (t) => {
   const { root, store, service } = await setup()
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }) })
