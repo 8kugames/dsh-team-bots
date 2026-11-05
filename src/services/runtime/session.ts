@@ -34,6 +34,14 @@ export const sessionMethods = {
     if (!sessionId) return undefined
     return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
   },
+  // 会话绑定退役（DSHBOTS-256）：旧绑定不删，降级为 alias=1 授权别名。
+  // 结转（DSHBOTS-145）或宿主失效替换后，仍以旧 session id 运行的宿主 agent
+  // 调用 team_* 工具时，ownerContextFor/memberContextFor 仍按同 bot/项目解析到授权；
+  // 别名行不参与活跃绑定唯一约束，新会话绑定照常建立。
+  retireBinding(sessionId) {
+    if (!sessionId) return
+    this.store.run('UPDATE session_bindings SET alias = 1 WHERE session_id = ? AND alias = 0', sessionId)
+  },
   async catalog(force = false) {
     const age = Date.now() - this.modelsCache.at
     if (!force) {
@@ -254,7 +262,7 @@ export const sessionMethods = {
         await this.selectModel(run.session_id, bot, modelOverride)
         return run.session_id
       }
-      this.store.run('DELETE FROM session_bindings WHERE session_id = ?', run.session_id)
+      this.retireBinding(run.session_id)
     }
     // 任务运行使用独立会话，与该项目总监会话互不阻塞；dm 运行用独立私信会话；
     // 单聊运行（solo_chat）没有项目，落在 bot 自己的 _the_bots/<dir> 专属会话；其余运行共用项目会话。
@@ -268,18 +276,18 @@ export const sessionMethods = {
     const solo = kind === 'solo'
     const existing = taskId
       ? this.store.get(
-        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ?",
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ? AND alias = 0",
         bot.id,
         project.id,
         taskId,
       )
       : solo
         ? this.store.get(
-          "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'solo' AND project_id IS NULL AND task_id IS NULL",
+          "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'solo' AND project_id IS NULL AND task_id IS NULL AND alias = 0",
           bot.id,
         )
         : this.store.get(
-          'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ?',
+          'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ? AND alias = 0',
           bot.id,
           project.id,
           kind,
@@ -302,8 +310,9 @@ export const sessionMethods = {
           return existing.session_id
         }
       }
-      // 会话已失效（宿主查不到）或结转判定要求开新会话：删旧绑定，落到下方新建路径。
-      this.store.run('DELETE FROM session_bindings WHERE session_id = ?', existing.session_id)
+      // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名，
+      // 落到下方新建路径（DSHBOTS-256：别名保留旧 session 的 bot/项目归属）。
+      this.retireBinding(existing.session_id)
     }
     const key = `${bot.id}:${solo ? 'solo' : project.id}:${kind}:${taskId ?? ''}`
     if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
@@ -335,8 +344,8 @@ export const sessionMethods = {
       this.applyFilePolicy(agent, bot, run, task)
       applyBotToolPolicy(agent, { isOwner, logger: this.logger })
       this.store.run(
-        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+         VALUES (?, ?, ?, ?, ?, ?, 0)
          ON CONFLICT(session_id) DO NOTHING`,
         sessionId,
         bot.id,

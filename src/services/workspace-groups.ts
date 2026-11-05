@@ -61,7 +61,8 @@ export async function backfillWorkspaceGroupBindings(service) {
            bt.solo_dir, bt.name AS bot_name
     FROM session_bindings b
     LEFT JOIN projects p ON p.id = b.project_id
-    LEFT JOIN bots bt ON bt.id = b.bot_id`)
+    LEFT JOIN bots bt ON bt.id = b.bot_id
+    WHERE b.alias = 0`)
   const groups = new Map()
   for (const row of rows) {
     const bot = { name: row.bot_name, solo_dir: row.solo_dir }

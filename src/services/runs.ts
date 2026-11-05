@@ -96,11 +96,11 @@ export const runsMethods = {
     const kind = message.origin_kind === 'task' ? 'task' : message.origin_kind === 'dm' ? 'dm' : 'project'
     const binding = message.origin_kind === 'task' && message.origin_task_id
       ? this.store.get(
-        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ?",
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ? AND alias = 0",
         caller.id, message.project_id, message.origin_task_id,
       )
       : this.store.get(
-        'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ?',
+        'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ? AND alias = 0',
         caller.id, message.project_id, kind,
       )
     // 无绑定（会话被轮换清理或首次私信）：走 dm_reply 运行，由 startRun 重建会话。

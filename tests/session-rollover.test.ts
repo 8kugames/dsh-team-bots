@@ -145,7 +145,7 @@ test('阈值触发且摘要未就绪：幂等补排一条摘要运行，并继�
   }
 })
 
-test('摘要就绪后：删旧绑定走新建会话，旧 session 宿主侧不受影响', async () => {
+test('摘要就绪后：旧绑定降级为授权别名并新建会话，旧 session 宿主侧不受影响', async () => {
   const ctx = await setup()
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
@@ -161,9 +161,90 @@ test('摘要就绪后：删旧绑定走新建会话，旧 session 宿主侧不�
     const sessionId = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
 
     assert.equal(sessionId, 'sess-new-1', '摘要就绪后应开新会话')
-    assert.equal(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', 'sess-old'), undefined, '旧绑定应删除')
-    assert.ok(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', 'sess-new-1'), '新绑定应建立')
-    assert.deepEqual(host.created, ['sess-new-1'], '只新建一次会话；旧 session 只删绑定不删宿主会话')
+    // DSHBOTS-256：旧绑定不再删除，降级为 alias=1 授权别名（旧 session 仍解析到同 bot/项目）。
+    assert.equal(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', 'sess-old')?.alias, 1, '旧绑定应降级为授权别名')
+    assert.equal(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', 'sess-new-1')?.alias, 0, '新绑定应是活跃绑定')
+    assert.deepEqual(host.created, ['sess-new-1'], '只新建一次会话；旧 session 只降级绑定不删宿主会话')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('结转后旧会话 id 仍通过 owner/member 鉴权（DSHBOTS-256）', async () => {
+  const ctx = await setup()
+  try {
+    const { director, dev, project } = await primeProject(ctx.service, ctx.store)
+    // 种子总监没有模型，ensureSession 的 selectModel 会拒；补上模型并回读最新行。
+    ctx.store.run("UPDATE bots SET provider = 'fake', model = 'model-a' WHERE id = ?", director.id)
+    const owner = ctx.store.get('SELECT * FROM bots WHERE id = ?', director.id)
+    // 总监会话：结转后旧 id 仍应通过 ownerContextFor。
+    bindSession(ctx.store, { botId: owner.id, projectId: project.id, sessionId: 'sess-owner-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: owner.id, sessionId: 'sess-owner-old', count: TURNS })
+    // 成员会话：结转后旧 id 仍应通过 memberContextFor，但仍不是总监。
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-dev-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-dev-old', count: TURNS })
+
+    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    ctx.store.setSetting(rolloverSummaryKey(director.id, project.id), '总监交接摘要。')
+    ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '成员交接摘要。')
+    assert.equal(await runtime.ensureSession(owner, project, { run: { kind: 'chat' } }), 'sess-new-1')
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-new-2')
+
+    const ownerOld = ctx.service.ownerContextFor('sess-owner-old')
+    assert.equal(ownerOld.project.id, project.id, '旧会话应解析回原项目')
+    assert.equal(ownerOld.actor.id, director.id, '旧会话应解析回原 bot')
+    assert.equal(ctx.service.ownerContextFor('sess-new-1').project.id, project.id, '新会话同样解析到原项目')
+
+    const memberOld = ctx.service.memberContextFor('sess-dev-old')
+    assert.equal(memberOld.project.id, project.id, '成员旧会话应解析回原项目')
+    assert.equal(memberOld.bot.id, dev.id, '成员旧会话应解析回原 bot')
+    assert.throws(
+      () => ctx.service.ownerContextFor('sess-dev-old'),
+      /只有项目总监 Bot 可以执行该操作/,
+      '成员旧会话不得越权当总监',
+    )
+
+    // 二次结转：更早的别名与刚降级的别名都仍解析到同一项目/bot。
+    seedRuns(ctx.store, { projectId: project.id, botId: owner.id, sessionId: 'sess-new-1', count: TURNS })
+    ctx.store.setSetting(rolloverSummaryKey(owner.id, project.id), '二次交接摘要。')
+    assert.equal(await runtime.ensureSession(owner, project, { run: { kind: 'chat' } }), 'sess-new-3')
+    assert.equal(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', 'sess-new-1')?.alias, 1, '二次结转后首轮新会话也降级为别名')
+    assert.equal(ctx.service.ownerContextFor('sess-owner-old').project.id, project.id, '最早别名仍解析回原项目')
+    assert.equal(ctx.service.ownerContextFor('sess-new-1').project.id, project.id, '二次别名仍解析回原项目')
+    assert.equal(ctx.service.ownerContextFor('sess-new-3').project.id, project.id, '当前活跃绑定解析回原项目')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('结转别名不跨 bot/项目：未绑定或其他项目的 session 不得被冒用（DSHBOTS-256）', async () => {
+  const ctx = await setup()
+  try {
+    const { director, dev, project } = await primeProject(ctx.service, ctx.store)
+    const project2 = await ctx.service.createProject({ name: 'Rollover 其他项目', key: 'RLV2', ownerBotId: director.id, memberIds: [dev.id] })
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
+    bindSession(ctx.store, { botId: dev.id, projectId: project2.id, sessionId: 'sess-old-2' })
+    seedRuns(ctx.store, { projectId: project2.id, botId: dev.id, sessionId: 'sess-old-2', count: TURNS })
+
+    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '项目一交接摘要。')
+    ctx.store.setSetting(rolloverSummaryKey(dev.id, project2.id), '项目二交接摘要。')
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    await runtime.ensureSession(dev, project2, { run: { kind: 'chat' } })
+
+    assert.equal(ctx.service.memberContextFor('sess-old').project.id, project.id, '旧会话不得漂到别的 bot/项目')
+    assert.equal(ctx.service.memberContextFor('sess-old-2').project.id, project2.id, '另一项目的旧会话只解析回本项目')
+    assert.throws(
+      () => ctx.service.memberContextFor('sess-never-bound'),
+      /只有项目群中的 Bot 可以执行该操作/,
+      '从未绑定的 session 不得被授权',
+    )
+    assert.throws(
+      () => ctx.service.ownerContextFor('sess-old'),
+      /只有项目总监 Bot 可以执行该操作/,
+      '成员旧会话在 owner 闸门必须被拒绝',
+    )
   } finally {
     await cleanup(ctx)
   }

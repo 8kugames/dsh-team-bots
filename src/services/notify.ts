@@ -41,7 +41,7 @@ export const notifyMethods = {
       mentions: [target.id],
     })
     const binding = this.store.get(
-      "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'project'",
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'project' AND alias = 0",
       target.id,
       project.id,
     )
