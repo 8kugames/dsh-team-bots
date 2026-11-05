@@ -221,7 +221,8 @@ test('产物清单剔除被 .gitignore 忽略的路径', async () => {
     git(dir, 'commit', '-q', '-m', 'ignore rules')
 
     await writeFile(join(dir, 'debug.log'), 'noise\n')
-    await mkdir(join(dir, '.tmp'))
+    // DSHBOTS-225：建群即物化 .tmp/bots/（目录已存在），mkdir 用 recursive 幂等创建。
+    await mkdir(join(dir, '.tmp'), { recursive: true })
     await writeFile(join(dir, '.tmp', 'cache.tgz'), 'BLOB')
     await writeFile(join(dir, 'notes.md'), 'real note\n')
 

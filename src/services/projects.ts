@@ -7,7 +7,7 @@ import { readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
-import { ensureExternalDir, ensureProjectWorkspace } from '../paths.js'
+import { ensureBotTmpDirs, ensureExternalDir, ensureProjectWorkspace } from '../paths.js'
 import { clampNumber, id, nowIso, parseDisabledSkills, projectKey, slugify, text } from '../util.js'
 
 
@@ -286,6 +286,16 @@ export const projectsMethods = {
         this.logger.warn?.(`dsh-team: 新项目 ${projectId} 清理旧 .team/secrets.env 残留失败：${error?.message ?? error}`)
       }
     }
+    // DSHBOTS-225 临时文件纪律：建群即落 .tmp/bots/（ignore 文件 + 各成员目录）。
+    // 创建失败只告警，不阻塞建群主流程。
+    try {
+      await ensureBotTmpDirs(
+        this.projectWorkDir(this.projectRow(projectId)),
+        this.membersOf(projectId).map(member => member.name),
+      )
+    } catch (error: any) {
+      this.logger.warn?.(`dsh-team: 项目 ${key} 初始化 .tmp/bots 失败：${error?.message ?? error}`)
+    }
     return this.projectView(this.projectRow(projectId))
   },
   async updateProject(projectId, patch, actor = this.actor()) {
@@ -509,7 +519,7 @@ export const projectsMethods = {
   },
 
   // 邀请已有 bot 加入项目。与 updateProject 的 memberIds 全量替换不同，这里做增量并给出精确错误语义。
-  addProjectMember(projectId, botId, actor = this.actor()) {
+  async addProjectMember(projectId, botId, actor = this.actor()) {
     const project = this.projectRow(projectId)
     if (project.status !== 'active') throw badRequest('项目已归档，不能添加成员')
     const bot = this.botRow(botId)
@@ -526,6 +536,13 @@ export const projectsMethods = {
       )
       this.audit(actor, 'project.add_member', 'project', projectId, { botId, botName: bot.name })
     })
+    // DSHBOTS-225 临时文件纪律：新成员入群即有自己的 .tmp/bots/{bot名}/ 目录；
+    // 创建失败只告警，不阻塞入群主流程。
+    try {
+      await ensureBotTmpDirs(this.projectWorkDir(project), [bot.name])
+    } catch (error: any) {
+      this.logger.warn?.(`dsh-team: 项目 ${project.key} 为成员 ${bot.name} 创建临时目录失败：${error?.message ?? error}`)
+    }
     return this.projectView(this.projectRow(projectId))
   },
 

@@ -13,6 +13,7 @@ import { id, nowIso, parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { readWriteScopes } from '../write-scopes.js'
+import { sanitizeTmpBotDirName } from '../../paths.js'
 
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
@@ -183,6 +184,7 @@ export const promptMethods = {
       `- Name: ${project.name}`,
       `- Key: ${project.key}`,
       `- Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
+      `- Temp files discipline: write every temporary or intermediate file (scratch scripts, probe outputs, downloaded artifacts) under \`.tmp/bots/${sanitizeTmpBotDirName(bot.name)}/\` inside the workspace; create that directory if it is missing. Never scatter temp files elsewhere in the project.`,
       roleLine,
       '',
       teamRules,
