@@ -1,6 +1,6 @@
 // modal-forms.js —— 各类 modal 表单与详情视图（新建项目/任务/Bot、技能、记忆、提案、价格、轨迹等），
 // 以及弹窗开关与焦点陷阱。骨架复用 modal-layer.js 的 modalShell / modalLoading / renderModalLayer。
-import { state, STATUS, STATUS_ORDER, PRIORITY, BOT_STATUS, SKILL_STATUS, RUN_STATUS, CREATOR_TYPE, EFFORT, COLORS, COLOR_NAMES } from './state.js'
+import { state, STATUS, STATUS_ORDER, PRIORITY, BOT_STATUS, SKILL_STATUS, RUN_STATUS, CREATOR_TYPE, EFFORT, COLORS, COLOR_NAMES, stageLabelText } from './state.js'
 import { icon } from './icons.js'
 import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, sandboxPill, timeAgo, toast } from './util.js'
 import { api } from './api.js'
@@ -439,7 +439,7 @@ function modalTask(task) {
   return modalShell({
     title: `${task.identifier} · ${task.title}`,
     // 任务阶段徽标走 taskStage 查表口径（DSHBOTS-42）：ended → stageLabel 为 null → 不显示。
-    badge: task.stageLabel ? esc(task.stageLabel) : endAt ? esc(`${task.status === 'done' ? '完成于' : '取消于'} ${formatTime(endAt)}`) : '',
+    badge: task.stageLabel ? esc(stageLabelText(task.stageLabel)) : endAt ? esc(`${task.status === 'done' ? '完成于' : '取消于'} ${formatTime(endAt)}`) : '',
     size: 'task',
     body: `<div class="task-detail-grid">
       <div class="task-detail-main">

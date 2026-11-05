@@ -80,7 +80,7 @@ test('筛选与搜索工具栏位置不变', () => {
   assert.match(source, /data-task-filter="status"/, '状态筛选仍在')
   assert.match(source, /data-task-filter="assignee"/, '成员筛选仍在')
   assert.match(source, /data-task-filter="timeRange"/, '时间筛选仍在')
-  assert.match(source, /<span class="tag">\$\{shownCount\} 个任务<\/span>/, '任务总数标签仍在')
+  assert.match(source, /<span class="tag">\$\{t\('task\.countBadge', \{ count: shownCount \}\)\}<\/span>/, '任务总数标签仍在')
 })
 
 test('样式：看板纵向排列，分组是块级', () => {
@@ -133,7 +133,7 @@ test('头部任务计数 = 各分组计数之和（P1-1）', () => {
     '分组计数与分组渲染同源',
   )
   assert.match(source, /const shownCount = groupCounts\.reduce\(\(sum, count\) => sum \+ count, 0\)/, '头部计数取各组之和')
-  assert.match(source, /<span class="tag">\$\{shownCount\} 个任务<\/span>/, '头部标签用各组之和')
+  assert.match(source, /<span class="tag">\$\{t\('task\.countBadge', \{ count: shownCount \}\)\}<\/span>/, '头部标签用各组之和')
   assert.doesNotMatch(source, /<span class="tag">\$\{tasks\.length\} 个任务<\/span>/, '头部不再用未分组的原始条数')
   // 与项目总数（设置页同源）的差额单独提示，不混进主计数
   assert.match(source, /const totalCount = Number\(project\.stats\?\.tasks/, '项目总数取设置页同源口径')

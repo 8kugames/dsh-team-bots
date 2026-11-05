@@ -121,6 +121,12 @@ export function labelText(table, key, prefix) {
   return Object.prototype.hasOwnProperty.call(table, key) ? t(`${prefix}${key}`) : key
 }
 
+// 后端 taskStageLabel 下发的中文阶段文案（task-stage.js 查表结果）：按「原文即键」入典翻译，
+// 未收录的文案回退原值并 warn，不静默吞。
+export function stageLabelText(label) {
+  return label ? t(label) : ''
+}
+
 // The one action in the top-right belongs to the page you are on.
 export const VIEW_ACTION = {
   tasks: { label: '新建任务', action: 'new-task', icon: 'plus' },

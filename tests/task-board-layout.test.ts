@@ -103,7 +103,7 @@ test('任务行结构：状态图标 + 优先级图标 + 编号 + 标题 + 右�
   assert.match(source, /class="task-status-icon \$\{attr\(status\)\}"/, '状态图标带状态 class 供配色')
   assert.match(source, /class="task-priority \$\{key\}"/, '优先级图标带档位 class 供配色')
   assert.match(source, /<span class="task-id">\$\{esc\(task\.identifier\)\}<\/span>/, '编号单独成簇')
-  assert.match(source, /\$\{bot \? avatar\(bot, 'sm'\) : '<span class="faint">未指派<\/span>'\}/, '行尾是负责人头像')
+  assert.match(source, /\$\{bot \? avatar\(bot, 'sm'\) : `<span class="faint">\$\{t\('task\.unassigned'\)\}<\/span>`\}/, '行尾是负责人头像')
   assert.match(source, /<span class="task-end-time" title="\$\{attr\(endAt\)\}">/, '终态时间小字在行尾')
 })
 

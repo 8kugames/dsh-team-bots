@@ -15,7 +15,7 @@ const systemSource = readFileSync(fileURLToPath(new URL('../src/services/system.
 
 test('任务卡 stage chip：文案走 stageLabel，「在等人」挂强调类，终态不渲染', () => {
   // chip 文案唯一来源是 taskView 下发的 stageLabel（后端七态查表）。
-  assert.match(appSource, /const runLabel = ended \? '' : task\.stageLabel \?\? ''/)
+  assert.match(appSource, /const runLabel = ended \? '' : stageLabelText\(task\.stageLabel\)/)
   // person 档（等待你回答/等待验收/需要你处理/等人处理）挂强调类，机器态保持中性。
   assert.match(
     appSource,
@@ -28,7 +28,7 @@ test('任务卡 stage chip：文案走 stageLabel，「在等人」挂强调类�
 })
 
 test('任务详情 modal 徽标走同一标签口径，ended 空槽由终态时间补位', () => {
-  assert.match(appSource, /badge: task\.stageLabel \? esc\(task\.stageLabel\) : endAt \? esc\(/)
+  assert.match(appSource, /badge: task\.stageLabel \? esc\(stageLabelText\(task\.stageLabel\)\) : endAt \? esc\(/)
 })
 
 test('person 强调样式复用既有色 token：不新增色值', () => {

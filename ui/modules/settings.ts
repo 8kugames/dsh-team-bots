@@ -40,7 +40,7 @@ function renderUsageGlobal() {
   }[focus]
   const overviewNotes = [
     unpriced > 0 ? `<div class="note warn-note">${t('usage.unpricedNote', { count: unpriced })}</div>` : '',
-    Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${Number(reconciliation.mismatched)} ${t('次运行的用量记录对不上，数据可能不完整。')}</div>` : '',
+    Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${t('次运行的用量记录对不上，数据可能不完整。', { count: Number(reconciliation.mismatched) })}</div>` : '',
   ].join('')
   return `
     ${usagePageHead(usage, t('usage.headGlobalHint'))}
@@ -404,7 +404,7 @@ function renderGlobal() {
                   </div>
                 </div>
                 <div class="field">
-                  <span class="field-label" id="desktop-notify-label">桌面通知</span>
+                  <span class="field-label" id="desktop-notify-label">${t('桌面通知')}</span>
                   <div><button class="btn small" type="button" data-action="toggle-notify" aria-labelledby="desktop-notify-label" aria-pressed="${notify.on ? 'true' : 'false'}"${notify.disabled ? ' disabled' : ''}>${esc(t(notify.label))}</button></div>
                   <div class="hint">${esc(t(notify.hint))}</div>
                 </div>

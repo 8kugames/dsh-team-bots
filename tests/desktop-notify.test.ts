@@ -131,7 +131,7 @@ test('页面可见且聚焦时只记基线不补弹；通知关闭时基线照�
 })
 
 test('渲染与轮询接线：全局配置开关、点击 case、poll 隐藏静默分支、审批卡 data-approval-id 锚点', () => {
-  assert.match(source, /id="desktop-notify-label">桌面通知/)
+  assert.match(source, /id="desktop-notify-label">\$\{t\('桌面通知'\)\}/)
   assert.match(source, /data-action="toggle-notify"/)
   assert.match(source, /case 'toggle-notify':[\s\S]{0,80}await toggleDesktopNotify\(\)/)
   // 页面隐藏时静默拉 state 只喂审批增量，不写 state.data、不渲染

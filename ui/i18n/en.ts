@@ -324,6 +324,18 @@ export default {
   'task.reviewUnverified': 'Unverified',
   'task.childrenSuffix': 'subtasks',
   'task.unassigned': 'Unassigned',
+  'task.countBadge': '${count} tasks',
+  // Task stage copy: the backend taskStageLabel lookup returns Chinese; the UI keys on that text.
+  '等待你回答': 'Waiting for your answer',
+  '等待验收': 'Waiting for review',
+  '需要你处理': 'Needs your attention',
+  '等人处理': 'Waiting for someone',
+  '等外部交付': 'Waiting for external delivery',
+  '正在执行': 'Running',
+  '排队中': 'Queued',
+  '待执行': 'To do',
+  '后台等待': 'Waiting in background',
+  '空闲': 'Idle',
   // Usage page (DSHBOTS-204): source-assertion tests lock some Chinese copy literals, so those
   // entries key on the source text itself; display goes through t() so language switching follows.
   '今日': 'Today',
@@ -517,6 +529,7 @@ export default {
   'global.outboxQueue': 'Delivery queue',
   'global.outboxFailed': '${count} messages failed to deliver',
   '不可用': 'Unavailable',
+  '桌面通知': 'Desktop notifications',
   '当前环境不支持桌面通知（需 HTTPS 或 localhost）。': 'This environment does not support desktop notifications (HTTPS or localhost required).',
   '已被浏览器拒绝': 'Blocked by the browser',
   '在浏览器站点设置中允许通知后刷新页面。': 'Allow notifications in the browser site settings and reload the page.',

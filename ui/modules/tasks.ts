@@ -1,5 +1,5 @@
 // tasks.js —— 任务面板（排序 / 分组 / 卡片 / 行）、终端面板，以及 bots / members / skills / memory / evolution 各视图。
-import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, BOT_STATUS, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, EFFORT, NAV, labelText } from './state.js'
+import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, BOT_STATUS, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, EFFORT, NAV, labelText, stageLabelText } from './state.js'
 import { icon } from './icons.js'
 import { activeProject, actorLabel, attr, avatar, botById, duration, esc, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, runDot, tildePath, timeAgo } from './util.js'
 import { api } from './api.js'
@@ -138,7 +138,7 @@ function renderTasks() {
         <select class="select" data-task-sort aria-label="任务排序" title="${t('task.sortTitle')}">
           ${TASK_SORTS.map(sort => `<option value="${sort.value}" ${state.taskSort === sort.value ? 'selected' : ''}>${t(sort.key)}</option>`).join('')}
         </select>
-        <span class="tag">${shownCount} 个任务</span>
+        <span class="tag">${t('task.countBadge', { count: shownCount })}</span>
         ${hiddenCount > 0 ? `<span class="faint" title="项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>` : ''}
       </div>
     </div>
@@ -220,7 +220,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
   const run = task.latestRun
   const stage = task.stage ?? { stage: 'idle' }
   const ended = stage.stage === 'ended'
-  const runLabel = ended ? '' : task.stageLabel ?? ''
+  const runLabel = ended ? '' : stageLabelText(task.stageLabel)
   const tags = []
   if (task.status === 'in_review') {
     tags.push(task.review_target === 'owner_bot' ? t('task.reviewOwner') : t('task.reviewYou'))
@@ -253,7 +253,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
       ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
       ${endAt ? `<span class="task-end-time" title="${attr(endAt)}">${icon('check')} ${formatTime(endAt)}</span>` : ''}
       ${['done', 'canceled'].includes(task.status) ? `<button type="button" class="task-reject" data-action="reject-task" data-task-id="${attr(task.id)}" title="${t('task.rejectTitle')}">${icon('reply')}${t('task.rejectAction')}</button>` : ''}
-      ${bot ? avatar(bot, 'sm') : '<span class="faint">未指派</span>'}
+      ${bot ? avatar(bot, 'sm') : `<span class="faint">${t('task.unassigned')}</span>`}
     </div>
   </article>`
 }
