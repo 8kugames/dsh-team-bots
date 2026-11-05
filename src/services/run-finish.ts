@@ -10,13 +10,47 @@ import { rolloverSummaryKey } from '../config.js'
 import {
   isQuotaExhausted,
   isRateLimitError,
+  isRetryChainError,
+  isTransientNetworkError,
   MAX_RATE_LIMIT_RETRIES,
   needsSynthesizedBackoff,
+  needsTransientBackoff,
   rateLimitBackoffMs,
+  transientBackoffMs,
 } from './backoff.js'
 import { ensureAttentionSchema, normalizeAttention } from './attention-schema.js'
 import { completeVisionRun, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
 import { chatReply } from '../wechat/format.js'
+
+// ── 失败终态白名单分类（DSHBOTS-267）──────────────────────────────────────
+// run 失败终态进入群聊/微信回推前，先按结构化信号归入有限白名单类别，对外只透出
+// 「类别+一句话摘要」；原始错误串、文件路径、请求正文不整段透传（完整信息仍落
+// runs.error_message 与 run_events，供 owner 查询）。分类信号复用 D-266 的
+// isTransientNetworkError（TRANSIENT_PATTERN）与既有限流/额度分类，不重复造。
+// 优先级：配额 > 限流 > 沙箱拒绝 > 超时 > 网络 > 内部错误 > 未知。
+const SANDBOX_DENIED_PATTERN = /(EPERM|EACCES|sandbox|file access denied|access denied)/i
+const TIMEOUT_PATTERN = /timed[\s_-]?out|timeout|超时/i
+const INTERNAL_PATTERN = /(internal error|EINTERNAL|INTERNAL_ERROR)/i
+const FAILURE_CATEGORY_NOTICES = {
+  quota: { label: '配额', summary: '模型额度耗尽，已按额度策略切换备用或转受阻。' },
+  rate_limited: { label: '限流', summary: '上游限流，已按退避策略自动处理。' },
+  sandbox_denied: { label: '沙箱拒绝', summary: '文件或命令操作被沙箱策略拒绝。' },
+  timeout: { label: '超时', summary: '上游响应超时。' },
+  network: { label: '网络', summary: '网络瞬态失败，已按退避策略自动重试。' },
+  internal: { label: '内部错误', summary: '服务内部错误。' },
+  unknown: { label: '未知', summary: '运行失败，完整原因见运行日志。' },
+}
+export function classifyFailure(error) {
+  const raw = `${String(error?.code ?? '')} ${String(error?.message ?? '')}`
+  if (isQuotaExhausted(error)) return FAILURE_CATEGORY_NOTICES.quota
+  if (isRateLimitError(error)) return FAILURE_CATEGORY_NOTICES.rate_limited
+  if (SANDBOX_DENIED_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.sandbox_denied
+  if (TIMEOUT_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.timeout
+  if (isTransientNetworkError(error)) return FAILURE_CATEGORY_NOTICES.network
+  if (INTERNAL_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.internal
+  return FAILURE_CATEGORY_NOTICES.unknown
+}
+
 
 export const runFinishMethods = {
   // 自动核验委派（DSHBOTS-113）：交付迁移 in_review 的同一事务内调用。开关关闭或
@@ -68,7 +102,14 @@ export const runFinishMethods = {
     // DSHBOTS-99：额度耗尽（已达到限额）不合成指数退避——额度窗口用尽，退避重打撞同一堵墙。
     const attemptNo = Math.max(1, Number(run.attempt) || 1)
     const quotaExhausted = isQuotaExhausted(error)
-    const synthesizedMs = needsSynthesizedBackoff(error) ? rateLimitBackoffMs(attemptNo) : null
+    // DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等过性错误）同判合成退避，
+    // 与限流共用同一 retry_after_ms 落库与 plan_wait 派生链；真 Retry-After 仍优先。
+    const transientBackoff = needsTransientBackoff(error)
+    const synthesizedMs = needsSynthesizedBackoff(error)
+      ? rateLimitBackoffMs(attemptNo)
+      : transientBackoff
+        ? transientBackoffMs(attemptNo)
+        : null
     // 额度耗尽时 provider 真给的重置时间照样保留（信息不丢，供 UI 显示额度恢复时间），
     // 但它不再触发对主模型的自动重试（见下方失败分支与 scheduler.retryExpiredPlanWaits）。
     const retryAfterMs = Number(error?.retryAfterMs) > 0 ? Number(error.retryAfterMs) : synthesizedMs
@@ -120,8 +161,10 @@ export const runFinishMethods = {
       const suffix = attemptNo < MAX_RATE_LIMIT_RETRIES ? '后重试' : '后转总监处理'
       this.insertRunEvent(
         runId,
-        'rate_limit_backoff',
-        `上游限流（${error?.code}）未返回 Retry-After，第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`,
+        transientBackoff ? 'transient_backoff' : 'rate_limit_backoff',
+        transientBackoff
+          ? `网络瞬态失败（${String(error?.code ?? error?.message ?? '未知错误').slice(0, 60)}），第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`
+          : `上游限流（${error?.code}）未返回 Retry-After，第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`,
       )
     }
     // 结构化提问（attention）：只在 bot 显式给出时落库，规范超长/超量后写入；
@@ -213,7 +256,8 @@ export const runFinishMethods = {
           senderId: bot.id,
           body: status === 'succeeded'
             ? (cleanOutput || `总监已完成${label}。`)
-            : `总监${label}运行失败：${error?.message ?? '未知错误'}`,
+            // DSHBOTS-267：失败只透出白名单类别+摘要，不透传原始错误串。
+            : `总监${label}运行失败（${classifyFailure(error).label}）：${classifyFailure(error).summary}`,
           taskId: run.task_id,
           runId,
         })
@@ -250,7 +294,7 @@ export const runFinishMethods = {
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `总监${label}运行失败：${error?.message ?? '未知错误'}`,
+          body: `总监${label}运行失败（${classifyFailure(error).label}）：${classifyFailure(error).summary}`,
           runId,
         })
       }
@@ -361,7 +405,9 @@ export const runFinishMethods = {
       // 禁止立刻重打上游——不切备用模型（备用可能走同一网关），也不立刻排总监处理运行。
       // DSHBOTS-99：额度耗尽（已达到限额）不走这条路径——不指数退避、无条件先试备用模型；
       // 瞬时限流的等待语义原样保留。
-      const backoffWaitMs = isRateLimitError(error) && retryAfterMs > 0 ? retryAfterMs : 0
+      // DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等）进同一退避链——等待期内同样
+      // 不切备用不排 handle，plan_retry 到期派生接管重试；attempt≤3，第 4 次照常转 blocked。
+      const backoffWaitMs = isRetryChainError(error) && retryAfterMs > 0 ? retryAfterMs : 0
       // 额度耗尽不做自动重试：重置时间只当信息留着，不据此重打主模型。
       const willRetry = !quotaExhausted && backoffWaitMs > 0 && attemptNo < MAX_RATE_LIMIT_RETRIES
       // 主 provider 不可用：临时切备用模型继续跑这条任务。派生成功后任务不置 blocked、
@@ -401,16 +447,22 @@ export const runFinishMethods = {
         const quotaNote = quotaExhausted
           ? `\n已达限额（${error?.code ?? '未知错误'}），主备模型均不可用，任务转为受阻${quotaResetNote}。`
           : ''
+        // 退避提示按失败类别措辞：瞬态抖动与限流都是「退避后自动重试」，不混用限流文案。
+        const backoffKind = isTransientNetworkError(error) ? '网络瞬态失败' : '上游限流'
+        const backoffVerb = isTransientNetworkError(error) ? '退避' : '指数退避'
         const backoffNote = backoffWaitMs > 0
           ? (willRetry
-              ? `\n上游限流，第 ${attemptNo} 次指数退避，约 ${Math.round(backoffWaitMs / 1000)} 秒后自动重试。`
-              : `\n上游限流，已达自动重试上限，约 ${Math.round(backoffWaitMs / 1000)} 秒后转总监处理。`)
+              ? `\n${backoffKind}，第 ${attemptNo} 次${backoffVerb}，约 ${Math.round(backoffWaitMs / 1000)} 秒后自动重试。`
+              : `\n${backoffKind}，已达自动重试上限，约 ${Math.round(backoffWaitMs / 1000)} 秒后转总监处理。`)
           : ''
+        // DSHBOTS-267：失败只透出白名单类别+摘要；原始错误串不进群聊（完整信息已落
+        // runs.error_message 与 run_events）。quotaNote/backoffNote 仅含结构化错误码。
+        const failure = classifyFailure(error)
         this.insertMessage({
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `任务执行失败：${error?.message ?? '未知错误'}\n运行 ID：${runId}${quotaNote}${backoffNote}`,
+          body: `任务执行失败（${failure.label}）：${failure.summary}\n运行 ID：${runId}${quotaNote}${backoffNote}`,
           taskId: run.task_id,
           runId,
         })
@@ -428,26 +480,28 @@ export const runFinishMethods = {
           })
         }
       } else if (run.kind === 'chat') {
+        // DSHBOTS-267：群聊与微信回推共用同一份分类文案，不含原始错误串。
+        const failureBody = `运行失败（${classifyFailure(error).label}）：${classifyFailure(error).summary}`
         this.insertMessage({
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `运行失败：${error?.message ?? '未知错误'}`,
+          body: failureBody,
           runId,
         })
-        this.notifyWechatChat(bot, run, `运行失败：${error?.message ?? '未知错误'}`, true)
+        this.notifyWechatChat(bot, run, failureBody, true)
       } else if (run.kind === 'solo_chat') {
-        const failure = `运行失败：${error?.message ?? '未知错误'}`
+        const failureBody = `运行失败（${classifyFailure(error).label}）：${classifyFailure(error).summary}`
         this.insertSoloMessage({
           botId: bot.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: failure,
+          body: failureBody,
           runId,
         })
         // DSHBOTS-258：微信通道的 solo 直达失败提示同样推回（notifyWechatChat 内部按
         // trigger_type='wechat' 门禁，普通 UI 单聊不推）。
-        this.notifyWechatChat(bot, run, failure, true)
+        this.notifyWechatChat(bot, run, failureBody, true)
       }
     }
     if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
@@ -511,8 +565,11 @@ export const runFinishMethods = {
     )
     // 护栏二：链路深度 ≤2——深度达 2 的 bot 回复不再派发。
     if (this.chatMentionChainDepth(run) >= 2) return []
-    const dispatched = targets.slice(0, 3)
+    // DSHBOTS-267 防循环上限（chat 路径）：每次 @ 唤醒即一条伙伴提醒，与 notify 路径
+    // 共用同一 run_events 配额流；超限目标静默丢弃（allowPartnerNotice 内 warn 留痕）。
+    const dispatched = targets.slice(0, 3).filter(target => this.allowPartnerNotice(run.id, target.id))
     for (const target of dispatched) {
+      this.recordPartnerNotice(run.id, target.id)
       this.enqueueOutbox({
         kind: 'chat_run',
         payload: { projectId: project.id, botId: target.id, messageId, origin: null },

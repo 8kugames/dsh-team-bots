@@ -727,7 +727,8 @@ test('wechat 直达真 service：消息以用户身份插入项目会话并触�
     await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
     assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
     await service.finishRun({ runId: soloRun.id, status: 'failed', error: { message: '模型超时' } } as any)
-    assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败：模型超时', 'solo 通道失败提示同样推回')
+    // DSHBOTS-267：失败只推「类别+摘要」，原始错误串不进微信。
+    assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败（超时）：上游响应超时。', 'solo 通道失败提示同样推回（白名单分类）')
 
     await service.sendMessage(store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id, '工作台普通群聊消息', { type: 'user', id: service.localUserId })
     const uiRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", store.get("SELECT id FROM messages WHERE body = '工作台普通群聊消息'").id)

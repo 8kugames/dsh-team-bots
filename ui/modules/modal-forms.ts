@@ -58,7 +58,7 @@ function modalNewProject() {
         <div class="field"><label id="new-project-owner-label" for="new-project-owner">${t("总监")} Bot</label><select class="select" style="width:100%" id="new-project-owner" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || t("成员"))}</option>`).join('')}</select></div>
       </div>
       <div class="field"><label id="new-project-description-label" for="new-project-description">${t("项目说明")}</label><textarea class="textarea" id="new-project-description" name="description" placeholder="${t("项目目标、边界和验收标准")}"></textarea></div>
-      <div class="field"><label id="new-project-production-label" for="new-project-production">${t("生产目录")}</label><div style="display:flex;gap:8px"><input class="input mono" style="flex:1" id="new-project-production" name="productionDir" placeholder="/Users/you/repos/my-game${t("（可选）")}"><button class="btn" type="button" data-action="pick-dir-open" data-picker-for="new-project-production">${icon('folder')}${t("选择")}</button></div><div class="hint">Bots ${t("的工作目录，可指向既有代码库等本机目录；留空则用默认管理目录。")}</div><div class="dir-picker" id="dir-picker-new-project-production" hidden></div></div>
+      <div class="field"><label id="new-project-production-label" for="new-project-production">${t("生产目录")}</label><div style="display:flex;gap:8px"><input class="input mono" style="flex:1" id="new-project-production" name="productionDir" placeholder="/Users/you/repos/my-game${t("（可选）")}"><button class="btn" type="button" data-action="pick-dir-open" data-picker-for="new-project-production">${icon('folder')}${t("选择")}</button></div><div class="dir-picker" id="dir-picker-new-project-production" hidden></div></div>
       ${bots.length > 1 ? `<div class="field"><span class="field-label" id="new-project-members-label">${t("其他成员")}</span><div class="check-list" role="group" aria-labelledby="new-project-members-label">${bots.slice(1).map(bot => `<div class="check-row"><input type="checkbox" id="new-project-member-${attr(bot.id)}" name="memberIds" value="${attr(bot.id)}"><label for="new-project-member-${attr(bot.id)}">${avatar(bot, 'sm')} ${esc(bot.name)}</label><span class="role">${esc(bot.role || '')}</span></div>`).join('')}</div></div>` : ''}
     </form>`,
     footer: `<button class="btn" data-action="close-modal">${t("取消")}</button><button class="btn primary" type="submit" form="modal-form">${icon('plus')}${t("创建项目")}</button>`,
@@ -119,7 +119,7 @@ function modalRemoveBotTracking() {
     title: t("移除追踪 · 后果确认"),
     badge: t("从列表移除"),
     subtitle: `${t("将停止追踪已归档 Bot「")}${modal.name}${t("」。")}`,
-    body: `<ul class="remove-tracking-list"><li>${t("该 Bot 将从工作台 Bots 列表与单聊入口移除，不再显示。")}</li><li>${t("运行记录、单聊消息、版本历史与专属工作区目录")}<strong>${t("全部保留")}</strong>${t("（不做物理删除）。")}</li><li>${t("移除追踪后不能恢复，该 Bot 也不能再被修改或重新启用。")}</li></ul><div class="hint">${t("这是软移除：数据只在数据库中停止展示，不清理任何文件。")}</div>`,
+    body: `<ul class="remove-tracking-list"><li>${t("该 Bot 将从工作台 Bots 列表与单聊入口移除，不再显示。")}</li><li>${t("运行记录、单聊消息、版本历史与专属工作区目录")}<strong>${t("全部保留")}</strong>${t("（不做物理删除）。")}</li><li>${t("移除追踪后不能恢复，该 Bot 也不能再被修改或重新启用。")}</li></ul>`,
     footer: `<button class="btn" data-action="close-modal">${t("取消")}</button><button class="btn danger" data-action="bot-remove-tracking-step2" type="button">${t("继续")}</button>`,
   })
 }
@@ -282,7 +282,7 @@ function modalNewTask() {
       <div class="field-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
         <div class="field"><label id="new-task-assignee-label" for="new-task-assignee">${t("指派给")}</label><select class="select" style="width:100%" id="new-task-assignee" name="assigneeBotId">${project.members.map(member => `<option value="${attr(member.id)}">${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
         <div class="field"><label id="new-task-priority-label" for="new-task-priority">${t("优先级")}</label><select class="select" style="width:100%" id="new-task-priority" name="priority"><option value="medium">${t("中")}</option><option value="high">${t("高")}</option><option value="urgent">${t("紧急")}</option><option value="low">${t("低")}</option><option value="none">${t("无")}</option></select></div>
-        <div class="field"><label id="new-task-time-budget-label" for="new-task-time-budget">${t('taskForm.timeBudgetLabel')}</label><input class="input" style="width:100%" id="new-task-time-budget" name="time_budget_minutes" type="number" min="1" max="10080" step="1" placeholder="${attr(t('taskForm.timeBudgetPlaceholder'))}"><div class="usage-note">${t('task.timeBudgetNote')}</div></div>
+        <div class="field"><label id="new-task-time-budget-label" for="new-task-time-budget">${t('taskForm.timeBudgetLabel')}</label><input class="input" style="width:100%" id="new-task-time-budget" name="time_budget_minutes" type="number" min="1" max="10080" step="1"><div class="usage-note">${t('task.timeBudgetNote')}</div></div>
       </div>
       <div class="field-row">
         <div class="field"><label id="new-task-parent-label" for="new-task-parent">${t("父任务")}</label><select class="select" style="width:100%" id="new-task-parent" name="parentTaskId"><option value="">${t("无（顶层任务）")}</option>${taskRelationOptions(preselectedParent)}</select></div>

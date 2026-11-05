@@ -23,10 +23,12 @@ export const taskNotifyMethods = {
       task.id,
     )
     if (active) return null
-    // 负责人 bot 行缺失（数据异常）时整体跳过：通知与开工都指不到人，
-    // 也不能让通知失败反过来把已经落库的状态变更顶掉。
-    const bot = this.store.get('SELECT name FROM bots WHERE id = ?', assigneeId)
-    if (!bot) return null
+    // 负责人 bot 行缺失（数据异常）或已暂停/归档（DSHBOTS-262）时整体跳过：通知与开工
+    // 都指不到人——看板拖拽/表单改状态是派发链路的隐形入口，暂停中不该被唤醒
+    // （enqueueTaskRun 对 pending task_run 补投兜底同口径）；也不能让通知失败反过来
+    // 把已经落库的状态变更顶掉。
+    const bot = this.store.get('SELECT name, status FROM bots WHERE id = ?', assigneeId)
+    if (!bot || bot.status !== 'active') return null
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
     try {

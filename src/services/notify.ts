@@ -9,7 +9,45 @@
 import { badRequest, notFound } from '../errors.js'
 import { text } from '../util.js'
 
+// ── 防循环三上限（DSHBOTS-267，配置默认值写死常量，KISS）──────────────────
+// 真实事故背书：伙伴回执淹没主对话、委派续跑近百轮重发已推翻目标。
+// ① 单 run 内经 notify/chat 产生的伙伴提醒（按去重目标计条数）上限：超出静默丢弃并记日志；
+// ② 同类提醒事件（同 run + 同目标 bot）每日次数上限：超出静默丢弃并记日志。
+// 每条放行的提醒在 run_events 记 type='partner_notice'，message 存 partner_notice:<目标bot>，
+// 两条上限都从这张事件流计数，不新建并行状态表。
+export const RUN_PARTNER_NOTICE_CAP = 3
+export const PARTNER_NOTICE_DAILY_CAP = 5
+
 export const notifyMethods = {
+  // 伙伴提醒配额闸（DSHBOTS-267）：放行返回 true；超限静默丢弃（warn 留痕）返回 false。
+  // run 归属不到（发起方无活跃运行）时不设限——空闲/人工会话的零星通知无循环风险。
+  allowPartnerNotice(runId, targetId) {
+    if (!runId || !targetId) return true
+    const distinctTargets = this.store.get(
+      "SELECT COUNT(DISTINCT message) AS n FROM run_events WHERE run_id = ? AND type = 'partner_notice'",
+      runId,
+    ).n
+    if (distinctTargets >= RUN_PARTNER_NOTICE_CAP) {
+      this.logger.warn?.('dsh-team: 伙伴提醒超单 run 上限（%s 个目标），静默丢弃：run=%s target=%s', RUN_PARTNER_NOTICE_CAP, runId, targetId)
+      return false
+    }
+    const todayCount = this.store.get(
+      "SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'partner_notice' AND message = ? AND date(created_at) = date('now')",
+      runId, `partner_notice:${targetId}`,
+    ).n
+    if (todayCount >= PARTNER_NOTICE_DAILY_CAP) {
+      this.logger.warn?.('dsh-team: 伙伴提醒超每日上限（%s 次/日），静默丢弃：run=%s target=%s', PARTNER_NOTICE_DAILY_CAP, runId, targetId)
+      return false
+    }
+    return true
+  },
+
+  // 记一条放行的伙伴提醒事件（配额闸通过后调用；chat 唤醒路径共用同一事件流）。
+  recordPartnerNotice(runId, targetId) {
+    if (!runId || !targetId) return
+    this.insertRunEvent(runId, 'partner_notice', `partner_notice:${targetId}`)
+  },
+
   // 工具入口：target=member 通知本项目另一成员；target=task 提醒本项目执行中任务。
   // 鉴权：调用者必须是本项目成员（memberContextFor），目标成员/任务都锁在本项目内，
   // 跨项目 ref 一律解析不到（notFound），不泄露他项目是否存在同名目标。
@@ -32,6 +70,18 @@ export const notifyMethods = {
       .find(member => member.name.toLowerCase() === name.toLowerCase())
     if (!target) throw notFound(`项目 ${project.name} 里没有叫 ${memberName} 的成员 Bot`)
     if (target.id === from.id) throw badRequest('不能给自己发通知')
+    // 暂停/不可用目标不投递（DSHBOTS-262）：通知即唤醒信号，暂停中先恢复再通知。
+    if (target.status === 'paused') throw badRequest(`Bot ${target.name} 已暂停，先恢复再通知`)
+    if (target.status !== 'active') throw badRequest(`Bot ${target.name} 当前不可用（${target.status}）`)
+    // DSHBOTS-267 防循环上限：归属发起方当前活跃运行，配额闸不通过即静默丢弃（不落留痕不投递）。
+    const activeRun = this.store.get(
+      "SELECT id FROM runs WHERE bot_id = ? AND project_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+      from.id, project.id,
+    )
+    if (!this.allowPartnerNotice(activeRun?.id, target.id)) {
+      return `伙伴提醒已达防循环上限，本次已静默丢弃（详见运行日志）。`
+    }
+    this.recordPartnerNotice(activeRun?.id, target.id)
     const notice = `【通知】${from.name}：${body}`
     const messageId = this.insertMessage({
       projectId: project.id,
@@ -72,6 +122,26 @@ export const notifyMethods = {
   async notifyTaskFromBot({ project, from, ref, body }) {
     const task = this.resolveBotTask(project, ref)
     const identifier = `${project.key}-${task.number}`
+    // 负责人暂停/不可用时提醒不投递（DSHBOTS-262）：提醒即唤醒信号，暂停中先恢复再提醒。
+    if (task.assignee_bot_id) {
+      const assignee = this.store.get('SELECT name, status FROM bots WHERE id = ?', task.assignee_bot_id)
+      if (assignee?.status === 'paused') throw badRequest(`任务 ${identifier} 负责人 ${assignee.name} 已暂停，先恢复再提醒`)
+      if (!assignee || assignee.status !== 'active') throw badRequest(`任务 ${identifier} 负责人当前不可用`)
+    }
+    // DSHBOTS-267 单跟进者在途幂等：每张任务同时只允许一个跟进提醒在途。
+    // 在途判定=最近一条任务提醒落库后，该任务没有启动过新运行（提醒尚未被任何运行消费）；
+    // 重复提醒静默吸收（不落新留痕、不注入、不计新），warn 留痕。
+    const lastNotice = this.store.get(
+      "SELECT created_at FROM messages WHERE task_id = ? AND sender_type = 'bot' AND body LIKE '【任务提醒】%' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      task.id,
+    )
+    if (lastNotice && !this.store.get(
+      'SELECT id FROM runs WHERE task_id = ? AND started_at > ? LIMIT 1',
+      task.id, lastNotice.created_at,
+    )) {
+      this.logger.warn?.('dsh-team: 任务 %s 已有在途跟进提醒，重复提醒静默吸收', identifier)
+      return `任务 ${identifier} 已有在途跟进提醒，本次重复未投递（幂等去重，不计数）。`
+    }
     const notice = `【任务提醒】${from.name}：${body}`
     const messageId = this.insertMessage({
       projectId: project.id,

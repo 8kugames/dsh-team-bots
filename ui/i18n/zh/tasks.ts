@@ -32,8 +32,7 @@ export default {
   "dm.failed": "失败",
   "dm.repliedAt": "回复于 ${time}",
   // 任务时效要求（DSHBOTS-129）
-  "taskForm.timeBudgetLabel": "时效要求（分钟）",
-  "taskForm.timeBudgetPlaceholder": "选填，留空不设",
+  "taskForm.timeBudgetLabel": "时效要求（分钟，选填）",
   "task.timeBudgetValue": "${minutes} 分钟",
   "task.timeBudgetNote": "硬性时限：到期运行将被中止；与全局运行超时取更短者",
   // 任务驳回（DSHBOTS-141）：终态任务退回待规划
@@ -42,7 +41,6 @@ export default {
   "task.rejectConfirm": "确定把「${title}」驳回退回待规划？",
   "task.rejectDone": "已驳回，任务退回待规划",
   // 任务面板
-  "task.dragHint": "拖拽任务行切换状态，点组头可折叠分组。",
   "task.searchPlaceholder": "搜索任务、编号或标签",
   "task.filterAllStatus": "全部状态",
   "task.filterAllMembers": "全部成员",
@@ -52,7 +50,6 @@ export default {
   "task.time30d": "近 30 天",
   "task.timeAll": "全部时间",
   "task.sortLabel": "任务排序",
-  "task.sortTitle": "组内排序：不影响分组与父子层级",
   "task.sortCreatedDesc": "创建时间 新→旧",
   "task.sortCreatedAsc": "创建时间 旧→新",
   "task.sortCompletedDesc": "完成时间 新→旧",

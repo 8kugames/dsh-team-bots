@@ -23,8 +23,6 @@ function wechatCard() {
           ${wechat.adminPeerId ? `<span class="wechat-admin">${t("管理员")} <strong>${esc(String(wechat.adminPeerId).slice(0, 12))}…</strong></span>` : ''}
         </div>
         ${wechat.error ? `<div class="hint" style="color:var(--coral,#e5484d)">${esc(wechat.error)}</div>` : ''}
-        ${auth?.qrSvg ? `
-          <div class="hint wechat-qr-hint">${t("微信扫码授权 ClawBot；手机上确认后此处会自动变为已连接。")}</div>` : ''}
         ${wechat.phase === 'verification' || auth?.verification ? `
           <div class="field-row" style="margin-top:8px">
             <div class="field"><label for="wechat-code">${t("微信验证码")}</label><input class="input mono" id="wechat-code" inputmode="numeric" placeholder="${t("扫码后手机上的验证码")}"></div>
@@ -35,7 +33,7 @@ function wechatCard() {
             ? `<button class="btn small danger" type="button" data-action="wechat-logout">${t("退出绑定")}</button>`
             : `<button class="btn small" type="button" data-action="wechat-login">${t("扫码绑定")}</button>`}
         </div>
-        <div class="hint">${t("扫码授权成功后自动把授权者绑定为管理员；任务完成会主动推送。")}</div>
+        <div class="hint">${t("微信扫码授权 ClawBot；确认后自动绑定授权者为管理员，任务完成主动推送。")}</div>
       </div>
       ${auth?.qrSvg ? `<div class="wechat-qr">${auth.qrSvg}</div>` : ''}
     </div>`
@@ -106,7 +104,7 @@ function secretAddCard(projects) {
       </div>
       <div class="field"><label for="secret-value">${t("密钥值")}</label>
         <input class="input mono" id="secret-value" name="value" type="password" minlength="8" autocomplete="new-password" placeholder="${t("至少 8 个字符，保存后不再回显")}">
-        <div class="hint">${t("至少 8 个字符；同作用域同名会覆盖旧值。")}</div>
+        <div class="hint">${t("同作用域同名会覆盖旧值。")}</div>
       </div>
       <div class="btn-row"><button class="btn small" type="submit">${icon('check')}${t("保存密钥")}</button></div>
     </form>`

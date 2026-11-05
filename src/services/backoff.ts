@@ -90,3 +90,37 @@ export function needsSynthesizedBackoff(error) {
   if (isQuotaExhausted(error)) return false
   return isRateLimitError(error) && !(Number(error?.retryAfterMs) > 0)
 }
+
+// ── 网络瞬态失败（DSHBOTS-266）──────────────────────────────────────────────
+// provider 网络抖动（连接重置/超时/5xx 等）是过性失败：退避后重打大概率自愈，
+// 直接常规失败转 blocked 等 owner 手动重试是误伤。判定只接住限流/额度分类漏掉的
+// 过性错误——优先级：额度耗尽 > 限流码 > 瞬态（429 仍走限流路径吃服务端 retry_after）。
+// 正则参考 dsh-superagent-prototype executor/dsh.ts 的 PASSING（去掉 429 与 rate limit：
+// 那两个信号归限流分类，瞬态不抢）。错误码与错误正文双重匹配，任一命中即可。
+// 数字锚点只对数字设界：HTTP_503 / status 502 命中，1408 / 75038 之类的长数字不误伤。
+export const TRANSIENT_PATTERN = /(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE|UND_ERR|socket hang up|fetch failed|overloaded|(?<!\d)408(?!\d)|(?<!\d)50[0-4](?!\d))/i
+
+// 瞬态退避时长：15s / 30s / 60s（15s × 2^(n-1)，attempt 缺失或非法按 1 计）。
+// 比限流链（1min 起步）短——网络抖动通常秒级自愈；重试上限复用 MAX_RATE_LIMIT_RETRIES=3。
+export function transientBackoffMs(attempt) {
+  const n = Math.max(1, Number(attempt) || 1)
+  return 15_000 * 2 ** (n - 1)
+}
+
+// 这次失败是不是网络瞬态。限流码与额度耗尽先排除（各自走既有路径）。
+export function isTransientNetworkError(error) {
+  if (isRateLimitError(error)) return false
+  if (isQuotaExhausted(error)) return false
+  return TRANSIENT_PATTERN.test(`${String(error?.code ?? '')} ${String(error?.message ?? '')}`)
+}
+
+// 瞬态失败且 provider 没给可用的 Retry-After → 需要合成指数退避（真 Retry-After 优先）。
+export function needsTransientBackoff(error) {
+  return isTransientNetworkError(error) && !(Number(error?.retryAfterMs) > 0)
+}
+
+// 这次失败是否进「退避等待 → plan_retry 到期派生」既有重试链（限流或网络瞬态）。
+export function isRetryChainError(error) {
+  if (isQuotaExhausted(error)) return false
+  return isRateLimitError(error) || isTransientNetworkError(error)
+}

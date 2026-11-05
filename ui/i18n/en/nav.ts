@@ -65,7 +65,6 @@ export default {
   "tree.archivedTitle": "Archived group chats",
   "tree.archived": "Archived",
   "tree.archivedEmpty": "No archived projects.",
-  "tree.archivedHint": "Reopen & remove under Project settings · status",
   // Sidebar bottom
   "sidebar.botsOverview": "Bots overview",
   "sidebar.pendingProposals": "Proposals awaiting approval",

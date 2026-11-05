@@ -117,7 +117,6 @@ function renderTasks() {
   const hiddenCount = Math.max(0, totalCount - shownCount)
   return `
     <div class="section-head">
-      <p>${t('task.dragHint')}</p>
       <div class="board-toolbar" style="margin:0">
         <input class="input search" id="task-search" placeholder="${t('task.searchPlaceholder')}" aria-label="${t('task.searchPlaceholder')}" value="${attr(state.taskFilter.search)}">
         <select class="select" data-task-filter="status">
@@ -134,11 +133,11 @@ function renderTasks() {
           <option value="30d" ${state.taskFilter.timeRange === '30d' ? 'selected' : ''}>${t('task.time30d')}</option>
           <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>${t('task.timeAll')}</option>
         </select>
-        <select class="select" data-task-sort aria-label="${t("任务排序")}" title="${t('task.sortTitle')}">
+        <select class="select" data-task-sort aria-label="${t("任务排序")}">
           ${TASK_SORTS.map(sort => `<option value="${sort.value}" ${state.taskSort === sort.value ? 'selected' : ''}>${t(sort.key)}</option>`).join('')}
         </select>
         <span class="tag">${t('task.countBadge', { count: shownCount })}</span>
-        ${hiddenCount > 0 ? `<span class="faint" title="${t("项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个", { totalCount: totalCount, hiddenCount: hiddenCount })}">${t("项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个", { totalCount: totalCount, hiddenCount: hiddenCount })}</span>` : ''}
+        ${hiddenCount > 0 ? `<span class="faint">${t("项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个", { totalCount: totalCount, hiddenCount: hiddenCount })}</span>` : ''}
       </div>
     </div>
     ${tasks.length === 0 ? `<div class="empty-state">

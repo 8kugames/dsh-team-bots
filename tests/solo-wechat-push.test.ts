@@ -79,7 +79,8 @@ test('微信来源 director solo run：回复与失败提示都推回微信（ch
       solo2.id, run.id,
     )
     await service.finishRun({ runId: run2.id, status: 'failed', error: { message: '模型超时' } } as any)
-    assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败：模型超时', '失败提示推回微信')
+    // DSHBOTS-267：失败只推「类别+摘要」，原始错误串不进微信。
+    assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败（超时）：上游响应超时。', '失败提示推回微信（白名单分类）')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
