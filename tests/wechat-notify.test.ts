@@ -151,7 +151,7 @@ test('验收通过（applyReview 路径）：推恰一条完成通知，重复�
 
     assert.equal(service.taskRow(task.id).status, 'done')
     assert.equal(pushed.length, 1, '完成只推一条')
-    assert.equal(pushed[0], `任务 TSN-${task.number}《验收推送》已完成。回复「详情 TSN-${task.number}」查看。`)
+    assert.equal(pushed[0], `✅ TSN-${task.number}《验收推送》已完成\n📖 回复「详情 TSN-${task.number}」查看`)
 
     await assert.rejects(
       () => service.applyReview(
@@ -186,7 +186,7 @@ test('微信「验收 KEY-N」指令：同一收口推恰一条，指令回复�
     assert.ok(reply.includes('已验收通过'), '指令回复文案不受影响')
     assert.equal(service.taskRow(task.id).status, 'done')
     assert.equal(pushed.length, 1, '微信验收路径同样只推一条')
-    assert.equal(pushed[0], `任务 TSN-${task.number}《微信验收》已完成。回复「详情 TSN-${task.number}」查看。`)
+    assert.equal(pushed[0], `✅ TSN-${task.number}《微信验收》已完成\n📖 回复「详情 TSN-${task.number}」查看`)
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})
     await closeQuietly(store)
@@ -210,7 +210,7 @@ test('看板/编辑表单直接完成（transition_task → done）：同样推�
 
     assert.equal(service.taskRow(task.id).status, 'done')
     assert.equal(pushed.length, 1, '直接完成同样只推一条')
-    assert.ok(pushed[0].includes(`任务 TSN-${task.number}《直接完成》已完成`))
+    assert.ok(pushed[0].includes(`TSN-${task.number}《直接完成》已完成`))
 
     // done → done 重复提交是同状态幂等（与重复 in_progress 提交同构，不构成状态转换）：不重复推。
     await service.transitionTask(task.id, 'done', actor)
@@ -231,11 +231,11 @@ test('创建任务（DSHBOTS-182 增补）：推恰一条含 KEY-N/标题/派给
     const task = await service.createTask({ projectId: project.id, title: '创建推送', assigneeBotId: dev.id, postCard: false })
 
     assert.equal(pushed.length, 1, '创建只推一条')
-    assert.equal(pushed[0], `任务 TSN-${task.number}《创建推送》已创建，派给 Builder。回复「详情 TSN-${task.number}」查看。`)
+    assert.equal(pushed[0], `🆕 TSN-${task.number}《创建推送》已创建\n👤 派给 Builder\n📖 回复「详情 TSN-${task.number}」查看`)
 
     const unassigned = await service.createTask({ projectId: project.id, title: '无主创建', status: 'todo', postCard: false })
     assert.equal(pushed.length, 2, '无指派任务创建同样推一条')
-    assert.equal(pushed[1], `任务 TSN-${unassigned.number}《无主创建》已创建，暂未指派。回复「详情 TSN-${unassigned.number}」查看。`)
+    assert.equal(pushed[1], `🆕 TSN-${unassigned.number}《无主创建》已创建\n👤 暂未指派\n📖 回复「详情 TSN-${unassigned.number}」查看`)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -284,9 +284,9 @@ test('D-185 合批：多条待发合并为一次发送，超过明细上限截�
 
     assert.equal(sent.length, 1, '7 条待发只占一次通道调用')
     const body = sent[0]
-    assert.ok(body.includes('任务动态 7 条：'), '合批摘要带总条数头')
+    assert.ok(body.includes('📣 任务动态 7 条'), '合批摘要带总条数头')
     for (let i = 0; i < 5; i++) assert.ok(body.includes(texts[i]), `明细第 ${i + 1} 条保留原文`)
-    assert.ok(body.includes('……等 2 项'), '超出明细上限的部分汇总为「等 N 项」')
+    assert.ok(body.includes('⋯ 其余 2 项'), '超出明细上限的部分汇总为「其余 N 项」')
     assert.ok(!body.includes(texts[5]) && !body.includes(texts[6]), '截断掉的条目不进正文')
     assert.equal(store.pendingOutbox().length, 0, '含截断条目在内全部标记已发送')
     const rows = store.db.prepare('SELECT * FROM outbox').all()
@@ -399,7 +399,7 @@ test('D-185 notify 合批窗口：窗口内多次推送合并为一次发送', a
     await new Promise(resolve => setTimeout(resolve, 120))
 
     assert.equal(sent.length, 1, '同一窗口内的两条推送只占一次通道调用')
-    assert.ok(sent[0].includes('任务动态 2 条：'))
+    assert.ok(sent[0].includes('📣 任务动态 2 条'))
     assert.ok(sent[0].includes('TSN-1') && sent[0].includes('TSN-2'))
     assert.equal(store.pendingOutbox().length, 0)
     store.close()

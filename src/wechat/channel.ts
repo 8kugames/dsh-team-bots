@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { TencentIlinkTransport } from '../../vendor/wechat-ilink/index.js'
 import { handleCommand, isRetryable, outboundChunks, WechatBusinessError, WechatIlinkError } from './commands.js'
+import { batchDigest, failureText, welcomeAdmin } from './format.js'
 import { AppError } from '../errors.js'
 
 const { version: PLUGIN_VERSION } = createRequire(import.meta.url)('../../package.json')
@@ -18,12 +19,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const OUTBOX_MAX_ATTEMPTS = 3
 /** 合批窗口：窗口内到达的多条推送合并为一次发送（一轮任务事件常并发多条，逐条发占消息额度）。 */
 const OUTBOX_BATCH_WINDOW_MS = 1500
-/** 合批摘要的明细行数上限：超过只保留最旧的 N 条原文，其余以「等 N 项」汇总。 */
-const OUTBOX_BATCH_LINES = 5
 /** 进程内记忆已处理消息，避免 cursor 未推进时重复回复。 */
 const PROCESSED_MEMORY_LIMIT = 500
-/** 用户侧只给通用失败提示，具体错误写日志。 */
-const GENERIC_FAILURE_TEXT = '消息处理失败，稍后重试'
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 /** 授权响应里可能出现的用户标识字段（vendor 的 confirmed 返回 userId=ilink_user_id）。 */
@@ -332,7 +329,7 @@ export class WechatChannel {
       this.store.saveAdminPeer(peerId)
       this.pendingAdmin = null
       this.log.info?.(`[wechat] 管理员已绑定（本次授权会话首条消息）: ${peerId}`)
-      await this.sendTo(peerId, '已绑定为本团队管理员。回复「帮助」查看指令。', signal)
+      await this.sendTo(peerId, welcomeAdmin(), signal)
       await this.flushOutbox(transport, signal)
       return
     }
@@ -356,7 +353,7 @@ export class WechatChannel {
         return
       }
       this.log.warn?.(`[wechat] 指令执行失败: ${this.errorText(error)}`)
-      await this.sendTo(peerId, GENERIC_FAILURE_TEXT, signal)
+      await this.sendTo(peerId, failureText(), signal)
         .catch(sendError => this.log.warn?.(`[wechat] 失败提示发送失败: ${this.errorText(sendError)}`))
       // 交给上层：这条没处理成功，cursor 不推进，下一轮还会重试
       throw error
@@ -488,15 +485,6 @@ export class WechatChannel {
 /** 业务性拒绝（任务不存在、参数非法等）：可读提示即可，不重试。 */
 function isBusinessError(error) {
   return error instanceof AppError || error instanceof WechatBusinessError || error?.permanent === true
-}
-
-/** 合批摘要：首行条数，逐条保留原文（每条自带 KEY-N 与状态），超明细上限截断加「等 N 项」。 */
-function batchDigest(items) {
-  const shown = items.slice(0, OUTBOX_BATCH_LINES)
-  const rest = items.length - shown.length
-  const lines = [`任务动态 ${items.length} 条：`, ...shown.map(item => item.text)]
-  if (rest > 0) lines.push(`……等 ${rest} 项`)
-  return lines.join('\n')
 }
 
 /** 从授权响应里取用户标识（vendor confirmed 返回 userId=ilink_user_id）。 */

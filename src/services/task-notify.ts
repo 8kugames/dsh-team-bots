@@ -6,6 +6,9 @@
 // 通知失败不能把已落库的变更打挂。
 // notifyTaskStarted（DSHBOTS-100）是群内开工通知+运行入队（非微信推送），
 // 与两个微信锚点同属任务通知域，一并落在本文件。
+// 微信推送文案排版集中在 src/wechat/format.js（DSHBOTS-211）。
+
+import { taskCreated, taskDone } from '../wechat/format.js'
 
 export const taskNotifyMethods = {
   // 「任务进入进行中」的唯一落点。
@@ -55,7 +58,7 @@ export const taskNotifyMethods = {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
     try {
-      this.wechat?.notify(`任务 ${identifier}《${task.title}》已完成。回复「详情 ${identifier}」查看。`)
+      this.wechat?.notify(taskDone(identifier, task.title))
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 任务完成微信通知失败 %s: %s', identifier, error?.message ?? error)
     }
@@ -67,9 +70,7 @@ export const taskNotifyMethods = {
     const identifier = `${project.key}-${task.number}`
     const assignee = task.assignee_bot_id ? this.botRow(task.assignee_bot_id)?.name : null
     try {
-      this.wechat?.notify(
-        `任务 ${identifier}《${task.title}》已创建${assignee ? `，派给 ${assignee}` : '，暂未指派'}。回复「详情 ${identifier}」查看。`,
-      )
+      this.wechat?.notify(taskCreated(identifier, task.title, assignee))
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 任务创建微信通知失败 %s: %s', identifier, error?.message ?? error)
     }

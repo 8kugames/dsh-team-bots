@@ -18,6 +18,7 @@ import { clampNumber, jsonParse, nowIso, parseDisabledSkills, parseMentions, pro
 import { parseWriteScopes, readWriteScopes, writeScopesOverlap } from './services/write-scopes.js'
 import { normalizeFilePolicy } from './services/file-policy.js'
 import { defineMethods } from './services/mixin.js'
+import { reviewResult } from './wechat/format.js'
 import { botsMethods } from './services/bots.js'
 import { projectsMethods } from './services/projects.js'
 import { chatMethods } from './services/chat.js'
@@ -67,15 +68,13 @@ export class TeamService {
     this.terminalActive = new Map()
   }
 
-  /** 微信管理员指令：按 <key-N> 定位并验收/退回任务。 */
+  /** 微信管理员指令：按 <key-N> 定位并验收/退回任务。回执排版集中在 wechat/format.js（DSHBOTS-211）。 */
   async wechatReview(identifier, { decision, comment }) {
     await this.initialize()
     if (!['accept', 'return'].includes(decision)) throw badRequest('验收结果只能是 accept 或 return')
     const { project, task } = this.resolveTaskByIdentifier(identifier)
     const view = await this.applyReview(task, project, decision, comment, { type: 'user', id: this.localUserId })
-    return decision === 'accept'
-      ? `任务 ${identifier}《${view.title}》已验收通过。`
-      : `任务 ${identifier}《${view.title}》已退回重做。`
+    return reviewResult(identifier, view.title, decision)
   }
 }
 

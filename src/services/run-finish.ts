@@ -16,6 +16,7 @@ import {
 } from './backoff.js'
 import { ensureAttentionSchema, normalizeAttention } from './attention-schema.js'
 import { completeVisionRun, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
+import { chatReply } from '../wechat/format.js'
 
 export const runFinishMethods = {
   // 自动核验委派（DSHBOTS-113）：交付迁移 in_review 的同一事务内调用。开关关闭或
@@ -401,7 +402,7 @@ export const runFinishMethods = {
           body: `运行失败：${error?.message ?? '未知错误'}`,
           runId,
         })
-        this.notifyWechatChat(bot, run, `运行失败：${error?.message ?? '未知错误'}`)
+        this.notifyWechatChat(bot, run, `运行失败：${error?.message ?? '未知错误'}`, true)
       } else if (run.kind === 'solo_chat') {
         this.insertSoloMessage({
           botId: bot.id,
@@ -418,10 +419,11 @@ export const runFinishMethods = {
   // 微信直达对话回程（DSHBOTS-208）：trigger_type='wechat' 的群聊运行结束时，
   // 把 bot 回复（或失败提示）推回微信管理员，出站走通道既有合批/重试治理；
   // 只推微信触发的运行，工作台群聊回复不受影响。推送失败不阻塞收尾主流程。
-  notifyWechatChat(bot, run, body) {
+  // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply（DSHBOTS-211）。
+  notifyWechatChat(bot, run, body, failed = false) {
     if (run?.trigger_type !== 'wechat' || !this.wechat) return
     try {
-      this.wechat.notify(`【${bot?.name ?? 'Bot'}】${body}`)
+      this.wechat.notify(chatReply(bot?.name ?? 'Bot', body, failed))
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 微信直达回复推送失败: %s', error?.message ?? error)
     }
