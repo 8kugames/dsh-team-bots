@@ -567,6 +567,22 @@ export const projectsMethods = {
     } catch (error: any) {
       this.logger.warn?.(`dsh-team: 项目 ${project.key} 为成员 ${bot.name} 创建临时目录失败：${error?.message ?? error}`)
     }
+    // DSHBOTS-229 入群通知：新成员入群后向其他成员发群系统消息（纯文本，无 emoji）。
+    // 与临时目录同口径：通知失败只告警，不阻塞入群主流程。
+    try {
+      const others = this.membersOf(projectId).filter(member => member.id !== botId)
+      if (others.length > 0) {
+        this.insertMessage({
+          projectId,
+          senderType: 'system',
+          senderId: 'system',
+          body: `成员 ${bot.name} 已加入项目群。`,
+          mentions: others.map(member => member.id),
+        })
+      }
+    } catch (error: any) {
+      this.logger.warn?.(`dsh-team: 项目 ${project.key} 为成员 ${bot.name} 发送入群通知失败：${error?.message ?? error}`)
+    }
     return this.projectView(this.projectRow(projectId))
   },
 
