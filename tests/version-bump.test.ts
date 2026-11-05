@@ -1,6 +1,6 @@
-// DSHBOTS-201：pre-commit 版本 bump 仅 main 分支生效。
-// 口径：①main 分支提交前 patch 位 +1 并暂存；②dev 等非 main 分支跳过（退出码 0，版本不变）；
-// ③DSH_SKIP_VERSION_BUMP=1 在 main 上仍跳过；④--dry-run 只打印不落盘。
+// DSHBOTS-201：pre-commit 版本 bump 在 main 与 dev 分支生效。
+// 口径：①main 分支提交前 patch 位 +1 并暂存；②dev 分支同样 bump；③其余分支跳过（退出码 0，版本不变）；
+// ④DSH_SKIP_VERSION_BUMP=1 在 main 上仍跳过；⑤--dry-run 只打印不落盘。
 // 端到端跑真脚本：在临时 git 仓库里复制 scripts/version-bump.mjs 后执行，root 由脚本自身位置推导。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -54,14 +54,27 @@ test('main 分支提交前 patch 位 +1 并暂存', () => {
   }
 })
 
-test('dev 分支跳过：版本不变、退出码 0', () => {
+test('dev 分支同样 bump：patch 位 +1 并暂存', () => {
   const dir = makeRepo()
   try {
     git(dir, ['checkout', '-q', '-b', 'dev'])
     const result = runScript(dir)
     assert.equal(result.status, 0, result.stderr)
+    assert.equal(readVersion(dir), '0.2.289')
+    assert.match(git(dir, ['show', ':package.json']), /"version": "0\.2\.289"/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('特性分支跳过：版本不变、退出码 0', () => {
+  const dir = makeRepo()
+  try {
+    git(dir, ['checkout', '-q', '-b', 'feature/x'])
+    const result = runScript(dir)
+    assert.equal(result.status, 0, result.stderr)
     assert.equal(readVersion(dir), '0.2.288')
-    assert.match(result.stdout, /非 main/)
+    assert.match(result.stdout, /非 main\/dev/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
