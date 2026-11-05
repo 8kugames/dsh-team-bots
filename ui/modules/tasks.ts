@@ -1,4 +1,3 @@
-// tasks.js —— 任务面板（排序 / 分组 / 卡片 / 行）、终端面板，以及 bots / members / skills / memory / evolution 各视图。
 import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, BOT_STATUS, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, EFFORT, NAV, labelText, stageLabelText } from './state.js'
 import { icon } from './icons.js'
 import { activeProject, actorLabel, attr, avatar, botById, duration, esc, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, runDot, tildePath, timeAgo } from './util.js'
@@ -135,11 +134,11 @@ function renderTasks() {
           <option value="30d" ${state.taskFilter.timeRange === '30d' ? 'selected' : ''}>${t('task.time30d')}</option>
           <option value="all" ${state.taskFilter.timeRange === 'all' ? 'selected' : ''}>${t('task.timeAll')}</option>
         </select>
-        <select class="select" data-task-sort aria-label="任务排序" title="${t('task.sortTitle')}">
+        <select class="select" data-task-sort aria-label="${t("任务排序")}" title="${t('task.sortTitle')}">
           ${TASK_SORTS.map(sort => `<option value="${sort.value}" ${state.taskSort === sort.value ? 'selected' : ''}>${t(sort.key)}</option>`).join('')}
         </select>
         <span class="tag">${t('task.countBadge', { count: shownCount })}</span>
-        ${hiddenCount > 0 ? `<span class="faint" title="项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>` : ''}
+        ${hiddenCount > 0 ? `<span class="faint" title="${t("项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个", { totalCount: totalCount, hiddenCount: hiddenCount })}">${t("项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个", { totalCount: totalCount, hiddenCount: hiddenCount })}</span>` : ''}
       </div>
     </div>
     ${tasks.length === 0 ? `<div class="empty-state">
@@ -235,7 +234,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
   // 依赖徽标（DSHBOTS-58）：depsSatisfied=false 即被未完成的任务挡住；blockedByNames 只列未满足项。
   const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
   const depsBlocked = task.depsSatisfied === false && blockedNames.length > 0
-  const depsTitle = `被 ${blockedNames.length} 个任务阻塞：${blockedNames.join('、')}`
+  const depsTitle = `${t("被")} ${blockedNames.length} ${t("个任务阻塞：")}${blockedNames.join(t("、"))}`
   return `<article class="task-card${isRunning ? ' running' : ''}${depth > 0 ? ' task-child' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
     ${taskStatusIcon(task)}
     ${taskPriorityIcon(task)}
@@ -247,7 +246,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
     <div class="task-card-foot">
       ${tags.length ? `<span class="task-tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</span>` : ''}
       ${reviewIdleBadge(task)}
-      ${depsBlocked ? `<span class="task-deps-badge" title="${attr(depsTitle)}">${icon('alert')}被 ${blockedNames.length} 个任务阻塞</span>` : ''}
+      ${depsBlocked ? `<span class="task-deps-badge" title="${attr(depsTitle)}">${icon('alert')}${t("被")} ${blockedNames.length} ${t("个任务阻塞")}</span>` : ''}
       ${!ended && run ? runDot(run.status) : ''}
       <span class="task-run-label${stage.stage === 'person' ? ' task-stage-person' : ''}">${runLabel}</span>
       ${isRunning ? `<span class="run-clock" data-started="${attr(run.started_at ?? '')}">${duration(run.started_at)}</span>` : ''}
@@ -325,35 +324,35 @@ function renderTerminal() {
         <div class="card terminal-card${active ? ' is-running' : ''}">
           <div class="terminal-chrome">
             <span class="terminal-chrome-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="terminal-chrome-label">终端</span>
+            <span class="terminal-chrome-label">${t("终端")}</span>
             <span class="terminal-chrome-path" title="${attr(project.workspace_path ?? '')}">${esc(tildePath(project.workspace_path ?? project.name))}</span>
           </div>
           ${active ? `<div class="terminal-active-row">
             ${runDot('running')}
             <code class="terminal-active-cmd">${esc(active.command)}</code>
             <span class="run-clock" data-started="${attr(active.createdAt ?? '')}">${duration(active.createdAt)}</span>
-            <button class="btn danger terminal-stop" data-action="terminal-stop" data-command-id="${attr(active.id)}">${icon('stop')}<span class="btn-label">停止</span></button>
+            <button class="btn danger terminal-stop" data-action="terminal-stop" data-command-id="${attr(active.id)}">${icon('stop')}<span class="btn-label">${t("停止")}</span></button>
           </div>` : ''}
           <div class="terminal-output-wrap">
             <pre class="terminal-output" id="terminal-output" data-command-id="${attr(latest?.id ?? '')}">${output ? esc(output) : ''}</pre>
-            ${output ? '' : `<div class="terminal-output-empty">${icon('terminal', 'terminal-empty-icon')}<span>暂无输出。执行一条命令后，这里显示实时输出（最多保留末尾 200KB）。</span></div>`}
+            ${output ? '' : `<div class="terminal-output-empty">${icon('terminal', 'terminal-empty-icon')}<span>${t("暂无输出。执行一条命令后，这里显示实时输出（最多保留末尾 200KB）。")}</span></div>`}
           </div>
           <form class="terminal-input-row" data-form="terminal-run">
             <input type="hidden" name="projectId" value="${attr(project.id)}">
             <span class="terminal-prompt" aria-hidden="true">$</span>
-            <input class="input terminal-input" id="terminal-cmd-input" name="command" placeholder="${active ? '有命令正在运行…' : '输入命令'} " value="${attr(state.terminalDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${active ? 'disabled' : ''}>
+            <input class="input terminal-input" id="terminal-cmd-input" name="command" placeholder="${active ? t("有命令正在运行…") : t("输入命令")} " value="${attr(state.terminalDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${active ? 'disabled' : ''}>
             ${active ? '' : '<span class="terminal-kbd" aria-hidden="true">⌘ / Ctrl ↵</span>'}
-            <button class="btn primary" type="submit" ${active ? 'disabled' : ''}>${icon('play')}<span class="btn-label">执行</span></button>
+            <button class="btn primary" type="submit" ${active ? 'disabled' : ''}>${icon('play')}<span class="btn-label">${t("执行")}</span></button>
           </form>
         </div>
       </div>
       <aside class="terminal-side">
-        ${taskBusy ? `<div class="terminal-warn">${icon('alert', 'terminal-warn-icon')}<span class="terminal-warn-text">有任务正在写该项目工作区，终端命令与它并发需自担风险</span></div>` : ''}
+        ${taskBusy ? `<div class="terminal-warn">${icon('alert', 'terminal-warn-icon')}<span class="terminal-warn-text">${t("有任务正在写该项目工作区，终端命令与它并发需自担风险")}</span></div>` : ''}
         <div class="card terminal-history-card">
-          <div class="terminal-history-head"><span class="eyebrow">命令历史</span><span class="tag">${terminal.history.length} 条</span></div>
-          ${terminal.history.length === 0 ? '<div class="terminal-history-empty">还没有执行过命令。</div>' : `<div class="terminal-history">
+          <div class="terminal-history-head"><span class="eyebrow">${t("命令历史")}</span><span class="tag">${terminal.history.length} ${t("条")}</span></div>
+          ${terminal.history.length === 0 ? `<div class="terminal-history-empty">${t("还没有执行过命令。")}</div>` : `<div class="terminal-history">
             ${terminal.history.map(item => `
-              <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" data-status="${attr(item.status ?? '')}" title="点击回填到输入框">
+              <button class="terminal-history-item" data-action="terminal-fill" data-command="${attr(item.command)}" data-status="${attr(item.status ?? '')}" title="${t("点击回填到输入框")}">
                 ${terminalStatusPill(item.status)}
                 <code class="terminal-history-cmd">${esc(item.command)}</code>
                 <span class="terminal-history-meta">
@@ -373,21 +372,21 @@ function renderBots() {
   const bots = state.data?.bots ?? []
   return `
     ${bots.length === 0 ? `<div class="empty-state">
-      <div class="empty-symbol">${icon('bot')}</div><h3>还没有 Bot</h3><p>至少创建一个 Bot 才能运行项目群聊和任务。</p>
-      <button class="btn" data-action="new-bot">${icon('plus')}新建 Bot</button>
+      <div class="empty-symbol">${icon('bot')}</div><h3>${t("还没有")} Bot</h3><p>${t("至少创建一个 Bot 才能运行项目群聊和任务。")}</p>
+      <button class="btn" data-action="new-bot">${icon('plus')}${t("新建")} Bot</button>
     </div>` : `<div class="grid bots">
       ${bots.map(bot => `<article class="card bot-card">
         <div class="bot-card-head">
           ${avatar(bot, 'lg')}
-          <div class="bot-card-title"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || '通用成员')}</span></div>
+          <div class="bot-card-title"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || t("通用成员"))}</span></div>
           <span class="bot-status ${attr(bot.status)}">${esc(BOT_STATUS[bot.status] ?? bot.status)}</span>
         </div>
-        <div class="bot-model"><span>${esc(bot.modelRef ?? '未配置模型')}${bot.effort ? ` · ${esc(EFFORT[bot.effort] ?? bot.effort)}` : ''}</span></div>
-        <div class="bot-metrics"><span><strong>${bot.openTasks}</strong> 任务</span><span class="dot-sep"></span><span><strong>${bot.memoryCount}</strong> 记忆</span><span class="dot-sep"></span><span><strong>${bot.stats.succeeded}</strong> 次成功</span></div>
+        <div class="bot-model"><span>${esc(bot.modelRef ?? t("未配置模型"))}${bot.effort ? ` · ${esc(EFFORT[bot.effort] ?? bot.effort)}` : ''}</span></div>
+        <div class="bot-metrics"><span><strong>${bot.openTasks}</strong> ${t("任务")}</span><span class="dot-sep"></span><span><strong>${bot.memoryCount}</strong> ${t("记忆")}</span><span class="dot-sep"></span><span><strong>${bot.stats.succeeded}</strong> ${t("次成功")}</span></div>
         <div class="bot-card-actions">
-          <button class="btn small" data-action="edit-bot" data-bot-id="${attr(bot.id)}">${icon('edit')}配置</button>
-          ${bot.status === 'active' ? `<button class="btn small" data-action="solo-bot" data-bot-id="${attr(bot.id)}" title="打开该 Bot 的调度页">调度</button><button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">归档</button>` : ''}
-          ${bot.status === 'archived' ? `<button class="btn small danger" data-action="bot-remove-tracking-open" data-bot-id="${attr(bot.id)}" title="软移除：数据保留，仅停止展示">移除追踪</button>` : ''}
+          <button class="btn small" data-action="edit-bot" data-bot-id="${attr(bot.id)}">${icon('edit')}${t("配置")}</button>
+          ${bot.status === 'active' ? `<button class="btn small" data-action="solo-bot" data-bot-id="${attr(bot.id)}" title="${t("打开该 Bot 的调度页")}">${t("调度")}</button><button class="btn small" data-action="archive-bot" data-bot-id="${attr(bot.id)}">${t("归档")}</button>` : ''}
+          ${bot.status === 'archived' ? `<button class="btn small danger" data-action="bot-remove-tracking-open" data-bot-id="${attr(bot.id)}" title="${t("软移除：数据保留，仅停止展示")}">${t("移除追踪")}</button>` : ''}
         </div>
       </article>`).join('')}
     </div>`}
@@ -406,18 +405,18 @@ function renderBotsOverview() {
   }
   const proposalsSection = pending.length === 0 ? '' : `
     <section class="section">
-      <div class="section-head"><h3>待审批提案</h3><span>${pending.length} 条待审</span></div>
+      <div class="section-head"><h3>${t("待审批提案")}</h3><span>${pending.length} ${t("条待审")}</span></div>
       ${[...groups.entries()].map(([botId, items]) => {
         const bot = botById(botId)
-        const label = bot ? `${bot.name}（${bot.role || '成员'}）` : '未归属 Bot'
+        const label = bot ? `${bot.name}${t("（")}${bot.role || t("成员")}${t("）")}` : t("未归属 Bot")
         return `
         <div class="card" style="margin-bottom: 10px;">
           <div class="bot-card-head">
             ${botId ? avatar(bot, 'sm') : `<div class="avatar sm">${icon('bot')}</div>`}
-            <div class="bot-card-title"><strong>${esc(label)}</strong><span>${items.length} 条待审提案</span></div>
+            <div class="bot-card-title"><strong>${esc(label)}</strong><span>${items.length} ${t("条待审提案")}</span></div>
             <div class="bot-card-actions">
-              <button class="btn small" data-action="batch-decide-proposals" data-bot-id="${attr(botId)}" data-decision="approved">${icon('check')}全部通过并应用</button>
-              <button class="btn small" data-action="batch-decide-proposals" data-bot-id="${attr(botId)}" data-decision="rejected">全部拒绝</button>
+              <button class="btn small" data-action="batch-decide-proposals" data-bot-id="${attr(botId)}" data-decision="approved">${icon('check')}${t("全部通过并应用")}</button>
+              <button class="btn small" data-action="batch-decide-proposals" data-bot-id="${attr(botId)}" data-decision="rejected">${t("全部拒绝")}</button>
             </div>
           </div>
           <div class="list">
@@ -425,7 +424,7 @@ function renderBotsOverview() {
               <div class="list-row" title="${esc(item.title ?? '')}">
                 ${avatar({ name: label, color: 'gray' }, 'sm')}
                 <div class="list-main">
-                  <div class="list-title"><strong>${esc(item.title ?? '未命名提案')}</strong><span class="member-role">${esc(PROPOSAL_KIND[item.kind] ?? item.kind)}</span></div>
+                  <div class="list-title"><strong>${esc(item.title ?? t("未命名提案"))}</strong><span class="member-role">${esc(PROPOSAL_KIND[item.kind] ?? item.kind)}</span></div>
                   <div class="list-meta"><span>${esc(item.created_at ?? '')}</span></div>
                 </div>
               </div>`).join('')}
@@ -435,7 +434,7 @@ function renderBotsOverview() {
     </section>`
   return `
     ${proposalsSection}
-    <div class="section-head"><h3>全部 Bots</h3><button class="btn" data-action="new-bot">${icon('plus')}新建 Bot</button></div>
+    <div class="section-head"><h3>${t("全部")} Bots</h3><button class="btn" data-action="new-bot">${icon('plus')}${t("新建")} Bot</button></div>
     ${renderBots()}
   `
 }
@@ -454,10 +453,10 @@ function renderMembers() {
   const members = project.members ?? []
   return `
     <div class="section-head">
-      <p>成员状态与用量按本项目口径聚合；移除后该 Bot 不再接收本项目的提及与新任务。</p>
+      <p>${t("成员状态与用量按本项目口径聚合；移除后该 Bot 不再接收本项目的提及与新任务。")}</p>
       <div class="btn-row">
-        <button class="btn" data-action="open-invite-member">${icon('plus')}邀请加入</button>
-        <button class="btn" data-action="nav" data-view="bots-overview" title="查看全部 Bot 或新建">${icon('bot')}总览bots</button>
+        <button class="btn" data-action="open-invite-member">${icon('plus')}${t("邀请加入")}</button>
+        <button class="btn" data-action="nav" data-view="bots-overview" title="${t("查看全部 Bot 或新建")}">${icon('bot')}${t("总览")}bots</button>
       </div>
     </div>
     <div class="members-grid">
@@ -468,24 +467,24 @@ function renderMembers() {
         const isOwner = member.member_role === 'owner' || member.id === project.owner_bot_id
         const tokens = Number(member.usage_input ?? 0) + Number(member.usage_cache_read ?? 0) + Number(member.usage_cache_write ?? 0) + Number(member.usage_output ?? 0)
         const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
-        const modelLine = modelRef ? String(modelRef) : '未配置'
+        const modelLine = modelRef ? String(modelRef) : t("未配置")
         const taskStats = member.taskStats ?? {}
         const taskDone = Number(taskStats.done ?? 0)
         const taskOpen = Number(taskStats.open ?? 0)
-        const usageDetail = `输入 ${formatNumber(member.usage_input)} · 缓存读 ${formatNumber(member.usage_cache_read)} · 缓存写 ${formatNumber(member.usage_cache_write)} · 输出 ${formatNumber(member.usage_output)}`
+        const usageDetail = `${t("输入")} ${formatNumber(member.usage_input)} · ${t("缓存读")} ${formatNumber(member.usage_cache_read)} · ${t("缓存写")} ${formatNumber(member.usage_cache_write)} · ${t("输出")} ${formatNumber(member.usage_output)}`
         return `
-        <div class="member-card${isOwner ? ' is-owner' : ''}" data-member-card data-bot-id="${attr(member.id)}" title="${esc(bot.name)} · ${esc(bot.role || '成员')} · ${esc(dot.text)}">
-          ${isOwner ? '' : `<button class="member-card-remove" data-action="remove-member" data-bot-id="${attr(member.id)}" title="移出项目" aria-label="将 ${esc(bot.name)} 移出项目">${icon('close')}</button>`}
+        <div class="member-card${isOwner ? ' is-owner' : ''}" data-member-card data-bot-id="${attr(member.id)}" title="${esc(bot.name)} · ${esc(bot.role || t("成员"))} · ${esc(dot.text)}">
+          ${isOwner ? '' : `<button class="member-card-remove" data-action="remove-member" data-bot-id="${attr(member.id)}" title="${t("移出项目")}" aria-label="${t("将")} ${esc(bot.name)} ${t("移出项目")}">${icon('close')}</button>`}
           <div class="member-card-top">${avatar(bot, 'lg')}</div>
           <div class="member-card-mid">
             <div class="member-card-name"><strong>${esc(bot.name)}</strong></div>
-            <div class="member-card-role">${isOwner ? '<span class="pill violet">总监</span>' : `<span class="member-role">${esc(bot.role || '成员')}</span>`}</div>
+            <div class="member-card-role">${isOwner ? `<span class="pill violet">${t("总监")}</span>` : `<span class="member-role">${esc(bot.role || t("成员"))}</span>`}</div>
             <div class="member-card-model" title="${esc(modelLine)}">${esc(modelLine)}</div>
           </div>
           <div class="member-card-foot">
-            <span class="pill ${member.busy ? 'amber' : 'green'} member-card-busy">${member.busy ? '任务中' : '空闲中'}</span>
-            <span class="member-card-tasks" title="本项目任务：已完成 ${taskDone} · 待办 ${taskOpen}（待办不含已取消）">已完成 ${taskDone} · 待办 ${taskOpen}</span>
-            <span class="member-card-usage" title="${esc(usageDetail)}">合计 <strong>${formatNumber(tokens)}</strong> tokens</span>
+            <span class="pill ${member.busy ? 'amber' : 'green'} member-card-busy">${member.busy ? t("任务中") : t("空闲中")}</span>
+            <span class="member-card-tasks" title="${t("本项目任务：已完成")} ${taskDone} · ${t("待办")} ${taskOpen}${t("（待办不含已取消）")}">${t("已完成")} ${taskDone} · ${t("待办")} ${taskOpen}</span>
+            <span class="member-card-usage" title="${esc(usageDetail)}">${t("合计")} <strong>${formatNumber(tokens)}</strong> tokens</span>
             <span class="member-card-cost"><strong>${formatCost(Number(member.usage_cost ?? 0))}</strong></span>
           </div>
         </div>`
@@ -502,59 +501,59 @@ function renderSkills() {
   const disabledSet = new Set(project?.disabledSkills ?? [])
   return `
     <div class="section-head">
-      <p>技能变更走提案和审批，不直接覆盖。${project ? `开关只作用于当前项目「${esc(project.name)}」：关闭后补全不再列出，Bot 会被明确告知不要调用；技能池本身不变。` : '进入一个项目后可按项目关闭特定技能。'}</p>
+      <p>${t("技能变更走提案和审批，不直接覆盖。")}${project ? `${t("开关只作用于当前项目「")}${esc(project.name)}${t("」：关闭后补全不再列出，Bot 会被明确告知不要调用；技能池本身不变。")}` : t("进入一个项目后可按项目关闭特定技能。")}</p>
       <div class="btn-row">
-        <button class="btn" data-action="sync-skills">${icon('refresh')}重新扫描</button>
+        <button class="btn" data-action="sync-skills">${icon('refresh')}${t("重新扫描")}</button>
       </div>
     </div>
-    <div class="card-head" style="margin-bottom:10px"><h3>共享技能池</h3></div>
-    <div class="path-row plain" style="margin-bottom:14px"><span>技能根目录</span><code>${esc(state.data.paths.skillRoot)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
+    <div class="card-head" style="margin-bottom:10px"><h3>${t("共享技能池")}</h3></div>
+    <div class="path-row plain" style="margin-bottom:14px"><span>${t("技能根目录")}</span><code>${esc(state.data.paths.skillRoot)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
     <div class="card list-card">
-      ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>技能池为空</h3><p>在技能根目录放置技能文件，或提交一个技能提案并审批。</p></div>` : skills.map(skill => {
+      ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>${t("技能池为空")}</h3><p>${t("在技能根目录放置技能文件，或提交一个技能提案并审批。")}</p></div>` : skills.map(skill => {
         const off = disabledSet.has(skill.slug)
         return `
         <div class="list-row skill-row">
           <div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div>
           <div class="list-main">
-            <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint mono">v${esc(currentSkillVersion(skill))}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[skill.status] ?? skill.status)}</span>${off ? '<span class="pill red">本项目已关闭</span>' : ''}</div>
-            <div class="list-desc">${esc(skill.description || '无描述')}</div>
+            <div class="list-title"><span class="skill-slug">${esc(skill.slug)}</span><span class="faint mono">v${esc(currentSkillVersion(skill))}</span><span class="pill ${skill.status === 'active' ? 'green' : 'red'}">${esc(SKILL_STATUS[skill.status] ?? skill.status)}</span>${off ? `<span class="pill red">${t("本项目已关闭")}</span>` : ''}</div>
+            <div class="list-desc">${esc(skill.description || t("无描述"))}</div>
             <div class="list-meta"><span>${esc(skill.relativePath)}</span></div>
             ${skillVersions(skill)}
           </div>
           <div class="btn-row">
-            <button class="btn small" data-action="skill-detail" data-slug="${attr(skill.slug)}">详情</button>
-            ${project ? `<button class="btn small" data-action="toggle-skill" data-slug="${attr(skill.slug)}" data-disabled="${off ? '0' : '1'}">${off ? '恢复' : '本项目关闭'}</button>` : ''}
+            <button class="btn small" data-action="skill-detail" data-slug="${attr(skill.slug)}">${t("详情")}</button>
+            ${project ? `<button class="btn small" data-action="toggle-skill" data-slug="${attr(skill.slug)}" data-disabled="${off ? '0' : '1'}">${off ? t("恢复") : t("本项目关闭")}</button>` : ''}
           </div>
         </div>
       `}).join('')}
     </div>
-    ${project ? `<div class="card-head" style="margin-top:24px"><h3>当前项目技能</h3></div>
-    <div class="section-head"><p>从项目目录（设了生产目录以生产目录为准，见下方实际路径）的 <code>.agents</code>、<code>.claude</code>、<code>.codex</code> 三个根扫描发现；同名技能按 .agents &gt; .claude &gt; .codex 去重。这些技能只在当前项目可用，且优先于同名共享技能。</p></div>
+    ${project ? `<div class="card-head" style="margin-top:24px"><h3>${t("当前项目技能")}</h3></div>
+    <div class="section-head"><p>${t("从项目目录（设了生产目录以生产目录为准，见下方实际路径）的")} <code>.agents</code>${t("、")}<code>.claude</code>${t("、")}<code>.codex</code> ${t("三个根扫描发现；同名技能按")} .agents &gt; .claude &gt; .codex ${t("去重。这些技能只在当前项目可用，且优先于同名共享技能。")}</p></div>
     ${(state.data.paths.projectSkillRoots ?? []).map(root => `<div class="path-row plain" style="margin-bottom:6px"><span style="text-transform:none">${esc(root.root)}</span><code>${esc(root.path)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(root.path + '/skills')}">${icon('copy')}</button></div>`).join('')}
     <div class="card list-card">
-      ${projectSkills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>项目内没有技能</h3><p>在项目目录的 .agents、.claude 或 .codex 下放置 skills/&lt;技能名&gt;/SKILL.md 即可。</p></div>` : projectSkills.map(skill => {
+      ${projectSkills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>${t("项目内没有技能")}</h3><p>${t("在项目目录的 .agents、.claude 或 .codex 下放置")} skills/&lt;${t("技能名")}&gt;/SKILL.md ${t("即可。")}</p></div>` : projectSkills.map(skill => {
         const off = disabledSet.has(skill.name)
         const dupRoots = (skill.roots ?? []).filter(root => root !== skill.root)
         return `
         <div class="list-row skill-row">
           <div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div>
           <div class="list-main">
-            <div class="list-title"><span class="skill-slug">${esc(skill.name)}</span><span class="faint mono">v${esc(skill.version ?? '1.0.0')}</span><span class="pill green">${esc(skill.root)}</span>${off ? '<span class="pill red">本项目已关闭</span>' : ''}</div>
-            <div class="list-desc">${esc(skill.description || '无描述')}</div>
+            <div class="list-title"><span class="skill-slug">${esc(skill.name)}</span><span class="faint mono">v${esc(skill.version ?? '1.0.0')}</span><span class="pill green">${esc(skill.root)}</span>${off ? `<span class="pill red">${t("本项目已关闭")}</span>` : ''}</div>
+            <div class="list-desc">${esc(skill.description || t("无描述"))}</div>
             <div class="list-meta"><span>${esc(skill.relativePath)}</span></div>
-            ${dupRoots.length ? `<div class="list-meta"><span>同名技能也出现在 ${dupRoots.map(root => esc(root)).join('、')}，按 ${esc(skill.root)} 优先取用</span></div>` : ''}
+            ${dupRoots.length ? `<div class="list-meta"><span>${t("同名技能也出现在")} ${dupRoots.map(root => esc(root)).join(t("、"))}${t("，按")} ${esc(skill.root)} ${t("优先取用")}</span></div>` : ''}
           </div>
           <div class="btn-row">
-            <button class="btn small" data-action="copy" data-copy="${attr(skill.path)}">${icon('copy')}复制路径</button>
+            <button class="btn small" data-action="copy" data-copy="${attr(skill.path)}">${icon('copy')}${t("复制路径")}</button>
           </div>
         </div>
       `}).join('')}
     </div>` : ''}
-    ${proposals.length ? `<div class="card-head" style="margin-top:24px"><h3>待审批技能提案</h3></div>
+    ${proposals.length ? `<div class="card-head" style="margin-top:24px"><h3>${t("待审批技能提案")}</h3></div>
     <div class="grid">
       ${proposals.map(item => `<div class="card proposal-card">
         <div class="proposal-head"><div class="empty-symbol" style="width:30px;height:30px;border-radius:9px;margin:0">${icon('spark')}</div><div><h3>${esc(item.title)}</h3><p>${esc(item.rationale)}</p></div></div>
-        <div class="proposal-actions"><span class="pill">待审</span><button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="approved">${icon('check')}通过</button><button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="rejected">拒绝</button></div>
+        <div class="proposal-actions"><span class="pill">${t("待审")}</span><button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="approved">${icon('check')}${t("通过")}</button><button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="rejected">${t("拒绝")}</button></div>
       </div>`).join('')}
     </div>` : ''}
   `
@@ -598,24 +597,24 @@ function renderMemory() {
   const results = state.memoryResults
   return `
     ${memories.length === 0 ? '' : `<div class="board-toolbar">
-      <input class="input search" id="memory-search" placeholder="搜索记忆主题或内容" aria-label="搜索记忆主题或内容" value="${attr(state.memoryQuery)}">
-      <button class="btn" data-action="search-memories">${icon('search')}搜索</button>
-      ${pending ? `<span class="pill amber">${pending} 条待审</span>` : ''}
-      <span class="tag" style="margin-left:auto">${memories.length} 条</span>
+      <input class="input search" id="memory-search" placeholder="${t("搜索记忆主题或内容")}" aria-label="${t("搜索记忆主题或内容")}" value="${attr(state.memoryQuery)}">
+      <button class="btn" data-action="search-memories">${icon('search')}${t("搜索")}</button>
+      ${pending ? `<span class="pill amber">${pending} ${t("条待审")}</span>` : ''}
+      <span class="tag" style="margin-left:auto">${memories.length} ${t("条")}</span>
     </div>`}
     ${results ? `<div class="card list-card" style="margin-bottom:12px">
-      <div class="card-head"><h3>搜索结果（${results.length}）</h3><button class="btn small" data-action="clear-memory-search">${icon('close')}清除</button></div>
-      ${results.length === 0 ? '<div class="faint">没有匹配的记忆。</div>' : results.map(item => `<div class="list-row">
+      <div class="card-head"><h3>${t("搜索结果（")}${results.length}${t("）")}</h3><button class="btn small" data-action="clear-memory-search">${icon('close')}${t("清除")}</button></div>
+      ${results.length === 0 ? `<div class="faint">${t("没有匹配的记忆。")}</div>` : results.map(item => `<div class="list-row">
         <div class="list-main">
-          <div class="list-title">${esc(item.topic)}<span class="pill ${memoryStatusTone(item.status)}">${esc(MEMORY_STATUS[item.status] ?? item.status ?? '未知')}</span></div>
+          <div class="list-title">${esc(item.topic)}<span class="pill ${memoryStatusTone(item.status)}">${esc(MEMORY_STATUS[item.status] ?? item.status ?? t("未知"))}</span></div>
           <div class="list-desc">${esc(item.content)}</div>
-          <div class="list-meta"><span>${esc(item.scope_type === 'project' ? '项目' : (botById(item.scope_id)?.name ?? 'Bot'))}</span><span>${esc(timeAgo(item.updated_at))}</span></div>
+          <div class="list-meta"><span>${esc(item.scope_type === 'project' ? t("项目") : (botById(item.scope_id)?.name ?? 'Bot'))}</span><span>${esc(timeAgo(item.updated_at))}</span></div>
         </div>
       </div>`).join('')}
     </div>` : ''}
-    ${!project && !inSoloContext() ? noProject() : memories.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('memory')}</div><h3>还没有记忆</h3><p>任务完成后会自动沉淀交付经验。</p><button class="btn" data-action="new-memory">${icon('plus')}写入记忆</button></div>` : `<div class="grid">
+    ${!project && !inSoloContext() ? noProject() : memories.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('memory')}</div><h3>${t("还没有记忆")}</h3><p>${t("任务完成后会自动沉淀交付经验。")}</p><button class="btn" data-action="new-memory">${icon('plus')}${t("写入记忆")}</button></div>` : `<div class="grid">
       ${memories.map(memory => {
-        const scopeName = memory.scope_type === 'project' ? '项目' : (botById(memory.scope_id)?.name ?? 'Bot')
+        const scopeName = memory.scope_type === 'project' ? t("项目") : (botById(memory.scope_id)?.name ?? 'Bot')
         const status = memory.status ?? 'active'
         return `<article class="card list-card">
           <div class="list-row">
@@ -623,16 +622,16 @@ function renderMemory() {
               <div class="card-head">
                 <div class="list-title">${esc(memory.topic)}<span class="pill ${memoryStatusTone(status)}">${esc(MEMORY_STATUS[status] ?? status)}</span></div>
                 <div class="btn-row">
-                  ${status === 'pending' ? `<button class="btn small" data-action="approve-memory" data-memory-id="${attr(memory.id)}">${icon('check')}通过</button><button class="btn small" data-action="reject-memory" data-memory-id="${attr(memory.id)}">${icon('close')}拒绝</button>` : ''}
+                  ${status === 'pending' ? `<button class="btn small" data-action="approve-memory" data-memory-id="${attr(memory.id)}">${icon('check')}${t("通过")}</button><button class="btn small" data-action="reject-memory" data-memory-id="${attr(memory.id)}">${icon('close')}${t("拒绝")}</button>` : ''}
                   <span class="pill">${esc(scopeName)}</span>
-                  <button class="btn icon" data-action="edit-memory" data-memory-id="${attr(memory.id)}" title="编辑记忆" aria-label="编辑记忆">${icon('edit')}</button>
-                  <button class="btn icon" data-action="delete-memory" data-memory-id="${attr(memory.id)}" title="删除记忆" aria-label="删除记忆">${icon('trash')}</button>
+                  <button class="btn icon" data-action="edit-memory" data-memory-id="${attr(memory.id)}" title="${t("编辑记忆")}" aria-label="${t("编辑记忆")}">${icon('edit')}</button>
+                  <button class="btn icon" data-action="delete-memory" data-memory-id="${attr(memory.id)}" title="${t("删除记忆")}" aria-label="${t("删除记忆")}">${icon('trash')}</button>
                 </div>
               </div>
               <div class="list-desc">${esc(memory.content)}</div>
               <div class="list-meta" style="justify-content:space-between">
                 <span>${esc(memorySource(memory.source))}</span>
-                <span>${esc(timeAgo(memory.updated_at))} · 置信度 ${Number(memory.confidence ?? 0).toFixed(2)}${memory.approved_by ? ` · 审批人 ${esc(actorLabel(memory.approved_by))}` : ''}</span>
+                <span>${esc(timeAgo(memory.updated_at))} · ${t("置信度")} ${Number(memory.confidence ?? 0).toFixed(2)}${memory.approved_by ? ` · ${t("审批人")} ${esc(actorLabel(memory.approved_by))}` : ''}</span>
               </div>
             </div>
           </div>
@@ -652,12 +651,12 @@ function skillVersions(skill, { rollback = true } = {}) {
   const current = String(currentSkillVersion(skill))
   const key = `skill-versions:${skill.slug}`
   return `<details class="skill-versions"${panelAttrs(state, key)}>
-    <summary class="summary-link">版本历史（${versions.length}）</summary>
+    <summary class="summary-link">${t("版本历史（")}${versions.length}${t("）")}</summary>
     ${versions.map(version => `<div class="list-meta">
       <span class="mono">v${esc(version.version)}</span>
       <span>${esc(version.status ?? '')}</span>
       <span>${esc(timeAgo(version.created_at))}</span>
-      ${String(version.version) !== current && rollback ? `<button class="btn small" data-action="rollback-skill" data-slug="${attr(skill.slug)}" data-version="${attr(version.version)}">回滚</button>` : ''}
+      ${String(version.version) !== current && rollback ? `<button class="btn small" data-action="rollback-skill" data-slug="${attr(skill.slug)}" data-version="${attr(version.version)}">${t("回滚")}</button>` : ''}
     </div>`).join('')}
   </details>`
 }
@@ -667,8 +666,8 @@ function canaryText(canary) {
   if (typeof canary === 'string') return canary
   if (typeof canary === 'object') {
     const parts = Object.entries(canary).map(([key, value]) => {
-      const label = key === 'projectIds' ? '项目' : key
-      const values = Array.isArray(value) ? value.join('、') : String(value)
+      const label = key === 'projectIds' ? t("项目") : key
+      const values = Array.isArray(value) ? value.join(t("、")) : String(value)
       return `${label} ${values}`
     })
     return parts.join(' · ')
@@ -679,17 +678,17 @@ function canaryText(canary) {
 function evaluationText(evaluation) {
   if (!evaluation) return ''
   if (typeof evaluation === 'string') return evaluation
-  const verdict = { pass: '通过', fail: '不通过', pending: '待评估' }[evaluation.verdict] ?? evaluation.verdict ?? ''
-  const notes = evaluation.notes ? `：${evaluation.notes}` : ''
-  const by = evaluation.evaluatedBy ? `（${evaluation.evaluatedBy}）` : ''
+  const verdict = { pass: t("通过"), fail: t("不通过"), pending: t("待评估") }[evaluation.verdict] ?? evaluation.verdict ?? ''
+  const notes = evaluation.notes ? `${t("：")}${evaluation.notes}` : ''
+  const by = evaluation.evaluatedBy ? `${t("（")}${evaluation.evaluatedBy}${t("）")}` : ''
   return `${verdict}${notes}${by}`
 }
 
 function proposalPreview(proposal) {
   const payload = proposal.payload ?? {}
-  if (proposal.kind === 'skill') return payload.content || '技能内容为空'
+  if (proposal.kind === 'skill') return payload.content || t("技能内容为空")
   if (proposal.kind === 'bot_update') {
-    return [payload.role ? `role: ${payload.role}` : '', payload.instructions ? `instructions:\n${payload.instructions}` : '', payload.model ? `model: ${payload.provider}/${payload.model}` : ''].filter(Boolean).join('\n\n') || '无配置内容'
+    return [payload.role ? `role: ${payload.role}` : '', payload.instructions ? `instructions:\n${payload.instructions}` : '', payload.model ? `model: ${payload.provider}/${payload.model}` : ''].filter(Boolean).join('\n\n') || t("无配置内容")
   }
   return JSON.stringify(payload, null, 2)
 }
@@ -736,13 +735,13 @@ function renderEvolution() {
   }
   return `
     <div class="section-head">
-      <p>变更需经人工审批后生效。</p>
+      <p>${t("变更需经人工审批后生效。")}</p>
       <div class="btn-row">
-        ${pending.length ? `<span class="pill">${pending.length} 个待审批</span>` : ''}
-        <button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button>
+        ${pending.length ? `<span class="pill">${pending.length} ${t("个待审批")}</span>` : ''}
+        <button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}${t("新建提案")}</button>
       </div>
     </div>
-    ${scoped.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('branch')}</div><h3>还没有进化提案</h3><p>Bot 可以提交自我改进建议，但无法自行批准。</p><button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}新建提案</button></div>` : `<div class="grid" style="gap:16px">
+    ${scoped.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('branch')}</div><h3>${t("还没有进化提案")}</h3><p>Bot ${t("可以提交自我改进建议，但无法自行批准。")}</p><button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}${t("新建提案")}</button></div>` : `<div class="grid" style="gap:16px">
       ${scoped.map(proposal => {
         const tone = proposal.status === 'approved' ? 'green' : proposal.status === 'rejected' ? 'red' : ''
         return `<article class="card proposal-card">
@@ -756,22 +755,22 @@ function renderEvolution() {
             </div>
             <span class="pill ${tone}">${esc(PROPOSAL_STATUS[proposal.status] ?? proposal.status)}</span>
           </div>
-          ${proposal.kind === 'workflow' ? '<div class="note">工作流提案尚未支持执行。</div>' : ''}
+          ${proposal.kind === 'workflow' ? `<div class="note">${t("工作流提案尚未支持执行。")}</div>` : ''}
           <div class="proposal-body" style="margin-top:0">${esc(proposalPreview(proposal).slice(0, 6000))}</div>
-          <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>由 ${esc(actorLabel(proposal.decided_by))} 决定</span>` : ''}${proposal.approvedBy ? `<span>审批人 ${esc(actorLabel(proposal.approvedBy))}</span>` : ''}${proposal.appliedAt ? `<span>已生效 ${esc(formatTime(proposal.appliedAt))}</span>` : ''}${proposal.canary ? `<span>灰度 ${esc(canaryText(proposal.canary))}</span>` : ''}</div>
-          ${proposal.evaluation ? `<div class="list-desc">评估 · ${esc(evaluationText(proposal.evaluation))}</div>` : ''}
+          <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>${t("由")} ${esc(actorLabel(proposal.decided_by))} ${t("决定")}</span>` : ''}${proposal.approvedBy ? `<span>${t("审批人")} ${esc(actorLabel(proposal.approvedBy))}</span>` : ''}${proposal.appliedAt ? `<span>${t("已生效")} ${esc(formatTime(proposal.appliedAt))}</span>` : ''}${proposal.canary ? `<span>${t("灰度")} ${esc(canaryText(proposal.canary))}</span>` : ''}</div>
+          ${proposal.evaluation ? `<div class="list-desc">${t("评估")} · ${esc(evaluationText(proposal.evaluation))}</div>` : ''}
           ${proposal.status === 'pending' ? `<details class="proposal-diff"${panelAttrs(state, `proposal:${proposal.id}`)}>
-            <summary class="btn small">${icon('chevron', 'chev')}查看差异</summary>
+            <summary class="btn small">${icon('chevron', 'chev')}${t("查看差异")}</summary>
             <div class="proposal-body" style="margin-top:8px">${esc(proposalDiffText(proposal).slice(0, 4000))}</div>
           </details>
           <div class="proposal-actions end">
-            <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="pass">评估通过</button>
-            <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="fail">评估不通过</button>
-            <button class="btn ${proposal.id === pending[0]?.id ? 'primary' : ''}" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="approved">${icon('check')}通过并应用</button>
-            <button class="btn" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="rejected">拒绝</button>
+            <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="pass">${t("评估通过")}</button>
+            <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="fail">${t("评估不通过")}</button>
+            <button class="btn ${proposal.id === pending[0]?.id ? 'primary' : ''}" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="approved">${icon('check')}${t("通过并应用")}</button>
+            <button class="btn" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="rejected">${t("拒绝")}</button>
           </div>` : ''}
           ${proposal.status === 'canary' ? `<div class="proposal-actions end">
-            <button class="btn primary" data-action="promote-proposal" data-proposal-id="${attr(proposal.id)}">${icon('check')}转正全量</button>
+            <button class="btn primary" data-action="promote-proposal" data-proposal-id="${attr(proposal.id)}">${icon('check')}${t("转正全量")}</button>
           </div>` : ''}
         </article>`
       }).join('')}
@@ -783,11 +782,11 @@ function renderEvolution() {
 // 任务级用量块（DSHBOTS-214）：taskDetail 的 usage.{own,total,subtaskCount}，本卡与含子任务并列，缓存读写分列。
 export function taskUsageBlock(usage) {
   if (!usage) return ''
-  const subtasks = Number(usage.subtaskCount) > 0 ? `<div class="kv"><span>含子任务</span><strong>${formatNumber(usage.total.totalTokens)} tok · ${usage.total.calls} 次 · ${formatCost(usage.total.cost)}</strong></div>` : ''
-  return `<div class="eyebrow">用量</div>
-    <div class="kv"><span>本卡</span><strong>${formatNumber(usage.own.totalTokens)} tok · ${usage.own.calls} 次 · ${formatCost(usage.own.cost)}</strong></div>
+  const subtasks = Number(usage.subtaskCount) > 0 ? `<div class="kv"><span>${t("含子任务")}</span><strong>${formatNumber(usage.total.totalTokens)} tok · ${usage.total.calls} ${t("次")} · ${formatCost(usage.total.cost)}</strong></div>` : ''
+  return `<div class="eyebrow">${t("用量")}</div>
+    <div class="kv"><span>${t("本卡")}</span><strong>${formatNumber(usage.own.totalTokens)} tok · ${usage.own.calls} ${t("次")} · ${formatCost(usage.own.cost)}</strong></div>
     ${subtasks}
-    <div class="kv"><span>缓存读 / 写</span><strong>${formatNumber(usage.own.cacheReadTokens)} / ${formatNumber(usage.own.cacheWriteTokens)} tok</strong></div>
+    <div class="kv"><span>${t("缓存读 / 写")}</span><strong>${formatNumber(usage.own.cacheReadTokens)} / ${formatNumber(usage.own.cacheWriteTokens)} tok</strong></div>
     <div class="divider"></div>`
 }
 
