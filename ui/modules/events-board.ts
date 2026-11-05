@@ -116,6 +116,8 @@ export async function handleBoardAction(action, target) {
       await api('update_settings', {
         run_timeout_minutes: value('settings-run-timeout'),
         stall_watchdog_minutes: value('settings-stall-watchdog'),
+        review_idle_minutes: value('settings-review-idle'),
+        review_auto_close: value('settings-review-auto-close'),
       })
       await loadState(state.projectId)
       toast(t("运行时效已保存"), 'success')

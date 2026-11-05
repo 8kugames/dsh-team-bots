@@ -66,6 +66,7 @@ export default {
   "task.groupSuffix": "group",
   "task.priorityTitle": "Priority: ${label}",
   "task.reviewIdleTitle": "Review idle for over ${minutes} minutes; please close it out",
+  "task.reviewVerdictTitle": "Review idle for over ${minutes} minutes; please close it out | Verdict ${verdict}: ${basis}",
   "task.reviewIdle": "Idle",
   "task.reviewOwner": "Director reviewing",
   "task.reviewYou": "Waiting for your review",

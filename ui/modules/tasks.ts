@@ -195,21 +195,26 @@ function taskPriorityIcon(task) {
 // 运行徽标文案来自后端 taskStage 纯函数查表的 stageLabel，不再从 latestRun.status 拼映射。
 // 终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：状态点、运行文案、计时与 running 高亮全部隐藏，
 // 已完成/已取消任务上挂着的遗留运行不再误导看板。
-// 验收滞留 badge（DSHBOTS-194）：in_review 卡静置超阈值亮「滞留 Xm」，≥2×阈值转红。
-// 阈值与后端守门同源（runLimits.reviewIdleMinutes，0=关闭）；锚点取 updated_at 与最近
-// run 活动时间的较大者（卡片 payload 不含评论时间戳，权威判定以后端系统提醒为准）；
+// 验收滞留 badge（DSHBOTS-194/235）：in_review 卡静置超阈值亮「滞留 Xm」，超 阈值×倍数 转红。
+// 锚点与升级线取后端 task.reviewIdle 同源数据（含最新评论与 run 活动，H3 两端口径统一）；
+// 阈值与后端守门同源（runLimits.reviewIdleMinutes，0=关闭）；滞留判定两端同式：
+// 静置毫秒严格大于阈值。badge 内联三档判定档位（A/B/C），title 携带判定依据。
 // 时长内嵌 run-clock 每秒自刷新，着色复用主题 pill 类不写死色值。
 function reviewIdleBadge(task) {
   const minutes = Number(state.data?.runLimits?.reviewIdleMinutes ?? 30)
   if (!minutes || task.status !== 'in_review') return ''
-  const anchors = [task.updated_at, task.latestRun?.ended_at, task.latestRun?.started_at]
-    .filter(Boolean).map(stamp => new Date(stamp).getTime()).filter(ms => Number.isFinite(ms))
-  if (!anchors.length) return ''
-  const idleMs = Date.now() - Math.max(...anchors)
-  if (idleMs < minutes * 60_000) return ''
-  const tier = idleMs >= minutes * 120_000 ? 'red' : 'amber'
-  const iso = new Date(Math.max(...anchors)).toISOString()
-  return `<span class="pill ${tier}" title="${t('task.reviewIdleTitle', { minutes })}">${t('task.reviewIdle')}&nbsp;<span class="run-clock" data-started="${attr(iso)}">${duration(iso)}</span></span>`
+  const idle = task.reviewIdle
+  if (!idle?.anchorMs) return ''
+  const idleMs = Date.now() - idle.anchorMs
+  if (idleMs <= minutes * 60_000) return ''
+  const escalateMinutes = Number(idle.escalateMinutes ?? minutes * 2)
+  const tier = idleMs > escalateMinutes * 60_000 ? 'red' : 'amber'
+  const iso = new Date(idle.anchorMs).toISOString()
+  const verdict = idle.verdict?.verdict
+  const title = idle.verdict?.basis
+    ? t('task.reviewVerdictTitle', { minutes, verdict, basis: idle.verdict.basis })
+    : t('task.reviewIdleTitle', { minutes })
+  return `<span class="pill ${tier}" title="${attr(title)}">${t('task.reviewIdle')}${verdict ? `·${attr(verdict)}` : ''}&nbsp;<span class="run-clock" data-started="${attr(iso)}">${duration(iso)}</span></span>`
 }
 function renderTaskCard(task, options: TaskCardOptions = {}) {
   const depth = Number(options.depth ?? 0)

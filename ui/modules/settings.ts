@@ -172,9 +172,14 @@ function renderRunLimitsCard() {
   const limits = state.data.runLimits ?? {}
   const savedRun = settings.run_timeout_minutes ?? ''
   const savedStall = settings.stall_watchdog_minutes ?? ''
+  const savedReviewIdle = settings.review_idle_minutes ?? ''
+  const savedAutoClose = settings.review_auto_close ?? ''
   const runValue = savedRun !== '' ? savedRun : String(limits.runTimeoutMinutes ?? 120)
   // 看门狗保存值 '0'（关闭）合法，不能用 || 短路吞掉。
   const stallValue = savedStall !== '' ? savedStall : String(limits.stallTimeoutMinutes ?? 30)
+  // 验收滞留阈值（DSHBOTS-235）：未保存回填生效值；'0'（关闭守门）同样合法不短路。
+  const reviewIdleValue = savedReviewIdle !== '' ? savedReviewIdle : String(limits.reviewIdleMinutes ?? 30)
+  const autoCloseOn = savedAutoClose !== '0'
   const envNames = [
     limits.runTimeoutEnv ? 'DSH_TEAM_RUN_TIMEOUT_MS' : '',
     limits.stallTimeoutEnv ? 'DSH_TEAM_STALL_TIMEOUT_MS' : '',
@@ -189,7 +194,17 @@ function renderRunLimitsCard() {
         <div class="field"><label id="settings-run-timeout-label" for="settings-run-timeout">${t('global.runTimeoutLabel')}</label><input class="input mono" style="text-align:right" type="number" min="1" max="360" id="settings-run-timeout" name="run_timeout_minutes" value="${attr(runValue)}"></div>
         <div class="field"><label id="settings-stall-watchdog-label" for="settings-stall-watchdog">${t('global.stallWatchdogLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="360" id="settings-stall-watchdog" name="stall_watchdog_minutes" value="${attr(stallValue)}"></div>
       </div>
+      <div class="field-row">
+        <div class="field"><label id="settings-review-idle-label" for="settings-review-idle">${t('global.reviewIdleLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="1440" id="settings-review-idle" name="review_idle_minutes" value="${attr(reviewIdleValue)}"></div>
+        <div class="field"><label id="settings-review-auto-close-label" for="settings-review-auto-close">${t('global.reviewAutoCloseLabel')}</label>
+          <select class="select" id="settings-review-auto-close" name="review_auto_close">
+            <option value="1" ${autoCloseOn ? 'selected' : ''}>${t('global.on')}</option>
+            <option value="0" ${!autoCloseOn ? 'selected' : ''}>${t('global.off')}</option>
+          </select>
+        </div>
+      </div>
       <div class="hint">${t('global.runLimitsHint1')}</div>
+      <div class="hint">${t('global.reviewIdleHint')}</div>
       <div class="hint">${t('新值只对之后启动的运行生效，进行中的运行不追溯。')}</div>
       ${envNames ? `<div class="hint">${t('global.runLimitsEnv', { names: envNames })}</div>` : ''}
       <div class="btn-row" style="margin-top:12px">

@@ -66,6 +66,7 @@ export default {
   "task.groupSuffix": "分组",
   "task.priorityTitle": "优先级：${label}",
   "task.reviewIdleTitle": "验收静置已超 ${minutes} 分钟，请尽快收口",
+  "task.reviewVerdictTitle": "验收静置已超 ${minutes} 分钟，请尽快收口｜判定 ${verdict}：${basis}",
   "task.reviewIdle": "滞留",
   "task.reviewOwner": "总监验收中",
   "task.reviewYou": "待您验收",
