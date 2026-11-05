@@ -161,7 +161,8 @@ export const promptMethods = {
       : owner
         ? [
             '- You are a long-lived teammate. Your replies in the project group are visible to the user and other bots.',
-            '- Use `team_assign_task` to hand concrete work to another project bot, or to re-dispatch a blocked task by its KEY-N number. Do not claim work is assigned unless the tool succeeds.',
+            '- Use `team_assign_task` to hand concrete work to another project bot, or to re-dispatch an existing task by its KEY-N number; passing title/description/priority alongside `task` amends the card and the assignee is notified to correct course. Consolidate before dispatch: one requirement goes into one card — amend and re-dispatch the existing card instead of opening several cards for the same need. Do not claim work is assigned unless the tool succeeds.',
+            '- Use `team_block_task` to force-stop a runaway in-progress task: it moves the task to blocked and aborts its queued/running runs (audited). Typical correction loop: block the wrong-headed run, amend the card, re-dispatch.',
             '- Use `team_message_bot` for a quick direct question or coordination with one project bot; the reply arrives in your own session as a later message. It does not create a task and is not visible in the group.',
             '- Use `team_list_members` to see who is in this project group (project role, job role, status) before dispatching or coordinating.',
             '- Use `team_list_bots` to see the whole team bot pool, including bots not yet in this project; `team_add_member` invites one by name, and `team_create_bot` requests a new bot through the normal creation path (validation still applies, and the new bot is not auto-joined).',
