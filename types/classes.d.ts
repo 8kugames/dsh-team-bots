@@ -23,6 +23,7 @@ import { projectsMethods } from '../src/services/projects.js'
 import { chatMethods } from '../src/services/chat.js'
 import { tasksMethods } from '../src/services/tasks.js'
 import { taskDispatchMethods } from '../src/services/task-dispatch.js'
+import { taskRunMethods } from '../src/services/task-runs.js'
 import { taskNotifyMethods } from '../src/services/task-notify.js'
 import { taskReviewMethods } from '../src/services/task-review.js'
 import { notifyMethods } from '../src/services/notify.js'
@@ -49,7 +50,7 @@ import { lifecycleMethods } from '../src/services/runtime/lifecycle.js'
 
 type TeamServiceMethods =
   & typeof botsMethods & typeof projectsMethods & typeof chatMethods
-  & typeof tasksMethods & typeof taskDispatchMethods & typeof taskNotifyMethods & typeof taskReviewMethods
+  & typeof tasksMethods & typeof taskDispatchMethods & typeof taskRunMethods & typeof taskNotifyMethods & typeof taskReviewMethods
   & typeof notifyMethods
   & typeof runsMethods & typeof runFinishMethods & typeof hygieneMethods
   & typeof modelFallbackMethods & typeof botQuotaMethods & typeof schedulerMethods & typeof memoryMethods
