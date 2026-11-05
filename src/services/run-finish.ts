@@ -9,10 +9,13 @@ import { id, nowIso, parseMentions, text } from '../util.js'
 import { rolloverSummaryKey } from '../config.js'
 import {
   isQuotaExhausted,
-  isRateLimitError,
+  isRetryChainError,
+  isTransientNetworkError,
   MAX_RATE_LIMIT_RETRIES,
   needsSynthesizedBackoff,
+  needsTransientBackoff,
   rateLimitBackoffMs,
+  transientBackoffMs,
 } from './backoff.js'
 import { ensureAttentionSchema, normalizeAttention } from './attention-schema.js'
 import { completeVisionRun, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
@@ -68,7 +71,14 @@ export const runFinishMethods = {
     // DSHBOTS-99：额度耗尽（已达到限额）不合成指数退避——额度窗口用尽，退避重打撞同一堵墙。
     const attemptNo = Math.max(1, Number(run.attempt) || 1)
     const quotaExhausted = isQuotaExhausted(error)
-    const synthesizedMs = needsSynthesizedBackoff(error) ? rateLimitBackoffMs(attemptNo) : null
+    // DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等过性错误）同判合成退避，
+    // 与限流共用同一 retry_after_ms 落库与 plan_wait 派生链；真 Retry-After 仍优先。
+    const transientBackoff = needsTransientBackoff(error)
+    const synthesizedMs = needsSynthesizedBackoff(error)
+      ? rateLimitBackoffMs(attemptNo)
+      : transientBackoff
+        ? transientBackoffMs(attemptNo)
+        : null
     // 额度耗尽时 provider 真给的重置时间照样保留（信息不丢，供 UI 显示额度恢复时间），
     // 但它不再触发对主模型的自动重试（见下方失败分支与 scheduler.retryExpiredPlanWaits）。
     const retryAfterMs = Number(error?.retryAfterMs) > 0 ? Number(error.retryAfterMs) : synthesizedMs
@@ -120,8 +130,10 @@ export const runFinishMethods = {
       const suffix = attemptNo < MAX_RATE_LIMIT_RETRIES ? '后重试' : '后转总监处理'
       this.insertRunEvent(
         runId,
-        'rate_limit_backoff',
-        `上游限流（${error?.code}）未返回 Retry-After，第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`,
+        transientBackoff ? 'transient_backoff' : 'rate_limit_backoff',
+        transientBackoff
+          ? `网络瞬态失败（${String(error?.code ?? error?.message ?? '未知错误').slice(0, 60)}），第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`
+          : `上游限流（${error?.code}）未返回 Retry-After，第 ${attemptNo} 次退避，约 ${Math.round(synthesizedMs / 1000)} 秒${suffix}`,
       )
     }
     // 结构化提问（attention）：只在 bot 显式给出时落库，规范超长/超量后写入；
@@ -361,7 +373,9 @@ export const runFinishMethods = {
       // 禁止立刻重打上游——不切备用模型（备用可能走同一网关），也不立刻排总监处理运行。
       // DSHBOTS-99：额度耗尽（已达到限额）不走这条路径——不指数退避、无条件先试备用模型；
       // 瞬时限流的等待语义原样保留。
-      const backoffWaitMs = isRateLimitError(error) && retryAfterMs > 0 ? retryAfterMs : 0
+      // DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等）进同一退避链——等待期内同样
+      // 不切备用不排 handle，plan_retry 到期派生接管重试；attempt≤3，第 4 次照常转 blocked。
+      const backoffWaitMs = isRetryChainError(error) && retryAfterMs > 0 ? retryAfterMs : 0
       // 额度耗尽不做自动重试：重置时间只当信息留着，不据此重打主模型。
       const willRetry = !quotaExhausted && backoffWaitMs > 0 && attemptNo < MAX_RATE_LIMIT_RETRIES
       // 主 provider 不可用：临时切备用模型继续跑这条任务。派生成功后任务不置 blocked、
@@ -401,10 +415,13 @@ export const runFinishMethods = {
         const quotaNote = quotaExhausted
           ? `\n已达限额（${error?.code ?? '未知错误'}），主备模型均不可用，任务转为受阻${quotaResetNote}。`
           : ''
+        // 退避提示按失败类别措辞：瞬态抖动与限流都是「退避后自动重试」，不混用限流文案。
+        const backoffKind = isTransientNetworkError(error) ? '网络瞬态失败' : '上游限流'
+        const backoffVerb = isTransientNetworkError(error) ? '退避' : '指数退避'
         const backoffNote = backoffWaitMs > 0
           ? (willRetry
-              ? `\n上游限流，第 ${attemptNo} 次指数退避，约 ${Math.round(backoffWaitMs / 1000)} 秒后自动重试。`
-              : `\n上游限流，已达自动重试上限，约 ${Math.round(backoffWaitMs / 1000)} 秒后转总监处理。`)
+              ? `\n${backoffKind}，第 ${attemptNo} 次${backoffVerb}，约 ${Math.round(backoffWaitMs / 1000)} 秒后自动重试。`
+              : `\n${backoffKind}，已达自动重试上限，约 ${Math.round(backoffWaitMs / 1000)} 秒后转总监处理。`)
           : ''
         this.insertMessage({
           projectId: project.id,

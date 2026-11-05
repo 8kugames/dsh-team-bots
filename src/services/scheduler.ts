@@ -7,7 +7,7 @@ import { effectiveRunLimits } from '../config.js'
 import { badRequest } from '../errors.js'
 import { applyRetention, reconcileUsage } from '../usage-reconcile.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
-import { MAX_RATE_LIMIT_RETRIES, RATE_LIMIT_CODES, isQuotaExhausted } from './backoff.js'
+import { MAX_RATE_LIMIT_RETRIES, isQuotaExhausted, isRetryChainError } from './backoff.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
@@ -398,9 +398,10 @@ export const schedulerMethods = {
     }
   },
   // 限流失败的自动重试（DSHBOTS-24；DSHBOTS-38 放开到 3 次并支持合成退避）：
-  // 失败 run 带 retry_after_ms（provider 真发过 Retry-After，或限流无头时 finishRun 合成的指数退避），
-  // 到期派生一次新运行。限流码链最多跑到 attempt=3（1→2→3），之后转常规失败处置；
-  // 非 RATE_LIMIT_CODES 的错误码不进本路径（维持只认限流码的原状）。
+  // 失败 run 带 retry_after_ms（provider 真发过 Retry-After，或限流/瞬态无头时 finishRun 合成的指数退避），
+  // 到期派生一次新运行。重试链最多跑到 attempt=3（1→2→3），之后转常规失败处置；
+  // DSHBOTS-266：链内错误判定移到下方 JS——限流码集合之外，网络瞬态失败（ECONNRESET/5xx/408
+  // 等，错误码/正文双匹配，见 backoff.ts 的 isRetryChainError）同样进本路径；SQL 表达不了该正则。
   // 只针对任务运行——solo/私信运行显示 plan_wait 状态但不自动派生，避免对同一个对话者重复发信。
   // 过期超过 24h 视为时过境迁不派生（服务停摆/长期搁置后不补跑旧任务）。
   // 幂等闸：task_id 非空 + 原 run 无 plan_retry 事件；idempotency_key UNIQUE 兜底并发 tick。
@@ -410,15 +411,15 @@ export const schedulerMethods = {
       `SELECT r.* FROM runs r
        WHERE r.status = 'failed' AND r.retry_after_ms IS NOT NULL
          AND r.task_id IS NOT NULL AND r.attempt < ${MAX_RATE_LIMIT_RETRIES}
-         AND r.error_code IN (${[...RATE_LIMIT_CODES].map(() => '?').join(', ')})
          AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
              <= CAST(strftime('%s', 'now') AS REAL)
          AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
              > CAST(strftime('%s', 'now') AS REAL) - ${PLAN_RETRY_MAX_LATE_SECONDS}
          AND NOT EXISTS(SELECT 1 FROM run_events e WHERE e.run_id = r.id AND e.type = 'plan_retry')`,
-      ...RATE_LIMIT_CODES,
     )
     for (const run of expired) {
+      // DSHBOTS-266：重试链判定（限流码 ∪ 网络瞬态）在 JS 做；非链内错误码不派生（现状不变）。
+      if (!isRetryChainError({ code: run.error_code, message: run.error_message })) continue
       // DSHBOTS-99：额度耗尽（已达到限额）的运行不再自动派生重试——额度窗口用尽时重打主模型
       // 只会再撞一次额度，任务已经转受阻，不能让它自己空转。
       // 备用链上的运行同理：每条链只切一次备用，plan_retry 派生出来的是主模型运行，等于绕开限额口径。
