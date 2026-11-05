@@ -18,6 +18,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { handleAction } from '../src/api.js'
+import './helpers/eval-shim.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')

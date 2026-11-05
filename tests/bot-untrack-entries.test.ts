@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
+import './helpers/eval-shim.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')

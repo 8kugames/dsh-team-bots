@@ -16,7 +16,7 @@ test('终端 tab 只出现在项目上下文导航', () => {
   // NAV/SOLO_NAV 都是每行一项，按收口括号截取整块（模块顶层 0 缩进）。
   const nav = /const NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1]
   assert.ok(nav, '缺少 NAV 定义')
-  assert.match(nav, /\['terminal',\s*'终端',\s*'terminal'\]/)
+  assert.match(nav, /\['terminal', 'terminal'\]/)
   const soloNav = /const SOLO_NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1]
   assert.ok(soloNav, '缺少 SOLO_NAV 定义')
   assert.ok(!soloNav.includes("'terminal'"), '单聊导航不应出现终端 tab')
@@ -164,7 +164,7 @@ test('命令与元信息字号层级：命令是主角，元信息退到 --ink-3
 })
 
 test('历史卡头部用 eyebrow 标题，空态用独立类不再靠行内样式', () => {
-  assert.match(renderTerminalBody, /class="terminal-history-head"><span class="eyebrow">命令历史<\/span>/, '历史卡标题应是 eyebrow')
+  assert.match(renderTerminalBody, /class="terminal-history-head"><span class="eyebrow">\$\{t\("命令历史"\)\}<\/span>/, '历史卡标题应是 eyebrow')
   assert.match(renderTerminalBody, /class="terminal-history-empty"/, '历史空态应使用独立类')
   assert.ok(!/class="side-empty" style="padding:14px 16px"/.test(renderTerminalBody), '历史空态不应再靠行内样式')
   assert.match(cssBlock('.terminal-history-empty'), /color:\s*var\(--ink-3\)/, '历史空态文字应弱化')

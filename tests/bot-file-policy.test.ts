@@ -198,9 +198,9 @@ test('UI marks file policy dropdowns on both bot forms', async () => {
   const selects = source.match(/name="filePolicy"/g) ?? []
   assert.equal(selects.length, 2, '单聊配置页与总览表单各应有一个文件权限下拉')
   // 三个档位的中文标签都注册在选项表里。
-  assert.match(source, /'read-only': '只读'/)
-  assert.match(source, /'workspace-write': '工作区内修改'/)
-  assert.match(source, /'danger-full-access': '完全访问'/)
+  assert.match(source, /keyed\('filePolicy\.', \['read-only'/)
+  assert.match(source, /keyed\('filePolicy\.', \['read-only', 'workspace-write'/)
+  assert.match(source, /keyed\('filePolicy\.', \['read-only', 'workspace-write', 'danger-full-access'/)
   // 表单提交管道把 filePolicy 带进 create/update patch。
   assert.match(source, /filePolicy: payload\.filePolicy \|\| undefined/)
   // 回填用 bot.file_policy（botView 自动带出）。

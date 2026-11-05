@@ -53,7 +53,7 @@ test('总览 bots 表单有备用模型与备用推理强度两个下拉', () =>
 test('备用模型下拉首项为「不启用（留空）」，选项取自同一模型表', () => {
   const fn = /function fallbackModelOptions\(currentRef\)[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(fn, '找不到 fallbackModelOptions')
-  assert.match(fn, /<option value=""\$\{currentRef \? '' : ' selected'\}>不启用（留空）<\/option>/, '首项留空即不启用')
+  assert.match(fn, /<option value=""\$\{currentRef \? '' : ' selected'\}>\$\{t\("不启用（留空）"\)}<\/option>/, '首项留空即不启用')
   assert.match(fn, /state\.data\?\.models \?\? \[\]/, '选项与主模型同一张模型表')
 })
 

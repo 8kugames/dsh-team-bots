@@ -112,7 +112,7 @@ test('paste 分发：图片走 addPendingImages（粘贴截图），不支持类
   assert.match(pasteHandler, /void addPendingImages\(images\)/, '图片复用现有待发通道')
   assert.match(pasteHandler, /getData\('text\/uri-list'\) \|\| data\.getData\('text\/plain'\)/, 'uri-list 优先、text/plain 兜底')
   assert.match(pasteHandler, /insertTextAtCursor\(input, paths\.join\('\\n'\)\)/, '有路径：按光标插入')
-  assert.match(pasteHandler, /toast\('浏览器未提供完整路径', 'error'\)/, '无路径：明说，不静默失败')
+  assert.match(pasteHandler, /toast\(t\("浏览器未提供完整路径"\), 'error'\)/, '无路径：明说，不静默失败')
 })
 
 test('红线：纯前端口径——无服务端接口、无目录扫描', () => {

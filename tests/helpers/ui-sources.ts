@@ -4,6 +4,8 @@ import { join } from 'node:path'
 
 const UI_DIR = fileURLToPath(new URL('../../ui', import.meta.url))
 
+import './eval-shim.js'
+
 // DSHBOTS-15 起 ui/app.js 拆为 ES modules：读源断言的测试统一读「app.js + ui/modules/*.js」
 // 拼接源，断言文本不随搬家改动（内容命中与否与所在文件无关）。
 export function readUiSource() {

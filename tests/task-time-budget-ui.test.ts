@@ -95,7 +95,7 @@ test('任务详情 modal：时效行条件渲染——有值显示「X 分钟」
   assert.match(body, /<div class="eyebrow"[^>]*>\$\{t\('taskForm\.timeBudgetLabel'\)\}<\/div>/, '时效行带小标签（与写范围段同构）')
   assert.match(body, /<div class="hint"[^>]*>\$\{t\('task\.timeBudgetNote'\)\}<\/div>/, '时效行下挂小字说明')
   // 行位置：与「写范围」同一信息层（在评论区之前）。
-  assert.ok(body.indexOf('task.timeBudgetMinutes ?') < body.indexOf('>评论<'), '时效行应与写范围同层，位于评论区之前')
+  assert.ok(body.indexOf('task.timeBudgetMinutes ?') < body.indexOf('>\$\{t\("评论"\)\}<'), '时效行应与写范围同层，位于评论区之前')
   assert.match(zh, /'task\.timeBudgetValue': '\$\{minutes\} 分钟'/, '中文时效值文案带分钟数插值')
   assert.match(zh, /'task\.timeBudgetNote': '硬性时限：到期运行将被中止；与全局运行超时取更短者'/, '中文小字说明口径与卡面一致')
 })

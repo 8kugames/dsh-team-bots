@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
+import './helpers/eval-shim.js'
 
 const source = readUiSource()
 const block = /\/\/ ac-core:start[\s\S]*?\/\/ ac-core:end/.exec(source)?.[0]

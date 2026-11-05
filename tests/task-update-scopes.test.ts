@@ -237,7 +237,7 @@ test('任务详情 modal：写范围段两态——只读 chips 保留 + 编辑�
   assert.match(modalTaskBody, /data-task-id="\$\{attr\(task\.id\)\}"/, '编辑动作携带 task id')
   // 编辑态表单：预填旧声明、逗号或空格分隔口径、保存/取消、生效范围 hint 逐字
   assert.match(modalTaskBody, /id="task-write-scopes"/, '输入框在场')
-  assert.match(modalTaskBody, /placeholder="逗号或空格分隔路径"/, 'placeholder 口径在场')
+  assert.match(modalTaskBody, /placeholder="\$\{t\("逗号或空格分隔路径"\)\}"/, 'placeholder 口径在场')
   assert.match(modalTaskBody, /writeScopes\.join\(', '\)/, '预填旧声明')
   assert.match(modalTaskBody, /data-action="update-scopes"/, '保存按钮在场')
   assert.match(modalTaskBody, /data-action="cancel-scopes-edit"/, '取消按钮在场')
@@ -255,6 +255,6 @@ test('编辑态 handler：切态走弹窗层局部刷新，保存走 task_update
   assert.match(source, /split\(\/\[,，、\\s\]\+\/\)/, '输入按逗号/顿号/空白切分')
   assert.match(source, /api\('task_update_scopes', \{ taskId: target\.dataset\.taskId, write_scopes: scopes \}, \{ quiet: true \}\)/, '保存调用 task_update_scopes（quiet，错误自管）')
   assert.match(source, /refreshAfterTask\(target\.dataset\.taskId\)/, '成功后刷新任务详情')
-  assert.match(source, /toast\('写范围已更新', 'success'\)/, '成功 toast')
+  assert.match(source, /toast\(t\("写范围已更新"\), 'success'\)/, '成功 toast')
   assert.match(source, /toast\(error\.message \|\| String\(error\), 'error'\)/, '失败透传后端文案')
 })

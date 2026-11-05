@@ -40,7 +40,7 @@ test('④ 再开与归档按钮：接线 + 警告色右对齐', () => {
   assert.match(source, /justify-content:flex-end/, '归档按钮行应右对齐')
   // 「项目状态」卡内按状态分流：进行中给归档，已归档给再开 + 移除追踪。
   assert.match(source, /data-action="remove-tracking-open" data-project-id="\$\{attr\(project\.id\)\}" data-project-name="\$\{attr\(project\.name\)\}"/, '已归档项目的「移除追踪」应在项目状态卡内')
-  assert.match(source, /data-action="reopen-project" data-project-id="\$\{attr\(project\.id\)\}">项目再开</, '已归档项目的「项目再开」应在项目状态卡内')
+  assert.match(source, /data-action="reopen-project" data-project-id="\$\{attr\(project\.id\)\}">\$\{t\("项目再开"\)}</, '已归档项目的「项目再开」应在项目状态卡内')
 })
 
 test('⑤ 样式：抽屉操作与移除弹窗列表，颜色只用既有 token', () => {

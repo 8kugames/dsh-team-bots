@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
+import './helpers/eval-shim.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')

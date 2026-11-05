@@ -24,8 +24,8 @@ test('① 成员 tab：邀请走弹窗选人 + 移除动作 + busy 徽标 + 用�
   assert.ok(!source.includes('id="invite-bot"'), '不再有邀请下拉 select#invite-bot（DSHBOTS-50 改为弹窗选人）')
   assert.match(source, /data-action="open-invite-member"/, '邀请按钮 open-invite-member（打开选人弹窗）')
   assert.match(source, /data-action="remove-member"/, '移除按钮 remove-member')
-  assert.match(source, /member\.member_role === 'owner' \|\| member\.id === project\.owner_bot_id[\s\S]*?<span class="pill violet">总监<\/span>/, '总监行 violet pill')
-  assert.match(source, /member\.busy \? '任务中' : '空闲中'|member\.busy \? "任务中" : "空闲中"|busy \? '任务中' : '空闲中'/, '任务中/空闲中徽标')
+  assert.match(source, /member\.member_role === 'owner' \|\| member\.id === project\.owner_bot_id[\s\S]*?<span class="pill violet">\$\{t\("总监"\)\}<\/span>/, '总监行 violet pill')
+  assert.match(source, /member\.busy \? t\("任务中"\) : t\("空闲中"\)/, '任务中/空闲中徽标')
   assert.match(source, /formatCost\(Number\(member\.usage_cost \?\? 0\)\)/, 'cost 合计用 formatCost')
 })
 

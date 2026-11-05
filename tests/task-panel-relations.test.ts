@@ -46,8 +46,8 @@ test('依赖徽标：depsSatisfied=false 时行尾显示「被 N 个任务阻塞
   assert.match(source, /const depsBlocked = task\.depsSatisfied === false && blockedNames\.length > 0/, '只有依赖未满足才显示')
   assert.match(source, /const blockedNames = Array\.isArray\(task\.blockedByNames\) \? task\.blockedByNames : \[\]/, '读 blockedByNames')
   assert.match(source, /class="task-deps-badge" title="\$\{attr\(depsTitle\)\}"/, '徽标带 title')
-  assert.match(source, /const depsTitle = `被 \$\{blockedNames\.length\} 个任务阻塞：\$\{blockedNames\.join\('、'\)\}`/, 'title 列出未满足的依赖编号')
-  assert.match(source, />\$\{icon\('alert'\)\}被 \$\{blockedNames\.length\} 个任务阻塞</, '徽标文案是被 N 个任务阻塞')
+  assert.match(source, /const depsTitle = \`\$\{t\("被"\)\} \$\{blockedNames\.length\} \$\{t\("个任务阻塞："\)\}\$\{blockedNames\.join\(t\("、"\)\)\}\`/, 'title 列出未满足的依赖编号')
+  assert.match(source, />\$\{icon\('alert'\)\}\$\{t\("被"\)\} \$\{blockedNames\.length\} \$\{t\("个任务阻塞"\)\}</, '徽标文案是被 N 个任务阻塞')
   const badge = block('.task-deps-badge')
   assert.ok(badge, '找不到 .task-deps-badge 样式块')
   assert.match(badge, /color:\s*var\(--danger\)/, '徽标用 danger 色')
@@ -55,7 +55,7 @@ test('依赖徽标：depsSatisfied=false 时行尾显示「被 N 个任务阻塞
 
 test('新建任务表单：可选父任务与依赖任务', () => {
   assert.match(source, /id="new-task-parent" name="parentTaskId"/, '有父任务下拉')
-  assert.match(source, /<option value="">无（顶层任务）<\/option>/, '父任务默认不选')
+  assert.match(source, /<option value="">\$\{t\("无（顶层任务）"\)\}<\/option>/, '父任务默认不选')
   assert.match(source, /id="new-task-blocked" name="blockedBy" multiple/, '依赖任务是多选')
   // D-63 派生子任务：taskRelationOptions 增加 selectedId 参数（预填父任务时给对应 option 打 selected），选项来源不变。
   assert.match(source, /function taskRelationOptions\(selectedId = ''\)/, '选项来自本项目任务')
@@ -75,6 +75,6 @@ test('分组头计数不受层级影响', () => {
 
 test('任务详情里也能看到父任务与被阻塞项', () => {
   assert.match(source, /const parentTask = \(state\.data\?\.tasks \?\? \[\]\)\.find\(item => item\.id === \(task\.parent_task_id \?\? task\.parentTaskId \?\? null\)\)/, '详情取父任务')
-  assert.match(source, /父任务：\$\{esc\(parentTask\.identifier\)\} · \$\{esc\(parentTask\.title\)\}/, '详情显示父任务编号与标题')
-  assert.match(source, /被 \$\{blockedNames\.length\} 个任务阻塞：\$\{esc\(blockedNames\.join\('、'\)\)\}/, '详情显示被阻塞项')
+  assert.match(source, /\$\{t\("父任务："\)\}\$\{esc\(parentTask\.identifier\)\} · \$\{esc\(parentTask\.title\)\}/, '详情显示父任务编号与标题')
+  assert.match(source, /\$\{t\("被"\)\} \$\{blockedNames\.length\} \$\{t\("个任务阻塞："\)\}\$\{esc\(blockedNames\.join\(t\("、"\)\)\)\}/, '详情显示被阻塞项')
 })

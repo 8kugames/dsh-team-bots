@@ -22,7 +22,7 @@ function modalTaskBody() {
 
 test('任务详情 modal 含「写范围」区块：声明的路径逐条以等宽 chip 列出', () => {
   const body = modalTaskBody()
-  assert.match(body, /<div class="eyebrow" style="margin-bottom:6px">写范围<\/div>/, '写范围用与「评论」同款的 eyebrow 标题')
+  assert.match(body, /<div class="eyebrow" style="margin-bottom:6px">\$\{t\("写范围"\)\}<\/div>/, '写范围用与「评论」同款的 eyebrow 标题')
   assert.match(body, /<div class="scope-block">/, '写范围有独立容器')
   assert.match(body, /<div class="scope-chips">/, '非空时用 chip 行承载路径')
   assert.match(body, /writeScopes\.map\(scope =>/, '声明的路径逐条列出')
@@ -30,16 +30,16 @@ test('任务详情 modal 含「写范围」区块：声明的路径逐条以等�
   assert.match(body, /title="\$\{attr\(scope\)\}"/, 'chip 保留完整路径的 title 提示（长路径省略时可查）')
   assert.match(body, /esc\(scope\)/, '路径走转义输出')
   // 区块位置：在「评论」分隔线之前，随任务元信息一起露出，不必翻到页尾。
-  assert.ok(body.indexOf('scope-block') < body.indexOf('>评论<'), '写范围区块应在评论区之前')
+  assert.ok(body.indexOf('scope-block') < body.indexOf('>\$\{t\("评论"\)\}<'), '写范围区块应在评论区之前')
 })
 
 test('未声明写范围：灰字兜底文案「未声明（保守串行）」，与非空分支同源互斥', () => {
   const body = modalTaskBody()
-  assert.match(body, /'<div class="scope-empty">未声明（保守串行）<\/div>'/, '空集合显示未声明兜底文案')
+  assert.match(body, /<div class="scope-empty">\$\{t\("未声明（保守串行）"\)\}<\/div>/, '空集合显示未声明兜底文案')
   // 兜底与列表是同一个三元的两支：空集合走灰字，非空走 chip 行。
   assert.match(
     body,
-    /writeScopes\.length\s*\?[\s\S]{0,400}?scope-chips[\s\S]{0,400}?:\s*'<div class="scope-empty">未声明（保守串行）<\/div>'/,
+    /writeScopes\.length\s*\?[\s\S]{0,400}?scope-chips[\s\S]{0,400}?:\s*`<div class="scope-empty">\$\{t\("未声明（保守串行）"\)\}<\/div>`/,
     '空/未声明与非空必须是互斥的两支，不会同时渲染',
   )
   assert.match(body, /Array\.isArray\(task\.writeScopes\)/, '缺失或非数组的 writeScopes 一律按未声明兜底')

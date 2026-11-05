@@ -15,7 +15,7 @@ test('① 更名：导航首 tab、侧卡与入口按钮都改成「调度」口
   assert.match(source, /<h3>\$\{t\('solo\.recentRuns'\)\}<\/h3>/, '运行侧卡标题应为「最近调度运行」')
   assert.match(source, /t\('solo\.noRuns'\)/, '运行侧卡空态应为「还没有调度运行。」')
   assert.match(source, /t\('viewTitle\.dispatch', \{ name: soloBot\.name \}\)/, '页面标题应带「调度」前缀')
-  assert.match(source, /data-action="solo-bot" data-bot-id="\$\{attr\(bot\.id\)\}" title="打开该 Bot 的调度页">调度</, 'Bots 页入口按钮文案应为「调度」')
+  assert.match(source, /title="\$\{t\("打开该 Bot 的调度页"\)\}">\$\{t\("调度"\)\}<\/button>/, 'Bots 页入口按钮文案应为「调度」')
   assert.doesNotMatch(source, /<h3>单聊对象<\/h3>/, '旧文案「单聊对象」不应残留')
   assert.doesNotMatch(source, /<h3>最近单聊运行<\/h3>/, '旧文案「最近单聊运行」不应残留')
 })
@@ -45,7 +45,7 @@ test('④ 任务行点击跳到该项目的任务页，nav 动作支持带 proje
 
 test('⑤ 运行行复用 run-clock 与 duration，且调度视图不新增定时器', () => {
   assert.match(source, /class="run-clock" data-started="\$\{attr\(started\)\}">\$\{duration\(started\)\}/, '运行时长复用 run-clock/duration')
-  assert.match(source, /const RUN_KIND = \{/, '运行类型名应有中文映射')
+  assert.match(source, /const RUN_KIND = keyed\('runKind\./, '运行类型名应有中文映射')
   const dispatchBlock = source.slice(source.indexOf('function dispatchTaskRow'), source.indexOf('function renderSoloChat'))
   assert.ok(dispatchBlock.length > 0, '应能定位到调度列表渲染区块')
   assert.doesNotMatch(dispatchBlock, /setInterval|setTimeout/, '调度列表不得新增定时器（沿用 2.8s poll）')
@@ -72,5 +72,5 @@ test('⑦ 调度对象卡头不再放「配置」按钮，chat-head 就近入口
   assert.doesNotMatch(block, /<h3>\$\{t\('solo\.dispatchTarget'\)\}<\/h3><button/, '调度对象卡头不得再带任何按钮（与 chat-head 配置入口重复）')
   assert.match(block, /<h3>\$\{t\('solo\.dispatchTarget'\)\}<\/h3><\/div>/, '调度对象卡头应只剩标题')
   assert.match(block, /chat-head-actions[\s\S]*?data-view="solo-config"[\s\S]*?t\('solo\.configButton'\)/, 'chat-head 右上角就近配置入口保留（R-1 ②）')
-  assert.match(source, /data-action="edit-bot" data-bot-id="\$\{attr\(bot\.id\)\}">\$\{icon\('edit'\)\}配置</, '总览 Bots 卡的全功能配置 modal 入口保留')
+  assert.match(source, /data-action="edit-bot" data-bot-id="\$\{attr\(bot\.id\)\}">\$\{icon\('edit'\)\}\$\{t\("配置"\)\}<\/button>/, '总览 Bots 卡的全功能配置 modal 入口保留')
 })

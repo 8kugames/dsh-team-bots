@@ -153,6 +153,8 @@ function loadModule(source, stubs) {
     querySelectorAll: () => [],
   }
   const globals = {
+    // DSHBOTS-220：源码已 t() 化，求值沙箱需注入 t（测试只关心链路，文案回键本身即可）
+    t: (key) => key,
     document: documentStub,
     window: { addEventListener: noop, confirm: () => false, open: noop, prompt: () => null },
     navigator: { clipboard: { writeText: async () => {} } },
@@ -180,9 +182,10 @@ const makeState = (): {
   data: { questions: [], pendingQuestions: { count: 0, items: [] } },
 })
 
-const cardOf = (state) => new Function('state', 'icon', 'esc', 'attr', 'formatTime', `${formatTimeSource}
+const tStub = (key) => key
+const cardOf = (state) => new Function('state', 'icon', 'esc', 'attr', 'formatTime', 't', `${formatTimeSource}
 ${markerBlock('question-card')}
-return { questionCardMarkup, questionDraftOf, questionDraftSelection, questionSelectOption }`)(state, iconStub, escStub, escStub, formatTime)
+return { questionCardMarkup, questionDraftOf, questionDraftSelection, questionSelectOption }`)(state, iconStub, escStub, escStub, formatTime, tStub)
 
 // 组装一次可交互场景：真实 markup + 真实 click/input 监听器 + 可编程 api/toast/render 桩。
 function makeHarness() {
@@ -397,9 +400,9 @@ test('守卫：question-option 点击对已失效（非 pending）问题不写�
     assert.ok(match, `api.js 必须导出 ${name}（真实实现驱动，禁复制）`)
     return match[0].replace(/^export /, '')
   }
-  const realApiFns = (state, api) => new Function('state', 'api',
+  const realApiFns = (state, api) => new Function('state', 'api', 't',
     ['markVisibleChatRead', 'preserveDecidedApprovals', 'preserveAnsweredQuestions', 'loadState'].map(fnSource).join('\n')
-      + '\nreturn { loadState, preserveAnsweredQuestions }')(state, api)
+      + '\nreturn { loadState, preserveAnsweredQuestions }')(state, api, tStub)
 
   test('竞态锁：提交作答后迟到的旧 pending 轮询不得把「已回答」闪回问题卡', async () => {
     const h = makeHarness()

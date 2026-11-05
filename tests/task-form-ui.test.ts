@@ -34,7 +34,7 @@ test('modalNewTask 读 state.modal.parentTaskId 预填：下拉显示该父任�
   // 空选项始终是首个 option（无预填时浏览器默认选中它）；预填时父任务选项带 selected 显式覆盖默认。
   assert.match(
     source,
-    /<option value="">无（顶层任务）<\/option>\$\{taskRelationOptions\(preselectedParent\)\}/,
+    /<option value="">\$\{t\("无（顶层任务）"\)\}<\/option>\$\{taskRelationOptions\(preselectedParent\)\}/,
     '父任务选项列表接收预填 id',
   )
   assert.match(source, /function taskRelationOptions\(selectedId = ''\)/, '选项函数支持选中标记')

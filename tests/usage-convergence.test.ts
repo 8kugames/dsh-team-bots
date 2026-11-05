@@ -23,8 +23,8 @@ function fnBody(name) {
 }
 
 test('① 群聊 NAV 与单聊 NAV 均恢复 usage tab', () => {
-  assert.match(NAV, /\['usage', '用量', 'chart'\]/, '群聊 NAV 应有「用量」tab')
-  assert.match(SOLO_NAV, /\['usage', '用量', 'chart'\]/, '单聊 NAV 应有「用量」tab')
+  assert.match(NAV, /\['usage', 'chart'\]/, '群聊 NAV 应有「用量」tab')
+  assert.match(SOLO_NAV, /\['usage', 'chart'\]/, '单聊 NAV 应有「用量」tab')
   assert.match(source, /case 'usage': return renderUsage\(\)/, 'render 路由 usage 保留')
 })
 

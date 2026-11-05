@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
+import './helpers/eval-shim.js'
 
 const source = readUiSource()
 const block = /\/\/ typing-status:start[\s\S]*?\/\/ typing-status:end/.exec(source)?.[0]

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
+import './helpers/eval-shim.js'
 
 const source = readUiSource()
 const css = await uiStylesSource()
@@ -19,11 +20,11 @@ test('交付产物默认收起：与「查看输出」同一折叠口径', () =>
   assert.match(source, /function runArtifacts\(state, run\)/, '交付产物渲染需要 state 以记住展开态')
   assert.match(
     source,
-    /<details style="margin-top:6px"\$\{panelAttrs\(state, `run-artifacts:\$\{run\.id\}`\)\}><summary class="summary-link">交付产物（/,
+    /<details style="margin-top:6px"\$\{panelAttrs\(state, `run-artifacts:\$\{run\.id\}`\)\}><summary class="summary-link">\$\{t\("交付产物（"\)\}/,
     '交付产物包在 details/summary 里，且默认不带 open（收起）',
   )
   assert.match(source, /\$\{runArtifacts\(state, run\)\}/, '调用处传入 state')
-  assert.match(source, /<summary class="summary-link">查看输出<\/summary>/, '与「查看输出」同一 summary-link 样式')
+  assert.match(source, /<summary class="summary-link">\$\{t\("查看输出"\)\}<\/summary>/, '与「查看输出」同一 summary-link 样式')
   assert.ok(!/artifact-list"><div class="eyebrow"[^>]*>交付产物</.test(source), '不再以常驻 eyebrow 展开展示交付产物')
 })
 

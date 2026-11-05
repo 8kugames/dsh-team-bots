@@ -185,7 +185,7 @@ test('⑩ 用量页每条提示只占一行，不堆解释', () => {
   assert.ok(fallback.length <= 40, '兜底说明不超过 40 字')
   // 四档时间窗的说明同样是一句话，且不重复页面头已声明的窗口标签。
   const meta = fnBody('usageDayPanelMeta')
-  const windowNotes = [...meta.matchAll(/note: '([^']*)'/g)].map((m) => m[1]).filter(Boolean)
+  const windowNotes = [...meta.matchAll(/note: t\("([^"]*)"\)/g)].map((m) => m[1]).filter(Boolean)
   assert.equal(windowNotes.length, 4, '四档时间窗各有一条说明')
   for (const note of windowNotes) {
     assert.equal((note.match(/。/g) ?? []).length, 1, `窗口说明只保留一句：${note}`)

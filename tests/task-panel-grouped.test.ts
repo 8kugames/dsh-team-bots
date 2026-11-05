@@ -172,7 +172,7 @@ const sortTasks = [
 
 test('排序选择器存在且写 state.taskSort（D-63）', () => {
   assert.match(source, /taskSort: 'completed_desc',/, 'state 默认 completed_desc')
-  assert.match(source, /<select class="select" data-task-sort aria-label="任务排序"/, '工具栏有排序选择器')
+  assert.match(source, /<select class="select" data-task-sort aria-label="\$\{t\("任务排序"\)\}"/, '工具栏有排序选择器')
   assert.match(source, /if \(el\.matches\('\[data-task-sort\]'\)\) \{\s*\n\s*state\.taskSort = el\.value\s*\n\s*render\(\)/, 'change 分支写 state 后重渲染')
 })
 

@@ -182,7 +182,7 @@ test('卡片信息布局：上头像、中名称+角色、下任务统计与用�
   assert.match(membersFn, /member-card-top">\$\{avatar\(bot, 'lg'\)\}/, '顶部是头像')
   assert.match(membersFn, /member-card-name"><strong>\$\{esc\(bot\.name\)\}<\/strong>/, '中部是名称')
   assert.match(membersFn, /class="member-role"/, '中部有角色标签')
-  assert.match(membersFn, /member-card-foot[\s\S]*?合计 <strong>\$\{formatNumber\(tokens\)\}<\/strong> tokens/, '底部有 token 合计')
+  assert.match(membersFn, /member-card-foot[\s\S]*?\$\{t\("合计"\)\} <strong>\$\{formatNumber\(tokens\)\}<\/strong> tokens/, '底部有 token 合计')
   assert.match(membersFn, /member-card-foot[\s\S]*?formatCost\(Number\(member\.usage_cost \?\? 0\)\)/, '底部有 cost 合计')
 })
 
@@ -212,10 +212,10 @@ test('中段三行式：名称 / 角色标签 / 模型小字各自独立成行',
   const roleIdx = membersFn.indexOf('member-card-role')
   const modelIdx = membersFn.indexOf('member-card-model')
   assert.ok(nameIdx > 0 && roleIdx > nameIdx && modelIdx > roleIdx, '名称 → 角色标签 → 模型，顺序自上而下')
-  assert.match(membersFn, /<div class="member-card-role">\$\{isOwner \? '<span class="pill violet">总监<\/span>'/, '第二行是角色标签行')
+  assert.match(membersFn, /<div class="member-card-role">\$\{isOwner \? `<span class="pill violet">\$\{t\("总监"\)\}<\/span>`/, '第二行是角色标签行')
   assert.match(membersFn, /<div class="member-card-model" title="\$\{esc\(modelLine\)\}">\$\{esc\(modelLine\)\}<\/div>/, '第三行是模型小字行')
   assert.ok(!membersFn.includes('member-card-tags'), '旧的同行容器已废弃')
-  assert.match(membersFn, /const modelLine = modelRef \? String\(modelRef\) : '未配置'/, '缺配置兜底「未配置」')
+  assert.match(membersFn, /const modelLine = modelRef \? String\(modelRef\) : t\("未配置"\)/, '缺配置兜底「未配置」')
   const modelCss = /\.member-card-model \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
   assert.match(modelCss, /text-overflow:\s*ellipsis/, '模型行过长省略号')
   assert.match(modelCss, /font-size:\s*var\(--fs-caption\)/, '模型行是小字')
@@ -228,7 +228,7 @@ test('模型不再只藏在 title 提示里，卡面可见', () => {
 })
 
 test('总监卡保留 violet 标识，且不渲染移除按钮', () => {
-  assert.match(membersFn, /isOwner \? '<span class="pill violet">总监<\/span>'/, '总监用 violet 标签')
+  assert.match(membersFn, /isOwner \? `<span class="pill violet">\$\{t\("总监"\)\}<\/span>`/, '总监用 violet 标签')
   assert.match(membersFn, /\$\{isOwner \? '' : `<button class="member-card-remove"/, '移除按钮只给非总监卡')
 })
 
@@ -249,7 +249,7 @@ test('成员卡不再渲染 .member-card-status 运行状态行（DSHBOTS-65）'
 
 test('成员卡新增「已完成 n · 待办 m」任务统计行（DSHBOTS-65）', () => {
   assert.match(membersFn, /const taskStats = member\.taskStats \?\? \{\}/, '数据来自 member.taskStats')
-  assert.match(membersFn, /member-card-foot[\s\S]*?已完成 \$\{taskDone\} · 待办 \$\{taskOpen\}/, '底部渲染「已完成 · 待办」统计')
+  assert.match(membersFn, /member-card-foot[\s\S]*?\$\{t\("已完成"\)\} \$\{taskDone\} · \$\{t\("待办"\)\} \$\{taskOpen\}/, '底部渲染「已完成 · 待办」统计')
   assert.match(membersFn, /const taskDone = Number\(taskStats\.done \?\? 0\)/, '缺数据兜底 0（不产生 NaN）')
   assert.match(membersFn, /const taskOpen = Number\(taskStats\.open \?\? 0\)/, '缺数据兜底 0（不产生 NaN）')
   const usageIdx = membersFn.indexOf('member-card-usage')

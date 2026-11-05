@@ -171,8 +171,8 @@ test('④ 窗口键与元信息：四档齐备、非法键回退 30 日', () => 
 
 test('⑤ 页面头提供四档时间窗切换，动作走按需取数而非 state 轮询', () => {
   assert.match(source, /const USAGE_WINDOWS = \[/, '四档窗口定义在常量里')
-  for (const label of ['今日', '7 日', '30 日', '至今']) {
-    assert.ok(source.includes(`label: '${label}'`), `窗口档位含 ${label}`)
+  for (const key of ['today', '7d', '30d', 'all']) {
+    assert.ok(source.includes(`label: 'usage.window.${key}'`), `窗口档位含 ${key}`)
   }
   assert.match(source, /data-action="usage-window"/, '页面头有切换按钮')
   assert.match(source, /case 'usage-window':/, '动作分发有 usage-window')

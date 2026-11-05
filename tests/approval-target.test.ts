@@ -12,6 +12,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { ensureApprovalSchema, toolTargetOf } from '../src/services/approvals.js'
 import { readUiSource } from './helpers/ui-sources.js'
+import './helpers/eval-shim.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 

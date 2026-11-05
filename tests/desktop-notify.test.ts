@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
+import './helpers/eval-shim.js'
 
 const source = readUiSource()
 const block = /\/\/ desktop-notify:start[\s\S]*?\/\/ desktop-notify:end/.exec(source)?.[0]

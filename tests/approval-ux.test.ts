@@ -12,6 +12,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { readUiSource } from './helpers/ui-sources.js'
+import './helpers/eval-shim.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
