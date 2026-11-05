@@ -6,7 +6,7 @@ import { state } from './state.js'
 import { icon } from './icons.js'
 import { t } from './i18n.js'
 import { attr, esc, formatTime } from './util.js'
-import { pageHead, pageNav, pageSection, pageShell, slot } from './page-shell.js'
+import { pageHead, pageNav, pageSection, pageShell, refreshAction, slot } from './page-shell.js'
 
 // 微信通道卡（自配置页迁入）：绑定状态、扫码授权、验证码与退出。
 function wechatCard() {
@@ -120,7 +120,7 @@ function secretAddCard(projects) {
 export function renderChannel() {
   const card = wechatCard()
   return pageShell(
-    pageHead('CHANNELS', t('viewTitle.channel'), t('channel.desc')),
+    pageHead('CHANNELS', t('viewTitle.channel'), t('channel.desc'), refreshAction()),
     '',
     [pageSection({
       index: '01', id: 'c-wechat', title: t('channel.sectionWechat'), desc: t('channel.sectionWechatDesc'),
@@ -135,7 +135,7 @@ export function renderSecretsPage() {
   const requests = state.data?.secretRequests ?? []
   const projects = (state.data?.projects ?? []).filter(project => project.status === 'active')
   return pageShell(
-    pageHead('SECRETS', t('viewTitle.secrets'), t('secrets.desc')),
+    pageHead('SECRETS', t('viewTitle.secrets'), t('secrets.desc'), refreshAction()),
     pageNav([
       { id: 's-requests', label: t('secrets.sectionRequests') },
       { id: 's-list', label: t('secrets.sectionList') },

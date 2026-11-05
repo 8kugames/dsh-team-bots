@@ -7,7 +7,7 @@ import { CURRENCY_SYMBOL, attr, botById, costValue, esc, formatCost, formatNumbe
 import { api } from './api.js'
 import { t } from './i18n.js'
 import { renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './settings.js'
-import { pageHead, pageSection } from './page-shell.js'
+import { pageHead, pageSection, refreshAction } from './page-shell.js'
 import { render } from '../app.js'
 
 // 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
@@ -336,6 +336,7 @@ function usagePageHead(usage, scopeText, exportLabel = '') {
       </div>
       <div class="btn-row">
         <button class="btn" data-action="export-usage-csv">${icon('download')}${t('usage.exportCsv')}${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
+        ${usageMode() === 'global' ? refreshAction() : ''}
       </div>`
   return pageHead('USAGE', usageViewTitle(), t('usage.headDesc', { scope: scopeText, window: windowText, loading: usageWindowLoading ? t('usage.loading') : '' }), actions)
 }

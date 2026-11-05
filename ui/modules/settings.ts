@@ -6,7 +6,7 @@ import { icon } from './icons.js'
 import { activeBots, activeProject, attr, botById, esc, pathCode, tildePath } from './util.js'
 import { notifyToggleView } from './cards.js'
 import { usageBotRow, usageCurrency, usageDayPanel, usageDayTitle, usageListPanel, usageMetricCards, usageModelPanel, usagePageHead, usageProjectRow, usageRunRow, usageSection, usageSnapshot, usageWindowText } from './usage.js'
-import { pageHead, pageNav, pageSection, pageShell, slot } from './page-shell.js'
+import { pageHead, pageNav, pageSection, pageShell, refreshAction, slot } from './page-shell.js'
 import { refresh, noProject } from '../app.js'
 import { renderPriceCard } from './modal-forms.js'
 
@@ -356,7 +356,7 @@ function renderGlobal() {
   const uiLanguage = data.settings?.ui_language || 'auto'
   const notify = notifyToggleView()
   return pageShell(
-    pageHead('GLOBAL CONFIGURATION', t('global.title'), t('global.desc')),
+    pageHead('GLOBAL CONFIGURATION', t('global.title'), t('global.desc'), refreshAction()),
     pageNav([
       { id: 'g-pref', label: t('global.groupPref') },
       { id: 'g-runtime', label: t('global.groupRuntime') },

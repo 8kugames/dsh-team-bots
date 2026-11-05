@@ -14,6 +14,7 @@ import { renderTasks, renderTerminal, renderBotsOverview, renderMembers, renderS
 import { overlayOpen, markAppRenderPending, renderModalLayer, ensureModalRoot, noteModalScroll, flushAppRender } from './modules/modal-layer.js'
 import { openModal, closeModal, openTask, openSkillDetail, openTrajectory, openBot, reloadTaskModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, trapModalFocus, renderDirPicker, closeDirPicker, parseFallbackFields, normalizeTimeBudgetMinutes, modelOptions, effortOptions, fallbackModelOptions, renderPriceCard } from './modules/modal-forms.js'
 import { activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, loadOlderMessages, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote, dispatchTaskRow, dispatchRunRow, renderSoloChat, loadSoloDetail, renderSoloConfig } from './modules/chat.js'
+import { refreshAction } from './modules/page-shell.js'
 import { handleBoardAction } from './modules/events-board.js'
 import './modules/events-click.js'
 import './modules/events-submit.js'
@@ -216,10 +217,9 @@ function runKindLabel(kind) {
 
 function renderShell() {
   const data = state.data
-  const solo = inSoloContext()
+  const inSolo = inSoloContext()
   // 场景分支：单聊上下文无项目域；群聊上下文 = 当前项目。
-  const project = solo ? null : activeProject()
-  const pending = pendingProposals()
+  const project = inSolo ? null : activeProject()
   // 跨项目待审（DSHBOTS-102）：state 顶层全局口径，与当前项目解耦。
   const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
   // 跨项目待答提问（DSHBOTS-116）：与审批同口径，顶层全局聚合。
@@ -228,11 +228,12 @@ function renderShell() {
   const activeTasks = Number(data?.activeTasks ?? 0)
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
-  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。
+  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。四页页壳页（DSHBOTS-216）冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；无横幅时 main-head 整块不渲染，避免空粘头残影。
   const isGlobal = GLOBAL_VIEWS.has(state.view) || (state.view === 'usage' && usageMode() === 'global')
+  const shellGlobalPage = isGlobal && state.view !== 'bots-overview'
+  const showMainHead = !shellGlobalPage || approvalBannerView(pendingApprovals) !== '' || questionBannerView(pendingQuestions) !== ''
   // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
   const isSolo = state.view === 'chat' && state.chatMode === 'solo'
-  const inSolo = inSoloContext()
   const soloBot = inSolo ? botById(state.soloBotId) : null
   const viewTitle = isSolo
     ? (soloBot ? t('viewTitle.dispatch', { name: soloBot.name }) : t('viewTitle.dispatchPlain'))
@@ -250,7 +251,6 @@ function renderShell() {
     : state.view === 'channel' ? t('viewTitle.channel')
     : state.view === 'secrets' ? t('viewTitle.secrets')
     : t('viewTitle.projectSettings')
-  const title = viewTitle
   const spec = VIEW_ACTION[state.view]
   const cardOwnsPrimary = state.view === 'evolution' && pendingProposals() > 0
   const primary = (!project && !inSolo) || !spec ? '' : spec.submit
@@ -357,20 +357,20 @@ function renderShell() {
             <span class="sidebar-meta-sep">·</span>
             <span>${t('sidebar.botsCount', { count: activeBots.length })}</span>
             <span class="sidebar-meta-sep">·</span>
-            <span>${t('sidebar.pendingReviews', { count: pending })}</span>
+            <span>${t('sidebar.pendingReviews', { count: pendingProposals() })}</span>
           </div>
         </div>
       </aside>
       <main class="main">
-        <div class="main-head">
+        ${showMainHead ? `<div class="main-head">
         ${approvalBannerView(pendingApprovals)}
         ${questionBannerView(pendingQuestions)}
-        <header class="topbar">
+        ${shellGlobalPage ? '' : `<header class="topbar">
           <div class="topbar-title">
             ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}
-            <h1>${esc(title)}</h1>
+            <h1>${esc(viewTitle)}</h1>
           </div>
-          ${isGlobal || solo || !project ? '' : `<div class="topbar-meta">
+          ${isGlobal || inSolo || !project ? '' : `<div class="topbar-meta">
             <span><b>${project?.stats?.openTasks ?? 0}</b> ${project?.stats?.openTasks === 1 ? t('topbar.taskOne') : t('topbar.taskMany')}</span>
             <span class="sep"></span>
             <span><b>${projectRunning}</b> ${projectRunning === 1 ? t('topbar.runningOne') : t('topbar.runningMany')}</span>
@@ -379,9 +379,9 @@ function renderShell() {
           </div>`}
           <div class="topbar-actions">
             ${primary}
-            <button class="btn icon" data-action="refresh" title="${t('topbar.refresh')}" aria-label="${t('topbar.refresh')}">${icon('refresh')}</button>
+            ${refreshAction()}
           </div>
-        </header>
+        </header>`}
         ${isGlobal ? '' : `<div class="tabbar" role="tablist" aria-label="${t('topbar.mainNav')}">
           ${(inSolo ? SOLO_NAV : NAV).map(([key, label]) => {
             const dot = tabDot(key)
@@ -391,7 +391,7 @@ function renderShell() {
             return `<button class="tab ${active ? 'active' : ''}" role="tab" id="tab-${key}" aria-controls="main-content" aria-selected="${active}" tabindex="${active ? '0' : '-1'}" data-action="nav" data-view="${key}"${tabMode ? ` data-usage-mode="${tabMode}"` : ''}>${t(inSolo && key === 'chat' ? 'nav.soloChat' : 'nav.' + key)}${dot ? `<span class="red-dot" title="${t('topbar.attention')}"></span>` : ''}</button>`
           }).join('')}
         </div>`}
-        </div>
+        </div>` : ''}
         <section class="content" id="main-content" role="tabpanel" tabindex="-1"${isGlobal ? '' : ` aria-labelledby="tab-${state.view}"`}>
           ${renderView()}
         </section>

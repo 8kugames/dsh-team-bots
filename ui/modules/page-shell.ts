@@ -1,3 +1,6 @@
+import { icon } from './icons.js'
+import { t } from './i18n.js'
+
 // page-shell.ts —— 四个一级页（用量统计 / 通道 / 密钥管理 / 全局配置）共用的控制台页壳。
 // 只负责结构：页头（eyebrow + 标题 + 口径 + 操作区）、分组导航、序号分组、12 列槽位网格。
 // 不取数、不绑事件；卡片内容仍由各页自己渲染，保证四页的信息架构与视觉语言一致。
@@ -12,6 +15,13 @@ export function pageHead(eyebrow, title, desc, actions = '') {
         </div>
         ${actions ? `<div class="global-head-actions">${actions}</div>` : ''}
       </header>`
+}
+
+// 刷新按钮：全局四页并入页头操作区（global-head-actions），其余视图仍由 topbar-actions 摆放。
+// 只产结构；点击走 app 壳的 data-action 委托，与页壳「不绑事件」口径一致。
+export function refreshAction() {
+  const label = t('topbar.refresh')
+  return `<button class="btn icon" data-action="refresh" title="${label}" aria-label="${label}">${icon('refresh')}</button>`
 }
 
 // 分组导航：仅当页面有 2 个及以上分组时出现，锚点命中高亮由 CSS :target 负责。
