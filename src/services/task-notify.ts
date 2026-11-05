@@ -53,6 +53,47 @@ export const taskNotifyMethods = {
     void this.tick()
     return { taskId: task.id, triggerType }
   },
+  // 任务卡修正闭环（DSHBOTS-232 ①）：已派单卡的卡面（标题/描述/优先级/写范围）变更时，
+  // 群内发系统消息点名负责人「按新卡面修正」；负责人名下该任务有正在执行的运行时，
+  // 再向其会话注入一条修正提示（复用 steer 通道，与评论直通同机制）。
+  // 通知失败不回滚已落库的卡面变更（与 notifyTaskStarted 同口径）。
+  async notifyTaskCardChanged(task) {
+    const assigneeId = task.assignee_bot_id
+    if (!assigneeId) return null
+    const bot = this.store.get('SELECT name FROM bots WHERE id = ?', assigneeId)
+    if (!bot) return null
+    const project = this.projectRow(task.project_id)
+    const identifier = `${project.key}-${task.number}`
+    try {
+      this.insertMessage({
+        projectId: task.project_id,
+        senderType: 'system',
+        senderId: 'system',
+        taskId: task.id,
+        body: `任务 ${identifier} 卡面已变更，请按新卡面修正。`,
+        mentions: [assigneeId],
+      })
+    } catch (error: any) {
+      this.logger.warn?.('dsh-team: 卡面变更通知失败 %s: %s', identifier, error?.message ?? error)
+      return null
+    }
+    const run = this.store.get(
+      "SELECT id, session_id FROM runs WHERE task_id = ? AND status = 'running' AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
+      task.id,
+    )
+    if (run && this.runtime?.steer) {
+      try {
+        await this.runtime.steer(
+          run.session_id,
+          `Task card ${identifier} has just been amended by the owner. Re-read the latest card (title/description/priority/write scopes) and correct the work in progress accordingly; mention the amendment in the delivery report.`,
+        )
+        this.insertRunEvent(run.id, 'card_changed', `卡面变更修正提示已注入（${identifier}）`)
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: 卡面变更修正提示注入失败 %s: %s', identifier, error?.message ?? error)
+      }
+    }
+    return { taskId: task.id, steered: Boolean(run) }
+  },
   // 任务完成微信推送（DSHBOTS-182）：锚定 →done 转换，触发点在 updateTask。
   notifyTaskDone(task) {
     const project = this.projectRow(task.project_id)

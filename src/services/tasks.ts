@@ -341,6 +341,16 @@ export const tasksMethods = {
     if (updates.status === 'done' && task.status !== 'done') {
       this.notifyTaskDone(this.taskRow(taskId))
     }
+    // 任务卡修正闭环（DSHBOTS-232 ①）：已派单卡的卡面（标题/描述/优先级/写范围）实际变值时
+    // 通知负责人修正。只认卡面字段——状态/负责人等流转字段各有自己的通知口径，不在此重复；
+    // 值未变的字段（同值重写）不触发。
+    if (task.assignee_bot_id) {
+      const cardChanged = ['title', 'description', 'priority'].some(
+        field => updates[field] !== undefined && updates[field] !== task[field],
+      ) || (updates.write_scopes !== undefined
+        && JSON.stringify(readWriteScopes(updates.write_scopes)) !== JSON.stringify(readWriteScopes(task.write_scopes)))
+      if (cardChanged) await this.notifyTaskCardChanged(this.taskRow(taskId))
+    }
     return this.taskView(this.taskRow(taskId))
   },
   // 写占用释放（DSHBOTS-73，用户口径）：写范围占用只看「进行中」的任务，
@@ -496,6 +506,47 @@ export const tasksMethods = {
         })
       }
     }
+  },
+  // 总监强制受阻（DSHBOTS-232 ②）：把「进行中」任务强制移「受阻」并中止其名下全部
+  // 排队/执行中运行。运行中止走既有 abort 链路（cancelRunInternal → runtime.cancelRun），
+  // 与看板暂停（PAUSED_BY_BOARD，可续跑的暂停语义）区分：强制受阻是中止语义，
+  // 稳定码 TASK_FORCE_BLOCKED + run 事件 force_blocked + 审计 task.force_blocked 留痕。
+  // 先停运行再改状态：状态变更经 updateTask 单一触发点，此时活跃运行已清空，
+  // 不会落进看板暂停分支造成双重口径。
+  async forceBlockTask(taskId, actor = this.actor()) {
+    const task = this.taskRow(taskId)
+    if (task.status !== 'in_progress') throw conflict(`任务不在进行中，不能强制受阻（当前 ${task.status}）`)
+    const runs = this.store.all(
+      "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+      taskId,
+    )
+    const stoppedRuns = []
+    for (const run of runs) {
+      await this.cancelRunInternal(run.id, false)
+      this.store.run(
+        'UPDATE runs SET error_code = ?, error_message = ? WHERE id = ?',
+        'TASK_FORCE_BLOCKED', '总监强制移为受阻，运行中止', run.id,
+      )
+      this.insertRunEvent(run.id, 'force_blocked', '总监强制受阻，运行中止')
+      stoppedRuns.push(run.id)
+    }
+    await this.updateTask(taskId, { status: 'blocked' }, actor)
+    this.audit(actor, 'task.force_blocked', 'task', taskId, { stoppedRuns })
+    const project = this.projectRow(task.project_id)
+    this.insertMessage({
+      projectId: task.project_id,
+      senderType: 'system',
+      senderId: 'system',
+      taskId,
+      body: `任务 ${project.key}-${task.number} 被总监强制移为受阻，运行已中止。`,
+    })
+    return this.taskView(this.taskRow(taskId))
+  },
+  // 总监会话入口（team_block_task 工具）：与 reviewFromBot 同款 owner 校验。
+  async forceBlockFromBot(sessionId, input) {
+    const { project, actor } = this.ownerContextFor(sessionId)
+    const task = this.resolveBotTask(project, input.task)
+    return this.forceBlockTask(task.id, actor)
   },
   async addComment(taskId, bodyInput, actor = this.actor()) {
     const task = this.taskRow(taskId)
@@ -671,6 +722,15 @@ export const tasksMethods = {
     if (input.taskId || input.task) {
       const task = this.resolveBotTask(project, input.taskId ?? input.task)
       if (['done', 'canceled'].includes(task.status)) throw conflict(`任务 ${project.key}-${task.number} 已结束，不能重派`)
+      // 任务卡修正闭环（DSHBOTS-232 ①）：重派可同时改卡面（标题/描述/优先级）——先经
+      // updateTask 落卡，卡面变化由其统一触发点通知负责人修正，再走原重派链路。
+      // 写范围不在此口改：入队运行快照与调度闸门消费的不是同一份数据，
+      // 改范围走工作台 taskUpdateScopes（含排队运行快照同步），不在这里开第二入口。
+      const patch: any = {}
+      if (input.title !== undefined) patch.title = input.title
+      if (input.description !== undefined) patch.description = input.description
+      if (input.priority !== undefined) patch.priority = input.priority
+      if (Object.keys(patch).length) await this.updateTask(task.id, patch, actor)
       const updated = await this.assignTask(task.id, member.id, actor, { autoStart: false, sandboxOverride })
       void this.tick()
       return updated

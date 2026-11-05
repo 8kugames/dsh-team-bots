@@ -24,11 +24,15 @@ export const SUBAGENT_GENERATION_TOOLS = [
 ] as const
 
 // 总监专权工具：服务层 ownerContextFor 已做权威校验，本清单用于工具层兜底与守门测试。
+// team_block_task（DSHBOTS-232）与派单/验收同款总监专属：强制受阻停运行是不可逆控制面操作。
+// team_list_bots / team_add_member / team_create_bot（DSHBOTS-229）是团队编制入口：
+// 池查询含未入群 bot，加人与建 bot 会改动项目成员或全局 bot 档案。
 // team_memory_list / team_memory_write / team_memory_cleanup（DSHBOTS-239）是记忆巡检面：
 // 枚举、同名覆盖写与批量终态化清理都只归总监。
 export const DIRECTOR_ONLY_TOOLS = [
   'team_assign_task',
   'team_review_task',
+  'team_block_task',
   'team_list_bots',
   'team_add_member',
   'team_create_bot',
@@ -62,14 +66,14 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_assign_task',
-    description: 'Assign a task to a project bot. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); without it, creates a new task that starts automatically. A new task whose write scopes exactly match an unfinished task in the same project is rejected as a duplicate dispatch; merge the cards into the existing task instead, or pass force_duplicate to override (audited).',
+    description: 'Assign a task to a project bot. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); passing title/description/priority alongside `task` amends the card — the assignee is immediately notified to correct course per the new card. Without `task`, creates a new task that starts automatically. A new task whose write scopes exactly match an unfinished task in the same project is rejected as a duplicate dispatch; merge the cards into the existing task instead, or pass force_duplicate to override (audited). Consolidate before dispatch: one requirement goes into one card — amend and re-dispatch the existing card (or add subtask cards with parent_task_id for genuinely independent parts) instead of opening several sibling cards for the same need.',
     parameters: {
       type: 'object',
       properties: {
         assignee: { type: 'string', description: 'Exact bot name from the project member list' },
-        title: { type: 'string', description: 'Short actionable task title (new tasks only)' },
-        description: { type: 'string', description: 'Self-contained instructions, constraints and acceptance criteria (new tasks only)' },
-        priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority' },
+        title: { type: 'string', description: 'Short actionable task title (new tasks; on re-dispatch it amends the card)' },
+        description: { type: 'string', description: 'Self-contained instructions, constraints and acceptance criteria (new tasks; on re-dispatch it amends the card and the assignee is notified to correct course)' },
+        priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority (new tasks and card amendment on re-dispatch)' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths this task will modify (new tasks only); the scheduler runs tasks with disjoint scopes in parallel. Omit to parse a `写范围：`/`write_scopes:` line from the description instead' },
         force_duplicate: { type: 'boolean', description: 'Escape hatch (new tasks only): skip the same-write-scope duplicate check when an unfinished task in this project already declares identical write scopes. Use only when a second task on the same paths is intentional; every use is audited as dispatch_force_duplicate' },
         time_budget_minutes: { type: 'integer', description: 'Required delivery time limit in minutes (new tasks only, 1-10080): injected into the task prompt, and the run is aborted when the budget expires. The effective timeout is the smaller of this budget and the global run timeout. Omit to take the default budget (env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > stall-watchdog minutes > fallback 20 minutes)' },
@@ -88,6 +92,25 @@ export function installTeamTools(ctx, service) {
       return args.task
         ? `Re-dispatched ${task.identifier} to ${task.assignee_name ?? args.assignee} (status: ${task.status}).`
         : `Created ${task.identifier} and assigned it to ${task.assignee_name ?? args.assignee}.`
+    },
+  })
+
+  ctx.tools.register({
+    name: 'team_block_task',
+    description: 'Force-move an in-progress task to blocked and abort its queued/running runs. Only the project owner bot may use this. The stop rides the existing abort chain and is audited as task.force_blocked (run error code TASK_FORCE_BLOCKED). Use it to stop a runaway or wrong-headed execution; typically followed by re-dispatching the same task with an amended card.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Task to force-block, as KEY-N (for example DEMO-3)' },
+      },
+      required: ['task'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const task = await service.forceBlockFromBot(sessionId, args)
+      return `Force-blocked ${task.identifier} (status: ${task.status}); its queued/running runs were aborted.`
     },
   })
 
