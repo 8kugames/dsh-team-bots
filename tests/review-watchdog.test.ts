@@ -357,6 +357,24 @@ test('规则 B：交付方 run 中止无进展 → 自动 return 附「交付方
   assert.equal(autoCloseAudits(store, task.id).length, 1)
 })
 
+test('规则 B 的 SUPERSEDED 剔除防线：最新 task run 仅清理标记 → 不判 B 自动退回，C 仅提醒', async (t) => {
+  const { root, store, service } = await setup()
+  t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }) })
+  silenceWatchdog(service)
+  const { project, director } = await seedProject(service)
+  const task = await service.createTask({ projectId: project.id, title: '仅清理标记', status: 'in_review', assigneeBotId: director.id })
+  store.run('UPDATE tasks SET updated_at = ? WHERE id = ?', minutesAgoIso(50), task.id)
+  seedTaskRun(service, task, 45, director.id, { status: 'canceled', error_code: 'SUPERSEDED' })
+  primeThreshold(service, '')
+  runReviewWatchdog(service)
+  await settle()
+  assert.equal(service.taskRow(task.id).status, 'in_review', 'SUPERSEDED 是清理标记非执行历史，不得触发 B 自动退回')
+  assert.equal(autoCloseAudits(store, task.id).length, 0)
+  assert.equal(systemAlerts(store, project.id).length, 1, '回落 C 档提醒')
+  const verdict = alertedMap(store)[task.id]
+  assert.equal(verdict.verdict, 'C')
+})
+
 test('开关关闭：review_auto_close=0 时 A/B 证据齐全也只提醒不自动（行为回到 D-194）', async (t) => {
   const { root, store, service } = await setup()
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }) })
