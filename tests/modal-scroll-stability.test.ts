@@ -219,3 +219,22 @@ test('视觉口径不变：backdrop-filter 仍留在 .modal-backdrop，滚动区
 test('滚动区合成层不改变滚动串联口径：overscroll-behavior: contain 仍在（DSHBOTS-98 底层滚动锁）', () => {
   assert.match(cssRule('.modal-body'), /overscroll-behavior:\s*contain/, '面板滚到尽头不得把滚动串到底层页面')
 })
+
+// —— DSHBOTS-210：遮罩打开时底页冻结（复发闪屏的第二个驱动源）——
+// D-98 只闸住「整页重建」、D-166 只闸住「滚动期重录」，但 1s 定时器对 #app 的秒级局部刷新
+// （run-clock 文本、终态气泡淡出、审批/提问倒计时与进度条）从未被闸。#app 正是 .modal-backdrop
+// 上 backdrop-filter 的输入：每写一次，整视口模糊层就重算重栅格一次 = 肉眼看得到的全屏闪。
+// 该机制与滚动无关（用户恰好在滚动时注意到），修复口径=遮罩打开期间底页一律不写。
+test('遮罩打开时底页秒级刷新冻结：1s 定时器按 overlayOpen() 早退，时钟只刷弹窗层', () => {
+  const tickSrc = /setInterval\(\(\) => \{\n  updateRunClocks\(\)\n([\s\S]*?)\n\}, 1000\)/.exec(source)?.[0]
+  assert.ok(tickSrc, '1s 定时器源可定位（首行仍为 updateRunClocks()）')
+  assert.match(tickSrc, /if \(overlayOpen\(\)\) return/, '1s 定时器含遮罩早退')
+  assert.ok(
+    tickSrc.indexOf('if (overlayOpen()) return') < tickSrc.indexOf('pruneTypingLinger()'),
+    '早退必须早于底页局部刷新（pruneTypingLinger 等一律只写 #app）'
+  )
+  const updater = /function updateRunClocks\(root = document\) \{[\s\S]*?\n\}/.exec(source)?.[0]
+  assert.ok(updater, 'updateRunClocks 仍在（时钟通道唯一实现）')
+  assert.match(updater, /if \(overlay && !el\.closest\('#modal-root'\)\) continue/,
+    '遮罩打开时跳过 #app 内的时钟节点，只刷弹窗层可见时钟')
+})

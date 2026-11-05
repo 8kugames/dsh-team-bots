@@ -736,7 +736,9 @@ document.addEventListener('visibilitychange', () => {
 // 运行行（runClockSpan 产出的占位）同一通道——只改 textContent，不重建节点。renderModalLayer
 // 挂载/补丁后同步调用一次，占位符不会等满 1s 才补上真实时长。
 function updateRunClocks(root = document) {
+  const overlay = overlayOpen() // 遮罩打开时底页在模糊后不可见：底页时钟跳过（DSHBOTS-210），只刷弹窗层
   for (const el of root.querySelectorAll('.run-clock[data-started]') as NodeListOf<HTMLElement>) {
+    if (overlay && !el.closest('#modal-root')) continue
     el.textContent = duration(el.dataset.started)
   }
 }
@@ -744,6 +746,8 @@ function updateRunClocks(root = document) {
 setInterval(() => { void poll() }, 2800)
 setInterval(() => {
   updateRunClocks()
+  // 遮罩打开时底页整体冻结（DSHBOTS-210）：下述刷新只写 #app，而 #app 是 backdrop-filter 的输入。
+  if (overlayOpen()) return
   // 终态气泡到期摘除与淡出刷新（DSHBOTS-150）：只动气泡节点，不整页重建（不打断输入中的草稿）。
   pruneTypingLinger()
   // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
