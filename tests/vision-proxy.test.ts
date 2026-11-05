@@ -247,11 +247,13 @@ test('能力声明缺失（modalities undefined）：主动预判不派生，失
     assert.ok(vision, '失败后兜底派生')
     assert.equal(vision.trigger_ref, sent.messageId)
     const failureNotice = t.store.get(
-      "SELECT * FROM messages WHERE project_id = ? AND sender_type = 'bot' AND body LIKE '运行失败：%'",
+      "SELECT * FROM messages WHERE project_id = ? AND sender_type = 'bot' AND body LIKE '运行失败（%'",
       t.project.id,
     )
-    assert.ok(failureNotice, '按现状报「模型不支持图片」（经运行失败消息可见）')
-    assert.match(failureNotice.body, /does not support image input/)
+    assert.ok(failureNotice, '失败消息仍落群聊可见（DSHBOTS-267 白名单分类文案）')
+    // DSHBOTS-267：只透出类别+摘要，原始错误串（含模型名）不得透传。
+    assert.match(failureNotice.body, /运行失败（未知）：/)
+    assert.doesNotMatch(failureNotice.body, /does not support image input/)
   } finally { await t.close() }
 })
 

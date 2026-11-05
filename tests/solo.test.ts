@@ -131,7 +131,9 @@ test('单聊消息走 solo_chat 运行并回写单聊消息', async () => {
     const failing = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND status = 'running'")
     await runtime.complete(failing.id, 'failed', '', { code: 'X', message: 'boom' })
     const failReply = store.get('SELECT * FROM solo_messages WHERE run_id = ?', failing.id)
-    assert.match(failReply.body, /运行失败：boom/)
+    // DSHBOTS-267：失败只落白名单类别+摘要，原始错误串 boom 不透传。
+    assert.match(failReply.body, /运行失败（未知）：/)
+    assert.doesNotMatch(failReply.body, /boom/)
     assert.equal(second.messageId, failing.trigger_ref)
   } finally {
     await closeQuietly(store)
