@@ -22,7 +22,7 @@ export const SUBAGENT_GENERATION_TOOLS = [
 ] as const
 
 // 总监专权工具：服务层 ownerContextFor 已做权威校验，本清单用于工具层兜底与守门测试。
-export const DIRECTOR_ONLY_TOOLS = ['team_assign_task', 'team_review_task'] as const
+export const DIRECTOR_ONLY_TOOLS = ['team_assign_task', 'team_review_task', 'team_list_bots', 'team_add_member', 'team_create_bot'] as const
 
 // 门控：agentTeam 开启且 bot 类型支持（项目内 active bot，成员与总监均可用）。
 export function subagentCapabilityEnabledFor(bot, config) {
@@ -108,6 +108,68 @@ export function installTeamTools(ctx, service) {
     async execute(args, exec) {
       const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
       return service.listMembersFromBot(sessionId)
+    },
+  })
+
+  // DSHBOTS-229：bots 池查询——总监可见含未入群的 bot；成员调用被服务层拒绝。
+  ctx.tools.register({
+    name: 'team_list_bots',
+    description: 'List the team bot pool for this project, including bots that are not in the project group yet, with their status and whether they already belong to this project. Only the project owner bot may use this. It shows each bot\'s own profile and this project\'s membership only; it never exposes other projects\' data.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      return service.listBotsPoolFromBot(sessionId)
+    },
+  })
+
+  // DSHBOTS-229：加人申请——复用 addProjectMember 的校验、审计与入群通知。
+  ctx.tools.register({
+    name: 'team_add_member',
+    description: 'Invite an existing bot into this project group by its exact name. Only the project owner bot may use this. The invite rides the normal membership path: the bot must be active and cannot already be a member, the join is audited, and the other members are announced in the group automatically.',
+    parameters: {
+      type: 'object',
+      properties: {
+        bot: { type: 'string', description: 'Exact bot name from the team bot pool' },
+      },
+      required: ['bot'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const result = await service.addMemberFromBot(sessionId, args)
+      return `Added ${result.member.name} to ${result.project.key} as ${result.member.member_role}.`
+    },
+  })
+
+  // DSHBOTS-229：建 bot 申请——仅申请入口，复用 createBot 的全部校验与审计。
+  ctx.tools.register({
+    name: 'team_create_bot',
+    description: 'Request a brand-new bot for the team. Only the project owner bot may use this. The request goes through the normal bot creation path, so name format/uniqueness and provider/model validation still apply, and the audit records you as the requester. The new bot is not added to this project automatically; invite it with team_add_member.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Bot name (Chinese/letters/digits/underscore/hyphen, up to 24 chars)' },
+        role: { type: 'string', description: 'Short job role, for example 开发 or 设计' },
+        instructions: { type: 'string', description: 'Standing instructions for the new bot' },
+        provider: { type: 'string', description: 'Model provider (must pair with model)' },
+        model: { type: 'string', description: 'Model id (must pair with provider)' },
+        effort: { type: 'string', description: 'Optional reasoning effort' },
+        fallbackProvider: { type: 'string', description: 'Optional fallback model provider (must pair with fallbackModel)' },
+        fallbackModel: { type: 'string', description: 'Optional fallback model id' },
+        fallbackEffort: { type: 'string', description: 'Optional fallback reasoning effort' },
+        color: { type: 'string', description: 'Avatar color: blue/teal/violet/amber/coral/pink/green/gray' },
+        filePolicy: { type: 'string', enum: ['workspace-write', 'read-only'], description: 'File sandbox tier for the new bot; omit to use the default workspace-write' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const bot = await service.createBotFromBot(sessionId, args)
+      return `Created bot ${bot.name} (status: ${bot.status}). Invite it to a project with team_add_member.`
     },
   })
 

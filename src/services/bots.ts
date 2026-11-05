@@ -110,6 +110,25 @@ export const botsMethods = {
     return this.botView(this.botRow(botId))
   },
 
+  // 建 bot 申请入口（DSHBOTS-229）：总监代团队申请新 bot，复用 createBot 的名称/唯一/模型校验与审计。
+  // 不绕过任何既有校验；新 bot 不自动入项目，需另走 addProjectMember。
+  async createBotFromBot(sessionId, input) {
+    const { actor } = this.ownerContextFor(sessionId)
+    const payload = input ?? {}
+    return this.createBot({
+      name: payload.name,
+      role: payload.role,
+      instructions: payload.instructions,
+      provider: payload.provider,
+      model: payload.model,
+      effort: payload.effort,
+      fallbackProvider: payload.fallbackProvider,
+      fallbackModel: payload.fallbackModel,
+      fallbackEffort: payload.fallbackEffort,
+      color: payload.color,
+      filePolicy: payload.filePolicy,
+    }, actor)
+  },
   // 单聊目录名：优先用名字的 slug，纯中文名回退到 bot-<id 末 6 位>；冲突时追加序号。
   // 目录名要过 safeSlug（长度上限 48），追加序号时按后缀长度截断基础名。
   soloDirFor(name, botId) {

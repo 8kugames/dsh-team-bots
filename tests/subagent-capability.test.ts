@@ -66,7 +66,7 @@ test('能力清单：子代理生成工具与总监专权工具边界清晰', ()
   for (const name of ['subagent', 'subagent_fork', 'workflow', 'spawn_teammate']) {
     assert.ok(generation.includes(name), `成员 bot 能力清单应含 ${name}`)
   }
-  assert.deepEqual([...DIRECTOR_ONLY_TOOLS], ['team_assign_task', 'team_review_task'])
+  assert.deepEqual([...DIRECTOR_ONLY_TOOLS], ['team_assign_task', 'team_review_task', 'team_list_bots', 'team_add_member', 'team_create_bot'])
   // 专权工具不得出现在成员能力清单里（防止「下放」）。
   for (const name of DIRECTOR_ONLY_TOOLS) {
     assert.ok(!generation.includes(name), `${name} 是总监专权，不得进入成员能力清单`)

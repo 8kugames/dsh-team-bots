@@ -606,4 +606,56 @@ export const projectsMethods = {
     })
     return this.projectView(this.projectRow(projectId))
   },
+
+  // bots 池视图（DSHBOTS-229）：总监视角列出全部未移除 bot，标注是否已在本项目及成员角色。
+  // 只暴露 bot 自身档案与本项目成员关系，不透露该 bot 在其他项目的成员关系或数据。
+  botsPoolFor(projectId) {
+    const project = this.projectRow(projectId)
+    const membership = new Map(
+      this.store.all(
+        "SELECT member_id, member_role FROM project_members WHERE project_id = ? AND member_type = 'bot'",
+        projectId,
+      ).map(row => [row.member_id, row.member_role]),
+    )
+    const bots = this.store.all(
+      "SELECT id, name, role, provider, model, status FROM bots WHERE status <> 'removed' ORDER BY created_at, name",
+    )
+    return {
+      project: { id: project.id, key: project.key, name: project.name },
+      bots: bots.map(bot => ({
+        id: bot.id,
+        name: bot.name,
+        role: bot.role,
+        modelRef: bot.provider && bot.model ? `${bot.provider}/${bot.model}` : null,
+        status: bot.status,
+        inProject: membership.has(bot.id),
+        memberRole: membership.get(bot.id) ?? null,
+      })),
+    }
+  },
+
+  // 池查询工具入口（DSHBOTS-229）：仅总监可用（ownerContextFor 权威校验）。
+  listBotsPoolFromBot(sessionId) {
+    const { project } = this.ownerContextFor(sessionId)
+    const pool = this.botsPoolFor(project.id)
+    const lines = pool.bots.map(bot => {
+      const membership = bot.inProject
+        ? (bot.memberRole === 'owner' ? '本项目总监' : '本项目成员')
+        : '未入群'
+      return `- ${bot.name} [${bot.status}] ${bot.role || '未设职责'}，${membership}`
+    })
+    return [`项目 ${project.key} 的 bots 池（${pool.bots.length}）：`, ...lines].join('\n')
+  },
+
+  // 加人申请入口（DSHBOTS-229）：总监按名称邀请 bot 入群，复用 addProjectMember 的校验、审计与入群通知。
+  async addMemberFromBot(sessionId, input) {
+    const { project, actor } = this.ownerContextFor(sessionId)
+    const name = String(input?.bot ?? input?.name ?? '').trim()
+    if (!name) throw badRequest('缺少 Bot 名称')
+    const bot = this.store.get('SELECT * FROM bots WHERE lower(name) = lower(?)', name)
+    if (!bot) throw notFound(`找不到 Bot ${name}`)
+    const view = await this.addProjectMember(project.id, bot.id, actor)
+    const member = view.members.find(row => row.id === bot.id)
+    return { project: { id: project.id, key: project.key, name: project.name }, member }
+  },
 }
