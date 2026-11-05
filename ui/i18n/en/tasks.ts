@@ -226,4 +226,7 @@ export default {
   "项目级密钥必须选择项目": "Project-level keys require a project",
   "项目设置已保存": "Project settings saved",
   "（": " (",
+  // DSHBOTS-246: keys added by the full t() literal audit
+  "（待办不含已取消）": " (todo excludes canceled)",
+  "，按": "; ",
 }

@@ -345,4 +345,10 @@ export default {
   "项目：": "Project: ",
   "预算": "Budget",
   "高": "High",
+  // DSHBOTS-246: keys added by the full t() literal audit
+  "（当前": " (current ",
+  "（可选）": " (optional)",
+  "（不做物理删除）。": " (no physical deletion).",
+  "，选择一个 Bot。": ", select a Bot.",
+  "？总监关系必须先解除。": "? The director relationship must be removed first.",
 }

@@ -69,6 +69,7 @@ export default {
   "solo.workspace": "专属工作区",
   // DSHBOTS-220: ui/modules 文案（原文即键）
   "${head}：${summary}": "${head}：${summary}",
+  "${source}｜${head}：${summary}": "${source}｜${head}：${summary}",
   "${minutes} 分 ${seconds} 秒后自动拒绝": "${minutes} 分 ${seconds} 秒后自动拒绝",
   "${minutes} 分后自动拒绝": "${minutes} 分后自动拒绝",
   "${seconds} 秒后自动拒绝": "${seconds} 秒后自动拒绝",
@@ -131,4 +132,9 @@ export default {
   "还没有选择": "还没有选择",
   "选择 · Enter 或 Tab 插入 · Esc 关闭": "选择 · Enter 或 Tab 插入 · Esc 关闭",
   "问）": "问）",
+  // DSHBOTS-246：全量 t() 实参清点补齐（原文即键）
+  "（无说明）": "（无说明）",
+  "（未选择）": "（未选择）",
+  "（共": "（共",
+  "（未命名项目）": "（未命名项目）",
 }

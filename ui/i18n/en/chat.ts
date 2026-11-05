@@ -69,6 +69,7 @@ export default {
   "solo.workspace": "Dedicated workspace",
   // DSHBOTS-220: ui/modules copy
   "${head}：${summary}": "${head}: ${summary}",
+  "${source}｜${head}：${summary}": "${source} | ${head}: ${summary}",
   "${minutes} 分 ${seconds} 秒后自动拒绝": "Auto-rejects in ${minutes}m ${seconds}s",
   "${minutes} 分后自动拒绝": "Auto-rejects in ${minutes}m",
   "${seconds} 秒后自动拒绝": "Auto-rejects in ${seconds}s",
@@ -131,4 +132,9 @@ export default {
   "还没有选择": "None selected yet",
   "选择 · Enter 或 Tab 插入 · Esc 关闭": "Select · Enter or Tab to insert · Esc to close",
   "问）": " questions)",
+  // DSHBOTS-246: keys added by the full t() literal audit
+  "（无说明）": "(no description)",
+  "（未选择）": "(not selected)",
+  "（共": " (",
+  "（未命名项目）": "(unnamed project)",
 }
