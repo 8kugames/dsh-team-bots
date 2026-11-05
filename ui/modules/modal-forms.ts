@@ -457,7 +457,7 @@ function modalTask(task) {
         ${(parentTask || blockedNames.length) ? `<div class="note">${parentTask ? `父任务：${esc(parentTask.identifier)} · ${esc(parentTask.title)}` : ''}${parentTask && blockedNames.length ? ' · ' : ''}${blockedNames.length ? `被 ${blockedNames.length} 个任务阻塞：${esc(blockedNames.join('、'))}` : ''}</div>` : ''}
         <div class="scope-block">
           <div class="eyebrow" style="margin-bottom:6px">写范围</div>
-          ${editingScopes ? scopesEdit : `${scopesEditable ? `<div class="btn-row" style="margin-bottom:6px"><button class="btn small" type="button" data-action="edit-scopes" data-task-id="${attr(task.id)}">${icon('edit')}${t('price.edit')}</button></div>` : ''}${scopesView}
+          ${editingScopes ? scopesEdit : `${scopesEditable ? `<div class="btn-row" style="margin-bottom:6px"><button class="btn small" type="button" data-action="edit-scopes" data-task-id="${attr(task.id)}">${icon('edit')}编辑</button></div>` : ''}${scopesView}
           <div class="hint" style="margin-top:6px">写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。</div>`}
         </div>
         ${task.timeBudgetMinutes ? `<div class="scope-block">
@@ -612,7 +612,7 @@ function renderPriceCard() {
       <td class="num mono">${esc(price.output_per_mtok)}</td>
       <td>${esc(price.currency)}</td>
       <td>${esc(provider)}</td>
-      <td class="num"><button class="btn small" data-action="edit-price" data-model="${attr(price.model)}" data-provider="${attr(price.provider)}">${icon('edit')}编辑</button></td>
+      <td class="num"><button class="btn small" data-action="edit-price" data-model="${attr(price.model)}" data-provider="${attr(price.provider)}">${icon('edit')}${t('price.edit')}</button></td>
     </tr>`
   }).join('')
   const body = prices.length
