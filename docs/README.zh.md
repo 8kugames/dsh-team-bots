@@ -2,49 +2,111 @@
 
 [English](../README.md)
 
-DSH Team Bots 是 npm 包 `dsh-team-bots`，一个 DSH（DeepSeek Harness）插件，把一整个协作的 bot 团队装进同一个工作区：项目群聊、任务板、按写范围并行调度、记忆与技能、用量与成本，外加一条个人微信通道。每个 run 都保留轨迹、时长、token 数和成本。
+`dsh-team-bots` 是一个 DSH 插件，把一个工作区变成一支团队：项目群聊、任务板、写范围并行调度、共享记忆与技能、审批卡、用量与成本，以及个人微信通道。每次运行都留下轨迹、时长、token 数与成本。
 
-![DSH Team Bots 工作区](assets/tasks.zh.png)
+## 运行前提
+
+- Node.js ≥ 22.19
+- DSH 命令行（`dsh`）
+
+插件运行在 DSH Web 进程内，没有独立服务，也不单独占端口。
 
 ## 安装
 
-需要 Node.js ≥ 22.19 与 DSH CLI；插件跑在 DSH Web 进程里 —— 没有独立服务与端口。
-
 ```sh
 dsh plugin --profile <name> add dsh-team-bots
-dsh --profile <name>                             # 从启动日志里读带 token 的 dsh web 入口
 ```
 
-包从 npm registry 解析，不需要 `npm pack` 或本地 tarball；在仓库里用 `npm run profile:install -- --profile <name>` 等价。
+从源码装（打包当前工作树并装进指定 profile）：
 
-## 启动
+```sh
+npm run profile:install -- --profile <name>
+```
+
+profile 里的插件文件是一份快照。改完代码要重新安装，否则页面一直跑旧版本。
+
+## 打开工作台
 
 ```text
-http://<host>:<port>/                     自动登录，直接进入团队工作区
-http://<host>:<port>/api/dsh-team/ui      DSH Team Bots 工作区（直达）
-http://<host>:<port>/index.html           DSH 原生 Web UI
+http://<host>:<port>/                     DSH Web 首页，自动登录进团队工作台
+http://<host>:<port>/api/dsh-team/ui      团队工作台本身
 ```
 
-首次访问首页会用当前启动 token 换一张 30 天登录 cookie。自动登录意味着**任何能访问到端口的人都是 owner**，所以请只监听本机或可信网络；要公网暴露，需要一个正确转发 Host 与 WebSocket 的 HTTPS 反向代理。
+首次访问会把当前启动 token 换成 30 天登录 cookie。自动登录意味着能访问该端口的人就是 owner，请只监听本机或可信网络；要对外暴露，前面放一层转发 Host 与 WebSocket 的 HTTPS 反向代理。
 
-## 配置要点
+## 工作台能做什么
 
-真正要紧的两个路径是 `DSH_TEAM_WORKSPACE`（团队工作区根目录，缺省 `~/.dsh/workspace/team-bots`）和 `DSH_TEAM_DATA`（团队数据库与 run 记录，缺省 `<workspace>/.data`）；其余变量、缺省值和解析顺序（显式 env > 页面保存值 > 代码缺省）都在 `src/config.ts`。
+### 群聊与调度
 
-`DSH_TEAM_DATA` 下的数据包括 `team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/`、`messages/` 和 `secrets-runtime/`（TTL 到期即焚）。备份时请把 `secret.key` 一起带走 —— 没有它，已有的密文永远解不开。
+每个项目是一个群聊；单个 Bot 也可以被单独一对一调度。会话绑定分四道车道——task、solo、dm、project——群聊、任务运行和私信互不阻塞。
 
-常用变量的模板在 `.env.example`；**不要把 `.env` 放在仓库根目录**，否则 `DSH_*` 会漏进 `npm test` 和 `npm run dev`。profile 里的插件文件是快照：改了代码必须重装，否则页面会卡在「connecting to the team space」。
+### 任务板
 
-## 截图
+状态：待规划、待执行、进行中、受阻、待验收、已完成、已取消。一张卡带负责人、优先级、父子任务、标签、写范围、可选的时效要求（硬性时限，到期中止运行）、评论，以及本卡自己的用量。任务行按状态分组，可拖到别的分组直接改状态。
 
-用量统计带汇总窗口、最近 14 天明细、按模型 / 按 bot / 按项目拆分和 CSV 导出：
+### 写范围与并行调度
 
-![用量统计](assets/usage.zh.png)
+每张卡声明自己会写哪些路径（相对项目工作目录）。同一项目下两个运行只有在双方都声明了写范围、且路径前缀互不重叠时才并行；没声明写范围的卡按串行处理。紧急卡可以豁免排队，但豁免会写进建卡消息，不做静默处理。
 
-全局配置页只保留核心分组；通道、密钥、版本状态与价格规则在各自的一级页：
+### 记忆、技能与进化提案
 
-![全局配置](assets/global-config-light.zh.png)
+记忆由 owner 写入、复核、冻结与归档，项目内所有 Bot 都能读到。技能来自共享技能根目录加项目级技能；改动走提案 → 审批 → 落地，先灰度再转全量。同一条路径也能改 Bot 的角色指令。
 
-## License
+### 审批卡与提问卡
+
+Bot 要工具审批、要密钥或要人回答时，工作台在聊天里出一张卡。owner 就地批准、拒绝或回答，结论记在卡上。
+
+### 用量与成本
+
+用量页按模型、按 Bot、按项目拆分，可导出 CSV，模型价格来自配置。运行限制（超时中止、无进展看门狗、验收滞留阈值）与预算按工作区设置。
+
+### 终端、通道与密钥
+
+每个项目有终端，在项目目录里执行命令。微信通道扫码绑定后，把任务动态推给 owner 的微信。密钥分团队级与项目级，界面上只显示指纹，取值以一次性运行时副本下发，到期即失效。
+
+## 配置
+
+| 变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `DSH_TEAM_WORKSPACE` | `~/.dsh/workspace/team-bots` | 团队工作区根目录 |
+| `DSH_TEAM_DATA` | `<workspace>/.data` | 数据库与运行记录 |
+
+其余变量的默认值与解析顺序（显式环境变量 > 页面上保存的值 > 代码默认值）都写在 `src/config.ts`，常用项见 `.env.example`。不要在仓库根目录放 `.env`，否则 `DSH_*` 会泄进 `npm test` 和 `npm run dev`。
+
+`DSH_TEAM_DATA` 下有 `team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/`、`messages/` 与 `secrets-runtime/`。备份时把 `secret.key` 和数据一起带走——没有它，已存的密文解不开。
+
+## 开发
+
+```sh
+npm install
+npm run build       # 把 TypeScript 编译成发布的 .js
+npm run typecheck
+npm test            # 先 build，再对 tests/ 与 scripts/ 跑 node --test
+npm run dev         # 本地开发服务器：http://127.0.0.1:4317
+npm run doctor      # 检查 node、dsh、路径与 profile 引用
+```
+
+另有几套工具：`npm run backup` / `npm run restore-check` 备份与校验数据，`npm run verify:agent-team` 验证 agent team 能力，`npm run load-test` 与 `npm run fault-test` 压运行时。
+
+仓库结构：
+
+```text
+ui/            浏览器端工作台（modules、styles、中英文案）
+src/           HTTP 接口、数据库、运行时与领域服务
+src/services/  领域逻辑：chat、tasks、scheduler、memory、skills、approvals、usage
+src/tools.ts   Bot 看到的工具面（team_* 系列）
+scripts/       构建、开发服务器、doctor、发版、备份与测试工具
+tests/         node:test 用例
+```
+
+## 发版
+
+```sh
+npm run release            # 加 --dry-run 可只打印计划，不做任何改动
+```
+
+工具先把 `dev` 推上去，再把 dev 落到 `main`（能快进就快进，否则落一份内容快照），推 `main` 与 tag，最后把 `dev` 同步回来。发布走 npm OIDC trusted publishing，不用 `NPM_TOKEN`，工作流在发布前会把 npm 升到 ≥ 11.5.1。
+
+## 许可
 
 Apache-2.0，见 `LICENSE` 与 `NOTICE`。
