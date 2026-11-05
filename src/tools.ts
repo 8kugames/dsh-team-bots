@@ -160,7 +160,7 @@ export function installTeamTools(ctx, service) {
         fallbackModel: { type: 'string', description: 'Optional fallback model id' },
         fallbackEffort: { type: 'string', description: 'Optional fallback reasoning effort' },
         color: { type: 'string', description: 'Avatar color: blue/teal/violet/amber/coral/pink/green/gray' },
-        filePolicy: { type: 'string', enum: ['workspace-write', 'read-only'], description: 'File sandbox tier for the new bot; omit to use the default workspace-write' },
+        filePolicy: { type: 'string', enum: ['workspace-write', 'read-only', 'danger-full-access'], description: 'File sandbox tier for the new bot; omit to use the default workspace-write' },
       },
       required: ['name'],
       additionalProperties: false,

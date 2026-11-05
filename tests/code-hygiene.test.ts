@@ -17,6 +17,7 @@ import {
   effectiveCodeHygieneLimit,
   scanCodeHygieneFiles,
 } from '../src/services/hygiene.js'
+import { messageLocale, systemAlertLabel } from '../src/services/locale.js'
 
 // startRun 只记账不回调完成：run 停在 running，finishRun 由测试显式调用。
 class HoldingRuntime { declare started: unknown[];
@@ -56,8 +57,9 @@ const workFile = async (service, project, rel, content) => {
   return rel
 }
 
+// 系统告警消息按前缀取回（DSHBOTS-228 后前缀随 locale：缺省英文 / 中文【系统指令】）。
 const systemAlerts = (store, projectId) =>
-  store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '【系统指令】%' ORDER BY rowid", projectId)
+  store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND (body LIKE '[SYSTEM ALERT]%' OR body LIKE '【系统指令】%') ORDER BY rowid", projectId)
 
 test('countTextLines：空文件 0、末行无换行计 1、尾换行不虚增', () => {
   assert.equal(countTextLines(''), 0)
@@ -127,7 +129,7 @@ test('默认 800：880 行不报、881 行即报，消息含文件/行数/上限
     const alerts = systemAlerts(store, project.id)
     assert.equal(alerts.length, 1)
     const body = alerts[0].body
-    assert.ok(body.startsWith('【系统指令】代码卫生告警'))
+    assert.ok(body.startsWith('[SYSTEM ALERT] 代码卫生告警'))
     assert.ok(body.includes('src/big.js（881 行）'))
     assert.ok(body.includes('约定上限 800 行'))
     assert.ok(body.includes('判定线 880 行 = 110%'))
@@ -135,6 +137,36 @@ test('默认 800：880 行不报、881 行即报，消息含文件/行数/上限
     assert.equal(alerts[0].sender_id, 'system')
     // edge.js 880 行恰在判定线上，不进告警也不进任何列表
     assert.ok(!body.includes('edge.js'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    store.close()
+  }
+})
+
+test('i18n 前缀（DSHBOTS-228）：缺省英文 [SYSTEM ALERT]，ui_language=zh 时为【系统指令】', async () => {
+  // 标签纯函数：zh* → 【系统指令】；en/auto/未知 → [SYSTEM ALERT] （缺省英文，注意拼写 ALERT）。
+  assert.equal(systemAlertLabel('zh'), '【系统指令】')
+  assert.equal(systemAlertLabel('zh-CN'), '【系统指令】')
+  assert.equal(systemAlertLabel('en'), '[SYSTEM ALERT] ')
+  assert.equal(systemAlertLabel('auto'), '[SYSTEM ALERT] ')
+  assert.equal(messageLocale({ uiLanguage: 'auto' }, () => null, null), 'en', 'auto 且无 loader → 缺省 en')
+  assert.equal(messageLocale({ uiLanguage: 'auto' }, () => 'zh'), 'zh', '保存值 zh 优先于 auto 缺省')
+  assert.equal(messageLocale({ uiLanguage: 'en' }, () => null), 'en', 'config 显式 en 生效')
+
+  const { root, store, service } = await setup()
+  try {
+    const { project } = await seedProject(service, 'I18N')
+    await workFile(service, project, 'src/big.js', lines(881))
+    service.runCodeHygieneScan(project)
+    assert.ok(systemAlerts(store, project.id)[0].body.startsWith('[SYSTEM ALERT] 代码卫生告警'))
+
+    // 显式 zh：前缀切换为【系统指令】，正文其余不变。
+    store.setSetting('ui_language', 'zh')
+    await workFile(service, project, 'src/another.js', lines(881))
+    service.runCodeHygieneScan(project)
+    const alerts = systemAlerts(store, project.id)
+    assert.equal(alerts.length, 2)
+    assert.ok(alerts[1].body.startsWith('【系统指令】代码卫生告警'))
   } finally {
     await rm(root, { recursive: true, force: true })
     store.close()

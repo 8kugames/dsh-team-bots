@@ -1,7 +1,8 @@
 // src/services/hygiene.js —— 代码卫生域（DSHBOTS-172）
 // 单文件行数约定：项目设置 code_hygiene_limit_lines（NULL = 默认 800，0 = 关闭）。
 // 每轮运行结束（run-finish 钩子）扫描项目工作区内的文本源码文件，超过约定上限
-// 110% 即向项目群发一条【系统指令】系统消息（列出文件+行数+上限，要求总监安排
+// 110% 即向项目群发一条系统告警消息（前缀按 locale：缺省 [SYSTEM ALERT]，中文环境
+// 【系统指令】，见 locale.js 的 systemAlertLabel；列出文件+行数+上限，要求总监安排
 // 拆分卡）。同一文件告警一次后，在其行数回落到判定线以内之前不重复告警。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods），
 // 方法体内的 this 与其他域一致（this.store / this.config / this.logger）。
@@ -9,6 +10,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { jsonParse } from '../util.js'
+import { messageLocale, systemAlertLabel } from './locale.js'
 
 // 约定默认上限（项目未设置时）；0 = 关闭检查。
 export const CODE_HYGIENE_DEFAULT_LIMIT = 800
@@ -137,8 +139,10 @@ export const hygieneMethods = {
       if (toAlert.length > 0) {
         const listed = toAlert.slice(0, CODE_HYGIENE_LIST_MAX)
         const more = toAlert.length - listed.length
+        // 前缀按 locale 落库（DSHBOTS-228）：缺省英文 [SYSTEM ALERT]，中文环境【系统指令】。
+        const alertPrefix = systemAlertLabel(messageLocale(this.config, key => this.store.setting(key), this.runtime?.ctx?.get?.('loader')))
         const body = [
-          `【系统指令】代码卫生告警：${toAlert.length} 个文件超过单文件行数约定（约定上限 ${limit} 行，判定线 ${threshold} 行 = ${Math.round(CODE_HYGIENE_OVER_RATIO * 100)}%）。`,
+          `${alertPrefix}代码卫生告警：${toAlert.length} 个文件超过单文件行数约定（约定上限 ${limit} 行，判定线 ${threshold} 行 = ${Math.round(CODE_HYGIENE_OVER_RATIO * 100)}%）。`,
           ...listed.map(file => `- ${file.path}（${file.lines} 行）`),
           more > 0 ? `……等共 ${toAlert.length} 个超标文件` : '',
           '请项目总监安排拆分卡，将超标文件按职责拆分到约定上限以内。',

@@ -9,6 +9,7 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { effectiveUiLanguage } from '../config.js'
 
 export const LOCALE_PLUGIN_ID = 'locale'
 export const LOCALE_PLUGIN_PACKAGE = '@deepseek-ai/dsh-client-locale'
@@ -110,4 +111,20 @@ export async function resolveUiLanguage({ loader = null, dshHome = null, profile
   const explicit = clampLocaleId(uiLanguage)
   if (explicit) return explicit
   return resolveDshUiLanguage({ loader, dshHome, profile })
+}
+
+// ── 出站系统消息的系统告警前缀（DSHBOTS-228）─────────────────────────────────
+// 用户拍板：前缀缺省英文 SYSTEM ALERT（注意拼写 ALERT），中文环境显示【系统指令】。
+// zh* → 【系统指令】；其余（en/未知/未设定）→ [SYSTEM ALERT] （缺省英文）。
+export function systemAlertLabel(locale) {
+  return clampLocaleId(locale) === 'zh' ? '【系统指令】' : '[SYSTEM ALERT] '
+}
+
+// 消息产生点的同步 locale 解析：run-finish 钩子与 scheduler tick 都在同步段发消息，
+// 不能走 async resolveUiLanguage。显式 ui_language（env > 保存值 > config 缺省）优先；
+// 'auto' 时 loader 直读 DSH 宿主活配置（同步）；仍不可判定按缺省英文（en）。
+export function messageLocale(config, getSetting: (key: string) => any = key => null, loader = null) {
+  const effective = effectiveUiLanguage(config, getSetting)
+  if (effective === 'auto') return clampLocaleId(localePreferenceFromLoader(loader)) ?? 'en'
+  return effective
 }
