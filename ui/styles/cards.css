@@ -299,4 +299,33 @@
 .proposal-diff[open] > summary .chev {
     transform: rotate(90deg);
 }
+/* 待审批提案逐条展开（DSHBOTS-223）：summary 复用 .list-row 版式，行分隔线移到 details 上，
+   避免折叠时 summary 与行底线叠出双线。 */
+.proposal-item {
+    border-bottom: 1px solid var(--line);
+}
+.proposal-item:last-child {
+    border-bottom: 0;
+}
+.proposal-item > summary.list-row {
+    cursor: pointer;
+    list-style: none;
+    border-bottom: 0;
+}
+.proposal-item > summary.list-row::-webkit-details-marker {
+    display: none;
+}
+.proposal-item > summary.list-row .chev {
+    align-self: center;
+    flex: none;
+}
+.proposal-item[open] > summary .chev {
+    transform: rotate(90deg);
+}
+.proposal-item-body {
+    padding: 0 16px 14px;
+}
+.proposal-item-body .proposal-body {
+    margin-top: 10px;
+}
 

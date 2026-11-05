@@ -106,3 +106,21 @@ test('DSHBOTS-105 state 顶层输出 activeTasks 任务计数，activeRuns 保�
   assert.match(stateFn, /activeRuns: Number\(this\.store\.get\("SELECT COUNT\(\*\) AS count FROM runs WHERE status IN \('queued', 'running'\)"\)\?\.count \?\? 0\)/, 'activeRuns 全库活跃运行计数保留')
   assert.match(stateFn, /activeTasks: Number\(this\.store\.get\("SELECT COUNT\(\*\) AS count FROM tasks WHERE status = 'in_progress'"\)\?\.count \?\? 0\)/, 'activeTasks 为 tasks 表 in_progress 计数')
 })
+
+// DSHBOTS-223 待审批提案逐条审批：每条提案可展开看完整内容（rationale/payload/evaluation），
+// 各自带 通过/拒绝 按钮（复用既有 decide-proposal 动作），与「全部通过并应用 / 全部拒绝」批量入口并存。
+test('DSHBOTS-223 待审批提案逐条展开 + 单条通过/拒绝 + 批量入口并存', () => {
+  const overviewFn = /function renderBotsOverview\(\) \{[\s\S]*?\n\}/.exec(source)?.[0] ?? ''
+  assert.ok(overviewFn, '找不到 renderBotsOverview')
+  assert.match(overviewFn, /<details class="proposal-item"\$\{panelAttrs\(state, `proposal-row:\$\{item\.id\}`\)\}>/, '每条提案为可展开 details，展开态走 panelAttrs 通道')
+  assert.match(overviewFn, /summary class="list-row"/, '折叠头复用 list-row 版式')
+  assert.match(overviewFn, /item\.rationale \? `<div class="list-desc">\$\{esc\(item\.rationale\)\}<\/div>`/, '展开体含 rationale')
+  assert.match(overviewFn, /proposalPreview\(item\)/, '展开体含 payload 完整内容（instructions 等）')
+  assert.match(overviewFn, /item\.evaluation \? [\s\S]*?evaluationText\(item\.evaluation\)/, '展开体含 evaluation')
+  assert.match(overviewFn, /data-action="decide-proposal" data-proposal-id="\$\{attr\(item\.id\)\}" data-decision="approved"/, '单条通过按钮（逐条）')
+  assert.match(overviewFn, /data-action="decide-proposal" data-proposal-id="\$\{attr\(item\.id\)\}" data-decision="rejected"/, '单条拒绝按钮（逐条）')
+  assert.match(overviewFn, /data-action="batch-decide-proposals" data-bot-id="\$\{attr\(botId\)\}" data-decision="approved"/, '批量通过入口保留')
+  assert.match(overviewFn, /data-action="batch-decide-proposals" data-bot-id="\$\{attr\(botId\)\}" data-decision="rejected"/, '批量拒绝入口保留')
+  const eventsSource = readFileSync(fileURLToPath(new URL('../ui/modules/events-click.js', import.meta.url)), 'utf8')
+  assert.match(eventsSource, /case 'decide-proposal': \{[\s\S]*?await api\('decide_proposal', \{ proposalId: target\.dataset\.proposalId, decision \}\)/, '单条按钮复用 decide-proposal 路由到 decide_proposal API')
+})

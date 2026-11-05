@@ -205,3 +205,37 @@ export function toast(message, type = '') {
   }, 3600)
 }
 
+// 提案展示辅助（DSHBOTS-223 自 tasks.ts 迁入，tasks.ts 触及 800 行铁律）：
+// 灰度范围、评估结论、payload 预览（instructions/skill 内容/兜底 JSON）三段纯格式化。
+export function canaryText(canary) {
+  if (!canary) return ''
+  if (typeof canary === 'string') return canary
+  if (typeof canary === 'object') {
+    const parts = Object.entries(canary).map(([key, value]) => {
+      const label = key === 'projectIds' ? t("项目") : key
+      const values = Array.isArray(value) ? value.join(t("、")) : String(value)
+      return `${label} ${values}`
+    })
+    return parts.join(' · ')
+  }
+  return String(canary)
+}
+
+export function evaluationText(evaluation) {
+  if (!evaluation) return ''
+  if (typeof evaluation === 'string') return evaluation
+  const verdict = { pass: t("通过"), fail: t("不通过"), pending: t("待评估") }[evaluation.verdict] ?? evaluation.verdict ?? ''
+  const notes = evaluation.notes ? `${t("：")}${evaluation.notes}` : ''
+  const by = evaluation.evaluatedBy ? `${t("（")}${evaluation.evaluatedBy}${t("）")}` : ''
+  return `${verdict}${notes}${by}`
+}
+
+export function proposalPreview(proposal) {
+  const payload = proposal.payload ?? {}
+  if (proposal.kind === 'skill') return payload.content || t("技能内容为空")
+  if (proposal.kind === 'bot_update') {
+    return [payload.role ? `role: ${payload.role}` : '', payload.instructions ? `instructions:\n${payload.instructions}` : '', payload.model ? `model: ${payload.provider}/${payload.model}` : ''].filter(Boolean).join('\n\n') || t("无配置内容")
+  }
+  return JSON.stringify(payload, null, 2)
+}
+

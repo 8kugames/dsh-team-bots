@@ -1,6 +1,6 @@
 import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, BOT_STATUS, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, EFFORT, NAV, labelText, stageLabelText } from './state.js'
 import { icon } from './icons.js'
-import { activeProject, actorLabel, attr, avatar, botById, duration, esc, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, runDot, tildePath, timeAgo } from './util.js'
+import { activeProject, actorLabel, attr, avatar, botById, canaryText, duration, esc, evaluationText, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, proposalPreview, runDot, tildePath, timeAgo } from './util.js'
 import { api } from './api.js'
 import { t } from './i18n.js'
 import { refresh, startTerminalPoll, panelAttrs, render, noProject } from '../app.js'
@@ -426,13 +426,25 @@ function renderBotsOverview() {
           </div>
           <div class="list">
             ${items.map(item => `
-              <div class="list-row" title="${esc(item.title ?? '')}">
-                ${avatar({ name: label, color: 'gray' }, 'sm')}
-                <div class="list-main">
-                  <div class="list-title"><strong>${esc(item.title ?? t("未命名提案"))}</strong><span class="member-role">${esc(PROPOSAL_KIND[item.kind] ?? item.kind)}</span></div>
-                  <div class="list-meta"><span>${esc(item.created_at ?? '')}</span></div>
+              <details class="proposal-item"${panelAttrs(state, `proposal-row:${item.id}`)}>
+                <summary class="list-row" title="${esc(item.title ?? '')}">
+                  ${avatar({ name: label, color: 'gray' }, 'sm')}
+                  <div class="list-main">
+                    <div class="list-title"><strong>${esc(item.title ?? t("未命名提案"))}</strong><span class="member-role">${esc(PROPOSAL_KIND[item.kind] ?? item.kind)}</span></div>
+                    <div class="list-meta"><span>${esc(item.created_at ?? '')}</span></div>
+                  </div>
+                  ${icon('chevron', 'chev')}
+                </summary>
+                <div class="proposal-item-body">
+                  ${item.rationale ? `<div class="list-desc">${esc(item.rationale)}</div>` : ''}
+                  <div class="proposal-body">${esc(proposalPreview(item).slice(0, 6000))}</div>
+                  ${item.evaluation ? `<div class="list-desc">${t("评估")} · ${esc(evaluationText(item.evaluation))}</div>` : ''}
+                  <div class="proposal-actions end">
+                    <button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="approved">${icon('check')}${t("通过")}</button>
+                    <button class="btn small" data-action="decide-proposal" data-proposal-id="${attr(item.id)}" data-decision="rejected">${t("拒绝")}</button>
+                  </div>
                 </div>
-              </div>`).join('')}
+              </details>`).join('')}
           </div>
         </div>`
       }).join('')}
@@ -664,38 +676,6 @@ function skillVersions(skill, { rollback = true } = {}) {
       ${String(version.version) !== current && rollback ? `<button class="btn small" data-action="rollback-skill" data-slug="${attr(skill.slug)}" data-version="${attr(version.version)}">${t("回滚")}</button>` : ''}
     </div>`).join('')}
   </details>`
-}
-
-function canaryText(canary) {
-  if (!canary) return ''
-  if (typeof canary === 'string') return canary
-  if (typeof canary === 'object') {
-    const parts = Object.entries(canary).map(([key, value]) => {
-      const label = key === 'projectIds' ? t("项目") : key
-      const values = Array.isArray(value) ? value.join(t("、")) : String(value)
-      return `${label} ${values}`
-    })
-    return parts.join(' · ')
-  }
-  return String(canary)
-}
-
-function evaluationText(evaluation) {
-  if (!evaluation) return ''
-  if (typeof evaluation === 'string') return evaluation
-  const verdict = { pass: t("通过"), fail: t("不通过"), pending: t("待评估") }[evaluation.verdict] ?? evaluation.verdict ?? ''
-  const notes = evaluation.notes ? `${t("：")}${evaluation.notes}` : ''
-  const by = evaluation.evaluatedBy ? `${t("（")}${evaluation.evaluatedBy}${t("）")}` : ''
-  return `${verdict}${notes}${by}`
-}
-
-function proposalPreview(proposal) {
-  const payload = proposal.payload ?? {}
-  if (proposal.kind === 'skill') return payload.content || t("技能内容为空")
-  if (proposal.kind === 'bot_update') {
-    return [payload.role ? `role: ${payload.role}` : '', payload.instructions ? `instructions:\n${payload.instructions}` : '', payload.model ? `model: ${payload.provider}/${payload.model}` : ''].filter(Boolean).join('\n\n') || t("无配置内容")
-  }
-  return JSON.stringify(payload, null, 2)
 }
 
 function renderEvolution() {
