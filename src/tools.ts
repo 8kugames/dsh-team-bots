@@ -383,4 +383,29 @@ export function installTeamTools(ctx, service) {
       return `Secret request ${request.requestId.slice(-6)} for ${request.name} is pending human approval.`
     },
   })
+
+  // DSHBOTS-243：通知通道产品化——成员通知 / 任务提醒，项目内任意成员可用。
+  // 投递面是宿主会话通道（runtime.steer），插件 messages 落库为准绳；跨项目目标一律拒绝。
+  ctx.tools.register({
+    name: 'team_notify',
+    description: 'Send a notification inside this project. Any project member may use this. `target=member` notifies another member bot of this project: the host session channel delivers it immediately when reachable, and the notification is always recorded in the group chat (sender = you, mention = the target). `target=task` reminds a task of this project: if the task has an active run, the reminder is steered into that run session (re-read the card and act on it); otherwise it lands as a task-thread message the owner can see on the review panel. Only members and tasks of this project are addressable; cross-project targets are rejected. A channel failure only warns and never blocks the other channel.',
+    parameters: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', enum: ['member', 'task'], description: 'member = notify another project member bot; task = remind a task of this project' },
+        member: { type: 'string', description: 'Exact bot name from the project member list (required when target=member)' },
+        task: { type: 'string', description: 'Task to remind, as KEY-N (required when target=task)' },
+        message: { type: 'string', description: 'Self-contained notification body' },
+      },
+      required: ['target', 'message'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      if (args.target === 'member' && !args.member) throw new Error('target=member 需要 member（目标 bot 名称）')
+      if (args.target === 'task' && !args.task) throw new Error('target=task 需要 task（KEY-N 任务编号）')
+      return service.notifyFromBot(sessionId, args)
+    },
+  })
 }
