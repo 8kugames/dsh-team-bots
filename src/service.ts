@@ -23,6 +23,7 @@ import { botsMethods } from './services/bots.js'
 import { projectsMethods } from './services/projects.js'
 import { chatMethods } from './services/chat.js'
 import { tasksMethods } from './services/tasks.js'
+import { taskDispatchMethods } from './services/task-dispatch.js'
 import { taskNotifyMethods } from './services/task-notify.js'
 import { notifyMethods } from './services/notify.js'
 import { taskReviewMethods } from './services/task-review.js'
@@ -88,6 +89,7 @@ defineMethods(TeamService.prototype, [
   projectsMethods,
   chatMethods,
   tasksMethods,
+  taskDispatchMethods,
   taskNotifyMethods,
   notifyMethods,
   taskReviewMethods,
