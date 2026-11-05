@@ -40,6 +40,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "pretest": "npm run build",
     "test": "node --test \"tests/*.test.js\"",
+    "release": "node scripts/release.mjs",
     "predev": "npm run build",
     "dev": "node scripts/dev-server.mjs",
     "prestart": "npm run build",
