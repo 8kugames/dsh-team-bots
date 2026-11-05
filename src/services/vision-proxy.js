@@ -83,7 +83,7 @@ export function spawnVisionProxyRun(service, { bot, message, target }) {
         createdAt,
       )
     })
-  } catch (insertError) {
+  } catch (insertError     ) {
     if (String(insertError).includes('UNIQUE')) {
       return service.store.get('SELECT * FROM runs WHERE idempotency_key = ?', idempotencyKey) ?? null
     }
@@ -111,7 +111,7 @@ export async function considerVisionProxy(service, { bot, message }) {
       return null
     }
     return spawnVisionProxyRun(service, { bot, message, target })
-  } catch (error) {
+  } catch (error     ) {
     service.logger?.warn?.('dsh-team: vision proxy consideration failed: %s', error?.message ?? error)
     return null
   }
@@ -141,7 +141,7 @@ export function maybeSpawnVisionAfterFailure(service, { run, bot, error }) {
       return null
     }
     return spawnVisionProxyRun(service, { bot, message, target })
-  } catch (spawnError) {
+  } catch (spawnError     ) {
     service.logger?.warn?.('dsh-team: vision proxy spawn after failure failed: %s', spawnError?.message ?? spawnError)
     return null
   }

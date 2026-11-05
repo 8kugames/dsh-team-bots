@@ -113,7 +113,7 @@ async function loadOlderMessages() {
       if (!listEl || state.chatAtBottom) return
       listEl.scrollTop = prevTop + (listEl.scrollHeight - prevHeight)
     })
-  } catch (err) {
+  } catch (err     ) {
     toast(err?.message || t('toast.loadOlderFailed'))
   } finally {
     state.chatOlder.loading = false

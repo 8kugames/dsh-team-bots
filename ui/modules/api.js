@@ -19,7 +19,7 @@ export async function api(action, payload = {}, { quiet = false } = {}) {
       throw new Error(message)
     }
     return body.data
-  } catch (error) {
+  } catch (error     ) {
     if (!quiet) toast(error.message || String(error), 'error')
     throw error
   } finally {

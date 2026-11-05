@@ -63,7 +63,7 @@ export const terminalMethods = {
         env: process.env,
         detached: true, // 独立进程组：kill(-pid) 能带走整条命令管线
       })
-    } catch (error) {
+    } catch (error     ) {
       this.finishTerminalCommand(commandId, 'failed', null, `无法启动命令：${error?.message ?? error}`)
       throw badRequest(`无法启动命令：${error?.message ?? error}`)
     }
@@ -146,7 +146,7 @@ export const terminalMethods = {
         status, exitCode, output, errorMessage, nowIso(), commandId,
       )
       if (row) this.trimTerminalHistory(row.project_id)
-    } catch (error) {
+    } catch (error     ) {
       this.logger.warn?.(`dsh-team: terminal command ${commandId} 收尾落库失败：${error?.message ?? error}`)
     }
   },

@@ -144,7 +144,7 @@ export function syncSkills(store, skillRoot) {
 
 // 技能 provider：共享技能池 + 当前会话所在项目的项目技能池。
 // 项目技能按 .agents > .claude > .codex 优先级去重，且优先于同名共享技能。
-export function skillProvider(skillRoot, options = {}) {
+export function skillProvider(skillRoot, options = {}       ) {
   const resolveProjectDir = options.resolveProjectDir ?? (() => null)
   const list = (cwd) => {
     const candidates = []

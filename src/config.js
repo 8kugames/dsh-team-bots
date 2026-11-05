@@ -70,7 +70,7 @@ const parseExtList = (value) => {
 // 里已含 env/注入解析结果，env 显式时直接采用；run*Env/stall*Env 标志供 UI 提示
 // 「环境变量已覆盖」。消费点（runtime 运行启动、service.reapStalledRuns）每次
 // 现算，新值对之后启动的运行生效，进行中不追溯。
-export function effectiveRunLimits(config, getSetting = () => null) {
+export function effectiveRunLimits(config, getSetting                           = () => null) {
   const runEnv = envExplicit('DSH_TEAM_RUN_TIMEOUT_MS')
   const stallEnv = envExplicit('DSH_TEAM_STALL_TIMEOUT_MS')
   const runSaved = savedInt(getSetting(RUN_TIMEOUT_KEY), RUN_LIMIT_RANGES[RUN_TIMEOUT_KEY])
@@ -88,7 +88,7 @@ export function effectiveRunLimits(config, getSetting = () => null) {
 // 兜底 20（看门狗未配置与配 0 关闭同值，预算不得变 0/无限）。消费点（createTask
 // 建档、assignTask 给存量 NULL 卡补挂）每次现算，改值对之后建档/派发的卡生效。
 export const TASK_TIME_BUDGET_FALLBACK_MINUTES = 20
-export function effectiveTaskTimeBudgetMinutes(config, getSetting = () => null) {
+export function effectiveTaskTimeBudgetMinutes(config, getSetting                           = () => null) {
   const env = envExplicit('DSH_TEAM_TASK_TIME_BUDGET_MINUTES')
   const stallMinutes = Math.round(effectiveRunLimits(config, getSetting).stallTimeoutMs / 60_000)
   return !env && stallMinutes > 0 ? stallMinutes : config.taskTimeBudgetMinutes
@@ -97,7 +97,7 @@ export function effectiveTaskTimeBudgetMinutes(config, getSetting = () => null) 
 // 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > 页面保存值 >
 // 默认 256；0 = 关闭。消费点（runtime.ensureSession 复用检查）每次现算，改值对
 // 下一次会话复用生效。
-export function effectiveSessionRolloverTurns(config, getSetting = () => null) {
+export function effectiveSessionRolloverTurns(config, getSetting                           = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_TURNS')
   const saved = savedInt(getSetting(SESSION_ROLLOVER_TURNS_KEY), SESSION_ROLLOVER_TURNS_RANGE)
   return !env && saved !== null ? saved : config.sessionRolloverTurns
@@ -106,7 +106,7 @@ export function effectiveSessionRolloverTurns(config, getSetting = () => null) {
 // 验收滞留阈值生效值（DSHBOTS-194）：优先级与会话结转一致——env 显式 > 保存值 >
 // 默认 30 分钟；0 = 关闭。消费点（scheduler 验收守门、runLimitsView 透出）每次
 // 现算，改值对下一轮扫描生效；env 标志供 UI 提示「环境变量已覆盖」。
-export function effectiveReviewIdleMinutes(config, getSetting = () => null) {
+export function effectiveReviewIdleMinutes(config, getSetting                           = () => null) {
   const env = envExplicit('DSH_TEAM_REVIEW_IDLE_MINUTES')
   const saved = savedInt(getSetting(REVIEW_IDLE_MINUTES_KEY), REVIEW_IDLE_MINUTES_RANGE)
   return {
@@ -139,14 +139,14 @@ const savedUiLanguage = (value) => {
 
 // UI 语言生效值：env 显式合法值 > 页面保存值 > 默认。'auto' 语义 = 跟随 DSH 宿主，
 // 交 resolveDshUiLanguage 三级兜底（loader → patch 文件 → navigator）。
-export function effectiveUiLanguage(config, getSetting = () => null) {
+export function effectiveUiLanguage(config, getSetting                           = () => null) {
   const envRaw = String(process.env.DSH_TEAM_UI_LANGUAGE ?? '').trim().toLowerCase()
   const envValue = UI_LANGUAGE_VALUES.includes(envRaw) ? envRaw : null
   const saved = savedUiLanguage(getSetting(UI_LANGUAGE_KEY))
   return envValue ?? saved ?? config.uiLanguage
 }
 
-export function resolveConfig(config = {}) {
+export function resolveConfig(config                      = {}) {
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
   const workspace = resolve(config.workspace || defaultWorkspace())
   const dataDir = resolve(

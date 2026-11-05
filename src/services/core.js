@@ -51,7 +51,7 @@ export const coreMethods = {
         try {
           const catalog = await this.runtime?.catalog(true) ?? []
           model = catalog[0]
-        } catch (error) {
+        } catch (error     ) {
           // 取不到模型目录也要留痕：否则种子 Bot 带着空模型上线，问题会被埋掉。
           this.logger.warn?.(`dsh-team: 取模型目录失败，种子 Bot 将不带模型：${error?.message ?? error}`)
         }
@@ -125,7 +125,7 @@ export const coreMethods = {
           await this.wechat.start().catch(error => {
             this.logger.warn?.(`[wechat] 通道启动失败: ${error?.message ?? error}`)
           })
-        } catch (error) {
+        } catch (error     ) {
           this.logger.warn?.(`[wechat] 通道加载失败，已跳过: ${error?.message ?? error}`)
         }
       }
@@ -169,7 +169,7 @@ export const coreMethods = {
       RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY,
       UI_LANGUAGE_KEY,
     ]
-    const values = {}
+    const values      = {}
     for (const key of keys) values[key] = this.store.setting(key, '')
     return values
   },
@@ -189,7 +189,7 @@ export const coreMethods = {
     }
   },
   updateSettings(patch, actor = this.actor()) {
-    const values = {}
+    const values      = {}
     for (const [key, value] of Object.entries(patch ?? {})) {
       if (!Object.keys(this.settingsView()).includes(key)) throw badRequest(`不支持的设置项：${key}`)
       values[key] = String(value ?? '').trim()

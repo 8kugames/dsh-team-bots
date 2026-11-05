@@ -127,7 +127,7 @@ export const secretsMethods = {
     try {
       if (!existsSync(filePath)) return false
       rmSync(filePath, { force: true })
-    } catch (error) {
+    } catch (error     ) {
       this.logger.warn?.('dsh-team: 焚毁项目 %s 运行时密钥失败：%s', projectId, error?.message ?? error)
       return false
     }

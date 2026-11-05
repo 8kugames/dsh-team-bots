@@ -104,7 +104,7 @@ function ensureModalRoot(doc = document) {
     el.id = 'modal-root'
     doc.body.appendChild(el)
   }
-  return el
+  return el                                               
 }
 
 function renderModalLayer() {

@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["esnext", "dom"],
+    "types": ["node"],
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "strict": true,
+    "noImplicitAny": false,
+    "noImplicitThis": false,
+    "strictNullChecks": false,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "index.ts",
+    "src/**/*.ts",
+    "ui/**/*.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.mts",
+    "types/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", ".dev", ".dist", ".tmp", ".preview"]
+}

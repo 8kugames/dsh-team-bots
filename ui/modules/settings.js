@@ -249,7 +249,7 @@ function dshPathsCard() {
 // DSH 服务卡：版本检查 + 投递失败提示（投递失败 kv 落在本卡尾部）。
 function dshServiceCard() {
   const data = state.data
-  // 「DSH 服务」卡检查结果：loadState 只换 state.data，dshUpdate 存这里不被轮询盖掉。
+  // @ts-ignore 「DSH 服务」卡检查结果：loadState 只换 state.data，dshUpdate 存这里不被轮询盖掉。
   const update = state.dshUpdate
   const latestCell = (latest, available) => latest == null
     ? '<strong>—</strong>'

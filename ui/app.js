@@ -20,7 +20,7 @@ import './modules/events-submit.js'
 import './modules/events-misc.js'
 // 全局一级视图集合：侧栏直达、无项目 tab（usage 的 global 模式另算，见 isGlobal）。
 const GLOBAL_VIEWS = new Set(['global', 'bots-overview', 'channel', 'secrets'])
-const app = document.getElementById('app')
+const app = document.getElementById('app')                                                                  
 const UI_SCALE_KEY = 'dshb:ui-scale'
 const UI_THEME_KEY = 'dshb:ui-theme'
 
@@ -28,7 +28,7 @@ const UI_THEME_KEY = 'dshb:ui-theme'
 // 与 <details data-panel> 同一套通道（key 形如 task-group:<status>），折叠即从集合里删掉。
 for (const status of STATUS_ORDER) state.openPanels.add(taskGroupKey(status))
 
-if (window.matchMedia?.('(max-width: 980px)').matches) state.tree = { chats: false, bots: false }
+if (window.matchMedia?.('(max-width: 980px)').matches) state.tree = { chats: false, bots: false }                     
 const savedScale = (() => {
   try { return Number(localStorage.getItem(UI_SCALE_KEY)) || null } catch { return null }
 })()
@@ -52,9 +52,9 @@ setLanguage(document.documentElement.dataset.dshLanguage || 'auto')
 // 下次 render 生效；首载只对齐不提示。render() 全量重建，滚动/弹窗由既有遮罩机制保持。
 function syncLanguage() {
   const language = state.data?.language
-  if (!language || language === state.uiLanguage) return
-  const first = state.uiLanguage === undefined
-  state.uiLanguage = language
+  if (!language || language === (state                           ).uiLanguage) return
+  const first = (state                           ).uiLanguage === undefined
+  ;(state                           ).uiLanguage = language
   setLanguage(language)
   if (!first) {
     toast(t('toast.languageSwitched'), 'success')
@@ -138,7 +138,7 @@ function updateTerminalDom(terminal) {
       outputEl.textContent = text
       outputEl.scrollTop = outputEl.scrollHeight
       // 空态占位是 pre 之外的独立层，有输出时收起，避免遮住首屏内容。
-      const emptyEl = document.querySelector('.terminal-output-empty')
+      const emptyEl = document.querySelector('.terminal-output-empty')               
       if (emptyEl) emptyEl.hidden = Boolean(text)
     }
   }
@@ -158,7 +158,7 @@ function bootError(error) {
 }
 
 function isTyping() {
-  const el = document.activeElement
+  const el = document.activeElement               
   return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
 
@@ -400,7 +400,7 @@ function renderShell() {
 }
 
 function syncChromeHeight() {
-  const head = document.querySelector('.main-head')
+  const head = document.querySelector('.main-head')               
   if (!head) return
   const chrome = head.offsetHeight + 48
   document.documentElement.style.setProperty('--chrome-h', `${chrome}px`)
@@ -494,7 +494,7 @@ function render() {
   app.className = ''
   // composer 持焦时的光标快照（DSHBOTS-123）：全量重建会拆走 #composer-input，先记选区与滚动，
   // rAF 收尾恢复焦点与光标，配合轮询渲染闸门静默放行后「边打字边轮询」不打断输入。
-  const activeBeforeRebuild = document.activeElement
+  const activeBeforeRebuild = document.activeElement                    
   const composerCaret = activeBeforeRebuild?.id === 'composer-input' ? {
     start: activeBeforeRebuild.selectionStart ?? 0,
     end: activeBeforeRebuild.selectionEnd ?? 0,
@@ -533,7 +533,7 @@ function render() {
         // 光标续接（DSHBOTS-123）：重建前持焦且已记快照时，把焦点与选区无损放回 composer。
         if (composerCaret && composerInput) {
           composerInput.focus()
-          try { composerInput.setSelectionRange(composerCaret.start, composerCaret.end, composerCaret.direction) } catch {}
+          try { (composerInput                    ).setSelectionRange(composerCaret.start, composerCaret.end, composerCaret.direction) } catch {}
           composerInput.scrollTop = composerCaret.scrollTop
         }
         const messages = document.querySelector('.chat-messages')
@@ -695,7 +695,7 @@ window.addEventListener('scroll', event => {
 // 顶部待审明细菜单（DSHBOTS-102）：点击菜单外任意处收起；面板关着时直接返回，不额外渲染。
 document.addEventListener('click', (event) => {
   if (!state.approvalPanelOpen) return
-  if (event.target.closest?.('.approval-banner')) return
+  if ((event.target               ).closest?.('.approval-banner')) return
   state.approvalPanelOpen = false
   render()
 })
@@ -736,7 +736,7 @@ document.addEventListener('visibilitychange', () => {
 // 运行行（runClockSpan 产出的占位）同一通道——只改 textContent，不重建节点。renderModalLayer
 // 挂载/补丁后同步调用一次，占位符不会等满 1s 才补上真实时长。
 function updateRunClocks(root = document) {
-  for (const el of root.querySelectorAll('.run-clock[data-started]')) {
+  for (const el of root.querySelectorAll('.run-clock[data-started]')                           ) {
     el.textContent = duration(el.dataset.started)
   }
 }
@@ -747,39 +747,39 @@ setInterval(() => {
   // 终态气泡到期摘除与淡出刷新（DSHBOTS-150）：只动气泡节点，不整页重建（不打断输入中的草稿）。
   pruneTypingLinger()
   // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
-  for (const el of document.querySelectorAll('.approval-clock[data-expires], .approval-menu-time[data-expires]')) {
+  for (const el of document.querySelectorAll('.approval-clock[data-expires], .approval-menu-time[data-expires]')                           ) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
     // 卡片内 .approval-clock 用 V2 倒计时文案（剩余 X 分 Y 秒），顶部窄条沿用「X 分后自动拒绝」。
     el.textContent = el.classList.contains('approval-menu-time') ? formatApprovalRemaining(remaining) : formatApprovalCountdown(remaining)
     el.classList.toggle('urgent', approvalUrgent(remaining))
   }
   // 卡片倒计时外层：图标随临期转黄（DSHBOTS-108）。
-  for (const el of document.querySelectorAll('.approval-countdown[data-expires]')) {
+  for (const el of document.querySelectorAll('.approval-countdown[data-expires]')                           ) {
     el.classList.toggle('urgent', approvalUrgent(approvalRemainingFrom(el.dataset.expires)))
   }
   // 卡片进度条：剩余越多条越长，临期变短并转黄（DSHBOTS-108）。
-  for (const el of document.querySelectorAll('.approval-progress[data-expires]')) {
+  for (const el of document.querySelectorAll('.approval-progress[data-expires]')                           ) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
     const ratio = approvalProgressRatio(remaining, el.dataset.window)
-    const fill = el.querySelector('.approval-progress-fill')
+    const fill = el.querySelector('.approval-progress-fill')               
     if (fill) fill.style.width = `${Math.round(ratio * 100)}%`
     el.classList.toggle('urgent', approvalUrgent(remaining))
     el.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
   }
   // 提问倒计时局部刷新（DSHBOTS-116）：与审批同口径，只改文本与危险色，不整卡重绘。
-  for (const el of document.querySelectorAll('.question-clock[data-expires], .question-menu-time[data-expires]')) {
+  for (const el of document.querySelectorAll('.question-clock[data-expires], .question-menu-time[data-expires]')                           ) {
     const remaining = questionRemainingFrom(el.dataset.expires)
     // 卡片与顶部窄条都用同一「剩余 X 分 Y 秒」口径（提问没有审批那种「自动拒绝」语义）。
     el.textContent = formatQuestionCountdown(remaining)
     el.classList.toggle('urgent', questionUrgent(remaining))
   }
-  for (const el of document.querySelectorAll('.question-countdown[data-expires]')) {
+  for (const el of document.querySelectorAll('.question-countdown[data-expires]')                           ) {
     el.classList.toggle('urgent', questionUrgent(questionRemainingFrom(el.dataset.expires)))
   }
-  for (const el of document.querySelectorAll('.question-progress[data-expires]')) {
+  for (const el of document.querySelectorAll('.question-progress[data-expires]')                           ) {
     const remaining = questionRemainingFrom(el.dataset.expires)
     const ratio = questionProgressRatio(remaining, el.dataset.window)
-    const fill = el.querySelector('.question-progress-fill')
+    const fill = el.querySelector('.question-progress-fill')               
     if (fill) fill.style.width = `${Math.round(ratio * 100)}%`
     el.classList.toggle('urgent', questionUrgent(remaining))
     el.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))

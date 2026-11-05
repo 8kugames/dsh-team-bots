@@ -238,7 +238,7 @@ export class WechatChannel {
     if (voided > 0) this.log.info?.(`[wechat] 链接建立，作废此前待发堆积 ${voided} 条（不补发）`)
     const transport = this.makeTransport(credentials)
     const abort = new AbortController()
-    const epoch = { abort, credentials }
+    const epoch                                                                             = { abort, credentials }
     this.transport = transport
     this.epoch = epoch
     this.phase = 'connecting'
@@ -276,9 +276,9 @@ export class WechatChannel {
         }
       } catch (error) {
         if (signal.aborted || this.epoch !== epoch) return
-        if (error instanceof WechatIlinkError && ['AUTH_REPLACED', 'AUTH_EXPIRED'].includes(error.code)) {
+        if (error instanceof WechatIlinkError && ['AUTH_REPLACED', 'AUTH_EXPIRED'].includes((error       ).code)) {
           this.phase = 'needs_reauth'
-          this.error = `${error.code}: ${error.message}`
+          this.error = `${(error       ).code}: ${(error       ).message}`
           this.log.warn?.('[wechat] 凭证失效，需要重新扫码')
           return
         }
@@ -347,7 +347,7 @@ export class WechatChannel {
       if (isBusinessError(error)) {
         // 业务性拒绝（如任务不存在、任务号非法）：给用户可读提示即可，不算处理失败
         this.log.warn?.(`[wechat] 指令被拒绝: ${this.errorText(error)}`)
-        await this.sendTo(peerId, String(error?.message ?? '指令无法执行'), signal)
+        await this.sendTo(peerId, String((error       )?.message ?? '指令无法执行'), signal)
           .catch(sendError => this.log.warn?.(`[wechat] 提示发送失败: ${this.errorText(sendError)}`))
         return
       }

@@ -209,7 +209,7 @@ async function ensureMode(path, mode) {
     const info = await stat(path)
     if ((info.mode & 0o7777) === mode) return
     await chmod(path, mode)
-  } catch (error) {
+  } catch (error     ) {
     if (error?.code !== 'ENOENT') throw error
   }
 }

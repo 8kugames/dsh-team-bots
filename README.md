@@ -29,7 +29,7 @@ The first visit to the home page exchanges the current startup token for a 30-da
 
 ## Configuration
 
-The two paths that matter are `DSH_TEAM_WORKSPACE` (team workspace root, default `~/.dsh/workspace/team-bots`) and `DSH_TEAM_DATA` (team database and run records, default `<workspace>/.data`); every other variable, its default and its resolution order (explicit env > value saved on the page > code default) live in `src/config.js`.
+The two paths that matter are `DSH_TEAM_WORKSPACE` (team workspace root, default `~/.dsh/workspace/team-bots`) and `DSH_TEAM_DATA` (team database and run records, default `<workspace>/.data`); every other variable, its default and its resolution order (explicit env > value saved on the page > code default) live in `src/config.ts`.
 
 Data under `DSH_TEAM_DATA` includes `team.sqlite`, `wechat-channel.sqlite`, `secret.key`, `memory/`, `messages/` and `secrets-runtime/` (burned on TTL expiry). Back up `secret.key` together with the data — without it the existing ciphertext cannot be decrypted.
 

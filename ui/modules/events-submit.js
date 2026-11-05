@@ -8,7 +8,7 @@ import { loadSoloDetail } from './chat.js'
 import { refresh, startTerminalPoll, render, formPayload } from '../app.js'
 
 document.addEventListener('submit', async (event) => {
-  const form = event.target.closest('form[data-form]')
+  const form = (event.target       ).closest('form[data-form]')
   if (!form) return
   event.preventDefault()
   const type = form.dataset.form
@@ -21,7 +21,7 @@ document.addEventListener('submit', async (event) => {
         description: payload.description,
         ownerBotId: payload.ownerBotId,
         memberIds: new FormData(form).getAll('memberIds'),
-        productionDir: payload.productionDir?.trim() || undefined,
+        productionDir: (payload.productionDir          )?.trim() || undefined,
       })
       closeModal()
       state.projectId = result.id
@@ -191,7 +191,7 @@ document.addEventListener('submit', async (event) => {
         cacheReadPerMtok: price(payload.cacheReadPerMtok),
         cacheWritePerMtok: price(payload.cacheWritePerMtok),
         outputPerMtok: price(payload.outputPerMtok),
-        currency: (payload.currency || 'CNY').toUpperCase(),
+        currency: ((payload.currency          ) || 'CNY').toUpperCase(),
       })
       closeModal()
       await refresh()
@@ -249,7 +249,7 @@ document.addEventListener('submit', async (event) => {
       startTerminalPoll()
       return
     }
-  } catch (error) {
+  } catch (error     ) {
     toast(error.message || String(error), 'error')
   }
 })

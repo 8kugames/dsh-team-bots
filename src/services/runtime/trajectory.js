@@ -59,7 +59,7 @@ export const trajectoryMethods = {
     if (!raw || !this.mask) return raw
     try {
       return this.mask(raw)
-    } catch (error) {
+    } catch (error     ) {
       this.logger.warn?.('dsh-team: 轨迹掩码失败，本次内容不落库：%s', error?.message ?? error)
       return '（密钥掩码失败，内容未记录）'
     }

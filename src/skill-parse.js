@@ -3,7 +3,7 @@ import { basename, dirname } from 'node:path'
 // 技能包（SKILL.md）解析：frontmatter 优先，缺失时回退到目录名与正文首段。
 export function parseSkill(raw, locator) {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(raw)
-  const metadata = {}
+  const metadata      = {}
   if (frontmatter?.[1]) {
     for (const line of frontmatter[1].split('\n')) {
       const match = /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line.trim())

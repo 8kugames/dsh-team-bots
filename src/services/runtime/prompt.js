@@ -278,7 +278,7 @@ export const promptMethods = {
       const current = policy?.overrideOf?.(liveSession)
       if (current === mode) return
       liveSession.append('sandbox/mode', { mode })
-    } catch (error) {
+    } catch (error     ) {
       this.logger.warn?.(`应用文件权限 ${mode} 失败（${bot?.name ?? bot?.id}）：${error?.message ?? error}`)
     }
   },

@@ -29,7 +29,7 @@ const describe = path => {
   let entry
   try {
     entry = lstatSync(path)
-  } catch (error) {
+  } catch (error     ) {
     if (error.code === 'ENOENT') return { label: 'missing', dir: false, target: null }
     return { label: error.code === 'ELOOP' ? 'broken symlink loop' : (error.code ?? 'error'), dir: false, target: null }
   }
@@ -44,7 +44,7 @@ const describe = path => {
         dir: targetEntry.isDirectory(),
         target,
       }
-    } catch (error) {
+    } catch (error     ) {
       return {
         label: error.code === 'ELOOP' ? 'broken symlink loop' : `dangling symlink (${error.code ?? 'error'})`,
         dir: false,
@@ -67,7 +67,7 @@ const writable = path => {
 
 function main() {
   const config = resolveConfig()
-  const targets = [
+  const targets                              = [
     ['DSH home', config.dshHome, true],
     ['workspace', config.workspace, false],
     ['data dir', config.dataDir, false],
@@ -78,7 +78,7 @@ function main() {
   console.log(`node        ${process.versions.node}  uid=${process.getuid?.() ?? 'n/a'} gid=${process.getgid?.() ?? 'n/a'} home=${homedir()}`)
 
   const dsh = spawnSync('dsh', ['--version'], { encoding: 'utf8' })
-  const dshVersion = dsh.status === 0 ? String(dsh.stdout).trim() : (dsh.error?.code === 'ENOENT' ? 'not installed' : 'unknown')
+  const dshVersion = dsh.status === 0 ? String(dsh.stdout).trim() : ((dsh.error                                     )?.code === 'ENOENT' ? 'not installed' : 'unknown')
   console.log(`dsh         ${dshVersion}`)
   console.log('')
 

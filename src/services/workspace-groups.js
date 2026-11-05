@@ -41,7 +41,7 @@ export async function attachSessionToWorkspace(registry, { cwd, title, sessionId
     const entity = await ensureWorkspaceForCwd(registry, { cwd, title })
     await entity.attachSession(sessionId)
     return true
-  } catch (error) {
+  } catch (error     ) {
     logger.warn?.(`dsh-team: 会话挂工作区分组失败（不影响会话运行）: ${error?.message ?? error}`)
     return false
   }
@@ -74,7 +74,7 @@ export async function backfillWorkspaceGroupBindings(service) {
       }
       group.sessionIds.push(row.session_id)
       groups.set(cwd, group)
-    } catch (error) {
+    } catch (error     ) {
       // 项目/单聊目录已不可推导（如记录残留）时只跳过该条会话。
       service.logger.warn?.(`dsh-team: 回填跳过会话 ${row.session_id}（工作区路径不可用）: ${error?.message ?? error}`)
     }

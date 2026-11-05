@@ -5,7 +5,7 @@ import { trajectoryMethods } from './services/runtime/trajectory.js'
 import { lifecycleMethods } from './services/runtime/lifecycle.js'
 
 export class DshRuntime {
-  constructor({ ctx, config, store, logger = console, mask = null }) {
+  constructor({ ctx, config, store, logger = console             , mask = null }) {
     this.ctx = ctx
     this.config = config
     this.store = store

@@ -61,7 +61,7 @@ export function runReviewWatchdog(service) {
       service.store.setSetting(REVIEW_IDLE_ALERTED_KEY, JSON.stringify(map))
     }
     return { alerted, recovered }
-  } catch (error) {
+  } catch (error     ) {
     service.logger?.warn?.('review watchdog failed: %s', error?.message ?? error)
     return { alerted: [], recovered: [], error: String(error?.message ?? error) }
   }

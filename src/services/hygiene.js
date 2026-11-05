@@ -77,7 +77,7 @@ export function countTextLines(content) {
 
 // 遍历工作区收集白名单内文件的行数（相对路径 → 行数）。
 // 纯函数（只依赖入参），目录不可读/文件读失败逐项跳过不抛出。
-export function scanCodeHygieneFiles(dir, { exts, ignoredDirs = CODE_HYGIENE_IGNORED_DIRS, ignoredFiles = CODE_HYGIENE_IGNORED_FILES, maxFileBytes = CODE_HYGIENE_MAX_FILE_BYTES } = {}) {
+export function scanCodeHygieneFiles(dir, { exts, ignoredDirs = CODE_HYGIENE_IGNORED_DIRS, ignoredFiles = CODE_HYGIENE_IGNORED_FILES, maxFileBytes = CODE_HYGIENE_MAX_FILE_BYTES } = {}       ) {
   const files = []
   const walk = (current, prefix) => {
     let entries
@@ -156,7 +156,7 @@ export const hygieneMethods = {
       }
       this.store.setSetting(settingKey, JSON.stringify(alerted))
       return { limit, threshold, scanned: files.length, over: over.length, alerted: toAlert.map(file => file.path), recovered }
-    } catch (error) {
+    } catch (error     ) {
       this.logger?.warn?.(`dsh-team: 代码卫生扫描失败（${project?.key ?? project?.id ?? 'unknown'}）：${error?.message ?? error}`)
       return { error: String(error?.message ?? error) }
     }

@@ -94,7 +94,7 @@ export function normalizeImageInputs(input) {
 export function toImageContentParts(images) {
   const list = Array.isArray(images) ? images : []
   return list.map(image => {
-    const part = { type: 'image', mediaType: image.mediaType, data: image.data }
+    const part      = { type: 'image', mediaType: image.mediaType, data: image.data }
     if (image.name) part.name = image.name
     return part
   })
@@ -235,7 +235,7 @@ export async function convertImagesForUpload(images, thresholdBytes, logger = nu
     try {
       const converted = await convertPngToJpeg(sharp, image.data, logger)
       out.push(converted ? { ...image, ...converted } : image)
-    } catch (error) {
+    } catch (error     ) {
       // 转码失败回退原图，不阻塞发送。
       logger?.warn?.('dsh-team: PNG 转 JPEG 失败，回退原图：%s', error?.message ?? error)
       out.push(image)
@@ -245,7 +245,7 @@ export async function convertImagesForUpload(images, thresholdBytes, logger = nu
 }
 
 // 外部输入 → 校验 + 转码，落库前的完整归一入口（sendMessage / sendSoloMessage 用）。
-export async function prepareImagesForStorage(input, thresholdBytes, logger = null, sharpFactory) {
+export async function prepareImagesForStorage(input, thresholdBytes, logger = null, sharpFactory ) {
   const images = normalizeImageInputs(input)
   return convertImagesForUpload(images, thresholdBytes, logger, sharpFactory)
 }

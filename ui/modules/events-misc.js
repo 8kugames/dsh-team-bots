@@ -10,11 +10,11 @@ import { closeModal, trapModalFocus, updateEffortOptions, updateFallbackEffortOp
 import { UI_SCALE_KEY, renderShell, renderKeepingChatScroll, panelKey, applyPanelToggle, nextChatAtBottom, render, refresh } from '../app.js'
 
 document.addEventListener('input', (event) => {
-  const el = event.target
+  const el = event.target                    
   el.closest?.('form')?.setAttribute('data-dirty', '1')
   if (el.id === 'remove-tracking-name') {
     // 输入项目名与待移除项目完全一致才点亮执行按钮；不属于此弹窗时跳过。
-    const submitBtn = document.getElementById('remove-tracking-submit')
+    const submitBtn = document.getElementById('remove-tracking-submit')                     
     if (submitBtn) submitBtn.disabled = el.value !== state.modal?.name
     return
   }
@@ -50,19 +50,19 @@ document.addEventListener('input', (event) => {
 // IME 组词标记（DSHBOTS-123）：组词期间 composition 事件不总是伴随常规 input 节奏，
 // 单独记 composerComposing，让轮询渲染闸门在组词全程让路；compositionend 后回到静默窗判定。
 document.addEventListener('compositionstart', (event) => {
-  if (event.target?.id === 'composer-input') state.composerComposing = true
+  if ((event.target               )?.id === 'composer-input') state.composerComposing = true
 })
 document.addEventListener('compositionend', (event) => {
-  if (event.target?.id === 'composer-input') state.composerComposing = false
+  if ((event.target               )?.id === 'composer-input') state.composerComposing = false
 })
 
 // select / checkbox 只发 change 不发 input，同样要计入未保存修改。
 document.addEventListener('change', (event) => {
-  event.target.closest?.('form')?.setAttribute('data-dirty', '1')
+  (event.target               ).closest?.('form')?.setAttribute('data-dirty', '1')
   // 邀请弹窗：单选后放开「确认邀请」按钮，并把选择记在 state.modal 上（重渲染后仍保持）。
-  if (state.modal?.type === 'invite-member' && event.target?.name === 'botId') {
-    state.modal.botId = String(event.target.value || '')
-    const submit = document.getElementById('invite-member-submit')
+  if (state.modal?.type === 'invite-member' && (event.target                    )?.name === 'botId') {
+    state.modal.botId = String((event.target                    ).value || '')
+    const submit = document.getElementById('invite-member-submit')                     
     if (submit) submit.disabled = !state.modal.botId
   }
 })
@@ -72,10 +72,10 @@ document.addEventListener('keydown', (event) => {
     trapModalFocus(event)
     return
   }
-  const tab = event.target.closest?.('[role="tab"]')
+  const tab = (event.target               ).closest?.('[role="tab"]')                      
   if (tab && ['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) {
     event.preventDefault()
-    const tabs = Array.from(document.querySelectorAll('[role="tab"]'))
+    const tabs = Array.from(document.querySelectorAll('[role="tab"]')                           )
     const index = tabs.indexOf(tab)
     const next = event.key === 'Home' ? tabs[0]
       : event.key === 'End' ? tabs[tabs.length - 1]
@@ -84,7 +84,7 @@ document.addEventListener('keydown', (event) => {
     next?.click()
     return
   }
-  if (state.ac && event.target.id === 'composer-input') {
+  if (state.ac && (event.target               ).id === 'composer-input') {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       moveAcSelection(event.key === 'ArrowDown' ? 1 : -1)
@@ -118,38 +118,38 @@ document.addEventListener('keydown', (event) => {
     renderKeepingChatScroll()
     return
   }
-  if (event.target.id === 'composer-input' && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+  if ((event.target               ).id === 'composer-input' && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault()
     void sendMessage()
     return
   }
-  if (event.target.id === 'task-search' && event.key === 'Enter') {
+  if ((event.target               ).id === 'task-search' && event.key === 'Enter') {
     event.preventDefault()
     render()
     return
   }
-  if (event.target.id === 'memory-search' && event.key === 'Enter') {
+  if ((event.target               ).id === 'memory-search' && event.key === 'Enter') {
     event.preventDefault()
     void searchMemories()
     return
   }
-  if (event.target.id === 'terminal-cmd-input' && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+  if ((event.target               ).id === 'terminal-cmd-input' && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault()
-    document.querySelector('form[data-form="terminal-run"]')?.requestSubmit()
+    document.querySelector                 ('form[data-form="terminal-run"]')?.requestSubmit()
     return
   }
 })
 
 document.addEventListener('mousedown', (event) => {
-  if (event.target.closest('.composer-ac-item')) {
+  if ((event.target               ).closest('.composer-ac-item')) {
     event.preventDefault()
     return
   }
-  if (state.ac && !event.target.closest('.composer-box')) closeAutocomplete()
+  if (state.ac && !(event.target               ).closest('.composer-box')) closeAutocomplete()
 })
 
 document.addEventListener('click', (event) => {
-  const el = event.target.closest('.composer-ac-item')
+  const el = (event.target               ).closest('.composer-ac-item')                      
   if (!el || !state.ac) return
   applyAutocomplete(state.ac.items[Number(el.dataset.acIdx)])
 })
@@ -157,7 +157,7 @@ document.addEventListener('click', (event) => {
 // 粘贴分发（DSHBOTS-70）：document 级委托——#composer-input 在 renderShell 里被 2.8s 轮询重建，
 // 监听挂节点会随节点一起被换掉（D-64 同类根因）。target 不是 composer 就完全放行，纯文本粘贴行为不变。
 document.addEventListener('paste', (event) => {
-  const input = event.target
+  const input = event.target                    
   if (input?.id !== 'composer-input') return
   const files = Array.from(event.clipboardData?.files ?? [])
   if (files.length === 0) return
@@ -189,7 +189,7 @@ document.addEventListener('error', (event) => {
 }, true)
 
 document.addEventListener('change', (event) => {
-  const el = event.target
+  const el = event.target                    
   // composer 选图：先把文件列表取出来（清空 input 后 FileList 会失效），再交给前端校验 + 读取。
   if (el.id === 'composer-image-input') {
     const files = Array.from(el.files ?? [])
@@ -209,7 +209,7 @@ document.addEventListener('change', (event) => {
   if (el.matches('[data-model-select]')) updateEffortOptions(el)
   if (el.matches('[data-fallback-model-select]')) updateFallbackEffortOptions(el)
   if (el.id === 'secret-scope') {
-    const projectSelect = document.getElementById('secret-project')
+    const projectSelect = document.getElementById('secret-project')                    
     if (projectSelect) {
       projectSelect.disabled = el.value !== 'project'
       if (el.value !== 'project') projectSelect.value = ''
@@ -218,7 +218,7 @@ document.addEventListener('change', (event) => {
 })
 
 document.addEventListener('scroll', (event) => {
-  const el = event.target
+  const el = event.target               
   if (!el?.classList?.contains('chat-messages')) return
   // 判定口径抽成纯函数 nextChatAtBottom：渲染窗口内与已脱离文档的节点保持原值（DSHBOTS-72）。
   state.chatAtBottom = nextChatAtBottom({
@@ -232,13 +232,13 @@ document.addEventListener('scroll', (event) => {
 }, true)
 
 // 折叠面板展开态：toggle 不冒泡，在 document 捕获阶段统一记录 <details data-panel> 的展开/收起（含 modal 里的面板）。
-document.addEventListener('toggle', (event) => {
+document.addEventListener('toggle', (event) => { // @ts-ignore
   applyPanelToggle(state, panelKey(event.target), event.target.open)
 }, true)
 
 // composer 拖柄：按住垂直拖动调整输入框高度，最小不低于当前内容的自动高度，最大不超过面板 61.8%；双击恢复自动高度。
 document.addEventListener('pointerdown', (event) => {
-  if (!event.target.closest?.('.composer-resizer')) return
+  if (!(event.target               ).closest?.('.composer-resizer')) return
   const input = document.getElementById('composer-input')
   if (!input) return
   event.preventDefault()
@@ -262,7 +262,7 @@ document.addEventListener('pointerdown', (event) => {
   window.addEventListener('pointercancel', onUp)
 })
 document.addEventListener('dblclick', (event) => {
-  if (!event.target.closest?.('.composer-resizer')) return
+  if (!(event.target               ).closest?.('.composer-resizer')) return
   const input = document.getElementById('composer-input')
   if (!input) return
   state.composerHeight = null
@@ -270,7 +270,7 @@ document.addEventListener('dblclick', (event) => {
 })
 
 let draggedTask = null
-document.addEventListener('dragstart', (event) => {
+document.addEventListener('dragstart', (event) => { // @ts-ignore
   const card = event.target.closest('.task-card')
   if (!card) return
   draggedTask = card.dataset.taskId
@@ -284,14 +284,14 @@ document.addEventListener('dragend', () => {
   draggedTask = null
 })
 document.addEventListener('dragover', (event) => {
-  const column = event.target.closest('.column[data-drop-status]')
+  const column = (event.target               ).closest('.column[data-drop-status]')                      
   if (!column || !draggedTask) return
   event.preventDefault()
   document.querySelectorAll('.column.drop-target').forEach(item => { if (item !== column) item.classList.remove('drop-target') })
   column.classList.add('drop-target')
 })
 document.addEventListener('drop', async (event) => {
-  const column = event.target.closest('.column[data-drop-status]')
+  const column = (event.target               ).closest('.column[data-drop-status]')                      
   if (!column || !draggedTask) return
   event.preventDefault()
   const taskId = draggedTask
@@ -300,7 +300,7 @@ document.addEventListener('drop', async (event) => {
     await api('transition_task', { taskId, status })
     await refresh()
     toast(`任务已移动到 ${STATUS[status]}`, 'success')
-  } catch (error) {
+  } catch (error     ) {
     toast(error.message || String(error), 'error')
   }
 })

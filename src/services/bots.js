@@ -55,7 +55,7 @@ export const botsMethods = {
     const placeholder = this.soloDirFor(name, botId)
     try {
       await this.ensureBotDir(placeholder)
-    } catch (error) {
+    } catch (error     ) {
       throw badRequest(`单聊工作区创建失败：${error.message}`)
     }
     let soloDir = placeholder
@@ -74,7 +74,7 @@ export const botsMethods = {
             fallbackProvider, fallbackModel, fallbackEffort, filePolicy, soloDir, createdAt, createdAt,
           )
           break
-        } catch (error) {
+        } catch (error     ) {
           const column = uniqueColumn(error)
           // 并发输掉名称查重的请求在这里拿到与名称预检一致的 conflict，而非裸 SQLITE 错误。
           if (column === 'bots.name') throw conflict('Bot 名称已存在')
@@ -100,7 +100,7 @@ export const botsMethods = {
     if (soloDir !== placeholder) {
       try {
         await this.ensureBotDir(soloDir)
-      } catch (error) {
+      } catch (error     ) {
         this.logger.warn?.(`单聊目录 ${soloDir} 补建失败：${error.message}`)
       }
     }
@@ -140,7 +140,7 @@ export const botsMethods = {
       // 回填是启动期的兜底：单个 bot 目录建不出来只告警，不拖垮整个启动。
       try {
         await this.ensureBotDir(dir)
-      } catch (error) {
+      } catch (error     ) {
         this.logger.warn?.(`单聊目录 ${dir} 创建失败：${error.message}`)
       }
     }
@@ -149,7 +149,7 @@ export const botsMethods = {
     const bot = this.botRow(botId)
     // removed 是移除追踪的终态：档案与历史仍可读，但不再接受任何修改（含 status 复活）。
     if (bot.status === 'removed') throw badRequest('该 Bot 已移除追踪，不能再修改')
-    const changes = {}
+    const changes      = {}
     if (patch.name !== undefined) {
       const name = text(patch.name, 40).replace(/\s+/g, '')
       if (!botNamePattern.test(name)) throw badRequest('Bot 名称格式无效')
@@ -241,7 +241,7 @@ export const botsMethods = {
   },
   // 移除追踪（DSHBOTS-193）：已归档 Bot 的软移除——bots.status 落 removed 终态，
   // 工作台列表不再展示；运行记录、单聊消息、版本、记忆与单聊工作区目录全部保留。
-  async removeBotTracking(botId, input = {}, actor = this.actor()) {
+  async removeBotTracking(botId, input = {}       , actor = this.actor()) {
     const bot = this.botRow(botId)
     if (bot.status !== 'archived') throw badRequest('Bot 未归档，先归档再移除追踪')
     if (String(input.confirmName ?? '').trim() !== bot.name) throw badRequest('确认名称与 Bot 名称不一致，已拒绝移除')

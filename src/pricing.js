@@ -17,7 +17,7 @@ const num = (value, fallback = 0) => {
 const first = (...values) => values.find(value => value !== undefined && value !== null && value !== '')
 
 // 接受两种写法：简写 hit/miss/out，或全称 inputPerMtok/cacheReadPerMtok/outputPerMtok。
-export function normalizePriceEntry(raw = {}) {
+export function normalizePriceEntry(raw = {}       ) {
   const model = String(first(raw.model, raw.id, raw.name, '') ?? '').trim()
   if (!model) return null
   return {
@@ -43,7 +43,7 @@ function parseEnv(value) {
 
 // 优先级：插件配置 config.modelPrices > 环境变量 DSH_TEAM_MODEL_PRICES(JSON) > 内置默认。
 // 显式配置空数组 = 关闭默认价格（成本显示未配置）。
-export function resolveModelPrices(config = {}, env = process.env) {
+export function resolveModelPrices(config = {}       , env = process.env) {
   const source = Array.isArray(config.modelPrices) && !config.modelPrices.disabled
     ? config.modelPrices
     : (parseEnv(env.DSH_TEAM_MODEL_PRICES) ?? DEFAULT_MODEL_PRICES)

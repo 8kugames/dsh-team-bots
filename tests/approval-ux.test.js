@@ -102,6 +102,9 @@ test('approvalsPending：跨项目聚合、只计 pending，明细带项目名�
 
 test('state 顶层 pendingApprovals 与项目解耦：A 项目视图也能看到 B 项目待审', async () => {
   const { root, store, service } = await setup()
+  // 断言前要 await state()（会让出事件循环）；setup 的 60ms 审批超时在并行跑满时会先触发，
+  // 让 pending 聚合归零。单独放宽本用例的等待窗口，收尾显式结算以免留下定时器。
+  service.config.approvalTimeoutMs = 5_000
   try {
     const projectA = await primeProject(store, service, 'State Alpha')
     const projectB = await primeProject(store, service, 'State Beta')
@@ -120,6 +123,7 @@ test('state 顶层 pendingApprovals 与项目解耦：A 项目视图也能看到
     assert.equal(viewB.pendingApprovals.count, 1)
     assert.equal(viewB.approvals.length, 1)
 
+    service.settleApproval(viewB.approvals[0].id, 'cancelled', 'rejected', null)
     await outcomeB
   } finally { await rm(root, { recursive: true, force: true }) }
 })

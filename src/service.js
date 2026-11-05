@@ -44,7 +44,7 @@ export { WRITE_SCOPE_MAX, WRITE_SCOPE_MAX_LEN, parseWriteScopes, readWriteScopes
 export { FILE_POLICIES, FILE_POLICY_LABELS } from './services/file-policy.js'
 
 export class TeamService {
-  constructor({ store, config, logger = console }) {
+  constructor({ store, config, logger = console              }) {
     this.store = store
     this.config = config
     this.logger = logger

@@ -209,7 +209,7 @@ export const memoryMethods = {
           sourceRefs: sourceRunId ? [sourceRunId] : [],
         })
         applied += 1
-      } catch (writeError) {
+      } catch (writeError     ) {
         this.logger.warn?.('dsh-team: 记忆审查写入失败：%s', writeError?.message ?? writeError)
       }
     }

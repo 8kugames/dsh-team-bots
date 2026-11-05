@@ -42,7 +42,7 @@ export const taskNotifyMethods = {
         body: `任务 ${identifier} 已开始（${bot.name}）。`,
         mentions: [assigneeId],
       })
-    } catch (error) {
+    } catch (error     ) {
       // 状态变更已经落库，通知/开工失败不能反过来把整次 update_task 打挂（用户会看到报错但状态已变）。
       this.logger.warn?.('dsh-team: 任务开始通知失败 %s: %s', identifier, error?.message ?? error)
       return null
@@ -56,7 +56,7 @@ export const taskNotifyMethods = {
     const identifier = `${project.key}-${task.number}`
     try {
       this.wechat?.notify(`任务 ${identifier}《${task.title}》已完成。回复「详情 ${identifier}」查看。`)
-    } catch (error) {
+    } catch (error     ) {
       this.logger.warn?.('dsh-team: 任务完成微信通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },
@@ -70,7 +70,7 @@ export const taskNotifyMethods = {
       this.wechat?.notify(
         `任务 ${identifier}《${task.title}》已创建${assignee ? `，派给 ${assignee}` : '，暂未指派'}。回复「详情 ${identifier}」查看。`,
       )
-    } catch (error) {
+    } catch (error     ) {
       this.logger.warn?.('dsh-team: 任务创建微信通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },

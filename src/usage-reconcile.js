@@ -33,7 +33,7 @@ export function setPrice(store, input) {
     Number(input.outputPerMtok ?? 0),
     String(input.currency ?? BUDGET_CURRENCY).trim().toUpperCase() || BUDGET_CURRENCY,
   ]
-  if (vals.slice(0, 4).some(value => !Number.isFinite(value) || value < 0)) throw new Error('价格必须是非负数')
+  if (vals.slice(0, 4).some(value => !Number.isFinite(value) || value           < 0)) throw new Error('价格必须是非负数')
   if (existing) {
     store.run(
       `UPDATE model_prices SET input_per_mtok = ?, cache_read_per_mtok = ?, cache_write_per_mtok = ?,

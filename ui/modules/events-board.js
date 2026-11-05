@@ -87,7 +87,7 @@ export async function handleBoardAction(action, target) {
       break
     }
     case 'save-settings': {
-      const value = id => document.getElementById(id)?.value ?? ''
+      const value = id => (document.getElementById(id)                           )?.value ?? ''
       const patch = {
         budget_currency: value('settings-currency'),
         memory_review: value('settings-memory-review'),
@@ -105,7 +105,7 @@ export async function handleBoardAction(action, target) {
     // 界面语言（DSHBOTS-162）：保存后 loadState 拿回新的 state.language，
     // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
     case 'save-ui-language': {
-      const value = document.getElementById('settings-ui-language')?.value ?? 'auto'
+      const value = (document.getElementById('settings-ui-language')                           )?.value ?? 'auto'
       await api('update_settings', { ui_language: value })
       await loadState(state.projectId)
       // poll() 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
@@ -114,7 +114,7 @@ export async function handleBoardAction(action, target) {
       break
     }
     case 'save-run-limits': {
-      const value = id => document.getElementById(id)?.value ?? ''
+      const value = id => (document.getElementById(id)                           )?.value ?? ''
       await api('update_settings', {
         run_timeout_minutes: value('settings-run-timeout'),
         stall_watchdog_minutes: value('settings-stall-watchdog'),
@@ -130,7 +130,7 @@ export async function handleBoardAction(action, target) {
       await loadState(state.projectId)
       break
     }
-    case 'check-dsh-update': {
+    case 'check-dsh-update': { // @ts-ignore
       state.dshUpdate = await api('dsh_update_info', {})
       render()
       break
@@ -144,7 +144,7 @@ export async function handleBoardAction(action, target) {
       break
     }
     case 'wechat-code': {
-      const code = document.getElementById('wechat-code')?.value?.trim()
+      const code = (document.getElementById('wechat-code')                           )?.value?.trim()
       if (!code) {
         toast('请输入微信验证码', 'error')
         break

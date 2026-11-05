@@ -210,7 +210,7 @@ function reviewIdleBadge(task) {
   const iso = new Date(Math.max(...anchors)).toISOString()
   return `<span class="pill ${tier}" title="验收静置已超 ${minutes} 分钟，请尽快收口">滞留&nbsp;<span class="run-clock" data-started="${attr(iso)}">${duration(iso)}</span></span>`
 }
-function renderTaskCard(task, options = {}) {
+function renderTaskCard(task, options                  = {}) {
   const depth = Number(options.depth ?? 0)
   const childCount = Number(options.childCount ?? 0)
   const expanded = options.expanded === true
@@ -579,7 +579,7 @@ async function searchMemories() {
     return
   }
   const project = pageProject()
-  const payload = { query }
+  const payload                    = { query }
   if (project) payload.projectId = project.id
   else if (inSoloContext() && state.soloBotId) payload.botId = state.soloBotId
   const result = await api('search_memories', payload)
@@ -722,7 +722,7 @@ function renderEvolution() {
   const proposalDiffText = (proposal) => {
     const diff = proposal?.diff
     if (diff && typeof diff === 'object') {
-      const blocks = Object.entries(diff).map(([field, change]) => {
+      const blocks = Object.entries(diff                                                  ).map(([field, change]) => {
         const from = change?.from ?? ''
         const to = change?.to ?? ''
         if (!from && !to) return ''

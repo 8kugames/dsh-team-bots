@@ -264,7 +264,7 @@ function pruneTypingLinger(now = Date.now()) {
     for (const el of document.querySelectorAll(`[data-bubble-key="${key}"]`)) el.remove()
   }
   // 淡出段：两次轮询之间也按剩余时间刷新透明度。
-  for (const el of document.querySelectorAll('[data-linger-until]')) {
+  for (const el of document.querySelectorAll('[data-linger-until]')                           ) {
     const remaining = Number(el.dataset.lingerUntil) - now
     el.style.opacity = String(remaining <= TYPING_LINGER_FADE_MS ? Math.max(0, remaining / TYPING_LINGER_FADE_MS) : 1)
   }

@@ -150,7 +150,7 @@ export const sessionMethods = {
         await restoreDefaultModel(defaults, before, {
           logger: this.logger,
           hmr: this.ctx.get?.('hmr'),
-          audit: (error, meta = {}) => this.store?.audit?.(
+          audit: (error, meta = {}       ) => this.store?.audit?.(
             'system',
             'system',
             'model_restore_failed',
@@ -239,7 +239,7 @@ export const sessionMethods = {
     )
     return runId
   },
-  async ensureSession(bot, project, { run, task, sessionKind, modelOverride } = {}) {
+  async ensureSession(bot, project, { run, task, sessionKind, modelOverride } = {}       ) {
     // 结转摘要运行（DSHBOTS-145）：必须回到被结转的旧会话写摘要，且不能参与阈值判定——
     // 否则摘要运行自己又会触发一次结转；solo 摘要运行也没有项目上下文，不查项目。
     if (run?.kind === 'rollover_summary' && run.session_id) {
@@ -372,7 +372,7 @@ export const sessionMethods = {
     if (Number(run.recovery) === 1) {
       this.store.run('UPDATE runs SET recovery = 0 WHERE id = ?', run.id)
     }
-    const pending = {
+    const pending      = {
       runId: run.id,
       sessionId,
       bot: effectiveBot,

@@ -137,7 +137,7 @@ function usageCostPrimaryText(totals, currency) {
 async function exportUsageCsv() {
   const usage = usageSnapshot()
   const project = pageProject()
-  const payload = { days: usage.days ?? 30, window: usageWindowKey }
+  const payload                          = { days: usage.days ?? 30, window: usageWindowKey }
   // 导出口径跟随当前页面口径（DSHBOTS-56）：
   // global=全局明细（不带任何过滤）；domain=本群明细；solo=该 Bot 的项目外明细。
   const mode = usageMode()

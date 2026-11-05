@@ -71,7 +71,7 @@ export const systemMethods = {
     const unreadCounts = this.unreadChatCounts()
     let project = projectId ? this.store.get('SELECT * FROM projects WHERE id = ?', projectId) : undefined
     if (!project) project = this.store.get("SELECT * FROM projects WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1")
-    const view = {
+    const view      = {
       me: this.store.get('SELECT id, name FROM users WHERE id = ?', this.localUserId),
       models: await this.runtime?.catalog() ?? [],
       bots: bots.map(bot => this.botView(bot)),
@@ -365,7 +365,7 @@ export const systemMethods = {
         latestDshVersion({ force: true }),
         latestTeamBotsVersion({ force: true }),
       ])
-    } catch (error) {
+    } catch (error     ) {
       throw new AppError('DSH_REGISTRY_UNAVAILABLE', `无法查询最新版本：${error.message}`, 502)
     }
     return {

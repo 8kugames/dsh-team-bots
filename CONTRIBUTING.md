@@ -16,5 +16,6 @@
 
 ## `ui/` contribution rules
 
-1. **Style slices must be registered.** The concatenation order is decided by `UI_STYLE_PARTS` in `src/http.js`, so a new style file must be registered there too; `tests/styles-split.test.js` guards the table's completeness.
-2. **The 800-line rule.** Both `ui/styles/*.css` and `ui/app.js` stay under 800 lines per file; beyond that, split by responsibility into new domain files.
+1. **Style slices must be registered.** The concatenation order is decided by `UI_STYLE_PARTS` in `src/http.ts`, so a new style file must be registered there too; `tests/styles-split.test.js` guards the table's completeness.
+2. **The 800-line rule.** Both `ui/styles/*.css` and `ui/app.ts` stay under 800 lines per file; beyond that, split by responsibility into new domain files.
+3. **Edit `.ts`, never the generated `.js`.** `npm run build` erases types in place and writes the sibling `.js`/`.mjs` that DSH and the browser actually load; `pretest`, `prepack`, `predev` and `prestart` run it automatically. `npm run typecheck` checks the TypeScript sources. Keep imports written with `.js` specifiers so the emitted paths stay unchanged.

@@ -170,7 +170,7 @@ export const projectsMethods = {
     if (!raw) return null
     try {
       return await ensureExternalDir(raw)
-    } catch (error) {
+    } catch (error     ) {
       throw badRequest(error.message || '生产目录无效')
     }
   },
@@ -183,7 +183,7 @@ export const projectsMethods = {
     let entries
     try {
       entries = readdirSync(target, { withFileTypes: true })
-    } catch (error) {
+    } catch (error     ) {
       throw badRequest(`无法读取目录 ${target}：${error?.message ?? error}`)
     }
     const dirs = []
@@ -282,7 +282,7 @@ export const projectsMethods = {
     if (Number(teamSecrets?.n) > 0) {
       try {
         await this.materializeProjectSecrets(this.projectRow(projectId))
-      } catch (error) {
+      } catch (error     ) {
         this.logger.warn?.(`dsh-team: 新项目 ${projectId} 清理旧 .team/secrets.env 残留失败：${error?.message ?? error}`)
       }
     }
@@ -290,7 +290,7 @@ export const projectsMethods = {
   },
   async updateProject(projectId, patch, actor = this.actor()) {
     const project = this.projectRow(projectId)
-    const updates = {}
+    const updates      = {}
     if (patch.name !== undefined) {
       const name = text(patch.name, 80)
       if (!name) throw badRequest('项目名称不能为空')
@@ -418,7 +418,7 @@ export const projectsMethods = {
     if (productionDirChanged && project.production_dir) {
       try {
         rmSync(join(project.production_dir, '.team', 'secrets.env'), { force: true })
-      } catch (error) {
+      } catch (error     ) {
         this.logger.warn?.(`dsh-team: 切换生产目录后清理旧目录密钥失败：${error?.message ?? error}`)
       }
     }
@@ -427,7 +427,7 @@ export const projectsMethods = {
       if (Number(teamSecrets?.n) > 0) {
         try {
           await this.materializeProjectSecrets(this.projectRow(projectId))
-        } catch (error) {
+        } catch (error     ) {
           this.logger.warn?.(`dsh-team: 切换生产目录后清理旧密钥残留失败：${error?.message ?? error}`)
         }
       }
@@ -451,7 +451,7 @@ export const projectsMethods = {
   // 移除已归档项目的全部管理数据（含项目行本身）。全局口径不动的三张表：usage_events（FK 置空，
   // 用量是全局历史）、audit_log（append-only，本次移除本身要可审计）、solo_messages（Bot 域，与项目无关）。
   // 逐表显式删除（子表先于父表），不依赖隐式级联；proposals 的 FK 是 SET NULL，必须在项目行删除前清掉。
-  removeProjectTracking(projectId, input = {}, actor = this.actor()) {
+  removeProjectTracking(projectId, input = {}       , actor = this.actor()) {
     const project = this.projectRow(projectId)
     if (project.status !== 'archived') throw badRequest('项目未归档，先归档再移除追踪')
     const confirmName = typeof input.confirmName === 'string' ? input.confirmName.trim() : ''
@@ -500,7 +500,7 @@ export const projectsMethods = {
     if (input.deleteProductionDir === true) {
       try {
         rmSync(dir, { recursive: true, force: true })
-      } catch (error) {
+      } catch (error     ) {
         this.logger.warn?.(`dsh-team: 移除项目 ${project.key} 生产目录失败：${error?.message ?? error}`)
         this.audit(actor, 'project.remove_tracking_dir', 'project', projectId, { dir, deleted: false })
       }

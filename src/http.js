@@ -105,7 +105,7 @@ const response = (body, type, status = 200, extra = {}) => new Response(body, {
   },
 })
 
-export function installHttp(ctx, service, logger = console) {
+export function installHttp(ctx, service, logger            = console) {
   const disposers = []
   const route = (path, methods, handler, requestBody = 'buffered') => {
     disposers.push(ctx.connection.fetch.register({
@@ -253,7 +253,7 @@ export function installHttp(ctx, service, logger = console) {
       const action = String(body?.action ?? '')
       const payload = body?.payload && typeof body.payload === 'object' ? body.payload : {}
       const actor = { type: 'user', id: service.localUserId }
-      const data = await handleAction(service, action, payload, actor)
+      const data = await handleAction(service, action                  , payload, actor)
       return response(JSON.stringify({ ok: true, data }), 'application/json; charset=utf-8')
     } catch (error) {
       return errorResponse(error)

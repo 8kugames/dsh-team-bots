@@ -34,7 +34,7 @@ const CONFIG = resolveConfig({
   maxConcurrentRuns: 3,
 })
 
-class PreviewRuntime {
+class PreviewRuntime {                                                                                                                  
   constructor(service) {
     this.service = service
     this.models = [
@@ -126,7 +126,7 @@ async function main() {
         try {
           const data = await handleAction(service, body.action, body.payload ?? {}, { type: 'user', id: service.localUserId })
           return send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, data }))
-        } catch (error) {
+        } catch (error     ) {
           return send(res, error.status || 500, 'application/json; charset=utf-8', JSON.stringify({ ok: false, error: { code: error.code ?? 'INTERNAL', message: error.message } }))
         }
       }

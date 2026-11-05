@@ -12,7 +12,7 @@ function currentPrice(store, provider, model) {
 // 单条明细成本：输入侧（含缓存读写）+ 输出侧，按每百万 token 计价。
 // recordUsage 入库与事后追认共用同一公式，保证两条口径算出的金额一致。
 // 导出给 ./usage-reconcile.js 的 CSV 追认口径复用，避免两处各写一份公式。
-export function costForTokens(price, tokens = {}) {
+export function costForTokens(price, tokens = {}       ) {
   const input = Number(tokens.input ?? 0)
   const cacheRead = Number(tokens.cacheRead ?? 0)
   const cacheWrite = Number(tokens.cacheWrite ?? 0)
@@ -255,7 +255,7 @@ function zoneClock(ms, timeZone) {
     minute: '2-digit',
     second: '2-digit',
   })
-  const parts = {}
+  const parts      = {}
   for (const part of dtf.formatToParts(new Date(ms))) {
     if (part.type !== 'literal') parts[part.type] = part.value
   }
@@ -285,7 +285,7 @@ function zoneDay(ms, timeZone) {
 
 // 解析时间窗：today / 7d / 30d / all，非法键回退 30 日。
 // since 为 null 表示「至今」（没有下界）；dayCount 是日历面板要画的根数。
-export function resolveUsageWindow(key, options = {}) {
+export function resolveUsageWindow(key, options = {}       ) {
   const now = Number(options.now ?? Date.now())
   const timeZone = options.timeZone ?? USAGE_TIME_ZONE
   const wanted = USAGE_WINDOW_KEYS.includes(String(key)) ? String(key) : '30d'
@@ -568,7 +568,7 @@ const SNAPSHOT_CACHE_MAX = 8
 
 // 缓存按 store 分桶：测试里每个用例一个临时库，共用一张表会串味。
 const snapshotCaches = new WeakMap()
-const liveSnapshotCaches = new Set()
+const liveSnapshotCaches = new Set     ()
 
 function cacheFor(store) {
   let cache = snapshotCaches.get(store)
@@ -604,7 +604,7 @@ export function clearUsageSnapshotCache() {
   for (const cache of liveSnapshotCaches) cache.clear()
 }
 
-export function usageSnapshot(store, projectId, days = 30, options = {}) {
+export function usageSnapshot(store, projectId, days = 30, options = {}       ) {
   const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const soloBotId = options.soloBotId ?? null
   const ttl = Number.isFinite(options.cacheTtlMs) ? options.cacheTtlMs : SNAPSHOT_CACHE_TTL_MS
@@ -620,7 +620,7 @@ export function usageSnapshot(store, projectId, days = 30, options = {}) {
   return value
 }
 
-function computeUsageSnapshot(store, projectId, days = 30, options = {}) {
+function computeUsageSnapshot(store, projectId, days = 30, options = {}       ) {
   const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const soloBotId = options.soloBotId ?? null
   // 时间窗口径（DSHBOTS-121）：传 window 走四档窗口；不传时沿用旧的「近 N 天」滚动窗口。

@@ -28,7 +28,7 @@ function approvalUrgent(remainingMs) {
   return (Number(remainingMs) || 0) <= APPROVAL_URGENT_MS
 }
 // 从 epoch ms 反推剩余毫秒，供 1s 局部刷新复用（与后端 approvalView 同口径）。
-function approvalRemainingFrom(expiresMs, fallbackMs) {
+function approvalRemainingFrom(expiresMs, fallbackMs ) {
   const expires = Number(expiresMs)
   return Number.isFinite(expires) ? Math.max(0, expires - Date.now()) : (Number(fallbackMs) || 0)
 }
@@ -147,7 +147,7 @@ function questionExpiresMs(expiresAt) {
   const parsed = Date.parse(expiresAt)
   return Number.isFinite(parsed) ? parsed : 0
 }
-function questionRemainingFrom(expiresMs, fallbackMs) {
+function questionRemainingFrom(expiresMs, fallbackMs ) {
   const expires = Number(expiresMs)
   return Number.isFinite(expires) ? Math.max(0, expires - Date.now()) : (Number(fallbackMs) || 0)
 }

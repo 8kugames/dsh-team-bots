@@ -110,7 +110,7 @@ export const runsMethods = {
     } else {
       try {
         plan = deliveryPlan({ row: message, callerSessionBusy: this.runtime.sessionBusy(binding.session_id) })
-      } catch (error) {
+      } catch (error     ) {
         this.logger.warn?.('dsh-team: 私信 %s 投递计划失败：%s', message.id, error?.message ?? error)
         return null
       }
@@ -307,7 +307,7 @@ export const runsMethods = {
         chatMessage,
         sessionKind,
       })
-    } catch (error) {
+    } catch (error     ) {
       this.logger.warn?.('dsh-team: run %s failed to start: %s', runId, error)
       this.fingerprints.delete(runId)
       await this.finishRun({

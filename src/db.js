@@ -478,7 +478,7 @@ export function openDatabase(path) {
 }
 
 export class Store {
-  constructor(db, options = {}) {
+  constructor(db, options = {}       ) {
     this.db = db
     this.ftsEnabled = options.ftsEnabled === true
   }

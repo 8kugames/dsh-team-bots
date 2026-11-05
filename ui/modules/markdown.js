@@ -70,7 +70,7 @@ function mdCreateRenderer(deps) {
 }
 // markdown-render:end
 
-// 真实依赖来自 vendor 脚本（见 index.html）；缺席时 mdRender 为 null，richText 走纯文本兜底。
+// @ts-ignore 真实依赖来自 vendor 脚本（见 index.html）；缺席时 mdRender 为 null，richText 走纯文本兜底。
 const mdRender = mdCreateRenderer({ marked: window.marked, DOMPurify: window.DOMPurify })
 export function richText(value, scope) {
   if (mdRender) return mdRender(value, scope)

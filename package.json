@@ -19,8 +19,10 @@
   "files": [
     "index.js",
     "src/",
+    "!src/**/*.ts",
     "scripts/doctor.mjs",
     "ui/",
+    "!ui/**/*.ts",
     "vendor/",
     "cordis.patch.yml",
     "README.md",
@@ -30,10 +32,20 @@
     "NOTICE",
     "LICENSE"
   ],
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "6.0.3"
+  },
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "pretest": "npm run build",
     "test": "node --test \"tests/*.test.js\"",
+    "predev": "npm run build",
     "dev": "node scripts/dev-server.js",
+    "prestart": "npm run build",
     "start": "node scripts/dev-server.js",
+    "prepack": "npm run build",
     "doctor": "node scripts/doctor.mjs",
     "profile:install": "node scripts/install-profile.mjs",
     "verify:agent-team": "node scripts/verify-agent-team.mjs",

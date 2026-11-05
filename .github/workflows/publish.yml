@@ -25,6 +25,7 @@ jobs:
           else
             npm install --no-save
           fi
+      - run: npm run typecheck
       - run: npm test
       - run: npm publish
         env:

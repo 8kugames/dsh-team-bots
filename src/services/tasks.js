@@ -243,12 +243,12 @@ export const tasksMethods = {
   },
   // options.startTriggerType：进入「进行中」时给运行用的触发类型标签（看板拖拽沿用 D-54 的 board_resume，
   // 其余路径默认 task_started）。只影响运行元数据与幂等键，不影响行为口径。
-  async updateTask(taskId, patch, actor = this.actor(), options = {}) {
+  async updateTask(taskId, patch, actor = this.actor(), options = {}       ) {
     const task = this.taskRow(taskId)
     if (patch.version !== undefined && Number(patch.version) !== Number(task.version)) {
       throw conflict('任务已被其他人更新，请刷新后重试')
     }
-    const updates = {}
+    const updates      = {}
     if (patch.title !== undefined) {
       const title = text(patch.title, 240)
       if (!title) throw badRequest('任务标题不能为空')
@@ -379,7 +379,7 @@ export const tasksMethods = {
   },
   // sandboxOverride 选项（DSHBOTS-156）：undefined=不动（重派未传 sandbox 时保留旧覆盖）；
   // null=显式清掉回落 bot 配置档（重派传 sandbox='inherit'）；字符串=收紧档（派发入口已校验）。
-  async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride } = {}) {
+  async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride } = {}       ) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
     this.assertMember(project.id, botId)

@@ -76,8 +76,8 @@ const HOST_NESTED_REJECTION = /^HMR transactions cannot be nested$/
 // 超时错误单独标记，便于与业务失败区分（超时不再重试：重试只会再排一次队）。
 // cause 保留最后一次真实失败原因：超时/预算耗尽只是「没等到」，不是失败本身，
 // 审计与 warn 必须同时看得见真正的业务错误。
-class RestoreTimeoutError extends Error {
-  constructor(ms, cause) {
+class RestoreTimeoutError extends Error {                           
+  constructor(ms, cause ) {
     const detail = describeCause(cause)
     super(`restore default model timed out after ${ms}ms${detail ? ` (last error: ${detail})` : ''}`)
     this.name = 'RestoreTimeoutError'
@@ -130,7 +130,7 @@ const withTimeout = async (fn, waitMs, onLate) => {
 // 返回是否恢复成功。失败必须可见：重试穷尽后 warn 一次并写审计 model_restore_failed，
 // 审计自身异常只 warn，不把失败抛回 selectModel 的串行链。
 // hooks.hmr：宿主 HMR 服务实例（ctx.get('hmr')），用于拿到 executing 做事务逃逸。
-export async function restoreDefaultModel(defaults, before, hooks = {}) {
+export async function restoreDefaultModel(defaults, before, hooks = {}       ) {
   const {
     logger,
     audit,
@@ -216,7 +216,7 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
         logger?.debug?.('dsh-team: restore default model ok via %s', escape)
       } catch {}
       return true
-    } catch (error) {
+    } catch (error     ) {
       lastError = error
       if (error instanceof RestoreTimeoutError) {
         // 调用排在宿主事务队列尾且迟迟不落地：重试只会再排一次队，直接收口。
@@ -266,7 +266,7 @@ export async function restoreDefaultModel(defaults, before, hooks = {}) {
       ...(budgetExhausted ? { budgetExhausted: true } : {}),
       ...(cause ? { cause } : {}),
     })
-  } catch (error) {
+  } catch (error     ) {
     try {
       logger?.warn?.('dsh-team: model restore audit failed: %s', error)
     } catch {}

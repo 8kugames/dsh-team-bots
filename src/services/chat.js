@@ -391,7 +391,7 @@ export const chatMethods = {
   // 定位聊天消息里 markdown 图片引用的工作区文件：只认项目工作目录或单聊 Bot
   // 工作区内的白名单图片，路径解析 + realpath 双重防穿越（与 artifactFile 同口径）。
   // SVG 可执行脚本，永不放行；尺寸上限由 HTTP 层把关（MAX_CHAT_IMAGE_BYTES）。
-  chatFile({ projectId, soloBotId, path } = {}) {
+  chatFile({ projectId, soloBotId, path } = {}       ) {
     const CHAT_IMAGE_TYPES = {
       '.png': 'image/png',
       '.jpg': 'image/jpeg',

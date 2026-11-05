@@ -29,7 +29,7 @@ http://<host>:<port>/index.html           DSH 原生 Web UI
 
 ## 配置要点
 
-真正要紧的两个路径是 `DSH_TEAM_WORKSPACE`（团队工作区根目录，缺省 `~/.dsh/workspace/team-bots`）和 `DSH_TEAM_DATA`（团队数据库与 run 记录，缺省 `<workspace>/.data`）；其余变量、缺省值和解析顺序（显式 env > 页面保存值 > 代码缺省）都在 `src/config.js`。
+真正要紧的两个路径是 `DSH_TEAM_WORKSPACE`（团队工作区根目录，缺省 `~/.dsh/workspace/team-bots`）和 `DSH_TEAM_DATA`（团队数据库与 run 记录，缺省 `<workspace>/.data`）；其余变量、缺省值和解析顺序（显式 env > 页面保存值 > 代码缺省）都在 `src/config.ts`。
 
 `DSH_TEAM_DATA` 下的数据包括 `team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/`、`messages/` 和 `secrets-runtime/`（TTL 到期即焚）。备份时请把 `secret.key` 一起带走 —— 没有它，已有的密文永远解不开。
 

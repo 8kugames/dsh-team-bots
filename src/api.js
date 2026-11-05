@@ -1,7 +1,7 @@
 import { AppError } from './errors.js'
 import { exportUsageCsv } from './usage-reconcile.js'
 
-const ACTIONS = new Set([
+const ACTIONS                      = new Set([
   'health', 'state', 'messages_page', 'models', 'bot_detail',
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot', 'remove_bot_tracking',
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
@@ -22,7 +22,7 @@ const ACTIONS = new Set([
   'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
 
-export async function handleAction(service, action, payload = {}, actor) {
+export async function handleAction(service, action                , payload                    = {}, actor) {
   if (!ACTIONS.has(action)) throw new AppError('UNKNOWN_ACTION', `未知操作 ${action}`, 404)
   switch (action) {
     case 'health':
@@ -241,7 +241,7 @@ export async function handleAction(service, action, payload = {}, actor) {
   }
 }
 
-function required(value, name) {
+function required   (value   , name        )                 {
   if (value === undefined || value === null || String(value).trim() === '') {
     throw new AppError('BAD_REQUEST', `缺少参数 ${name}`, 400)
   }

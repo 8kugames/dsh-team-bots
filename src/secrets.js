@@ -54,7 +54,7 @@ export function isShellIdentifier(name) {
 export class SecretBox {
   #key
 
-  constructor({ keyFile, keyHex, requireExisting = false } = {}) {
+  constructor({ keyFile, keyHex, requireExisting = false } = {}       ) {
     if (keyHex !== undefined) {
       this.#key = decodeKeyHex(keyHex, 'keyHex')
     } else if (keyFile !== undefined) {
@@ -89,7 +89,7 @@ export class SecretBox {
       const decipher = createDecipheriv('aes-256-gcm', this.#key, Buffer.from(String(valueIv), 'base64'))
       decipher.setAuthTag(Buffer.from(String(valueTag), 'base64'))
       return Buffer.concat([decipher.update(Buffer.from(String(valueEnc), 'base64')), decipher.final()]).toString('utf8')
-    } catch (error) {
+    } catch (error     ) {
       throw new Error(`解密失败（密文或认证标签不匹配）: ${error.message}`)
     }
   }
@@ -185,7 +185,7 @@ async function ensureGitignore(workspaceDir) {
   let current = null
   try {
     current = await readFile(gitignorePath, 'utf8')
-  } catch (error) {
+  } catch (error     ) {
     if (error?.code !== 'ENOENT') throw error
   }
   if (current !== null && current.split(/\r?\n/).some(line => GITIGNORE_TEAM_FORMS.has(line.trim()))) return

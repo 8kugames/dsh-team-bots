@@ -52,7 +52,7 @@ export function ensureQuestionSchema(store) {
 // 问题条目清洗：文案统一过密钥掩码（会进群聊与 bot 可见范围），并夹取长度防单条撑爆卡片。
 // intent 只保留 plan-review 的展示字段；未知 intent 一律按通用选项列表渲染（协议允许）。
 function cleanQuestionItem(item) {
-  const cleaned = {
+  const cleaned      = {
     id: String(item?.id ?? '').slice(0, 100),
     question: textValue(item?.question, 4_000),
   }
@@ -60,7 +60,7 @@ function cleanQuestionItem(item) {
   if (item?.header) cleaned.header = textValue(item.header, 200)
   if (Array.isArray(item?.options)) {
     cleaned.options = item.options.slice(0, 20).map(option => {
-      const row = { label: textValue(option?.label, 200) }
+      const row      = { label: textValue(option?.label, 200) }
       if (option?.description) row.description = textValue(option.description, 1_000)
       return row
     })
@@ -239,7 +239,7 @@ export const questionsMethods = {
       const accepted = await userQuestions.answer(agent, callId, hostAnswer)
       if (accepted !== true) throw new Error('question no longer answerable at host')
       this.audit({ type: 'system', id: 'system' }, 'question.steer', 'question', questionId, { callId })
-    } catch (error) {
+    } catch (error     ) {
       this.audit({ type: 'system', id: 'system' }, 'question.steer_failed', 'question', questionId, {
         callId,
         reason: error?.message ?? String(error),
@@ -263,7 +263,7 @@ export const questionsMethods = {
         .map(item => [String(item?.id), item]),
     )
     const answers = items.map(item => {
-      const answer = given.get(String(item.id))
+      const answer = given.get(String(item.id))       
       const selected = (Array.isArray(answer?.selected) ? answer.selected : [])
         .map(value => String(value)).filter(Boolean).slice(0, 20)
       const custom = answer?.custom ? String(answer.custom).slice(0, 2_000) : undefined

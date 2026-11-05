@@ -29,7 +29,7 @@ const USAGE = `用法：node scripts/backup.mjs [选项]
 成功后向 stdout 打印一份 JSON 摘要；失败时把原因打到 stderr 并以退出码 1 结束。`
 
 function parseArgs(argv) {
-  const args = {}
+  const args                                   = {}
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]
     if (!token.startsWith('--')) continue

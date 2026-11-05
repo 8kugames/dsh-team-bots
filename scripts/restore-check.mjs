@@ -22,7 +22,7 @@ const USAGE = `用法：node scripts/restore-check.mjs [选项]
 清单与备份不一致即视为演练失败；与生产库的差异只报告、不判失败。`
 
 function parseArgs(argv) {
-  const args = {}
+  const args                                   = {}
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]
     if (!token.startsWith('--')) continue

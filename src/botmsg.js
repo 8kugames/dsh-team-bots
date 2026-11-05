@@ -45,7 +45,7 @@ function describeHit(row, body) {
 }
 
 // 幂等写入：UNIQUE(project_id, from_bot_id, request_id) 命中时返回现有行且不覆盖任何字段。
-export function upsertBotMessage(store, { projectId, fromBotId, toBotId, requestId, text, originSessionId = null, originKind = null, originTaskId = null, now }) {
+export function upsertBotMessage(store, { projectId, fromBotId, toBotId, requestId, text, originSessionId = null, originKind = null, originTaskId = null, now }     ) {
   const safeRequestId = sanitizeRequestId(requestId)
   if (String(text ?? '').trim() === '') throw new Error('text is required')
   const body = truncateText(text)

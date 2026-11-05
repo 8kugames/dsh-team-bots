@@ -29,7 +29,7 @@ function isHumanRun(run) {
 //   - 只读运行（mode ≠ 'write'）不占写槽。
 //   - 非任务运行（chat/dm/dm_reply 等）不绑任务，按运行自身判定，照旧占槽。
 //   - 任务运行（kind = 'task'）只有任务 status = 'in_progress' 时才占槽；任务不在进行中即视为已释放。
-export function runHoldsWriteLock({ kind, mode, taskStatus } = {}) {
+export function runHoldsWriteLock({ kind, mode, taskStatus } = {}       ) {
   if (mode !== 'write') return false
   if (kind !== 'task') return true
   return taskStatus === 'in_progress'
@@ -95,7 +95,7 @@ export const schedulerMethods = {
         nowIso(), row.id,
       )
       return result
-    } catch (error) {
+    } catch (error     ) {
       if (error?.defer === true) {
         this.store.run(
           `UPDATE outbox SET status = 'pending', available_at = ?, last_error = ? WHERE id = ?`,
@@ -183,7 +183,7 @@ export const schedulerMethods = {
       if (!task || task.status !== 'in_review') return null
       try {
         return this.spawnReviewDelegate(task, { actor: { type: 'system', id: 'system' }, origin: 'auto' }).runId
-      } catch (error) {
+      } catch (error     ) {
         const exhausted = Number(row.attempts ?? 0) >= 3
         this.audit({ type: 'system', id: 'system' }, 'review.auto_delegate_retry', 'task', task.id, {
           attempt: Number(row.attempts ?? 0) + 1,
@@ -283,7 +283,7 @@ export const schedulerMethods = {
       this.logger.warn?.('dsh-team: run %s made no progress since %s', run.id, run.last_progress_at ?? run.started_at)
       try {
         await this.runtime?.cancelRun?.(run.id)
-      } catch (error) {
+      } catch (error     ) {
         this.logger.warn?.('dsh-team: cancel stalled run %s failed: %s', run.id, error)
       }
       await this.finishRun({
@@ -349,7 +349,7 @@ export const schedulerMethods = {
           id('evt'), run.id, 'plan_retry',
           `限流重试到期，派生新运行 ${runId}（attempt ${(run.attempt ?? 1) + 1}）`, createdAt,
         )
-      } catch (error) {
+      } catch (error     ) {
         // idempotency_key UNIQUE 撞车 = 另一个 tick 已派生过，跳过即可。
         if (String(error).includes('UNIQUE')) continue
         throw error
@@ -558,7 +558,7 @@ export const schedulerMethods = {
         }
         void this.executeRun(run.id)
       }
-    } catch (error) {
+    } catch (error     ) {
       this.logger.error?.('dsh-team: scheduler tick failed: %s', error)
     } finally {
       this.ticking = false

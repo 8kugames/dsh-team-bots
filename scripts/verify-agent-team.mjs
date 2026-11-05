@@ -30,7 +30,7 @@ function readProfile() {
   }
   try {
     return JSON.parse(readFileSync(PACKAGE_FILE, 'utf8'))
-  } catch (error) {
+  } catch (error     ) {
     bad(`profile package.json is not valid JSON: ${error.message}`)
     return null
   }
@@ -43,7 +43,7 @@ function dumpConfig() {
       timeout: 60_000,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-  } catch (error) {
+  } catch (error     ) {
     bad(`dsh --dump-config failed: ${error.message}`)
     return ''
   }

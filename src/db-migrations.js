@@ -270,7 +270,7 @@ function migrateSoloDirUnique(db) {
   if (!columnsOf(db, 'bots').includes('solo_dir')) return
   try {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS bots_solo_dir_unique ON bots(solo_dir) WHERE solo_dir IS NOT NULL')
-  } catch (error) {
+  } catch (error     ) {
     console.warn(`dsh-team: 单聊目录存在重复，bots.solo_dir 唯一索引未创建：${error.message}`)
   }
 }
@@ -293,7 +293,7 @@ function rebuildTable(db, name, createSql) {
     db.exec(`DROP TABLE ${name}`)
     db.exec(`ALTER TABLE ${name}_new RENAME TO ${name}`)
     db.exec('COMMIT')
-  } catch (error) {
+  } catch (error     ) {
     try { db.exec('ROLLBACK') } catch {}
     throw error
   } finally {

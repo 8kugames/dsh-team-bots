@@ -240,6 +240,9 @@ test('reason 与 displayReason 落库前过密钥掩码', async () => {
 
 test('state 视图带 approvals，审批消息不进 bot 上下文', async () => {
   const { root, store, service } = await setup()
+  // 断言前要 await state()（会让出事件循环）；setup 的 60ms 审批超时在并行跑满时会先触发，
+  // 让 pending 变 timeout。这是计时口径问题，单独放宽本用例的等待窗口。
+  service.config.approvalTimeoutMs = 5_000
   try {
     const project = await primeProject(store, service, 'Approval View')
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")

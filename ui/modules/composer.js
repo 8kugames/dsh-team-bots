@@ -82,7 +82,7 @@ function acSources() {
 }
 
 function updateAutocomplete() {
-  const input = document.getElementById('composer-input')
+  const input = document.getElementById('composer-input')                    
   const popup = document.getElementById('composer-ac')
   if (!input || !popup) { state.ac = null; return }
   const token = input === document.activeElement ? detectAcToken(input.value, input.selectionStart) : null
@@ -131,7 +131,7 @@ function closeAutocomplete() {
 }
 
 function applyAutocomplete(item) {
-  const input = document.getElementById('composer-input')
+  const input = document.getElementById('composer-input')                    
   if (!input || !item || !state.ac) return
   const { from, to } = state.ac
   input.value = input.value.slice(0, from) + item.insert + input.value.slice(to)
@@ -182,7 +182,7 @@ function validateImageSelection(files, existingCount = 0) {
   const accepted = []
   const rejected = []
   let count = Number(existingCount) || 0
-  for (const file of Array.from(files ?? [])) {
+  for (const file of Array.from(files ?? [])          ) {
     const name = file?.name ?? ''
     const mediaType = resolveImageMediaType(file?.type, name)
     if (!mediaType) {
@@ -326,7 +326,7 @@ function thumbnailFallback(name, iconHtml, doc = document) {
 // change 落在已脱离 document 的旧节点上，document 级委托收不到（DSHBOTS-64 根因）。
 // 挂在 body 上只建一次，任何重渲染都动不了它，change 始终能冒泡到委托层。
 function ensureComposerImageInput(doc = document) {
-  let el = doc.getElementById('composer-image-input')
+  let el = doc.getElementById('composer-image-input')                           
   if (el) return el
   el = doc.createElement('input')
   el.id = 'composer-image-input'
@@ -424,7 +424,7 @@ function renderMessageImages(images) {
 // 渲染后补缩略图：模板已同步嵌缓存命中者，这里只处理未命中的瓦片——异步取图并原位替换图标占位；
 // 取图失败保留占位（瓦片仍可点击，报错交给查看器路径兜底）。
 async function hydrateMessageImageThumbs(root = document) {
-  const tiles = Array.from(root.querySelectorAll('.msg-image-tile[data-image-id]'))
+  const tiles = Array.from(root.querySelectorAll('.msg-image-tile[data-image-id]')                           )
   await Promise.all(tiles.filter(tile => !tile.querySelector('.msg-image-thumb')).map(async tile => {
     const imageId = tile.dataset.imageId
     if (!imageId) return
@@ -481,7 +481,7 @@ async function openMessageImage(imageId) {
     img.alt = image.name || '图片'
     img.src = base64BlobUrl(image.data, image.mediaType)
     body.appendChild(img)
-  } catch (error) {
+  } catch (error     ) {
     body.textContent = error?.message || '图片加载失败'
   }
 }
@@ -489,7 +489,7 @@ async function openMessageImage(imageId) {
 function closeImageViewer() {
   const viewer = document.getElementById('image-viewer')
   if (!viewer || viewer.hidden) return
-  const img = viewer.querySelector('.image-viewer-img')
+  const img = viewer.querySelector('.image-viewer-img')                           
   if (img?.src) {
     try { URL.revokeObjectURL(img.src) } catch {}
     img.removeAttribute('src')
@@ -559,7 +559,7 @@ function applyComposerHeight(input) {
 function syncComposerBox(input) {
   state.chatDrafts[draftKey(state)] = input.value
   applyComposerHeight(input)
-  const button = document.querySelector('[data-action="send-message"]')
+  const button = document.querySelector('[data-action="send-message"]')                            
   if (button) button.disabled = input.value.trim() === '' && pendingImagesFor().length === 0
 }
 
@@ -645,7 +645,7 @@ async function sendMessage() {
 }
 
 async function saveTaskFromForm(taskId) {
-  const form = document.getElementById('task-form')
+  const form = document.getElementById('task-form')                   
   if (!form) throw new Error('保存失败，请重试。')
   const formData = new FormData(form)
   const assignee = formData.get('assigneeBotId')

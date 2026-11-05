@@ -143,7 +143,7 @@ async function renderDirPicker(inputId, path) {
   let error = ''
   try {
     data = await api('browse_dirs', { path }, { quiet: true })
-  } catch (err) {
+  } catch (err     ) {
     error = err?.message || String(err)
   }
   const current = data?.path ?? path ?? ''
@@ -560,7 +560,7 @@ function defaultPriceFor(model) {
   return priceDefaults().find(item => item.model.toLowerCase() === key)
 }
 
-function modalPrice(seed = {}) {
+function modalPrice(seed                    = {}) {
   const editing = Boolean(seed.model)
   const catalogModels = (state.data?.models ?? []).map(item => item.model)
   const knownModels = [...new Set([...catalogModels, ...priceDefaults().map(item => item.model)])]
@@ -647,15 +647,15 @@ let lastFocused = null
 
 function focusableItems(root) {
   if (!root) return []
-  return Array.from(root.querySelectorAll(FOCUSABLE))
+  return Array.from(root.querySelectorAll(FOCUSABLE)                           )
     .filter(el => el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement)
 }
 
 function focusModal() {
-  const modal = document.querySelector('.modal')
+  const modal = document.querySelector('.modal')                      
   if (!modal) return
   const body = modal.querySelector('.modal-body')
-  const preferred = body?.querySelector('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])')
+  const preferred = body?.querySelector('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])')                      
   const items = focusableItems(modal)
   ;(preferred ?? items[0] ?? modal).focus()
 }
@@ -667,7 +667,7 @@ function restoreFocus() {
 }
 
 function trapModalFocus(event) {
-  const modal = document.querySelector('.modal')
+  const modal = document.querySelector('.modal')                      
   if (!modal) return false
   const items = focusableItems(modal)
   if (items.length === 0) {
@@ -738,7 +738,7 @@ async function openTrajectory(runId) {
     if (state.modal?.type !== 'trajectory') return
     state.modal = { type: 'trajectory', detail, runId }
     renderModalLayer()
-  } catch (error) {
+  } catch (error     ) {
     closeModal()
     toast(error?.message || '读取思考过程失败', 'error')
   }
@@ -765,14 +765,14 @@ async function reloadTaskModal(taskId) {
 }
 
 function bindProposalForm() {
-  const kind = document.querySelector('[data-proposal-kind]')
+  const kind = document.querySelector('[data-proposal-kind]')                           
   if (!kind) return
   const apply = () => {
     const value = kind.value
-    document.querySelectorAll('[data-section]').forEach(section => {
+    document.querySelectorAll             ('[data-section]').forEach(section => {
       section.style.display = section.dataset.section === value ? '' : 'none'
     })
-    const botField = document.querySelector('[data-field="bot"]')
+    const botField = document.querySelector('[data-field="bot"]')                      
     if (botField) botField.style.display = value === 'bot_update' ? '' : 'none'
   }
   kind.addEventListener('change', apply)

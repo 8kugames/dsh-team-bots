@@ -23,13 +23,13 @@ async function refreshAfterTask(taskId) {
 document.addEventListener('click', async (event) => {
   // 正文内嵌图（markdown <img>）没有 data-action：先于动作委托拦截，点击直接放大；
   // 附图缩略图在 .message-bubble 外，不受此分支影响，仍走 view-message-image 进查看器。
-  const bubbleImg = event.target.closest?.('.message-bubble img')
+  const bubbleImg = (event.target       ).closest?.('.message-bubble img')
   if (bubbleImg) {
     event.preventDefault()
     openInlineImage(bubbleImg)
     return
   }
-  const target = event.target.closest('[data-action]')
+  const target = (event.target       ).closest('[data-action]')
   if (!target) return
   const action = target.dataset.action
   if (action === 'modal-backdrop') {
@@ -64,7 +64,7 @@ document.addEventListener('click', async (event) => {
           const updated = await api('approval_decide', { approvalId, decision }, { quiet: true })
           if (updated && index >= 0) list[index] = updated
           else if (updated) list.push(updated)
-        } catch (error) {
+        } catch (error     ) {
           // 回滚到决策前状态，避免「界面已决、后端仍 pending」的假成功。
           if (previous && index >= 0) list[index] = previous
           const rollback = state.data?.pendingApprovals
@@ -149,7 +149,7 @@ document.addEventListener('click', async (event) => {
           if (updated && index >= 0) list[index] = updated
           else if (updated) list.push(updated)
           state.questionDraft.delete(questionId)
-        } catch (error) {
+        } catch (error     ) {
           // 回滚到提交前状态，避免「界面已答、后端仍 pending」的假成功。
           if (previous && index >= 0) list[index] = previous
           const rollback = state.data?.pendingQuestions
@@ -237,8 +237,8 @@ document.addEventListener('click', async (event) => {
         }
         break
       }
-      case 'pick-dir-open': {
-        const input = document.getElementById(target.dataset.pickerFor)
+       case 'pick-dir-open': {
+         const input = document.getElementById(target.dataset.pickerFor)                           
         const current = input?.value?.trim() ?? ''
         await renderDirPicker(target.dataset.pickerFor, current.startsWith('/') ? current : '')
         break
@@ -257,8 +257,8 @@ document.addEventListener('click', async (event) => {
         await renderDirPicker(target.dataset.pickerFor, '')
         break
       }
-      case 'pick-dir-choose': {
-        const input = document.getElementById(target.dataset.pickerFor)
+       case 'pick-dir-choose': {
+         const input = document.getElementById(target.dataset.pickerFor)                           
         if (input && target.dataset.path) {
           input.value = target.dataset.path
           // 程序赋值不触发 input 事件，手动把所属表单标记为未保存，暂停自动刷新直到保存。
@@ -339,7 +339,7 @@ document.addEventListener('click', async (event) => {
       case 'remove-tracking-step2': {
         if (state.modal?.type !== 'remove-tracking') break
         // 复选框状态在翻页时读取一次：第二步的确认文案与最终提交都以此为准。
-        state.modal.purge = document.getElementById('remove-tracking-purge')?.checked === true
+        state.modal.purge = (document.getElementById('remove-tracking-purge')                           )?.checked === true
         state.modal.step = 2
         // 弹窗层只认 renderModalLayer 直调：modal 打开期间整页渲染被 D-98 遮罩闸门
         // 拦截（app.js 只记 pending 不碰 #modal-root），误走整页路径会让翻页零响应（DSHBOTS-192）。
@@ -375,7 +375,7 @@ document.addEventListener('click', async (event) => {
       case 'bot-remove-tracking-confirm': {
         if (state.modal?.type !== 'bot-remove-tracking') break
         const botId = state.modal.botId
-        const confirmName = document.getElementById('remove-tracking-name')?.value ?? ''
+        const confirmName = (document.getElementById('remove-tracking-name')                           )?.value ?? ''
         await api('remove_bot_tracking', { botId, confirmName })
         closeModal()
         // 正停在该 Bot 的单聊/配置页时回到群聊，避免引用已移除的 Bot；
@@ -399,7 +399,7 @@ document.addEventListener('click', async (event) => {
           await api('transition_task', { taskId, status: 'backlog' }, { quiet: true })
           await refreshAfterTask(taskId)
           toast(t('task.rejectDone'), 'success')
-        } catch (error) {
+        } catch (error     ) {
           toast(error.message || String(error), 'error')
         }
         break
@@ -450,12 +450,12 @@ document.addEventListener('click', async (event) => {
       case 'update-scopes': {
         // 保存走 task_update_scopes（DSHBOTS-151/155）：归一、终态/running 拒改、queued 快照同步都在
         // 服务端裁决，失败文案（如「先等运行结束或取消」）原样透传给用户。
-        const scopes = (document.getElementById('task-write-scopes')?.value ?? '').split(/[,，、\s]+/).filter(Boolean)
+        const scopes = ((document.getElementById('task-write-scopes')                           )?.value ?? '').split(/[,，、\s]+/).filter(Boolean)
         try {
           await api('task_update_scopes', { taskId: target.dataset.taskId, write_scopes: scopes }, { quiet: true })
           await refreshAfterTask(target.dataset.taskId)
           toast('写范围已更新', 'success')
-        } catch (error) {
+        } catch (error     ) {
           toast(error.message || String(error), 'error')
         }
         break
@@ -597,7 +597,7 @@ document.addEventListener('click', async (event) => {
       }
       case 'terminal-fill': {
         state.terminalDraft = target.dataset.command ?? ''
-        const cmdInput = document.getElementById('terminal-cmd-input')
+        const cmdInput = document.getElementById('terminal-cmd-input')                           
         if (cmdInput && !cmdInput.disabled) {
           cmdInput.value = state.terminalDraft
           cmdInput.focus()
@@ -607,7 +607,7 @@ document.addEventListener('click', async (event) => {
       default:
         break
     }
-  } catch (error) {
+  } catch (error     ) {
     toast(error.message || String(error), 'error')
   }
 })
