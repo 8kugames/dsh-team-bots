@@ -569,6 +569,17 @@ This task is urgent and exempt from lane queuing discipline: start immediately, 
 # Subtask discipline
 Before closing: if this task cannot be finished in one run (e.g. quota-capped partial delivery) or new closing conditions emerge (test gaps, coupled fixes, later productization), immediately file subtasks via team_assign_task with parent_task_id and report in the group — never leave follow-ups as verbal suggestions without cards. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.`
       // subtask-discipline:end
+      // splitting-guidance:start —— 提速拆分引导（DSHBOTS-212）。根因调查结论：此前唯一讲并行拆分
+      // 的段（下方 parallel）被 config.agentTeam 默认关闭，纪律段只覆盖「做不完再兜底立卡」，
+      // 执行 bot 又无派单权限（team_assign_task 仅总监可用），三条叠加导致拆分使用率为零。
+      // 本段补齐「何时拆、怎么拆」：拆分判据（独立部分 + 写范围不相交 + 拆后合并成本更低，
+      // 即 C_removed > C_introduced 的白话口径）+ 角色现实（无权限就在交付报告里提拆分方案）。
+      // 静态段（不随卡变化）：与纪律段同为全局前缀，置于 # Assigned task 之前，护住前缀缓存。
+      const splittingGuidanceBlock = `
+
+# Splitting for speed
+Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery (each card re-reads context; per-task usage shows the extra input and cache tokens). One card per part: team_assign_task with parent_task_id set to this task, disjoint write_scopes, blocked_by where order matters. Not the project owner? Propose the split in your delivery report (per-part title and scopes) instead of calling dispatch tools you lack. Example: "implement API + write its docs" splits into an API card (write_scopes: src/api/) and a docs card (write_scopes: docs/), both parented here, run concurrently.`
+      // splitting-guidance:end
       // recovery note（DSHBOTS-135）：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
       // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
       // 本段只在重排队后的第一次执行出现。与时效段（D-125）、豁免段（D-126）、纪律段（D-132）互不干扰。
@@ -584,7 +595,7 @@ The previous run was interrupted by a host restart. Check the workspace and git 
 - Record every part on the shared task board with team_task_create and a disjoint write_scope. Never let two members edit the same path.
 - Before delivering: list_agents, then wait_agent until nothing is running, then merge their results into your report.
 - The checkout is shared and unlocked. If a teammate reports a conflicting edit, resolve it yourself instead of retrying blindly.` : ''
-      return `${header}${subtaskDisciplineBlock}
+      return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}
 
 Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
 When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.${parallel}

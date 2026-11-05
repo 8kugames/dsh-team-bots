@@ -181,6 +181,79 @@ test('注入指令段恒英文守门：纪律/豁免/恢复/时效段无中文�
   }
 })
 
+test('提速拆分引导段（D-212）：固定任务集渲染——判据/角色现实/示例齐全，恒英文，段序守门', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await seedProject(ctx.service, ctx.store)
+    const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
+    const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
+    const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
+    const actor = ctx.service.actor()
+    // 固定任务集（对照纪律）：与既有用例同一组 fixture（普通卡 / urgent 限时卡 / 群聊运行），
+    // 提示词变更必须在这组固定输入上重放断言，防段落漂移与互相挤占。
+    const plain = await ctx.service.createTask({ projectId: project.id, title: '普通任务', writeScopes: ['src/a.js'] }, actor)
+    const urgent = await ctx.service.createTask(
+      { projectId: project.id, title: '紧急限时任务', priority: 'urgent', time_budget_minutes: 30, writeScopes: ['src/b.js'] },
+      actor,
+    )
+    const promptOf = (row) => runtime.promptFor({ run: { kind: 'task' }, bot: botRow, project: projectRow, task: rowOf(ctx.store, row.id) })
+
+    const plainPrompt = promptOf(plain)
+    assert.match(plainPrompt, /# Splitting for speed/, '所有任务卡都应注入提速拆分引导段')
+    // 段序守门：纪律段 → 拆分引导段 → 任务卡字段块（两段皆静态前缀，先于 # Assigned task）。
+    const disciplineAt = plainPrompt.indexOf('# Subtask discipline')
+    const splittingAt = plainPrompt.indexOf('# Splitting for speed')
+    const assignedAt = plainPrompt.indexOf('# Assigned task')
+    assert.ok(disciplineAt >= 0 && splittingAt > disciplineAt && assignedAt > splittingAt,
+      '段序应为 Subtask discipline → Splitting for speed → Assigned task')
+
+    // 判据：独立部分 + 写范围不相交 + 拆后合并成本更低（C_removed > C_introduced 的白话口径）。
+    assert.match(plainPrompt, /2\+ independent parts/, '应给出「两个以上独立部分」判据')
+    assert.match(plainPrompt, /disjoint write scopes/, '应给出写范围不相交判据')
+    assert.match(plainPrompt, /joined cost of split cards stays below one-run delivery/, '应给出拆分划算成本判据')
+    // 怎么拆：parent_task_id + 不相交 write_scopes + blocked_by 次序。
+    assert.match(plainPrompt, /team_assign_task[\s\S]*parent_task_id/, '应指示 team_assign_task 传 parent_task_id')
+    assert.match(plainPrompt, /blocked_by where order matters/, '应提示依赖次序用 blocked_by')
+    // 角色现实（根因之一：执行 bot 无派单权限）：无权限时改为在交付报告里提拆分方案。
+    assert.match(plainPrompt, /Not the project owner\?/, '应区分无派单权限的角色路径')
+    assert.match(plainPrompt, /Propose the split in your delivery report/, '无权限角色应在报告里提议拆分')
+    // 示例在场。
+    assert.match(plainPrompt, /src\/api\//, '示例应含具体写范围')
+    assert.match(plainPrompt, /run concurrently/, '示例应说明并行收益')
+
+    // 恒英文 + 词数上限（与纪律段同款守门）。
+    const m = plainPrompt.match(/# Splitting for speed\n([\s\S]*?)(?=\n\nDo the task|\n\n# )/)
+    assert.ok(m, '拆分引导段应可整段抽取')
+    assert.ok(!/[\u4e00-\u9fff]/.test(m[1]), '拆分引导段正文必须恒英文')
+    const words = m[1].trim().split(/\s+/).length
+    assert.ok(words <= 140, `拆分引导段词数上限 140（实测 ${words}）`)
+
+    // 对照组 1：urgent 限时卡三段并存互不挤占。
+    const urgentPrompt = promptOf(urgent)
+    for (const marker of ['# Time budget', '# Urgent exemption', '# Subtask discipline', '# Splitting for speed']) {
+      assert.ok(urgentPrompt.includes(marker), `urgent 卡应同时含 ${marker}`)
+    }
+    // 对照组 2：非任务运行零注入。
+    const chatPrompt = runtime.promptFor({
+      run: { kind: 'chat' }, bot: botRow, project: projectRow, task: null,
+      chatMessage: { id: 'msg-x', body: '在吗' },
+    })
+    assert.ok(!chatPrompt.includes('# Splitting for speed'), '群聊运行不得注入拆分引导段')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('工具 schema 契约：parent_task_id 描述含提速拆分语义（D-212 根因修复之一）', () => {
+  const tools = []
+  installTeamTools({ tools: { register: (tool) => tools.push(tool) } }, {})
+  const field = tools.find(item => item.name === 'team_assign_task').parameters.properties.parent_task_id
+  // 此前描述只有「做不完再立卡」的兜底语义，总监侧得不到「可以主动拆分提速」的信号。
+  assert.match(field.description, /split a large task into parallel subtask cards for speed/, '应注明提速拆分用法')
+  assert.match(field.description, /disjoint write_scopes/, '应注明子卡写范围不相交')
+  assert.match(field.description, /run concurrently/, '应注明并行收益')
+})
+
 test('非任务运行零注入：群聊运行提示词不含拆解纪律段', async () => {
   const ctx = await setup()
   try {

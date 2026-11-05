@@ -377,6 +377,9 @@ export const sessionMethods = {
       sessionId,
       bot: effectiveBot,
       projectId: project?.id ?? null,
+      // 任务归因（DSHBOTS-212）：记账时透传到 usage_events.task_id；
+      // 非任务运行为 null，沿用既有「无任务归因」口径。
+      taskId: run.task_id ?? null,
       started: false,
       texts: [],
       lastText: '',

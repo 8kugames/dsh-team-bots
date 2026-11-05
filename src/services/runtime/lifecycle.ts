@@ -181,7 +181,9 @@ export const lifecycleMethods = {
     const row = recordUsage(this.store, {
       sourceKey,
       sourceEventId: messageId || null,
-      run: { id: pending.runId, project_id: pending.projectId, bot_id: pending.bot.id },
+      // task_id（DSHBOTS-212）：任务运行的用量归因到任务，支撑任务级端到端成本聚合
+      // （taskUsageTotals 经 COALESCE(u.task_id, r.task_id) 同时追认历史行）。
+      run: { id: pending.runId, project_id: pending.projectId, bot_id: pending.bot.id, task_id: pending.taskId ?? null },
       provider: pending.bot.provider ?? '',
       model: pending.bot.model ?? '',
       usage,

@@ -15,6 +15,7 @@ import {
 // 任务工单七态派生与标签口径的唯一来源：task-stage 纯函数域（tests/task-stage.test.js 断言其判定表）。
 import { taskStage, taskStageLabel } from './task-stage.js'
 import { effectiveTaskTimeBudgetMinutes } from '../config.js'
+import { taskSubtreeIds, taskTreeUsageTotals, taskUsageTotals } from '../usage.js'
 
 export const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 
@@ -755,9 +756,20 @@ export const tasksMethods = {
       'SELECT t.id, t.number, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id WHERE d.task_id = ?',
       taskId,
     )
+    // 任务级 usage 口径（DSHBOTS-212）：usage = 本卡全部运行（成功交付 + 失败重试 + 核验/受阻
+    // 派生运行）端到端 token/成本，缓存读写分列；usageTotal = 本卡 + 全部后代子卡，
+    // 拆分划算判定（C_removed > C_introduced）拿它与同类整卡任务的 usage 对比。
+    // 只挂 taskDetail 单卡详情，不进 taskView 列表热路径（每卡一次聚合会放大列表查询）。
+    const subtreeIds = taskSubtreeIds(this.store, taskId)
+    const budgetCurrency = this.budgetCurrency()
     return {
       ...this.taskView(task),
       projectKey: project.key,
+      usage: {
+        own: taskUsageTotals(this.store, taskId, budgetCurrency),
+        total: taskTreeUsageTotals(this.store, taskId, budgetCurrency),
+        subtaskCount: subtreeIds.length - 1,
+      },
       comments: comments.map(comment => ({
         ...comment,
         authorName: comment.author_type === 'bot'

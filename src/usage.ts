@@ -111,7 +111,7 @@ function andClause(where, clause) {
 // 成本聚合（含追认）：已计价明细用入库时算死的成本，未计价明细（total_cost IS NULL）
 // 按当前价目表补算——价目配齐后无需迁移，聚合结果即全量。pricedCalls/unpricedCalls
 // 也随之按「当前能否计价」统计：能追认的未计价计入 priced，仍无价可追认的才是真未计价。
-function costBreakdown(store, where, params, budgetCurrency, prices = null) {
+function costBreakdown(store, where, params, budgetCurrency, prices = null, join = '') {
   const priceMap = prices ?? currentPriceMap(store)
   const rows = store.all(
     `SELECT u.currency AS currency,
@@ -125,7 +125,7 @@ function costBreakdown(store, where, params, budgetCurrency, prices = null) {
             COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.cache_write_tokens ELSE 0 END), 0) AS null_cache_write_tokens,
             COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.output_tokens ELSE 0 END), 0) AS null_output_tokens,
             COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.reasoning_tokens ELSE 0 END), 0) AS null_reasoning_tokens
-       FROM usage_events u ${where}
+       FROM usage_events u ${join} ${where}
       GROUP BY u.currency, u.provider, u.model`,
     ...params,
   )
@@ -223,15 +223,56 @@ const ZERO_TOTALS = {
 
 // 单条件聚合：token 与调用次数 + 成本分币种。
 // prices 为调用方已取好的当前价目表（usageSnapshot 只取一次，避免 N+1）；缺省自行加载。
-export function aggregateUsage(store, filters = [], params = [], budgetCurrency = BUDGET_CURRENCY, prices = null) {
+// join 为可选的 JOIN 子句（任务级口径需要 LEFT JOIN runs 追认历史 task_id，见 taskUsageTotals）。
+export function aggregateUsage(store, filters = [], params = [], budgetCurrency = BUDGET_CURRENCY, prices = null, join = '') {
   const where = filterClause(filters)
-  const row = store.get(`SELECT ${AGGREGATES} FROM usage_events u ${where}`, ...params)
-  const breakdown = costBreakdown(store, where, params, budgetCurrency, prices)
+  const row = store.get(`SELECT ${AGGREGATES} FROM usage_events u ${join} ${where}`, ...params)
+  const breakdown = costBreakdown(store, where, params, budgetCurrency, prices, join)
   return mapTotals(row, breakdown)
 }
 
 export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY) {
   return aggregateUsage(store, ['u.run_id = ?'], [runId], budgetCurrency)
+}
+
+// —— 任务级 usage 聚合（DSHBOTS-212）——
+// 口径：一个任务端到端花多少 token。两条归因路径合一：
+//   1) 新明细：usage_events.task_id（lifecycle 记账时随 run 透传，DSHBOTS-212 起）。
+//   2) 历史明细：task_id 列上线前的存量行 task_id 为 NULL，经 run_id JOIN runs 追认
+//      （runs.task_id 自始有值）。COALESCE 两条路径同权，不做一次性回填迁移。
+// 覆盖该任务全部运行：成功交付、失败重试（attempt 递增仍同 run 行）、核验/受阻处理
+// 派生运行（task_id 相同）——「端到端成本」即该任务名下发生过的一切模型消费。
+// 缓存 token 分列（cache_read/cache_write），计价沿用 costForTokens 既有口径，不另算。
+const RUN_TASK_JOIN = 'LEFT JOIN runs r ON r.id = u.run_id'
+const EFFECTIVE_TASK_ID = 'COALESCE(u.task_id, r.task_id)'
+
+export function taskUsageTotals(store, taskId, budgetCurrency = BUDGET_CURRENCY) {
+  return aggregateUsage(store, [`${EFFECTIVE_TASK_ID} = ?`], [taskId], budgetCurrency, null, RUN_TASK_JOIN)
+}
+
+// 任务子树 id 集（含自身）：沿 tasks.parent_task_id 下钻全部后代。
+// UNION（非 UNION ALL）天然去重：即使脏数据造出环也会收敛终止。
+export function taskSubtreeIds(store, taskId) {
+  const rows = store.all(
+    `WITH RECURSIVE tree(id) AS (
+       SELECT id FROM tasks WHERE id = ?
+       UNION
+       SELECT t.id FROM tasks t JOIN tree ON t.parent_task_id = tree.id
+     ) SELECT id FROM tree`,
+    taskId,
+  )
+  return rows.map(row => row.id)
+}
+
+// 含子树的任务级口径：主项 + 全部后代子卡一并聚合。
+// 拆分划算判定（C_removed > C_introduced）用它与「同类整卡任务」的 taskUsageTotals
+// 对比：拆分后总成本 = 主项 usageTotal（含子卡），拆掉的是串行等待，引入的是每卡的
+// 会话预热/交接重复上下文——两个口径都含缓存 token 分列，可直接看输入侧增量。
+export function taskTreeUsageTotals(store, taskId, budgetCurrency = BUDGET_CURRENCY) {
+  const ids = taskSubtreeIds(store, taskId)
+  if (!ids.length) return { ...ZERO_TOTALS }
+  const marks = `(${ids.map(() => '?').join(', ')})`
+  return aggregateUsage(store, [`${EFFECTIVE_TASK_ID} IN ${marks}`], ids, budgetCurrency, null, RUN_TASK_JOIN)
 }
 
 // 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
