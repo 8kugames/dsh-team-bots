@@ -180,32 +180,28 @@
     box-shadow: var(--shadow-3);
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 8px;
 }
 .approval-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
-.approval-menu-item {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    grid-template-areas:
-        "project project time"
-        "line line line"
-        "summary summary summary";
+/* 来源定位行（DSHBOTS-240）：顶部跨会话审批通知的卡片多一行「来源群聊（项目名/KEY）+ 任务 ID/任务名」，
+   让 owner 不跳转即可判断该批谁。群聊卡片不带这些字段，不渲染该行。 */
+.approval-source {
+    display: flex;
+    flex-wrap: wrap;
     gap: 2px 8px;
-    padding: 8px 10px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--ink);
-    text-align: left;
-    cursor: pointer;
+    font-size: var(--fs-caption);
+    color: var(--ink-3);
 }
-.approval-menu-item:hover,
-.approval-menu-item:focus-visible { background: var(--surface-2); }
-.approval-menu-project { grid-area: project; font-weight: 600; font-size: var(--fs-small); }
-.approval-menu-line { grid-area: line; color: var(--ink-2); font-size: var(--fs-small); }
-.approval-menu-summary { grid-area: summary; color: var(--ink-3); font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-word; }
-.approval-menu-time { grid-area: time; color: var(--star); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.approval-menu-time.urgent { color: var(--star); }
+.approval-source-scope { font-weight: 600; color: var(--ink-2); }
+/* 顶部通知展开态的审批卡（DSHBOTS-240）：与群内审批卡同组件，卡片整体可点跳转到对应会话，
+   与卡内「允许一次/拒绝」按钮并存（按钮点击经 data-action 内层命中，不触发跳转）。 */
+.approval-menu-card {
+    cursor: pointer;
+    border-radius: 12px;
+    transition: background .12s ease;
+}
+.approval-menu-card:hover { background: var(--surface-2); }
+.approval-menu-card .message-row { gap: 0; }
 /* 提问卡片（DSHBOTS-116）：与审批卡片同骨架，四态中只有 pending 是强调态；已答两态回中性底。
    圆角 12（卡）/ 8（问题块、选项）/ 6（图标徽章）/ 7（pill、进度条），间距 4-6-8-10。
    整行化与右对齐（DSHBOTS-190）：对齐审批卡 D-173/D-180 口径——占满消息行、按钮与 pill 贴右缘。 */

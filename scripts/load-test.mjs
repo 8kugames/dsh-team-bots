@@ -24,7 +24,7 @@ const USAGE = `用法：node scripts/load-test.mjs [选项]
 断言全部通过时退出码 0，任一断言失败退出码 1。`
 
 function parseArgs(argv) {
-  const args = {}
+  const args                                   = {}
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]
     if (!token.startsWith('--')) continue
@@ -54,7 +54,7 @@ function percentile(sorted, ratio) {
 }
 
 // 假 runtime：立刻接管运行，延迟 durationMs 后回报成功，不碰任何真实模型。
-class FakeRuntime {
+class FakeRuntime {                                                                                                                                                                                                                  
   constructor({ durationMs = 2 } = {}) {
     this.durationMs = durationMs
     this.active = 0

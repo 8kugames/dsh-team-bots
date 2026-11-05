@@ -51,4 +51,18 @@
 .avatar.gray {
     --av: var(--c-gray);
 }
+/* 像素块头像（DSHBOTS-221）：identicon SVG 占头像块内 72%，颜色继承 var(--av)。 */
+.avatar .identicon {
+    width: 72%;
+    height: 72%;
+    display: block;
+    fill: var(--av, var(--c-gray));
+}
+/* 设置表单里外观颜色一行右侧的 roll / 启用按钮组。 */
+.avatar-roll-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
 

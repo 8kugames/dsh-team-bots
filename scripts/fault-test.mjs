@@ -18,7 +18,7 @@ const USAGE = `用法：node scripts/fault-test.mjs [选项]
 三项演练全部通过时退出码 0，任一项失败退出码 1。`
 
 function parseArgs(argv) {
-  const args = {}
+  const args                                   = {}
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]
     if (!token.startsWith('--')) continue
@@ -35,7 +35,7 @@ function parseArgs(argv) {
 }
 
 // 假 runtime：只负责让运行有个可控的结局，不碰真实模型。
-class FakeRuntime {
+class FakeRuntime {                                                                                                                                       
   constructor() {
     this.started = []
     this.canceled = []
