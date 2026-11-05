@@ -6,7 +6,7 @@ import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePo
 import { api } from './api.js'
 import { mdChatScope, richText } from './markdown.js'
 import { t } from './i18n.js'
-import { currentSkillVersion, skillVersions } from './tasks.js'
+import { currentSkillVersion, skillVersions, taskUsageBlock } from './tasks.js'
 import { ensureComposerImageInput, ensureImageViewer } from './composer.js'
 import { app, refresh, panelAttrs, render, updateRunClocks } from '../app.js'
 import { modalShell, modalLoading, renderModalLayer } from './modal-layer.js'
@@ -478,6 +478,7 @@ function modalTask(task) {
         </form>
       </div>
       <aside class="task-detail-side">
+        ${taskUsageBlock(task.usage)}
         <div class="eyebrow">运行记录</div>
         ${(activeRun || latestFailed) ? `<div class="btn-row" style="margin:9px 0 2px">${activeRun ? `<button class="btn danger small" type="button" data-action="cancel-run" data-run-id="${attr(activeRun.id)}">${icon('stop')}停止运行</button>` : ''}${latestFailed ? `<button class="btn small" type="button" data-action="retry-run" data-run-id="${attr(latestFailed.id)}">${icon('refresh')}重试</button>` : ''}</div>` : ''}
         <div style="margin-top:8px">${(task.runs ?? []).length === 0 ? '<div class="note">还没有运行。</div>' : task.runs.map(run => `<div class="run-row">
@@ -793,6 +794,5 @@ function updateFallbackEffortOptions(select) {
   if (!effort) return
   effort.innerHTML = effortOptions(select.value, '')
 }
-
 
 export { modalNewProject, modalRemoveTracking, modalRemoveBotTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory, openModal, closeModal, openTask, openSkillDetail, openTrajectory, openBot, reloadTaskModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, trapModalFocus, renderDirPicker, closeDirPicker, parseFallbackFields, normalizeTimeBudgetMinutes, modelOptions, effortOptions, fallbackModelOptions, renderPriceCard }

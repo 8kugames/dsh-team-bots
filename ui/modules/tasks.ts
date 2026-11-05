@@ -780,4 +780,15 @@ function renderEvolution() {
 }
 
 
+// 任务级用量块（DSHBOTS-214）：taskDetail 的 usage.{own,total,subtaskCount}，本卡与含子任务并列，缓存读写分列。
+export function taskUsageBlock(usage) {
+  if (!usage) return ''
+  const subtasks = Number(usage.subtaskCount) > 0 ? `<div class="kv"><span>含子任务</span><strong>${formatNumber(usage.total.totalTokens)} tok · ${usage.total.calls} 次 · ${formatCost(usage.total.cost)}</strong></div>` : ''
+  return `<div class="eyebrow">用量</div>
+    <div class="kv"><span>本卡</span><strong>${formatNumber(usage.own.totalTokens)} tok · ${usage.own.calls} 次 · ${formatCost(usage.own.cost)}</strong></div>
+    ${subtasks}
+    <div class="kv"><span>缓存读 / 写</span><strong>${formatNumber(usage.own.cacheReadTokens)} / ${formatNumber(usage.own.cacheWriteTokens)} tok</strong></div>
+    <div class="divider"></div>`
+}
+
 export { renderTasks, taskGroupKey, taskChildrenKey, terminalOutputText, renderTerminal, renderBotsOverview, renderMembers, renderSkills, searchMemories, renderMemory, currentSkillVersion, skillVersions, renderEvolution }
