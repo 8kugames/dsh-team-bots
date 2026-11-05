@@ -74,6 +74,19 @@
        可见。提升为合成层后滚动内容在自己的层里位移，遮罩不再参与滚动期的重录。 */
     will-change: transform;
 }
+/* 遮罩期间冻结底页动画时间基（DSHBOTS-255）：D-210 已把遮罩打开时对 #app 的 JS 写入全部早退，
+   但 #app 里的 CSS 无穷动画（看板进行中卡片的 swim/sheen、typing 圆点）不归 JS 管——它们在
+   全页 backdrop-filter 的输入侧每帧改变模糊输入，活体取证（CDP Tracing，真 GPU）显示任务弹窗
+   滚动 6 个滚轮 tick 产生 33 次 UpdateLayoutTree，把底页动画全部关掉后塌缩到 2 次：滚动期的
+   主线程样式/布局churn 全部来自这些动画在模糊输入侧的每帧翻动。遮罩下的底页本就模糊且
+   D-210 冻结后无数据更新，动画继续走只剩代价没有信息——用 :has 直接以「遮罩在档」为条件
+   暂停 #app 动画：状态由样式系统随 .modal-backdrop 的挂载/卸载原子推导，无定时器、无时间窗、
+   不引入 JS 状态。#modal-root 自身在 #app 之外，弹窗内动画不受影响。 */
+body:has(#modal-root .modal-backdrop) #app *,
+body:has(#modal-root .modal-backdrop) #app *::before,
+body:has(#modal-root .modal-backdrop) #app *::after {
+    animation-play-state: paused;
+}
 .modal-foot {
     display: flex;
     align-items: center;

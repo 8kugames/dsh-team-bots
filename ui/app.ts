@@ -739,7 +739,7 @@ function updateRunClocks(root = document) {
   const overlay = overlayOpen() // 遮罩打开时底页在模糊后不可见：底页时钟跳过（DSHBOTS-210），只刷弹窗层
   for (const el of root.querySelectorAll('.run-clock[data-started]') as NodeListOf<HTMLElement>) {
     if (overlay && !el.closest('#modal-root')) continue
-    el.textContent = duration(el.dataset.started)
+    const next = duration(el.dataset.started); if (el.textContent !== next) el.textContent = next // DSHBOTS-255 等值守卫：值相同也写会替换文本节点
   }
 }
 
