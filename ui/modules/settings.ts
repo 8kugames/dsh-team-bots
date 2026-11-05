@@ -266,6 +266,15 @@ function dshPathsCard() {
     </div>`
 }
 
+// 版本行（DSHBOTS-253）：取不到真值（缺失/null/'unknown'/空串/纯空白）时整行不渲染，
+// 不显示 unknown 或空占位；两个「最新版本」行行为不变。
+function versionRow(labelKey, value) {
+  const version = typeof value === 'string' ? value.trim() : ''
+  return version && version !== 'unknown'
+    ? `<div class="kv"><span>${t(labelKey)}</span><strong>${esc(version)}</strong></div>`
+    : ''
+}
+
 // DSH 服务卡：版本检查 + 投递失败提示（投递失败 kv 落在本卡尾部）。
 function dshServiceCard() {
   const data = state.data
@@ -283,9 +292,9 @@ function dshServiceCard() {
         <h3>${t('global.cardDshService')}</h3>
         <button class="btn small" data-action="check-dsh-update">${icon('refresh')}${t('global.checkUpdate')}</button>
       </div>
-      <div class="kv"><span>${t('global.dshCurrentVersion')}</span><strong>${esc(data.dsh?.version ?? 'unknown')}</strong></div>
+      ${versionRow('global.dshCurrentVersion', data.dsh?.version)}
       <div class="kv"><span>${t('global.dshLatestVersion')}</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
-      <div class="kv"><span>${t('global.pluginCurrentVersion')}</span><strong>${esc(data.pluginVersion ?? 'unknown')}</strong></div>
+      ${versionRow('global.pluginCurrentVersion', data.pluginVersion)}
       <div class="kv"><span>${t('global.pluginLatestVersion')}</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
       ${Number(outbox.failed ?? 0) > 0 ? `<div class="kv" style="margin-top:12px"><span>${t('global.outboxQueue')}</span><strong>${t('global.outboxFailed', { count: outbox.failed })}</strong></div>` : ''}
     </div>`

@@ -1,5 +1,7 @@
+import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const registry = (process.env.NPM_REGISTRY || 'https://registry.npmjs.org/').replace(/\/+$/, '')
 // 每个包一条缓存：{ at, version }，5 分钟内复用。
@@ -106,4 +108,54 @@ export function detectDshRuntimeVersion(env, argv1) {
     }
   }
   return 'unknown'
+}
+
+// 插件部署位置向上找宿主包的目录级数上限（含起始目录）：覆盖插件与宿主同装一张
+// 依赖树的常见布局（<root>/node_modules/dsh-team-bots → <root>/node_modules/@deepseek-ai/dsh）。
+const PLUGIN_HOST_PACKAGE_LEVELS = 6
+
+// 从插件部署位置尽力探测宿主 dsh 版本（DSHBOTS-253）：插件作为宿主子进程运行时
+// process.argv[1] 是插件自身入口，detectDshRuntimeVersion 的 argv 链在插件宿主下恒 miss。
+// 这里从插件自身文件位置再探两级：
+// ① createRequire.resolve('@deepseek-ai/dsh/package.json')——插件与宿主同依赖树时命中；
+// ② 沿插件目录逐级向上找 node_modules/@deepseek-ai/dsh/package.json。
+// 都拿不到返回 ''（结果按进程 memoize：插件部署位置不会在运行中变化）。
+let hostDshVersionCache: string | null = null
+export function detectHostDshVersionFromPlugin(startDir: string | null = null) {
+  if (startDir === null && hostDshVersionCache !== null) return hostDshVersionCache
+  let version = ''
+  if (startDir === null) {
+    try {
+      const pkg = JSON.parse(readFileSync(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'), 'utf8'))
+      if (typeof pkg?.version === 'string' && pkg.version) version = pkg.version
+    } catch {
+      // 不在可解析的依赖树内：走目录上溯。
+    }
+  }
+  if (!version) {
+    let dir = resolve(startDir ?? dirname(fileURLToPath(import.meta.url)))
+    for (let level = 0; level < PLUGIN_HOST_PACKAGE_LEVELS; level += 1) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
+        if (typeof pkg?.version === 'string' && pkg.version) {
+          version = pkg.version
+          break
+        }
+      } catch {
+        // 本级没有宿主包：继续向上。
+      }
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+  if (startDir === null) hostDshVersionCache = version
+  return version
+}
+
+// dsh 版本展示值归一（DSHBOTS-253）：探测失败形态（null/undefined/'unknown'/空串/纯空白）
+// 一律归为 ''，UI 据此整行隐藏，不再展示 unknown 占位。
+export function displayDshVersion(version) {
+  const value = typeof version === 'string' ? version.trim() : ''
+  return value && value !== 'unknown' ? value : ''
 }

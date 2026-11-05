@@ -199,6 +199,27 @@ test('关于内容回迁配置页第三分组：DSH 路径/服务卡 + 检查更
   stopTimers()
 })
 
+test('DSH 服务卡版本行：取不到整行隐藏，取到显示真值（DSHBOTS-253）', async () => {
+  // 取不到的三种形态：字段缺失 / 'unknown' 兜底 / 空串（含纯空白）——两个「当前版本」行
+  // 整行不渲染，不留 unknown 或空占位；两个「最新版本」行行为不变。
+  for (const fixture of [
+    { dsh: {}, pluginVersion: undefined },
+    { dsh: { version: 'unknown' }, pluginVersion: 'unknown' },
+    { dsh: { version: ' ' }, pluginVersion: '' },
+  ]) {
+    const { html } = await renderPage('settings', 'renderGlobal', fixture)
+    assert.ok(!html.includes('>dsh 当前版本</span>'), 'dsh 当前版本取不到时该行不应渲染')
+    assert.ok(!html.includes('>dsh-team-bots 当前版本</span>'), '插件当前版本取不到时该行不应渲染')
+    assert.ok(html.includes('>dsh 最新版本</span>'), 'dsh 最新版本行不受影响')
+    assert.ok(html.includes('>dsh-team-bots 最新版本</span>'), '插件最新版本行不受影响')
+    stopTimers()
+  }
+  const shown = await renderPage('settings', 'renderGlobal', { dsh: { version: '0.2.2-rc.1' }, pluginVersion: '0.2.316' })
+  assert.match(shown.html, /dsh 当前版本<\/span><strong>0\.2\.2-rc\.1<\/strong>/, 'dsh 当前版本取到时应显示真值')
+  assert.match(shown.html, /dsh-team-bots 当前版本<\/span><strong>0\.2\.316<\/strong>/, '插件当前版本取到时应显示真值')
+  stopTimers()
+})
+
 test('技能页保留重扫技能入口（自配置页去重合并的唯一入口）', async () => {
   const { html } = await renderPage('tasks', 'renderSkills')
   assert.match(html, /data-action="sync-skills"/, '重扫技能入口应在技能页')

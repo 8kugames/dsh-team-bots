@@ -6,7 +6,7 @@
 import { createRequire } from 'node:module'
 import { AppError, badRequest, conflict, hotUpgradeUnsupported } from '../errors.js'
 import { usageSnapshot } from '../usage.js'
-import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion, detectDshRuntimeVersion } from '../updater.js'
+import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion, detectDshRuntimeVersion, detectHostDshVersionFromPlugin, displayDshVersion } from '../updater.js'
 import { skillSnapshot } from '../skills.js'
 import { projectSkillRoots } from '../project-skills.js'
 import { resolveUiLanguage } from './locale.js'
@@ -71,6 +71,7 @@ export const systemMethods = {
     const unreadCounts = this.unreadChatCounts()
     let project = projectId ? this.store.get('SELECT * FROM projects WHERE id = ?', projectId) : undefined
     if (!project) project = this.store.get("SELECT * FROM projects WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1")
+    const capabilityInfo = this.runtime?.capabilityInfo?.() ?? {}
     const view: any = {
       me: this.store.get('SELECT id, name FROM users WHERE id = ?', this.localUserId),
       models: await this.runtime?.catalog() ?? [],
@@ -116,9 +117,12 @@ export const systemMethods = {
       },
       dsh: {
         native: true,
-        profile: this.runtime?.capabilityInfo?.().profile ?? process.env.DSH_PROFILE ?? 'team-bots',
+        profile: process.env.DSH_PROFILE ?? 'team-bots',
         home: this.config.dshHome,
-        ...this.runtime?.capabilityInfo?.() ?? {},
+        ...capabilityInfo,
+        // 当前版本尽力取真值（DSHBOTS-253）：capability 链（env→argv）取不到时，从插件
+        // 部署位置再探宿主包；仍拿不到为 ''，UI 据此整行隐藏「dsh 当前版本」。
+        version: displayDshVersion(capabilityInfo.version) || detectHostDshVersionFromPlugin(),
       },
       // 本插件（dsh-team-bots）部署生效版：与 health().version 同源。
       pluginVersion: PLUGIN_VERSION,
@@ -367,7 +371,10 @@ export const systemMethods = {
   },
   async dshUpdateInfo() {
     // 探测链（DSHBOTS-146）：env → argv[1] 向上找宿主 package.json → unknown。
-    const current = detectDshRuntimeVersion(process.env, process.argv[1])
+    // argv 链 miss 时（插件作为宿主子进程，argv[1] 指不到宿主包）从插件部署位置再探
+    // 宿主包（DSHBOTS-253）；仍拿不到保持 'unknown'，updateAvailable 的 unknown 语义不变。
+    const detected = detectDshRuntimeVersion(process.env, process.argv[1])
+    const current = detected !== 'unknown' ? detected : detectHostDshVersionFromPlugin() || 'unknown'
     let latest
     let pluginLatest
     try {
