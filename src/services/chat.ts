@@ -253,7 +253,10 @@ export const chatMethods = {
     this.audit(actor, 'chat.solo_clear', 'bot', bot.id, { cleared: count })
     return count
   },
-  async sendSoloMessage(botId, bodyInput, actor = this.actor(), imagesInput = []) {
+  // options.origin（DSHBOTS-258）：'wechat' 表示消息来自微信通道（项目外 director 专属
+  // 工作区），随 solo_chat_run 载荷传递，scheduler 据此把 solo 运行打成 trigger_type='wechat'，
+  // 运行收尾的回复才会推回微信；普通 UI 单聊不传，保持 'mention' 不推。
+  async sendSoloMessage(botId, bodyInput, actor = this.actor(), imagesInput = [], options: { origin?: string } = {}) {
     const bot = this.botRow(botId)
     if (bot.status !== 'active') throw conflict('Bot 已归档或暂停')
     const body = text(bodyInput, 20_000)
@@ -299,7 +302,7 @@ export const chatMethods = {
     })
     this.enqueueOutbox({
       kind: 'solo_chat_run',
-      payload: { botId: bot.id, messageId },
+      payload: { botId: bot.id, messageId, ...(options.origin ? { origin: options.origin } : {}) },
       projectId: null,
       sourceId: messageId,
       idempotencyKey: `solo_chat:${messageId}`,

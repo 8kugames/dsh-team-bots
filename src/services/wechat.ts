@@ -19,6 +19,9 @@ export function wechatQrSvg(url) {
   return qr.createSvgTag({ cellSize: 4, margin: 2 })
 }
 
+/** 项目外导演通道的正文来源标记（DSHBOTS-258）：让 director 一眼看出该消息来自微信管理员。 */
+const WECHAT_SOLO_SOURCE_MARK = '[微信管理员] '
+
 /** channel.js 的状态守卫文案全集（未启用/已登录等，抛的都是裸 Error）。 */
 const CHANNEL_GUARD_MESSAGES = new Set([
   '微信通道未启用（DSH_TEAM_WECHAT=1）',
@@ -84,15 +87,56 @@ export const wechatMethods = {
   },
 
   /**
-   * 微信直达对话（DSHBOTS-208，接替原派单转发 wechatDispatch）：把管理员消息以
-   * 工作台用户身份插入项目群聊并触发 chat 运行（无 mention 时定向项目总监），
-   * 运行结束的 bot 回复由 run-finish 按 trigger_type='wechat' 推回微信管理员。
-   * 返回：显式 key 未命中 → null；无可定向目标 → { error: 'no_target' }；
-   * 项目无可定向 Bot（无 mention 且总监不可用）→ { error: 'no_owner', project }；
-   * 成功 → { project, messageId, runBots }。key 为空时按 fallbackKey（通道绑定）
-   * 解析，仍未命中且恰有一个 active 项目时自动选中。
+   * 项目外导演通道的目标解析（DSHBOTS-258）：微信自由文本的默认且唯一去向是 director
+   * bot 的专属工作区单聊。解析规则：active bot 里 name='director'（大小写不敏感）优先于
+   * role='director'/'总监'；同级多个按 created_at、id 取最旧，保证确定性。不过滤 solo_dir：
+   * 目录一律读 bots.solo_dir 既有链路，为空时按 soloPromptFor 现有兜底路径处理，不写死目录。
+   * 0 命中返回 null（异常状态防御，走次级回退避免消息黑洞）。
    */
-  async wechatChat(key, body, fallbackKey = null) {
+  wechatDirectorBot() {
+    const rows = this.store.all(
+      `SELECT * FROM bots
+       WHERE status = 'active' AND (lower(name) = 'director' OR role IN ('director', '总监'))
+       ORDER BY CASE WHEN lower(name) = 'director' THEN 0 ELSE 1 END, created_at, id`,
+    )
+    return rows[0] ?? null
+  },
+
+  /**
+   * 项目外导演通道投递（DSHBOTS-258）：消息落 director 的 solo_messages 并触发
+   * solo_chat 运行，不进任何项目群聊。身份用微信 admin 的 peer id（不以 localUserId
+   * 冒充工作台用户）；正文前缀 [微信管理员] 让 director 能看出消息来自微信通道。
+   * firstContact：该管理员此前没在这个专属工作区说过话（首触回执依据，见 commands）。
+   */
+  async wechatDirectorChat(director, body) {
+    const adminPeerId = this.wechat?.status?.()?.adminPeerId ?? null
+    const actor = { type: 'user', id: adminPeerId ?? 'user:wechat' }
+    const firstContact = !this.store.get(
+      "SELECT id FROM solo_messages WHERE bot_id = ? AND sender_type = 'user' AND sender_id = ? LIMIT 1",
+      director.id,
+      actor.id,
+    )
+    const result = await this.sendSoloMessage(
+      director.id,
+      `${WECHAT_SOLO_SOURCE_MARK}${body}`,
+      actor,
+      [],
+      { origin: 'wechat' },
+    )
+    return { director, messageId: result?.messageId ?? null, firstContact }
+  },
+
+  /**
+   * 微信直达对话（DSHBOTS-208 起，258 四次拍板后收敛为绝对二值路由）：
+   * /tr 显式转发（key 非空）→ 消息以工作台用户身份插入项目群聊并触发 chat 运行，
+   * 运行结束的 bot 回复由 run-finish 按 trigger_type='wechat' 推回微信管理员；
+   * 自由文本（key 为空）→ 一律投项目外 director 专属工作区单聊（不随 direct_project_key
+   * 绑定、active 项目数变化，路由层无绑定/项目数判断分支），返回
+   * { director, messageId, firstContact }；解析不到 director（通道异常）→ { error: 'no_director' }。
+   * 项目无可定向 Bot（无 mention 且总监不可用）→ { error: 'no_owner', project }；
+   * 群聊直达成功 → { project, messageId, runBots }；显式 key 未命中 → null。
+   */
+  async wechatChat(key, body) {
     let project = null
     if (key) {
       project = this.store.get(
@@ -101,11 +145,13 @@ export const wechatMethods = {
       )
       if (!project) return null
     } else {
-      const actives = this.store.all("SELECT * FROM projects WHERE status = 'active'")
-      project = (fallbackKey
-        ? actives.find(row => row.key.toUpperCase() === String(fallbackKey).toUpperCase())
-        : null) ?? (actives.length === 1 ? actives[0] : null)
-      if (!project) return { error: 'no_target' }
+      // DSHBOTS-258 绝对口径：自由文本永远走 director 专属工作区，用户不直接进群。
+      // 路由层不出现 direct_project_key 绑定判断，也不出现 active 项目数量判断——
+      // 唯一分流条件是 /tr 显式转发（key 非空）。解析不到 director 属通道异常，
+      // 独立 no_director 出口（不复用 no_target：那是「需要用户选项目」的语义链）。
+      const director = this.wechatDirectorBot()
+      if (director) return this.wechatDirectorChat(director, String(body ?? ''))
+      return { error: 'no_director' }
     }
     const members = this.membersOf(project.id).filter(bot => bot.status === 'active')
     const text = String(body ?? '')

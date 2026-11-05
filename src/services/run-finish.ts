@@ -339,13 +339,17 @@ export const runFinishMethods = {
           this.enqueueMemoryReview(project, bot, null, runId)
         }
       } else if (run.kind === 'solo_chat') {
+        const reply = cleanOutput || '模型未返回文本。'
         this.insertSoloMessage({
           botId: bot.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: cleanOutput || '模型未返回文本。',
+          body: reply,
           runId,
         })
+        // DSHBOTS-258：微信通道投的项目外 director 单聊（trigger_type='wechat'），
+        // 回复同样推回微信管理员；普通 UI 单聊（mention）不推。
+        this.notifyWechatChat(bot, run, reply)
       }
     } else {
       // DSHBOTS-112：无视觉模型收图失败的兜底信号——错误表明模型无视觉且消息带图时补派生
@@ -433,20 +437,24 @@ export const runFinishMethods = {
         })
         this.notifyWechatChat(bot, run, `运行失败：${error?.message ?? '未知错误'}`, true)
       } else if (run.kind === 'solo_chat') {
+        const failure = `运行失败：${error?.message ?? '未知错误'}`
         this.insertSoloMessage({
           botId: bot.id,
           senderType: 'bot',
           senderId: bot.id,
-          body: `运行失败：${error?.message ?? '未知错误'}`,
+          body: failure,
           runId,
         })
+        // DSHBOTS-258：微信通道的 solo 直达失败提示同样推回（notifyWechatChat 内部按
+        // trigger_type='wechat' 门禁，普通 UI 单聊不推）。
+        this.notifyWechatChat(bot, run, failure, true)
       }
     }
     if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
   },
 
-  // 微信直达对话回程（DSHBOTS-208）：trigger_type='wechat' 的群聊运行结束时，
-  // 把 bot 回复（或失败提示）推回微信管理员，出站走通道既有合批/重试治理；
+  // 微信直达对话回程（DSHBOTS-208/258）：trigger_type='wechat' 的运行（项目群聊直达、
+  // 项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）推回微信管理员，出站走通道既有合批/重试治理；
   // 只推微信触发的运行，工作台群聊回复不受影响。推送失败不阻塞收尾主流程。
   // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply（DSHBOTS-211）。
   notifyWechatChat(bot, run, body, failed = false) {

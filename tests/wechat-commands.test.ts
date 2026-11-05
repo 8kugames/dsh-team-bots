@@ -112,11 +112,12 @@ test('权限门：非 admin 对写操作（/reject /tr）拒绝，只读指令�
 test('无前缀消息仍走 director 对话链路，不被固定指令截获', async () => {
   const service = SERVICE_STUB()
   const silent = await handleCommand(service, '把首页改成深色模式', ADMIN_CTX)
-  assert.equal(silent, '', '绑定项目内的自由文本静默直达')
-  assert.deepEqual(service.chatted, { key: null, body: '把首页改成深色模式', fallbackKey: 'web' })
+  assert.equal(silent, '', '非首触自由文本静默直达 director')
+  // DSHBOTS-258 绝对口径：自由文本不传绑定（路由层无绑定判断），key 恒为 null
+  assert.deepEqual(service.chatted, { key: null, body: '把首页改成深色模式', fallbackKey: undefined })
 
   // 旧触发式指令词也已收编：作为普通文本进对话，不再被指令层拦截
   await handleCommand(service, '验收 web-5 干得漂亮', ADMIN_CTX)
-  assert.deepEqual(service.chatted, { key: null, body: '验收 web-5 干得漂亮', fallbackKey: 'web' })
+  assert.deepEqual(service.chatted, { key: null, body: '验收 web-5 干得漂亮', fallbackKey: undefined })
   assert.equal(service.seen, null, '旧触发词不得再触发验收路由')
 })

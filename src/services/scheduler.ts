@@ -16,8 +16,9 @@ import { runReviewWatchdog } from './review-watchdog.js'
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
 
 // DSHBOTS-43 人的消息保底槽：人触发的运行判定。
-// 现有字段口径：chat/solo_chat 的 trigger_type 是 'mention'（微信直达为 'wechat'，DSHBOTS-208），
-// dm 是 'dm'，dm_reply 是 'dm_reply'；用 kind 判定最稳（solo_chat 也命中），以现有字段为准不新增列。
+// 现有字段口径：chat/solo_chat 的 trigger_type 是 'mention'（微信直达为 'wechat'，DSHBOTS-208；
+// DSHBOTS-258 起项目外 director 专属工作区的 solo 直达同为 'wechat'），dm 是 'dm'，dm_reply 是
+// 'dm_reply'；用 kind 判定最稳（solo_chat 也命中），以现有字段为准不新增列。
 const HUMAN_RUN_KINDS = new Set(['chat', 'solo_chat', 'dm', 'dm_reply'])
 function isHumanRun(run) {
   return HUMAN_RUN_KINDS.has(run.kind)
@@ -238,7 +239,11 @@ export const schedulerMethods = {
     if (row.kind === 'solo_chat_run') {
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
       if (!bot || bot.status !== 'active') return null
-      return this.enqueueSoloChatRun(bot, payload.messageId)
+      // payload.origin='wechat'（DSHBOTS-258）：微信通道投的项目外 director 单聊，
+      // solo 运行打 wechat 标记，运行收尾的回复据此推回微信；普通 UI 单聊保持 mention。
+      return this.enqueueSoloChatRun(bot, payload.messageId, {
+        triggerType: payload.origin === 'wechat' ? 'wechat' : 'mention',
+      })
     }
     if (row.kind === 'dm_run') {
       const message = this.store.get('SELECT * FROM bot_messages WHERE id = ?', payload.messageId)

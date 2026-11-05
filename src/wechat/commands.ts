@@ -2,8 +2,8 @@ import { WechatIlinkError, chunkWechatText, filterWechatMarkdown } from '../../v
 import { TASK_ID_PATTERN } from '../util.js'
 import {
   adminDenied, answerHelp, badTaskId, botsList, connectedReceipt, helpText, keysList,
-  needPickProject, needReturnReason, noOwner, projectNotFound, statesView, taskDetail,
-  trHelp, unknownCommand,
+  needPickProject, needReturnReason, noDirector, noOwner, projectNotFound, statesView,
+  taskDetail, trHelp, unknownCommand,
 } from './format.js'
 
 /** 微信答复路由：答 <token> <选项或文字>（DSHBOTS-215）。token 为提问/审批 id 末 6 位。 */
@@ -15,11 +15,8 @@ const APPROVAL_PATTERN = /^(?:批|审批|approve)\s+([A-Za-z0-9]{4,10})\s*(允�
 /** 正文里的任务号候选（不要求空格分隔），再由 TASK_ID_PATTERN 校验。 */
 const TASK_ID_CANDIDATE = /([a-z][a-z0-9-]*-\d+)/gi
 
-/** 派单转发格式 <key>: <消息>：key 与项目 key 同口径（字母数字、至多 10 位），全角冒号与大小写均容忍。 */
-const DISPATCH_PATTERN = /^([A-Za-z0-9]{1,10})\s*[:：]\s*([\s\S]+)$/
-
-/** /tr 格式：<key> <消息>，key 与项目 key 同口径（字母数字、至多 10 位）。 */
-const TR_PATTERN = /^([A-Za-z0-9]{1,10})\s+([\s\S]+)$/
+/** /tr 格式：<key> <消息> 或 <key>: <消息>（DSHBOTS-258 容忍冒号写法），key 与项目 key 同口径。 */
+const TR_PATTERN = /^([A-Za-z0-9]{1,10})(?:\s*[:：]\s*|\s+)([\s\S]+)$/
 
 /** 固定指令的写操作：需要 admin-peer 门（与 答/批 同口径）。 */
 const ADMIN_VERBS = new Set(['reject', 'tr'])
@@ -34,9 +31,18 @@ export class WechatBusinessError extends Error {
 }
 
 /**
+ * 项目外 director 通道首触回执（DSHBOTS-258）。文案本地放：format.js 不在本卡写范围，
+ * 且只有这一处新文案，不强行迁移。
+ */
+function directorReceipt(bot) {
+  return `已直达【${bot.name}】专属工作区（项目外单聊），回复会推送到微信；发「/tr <key> <消息>」可显式转发进指定项目。`
+}
+
+/**
  * 把管理员消息解析为指令并执行（DSHBOTS-249 前缀固定指令集）。
- * 拦截顺序：①以 / 开头的固定指令（本卡）；②答/批 <token> 前缀（DSHBOTS-215）；
- * ③<key>: <消息> 派单转发（DSHBOTS-183）；④其余自由文本直达项目总监（DSHBOTS-208）。
+ * 拦截顺序：①以 / 开头的固定指令（D-249，/tr 是唯一显式转发进项目的通道）；
+ * ②答/批 <token> 前缀（DSHBOTS-215）；③其余一切自由文本直达项目外 director
+ * 专属工作区（DSHBOTS-258 三次收紧：不再有 <key>: 派单转发与绑定项目路由，用户不直接进群）。
  * 旧触发式指令（帮助/状态/验收/驳回/详情/q）已全部收编进 / 前缀指令集——触发词
  * 与无前缀对话路径冲突（任何中文首词都可能被当成指令拦截），本卡一并收口移除。
  * ctx（DSHBOTS-208，通道侧传入）：{ boundKey: 当前绑定项目 key | null,
@@ -66,32 +72,26 @@ export async function handleCommand(service, rawText, ctx = null) {
     return (service as any).wechatAnswerQuestion(answer[1].toLowerCase(), text, ctx?.boundKey ?? null)
   }
 
-  const dispatch = DISPATCH_PATTERN.exec(body)
-  if (dispatch) {
-    const key = dispatch[1].toUpperCase()
-    const message = dispatch[2].trim()
-    const chat = await service.wechatChat(key, message)
-    if (!chat) {
-      return projectNotFound(key, service.stateView().projects ?? [])
-    }
-    if (chat.error === 'no_owner') return noOwner(chat.project)
-    ctx?.bind?.(chat.project.key)
-    return connectedReceipt(chat.project, 'dispatch')
-  }
+  // DSHBOTS-258 三次收紧口径：原 <key>: <消息> 派单转发不再路由进项目——除 /tr 显式
+  // 转发外，其余一切文本（含带 key 前缀的写法）一律按自由文本走 director 专属工作区。
 
-  // DSHBOTS-208 任意交互：非指令文本直达当前项目的总监，不再回「未识别的指令」。
-  const boundKey = ctx?.boundKey ?? null
-  const chat = await service.wechatChat(null, body, boundKey)
+  // DSHBOTS-208/258 任意交互：自由文本永远直达项目外 director 专属工作区（不随
+  // direct_project_key 绑定或 active 项目数变化），首触回执、之后静默直达。
+  const chat = await service.wechatChat(null, body)
+  // 项目外 director 通道：首触回执说明去向，之后静默直达（回复由运行回程推送），
+  // 不回写项目绑定（通道是项目外的）。
+  if (chat?.director) {
+    return chat.firstContact ? directorReceipt(chat.director) : ''
+  }
+  if (chat?.error === 'no_director') {
+    // 导演通道异常（DSHBOTS-258）：独立出口，不触发选项目提示链。
+    return noDirector()
+  }
   if (!chat || chat.error === 'no_target') {
     return needPickProject(service.stateView().projects ?? [])
   }
   if (chat.error === 'no_owner') return noOwner(chat.project)
-  ctx?.bind?.(chat.project.key)
-  if (boundKey === chat.project.key) {
-    // 已绑定同项目：静默直达，总监回复由回程推送，不再逐条回执。
-    return ''
-  }
-  return connectedReceipt(chat.project, 'bind')
+  return ''
 }
 
 /**

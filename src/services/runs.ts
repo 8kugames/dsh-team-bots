@@ -142,7 +142,9 @@ export const runsMethods = {
     this.insertRunEvent(runId, 'queued', '私信回信排队投递给发送方会话')
     return runId
   },
-  enqueueSoloChatRun(bot, messageId) {
+  // triggerType（DSHBOTS-258）：'wechat' 表示消息来自微信通道（项目外 director 专属工作区），
+  // 与群聊直达（enqueueChatRun 的 origin 口径）同语义——运行收尾据此把 solo 回复推回微信管理员。
+  enqueueSoloChatRun(bot, messageId, { triggerType = 'mention' } = {}) {
     const existing = this.store.get(
       "SELECT id FROM runs WHERE trigger_ref = ? AND bot_id = ? AND kind = 'solo_chat'",
       messageId,
@@ -154,12 +156,14 @@ export const runsMethods = {
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
         attempt, idempotency_key, queued_at)
-       VALUES (?, NULL, ?, 'solo_chat', 'write', 'mention', ?, 'queued', 1, ?, ?)`,
-      runId, bot.id, messageId, `solo_chat:${messageId}`, createdAt,
+       VALUES (?, NULL, ?, 'solo_chat', 'write', ?, ?, 'queued', 1, ?, ?)`,
+      runId, bot.id, triggerType, messageId, `solo_chat:${messageId}`, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, 'queued', '单聊消息触发', createdAt,
+      id('evt'), runId, 'queued',
+      triggerType === 'wechat' ? '微信消息触发（项目外单聊直达）' : '单聊消息触发',
+      createdAt,
     )
     return runId
   },

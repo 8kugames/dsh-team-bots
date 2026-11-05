@@ -23,7 +23,7 @@ export function helpText() {
     '  /reject <任务号> <理由>  退回重做（管理员）',
     '  /tr <key> <消息>     跨项目直达（管理员）',
     '',
-    '其余消息直接发给当前项目的总监，回复会推送到微信。',
+    '其余消息直接发给项目外 director 的专属工作区，回复会推送到微信。',
   ].join('\n')
 }
 
@@ -117,6 +117,11 @@ export function connectedReceipt(project, via) {
 /** 项目无可定向总监。 */
 export function noOwner(project) {
   return `项目【${project.name || project.key}】没有可用的总监 Bot，无法直达。`
+}
+
+/** 项目外导演通道不可达（DSHBOTS-258）：通道异常，语义与「需要用户选项目」不同。 */
+export function noDirector() {
+  return '导演通道暂不可用，请稍后再试或到工作台处理。'
 }
 
 /** 未选定直达项目：引导先指定一次，附项目清单。 */
