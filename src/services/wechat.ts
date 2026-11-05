@@ -118,6 +118,19 @@ export const wechatMethods = {
     return { project, ...result }
   },
 
+  /**
+   * 微信 /bots 指令（DSHBOTS-249）：按项目 key 列当前项目机器人清单。
+   * 数据源与工作台项目成员表同源（membersOf），只读；key 未命中返回空表。
+   */
+  wechatProjectBots(key) {
+    const project = this.store.get(
+      "SELECT * FROM projects WHERE key = ? COLLATE NOCASE AND status = 'active'",
+      String(key ?? '').trim(),
+    )
+    if (!project) return []
+    return this.membersOf(project.id)
+  },
+
   // ===== DSHBOTS-215：微信问答回路 =====
   // 群聊提问/审批转发微信：只推纯文本镜像，状态仍由工作台卡片与群消息承载；
   // 管理员在微信的答复经 commands 的「答/批 <token> …」路由回原条目（见 wechatAnswerQuestion /

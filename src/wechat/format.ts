@@ -11,41 +11,83 @@ export const RULE = '———————————————'
 /** 合批摘要的明细行数上限：超过只保留最旧 N 条原文，其余汇总。 */
 export const DIGEST_DETAIL_LINES = 5
 
-/** 帮助：指令逐条说明，自由文本直达。 */
+/** 帮助：固定指令一行一条，自由文本直达。 */
 export function helpText() {
   return [
     '可用指令：',
-    '  帮助 / help / ?        查看本帮助',
-    '  状态                   概览各项目与待验收任务',
-    '  验收 <任务号> [评语]     通过验收，如：验收 web-3 做得好',
-    '  驳回 <任务号> <理由>     退回重做，理由必填',
-    '  详情 <任务号>           查看任务卡片',
-    '  q                      列出项目 key',
-    '  <key>: <消息>           指定项目并直达其总监，如：web: 上线新版官网',
+    '  /?                  查看本帮助',
+    '  /keys               项目 key 清单',
+    '  /bots               当前项目机器人清单',
+    '  /states             未验收任务清单',
+    '  /detail <任务号>     任务详情',
+    '  /reject <任务号> <理由>  退回重做（管理员）',
+    '  /tr <key> <消息>     跨项目直达（管理员）',
     '',
-    '其余任意消息直接发给当前项目的总监，回复会推送到微信。',
+    '其余消息直接发给当前项目的总监，回复会推送到微信。',
   ].join('\n')
 }
 
-/** 状态视图：项目分组 + 任务行（任务号前置，状态用 [状态码] 纯文字）。 */
-export function statusView(projects) {
-  const lines = ['进行中的任务']
+/** 未知固定指令：回一条简短可用指令提示。 */
+export function unknownCommand() {
+  return '没有这个指令，发送 /? 查看可用指令。'
+}
+
+/** 写操作权限不足（非管理员）。 */
+export function adminDenied() {
+  return '该指令仅限管理员使用。'
+}
+
+/** /tr 缺 key 或消息时的格式提示。 */
+export function trHelp() {
+  return '格式：/tr <key> <消息>，如：/tr web 上线新版官网。'
+}
+
+/** /keys：可选项目 key 清单；当前绑定项目标注（当前）。 */
+export function keysList(projects, boundKey = null) {
+  const list = projects ?? []
+  if (!list.length) return '当前没有可选的项目。'
+  const lines = ['项目 key：']
+  for (const project of list) {
+    const current = Boolean(boundKey) && String(project.key).toUpperCase() === String(boundKey).toUpperCase()
+    const name = project.name && project.name !== project.key ? `  ${project.name}` : ''
+    lines.push(`  ${project.key}${name}${current ? '（当前）' : ''}`)
+  }
+  return lines.join('\n')
+}
+
+/** /bots：当前项目机器人清单。 */
+export function botsList(bots) {
+  const list = bots ?? []
+  if (!list.length) return '当前项目没有机器人。'
+  const lines = ['当前项目机器人：']
+  for (const bot of list) {
+    const role = bot.member_role || bot.bot_role
+    const state = bot.status && bot.status !== 'active' ? `  [${bot.status}]` : ''
+    lines.push(`  ${bot.name}${role ? `  ${role}` : ''}${state}`)
+  }
+  return lines.join('\n')
+}
+
+/** /states：未验收（in_review）任务清单，按项目分组。 */
+export function statesView(projects) {
+  const lines = ['未验收的任务']
   let any = false
   for (const project of projects ?? []) {
-    const open = (project.tasks ?? []).filter(task => task.status !== 'done' && task.status !== 'canceled')
-    if (!open.length) continue
+    const pending = (project.tasks ?? []).filter(task => task.status === 'in_review')
+    if (!pending.length) continue
     any = true
     lines.push(`【${project.name || project.key}】`)
-    for (const task of open.slice(0, 10)) {
+    for (const task of pending.slice(0, 10)) {
       lines.push(`  ${project.key}-${task.number} [${task.status}] ${task.title}`)
     }
   }
-  return any ? lines.join('\n') : '当前没有进行中的任务。'
+  return any ? lines.join('\n') : '当前没有待验收的任务。'
 }
 
-/** 任务详情：卡片头 + 最近评论（各评论空行分段，正文缩进两格）。 */
+/** 任务详情：卡片头 + 指派 + 最近评论（各评论空行分段，正文缩进两格）。 */
 export function taskDetail(view) {
   const lines = [`${view.identifier} [${view.status}] ${view.title}`]
+  lines.push(`指派 ${view.assigneeName ?? '暂未指派'}`)
   for (const comment of (view.comments ?? []).slice(-3)) {
     lines.push('', `— ${comment.author_type}:${comment.author_id} ${comment.created_at}`)
     lines.push(`  ${String(comment.body).slice(0, 200)}`)
@@ -168,7 +210,7 @@ export function taskCreated(identifier, title, assignee) {
   return [
     `${identifier}《${title}》已创建`,
     `指派 ${assignee || '暂未指派'}`,
-    `回复「详情 ${identifier}」查看`,
+    `发送 /detail ${identifier} 查看`,
   ].join('\n')
 }
 
@@ -176,7 +218,7 @@ export function taskCreated(identifier, title, assignee) {
 export function taskDone(identifier, title) {
   return [
     `${identifier}《${title}》已完成`,
-    `回复「详情 ${identifier}」查看`,
+    `发送 /detail ${identifier} 查看`,
   ].join('\n')
 }
 
@@ -191,7 +233,7 @@ export function batchDigest(items) {
 
 /** 管理员绑定欢迎。 */
 export function welcomeAdmin() {
-  return '已绑定为本团队管理员\n回复「帮助」查看指令'
+  return '已绑定为本团队管理员\n发送 /? 查看指令'
 }
 
 /** 用户侧通用失败提示（具体错误只进日志）。 */

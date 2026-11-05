@@ -16,6 +16,10 @@ const SERVICE_STUB = () => ({
   stateView() {
     return { projects: [] }
   },
+  // D-249 后「帮助」按自由文本直达：桩补一个静默成功的 wechatChat 即可走通入站路径。
+  async wechatChat() {
+    return { project: { key: 'web', name: 'Web' }, messageId: 'm1' }
+  },
 })
 
 async function openStore(prefix = 'wechat-peers-') {

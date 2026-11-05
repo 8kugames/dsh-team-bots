@@ -6,10 +6,10 @@ import { join } from 'node:path'
 import { WechatStore } from '../src/wechat/store.js'
 import { extractTaskId, handleCommand, isRetryable, outboundChunks, WechatBusinessError, WechatIlinkError } from '../src/wechat/commands.js'
 import {
-  answerFailed, answerHelp, answerReceipt, approvalCard, badTaskId, batchDigest, chatReply,
-  connectedReceipt, failureText, helpText, needPickProject, needReturnReason, noOwner,
-  projectList, projectNotFound, questionCard, reviewResult, statusView, taskCreated,
-  taskDone, taskDetail, welcomeAdmin,
+  adminDenied, answerFailed, answerHelp, answerReceipt, approvalCard, badTaskId, batchDigest,
+  botsList, chatReply, connectedReceipt, failureText, helpText, keysList, needPickProject,
+  needReturnReason, noOwner, projectList, projectNotFound, questionCard, reviewResult,
+  statesView, taskCreated, taskDone, taskDetail, trHelp, unknownCommand, welcomeAdmin,
 } from '../src/wechat/format.js'
 import { WechatChannel } from '../src/wechat/channel.js'
 import { TASK_ID_PATTERN } from '../src/util.js'
@@ -23,10 +23,19 @@ const SERVICE_STUB = (): any => ({
     return { projects: [{ key: 'web', name: 'Web', tasks: [
       { number: 3, status: 'in_progress', title: '写登录页' },
       { number: 4, status: 'done', title: '已完成' },
+      { number: 5, status: 'in_review', title: '等验收' },
     ] }] }
   },
+  wechatProjectBots(key) {
+    if (String(key).toLowerCase() !== 'web') return []
+    return [
+      { name: 'director', member_role: 'owner', status: 'active' },
+      { name: 'builder', member_role: 'member', status: 'active' },
+      { name: 'sleeper', member_role: 'member', status: 'paused' },
+    ]
+  },
   taskViewByIdentifier(identifier) {
-    return { identifier, status: 'in_progress', title: '写登录页', comments: [] }
+    return { identifier, status: 'in_review', title: '写登录页', assigneeName: 'Builder', comments: [] }
   },
   wechatReview(identifier, { decision, comment }) {
     this.seen = { identifier, decision, comment }
@@ -72,46 +81,43 @@ test('wechat store 持久化凭证、游标、管理员与发件箱', async () =
   }
 })
 
-test('wechat commands 帮助、状态与验收路由', async () => {
-  assert.ok((await handleCommand({}, '帮助')).includes('状态'))
+test('wechat commands /? /states /detail /reject 路由（DSHBOTS-249）', async () => {
+  assert.ok((await handleCommand({}, '/?')).includes('可用指令'))
   assert.ok((await handleCommand({}, '')).includes('可用指令'))
-  // DSHBOTS-208：未匹配指令的文本不再回「未识别」，走直达路由（无可用项目时引导选项目）。
+  // 旧触发式指令已收编进 / 前缀：中文词不再拦截，走直达对话（无可用项目时引导选项目）。
   const free = { stateView: () => ({ projects: [] }), async wechatChat() { return { error: 'no_target' } } }
   assert.ok((await handleCommand(free, 'foo')).includes('还没有选定直达的项目'))
 
   const service = SERVICE_STUB()
-  const state = await handleCommand(service, '状态')
-  assert.ok(state.includes('【Web】'))
-  assert.ok(state.includes('web-3 [in_progress] 写登录页'))
-  assert.ok(!state.includes('web-4'), '完成态任务不应出现在状态列表')
+  const states = await handleCommand(service, '/states')
+  assert.ok(states.includes('【Web】'))
+  assert.ok(states.includes('web-5 [in_review] 等验收'))
+  assert.ok(!states.includes('web-3'), '非 in_progress 任务不应出现在验收面清单')
 
-  assert.ok((await handleCommand(service, '详情 web-3')).includes('写登录页'))
-  assert.ok((await handleCommand(service, '验收 web-3 干得漂亮')).includes('已验收 web-3'))
-  assert.deepEqual(service.seen, { identifier: 'web-3', decision: 'accept', comment: '干得漂亮' })
+  const detail = await handleCommand(service, '/detail web-5')
+  assert.ok(detail.includes('写登录页'))
+  assert.ok(detail.includes('指派 Builder'), '详情应带指派')
 
-  assert.ok((await handleCommand(service, '验收 bad-id')).includes('任务号格式'))
-  const rejected = await handleCommand(service, '驳回 web-3 首页样式崩了')
-  assert.ok(rejected.includes('已驳回 web-3'))
-  assert.equal(service.seen.decision, 'return')
-  assert.equal(service.seen.comment, '首页样式崩了')
-  assert.ok((await handleCommand(service, '驳回 web-3')).includes('必须带理由'))
+  assert.ok((await handleCommand(service, '/detail bad-id')).includes('任务号格式'))
+  const rejected = await handleCommand(service, '/reject web-5 首页样式崩了')
+  assert.ok(rejected.includes('已驳回 web-5'))
+  assert.deepEqual(service.seen, { identifier: 'web-5', decision: 'return', comment: '首页样式崩了' })
+  assert.ok((await handleCommand(service, '/reject web-5')).includes('必须带理由'))
 })
 
-test('wechat commands 无空格正文也能解析任务号', async () => {
+test('wechat commands /detail /reject 正文里任务号可无空格分隔', async () => {
   const service = SERVICE_STUB()
-  const reply = await handleCommand(service, '验收web-3 做得好')
-  assert.ok(reply.includes('已验收 web-3'))
-  assert.deepEqual(service.seen, { identifier: 'web-3', decision: 'accept', comment: '做得好' })
 
-  const noSpace = await handleCommand(service, '验收web-3')
-  assert.ok(noSpace.includes('已验收 web-3'))
+  // 任务号出现在正文任意位置（extractTaskId 不强制首位）
+  const reply = await handleCommand(service, '/detail 请看 web-5')
+  assert.ok(reply.includes('写登录页'))
 
-  const returned = await handleCommand(service, '驳回web-3 样式崩了')
-  assert.ok(returned.includes('已驳回 web-3'))
+  const returned = await handleCommand(service, '/reject web-5 样式崩了')
+  assert.ok(returned.includes('已驳回 web-5'))
   assert.equal(service.seen.comment, '样式崩了')
 
   // 正文里没有合法任务号时给明确提示
-  const missing = await handleCommand(service, '验收 随便说说')
+  const missing = await handleCommand(service, '/detail 随便说说')
   assert.ok(missing.includes('任务号格式'))
   assert.ok(missing.includes('web-3'))
 })
@@ -216,12 +222,12 @@ test('wechat channel 只有 admin_peer_id 能执行管理指令，「绑定」�
     channel.bindAuthorizedAdmin({ userId: 'p-admin' })
     assert.equal(store.getState().admin_peer_id, 'p-admin')
 
-    await channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c1', text: '帮助' }, channel.transport)
-    assert.ok(sent.at(-1).text.includes('状态'))
+    await channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c1', text: '/?' }, channel.transport)
+    assert.ok(sent.at(-1).text.includes('可用指令'))
 
     // 非管理员消息被忽略，不执行管理指令
     const before = sent.length
-    await channel.onInbound({ senderId: 'p-other', contextToken: 'ctx-2', clientId: 'c2', text: '状态' }, channel.transport)
+    await channel.onInbound({ senderId: 'p-other', contextToken: 'ctx-2', clientId: 'c2', text: '/states' }, channel.transport)
     assert.equal(sent.length, before, '非管理员消息不应触发任何回复')
     assert.equal(store.getState().admin_peer_id, 'p-admin')
 
@@ -255,7 +261,7 @@ test('wechat channel 处理失败时 cursor 不前移，成功才落盘', async 
     const transport = {
       async poll() {
         controller.abort()
-        return { cursor: 'c-next', messages: [{ messageId: 'm-1', senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '状态' }] }
+        return { cursor: 'c-next', messages: [{ messageId: 'm-1', senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '/states' }] }
       },
     }
     await channel.pollLoop(epoch, transport, controller.signal)
@@ -274,7 +280,7 @@ test('wechat channel 处理失败时 cursor 不前移，成功才落盘', async 
     await channel2.pollLoop(epoch2, {
       async poll() {
         controller2.abort()
-        return { cursor: 'c-next', messages: [{ messageId: 'm-2', senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '帮助' }] }
+        return { cursor: 'c-next', messages: [{ messageId: 'm-2', senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '/?' }] }
       },
     }, controller2.signal)
     assert.equal(store2.getState().cursor, 'c-next')
@@ -300,7 +306,7 @@ test('wechat channel 内部异常不回显给用户', async () => {
     channel.bindAuthorizedAdmin({ userId: 'p-admin' })
     // onInbound 会把处理异常继续抛给上层（用于 cursor 不前移），但用户侧只收到通用提示
     await assert.rejects(
-      () => channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '状态' }, channel.transport),
+      () => channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '/states' }, channel.transport),
       /detail-secret/,
     )
     const text = sent.at(-1).text
@@ -326,7 +332,7 @@ test('wechat channel 业务性拒绝给可读提示且不重试', async () => {
     channel.transport = { async sendMessage(request) { sent.push(request) } }
     channel.bindAuthorizedAdmin({ userId: 'p-admin' })
     await assert.doesNotReject(
-      () => channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '验收 web-3' }, channel.transport),
+      () => channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx', clientId: 'c1', text: '/reject web-3 差' }, channel.transport),
       '业务性拒绝不应作为处理失败上抛（否则 cursor 永不推进）',
     )
     assert.ok(sent.at(-1).text.includes('没有任务 3'), '业务错误应给用户可读提示')
@@ -536,26 +542,36 @@ const DISPATCH_STUB = () => ({
   },
 })
 
-test('wechat commands help/help 大小写变体都出帮助', async () => {
-  for (const text of ['help', 'Help', 'HELP', '?']) {
-    const reply = await handleCommand({}, text)
-    assert.ok(reply.includes('可用指令'), `「${text}」应输出帮助`)
-    assert.ok(reply.includes('q'), '帮助里应提到 q 指令')
-    assert.ok(reply.includes('<key>: <消息>'), '帮助里应提到指定项目直达格式')
-    assert.ok(reply.includes('任意消息'), '帮助里应说明自由文本直达')
+test('wechat commands /? 出帮助，旧 help/？ 触发词不再拦截', async () => {
+  const reply = await handleCommand({}, '/?')
+  assert.ok(reply.includes('可用指令'))
+  assert.ok(reply.includes('/keys'), '帮助里应提到 /keys 指令')
+  assert.ok(reply.includes('/tr'), '帮助里应提到 /tr 指令')
+  assert.ok(reply.includes('/reject'), '帮助里应提到 /reject 指令')
+  assert.ok(reply.includes('任意消息') || reply.includes('其余消息'), '帮助里应说明自由文本直达')
+
+  // 旧触发词（help/?/帮助）已不再是指令：作为自由文本走直达路由
+  const free = { stateView: () => ({ projects: [{ key: 'web', name: 'Web', tasks: [] }] }), async wechatChat() { return { error: 'no_target' } } }
+  for (const text of ['help', 'Help', '?', '帮助']) {
+    assert.ok((await handleCommand(free, text)).includes('还没有选定直达的项目'), `「${text}」应按自由文本直达`)
   }
 })
 
-test('wechat commands q 列出可选项目 key，空列表给空态文案', async () => {
+test('wechat commands /keys 列出项目 key，空列表给空态文案', async () => {
   const service = DISPATCH_STUB()
-  const reply = await handleCommand(service, 'q')
-  assert.ok(reply.startsWith('可选的项目：'))
+  const reply = await handleCommand(service, '/keys')
+  assert.ok(reply.startsWith('项目 key：'))
   assert.ok(reply.includes('  web  Web'), 'key 与名称都应出现')
   assert.ok(reply.includes('  bot'), '无名称项目只列 key')
-  assert.equal((await handleCommand(service, 'Q')), reply, '大小写不敏感')
+  assert.equal((await handleCommand(service, '/KEYS')), reply, '大小写不敏感')
 
   const empty = { stateView: () => ({ projects: [] }) }
-  assert.ok((await handleCommand(empty, 'q')).includes('当前没有可选的项目'))
+  assert.ok((await handleCommand(empty, '/keys')).includes('当前没有可选的项目'))
+
+  // 绑定项目标注（当前）
+  const bound = await handleCommand(service, '/keys', { boundKey: 'web' })
+  assert.ok(bound.includes('web  Web（当前）'), '绑定项目应带（当前）标注')
+  assert.ok(!bound.includes('bot  （当前）'))
 })
 
 test('wechat commands 指定项目直达命中：按 key 调 wechatChat 并回执', async () => {
@@ -607,13 +623,12 @@ test('wechat commands 任意交互：自由文本经绑定项目直达，同项�
   assert.ok((await handleCommand(ownerless, '在吗')).includes('没有可用的总监 Bot'))
 })
 
-test('wechat commands 现有指令行为不变：状态/验收/驳回/详情照旧', async () => {
+test('wechat commands 固定指令照旧：/states /reject /detail 路由不变', async () => {
   const service = SERVICE_STUB()
-  const state = await handleCommand(service, '状态')
-  assert.ok(state.includes('web-3 [in_progress] 写登录页'))
-  assert.ok((await handleCommand(service, '验收 web-3 好')).includes('已验收 web-3'))
-  assert.ok((await handleCommand(service, '驳回 web-3 差')).includes('已驳回 web-3'))
-  assert.ok((await handleCommand(service, '详情 web-3')).includes('写登录页'))
+  const states = await handleCommand(service, '/states')
+  assert.ok(states.includes('web-5 [in_review] 等验收'))
+  assert.ok((await handleCommand(service, '/reject web-5 差')).includes('已驳回 web-5'))
+  assert.ok((await handleCommand(service, '/detail web-5')).includes('写登录页'))
   // 非指令文本不再回「未识别」，直达路由由 wechatChat 承接
   const free = await handleCommand(SERVICE_STUB(), 'foo')
   assert.ok(free.includes('已连接【Web】'), '未绑定时的首条自由文本回连接确认')
@@ -722,8 +737,15 @@ test('wechat 排版纯文本：全部 format 渲染结果无 emoji', () => {
   const project = { key: 'web', name: 'Web' }
   const samples = [
     helpText(),
-    statusView([{ key: 'web', name: 'Web', tasks: [{ number: 3, status: 'in_progress', title: '写登录页' }] }]),
-    statusView([]),
+    statesView([{ key: 'web', name: 'Web', tasks: [{ number: 3, status: 'in_review', title: '等验收' }] }]),
+    statesView([]),
+    keysList([project, { key: 'bot', name: '' }], 'web'),
+    keysList([]),
+    botsList([{ name: 'director', member_role: 'owner', status: 'active' }]),
+    botsList([]),
+    unknownCommand(),
+    adminDenied(),
+    trHelp(),
     taskDetail({
       identifier: 'web-3', status: 'in_progress', title: '写登录页',
       comments: [{ author_type: 'user', author_id: 'admin', created_at: '2026-11-05 14:00', body: '做得好' }],

@@ -151,7 +151,7 @@ test('验收通过（applyReview 路径）：推恰一条完成通知，重复�
 
     assert.equal(service.taskRow(task.id).status, 'done')
     assert.equal(pushed.length, 1, '完成只推一条')
-    assert.equal(pushed[0], `TSN-${task.number}《验收推送》已完成\n回复「详情 TSN-${task.number}」查看`)
+    assert.equal(pushed[0], `TSN-${task.number}《验收推送》已完成\n发送 /detail TSN-${task.number} 查看`)
 
     await assert.rejects(
       () => service.applyReview(
@@ -186,7 +186,7 @@ test('微信「验收 KEY-N」指令：同一收口推恰一条，指令回复�
     assert.ok(reply.includes('已验收通过'), '指令回复文案不受影响')
     assert.equal(service.taskRow(task.id).status, 'done')
     assert.equal(pushed.length, 1, '微信验收路径同样只推一条')
-    assert.equal(pushed[0], `TSN-${task.number}《微信验收》已完成\n回复「详情 TSN-${task.number}」查看`)
+    assert.equal(pushed[0], `TSN-${task.number}《微信验收》已完成\n发送 /detail TSN-${task.number} 查看`)
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})
     await closeQuietly(store)
@@ -231,11 +231,11 @@ test('创建任务（DSHBOTS-182 增补）：推恰一条含 KEY-N/标题/派给
     const task = await service.createTask({ projectId: project.id, title: '创建推送', assigneeBotId: dev.id, postCard: false })
 
     assert.equal(pushed.length, 1, '创建只推一条')
-    assert.equal(pushed[0], `TSN-${task.number}《创建推送》已创建\n指派 Builder\n回复「详情 TSN-${task.number}」查看`)
+    assert.equal(pushed[0], `TSN-${task.number}《创建推送》已创建\n指派 Builder\n发送 /detail TSN-${task.number} 查看`)
 
     const unassigned = await service.createTask({ projectId: project.id, title: '无主创建', status: 'todo', postCard: false })
     assert.equal(pushed.length, 2, '无指派任务创建同样推一条')
-    assert.equal(pushed[1], `TSN-${unassigned.number}《无主创建》已创建\n指派 暂未指派\n回复「详情 TSN-${unassigned.number}」查看`)
+    assert.equal(pushed[1], `TSN-${unassigned.number}《无主创建》已创建\n指派 暂未指派\n发送 /detail TSN-${unassigned.number} 查看`)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -276,7 +276,7 @@ function connectedChannel(store, sendMessage?, { batchWindowMs = 20 } = {}) {
 test('D-185 合批：多条待发合并为一次发送，超过明细上限截断加「等 N 项」', async () => {
   const { root, store } = await openChannelStore()
   try {
-    const texts = Array.from({ length: 7 }, (_, i) => `任务 TSN-${i + 1}《任务${i + 1}》已完成。回复「详情 TSN-${i + 1}」查看。`)
+    const texts = Array.from({ length: 7 }, (_, i) => `任务 TSN-${i + 1}《任务${i + 1}》已完成。发送 /detail TSN-${i + 1} 查看。`)
     for (const text of texts) store.enqueue(text)
     const { channel, sent } = connectedChannel(store)
 
@@ -300,7 +300,7 @@ test('D-185 合批：多条待发合并为一次发送，超过明细上限截�
 test('D-185 单条待发不受合批影响：原文直发，无摘要头尾', async () => {
   const { root, store } = await openChannelStore()
   try {
-    const text = '任务 TSN-1《单条》已完成。回复「详情 TSN-1」查看。'
+    const text = '任务 TSN-1《单条》已完成。发送 /detail TSN-1 查看。'
     store.enqueue(text)
     const { channel, sent } = connectedChannel(store)
 
@@ -322,7 +322,7 @@ test('D-185 重试上限：可重试失败计次，达上限废弃，通道痊�
     const { channel, sent, logs } = connectedChannel(store, () => {
       if (fail) throw new WechatIlinkError('PROTOCOL_ERROR', 'iLink rejected the message', true)
     })
-    store.enqueue('任务 TSN-9《堆积》已完成。回复「详情 TSN-9」查看。')
+    store.enqueue('任务 TSN-9《堆积》已完成。发送 /detail TSN-9 查看。')
     const signal = () => new AbortController().signal
 
     await channel.flushOutbox(channel.transport, signal())
@@ -394,8 +394,8 @@ test('D-185 notify 合批窗口：窗口内多次推送合并为一次发送', a
   try {
     const { channel, sent } = connectedChannel(store)
 
-    channel.notify('任务 TSN-1《甲》已创建，暂未指派。回复「详情 TSN-1」查看。')
-    channel.notify('任务 TSN-2《乙》已完成。回复「详情 TSN-2」查看。')
+    channel.notify('任务 TSN-1《甲》已创建，暂未指派。发送 /detail TSN-1 查看。')
+    channel.notify('任务 TSN-2《乙》已完成。发送 /detail TSN-2 查看。')
     await new Promise(resolve => setTimeout(resolve, 120))
 
     assert.equal(sent.length, 1, '同一窗口内的两条推送只占一次通道调用')
