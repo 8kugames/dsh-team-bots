@@ -1,8 +1,3 @@
-// ui/modules/i18n.js —— 轻量 i18n（DSHBOTS-120 Phase 1）
-// 字典在 ../i18n/<lang>.js（key → 文案，zh 为源语言）。t(key, params) 支持 ${name} 插值；
-// 当前语言缺 key 时回退中文原文并 console.warn，中文也缺时返回 key 本身（保证不漏白屏）。
-// DOM（document.documentElement.lang）只在浏览器环境碰，node --test 下可直接 import 断言。
-
 import zh from '../i18n/zh.js'
 import en from '../i18n/en.js'
 

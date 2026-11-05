@@ -1,6 +1,3 @@
-// 排队气泡的乐观渲染与终态驻留（DSHBOTS-150）。
-// DSHBOTS-159 从 ui/app.js 的 typing-linger 标记块外迁：纯逻辑 + 模块级短命台账，不碰滚动。
-// 反向依赖 app.js 的 runStatusLabel（调用期解析：函数声明已提升，无 TDZ）。
 import { state } from './state.js'
 import { attr, avatar, botById, duration, esc } from './util.js'
 import { t } from './i18n.js'

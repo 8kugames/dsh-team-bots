@@ -1,4 +1,3 @@
-// 内联 SVG 图标表（24 viewBox 描边风格）与 icon() 拼装器。
 export const icons = {
   message: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>',
   board: '<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/>',
