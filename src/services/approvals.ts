@@ -1,14 +1,16 @@
 // DSHBOTS-32 群聊审批：宿主 approval/request waterfall 的插件侧应答器。
-// 只认领 session_bindings 命中且绑定到项目的 bot 会话；其余 next() 透传（人类会话审批继续走 Web UI）。
-// 决策权仅项目负责人（type=user）持有，bot 一律 forbidden 不能自批；pending 之外拒绝重复应答，动作写审计。
+// 认领 session_bindings 命中的 bot 会话：绑定到项目的走群聊卡片；绑定为单聊（kind='solo'、
+// project_id 为空）的走单聊卡片（DSHBOTS-218）；其余 next() 透传（人类会话审批继续走 Web UI）。
+// 决策权仅用户（type=user）持有，bot 一律 forbidden 不能自批；pending 之外拒绝重复应答，动作写审计。
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 db.js 的 addColumn/recordMigration 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, nowIso } from '../util.js'
+import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
-const APPROVALS_DDL = `
-CREATE TABLE IF NOT EXISTS approvals (
+// project_id 可空：单聊会话没有项目归属（DSHBOTS-218），卡片锚点改落 solo_messages。
+const APPROVALS_TABLE_DDL = `
   id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   run_id TEXT,
   bot_id TEXT NOT NULL,
   session_id TEXT,
@@ -22,7 +24,9 @@ CREATE TABLE IF NOT EXISTS approvals (
   decided_at TEXT,
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL
-);
+`
+const APPROVALS_DDL = `
+CREATE TABLE IF NOT EXISTS approvals (${APPROVALS_TABLE_DDL});
 CREATE INDEX IF NOT EXISTS approvals_status_idx ON approvals(status, created_at);
 CREATE INDEX IF NOT EXISTS approvals_project_idx ON approvals(project_id, created_at);
 `
@@ -31,6 +35,12 @@ CREATE INDEX IF NOT EXISTS approvals_project_idx ON approvals(project_id, create
 // 重启清理也在此——宿主侧请求随进程消失，不可能再被应答，库里残留的 pending 一律置 timeout。
 export function ensureApprovalSchema(store) {
   store.exec(APPROVALS_DDL)
+  // 旧库 approvals.project_id 是 NOT NULL（群聊专用时期），单聊会话无处归属：重建放宽为可空。
+  if (columnNotNull(store.db, 'approvals', 'project_id')) {
+    rebuildTable(store.db, 'approvals', `CREATE TABLE approvals (${APPROVALS_TABLE_DDL})`)
+    store.exec('CREATE INDEX IF NOT EXISTS approvals_status_idx ON approvals(status, created_at)')
+    store.exec('CREATE INDEX IF NOT EXISTS approvals_project_idx ON approvals(project_id, created_at)')
+  }
   const messageColumns = store.all('PRAGMA table_info(messages)').map(column => column.name)
   if (!messageColumns.includes('kind')) {
     store.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'")
@@ -115,19 +125,22 @@ export const approvalsMethods = {
     }, 'dsh-team: approval request binding')
   },
 
-  // waterfall 监听器：命中 bot 会话且绑定到项目才认领；单聊会话（project_id 为空）没有群聊可发卡片，透传。
+  // waterfall 监听器：命中 bot 会话且绑定到项目才认领走群聊卡片；单聊会话（kind='solo'、
+  // project_id 为空）由工作台单聊卡片承接（DSHBOTS-218）；其余（未绑定、bot 间私信）透传。
   async handleApprovalRequest(req, next) {
     const sessionId = req?.agent?.session?.id
     // bindingOfSession 在 DshRuntime 原型上，服务层拿不到 this 绑定，这里直查同款 SQL。
     const binding = sessionId
       ? this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
       : undefined
-    if (!binding || !binding.project_id) return next()
+    if (!binding) return next()
 
     const store = this.store
+    const isSolo = binding.kind === 'solo' && !binding.project_id
+    if (!binding.project_id && !isSolo) return next()
     const bot = store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
-    const project = store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)
-    if (!bot || !project) return next()
+    const project = isSolo ? null : store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)
+    if (!bot || (!isSolo && !project)) return next()
 
     const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY queued_at DESC LIMIT 1', sessionId)
     const timeoutMs = this.config.approvalTimeoutMs
@@ -146,27 +159,38 @@ export const approvalsMethods = {
     store.run(
       `INSERT INTO approvals(id, project_id, run_id, bot_id, session_id, tool_name, call_id, reason, display_reason, tool_target, status, created_at, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-      approvalId, project.id, run?.id ?? null, bot.id, sessionId,
+      approvalId, project?.id ?? null, run?.id ?? null, bot.id, sessionId,
       toolName, callId, reason, displayReason, toolTarget,
       createdAt, new Date(Date.parse(createdAt) + timeoutMs).toISOString(),
     )
 
-    // 群聊里写一条审批卡片消息：状态渲染时查 approvals 表，消息体只是纯文本兜底，不承载状态。
-    const group = this.groupOf(project.id)
+    // 卡片锚点：群聊落 messages（kind=approval），单聊落 solo_messages（DSHBOTS-218）。
+    // 状态渲染时查 approvals 表，消息体只是纯文本兜底，不承载状态。
     const summary = displayReason || reason || '请求执行需要授权的操作'
-    store.run(
-      `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, kind, approval_id, created_at)
-       VALUES (?, ?, ?, 'system', ?, ?, '[]', 'approval', ?, ?)`,
-      id('msg'), project.id, group?.id ?? null, bot.id,
-      `【审批请求】${bot.name} 请求使用 ${toolName}：${summary}`, approvalId, createdAt,
-    )
+    const anchorBody = `【审批请求】${bot.name} 请求使用 ${toolName}：${summary}`
+    if (isSolo) {
+      this.insertSoloMessage?.({
+        botId: bot.id, senderType: 'system', senderId: 'system',
+        body: anchorBody, runId: run?.id ?? null, createdAt, kind: 'approval', approvalId,
+      })
+    } else {
+      const group = this.groupOf(project.id)
+      store.run(
+        `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, kind, approval_id, created_at)
+         VALUES (?, ?, ?, 'system', ?, ?, '[]', 'approval', ?, ?)`,
+        id('msg'), project.id, group?.id ?? null, bot.id, anchorBody, approvalId, createdAt,
+      )
+    }
 
     // DSHBOTS-215 问答回路：审批转发微信管理员（通道可用时）。只推纯文本镜像，
     // 状态仍由群卡片/工作台承载；管理员决定经「批 <token> 允许|拒绝」路由回本条目。
-    try {
-      this.wechatApproval?.(project, { id: approvalId, bot_name: bot.name, tool_name: toolName, reason: summary })
-    } catch (error: any) {
-      this.logger?.warn?.('dsh-team: 微信审批转发失败: %s', error?.message ?? error)
+    // 单聊没有项目语境，不转发（微信侧只服务项目管理者）。
+    if (project) {
+      try {
+        this.wechatApproval?.(project, { id: approvalId, bot_name: bot.name, tool_name: toolName, reason: summary })
+      } catch (error: any) {
+        this.logger?.warn?.('dsh-team: 微信审批转发失败: %s', error?.message ?? error)
+      }
     }
 
     return new Promise(resolve => {
@@ -229,6 +253,8 @@ export const approvalsMethods = {
       ...row,
       botName: bot?.name ?? 'Bot',
       tool_target_display: row.tool_target ? this.toolTargetDisplay(row.tool_target) : null,
+      // 会话归属（DSHBOTS-218）：单聊审批没有项目，UI 据此显示来源列并决定跳转目标。
+      scope: row.project_id ? 'project' : 'solo',
       remainingMs: row.status === 'pending' ? Math.max(0, expiresAt - Date.now()) : 0,
     }
   },
@@ -243,9 +269,20 @@ export const approvalsMethods = {
     return rows.map(row => this.approvalView(row))
   },
 
+  // 单聊视图的待审批条目（DSHBOTS-218）：口径与 approvalsForProject 一致，按 bot 取项目外条目。
+  approvalsForBot(botId) {
+    const rows = this.store.all(
+      `SELECT * FROM approvals WHERE project_id IS NULL AND bot_id = ?
+       ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 30`,
+      botId,
+    )
+    return rows.map(row => this.approvalView(row))
+  },
+
   // 全局待审视图（DSHBOTS-102）：跨项目聚合 status='pending'，按创建时间倒序。
   // count 是全库 pending 总数（徽标口径，已决一律不计），items 最多 50 条供顶部入口列明细。
   // 明细带项目名，用户不在该项目群聊页也能看到「谁、在哪个项目、要什么、还剩多久」。
+  // scope 区分项目群聊 / 单聊（DSHBOTS-218）：顶部入口据此决定点击后跳哪个会话。
   approvalsPending(limit = 50) {
     const rows = this.store.all(
       `SELECT a.*, p.name AS project_name FROM approvals a LEFT JOIN projects p ON p.id = a.project_id
@@ -255,7 +292,10 @@ export const approvalsMethods = {
     const count = Number(this.store.get("SELECT COUNT(*) AS count FROM approvals WHERE status = 'pending'")?.count ?? 0)
     return {
       count,
-      items: rows.map(row => ({ ...this.approvalView(row), projectName: row.project_name ?? '' })),
+      items: rows.map(row => ({
+        ...this.approvalView(row),
+        projectName: row.project_name ?? '',
+      })),
     }
   },
 }

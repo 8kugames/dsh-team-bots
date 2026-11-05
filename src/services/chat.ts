@@ -214,7 +214,9 @@ export const chatMethods = {
   },
 
   // ===== 单聊：项目外与单个 Bot 的一对一会话，工作目录 _the_bots/<solo_dir> =====
-  insertSoloMessage({ botId, senderType, senderId, body, runId = null, images = [], createdAt = nowIso() }) {
+  // kind/questionId/approvalId 是卡片锚点（DSHBOTS-218）：单聊里发起的提问/审批在会话流里
+  // 落一条 system 卡片消息，卡片状态渲染时查 questions/approvals 表，与群聊同口径。
+  insertSoloMessage({ botId, senderType, senderId, body, runId = null, images = [], createdAt = nowIso(), kind = 'text', questionId = null, approvalId = null }) {
     const messageId = id('msg')
     // 单聊 bot 回复同样剥残片：剥完整条为空就不落库。用户消息不动。
     const cleanedBody = senderType === 'bot' ? stripLeakedToolMarkup(body) : body
@@ -222,9 +224,9 @@ export const chatMethods = {
     // 单聊同样过密钥掩码：单聊正文会进模型上下文，明文密钥不该落库。
     const maskedBody = this.maskSecretValues(cleanedBody)
     this.store.run(
-      `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, run_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      messageId, botId, senderType, senderId, maskedBody, runId, createdAt,
+      `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, run_id, kind, question_id, approval_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      messageId, botId, senderType, senderId, maskedBody, runId, kind, questionId, approvalId, createdAt,
     )
     if (images.length > 0) {
       insertMessageImages(this.store, { messageId, soloMessageId: messageId, images, botId })

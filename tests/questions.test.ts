@@ -189,20 +189,41 @@ test('未绑定会话透传：next() 接管，不落提问（D-190 后仅此路�
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-190：单聊 bot 会话（binding 有 bot 无 project）不再透传——提问能力整体收紧为总监专属，
-// 单聊原生界面同样是 bot 可达的提问出口，必须同样拒绝并给出指引。
-test('权限收紧：单聊 bot 会话发起 ask 也被拒绝，不再透传原生界面', async () => {
+// DSHBOTS-218：单聊会话（kind='solo'、project_id 为空）由工作台单聊卡片承接——单聊里 bot 就是
+// 对话方，没有群聊可发，无需总监归属闸门，也不再透传原生界面。
+test('单聊会话发起 ask 由工作台单聊卡片承接，不落群聊、不透传', async () => {
   const { root, store, service } = await setup()
   try {
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
-    bindSession(store, { sessionId: 'sess-solo', botId: director.id, projectId: null })
+    bindSession(store, { sessionId: 'sess-solo', botId: director.id, projectId: null, kind: 'solo' })
     let nexted = false
     const { req } = makeReq({ sessionId: 'sess-solo' })
-    await assert.rejects(
-      () => service.handleQuestionRequest(req, () => { nexted = true }),
-      /仅限项目总监/,
-    )
-    assert.equal(nexted, false, '单聊 bot 不得透传原生界面')
+    const outcome = ask(service, req, () => { nexted = true })
+    assert.equal(nexted, false, '单聊会话不得透传原生界面')
+    const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
+    assert.ok(row)
+    assert.equal(row.project_id, null, '单聊提问无项目归属')
+    const anchor = store.get('SELECT * FROM solo_messages WHERE question_id = ?', row.id)
+    assert.ok(anchor, '单聊会话里落一条卡片锚点消息')
+    assert.equal(anchor.kind, 'question')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0, '不得落群聊消息')
+    const view = await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['dev'] }] })
+    assert.equal(view.status, 'answered')
+    assert.deepEqual(await outcome, { answers: [{ id: 'q1', selected: ['dev'] }] })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// kind='project' 但 project_id 为空（异常/历史绑定）没有单聊卡片可落，仍透传。
+test('项目型绑定但 project_id 为空仍透传：next() 接管，不落提问', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    bindSession(store, { sessionId: 'sess-orphan', botId: director.id, projectId: null })
+    let nexted = false
+    const { req } = makeReq({ sessionId: 'sess-orphan' })
+    const result = await service.handleQuestionRequest(req, () => { nexted = true; return { answers: [] } })
+    assert.equal(nexted, true)
+    assert.deepEqual(result, { answers: [] })
     assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

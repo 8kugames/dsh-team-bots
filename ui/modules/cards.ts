@@ -299,7 +299,7 @@ function questionBannerView(pendingQuestions) {
           ${state.questionPanelOpen ? `<div class="question-menu" role="menu">
             ${items.length === 0 ? '<div class="question-menu-empty">暂无明细</div>' : items.map(item => `
               <button class="question-menu-item" role="menuitem" data-action="focus-question" data-question-id="${attr(item.id)}">
-                <span class="question-menu-project">${esc(item.projectName || '（未命名项目）')}</span>
+                <span class="question-menu-project">${esc(cardScopeLabel(item))}</span>
                 <span class="question-menu-line">${esc(item.botName || 'Bot')}</span>
                 <span class="question-menu-summary">${esc(questionBannerSummary(item))}</span>
                 <span class="question-menu-time" data-expires="${questionExpiresMs(item.expires_at)}">${esc(formatQuestionCountdown(questionRemainingFrom(questionExpiresMs(item.expires_at), item.remainingMs)))}</span>
@@ -308,11 +308,23 @@ function questionBannerView(pendingQuestions) {
         </div>`
 }
 
-// 点通知：聚焦窗口，跳到该项目群聊并把提问卡滚动到可视区。
+// 顶部窄条的来源标签（DSHBOTS-218）：单聊会话没有项目归属，来源列显示「单聊」，不显示项目名。
+function cardScopeLabel(item) {
+  return item.scope === 'solo' ? '单聊' : (item.projectName || '（未命名项目）')
+}
+
+// 点通知：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把提问卡滚动到可视区。
 function focusQuestionCard(question) {
-  if (!question?.project_id) return
-  state.projectId = question.project_id
-  state.chatMode = 'group'
+  if (!question) return
+  if (question.project_id) {
+    state.projectId = question.project_id
+    state.chatMode = 'group'
+  } else {
+    // 单聊卡片没有项目归属：跳到该 bot 的 1V1 会话，卡片锚点就在单聊消息流里。
+    if (!question.bot_id) return
+    state.soloBotId = question.bot_id
+    state.chatMode = 'solo'
+  }
   state.view = 'chat'
   refresh()
     .then(() => {
@@ -338,7 +350,7 @@ function approvalBannerView(pendingApprovals) {
           ${state.approvalPanelOpen ? `<div class="approval-menu" role="menu">
             ${items.length === 0 ? '<div class="approval-menu-empty">暂无明细</div>' : items.map(item => `
               <button class="approval-menu-item" role="menuitem" data-action="focus-approval" data-approval-id="${attr(item.id)}">
-                <span class="approval-menu-project">${esc(item.projectName || '（未命名项目）')}</span>
+                <span class="approval-menu-project">${esc(cardScopeLabel(item))}</span>
                 <span class="approval-menu-line">${esc(item.botName || 'Bot')} · ${esc(item.tool_name || '工具')}</span>
                 <span class="approval-menu-summary">${esc(item.display_reason || item.reason || '')}</span>
                 <span class="approval-menu-time" data-expires="${approvalExpiresMs(item.expires_at)}">${esc(formatApprovalRemaining(item.remainingMs))}</span>
@@ -405,11 +417,18 @@ function approvalNotifyBody(approval) {
   return text.length > 120 ? `${text.slice(0, 119)}…` : text
 }
 
-// 点通知：聚焦窗口，跳到该项目群聊并把审批卡滚动到可视区。
+// 点通知：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把审批卡滚动到可视区。
 function focusApprovalCard(approval) {
-  if (!approval?.project_id) return
-  state.projectId = approval.project_id
-  state.chatMode = 'group'
+  if (!approval) return
+  if (approval.project_id) {
+    state.projectId = approval.project_id
+    state.chatMode = 'group'
+  } else {
+    // 单聊卡片没有项目归属：跳到该 bot 的 1V1 会话，卡片锚点就在单聊消息流里。
+    if (!approval.bot_id) return
+    state.soloBotId = approval.bot_id
+    state.chatMode = 'solo'
+  }
   state.view = 'chat'
   refresh()
     .then(() => {

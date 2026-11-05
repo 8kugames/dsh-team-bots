@@ -197,6 +197,10 @@ export const systemMethods = {
         })
         const soloTotal = Number(this.store.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', soloBot.id)?.count ?? 0)
         const archivedCount = Math.max(0, soloTotal - soloWindow.length)
+        // 单聊卡片条目（DSHBOTS-218）：提问/审批在单聊会话里发起时落 solo_messages 卡片锚点，
+        // 状态查 questions/approvals 表（project_id 为空的那批）。
+        const soloQuestions = this.questionsForBot(soloBot.id)
+        const soloApprovals = this.approvalsForBot(soloBot.id)
         view.solo = {
           bot: this.botView(soloBot),
           // 默认视图走归档窗口（DSHBOTS-171）：只留「最近 dmKeepRecent 条 且 dmArchiveDays
@@ -207,7 +211,13 @@ export const systemMethods = {
             "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 30",
             soloBot.id,
           ).map(run => this.runView(run)),
+          questions: soloQuestions,
+          approvals: soloApprovals,
         }
+        // 卡片渲染与点击处理统一读 state.data.questions/approvals（群聊/单聊共用同一条 renderMessage），
+        // 这里把单聊条目并进同一份列表，单聊里的卡片才查得到状态、不退化成纯文本。
+        view.questions = [...(view.questions ?? []), ...soloQuestions]
+        view.approvals = [...(view.approvals ?? []), ...soloApprovals]
         // 单聊上下文口径（DSHBOTS-5 收敛）：记忆只看该 bot 自己的（不含团队）；运行只看该 bot 的项目外运行；
         // 提案保持全量（渲染层按 bot 过滤，逐个审批）。
         view.proposals = this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item))

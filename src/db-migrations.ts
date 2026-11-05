@@ -102,6 +102,7 @@ export function runMigrations(db) {
   migrateProposals(db)
   migrateUsageEvents(db)
   migrateSoloSupport(db)
+  migrateSoloMessageCards(db)
   migrateSoloDirUnique(db)
   migrateMessages(db)
   db.exec(BINDING_INDEXES)
@@ -127,6 +128,7 @@ export function runMigrations(db) {
   recordMigration(db, 'bots_fallback_model')
   recordMigration(db, 'runs_model_override')
   recordMigration(db, 'chat_reads')
+  recordMigration(db, 'solo_message_cards')
   return { ftsEnabled }
 }
 
@@ -257,9 +259,17 @@ function migrateSoloSupport(db) {
   }
 }
 
-function columnNotNull(db, table, column) {
+export function columnNotNull(db, table, column) {
   const info = db.prepare(`PRAGMA table_info(${table})`).all().find(row => row.name === column)
   return Boolean(info?.notnull)
+}
+
+// 单聊卡片锚点（DSHBOTS-218）：solo_messages 增加 kind/question_id/approval_id 三列，
+// 让单聊会话也能挂提问卡与审批卡（状态仍查 questions/approvals 表）。
+function migrateSoloMessageCards(db) {
+  addColumn(db, 'solo_messages', 'kind', "TEXT NOT NULL DEFAULT 'text'")
+  addColumn(db, 'solo_messages', 'question_id', 'TEXT')
+  addColumn(db, 'solo_messages', 'approval_id', 'TEXT')
 }
 
 // 单聊目录唯一：新库建表时 solo_dir 就带 UNIQUE，老库是 addColumn 补的列，没有唯一约束，
@@ -282,7 +292,9 @@ function migrateMessages(db) {
 }
 
 // 全量重建一张表：原名表数据拷入 <name>_new 后删除原名表，再把新表改回原名。
-function rebuildTable(db, name, createSql) {
+// 导出给自管迁移域（questions/approvals）复用：它们的表体定义在本域之外，
+// 放宽 project_id 可空性（单聊会话无项目归属）同样只能走重建。
+export function rebuildTable(db, name, createSql) {
   const columns = db.prepare(`PRAGMA table_info(${name})`).all().map(row => row.name)
   db.exec('PRAGMA foreign_keys = OFF')
   try {

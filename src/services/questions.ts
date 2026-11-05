@@ -1,16 +1,18 @@
 // DSHBOTS-116 群聊提问：宿主 user-questions/request waterfall 的插件侧应答器。
-// 只认领 session_bindings 命中且绑定到项目的 bot 会话；其余 next() 透传（人类会话提问继续走原生界面）。
-// 应答权仅项目负责人（type=user）持有，bot 一律 forbidden 不能自答；pending 之外拒绝重复应答，动作写审计。
+// 认领 session_bindings 命中的 bot 会话：绑定到项目的走群聊卡片；绑定为单聊（kind='solo'、
+// project_id 为空）的走单聊卡片（DSHBOTS-218）；其余 next() 透传（人类会话提问继续走原生界面）。
+// 应答权仅用户（type=user）持有，bot 一律 forbidden 不能自答；pending 之外拒绝重复应答，动作写审计。
 // DSHBOTS-177：宿主 timed 前台等待到期（ASK_TIMED_OUT abort）不杀卡——条目保持可答至插件
 // questionTimeoutMs 窗口，窗口内迟到作答经宿主 userQuestions.answer 回投原 agent；其余 abort 立即失效。
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 approvals.js 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, jsonParse, nowIso, text as textValue } from '../util.js'
+import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
-const QUESTIONS_DDL = `
-CREATE TABLE IF NOT EXISTS questions (
+// project_id 可空：单聊会话没有项目归属（DSHBOTS-218），卡片锚点改落 solo_messages。
+const QUESTIONS_TABLE_DDL = `
   id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   run_id TEXT,
   bot_id TEXT NOT NULL,
   session_id TEXT,
@@ -22,7 +24,9 @@ CREATE TABLE IF NOT EXISTS questions (
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   ended_at TEXT
-);
+`
+const QUESTIONS_DDL = `
+CREATE TABLE IF NOT EXISTS questions (${QUESTIONS_TABLE_DDL});
 CREATE INDEX IF NOT EXISTS questions_status_idx ON questions(status, created_at);
 CREATE INDEX IF NOT EXISTS questions_project_idx ON questions(project_id, created_at);
 `
@@ -31,6 +35,12 @@ CREATE INDEX IF NOT EXISTS questions_project_idx ON questions(project_id, create
 // 重启清理也在此——宿主侧请求随进程消失，不可能再被应答，库里残留的 pending 一律置 timeout。
 export function ensureQuestionSchema(store) {
   store.exec(QUESTIONS_DDL)
+  // 旧库 questions.project_id 是 NOT NULL（群聊专用时期），单聊会话无处归属：重建放宽为可空。
+  if (columnNotNull(store.db, 'questions', 'project_id')) {
+    rebuildTable(store.db, 'questions', `CREATE TABLE questions (${QUESTIONS_TABLE_DDL})`)
+    store.exec('CREATE INDEX IF NOT EXISTS questions_status_idx ON questions(status, created_at)')
+    store.exec('CREATE INDEX IF NOT EXISTS questions_project_idx ON questions(project_id, created_at)')
+  }
   const messageColumns = store.all('PRAGMA table_info(messages)').map(column => column.name)
   if (!messageColumns.includes('question_id')) {
     store.exec('ALTER TABLE messages ADD COLUMN question_id TEXT')
@@ -92,10 +102,12 @@ export const questionsMethods = {
     }, 'dsh-team: user question request binding')
   },
 
-  // waterfall 监听器：DSHBOTS-190 起，提问能力收紧为项目总监（owner bot）专属。
-  // 未绑定会话无法归因，保持透传原生界面；命中 bot 会话一律先过所有权闸门，不再透传——
+  // waterfall 监听器：DSHBOTS-190 起，项目会话的提问能力收紧为项目总监（owner bot）专属。
+  // 未绑定会话无法归因，保持透传原生界面；命中 bot 会话一律先过归属闸门，不再透传——
   // 透传会把提问落回宿主面板，收紧形同虚设。拒绝以 rejected promise 回宿主，错误文案
   // 即调用 bot 收到的 ask_user_question 工具结果。
+  // DSHBOTS-218：单聊会话（kind='solo'）由工作台单聊卡片承接——单聊里 bot 就是对话方，
+  // 没有群聊可发，无需总监归属闸门；bot 间私信（kind='dm'）没有人类作答方，照旧透传。
   async handleQuestionRequest(req, next) {
     const sessionId = req?.agent?.session?.id
     // bindingOfSession 在 DshRuntime 原型上，服务层拿不到 this 绑定，这里直查同款 SQL。
@@ -104,21 +116,17 @@ export const questionsMethods = {
       : undefined
     if (!binding) return next()
 
-    if (!binding.project_id) {
-      return Promise.reject(new Error(
-        'ask_user_question 仅限项目总监 Bot 在项目群中使用；当前是单聊会话。如需向用户提问，请在项目群中由总监 Bot 发起。',
-      ))
-    }
-
     const store = this.store
+    const isSolo = binding.kind === 'solo' && !binding.project_id
+    if (!binding.project_id && !isSolo) return next()
     const bot = store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
-    const project = store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)
-    if (!bot || !project) {
+    const project = isSolo ? null : store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)
+    if (!bot || (!isSolo && !project)) {
       return Promise.reject(new Error(
-        'ask_user_question 会话绑定失效，无法确认项目归属；请在项目群中由总监 Bot 发起提问。',
+        'ask_user_question 会话绑定失效，无法确认会话归属；请在项目群中由总监 Bot 发起提问，或与 Bot 单聊时重试。',
       ))
     }
-    if (project.owner_bot_id !== binding.bot_id) {
+    if (!isSolo && project.owner_bot_id !== binding.bot_id) {
       return Promise.reject(new Error(
         `ask_user_question 仅限项目总监 Bot 使用；${bot.name} 不是本项目总监。需要用户决策时，请把问题交给总监 Bot 发起。`,
       ))
@@ -149,7 +157,7 @@ export const questionsMethods = {
     store.run(
       `INSERT INTO questions(id, project_id, run_id, bot_id, session_id, call_id, questions, status, created_at, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-      questionId, project.id, run?.id ?? null, bot.id, sessionId, callId,
+      questionId, project?.id ?? null, run?.id ?? null, bot.id, sessionId, callId,
       JSON.stringify(masked), createdAt, new Date(Date.parse(createdAt) + timeoutMs).toISOString(),
     )
 
@@ -158,21 +166,32 @@ export const questionsMethods = {
       sessionId, callId, count: masked.length,
     })
 
-    // 群聊里写一条提问卡片消息：状态渲染时查 questions 表，消息体只是纯文本兜底，不承载状态。
-    const group = this.groupOf(project.id)
-    store.run(
-      `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, kind, question_id, created_at)
-       VALUES (?, ?, ?, 'system', ?, ?, '[]', 'question', ?, ?)`,
-      id('msg'), project.id, group?.id ?? null, bot.id,
-      `【提问】${bot.name} 发起提问（${masked.length} 个问题）`, questionId, createdAt,
-    )
+    // 卡片锚点：群聊落 messages（kind=question），单聊落 solo_messages（DSHBOTS-218）。
+    // 状态渲染时查 questions 表，消息体只是纯文本兜底，不承载状态。
+    const anchorBody = `【提问】${bot.name} 发起提问（${masked.length} 个问题）`
+    if (isSolo) {
+      this.insertSoloMessage?.({
+        botId: bot.id, senderType: 'system', senderId: 'system',
+        body: anchorBody, runId: run?.id ?? null, createdAt, kind: 'question', questionId,
+      })
+    } else {
+      const group = this.groupOf(project.id)
+      store.run(
+        `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, kind, question_id, created_at)
+         VALUES (?, ?, ?, 'system', ?, ?, '[]', 'question', ?, ?)`,
+        id('msg'), project.id, group?.id ?? null, bot.id, anchorBody, questionId, createdAt,
+      )
+    }
 
     // DSHBOTS-215 问答回路：提问转发微信管理员（通道可用时）。只推纯文本镜像，
     // 状态仍由群卡片/工作台承载；管理员答复经「答 <token> …」路由回本条目。
-    try {
-      this.wechatQuestion?.(project, { id: questionId, bot_name: bot.name }, masked)
-    } catch (error: any) {
-      this.logger?.warn?.('dsh-team: 微信提问转发失败: %s', error?.message ?? error)
+    // 单聊没有项目语境，不转发（微信侧只服务项目管理者）。
+    if (project) {
+      try {
+        this.wechatQuestion?.(project, { id: questionId, bot_name: bot.name }, masked)
+      } catch (error: any) {
+        this.logger?.warn?.('dsh-team: 微信提问转发失败: %s', error?.message ?? error)
+      }
     }
 
     return new Promise((resolve, reject) => {
@@ -297,6 +316,8 @@ export const questionsMethods = {
       questions: jsonParse(row.questions, []),
       answer: jsonParse(row.answer, null),
       botName: bot?.name ?? 'Bot',
+      // 会话归属（DSHBOTS-218）：单聊提问没有项目，UI 据此显示来源列并决定跳转目标。
+      scope: row.project_id ? 'project' : 'solo',
       remainingMs: row.status === 'pending'
         ? Math.max(0, (Number.isFinite(expiresAt) ? expiresAt : Date.parse(row.created_at) + this.config.questionTimeoutMs) - Date.now())
         : 0,
@@ -313,8 +334,19 @@ export const questionsMethods = {
     return rows.map(row => this.questionView(row))
   },
 
+  // 单聊视图的提问条目（DSHBOTS-218）：口径与 questionsForProject 一致，按 bot 取项目外条目。
+  questionsForBot(botId) {
+    const rows = this.store.all(
+      `SELECT * FROM questions WHERE project_id IS NULL AND bot_id = ?
+       ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 30`,
+      botId,
+    )
+    return rows.map(row => this.questionView(row))
+  },
+
   // 全局待答视图：跨项目聚合 status='pending'，按创建时间倒序。
   // count 是全库 pending 总数（徽标口径，已决一律不计），items 最多 50 条供顶部入口列明细。
+  // scope 区分项目群聊 / 单聊（DSHBOTS-218）：顶部入口据此决定点击后跳哪个会话。
   questionsPending(limit = 50) {
     const rows = this.store.all(
       `SELECT q.*, p.name AS project_name FROM questions q LEFT JOIN projects p ON p.id = q.project_id
@@ -324,7 +356,10 @@ export const questionsMethods = {
     const count = Number(this.store.get("SELECT COUNT(*) AS count FROM questions WHERE status = 'pending'")?.count ?? 0)
     return {
       count,
-      items: rows.map(row => ({ ...this.questionView(row), projectName: row.project_name ?? '' })),
+      items: rows.map(row => ({
+        ...this.questionView(row),
+        projectName: row.project_name ?? '',
+      })),
     }
   },
 }

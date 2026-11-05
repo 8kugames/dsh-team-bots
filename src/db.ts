@@ -114,6 +114,11 @@ CREATE TABLE IF NOT EXISTS solo_messages (
   sender_id TEXT NOT NULL,
   body TEXT NOT NULL,
   run_id TEXT,
+  -- 卡片锚点：kind=question/approval 时 question_id/approval_id 指向 questions/approvals 行，
+  -- 卡片状态渲染时查那张表（与群聊 messages.kind/question_id/approval_id 同口径）。
+  kind TEXT NOT NULL DEFAULT 'text',
+  question_id TEXT,
+  approval_id TEXT,
   created_at TEXT NOT NULL
 );
 
