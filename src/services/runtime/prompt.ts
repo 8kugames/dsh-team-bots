@@ -57,7 +57,7 @@ export function effectiveSandbox(run, bot, task) {
 
 const sessionIdOf = context => context?.agent?.id ?? context?.session?.id ?? context?.sessionId
 
-// 任务描述超长截断管线（DSHBOTS-113，事故 m_33bddb；DSHBOTS-140 起三条任务派生分支共用）：
+// 任务描述超长截断管线（DSHBOTS-113，事故 m_33bddb；DSHBOTS-254 起任务分支与 review/handle 同口径）：
 // 任务全文拼进提示词可能顶爆 400 上下文，超过 8K 字符截断并注明，消费方据此只基于
 // 截断内可见的部分下结论并声明盲区；标题/状态/写范围/任务评论在截断点之外恒在场。
 function truncateTaskDescription(raw) {
@@ -433,17 +433,20 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
       `Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
       `You are: ${bot.name}`,
     ].join('\n')
+    // 任务评论注入（DSHBOTS-254 收口）：最近 3 条、合计 ≤1.5k——每条正文 500 上限（1.5k/3 的
+    // 按比例缩减）+ 拼接后 1500 硬顶（兜住行前缀开销），最坏 ~4k → 1.5k。
     const taskComments = task
       ? this.store.all(
-        'SELECT id, author_type, author_id, body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 5',
+        'SELECT id, author_type, author_id, body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 3',
         task.id,
       ).reverse()
       : []
     const threads = taskComments.length === 0
       ? ''
       : `\nRecent task comments:\n${taskComments
-        .map(item => `- [c_${item.id.slice(-6)}] ${item.author_type}:${item.author_id}: ${item.body.length > 800 ? `${item.body.slice(0, 800)}…` : item.body}`)
-        .join('\n')}`
+        .map(item => `- [c_${item.id.slice(-6)}] ${item.author_type}:${item.author_id}: ${item.body.length > 500 ? `${item.body.slice(0, 500)}…` : item.body}`)
+        .join('\n')
+        .slice(0, 1_500)}`
     // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入。
     // 任务派生运行（review/handle/memory_review）与该任务共用同一时效上限，提示词必须同步告知，
     // 否则运行会在代理不知情的情况下被超时中止。
@@ -458,7 +461,7 @@ The effective timeout is the smaller of this budget and the global run timeout (
     }
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
       // 超长防护（DSHBOTS-113，事故 m_33bddb；DSHBOTS-140 扩到 owner review / handle）：
-      // 三条分支共用 truncateTaskDescription 的同一截断点与盲区口径。
+      // 任务派生分支共用 truncateTaskDescription 的同一截断点与盲区口径（任务分支见 DSHBOTS-254）。
       const writeScopes = readWriteScopes(task.write_scopes)
       const declaredScopes = writeScopes.length ? writeScopes.join(', ') : '(none declared)'
       const description = truncateTaskDescription(task.description)
@@ -579,6 +582,9 @@ Your reply:
 ${(sourceRun?.output ?? '').slice(0, 4000)}`
     }
     if (task) {
+      // 超长防护（DSHBOTS-254）：任务分支与 review/handle 同口径复用 truncateTaskDescription
+      // （8k 截断 + 盲区标记），建卡上限 40k 的长卡不再整段进提示词。
+      const description = truncateTaskDescription(task.description)
       // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
       const timeBudgetBlock = timeBudgetBlockFor(task)
       // 紧急豁免（DSHBOTS-126）：urgent 任务卡追加豁免指令（用户口径 m08196-2）——
@@ -587,25 +593,23 @@ ${(sourceRun?.output ?? '').slice(0, 4000)}`
 
 # Urgent exemption
 This task is urgent and exempt from lane queuing discipline: start immediately, without waiting for other tasks' file lanes to clear. If in-flight edits to the same files exist in the workspace, first run git status to record the scene, then commit only this card's files by exact pathspec — never add/checkout/stash others' changes.` : ''
-      // subtask-discipline:start —— 子任务拆解纪律（DSHBOTS-132）：把「主项未完成/新收口条件 →
-      // 立产品级子卡」从总监口头纪律升级为产品能力。所有任务卡无条件注入，与时效段（D-125）、
-      // 紧急豁免段（D-126）互不干扰：本段不读 priority/time_budget，后两者不读本段。
+      // subtask-discipline:start —— 子任务拆解纪律（DSHBOTS-132；DSHBOTS-254 与提速拆分/并行段
+      // 语义去重，三段合计 ≤1200 字符，tests/prompt-budget.test.ts 守门）：主项做不完或出现新
+      // 收口条件 → 立产品级子卡。所有任务卡无条件注入，与时效段（D-125）、紧急豁免段（D-126）
+      // 互不干扰：本段不读 priority/time_budget，后两者不读本段。
       const subtaskDisciplineBlock = `
 
 # Subtask discipline
-Before closing: if this task cannot be finished in one run (e.g. quota-capped partial delivery) or new closing conditions emerge (test gaps, coupled fixes, later productization), immediately file subtasks via team_assign_task with parent_task_id and report in the group — never leave follow-ups as verbal suggestions without cards. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.`
+Before closing: if this task cannot be finished in one run or new closing conditions emerge, file subtasks via team_assign_task with parent_task_id and report in the group — no verbal-only follow-ups. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.`
       // subtask-discipline:end
-      // splitting-guidance:start —— 提速拆分引导（DSHBOTS-212）。根因调查结论：此前唯一讲并行拆分
-      // 的段（下方 parallel）被 config.agentTeam 缺省关闭（DSHBOTS-230 起缺省开启，parallel 段
-      // 默认可见），纪律段只覆盖「做不完再兜底立卡」，
-      // 执行 bot 又无派单权限（team_assign_task 仅总监可用），三条叠加导致拆分使用率为零。
-      // 本段补齐「何时拆、怎么拆」：拆分判据（独立部分 + 写范围不相交 + 拆后合并成本更低，
-      // 即 C_removed > C_introduced 的白话口径）+ 角色现实（无权限就在交付报告里提拆分方案）。
-      // 静态段（不随卡变化）：与纪律段同为全局前缀，置于 # Assigned task 之前，护住前缀缓存。
+      // splitting-guidance:start —— 提速拆分引导（DSHBOTS-212；DSHBOTS-254 去重收口）：
+      // 拆分判据（2+ 独立部分 + 写范围不相交 + 拆后合并成本更低）+ 角色现实（无派单权限就在
+      // 交付报告里提拆分方案）。静态段（不随卡变化）：与纪律段同为全局前缀，置于 # Assigned task
+      // 之前，护住前缀缓存。
       const splittingGuidanceBlock = `
 
 # Splitting for speed
-Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery (each card re-reads context; per-task usage shows the extra input and cache tokens). One card per part: team_assign_task with parent_task_id set to this task, disjoint write_scopes, blocked_by where order matters. Not the project owner? Propose the split in your delivery report (per-part title and scopes) instead of calling dispatch tools you lack. Example: "implement API + write its docs" splits into an API card (write_scopes: src/api/) and a docs card (write_scopes: docs/), both parented here, run concurrently.`
+Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery. One card per part: parent_task_id to this task, blocked_by where order matters. Not the project owner? Propose the split in your delivery report. Example: API card (src/api/) + docs card, run concurrently.`
       // splitting-guidance:end
       // recovery note（DSHBOTS-135）：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
       // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
@@ -614,14 +618,14 @@ Split only when all hold: the task has 2+ independent parts, parts have disjoint
 
 # Recovery note
 The previous run was interrupted by a host restart. Check the workspace and git status first to verify the current state, then resume from where it stopped; do not repeat external actions already performed (commits/publishes/messages).` : ''
+      // agentTeam 门控（DSHBOTS-254 收口）：单卡内并行的执行口径——teammates/子代理、
+      // 部件落项目 KEY-N 卡、交付前 wait_agent 汇总。拆分判据不在此重复（见上方提速拆分段）。
       const parallel = this.config.agentTeam ? `
 
 # Parallel work inside this task
-- Split into teammates only when the task has two or more independent parts (separate modules, separate docs, an independent review). Small or single-file work: do it yourself.
-- At most ${this.config.maxTeammates} teammates, lower-kebab-case names, each with a one-paragraph brief.
-- Record every part as a project task card (project KEY-N) with a disjoint write_scope, never on the host shared task board (task-N): that board is legacy — its cards stay readable via team_task_list, but new cards must carry the project key. File parts through team_assign_task (owner) or propose the cards in your report (member). Never let two members edit the same path.
-- Before delivering: list_agents, then wait_agent until nothing is running, then merge their results into your report.
-- The checkout is shared and unlocked. If a teammate reports a conflicting edit, resolve it yourself instead of retrying blindly.` : ''
+- Parallelize independent parts via teammates (at most ${this.config.maxTeammates}) or child agents (subagent/subagent_fork).
+- Record every part as a project task card (project KEY-N) with a disjoint write_scope, never on the host shared task board (task-N).
+- Before delivering: list_agents, wait_agent until idle, merge results into your report; resolve conflicting edits yourself.` : ''
       return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}
 
 Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
@@ -632,7 +636,7 @@ Title: ${task.title}
 Priority: ${task.priority}
 Status: ${task.status}
 Description:
-${task.description || '(no description)'}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}`
+${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}`
     }
     const { rows: recent, incremental } = this.watermarkWindow({
       sessionId,
