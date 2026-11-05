@@ -127,6 +127,57 @@ export function chatReply(botName, body, failed = false) {
   return `${failed ? '⚠️' : '💬'} ${botName}\n${RULE}\n${body}`
 }
 
+/** 提问/审批的微信短 token：取 id 末 6 位（库内唯一性由项目绑定 + pending 收敛）。 */
+export function wechatToken(rowId) {
+  return String(rowId ?? '').slice(-6).toLowerCase()
+}
+
+/**
+ * 提问转发微信（DSHBOTS-215）：群聊提问卡片的微信镜像。
+ * 带短 token 与回复格式，管理员的答复经 commands 的「答 <token> …」路由回原问题。
+ * 微信出站一律纯文本、不用 emoji（D-211 实机验收驳回口径，重做卡 D-217）。
+ */
+export function questionCard(projectName, botName, items, token) {
+  const lines = [`【提问】${botName}（${projectName}）`, RULE]
+  for (const [index, item] of (items ?? []).entries()) {
+    lines.push(`Q${index + 1}: ${item.question}`)
+    if (item.detail) lines.push(`  ${item.detail}`)
+    if (Array.isArray(item.options) && item.options.length > 0) {
+      lines.push(`  选项: ${item.options.map((option, i) => `${i + 1}.${option.label}`).join(' / ')}`)
+    }
+  }
+  lines.push('', `回复「答 ${token} <选项或文字>」`)
+  if ((items ?? []).length > 1) lines.push(`多个问题用「;」分隔，如：答 ${token} 1:选项一;2:补充说明`)
+  return lines.join('\n')
+}
+
+/** 审批转发微信（DSHBOTS-215）：审批卡片的微信镜像，允许/拒绝经「批 <token> …」路由回原审批。 */
+export function approvalCard(projectName, botName, toolName, reason, token) {
+  return [
+    `【审批】${botName}（${projectName}）`,
+    RULE,
+    `工具: ${toolName}`,
+    `原因: ${reason}`,
+    '',
+    `回复「批 ${token} 允许」或「批 ${token} 拒绝」`,
+  ].join('\n')
+}
+
+/** 答复/审批路由成功回执。 */
+export function answerReceipt(token, summary) {
+  return `已收到答复（${token}）\n${summary}`
+}
+
+/** 答复/审批路由失败提示（token 未命中、选项无法解析等）。 */
+export function answerFailed(token, reason) {
+  return `答复无法提交（${token}）：${reason}`
+}
+
+/** 答复缺少正文。 */
+export function answerHelp() {
+  return '请按格式答复：答 <token> <选项或文字>；多个问题用「;」分隔，如：答 abc123 1:选项一;2:补充说明。'
+}
+
 /** 任务创建推送。 */
 export function taskCreated(identifier, title, assignee) {
   return [

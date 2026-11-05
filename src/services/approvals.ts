@@ -161,6 +161,14 @@ export const approvalsMethods = {
       `【审批请求】${bot.name} 请求使用 ${toolName}：${summary}`, approvalId, createdAt,
     )
 
+    // DSHBOTS-215 问答回路：审批转发微信管理员（通道可用时）。只推纯文本镜像，
+    // 状态仍由群卡片/工作台承载；管理员决定经「批 <token> 允许|拒绝」路由回本条目。
+    try {
+      this.wechatApproval?.(project, { id: approvalId, bot_name: bot.name, tool_name: toolName, reason: summary })
+    } catch (error: any) {
+      this.logger?.warn?.('dsh-team: 微信审批转发失败: %s', error?.message ?? error)
+    }
+
     return new Promise(resolve => {
       this.approvalPending ??= new Map()
       const timer = setTimeout(() => {

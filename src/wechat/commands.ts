@@ -1,12 +1,18 @@
 import { WechatIlinkError, chunkWechatText, filterWechatMarkdown } from '../../vendor/wechat-ilink/index.js'
 import { TASK_ID_PATTERN } from '../util.js'
 import {
-  badTaskId, connectedReceipt, helpText, needPickProject, needReturnReason,
+  answerHelp, badTaskId, connectedReceipt, helpText, needPickProject, needReturnReason,
   noOwner, projectList, projectNotFound, statusView, taskDetail,
 } from './format.js'
 
 /** 需要任务号的任务指令。 */
 const TASK_VERBS = ['验收', '驳回', '详情']
+
+/** 微信答复路由：答 <token> <选项或文字>（DSHBOTS-215）。token 为提问/审批 id 末 6 位。 */
+const ANSWER_PATTERN = /^(?:答|答复|回答|answer)\s+([A-Za-z0-9]{4,10})(?:\s+([\s\S]*))?$/i
+
+/** 微信审批路由：批 <token> 允许|拒绝（DSHBOTS-215）。 */
+const APPROVAL_PATTERN = /^(?:批|审批|approve)\s+([A-Za-z0-9]{4,10})\s*(允许|拒绝|allow|reject)$/i
 
 /** 正文里的任务号候选（不要求空格分隔），再由 TASK_ID_PATTERN 校验。 */
 const TASK_ID_CANDIDATE = /([a-z][a-z0-9-]*-\d+)/gi
@@ -59,6 +65,20 @@ export async function handleCommand(service, rawText, ctx = null) {
 
   if (normalized === 'q') {
     return projectList(service.stateView().projects ?? [])
+  }
+
+  // DSHBOTS-215 问答回路：微信答复/审批按 token 路由回对应条目，绝不进普通对话。
+  // 仅在 service 实现了对应方法时拦截（测试桩未实现时按普通文本处理）。
+  const approval = APPROVAL_PATTERN.exec(body)
+  if (approval && typeof (service as any).wechatDecideApproval === 'function') {
+    const decision = ['允许', 'allow'].includes(approval[2].toLowerCase()) ? 'allow' : 'reject'
+    return (service as any).wechatDecideApproval(approval[1].toLowerCase(), decision, ctx?.boundKey ?? null)
+  }
+  const answer = ANSWER_PATTERN.exec(body)
+  if (answer && typeof (service as any).wechatAnswerQuestion === 'function') {
+    const text = String(answer[2] ?? '').trim()
+    if (!text) return answerHelp()
+    return (service as any).wechatAnswerQuestion(answer[1].toLowerCase(), text, ctx?.boundKey ?? null)
   }
 
   const dispatch = DISPATCH_PATTERN.exec(body)

@@ -6,7 +6,8 @@
 import { createRequire } from 'node:module'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
-import { parseMentions } from '../util.js'
+import { jsonParse, parseMentions } from '../util.js'
+import { answerFailed, answerReceipt, approvalCard, questionCard, wechatToken } from '../wechat/format.js'
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
 // 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
@@ -116,4 +117,144 @@ export const wechatMethods = {
     const result = await this.sendMessage(project.id, text, { type: 'user', id: this.localUserId }, null, [], { origin: 'wechat' })
     return { project, ...result }
   },
+
+  // ===== DSHBOTS-215：微信问答回路 =====
+  // 群聊提问/审批转发微信：只推纯文本镜像，状态仍由工作台卡片与群消息承载；
+  // 管理员在微信的答复经 commands 的「答/批 <token> …」路由回原条目（见 wechatAnswerQuestion /
+  // wechatDecideApproval）。转发失败只告警，不阻塞提问主流程。
+
+  /** 提问转发微信（只推文本；token 取问题 id 末 6 位）。 */
+  wechatQuestion(project, row, items) {
+    if (!this.wechat || typeof this.wechat.notify !== 'function') return false
+    try {
+      this.wechat.notify(questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)))
+      return true
+    } catch (error: any) {
+      this.logger.warn?.('dsh-team: 微信提问转发失败: %s', error?.message ?? error)
+      return false
+    }
+  },
+
+  /** 审批转发微信（只推文本；token 取审批 id 末 6 位）。 */
+  wechatApproval(project, row) {
+    if (!this.wechat || typeof this.wechat.notify !== 'function') return false
+    try {
+      this.wechat.notify(approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)))
+      return true
+    } catch (error: any) {
+      this.logger.warn?.('dsh-team: 微信审批转发失败: %s', error?.message ?? error)
+      return false
+    }
+  },
+
+  /** 按 token + 绑定项目定位 pending 条目（questions / approvals 共用）。 */
+  pendingWechatRow(table, token, fallbackKey = null) {
+    const rows = this.store.all(
+      `SELECT ${table}.*, p.key AS project_key FROM ${table}
+       LEFT JOIN projects p ON p.id = ${table}.project_id
+       WHERE ${table}.status = 'pending' AND lower(substr(${table}.id, -6)) = ?`,
+      String(token ?? '').toLowerCase(),
+    )
+    if (!rows.length) return null
+    if (fallbackKey) {
+      const key = String(fallbackKey).toUpperCase()
+      return rows.find(row => String(row.project_key ?? '').toUpperCase() === key) ?? null
+    }
+    return rows[0]
+  },
+
+  /**
+   * 微信答复路由（DSHBOTS-215）：把管理员的「答 <token> <内容>」落成对应提问的宿主应答。
+   * 来源标识为 user:wechat，与工作台作答（user:<actorId>）区分，审计单独记 question.answer_wechat。
+   */
+  async wechatAnswerQuestion(token, body, fallbackKey = null) {
+    const row = this.pendingWechatRow('questions', token, fallbackKey)
+    if (!row) return answerFailed(token, '没有匹配的待答提问（可能已作答或已过期）')
+    const items = jsonParse(row.questions, [])
+    const parsed = parseWechatAnswers(items, body)
+    if (parsed.error) return answerFailed(token, parsed.error)
+    this.settleQuestion(row.id, 'answered', { answers: parsed.answers }, 'user:wechat')
+    this.audit({ type: 'user', id: 'user_wechat' }, 'question.answer_wechat', 'question', row.id, {
+      token,
+      answers: parsed.answers,
+    })
+    return answerReceipt(wechatToken(row.id), parsed.summary)
+  },
+
+  /** 微信审批路由（DSHBOTS-215）：把「批 <token> 允许|拒绝」落成对应审批的宿主应答。 */
+  async wechatDecideApproval(token, decision, fallbackKey = null) {
+    const row = this.pendingWechatRow('approvals', token, fallbackKey)
+    if (!row) return answerFailed(token, '没有匹配的待审批请求（可能已处理或已过期）')
+    if (!['allow', 'reject'].includes(decision)) return answerFailed(token, '只能回复「允许」或「拒绝」')
+    this.settleApproval(
+      row.id,
+      decision === 'allow' ? 'allowed' : 'rejected',
+      decision === 'allow' ? 'allowed-once' : 'rejected',
+      'user:wechat',
+    )
+    this.audit({ type: 'user', id: 'user_wechat' }, `approval.${decision}_wechat`, 'approval', row.id, {
+      token,
+      toolName: row.tool_name,
+    })
+    return answerReceipt(wechatToken(row.id), `${row.tool_name} 已${decision === 'allow' ? '允许' : '拒绝'}`)
+  },
+}
+
+/** 选项匹配：序号（1 起）或选项文字精确命中（大小写不敏感）。 */
+function matchWechatOptions(options, raw) {
+  const value = String(raw ?? '').trim().toLowerCase()
+  if (!value) return []
+  const numeric = /^(\d+)$/.exec(value)
+  if (numeric) {
+    const index = Number(numeric[1])
+    return index >= 1 && index <= options.length ? [options[index - 1].label] : []
+  }
+  const hit = options.find(option => String(option.label ?? '').trim().toLowerCase() === value)
+  return hit ? [hit.label] : []
+}
+
+/**
+ * 微信答复解析：支持「1:选项一;2:补充说明」的按题作答，也支持单题直接回选项/文字。
+ * 带序前缀的段按序号指派，其余段按顺序补到未指派题；选项题必须命中选项，否则整单拒绝。
+ */
+function parseWechatAnswers(items, body) {
+  if (!Array.isArray(items) || items.length === 0) return { error: '提问内容缺失' }
+  const segments = String(body ?? '').split(/[;；]/).map(segment => segment.trim()).filter(Boolean)
+  const assigned = new Map()
+  const rest = []
+  for (const segment of segments) {
+    const indexed = /^(\d+)\s*[:：]\s*([\s\S]*)$/.exec(segment)
+    if (indexed && Number(indexed[1]) >= 1 && Number(indexed[1]) <= items.length) {
+      assigned.set(Number(indexed[1]) - 1, indexed[2].trim())
+    } else {
+      rest.push(segment)
+    }
+  }
+  let cursor = 0
+  for (let i = 0; i < items.length; i++) {
+    if (assigned.has(i)) continue
+    if (rest.length === 0) break
+    if (rest.length === 1 && items.length === 1) {
+      assigned.set(i, rest[0])
+      continue
+    }
+    if (cursor < rest.length) assigned.set(i, rest[cursor++])
+  }
+  const answers = []
+  const parts = []
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    const raw = String(assigned.get(i) ?? '').trim()
+    const options = Array.isArray(item.options) ? item.options : []
+    if (options.length > 0) {
+      const selected = matchWechatOptions(options, raw)
+      if (selected.length === 0) return { error: `Q${i + 1} 无法解析，请回复选项文字或序号（如 1）` }
+      answers.push({ id: String(item.id), selected })
+      parts.push(`Q${i + 1}: ${selected.join('、')}`)
+    } else {
+      answers.push({ id: String(item.id), selected: [], ...(raw ? { custom: raw } : {}) })
+      parts.push(`Q${i + 1}: ${raw || '(未填)'}`)
+    }
+  }
+  return { answers, summary: parts.join('\n') }
 }

@@ -639,9 +639,15 @@ ${task.description || '(no description)'}${threads}${timeBudgetBlock}${urgentExe
       : openTasks.map(item => `- ${project.key}-${item.number} [${item.status}] ${item.title}`).join('\n')
     // 引用回复上下文：本次消息带 reply_to 时，明确告知 bot 用户在回哪条消息（含 m_ 短 id 供 team_recall 取全文）。
     const quoteLine = this.quotedLineFor(chatMessage)
+    // DSHBOTS-215 微信直达语境：多轮连续对话（项目会话复用），不要每条当新指令；
+    // 派活意图要真建卡/派单；需要用户决策时用 ask_user_question（会转发到微信）。
+    const wechatBlock = run.trigger_type === 'wechat' ? `
+
+# WeChat direct conversation
+This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task / team_task_create) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you.` : ''
     return `${header}
 
-Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.
+Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}

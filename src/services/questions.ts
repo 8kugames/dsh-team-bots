@@ -167,6 +167,14 @@ export const questionsMethods = {
       `【提问】${bot.name} 发起提问（${masked.length} 个问题）`, questionId, createdAt,
     )
 
+    // DSHBOTS-215 问答回路：提问转发微信管理员（通道可用时）。只推纯文本镜像，
+    // 状态仍由群卡片/工作台承载；管理员答复经「答 <token> …」路由回本条目。
+    try {
+      this.wechatQuestion?.(project, { id: questionId, bot_name: bot.name }, masked)
+    } catch (error: any) {
+      this.logger?.warn?.('dsh-team: 微信提问转发失败: %s', error?.message ?? error)
+    }
+
     return new Promise((resolve, reject) => {
       this.questionPending ??= new Map()
       const timer = setTimeout(() => {
