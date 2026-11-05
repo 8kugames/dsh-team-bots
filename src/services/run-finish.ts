@@ -5,7 +5,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { runUsageTotals } from '../usage.js'
-import { id, nowIso, text } from '../util.js'
+import { id, nowIso, parseMentions, text } from '../util.js'
 import { rolloverSummaryKey } from '../config.js'
 import {
   isQuotaExhausted,
@@ -321,13 +321,18 @@ export const runFinishMethods = {
           }
         }
       } else if (run.kind === 'chat') {
-        this.insertMessage({
+        const replyMessageId = this.insertMessage({
           projectId: project.id,
           senderType: 'bot',
           senderId: bot.id,
           body: cleanOutput || '模型未返回文本。',
           runId,
         })
+        // DSHBOTS-252：chat 运行成功回复正文与用户消息同语义解析 @mention 并派发 chat_run
+        // 唤醒目标 bot。触发面仅此一处（验收/受阻摘要、失败提示、通知、任务卡、solo/dm
+        // 落库一律不触发）；剥空不落库的回复（insertMessage 返回 null）同样不派发。
+        const wokenBotIds = this.dispatchBotMentionRuns(project, run, bot, replyMessageId)
+        if (wokenBotIds.length > 0) void this.tick()
         this.notifyWechatChat(bot, run, cleanOutput || '模型未返回文本。')
         // 群聊回复后的自动记忆审查（可在设置关闭；与任务交付审查同一队列同一幂等键规则）。
         if (this.chatMemoryReviewEnabled()) {
@@ -451,5 +456,64 @@ export const runFinishMethods = {
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 微信直达回复推送失败: %s', error?.message ?? error)
     }
+  },
+
+  // ── Bot 群聊回复 mention 唤醒（DSHBOTS-252）────────────────────────────
+  // 与用户消息同语义（chat.ts sendMessage）：@xxx 用 parseMentions 解析 active 成员、
+  // 显式 @ 优先（bot 路径无引用兜底道）、目标 slice(0,3)；派发走既有 chat_run outbox →
+  // enqueueChatRun，串行车道沿用 D-219 的 project lane（sessionLaneKey 对 kind='chat'
+  // 恒为 project:<bot>:<project>），不新建串行道。防循环三护栏：
+  //   ① 禁自唤醒——解析结果剔除回复 bot 自身；
+  //   ② 链路深度 ≤2——chatMentionChainDepth 回溯来源链，本回复链深达 2 即不再派发；
+  //   ③ 任务卡双保险——taskId 非空的消息不参与派发（群聊 messages 表无 kind 列，
+  //     「kind 恒为 text」由结构保证；带 kind 的 solo 落库点不触发本派发）。
+  chatMentionChainDepth(run) {
+    let depth = 0
+    let ref = run?.trigger_ref
+    const seen = new Set()
+    while (depth < 2 && ref && !seen.has(ref)) {
+      seen.add(ref)
+      const message = this.store.get('SELECT sender_type, run_id FROM messages WHERE id = ?', ref)
+      // 人发消息与结构化 bot 落库（notify 等无 run_id 的 bot 消息）都是链根，回溯到此为止。
+      if (!message || message.sender_type !== 'bot' || !message.run_id) break
+      const parent = this.store.get('SELECT kind, trigger_ref FROM runs WHERE id = ?', message.run_id)
+      if (!parent || parent.kind !== 'chat' || !parent.trigger_ref) break
+      depth += 1
+      ref = parent.trigger_ref
+    }
+    return depth
+  },
+
+  // 对 bot 回复正文解析 @mention 并派发 chat_run；返回被唤醒的 bot id 列表。
+  // 解析对象是落库行正文（已过剥残片+密钥掩码两道清洗），与所有成员读到的转录一致。
+  dispatchBotMentionRuns(project, run, bot, messageId) {
+    if (!messageId) return []
+    // 护栏三双保险：唯一调用点不带 taskId，这里按落库行复核，兜未来调用面扩张。
+    const message = this.store.get('SELECT id, task_id, body FROM messages WHERE id = ?', messageId)
+    if (!message || message.task_id) return []
+    const members = this.membersOf(project.id).filter(member => member.status === 'active')
+    // 护栏一：禁自唤醒——剔除回复 bot 自身。
+    const targets = parseMentions(message.body, members).filter(member => member.id !== bot.id)
+    if (targets.length === 0) return []
+    // mentions_json 记录过滤后的全部 @ 目标（对齐用户路径的 UI mention 渲染口径），
+    // 与实际派发数（slice(0,3)）允许在 >3 目标时不同。
+    this.store.run(
+      'UPDATE messages SET mentions_json = ? WHERE id = ?',
+      JSON.stringify(targets.map(member => member.id)), messageId,
+    )
+    // 护栏二：链路深度 ≤2——深度达 2 的 bot 回复不再派发。
+    if (this.chatMentionChainDepth(run) >= 2) return []
+    const dispatched = targets.slice(0, 3)
+    for (const target of dispatched) {
+      this.enqueueOutbox({
+        kind: 'chat_run',
+        payload: { projectId: project.id, botId: target.id, messageId, origin: null },
+        projectId: project.id,
+        sourceId: messageId,
+        // 幂等键与用户路径（chat:<id>:<bot>）前缀区分，outbox 一眼可辨唤醒来源。
+        idempotencyKey: `chat_bot:${messageId}:${target.id}`,
+      })
+    }
+    return dispatched.map(member => member.id)
   },
 }
