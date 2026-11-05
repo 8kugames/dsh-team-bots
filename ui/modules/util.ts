@@ -125,7 +125,7 @@ export function identiconSvg(seed) {
       if (cells[col]) rects += `<rect x="${col}" y="${row}" width="1" height="1"/>`
     }
   }
-  return `<svg class="identicon" viewBox="0 0 5 5" fill="var(--av, var(--c-gray))" aria-hidden="true">${rects}</svg>`
+  return `<svg class="identicon" viewBox="0 0 5 5" aria-hidden="true">${rects}</svg>`
 }
 // roll 用的随机种子：字母数字短串，满足服务端 avatarSeedPattern 校验。
 export const avatarSeedRandom = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
