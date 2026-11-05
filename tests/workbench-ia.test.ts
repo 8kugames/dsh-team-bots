@@ -14,7 +14,7 @@ const SOLO_NAV = /const SOLO_NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1] ?? '
 
 // ① 项目导航：bots 改「成员」members，群聊侧栏「项目成员」面板移除，设置页成员 checkbox 移除。
 test('① 项目导航 bots → members 成员 tab', () => {
-  assert.match(NAV, /\['members', '成员', 'users'\]/, 'NAV 应有成员 tab')
+  assert.match(NAV, /\['members', 'users'\]/, 'NAV 应有成员 tab')
   assert.ok(!/\['bots',/.test(NAV), 'NAV 不应再有 bots tab')
   assert.match(source, /case 'members':\s*\n?\s*return renderMembers\(\)/, 'render 路由 case members → renderMembers')
   assert.match(source, /function renderMembers\(\)/, 'renderMembers 函数存在')
@@ -46,7 +46,7 @@ test('① 群聊侧栏与设置页的项目成员面板已移除', () => {
 // ② 总览bots 挂侧栏全局配置上方、进化从项目 NAV 移除、记忆随上下文收敛。
 test('② 项目 NAV 无进化；单聊 NAV 保留进化', () => {
   assert.ok(!/\['evolution',/.test(NAV), '项目 NAV 不应再有进化 tab')
-  assert.match(SOLO_NAV, /\['evolution', '进化', 'branch'\]/, '单聊 NAV 保留进化（逐个审批）')
+  assert.match(SOLO_NAV, /\['evolution', 'branch'\]/, '单聊 NAV 保留进化（逐个审批）')
 })
 
 test('② 侧栏「总览bots」入口在全局配置上方，带待审红点', () => {

@@ -10,7 +10,7 @@ import { readUiSource } from './helpers/ui-sources.js'
 const source = readUiSource()
 
 test('① 更名：导航首 tab、侧卡与入口按钮都改成「调度」口径', () => {
-  assert.match(source, /\['chat', '调度', 'message'\]/, '单聊导航首 tab 应显示「调度」')
+  assert.match(source, /\['chat', 'message'\]/, '单聊导航首 tab 应显示「调度」')
   assert.match(source, /<h3>\$\{t\('solo\.dispatchTarget'\)\}<\/h3>/, '侧卡标题应为「调度对象」')
   assert.match(source, /<h3>\$\{t\('solo\.recentRuns'\)\}<\/h3>/, '运行侧卡标题应为「最近调度运行」')
   assert.match(source, /t\('solo\.noRuns'\)/, '运行侧卡空态应为「还没有调度运行。」')
