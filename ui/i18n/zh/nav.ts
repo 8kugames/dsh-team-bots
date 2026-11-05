@@ -65,7 +65,6 @@ export default {
   "tree.archivedTitle": "已归档群聊",
   "tree.archived": "已归档",
   "tree.archivedEmpty": "没有已归档项目。",
-  "tree.archivedHint": "再开与移除在项目设置 · 项目状态里",
   // 侧栏底部
   "sidebar.botsOverview": "总览bots",
   "sidebar.pendingProposals": "有待审批提案",

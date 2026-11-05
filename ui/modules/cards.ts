@@ -414,7 +414,7 @@ function notifyToggleView() {
   const permission = notifyPermission()
   if (permission === 'unsupported') return { on: false, disabled: true, label: t("不可用"), hint: t("当前环境不支持桌面通知（需 HTTPS 或 localhost）。") }
   if (permission === 'denied') return { on: false, disabled: true, label: t("已被浏览器拒绝"), hint: t("在浏览器站点设置中允许通知后刷新页面。") }
-  if (notifyOn()) return { on: true, disabled: false, label: t("已开启"), hint: t("新审批到达且页面不可见或失焦时弹系统通知，需保持本页开启。") }
+  if (notifyOn()) return { on: true, disabled: false, label: t("已开启"), hint: t("页面不可见或失焦时弹系统通知，需保持本页开启。") }
   return { on: false, disabled: false, label: permission === 'granted' ? t("已关闭") : t("未开启"), hint: t("开启后新审批到达时弹系统桌面通知。") }
 }
 

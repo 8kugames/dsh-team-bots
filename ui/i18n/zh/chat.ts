@@ -63,7 +63,7 @@ export default {
   "solo.dispatching": "正在调度",
   "solo.noDispatching": "当前没有运行中的调度。",
   "solo.subagents": "子智能体",
-  "solo.subagentsBody": "bot 会话已内置 subagent / subagent_fork / workflow 工具，可在执行中自行派生子智能体并行加速；无需工作台额外编排。",
+  "solo.subagentsBody": "内置 subagent / subagent_fork / workflow，可在执行中派生并行子智能体。",
   "solo.recentRuns": "最近调度运行",
   "solo.noRuns": "还没有调度运行。",
   "solo.workspace": "专属工作区",

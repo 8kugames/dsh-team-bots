@@ -56,7 +56,7 @@ test('⑥ 子智能体卡如实描述内置能力，不造假数据', () => {
   // DSHBOTS-120 起文案进字典：接线在 app.js（t 调用），实质内容锁在 zh/en 字典值里。
   // DSHBOTS-233 词表按域拆分后，字典值经聚合入口导入，不再从 zh.js 文件文本断言。
   assert.ok(
-    zhDict['solo.subagentsBody'].includes('bot 会话已内置 subagent / subagent_fork / workflow 工具'),
+    zhDict['solo.subagentsBody'].includes('subagent / subagent_fork / workflow'),
     '中文字典应如实描述已内置的子智能体工具',
   )
   assert.ok(

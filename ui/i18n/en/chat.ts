@@ -63,7 +63,7 @@ export default {
   "solo.dispatching": "Dispatching",
   "solo.noDispatching": "Nothing is dispatching right now.",
   "solo.subagents": "Subagents",
-  "solo.subagentsBody": "Bot sessions ship with subagent / subagent_fork / workflow tools and can spawn subagents on the fly to parallelize; no extra orchestration is needed here.",
+  "solo.subagentsBody": "Built in: subagent / subagent_fork / workflow — spawn parallel subagents mid-run.",
   "solo.recentRuns": "Recent dispatch runs",
   "solo.noRuns": "No dispatch runs yet.",
   "solo.workspace": "Dedicated workspace",

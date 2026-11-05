@@ -84,7 +84,6 @@ export default {
   "questionStatus.expired": "Cancelled",
   "questionStatus.timeout": "Timed out",
   // DSHBOTS-220: ui/modules copy
-  "<span class=\\\"faint\\\" title=\\\"项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个\\\">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>": "<span class=\\\"faint\\\" title=\\\"Project has ${totalCount} tasks; the current filter, time window, or list limit hides ${hiddenCount}\\\">${totalCount} total · ${hiddenCount} hidden</span>",
   "<span class=\\\"pill amber\\\">${pending} 条待审</span>": "${pending} pending",
   "Bot 已归档": "Bot archived",
   "」关闭": "\\\", disabled",
@@ -171,7 +170,6 @@ export default {
   "主目录": "Home",
   "选定此目录": "Choose this folder",
   "项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个": "${totalCount} tasks in this project · ${hiddenCount} hidden",
-  "项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个": "${totalCount} tasks in this project; the current filter, time window or list limit hides ${hiddenCount}",
   // DSHBOTS-241：bot 额度墙状态与手动解除
   "额度状态": "Quota status",
   "额度": "Quota",

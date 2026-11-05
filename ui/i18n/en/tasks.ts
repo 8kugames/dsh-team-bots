@@ -32,8 +32,7 @@ export default {
   "dm.failed": "Failed",
   "dm.repliedAt": "Replied at ${time}",
   // Task time budget (DSHBOTS-129)
-  "taskForm.timeBudgetLabel": "Time budget (minutes)",
-  "taskForm.timeBudgetPlaceholder": "Optional; leave blank for none",
+  "taskForm.timeBudgetLabel": "Time budget (minutes, optional)",
   "task.timeBudgetValue": "${minutes} min",
   "task.timeBudgetNote": "Hard limit: the run is aborted on expiry; the shorter of this budget and the global run timeout applies",
   // Task rejection (DSHBOTS-141): terminal tasks back to backlog
@@ -42,7 +41,6 @@ export default {
   "task.rejectConfirm": "Move \"${title}\" back to the backlog?",
   "task.rejectDone": "Rejected; task moved back to the backlog",
   // Task board
-  "task.dragHint": "Drag a task row to change its status; click a group header to collapse it.",
   "task.searchPlaceholder": "Search tasks, IDs, or labels",
   "task.filterAllStatus": "All statuses",
   "task.filterAllMembers": "All members",
@@ -52,7 +50,6 @@ export default {
   "task.time30d": "Last 30 days",
   "task.timeAll": "All time",
   "task.sortLabel": "Task sort",
-  "task.sortTitle": "Sorts within a group only; does not affect grouping or hierarchy",
   "task.sortCreatedDesc": "Created new → old",
   "task.sortCreatedAsc": "Created old → new",
   "task.sortCompletedDesc": "Completed new → old",

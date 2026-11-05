@@ -84,7 +84,6 @@ export default {
   "questionStatus.expired": "已取消",
   "questionStatus.timeout": "已超时",
   // DSHBOTS-220: ui/modules 文案（原文即键）
-  "<span class=\\\"faint\\\" title=\\\"项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个\\\">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>": "<span class=\\\"faint\\\" title=\\\"项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个\\\">项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个</span>",
   "<span class=\\\"pill amber\\\">${pending} 条待审</span>": "<span class=\\\"pill amber\\\">${pending} 条待审</span>",
   "Bot 已归档": "Bot 已归档",
   "」关闭": "」关闭",
@@ -171,7 +170,6 @@ export default {
   "主目录": "主目录",
   "选定此目录": "选定此目录",
   "项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个": "项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个",
-  "项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个": "项目共 ${totalCount} 个任务；当前筛选、时间窗或列表上限隐藏了 ${hiddenCount} 个",
   // DSHBOTS-241：bot 额度墙状态与手动解除
   "额度状态": "额度状态",
   "额度": "额度",

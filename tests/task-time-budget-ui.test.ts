@@ -27,7 +27,7 @@ function createTaskBranch() {
   return app.slice(start, end).replace(/\/\/[^\n]*/g, '')
 }
 
-test('新建任务表单含「时效要求（分钟）」可选数字输入框，placeholder 注明选填留空不设', () => {
+test('新建任务表单含「时效要求（分钟，选填）」可选数字输入框，不再重复占位说明', () => {
   const body = functionBody(app, 'function modalNewTask()')
   assert.match(body, /id="new-task-time-budget"/, '表单必须有该输入框')
   assert.match(body, /name="time_budget_minutes"/, '表单字段名与服务端/工具参数同口径（time_budget_minutes）')
@@ -35,7 +35,8 @@ test('新建任务表单含「时效要求（分钟）」可选数字输入框�
   assert.match(body, /min="1"/, '下限 1 分钟')
   assert.match(body, /max="10080"/, '上限 10080 分钟（一周），与服务端钳制一致')
   assert.match(body, /t\('taskForm\.timeBudgetLabel'\)/, '标签走 i18n，不写死中文')
-  assert.match(body, /placeholder="\$\{attr\(t\('taskForm\.timeBudgetPlaceholder'\)\)\}"/, 'placeholder 走 i18n 且转义')
+  // 选填语义只在标签里说一次，输入框不再挂重复 placeholder（DSHBOTS-264 精校）。
+  assert.doesNotMatch(body, /id="new-task-time-budget"[^>]*placeholder/, '时效输入框不得再挂重复 placeholder')
   // 选填：不得带 required，否则留空无法提交（留空 = 不设时效）。
   assert.doesNotMatch(body, /id="new-task-time-budget"[^>]*required/, '该输入框是选填，不得标 required')
   // 版式：时效字段与「指派给/优先级」同一行，三列自适应（宽屏三列、窄屏自动收成单列），不留空格子。
@@ -44,8 +45,9 @@ test('新建任务表单含「时效要求（分钟）」可选数字输入框�
     /<div class="field-row" style="grid-template-columns:repeat\(auto-fit,minmax\(180px,1fr\)\)">[\s\S]*?id="new-task-time-budget"/,
     '时效字段所在行用自适应三列版式（窄屏自动折行，不留空位）',
   )
-  // 字典值必须是「选填，留空不设」口径。
-  assert.equal(zh['taskForm.timeBudgetPlaceholder'], '选填，留空不设', '中文 placeholder 注明选填留空不设')
+  // 「选填」语义并入标签，字典不再单列 placeholder。
+  assert.equal(zh['taskForm.timeBudgetLabel'], '时效要求（分钟，选填）', '中文标签自带选填口径')
+  assert.equal(zh['taskForm.timeBudgetPlaceholder'], undefined, '冗余 placeholder 键应已移除')
 })
 
 test('时效归一：空串/0/负数/非数字 → null（提交时整键不传），正数取整数分钟', () => {
@@ -100,7 +102,7 @@ test('任务详情 modal：时效行条件渲染——有值显示「X 分钟」
 })
 
 test('i18n：zh/en 各含时效相关 key，且中英 key 集合一致', () => {
-  const keys = ['taskForm.timeBudgetLabel', 'taskForm.timeBudgetPlaceholder', 'task.timeBudgetValue', 'task.timeBudgetNote']
+  const keys = ['taskForm.timeBudgetLabel', 'task.timeBudgetValue', 'task.timeBudgetNote']
   const zhKeys = new Set(Object.keys(zh))
   const enKeys = new Set(Object.keys(en))
   for (const key of keys) {

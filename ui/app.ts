@@ -328,7 +328,7 @@ function renderShell() {
             </div>
             ${state.tree.archived ? `<div class="tree-list">
               ${archivedChats.length === 0 ? `<div class="side-empty">${t('tree.archivedEmpty')}</div>` : archivedChats.map(item => `
-                <button class="tree-item chat-item archived ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)} · ${t('tree.archivedHint')}">
+                <button class="tree-item chat-item archived ${item.id === project?.id && !isGlobal && state.chatMode !== 'solo' ? 'active' : ''}" data-action="select-project" data-project-id="${attr(item.id)}" title="${esc(item.name)}">
                   <span class="chat-hash">#</span>
                   <span class="tree-item-name">${esc(item.name)}</span>
                   <span class="tree-flag">${t('common.archived')}</span>
