@@ -597,6 +597,12 @@ async function sendMessage() {
     state.chatAtBottom = true
     clearPendingImages()
     render()
+    // DOM 值显式清空（DSHBOTS-244）：morph 复用持焦 textarea 时，syncFormValue 按「聚焦中控件的
+    // 值归用户管」不覆写 .value，state 已清而 DOM 残留；render 的 rAF 里 syncComposerBox 还会把
+    // 残值回写复活 state 草稿（失败恢复串随之叠加 "body\nbody"）。render 后取节点收敛唯一出口：
+    // 复用路径清掉残留，全量重建路径对新节点幂等。⌘Enter/发送按钮/补全回车三入口同经此处。
+    const box = document.getElementById('composer-input') as HTMLInputElement | null
+    if (box) box.value = ''
     let result
     if (solo) {
       result = await api('send_solo_message', { botId: bot.id, body, ...(images.length ? { images } : {}) })
