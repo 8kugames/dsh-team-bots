@@ -113,7 +113,33 @@ test('命中 bot 会话：落 pending 审批与 kind=approval 消息，allow 返
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('未绑定会话与单聊绑定都透传：next() 接管，不落审批', async () => {
+// DSHBOTS-218：单聊会话（kind='solo'、project_id 为空）由工作台单聊卡片承接——单聊里 bot 就是
+// 对话方，没有群聊可发，无需项目语境，也不再透传原生界面。
+test('单聊会话的提权请求由工作台单聊卡片承接，不落群聊、不透传', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    bindSession(store, { sessionId: 'sess-solo', botId: director.id, projectId: null, kind: 'solo' })
+    let nexted = false
+    const { req } = makeReq({ sessionId: 'sess-solo', zh: '需要执行一次提权 bash 命令' })
+    const outcome = service.handleApprovalRequest(req, () => { nexted = true })
+    assert.equal(nexted, false)
+    const row = store.get("SELECT * FROM approvals WHERE status = 'pending'")
+    assert.ok(row && row.tool_name === 'bash')
+    assert.equal(row.project_id, null, '单聊审批无项目归属')
+    const anchor = store.get('SELECT * FROM solo_messages WHERE approval_id = ?', row.id)
+    assert.ok(anchor, '单聊会话里落一条卡片锚点消息')
+    assert.equal(anchor.kind, 'approval')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 0, '不得落群聊消息')
+    const view = await service.decideApproval(row.id, 'allow')
+    assert.equal(view.status, 'allowed')
+    assert.equal(await outcome, 'allowed-once')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// 未绑定会话、以及 kind='project' 但 project_id 为空的异常绑定都透传：next() 接管，不落审批。
+// 真正的单聊绑定（kind='solo'）由上一条用例覆盖，走工作台单聊卡片。
+test('未绑定会话与项目型空绑定都透传：next() 接管，不落审批', async () => {
   const { root, store, service } = await setup()
   try {
     const project = await primeProject(store, service, 'Approval Pass')
