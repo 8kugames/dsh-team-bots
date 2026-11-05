@@ -59,16 +59,19 @@ export const BINDINGS_DDL = `
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   kind TEXT NOT NULL DEFAULT 'project',
   task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  alias INTEGER NOT NULL DEFAULT 0
 `
 
+// alias=1 是会话结转/失效替换后保留的授权别名：旧 session id 仍解析到同 bot/项目/车道，
+// 但不再作为活跃绑定参与「每 bot 每项目每车道一个会话」的唯一约束。
 const BINDING_INDEXES = `
   CREATE UNIQUE INDEX IF NOT EXISTS one_project_binding
-    ON session_bindings(bot_id, project_id, kind) WHERE task_id IS NULL AND project_id IS NOT NULL;
+    ON session_bindings(bot_id, project_id, kind) WHERE task_id IS NULL AND project_id IS NOT NULL AND alias = 0;
   CREATE UNIQUE INDEX IF NOT EXISTS one_task_binding
-    ON session_bindings(bot_id, project_id, kind, task_id) WHERE task_id IS NOT NULL;
+    ON session_bindings(bot_id, project_id, kind, task_id) WHERE task_id IS NOT NULL AND alias = 0;
   CREATE UNIQUE INDEX IF NOT EXISTS one_solo_binding
-    ON session_bindings(bot_id) WHERE kind = 'solo' AND project_id IS NULL AND task_id IS NULL;
+    ON session_bindings(bot_id) WHERE kind = 'solo' AND project_id IS NULL AND task_id IS NULL AND alias = 0;
   CREATE INDEX IF NOT EXISTS session_bindings_task_idx ON session_bindings(task_id);
 `
 
@@ -106,6 +109,7 @@ export function runMigrations(db) {
   migrateSoloMessageCards(db)
   migrateSoloDirUnique(db)
   migrateMessages(db)
+  migrateSessionBindingAlias(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -132,6 +136,7 @@ export function runMigrations(db) {
   recordMigration(db, 'solo_message_cards')
   recordMigration(db, 'bots_avatar_seed')
   recordMigration(db, 'runs_merged_messages')
+  recordMigration(db, 'session_binding_alias')
   migrateBotQuota(db)
   // 验收守门索引（DSHBOTS-235）：扫描按 task_id 关联查 task_comments / runs，
   // 旧库无对应索引时每卡全表扫；对新库空转（SCHEMA 已建）。
@@ -256,6 +261,19 @@ function recordMigration(db, name) {
 function migrateSessionBindings(db) {
   if (columnsOf(db, 'session_bindings').includes('task_id')) return
   rebuildTable(db, 'session_bindings', `CREATE TABLE session_bindings (${BINDINGS_DDL})`)
+}
+
+// 会话绑定授权别名（DSHBOTS-256）：旧库补 alias 列并把三条部分唯一索引收窄到 alias=0，
+// 否则旧绑定行会让新活跃绑定插不进去（旧索引不认 alias，同 bot/项目/车道仍判重）。
+// 仅在首次补列时重建索引；新库建表已带 alias 与收窄索引，已迁移库不重复 drop/create。
+function migrateSessionBindingAlias(db) {
+  const hadAlias = columnsOf(db, 'session_bindings').includes('alias')
+  addColumn(db, 'session_bindings', 'alias', 'INTEGER NOT NULL DEFAULT 0')
+  if (hadAlias) return
+  db.exec('DROP INDEX IF EXISTS one_project_binding')
+  db.exec('DROP INDEX IF EXISTS one_task_binding')
+  db.exec('DROP INDEX IF EXISTS one_solo_binding')
+  db.exec(BINDING_INDEXES)
 }
 
 // 单聊支持：runs 与 session_bindings 的 project_id 放宽为可空（项目外会话与运行），
