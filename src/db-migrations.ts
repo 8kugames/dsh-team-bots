@@ -39,7 +39,8 @@ export const RUNS_DDL = `
   usage_cache_write INTEGER NOT NULL DEFAULT 0,
   usage_output INTEGER NOT NULL DEFAULT 0,
   usage_cost REAL,
-  cancel_requested INTEGER NOT NULL DEFAULT 0
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  merged_messages TEXT
 `
 
 export const RUNS_INDEXES = `
@@ -130,6 +131,7 @@ export function runMigrations(db) {
   recordMigration(db, 'chat_reads')
   recordMigration(db, 'solo_message_cards')
   recordMigration(db, 'bots_avatar_seed')
+  recordMigration(db, 'runs_merged_messages')
   return { ftsEnabled }
 }
 
@@ -175,6 +177,8 @@ function migrateRuns(db) {
   addColumn(db, 'runs', 'model_provider', 'TEXT')
   addColumn(db, 'runs', 'model_model', 'TEXT')
   addColumn(db, 'runs', 'model_effort', 'TEXT')
+  // 入站消息合批（DSHBOTS-231）：领取时同通道排队消息被合并进来，存被合并消息的 id 列表（JSON）。
+  addColumn(db, 'runs', 'merged_messages', 'TEXT')
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
 }
 

@@ -44,6 +44,14 @@ export function runHoldsWriteLock({ kind, mode, taskStatus } = {} as any) {
 // task_run 的先写者赢是防重复派生闸，同样保持默认（先写者赢）不动。
 const OUTBOX_COALESCE_KINDS = new Set(['review_delegate_auto'])
 
+// 入站消息合批（DSHBOTS-231）：只合并「人发的消息运行」——同一条绑定道内、仍在排队的
+// chat / solo_chat 运行。任务运行、派生运行（review/handle/memory_review/vision）与私信
+// （dm/dm_reply，各自有按消息的回信契约）都不参与：合并它们会破坏既有的投递语义。
+const RUN_COALESCE_KINDS = new Set(['chat', 'solo_chat'])
+// 默认保守上限：一次运行最多合并 5 条消息、且只合并入队时间相差 30 秒内的排队消息。
+const COALESCE_MAX_MESSAGES_DEFAULT = 5
+const COALESCE_WINDOW_MS_DEFAULT = 30_000
+
 export const schedulerMethods = {
 
   // outbox：把「状态变更 → 建运行」这一跳变成可重放的持久交接。
@@ -292,6 +300,53 @@ export const schedulerMethods = {
     }
     if (run.kind === 'dm') return `dm:${run.bot_id}:${run.project_id}`
     return `project:${run.bot_id}:${run.project_id}`
+  },
+
+  // 入站消息合批（DSHBOTS-231）：领取一条运行后，把同一条绑定道内仍在排队的消息运行合并
+  // 进来——被合并的运行置 canceled（error_code='MERGED'），消息 id 记入本运行的
+  // merged_messages，executeRun 据此把多条消息一次性注入同一轮上下文，不再一条消息一次运行。
+  // 只在 claimKey 相同的通道内合并，D-219 的四道解耦语义不变；合并窗口与条数上限走 settings。
+  // 并发安全：被合并的运行用「queued → canceled」原子更新抢占，抢不到（另一拍已领取）就跳过。
+  coalesceQueuedRuns(run) {
+    if (!RUN_COALESCE_KINDS.has(run.kind)) return []
+    const max = Number(this.store.setting('coalesce_max_messages', String(COALESCE_MAX_MESSAGES_DEFAULT)))
+    if (!Number.isFinite(max) || max <= 1) return []
+    const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
+    const claimedQueuedAt = Date.parse(run.queued_at)
+    const laneKey = this.claimKey(run)
+    const candidates = this.store.all(
+      `SELECT * FROM runs WHERE status = 'queued' AND id != ? AND kind = ?
+        ORDER BY queued_at LIMIT 100`,
+      run.id, run.kind,
+    )
+    const mergedIds = []
+    const mergedRuns = []
+    for (const candidate of candidates) {
+      if (mergedIds.length >= max - 1) break
+      if (!candidate.trigger_ref) continue
+      if (this.claimKey(candidate) !== laneKey) continue
+      const queuedAt = Date.parse(candidate.queued_at)
+      if (!Number.isFinite(queuedAt) || !Number.isFinite(claimedQueuedAt)) continue
+      if (queuedAt < claimedQueuedAt || queuedAt - claimedQueuedAt > windowMs) continue
+      const changed = this.store.run(
+        `UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'MERGED', error_message = ?
+         WHERE id = ? AND status = 'queued'`,
+        nowIso(), `消息已合并进运行 ${run.id}，不再单独执行`, candidate.id,
+      )
+      if (Number(changed?.changes ?? 0) !== 1) continue
+      mergedIds.push(candidate.trigger_ref)
+      mergedRuns.push(candidate)
+    }
+    if (!mergedIds.length) return []
+    this.store.run('UPDATE runs SET merged_messages = ? WHERE id = ?', JSON.stringify(mergedIds), run.id)
+    this.insertRunEvent(
+      run.id, 'runs_merged',
+      `同通道 ${mergedIds.length} 条排队消息合并进本次运行：${mergedIds.map(item => item.slice(-6)).join('、')}`,
+    )
+    for (const candidate of mergedRuns) {
+      this.insertRunEvent(candidate.id, 'merged_into', `排队消息已合并进运行 ${run.id}`)
+    }
+    return mergedRuns
   },
 
   // 运行超时由 runtime 的定时器负责；这里补充“还活着但没有任何进展”的判定。
@@ -567,6 +622,9 @@ export const schedulerMethods = {
           nowIso(), nowIso(), run.id,
         )
         if (Number(claimed.changes) !== 1) continue
+        // 入站消息合批（DSHBOTS-231）：领取后把同通道仍在排队的消息并进本次运行，
+        // 被合并的运行置 canceled/MERGED，消息 id 落到 merged_messages 供 executeRun 注入。
+        this.coalesceQueuedRuns(run)
         // 借用了人的消息保底槽（超出并发上限放行）：记事件并占住额外槽，下一次归还前不再放第二条。
         if (human && activeTotal >= maxRuns) {
           humanSlotTaken = true

@@ -299,6 +299,8 @@ export const runsMethods = {
         : (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) && run.trigger_ref
           ? this.store.get('SELECT * FROM solo_messages WHERE id = ?', run.trigger_ref)
           : null
+      // 合批消息（DSHBOTS-231）：领取时合并进来的同通道排队消息，与触发消息同一轮注入。
+      const extraMessages = this.mergedMessagesFor(run)
       if (run.mode === 'read') this.fingerprints.set(runId, this.workspaceFingerprint(project))
       const sessionKind = this.sessionKindFor(run)
       await this.runtime.startRun({
@@ -307,6 +309,7 @@ export const runsMethods = {
         project,
         task: task ?? this.sessionTaskFor(run, sessionKind),
         chatMessage,
+        extraMessages,
         sessionKind,
       })
     } catch (error: any) {
@@ -351,6 +354,24 @@ if (run.kind === 'dm_reply') {
     }
     if (!taskId) return null
     return this.store.get('SELECT * FROM tasks WHERE id = ?', taskId) ?? null
+  },
+
+  // 合批消息（DSHBOTS-231）：本运行领取时合并进来的同通道排队消息。
+  // 按 merged_messages 记录的消息 id 顺序取回；消息已被删除的条目跳过，不阻塞本次运行。
+  // 两张消息表的列不完全一致（solo_messages 没有 reply_to_id），按运行类别选列。
+  mergedMessagesFor(run) {
+    const ids = jsonParse(run.merged_messages, [])
+    if (!Array.isArray(ids) || !ids.length) return []
+    const columns = run.kind === 'solo_chat'
+      ? 'id, sender_type, sender_id, body'
+      : 'id, sender_type, sender_id, body, reply_to_id'
+    const table = run.kind === 'solo_chat' ? 'solo_messages' : 'messages'
+    const rows = []
+    for (const messageId of ids) {
+      const row = this.store.get(`SELECT ${columns} FROM ${table} WHERE id = ?`, messageId)
+      if (row) rows.push(row)
+    }
+    return rows
   },
   insertRunEvent(runId, type, message) {
     if (!runId) return
@@ -518,13 +539,15 @@ if (run.kind === 'dm_reply') {
     const task = run.task_id ? this.store.get('SELECT number, title, sandbox_override FROM tasks WHERE id = ?', run.task_id) : undefined
     const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
     // recovery 是重启恢复的内部瞬态标记（置位→注入→清零），不属于 API 视图，随 attention_json 一并剥出。
-    const { write_scopes: rawScopes, attention_json: attentionJson, recovery: _recovery, ...rest } = run
+    // merged_messages 是合批消息 id 列表（DSHBOTS-231），同样剥出原始 JSON，只给解析后的 id。
+    const { write_scopes: rawScopes, attention_json: attentionJson, merged_messages: mergedRaw, recovery: _recovery, ...rest } = run
     const fallbackRef = bot?.fallback_provider && bot?.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null
     const usedRef = run.model_provider && run.model_model ? `${run.model_provider}/${run.model_model}` : null
     return {
       ...rest,
       artifacts: jsonParse(run.artifacts, []),
       attention: parseAttention(attentionJson),
+      mergedMessageIds: Array.isArray(jsonParse(mergedRaw, [])) ? jsonParse(mergedRaw, []) : [],
       botName: bot?.name ?? 'Bot',
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,

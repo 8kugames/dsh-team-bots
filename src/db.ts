@@ -8,7 +8,7 @@ import { nowIso } from './util.js'
 // RUNS_DDL/RUNS_INDEXES/BINDINGS_DDL 在新库建表（下方 SCHEMA）与旧库迁移重建间共用，防两处漂移。
 import { runMigrations, RUNS_DDL, RUNS_INDEXES, BINDINGS_DDL } from './db-migrations.js'
 
-const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, model_provider, model_model, model_effort, error_code, error_message, retry_after_ms, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested'
+const RUNS_COLUMNS = 'id, project_id, bot_id, task_id, parent_run_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, model_provider, model_model, model_effort, error_code, error_message, retry_after_ms, output, artifacts, queued_at, started_at, ended_at, last_progress_at, usage_input, usage_cache_read, usage_cache_write, usage_output, usage_cost, cancel_requested, merged_messages'
 
 const BINDING_COLUMNS = 'session_id, bot_id, project_id, kind, task_id, created_at'
 

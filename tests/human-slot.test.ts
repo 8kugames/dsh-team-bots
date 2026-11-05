@@ -79,7 +79,7 @@ test('满并发时人消息运行借保底槽仍能起来 1 条，并写 human_s
   } finally { await cleanup(root, store) }
 })
 
-test('第二条人消息运行仍排队（保底槽只放行 1 条）', async () => {
+test('第二条人消息合并进第一条运行（保底槽仍只放行 1 条）', async () => {
   const { root, store, service, runtime, director, dev, project } = await manualSetup({ maxConcurrentRuns: 1 })
   try {
     const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/x/'], autoStart: true })
@@ -89,9 +89,13 @@ test('第二条人消息运行仍排队（保底槽只放行 1 条）', async ()
     const second = primeChatRun(service, project, dev, '@Builder 追问二')
     await service.tick()
     assert.ok(runtime.started.includes(first), '第一条人消息借槽启动')
-    assert.ok(!runtime.started.includes(second), '第二条人消息仍应排队')
+    assert.ok(!runtime.started.includes(second), '第二条人消息不应再启动一次运行')
     const status = store.get('SELECT status FROM runs WHERE id = ?', second).status
-    assert.equal(status, 'queued', '第二条应保持 queued')
+    // DSHBOTS-231 合批：同一通道第二条人消息被合并进第一条运行的上下文，不再单独排队。
+    assert.equal(status, 'canceled', '第二条应被合并进第一条运行')
+    assert.equal(store.get('SELECT error_code FROM runs WHERE id = ?', second).error_code, 'MERGED')
+    const firstRun = store.get('SELECT * FROM runs WHERE id = ?', first)
+    assert.equal(JSON.parse(firstRun.merged_messages).length, 1, '第一条运行应携带被合并的第二条消息')
   } finally { await cleanup(root, store) }
 })
 

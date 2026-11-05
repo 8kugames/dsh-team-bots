@@ -189,7 +189,7 @@ test('state 携带 solo 段：单聊消息、运行与 bot 视图', async () => 
   }
 })
 
-test('单聊与同 Bot 群聊互不阻塞、同 Bot 单聊串行、跨 Bot 单聊并行（DSHBOTS-219 分身通道）', async () => {
+test('单聊与同 Bot 群聊互不阻塞、同 Bot 单聊合批、跨 Bot 单聊并行（DSHBOTS-219 分身通道）', async () => {
   const { root, store, service, runtime, director, dev } = await soloSetup()
   try {
     const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id] })
@@ -209,16 +209,16 @@ test('单聊与同 Bot 群聊互不阻塞、同 Bot 单聊串行、跨 Bot 单�
     assert.ok(kinds.includes(`solo_chat:${director.id}`))
     // 分身通道（DSHBOTS-219）：同一 bot 的群聊回复不再被单聊占道——即使单聊还挂着，群聊照常启动
     assert.ok(kinds.includes(`chat:${dev.id}`), '单聊运行期间群聊回复应并行启动')
-    // 同一 bot 的第二条单聊仍走同一条 solo 通道，必须仍在排队
+    // DSHBOTS-231 合批：同 bot 第二条单聊在首条领取时合并进同一轮上下文，不再单独排队。
     const queued = store.all("SELECT * FROM runs WHERE status = 'queued'")
-    assert.ok(queued.some(row => row.kind === 'solo_chat' && row.bot_id === dev.id), '同 bot 第二条单聊应串行排队')
-
+    assert.ok(!queued.some(row => row.kind === 'solo_chat' && row.bot_id === dev.id), '同 bot 第二条单聊应被合并，不再排队')
     const devSolo = running.find(row => row.kind === 'solo_chat' && row.bot_id === dev.id)
+    assert.equal(JSON.parse(devSolo.merged_messages).length, 1, '首条单聊运行应携带被合并的第二条消息')
+
     await runtime.complete(devSolo.id, 'succeeded', '单聊回复')
     await service.tick()
     const secondSolo = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id)
-    assert.ok(secondSolo, '首条单聊结束后第二条单聊才能启动')
-    await runtime.complete(secondSolo.id, 'succeeded', '第二条单聊回复')
+    assert.ok(!secondSolo, '第二条单聊已合并进首条运行，不再单独启动')
     await runtime.complete(running.find(row => row.kind === 'solo_chat' && row.bot_id === director.id).id, 'succeeded', '好')
     await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'chat' AND status = 'running'").id, 'succeeded', '群聊回复')
     await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'task' AND status = 'running'").id, 'succeeded', 'done')

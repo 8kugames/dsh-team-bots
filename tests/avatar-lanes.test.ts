@@ -126,7 +126,7 @@ test('claimKey 键位守门：dm_reply 按来信 origin 归道，rollover_summar
   }
 })
 
-test('单聊 pending 卡住不阻塞同 bot 群聊与跨项目分身，同 bot 第二条单聊仍串行', async () => {
+test('单聊 pending 卡住不阻塞同 bot 群聊与跨项目分身，第二条单聊合并进首条运行', async () => {
   const { root, store, service, director, dev } = await laneSetup()
   try {
     const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
@@ -147,8 +147,14 @@ test('单聊 pending 卡住不阻塞同 bot 群聊与跨项目分身，同 bot �
     assert.ok(running.some(row => row.kind === 'chat' && row.project_id === alpha.id), '单聊卡住时甲项目群聊应并行启动')
     assert.ok(running.some(row => row.kind === 'chat' && row.project_id === beta.id), '跨项目分身群聊也应并行启动')
     assert.equal(running.filter(row => row.kind === 'solo_chat' && row.bot_id === dev.id).length, 1, '同 bot 同时只有一条单聊在跑')
+    // DSHBOTS-231 合批：同一条 solo 通道里第二条消息在首条领取时被合并进同一轮上下文，
+    // 不再单独排一条运行；通道解耦语义不变（其余两条群聊仍并行启动）。
     const queuedSolo = store.all("SELECT * FROM runs WHERE status = 'queued' AND kind = 'solo_chat'")
-    assert.equal(queuedSolo.length, 1, '第二条单聊应留在 solo 通道排队')
+    assert.equal(queuedSolo.length, 0, '第二条单聊不再单独排队，应被合并')
+    const mergedSolo = store.all("SELECT * FROM runs WHERE error_code = 'MERGED' AND kind = 'solo_chat'")
+    assert.equal(mergedSolo.length, 1, '第二条单聊应合并进首条单聊运行')
+    const soloRun = running.find(row => row.kind === 'solo_chat' && row.bot_id === dev.id)
+    assert.equal(JSON.parse(soloRun.merged_messages).length, 1, '首条单聊运行应携带被合并的消息')
     assert.equal(running.length, 3, '恰好三条分身运行（1 单聊 + 2 群聊）')
   } finally {
     await cleanup(root, store)

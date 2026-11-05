@@ -347,7 +347,7 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
 - Do not call any tool and do not write files. Reply with the summary text only.`
   },
   // 单聊运行提示词：没有项目上下文，只带本会话增量新消息。
-  soloRunPrompt({ bot, chatMessage, sessionId }) {
+  soloRunPrompt({ bot, chatMessage, extraMessages, sessionId }) {
     const header = [
       `You are: ${bot.name}`,
       'Mode: one-on-one conversation (outside projects)',
@@ -362,7 +362,8 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
       excludeId: chatMessage?.id,
     })
     // P3-1：单聊同款，无信息量 system 短状态不进尾窗。
-    const visible = recent.filter(item => !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
+    const mergedIds = new Set((extraMessages ?? []).map(item => item.id))
+    const visible = recent.filter(item => !mergedIds.has(item.id) && !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
     const context = visible.map((item) => {
       const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
       return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}: ${body}`
@@ -375,7 +376,7 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
 Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.
 
 # Solo message
-${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}${this.rolloverSummaryBlock(bot, null, sessionId)}
+${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}${this.mergedMessagesBlock(extraMessages)}${this.rolloverSummaryBlock(bot, null, sessionId)}
 
 ${recentBlock}`
   },
@@ -401,8 +402,8 @@ Transcription requirements:
 Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
 ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
   },
-  promptFor({ run, bot, project, task, chatMessage, sessionId }: { run: { kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; timeBudgetMinutes?: number; time_budget_minutes?: number }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; sessionId?: string }) {
-    if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, sessionId })
+  promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId }: { run: { kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; timeBudgetMinutes?: number; time_budget_minutes?: number }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; extraMessages?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }[]; sessionId?: string }) {
+    if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, extraMessages, sessionId })
     if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
     // 结转摘要（DSHBOTS-145）：先于 header 判定——单聊摘要运行没有项目，
     // header 直接解引用 project 会炸。
@@ -622,8 +623,9 @@ ${task.description || '(no description)'}${threads}${timeBudgetBlock}${urgentExe
       params: [project.id],
       excludeId: chatMessage?.id,
     })
-    // P3-1：无信息量 system 短状态不进尾窗。
-    const visible = recent.filter(item => !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
+    // P3-1：无信息量 system 短状态不进尾窗；合批消息已在专门段落呈现，同样不进尾窗（不双份）。
+    const mergedIds = new Set((extraMessages ?? []).map(item => item.id))
+    const visible = recent.filter(item => !mergedIds.has(item.id) && !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
     const context = visible.map((item) => {
       const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
       return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}${item.task_id ? ' (task thread)' : ''}: ${body}`
@@ -654,11 +656,23 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
-${quoteLine}${this.rolloverSummaryBlock(bot, project, sessionId)}
+${this.mergedMessagesBlock(extraMessages)}${quoteLine}${this.rolloverSummaryBlock(bot, project, sessionId)}
 ${recentBlock}
 
 Open tasks:
 ${taskList}`
+  },
+
+  // 合批消息段（DSHBOTS-231）：领取时合并进来的同通道排队消息，与触发消息同一轮注入。
+  // 无合批消息时返回空串，单条消息的提示词格式与原来完全一致（既有锚点测试不受影响）。
+  mergedMessagesBlock(extraMessages) {
+    if (!extraMessages?.length) return ''
+    const lines = extraMessages.map(item => {
+      const body = String(item.body ?? '')
+      const shown = body.length > 4_000 ? `${body.slice(0, 4_000)}…` : body
+      return `- [m_${String(item.id).slice(-6)}] ${item.sender_type}:${item.sender_id}: ${shown}`
+    }).join('\n')
+    return `\n\n# Merged messages (queued while this run was waiting, ids are for team_recall):\n${lines}`
   },
 
   // 引用行：正文控制在 200 字内；bot 发送者查名字，其余回退 sender_type:sender_id 展示。
