@@ -84,13 +84,15 @@ export const tasksMethods = {
     const rawTimeBudget = input.timeBudgetMinutes ?? input.time_budget_minutes
     const timeBudgetMinutes = (Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null)
       ?? this.defaultTaskTimeBudget()
-    // 派发沙箱覆盖（DSHBOTS-156）：列只收合法收紧档；入参解析与「只收紧不放大」校验
-    // 在派发入口 assignFromBot（对准承接 bot 的 file_policy），这里挡直写的垃圾值。
-    if (input.sandboxOverride !== undefined && input.sandboxOverride !== null
-      && !SANDBOX_OVERRIDES.includes(input.sandboxOverride)) {
-      throw badRequest(`沙箱覆盖无效，允许值：${SANDBOX_OVERRIDES.join(' / ')}`)
+    // 派发沙箱覆盖（DSHBOTS-156/234）：档位解析顺序=卡面显式声明 > bot 配置（inherit 为缺省）。
+    // 'inherit'/空值同义=跟随 bot 配置档（列落 NULL）；列只收合法收紧档，垃圾值拒收。
+    // 「只收紧不放大」校验在派发入口 assignFromBot（对准承接 bot 的 file_policy）。
+    const rawSandboxOverride = input.sandboxOverride
+    if (rawSandboxOverride !== undefined && rawSandboxOverride !== null && rawSandboxOverride !== ''
+      && rawSandboxOverride !== 'inherit' && !SANDBOX_OVERRIDES.includes(rawSandboxOverride)) {
+      throw badRequest(`沙箱覆盖无效，允许值：inherit / ${SANDBOX_OVERRIDES.join(' / ')}`)
     }
-    const sandboxOverride = input.sandboxOverride ?? null
+    const sandboxOverride = !rawSandboxOverride || rawSandboxOverride === 'inherit' ? null : rawSandboxOverride
     const taskId = id('task')
     const createdAt = nowIso()
     // 终态时间在创建时补齐（DSHBOTS-69）：以 done/canceled 建档的任务终态列取同一 createdAt，
