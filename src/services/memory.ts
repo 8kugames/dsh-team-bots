@@ -432,4 +432,115 @@ export const memoryMethods = {
       actor: { type: 'bot', id: binding.bot_id },
     })
   },
+
+  // ── 总监记忆管理（DSHBOTS-239）：list / 同名覆盖写 / 批量清理 ──
+  // 三入口共用 ownerContextFor 权威鉴权（仅项目总监，单聊/成员拒绝）；
+  // 不改宿主 team_remember 语义，插件层独立封装。
+
+  // 把 scope 枚举解析到总监会话所在的具体作用域：bot=总监自己，project=会话项目，team=全团队。
+  resolveOwnerMemoryScope(ownerCtx, scope) {
+    const scopeType = ['bot', 'project', 'team'].includes(scope) ? scope : null
+    if (!scopeType) throw badRequest('记忆作用域无效')
+    const scopeId = scopeType === 'bot' ? ownerCtx.binding.bot_id : scopeType === 'project' ? ownerCtx.project.id : 'team'
+    return { scopeType, scopeId }
+  },
+
+  memoryListFromBot(sessionId, input: { scope?: string, topic?: string, limit?: number } = {}) {
+    const ownerCtx = this.ownerContextFor(sessionId)
+    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope ?? 'project')
+    const keyword = text(input.topic, 200).trim()
+    const limitN = Math.min(200, Math.max(1, Number(input.limit) || 50))
+    const like = `%${keyword}%`
+    const rows = this.store.all(
+      `SELECT * FROM memories
+        WHERE scope_type = ? AND scope_id = ? AND status = 'active'
+          ${keyword ? 'AND topic LIKE ?' : ''}
+        ORDER BY updated_at DESC LIMIT ?`,
+      scopeType, scopeId, ...(keyword ? [like] : []), limitN,
+    )
+    return rows.map(row => this.memoryView(row))
+  },
+
+  // 写入/同名覆盖：同 scope+topic 已有 active 记忆时原地更新（revision+1、事件留痕），
+  // 不再叠新条；无同名时走 createMemory 正常创建。
+  memoryWriteFromBot(sessionId, input) {
+    const ownerCtx = this.ownerContextFor(sessionId)
+    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope)
+    const actor = ownerCtx.actor
+    const topic = text(input.topic, 120)
+    if (!topic) throw badRequest('缺少记忆主题')
+    const existing = this.store.get(
+      "SELECT * FROM memories WHERE scope_type = ? AND scope_id = ? AND topic = ? AND status = 'active'",
+      scopeType, scopeId, topic,
+    )
+    if (!existing) {
+      const memory = this.createMemory({
+        scopeType,
+        scopeId,
+        topic,
+        content: input.content,
+        source: `session:${sessionId}`,
+        confidence: 0.9,
+        createdBy: `bot:${actor.id}`,
+        actor,
+      })
+      return { memory: this.memoryView(memory), overwritten: false }
+    }
+    const content = redactSecrets(text(input.content, 8000))
+    if (!content) throw badRequest('记忆内容不能为空')
+    const now = nowIso()
+    this.store.run(
+      'UPDATE memories SET content = ?, source = ?, revision = revision + 1, updated_at = ? WHERE id = ?',
+      content, `session:${sessionId}`, now, existing.id,
+    )
+    this.store.run(
+      'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      id('mevt'), existing.id, 'updated', actor.type, actor.id, existing.content, content, now,
+    )
+    this.audit(actor, 'memory.overwrite', 'memory', existing.id, { scopeType, scopeId, topic })
+    this.writeMemoryMirror(existing.id)
+    return { memory: this.memoryView(this.store.get('SELECT * FROM memories WHERE id = ?', existing.id)), overwritten: true }
+  },
+
+  // 批量清理：按过期口径把 active 记忆终态化（archived，检索即不再回灌）。
+  // 口径两选一（可并用）：task=已闭环卡（done/canceled）的过程记录主题，topics=点名主题。
+  // 逐条 memory_events 留痕 + 一笔 memory.cleanup 审计列出被清条目。
+  memoryCleanupFromBot(sessionId, input) {
+    const ownerCtx = this.ownerContextFor(sessionId)
+    const { project, actor } = ownerCtx
+    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope)
+    const topics = (Array.isArray(input.topics) ? input.topics : []).map(item => text(item, 120)).filter(Boolean)
+    let taskLabel = null
+    let taskTopics: string[] = []
+    if (input.task) {
+      const task = this.resolveBotTask(project, input.task)
+      if (!['done', 'canceled'].includes(task.status)) {
+        throw badRequest(`仅已闭环（done/canceled）任务的历史记录可清理，${project.key}-${task.number} 当前为 ${task.status}`)
+      }
+      taskLabel = `${project.key}-${task.number}`
+      // learnFromTask 的两类过程记录主题形态：任务 KEY-N（bot 域）/ KEY-N 交付记录（项目域）。
+      taskTopics = [`任务 ${taskLabel}`, `${taskLabel} 交付记录`]
+    }
+    const wanted = [...new Set([...topics, ...taskTopics])]
+    if (!wanted.length) throw badRequest('cleanup 需要 topics 或 task 至少一项')
+    const placeholders = wanted.map(() => '?').join(', ')
+    const rows = this.store.all(
+      `SELECT * FROM memories WHERE scope_type = ? AND scope_id = ? AND status = 'active' AND topic IN (${placeholders})`,
+      scopeType, scopeId, ...wanted,
+    )
+    const now = nowIso()
+    const cleaned: Array<{ id: string, topic: string }> = []
+    this.store.transaction(() => {
+      for (const row of rows) {
+        this.store.run("UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?", now, row.id)
+        this.store.run(
+          'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',
+          id('mevt'), row.id, 'archived', actor.type, actor.id, row.content, now,
+        )
+        cleaned.push({ id: row.id, topic: row.topic })
+      }
+      this.audit(actor, 'memory.cleanup', 'memory', `${scopeType}:${scopeId}`, { scope: scopeType, task: taskLabel, cleaned })
+    })
+    return { cleaned, archived: cleaned.length, missed: wanted.filter(topic => !cleaned.some(item => item.topic === topic)) }
+  },
 }

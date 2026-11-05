@@ -24,7 +24,18 @@ export const SUBAGENT_GENERATION_TOOLS = [
 ] as const
 
 // 总监专权工具：服务层 ownerContextFor 已做权威校验，本清单用于工具层兜底与守门测试。
-export const DIRECTOR_ONLY_TOOLS = ['team_assign_task', 'team_review_task', 'team_list_bots', 'team_add_member', 'team_create_bot'] as const
+// team_memory_list / team_memory_write / team_memory_cleanup（DSHBOTS-239）是记忆巡检面：
+// 枚举、同名覆盖写与批量终态化清理都只归总监。
+export const DIRECTOR_ONLY_TOOLS = [
+  'team_assign_task',
+  'team_review_task',
+  'team_list_bots',
+  'team_add_member',
+  'team_create_bot',
+  'team_memory_list',
+  'team_memory_write',
+  'team_memory_cleanup',
+] as const
 
 // 门控：agentTeam 开启且 bot 类型支持（项目内 active bot，成员与总监均可用）。
 export function subagentCapabilityEnabledFor(bot, config) {
@@ -211,6 +222,76 @@ export function installTeamTools(ctx, service) {
       const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
       const memory = service.rememberFromBot(sessionId, args)
       return `Saved ${memory.scope_type} memory "${memory.topic}".`
+    },
+  })
+
+  // ── 总监记忆管理工具集（DSHBOTS-239）：list / 同名覆盖写 / 批量清理 ──
+  // 服务层 ownerContextFor 权威鉴权；此处注册形态与 DIRECTOR_ONLY_TOOLS 兜底同源。
+
+  ctx.tools.register({
+    name: 'team_memory_list',
+    description: 'List existing long-term memories in one scope (bot / project / team) for hygiene inspection: entries with short id, topic, updated time and a content preview, optionally filtered by topic substring. Director-only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to enumerate: bot = your own memories, project = this project, team = whole team. Default project' },
+        topic: { type: 'string', description: 'Optional substring filter on the topic label' },
+        limit: { type: 'integer', description: 'Max entries to return (1-200, default 50)' },
+      },
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const rows = service.memoryListFromBot(sessionId, args)
+      if (!rows.length) return 'No active memories in this scope.'
+      return rows
+        .map(row => `- [${row.id.slice(-6)}] ${row.topic} (${row.scope_type}, updated ${row.updated_at})\n  ${String(row.content).replace(/\s+/g, ' ').slice(0, 240)}`)
+        .join('\n')
+    },
+  })
+
+  ctx.tools.register({
+    name: 'team_memory_write',
+    description: 'Write a durable memory with same-name overwrite: an active memory with the same scope+topic is updated in place (revision bumps, event trail kept) instead of appending a duplicate entry; otherwise a new memory is created. Use it to refresh a wording to the latest final state instead of piling up near-duplicates. Scope rules: bot = your own, project = this project, team = whole team. Never store secrets or credentials. Director-only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'bot: only you remember it; project: every project bot can use it; team: shared by the whole team (owner bots only)' },
+        topic: { type: 'string', description: 'Short topic label; same topic in the same scope is overwritten in place' },
+        content: { type: 'string', description: 'The durable memory, with enough context to be useful later' },
+      },
+      required: ['scope', 'topic', 'content'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const { memory, overwritten } = service.memoryWriteFromBot(sessionId, args)
+      return `${overwritten ? 'Overwrote' : 'Saved'} ${memory.scope_type} memory "${memory.topic}" (rev ${memory.revision}).`
+    },
+  })
+
+  ctx.tools.register({
+    name: 'team_memory_cleanup',
+    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Two criteria, combinable: `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision. Do not archive entries recording the user\'s explicit decisions. Director-only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to clean: bot = your own, project = this project, team = whole team' },
+        topics: { type: 'array', items: { type: 'string' }, description: 'Exact topic labels to archive in this scope' },
+        task: { type: 'string', description: 'Closed card (KEY-N) whose process-record memories should be archived; rejected unless the task is done or canceled' },
+      },
+      required: ['scope'],
+      additionalProperties: false,
+    },
+    output: stringOutput,
+    async execute(args, exec) {
+      const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
+      const result = service.memoryCleanupFromBot(sessionId, args)
+      const cleaned = result.cleaned.map(item => `"${item.topic}"`).join(', ') || 'none'
+      const missed = result.missed.length ? ` Not found (skipped): ${result.missed.map(topic => `"${topic}"`).join(', ')}.` : ''
+      return `Archived ${result.archived} ${result.archived === 1 ? 'entry' : 'entries'}: ${cleaned}.${missed}`
     },
   })
 
