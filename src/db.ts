@@ -459,6 +459,8 @@ CREATE TABLE IF NOT EXISTS secret_requests (
 CREATE INDEX IF NOT EXISTS secret_requests_status_idx ON secret_requests(status, created_at DESC);
 
 ${RUNS_INDEXES}
+CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id);
+CREATE INDEX IF NOT EXISTS task_comments_task_idx ON task_comments(task_id);
 CREATE INDEX IF NOT EXISTS messages_project_idx ON messages(project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS solo_messages_bot_idx ON solo_messages(bot_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS tasks_project_idx ON tasks(project_id, status, updated_at DESC);

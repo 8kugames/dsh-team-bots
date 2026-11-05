@@ -132,6 +132,13 @@ export function runMigrations(db) {
   recordMigration(db, 'solo_message_cards')
   recordMigration(db, 'bots_avatar_seed')
   recordMigration(db, 'runs_merged_messages')
+  // 验收守门索引（DSHBOTS-235）：扫描按 task_id 关联查 task_comments / runs，
+  // 旧库无对应索引时每卡全表扫；对新库空转（SCHEMA 已建）。
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id);
+    CREATE INDEX IF NOT EXISTS task_comments_task_idx ON task_comments(task_id);
+  `)
+  recordMigration(db, 'review_watchdog_indexes')
   return { ftsEnabled }
 }
 

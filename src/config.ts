@@ -29,10 +29,15 @@ export const RUN_LIMIT_RANGES = {
   [STALL_WATCHDOG_KEY]: [0, 360],
 }
 
-// ── 验收滞留守门（DSHBOTS-194）─────────────────────────────────────────────
+// ── 验收滞留守门（DSHBOTS-194 / DSHBOTS-235）───────────────────────────────
 // in_review 任务超阈值分钟无新评论且无关联 run 活动 = 验收滞留；0 = 关闭守门。
 export const REVIEW_IDLE_MINUTES_KEY = 'review_idle_minutes'
 export const REVIEW_IDLE_MINUTES_RANGE = [0, 1440]
+// 三档自动收口（DSHBOTS-235）：总开关（默认开，0 = 关闭自动 accept/return，只提醒）
+// 与二次催办倍数（滞留超 阈值×倍数 升级语气再催一次，默认 2）。
+export const REVIEW_AUTO_CLOSE_KEY = 'review_auto_close'
+export const REVIEW_ESCALATE_KEY = 'review_idle_escalate_multiple'
+export const REVIEW_ESCALATE_RANGE = [2, 10]
 
 // ── 会话结转（DSHBOTS-145）─────────────────────────────────────────────────
 // 同一绑定会话累计运行轮数超过阈值后结转：先排一次 bot 自写交接摘要，摘要就绪后

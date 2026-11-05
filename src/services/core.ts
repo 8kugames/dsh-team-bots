@@ -3,7 +3,7 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
-import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES } from '../config.js'
+import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE, REVIEW_IDLE_MINUTES_KEY, REVIEW_IDLE_MINUTES_RANGE } from '../config.js'
 import { badRequest, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
@@ -168,6 +168,7 @@ export const coreMethods = {
       'memory_review', 'chat_memory_review',
       RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY,
       UI_LANGUAGE_KEY,
+      REVIEW_IDLE_MINUTES_KEY, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY,
     ]
     const values: any = {}
     for (const key of keys) values[key] = this.store.setting(key, '')
@@ -219,6 +220,33 @@ export const coreMethods = {
         throw badRequest(`${key} 必须是 ${min}–${max} 的整数分钟`)
       }
       values[key] = String(num)
+    }
+    // 验收滞留守门三键（DSHBOTS-194/235）：阈值 0–1440（0 = 关闭）；自动收口 0/1；
+    // 二次催办倍数 2–10。空串 = 清除保存值回退默认，与运行时效同口径。
+    {
+      const [idleMin, idleMax] = REVIEW_IDLE_MINUTES_RANGE
+      const key = REVIEW_IDLE_MINUTES_KEY
+      if (values[key] !== undefined && values[key] !== '') {
+        const num = Number(values[key])
+        if (!Number.isInteger(num) || num < idleMin || num > idleMax) {
+          throw badRequest(`${key} 必须是 ${idleMin}–${idleMax} 的整数分钟`)
+        }
+        values[key] = String(num)
+      }
+    }
+    if (values[REVIEW_AUTO_CLOSE_KEY] !== undefined && values[REVIEW_AUTO_CLOSE_KEY] !== '') {
+      if (!['0', '1'].includes(values[REVIEW_AUTO_CLOSE_KEY])) throw badRequest(`${REVIEW_AUTO_CLOSE_KEY} 必须是 0 或 1`)
+    }
+    {
+      const [escMin, escMax] = REVIEW_ESCALATE_RANGE
+      const key = REVIEW_ESCALATE_KEY
+      if (values[key] !== undefined && values[key] !== '') {
+        const num = Number(values[key])
+        if (!Number.isInteger(num) || num < escMin || num > escMax) {
+          throw badRequest(`${key} 必须是 ${escMin}–${escMax} 的整数`)
+        }
+        values[key] = String(num)
+      }
     }
     // UI 语言（DSHBOTS-162）：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
     // 非法输入 badRequest，不静默钳制（与运行时效同口径）；外部写入的非法值由
