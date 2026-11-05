@@ -48,10 +48,13 @@ export function subagentCapabilityEnabledFor(bot, config) {
 
 // 工具层兜底（DSHBOTS-238）：成员 bot 隐藏总监专权工具，避免「误调被拒后才知情」；
 // 子代理生成工具由 preset 全局注册，成员 bot 默认可见，无需额外放行。
-// resolved 为 sessionController.resolveAgent 的返回（{ agent } 或 { error }）。
+// DSHBOTS-247：调用点形状不一——session.ts 的结转/复用路径传 resolveAgent 的
+// `{ agent }` 包装，新建会话路径传裸 agent。这里归一为句柄后取 restrict，两种形状都生效；
+// 旧实现只认包装形状时，裸形状会静默跳过（策略从未生效）或旧构建抛 "reading 'ctx'"。
 export function applyBotToolPolicy(resolved, { isOwner, logger }: { isOwner: boolean; logger?: { warn?: (...args: unknown[]) => void } }) {
   if (isOwner) return
-  const restrict = resolved?.agent?.ctx?.tools?.restrict
+  const handle = resolved?.agent ?? resolved
+  const restrict = handle?.ctx?.tools?.restrict
   if (typeof restrict !== 'function') return
   try {
     restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })

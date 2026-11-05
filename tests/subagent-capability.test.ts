@@ -142,6 +142,38 @@ test('工具层兜底：成员 bot 隐藏总监专权工具，总监不受影响
   assert.doesNotThrow(() => applyBotToolPolicy({ agent: { ctx: { tools: {} } } }, { isOwner: false }))
 })
 
+test('工具层兜底：包装与裸 agent 两种形状都生效（DSHBOTS-247）', () => {
+  // 结转/复用路径传 resolveAgent 的 { agent } 包装。
+  const wrappedCalls = []
+  applyBotToolPolicy(
+    { agent: { ctx: { tools: { restrict: (filter) => wrappedCalls.push(filter) } } } },
+    { isOwner: false, logger: { warn() {} } },
+  )
+  assert.equal(wrappedCalls.length, 1, '包装形状应调用一次 restrict')
+  assert.deepEqual([...wrappedCalls[0].deny], [...DIRECTOR_ONLY_TOOLS], 'deny 清单应为总监专权工具')
+
+  // 新建会话路径传裸 agent（session.ts:336）——旧实现只认包装形状会静默跳过。
+  const bareCalls = []
+  applyBotToolPolicy(
+    { ctx: { tools: { restrict: (filter) => bareCalls.push(filter) } } },
+    { isOwner: false, logger: { warn() {} } },
+  )
+  assert.equal(bareCalls.length, 1, '裸 agent 形状也应调用一次 restrict（不再静默跳过）')
+  assert.deepEqual([...bareCalls[0].deny], [...DIRECTOR_ONLY_TOOLS], '裸形状 deny 清单也应为总监专权工具')
+
+  // isOwner 短路不变：两种形状都不应触发 restrict。
+  const ownerWrapped = []
+  applyBotToolPolicy({ agent: { ctx: { tools: { restrict: (filter) => ownerWrapped.push(filter) } } } }, { isOwner: true })
+  const ownerBare = []
+  applyBotToolPolicy({ ctx: { tools: { restrict: (filter) => ownerBare.push(filter) } } }, { isOwner: true })
+  assert.equal(ownerWrapped.length, 0, '总监（包装形状）不应被限制')
+  assert.equal(ownerBare.length, 0, '总监（裸形状）不应被限制')
+
+  // 无 restrict / 带 error 的形状仍静默跳过，不抛错。
+  assert.doesNotThrow(() => applyBotToolPolicy({ error: new Error('x') }, { isOwner: false }))
+  assert.doesNotThrow(() => applyBotToolPolicy({ ctx: { tools: {} } }, { isOwner: false }))
+})
+
 test('服务层权威闸门：成员 bot 调 team_assign_task 仍被拒（专权未下放）', async () => {
   const t = await setup({ agentTeam: true })
   try {
