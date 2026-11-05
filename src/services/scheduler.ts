@@ -16,8 +16,8 @@ import { runReviewWatchdog } from './review-watchdog.js'
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
 
 // DSHBOTS-43 人的消息保底槽：人触发的运行判定。
-// 现有字段口径：chat/solo_chat 的 trigger_type 是 'mention'，dm 是 'dm'，dm_reply 是 'dm_reply'；
-// 用 kind 判定最稳（solo_chat 也命中），以现有字段为准不新增列。
+// 现有字段口径：chat/solo_chat 的 trigger_type 是 'mention'（微信直达为 'wechat'，DSHBOTS-208），
+// dm 是 'dm'，dm_reply 是 'dm_reply'；用 kind 判定最稳（solo_chat 也命中），以现有字段为准不新增列。
 const HUMAN_RUN_KINDS = new Set(['chat', 'solo_chat', 'dm', 'dm_reply'])
 function isHumanRun(run) {
   return HUMAN_RUN_KINDS.has(run.kind)
@@ -157,7 +157,7 @@ export const schedulerMethods = {
       const project = this.store.get('SELECT * FROM projects WHERE id = ?', payload.projectId)
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
       if (!project || !bot || project.status !== 'active' || bot.status !== 'active') return null
-      return this.enqueueChatRun(project, bot, payload.messageId)
+      return this.enqueueChatRun(project, bot, payload.messageId, payload.origin)
     }
     if (row.kind === 'task_run') {
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', payload.taskId)

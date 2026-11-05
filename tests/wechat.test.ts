@@ -26,6 +26,13 @@ const SERVICE_STUB = (): any => ({
     this.seen = { identifier, decision, comment }
     return `已${decision === 'accept' ? '验收' : '驳回'} ${identifier}`
   },
+  // DSHBOTS-208 直达对话桩：记录调用并按 key 命中/未命中模拟项目解析。
+  chatted: null,
+  async wechatChat(key, body, fallbackKey) {
+    this.chatted = { key, body, fallbackKey }
+    if (key && key.toLowerCase() !== 'web') return null
+    return { project: { id: 'p-web', key: key ? key.toLowerCase() : 'web', name: 'Web' }, messageId: 'msg_1', runBots: ['bot_director'] }
+  },
 })
 
 async function openStore(prefix = 'wechat-') {
@@ -62,7 +69,9 @@ test('wechat store 持久化凭证、游标、管理员与发件箱', async () =
 test('wechat commands 帮助、状态与验收路由', async () => {
   assert.ok((await handleCommand({}, '帮助')).includes('状态'))
   assert.ok((await handleCommand({}, '')).includes('可用指令'))
-  assert.ok((await handleCommand({}, 'foo')).includes('未识别'))
+  // DSHBOTS-208：未匹配指令的文本不再回「未识别」，走直达路由（无可用项目时引导选项目）。
+  const free = { stateView: () => ({ projects: [] }), async wechatChat() { return { error: 'no_target' } } }
+  assert.ok((await handleCommand(free, 'foo')).includes('还没有选定直达的项目'))
 
   const service = SERVICE_STUB()
   const state = await handleCommand(service, '状态')
@@ -210,10 +219,11 @@ test('wechat channel 只有 admin_peer_id 能执行管理指令，「绑定」�
     assert.equal(sent.length, before, '非管理员消息不应触发任何回复')
     assert.equal(store.getState().admin_peer_id, 'p-admin')
 
-    // 「绑定」口令已移除：管理员发「绑定」不再改绑
+    // 「绑定」口令已移除：管理员发「绑定」不再改绑 admin，而是按自由文本直达项目总监（DSHBOTS-208）
     await channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c3', text: '绑定' }, channel.transport)
-    assert.ok(sent.at(-1).text.includes('未识别'), '「绑定」口令应被移除')
-    assert.equal(store.getState().admin_peer_id, 'p-admin')
+    assert.ok(sent.at(-1).text.includes('已连接【Web】'), '「绑定」按自由文本直达，回连接确认')
+    assert.equal(store.getState().admin_peer_id, 'p-admin', '管理员绑定不受影响')
+    assert.equal(store.getDirectProjectKey(), 'web', '首次直达成功后通道记住绑定项目')
     store.close()
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -506,16 +516,17 @@ test('wechat channel 扫码授权 begin 与 wait 必须同一 transport 实例',
   }
 })
 
-// —— DSHBOTS-183：help 变体、q 列项目 key、{key}: {msg} 派单转发 ——
+// —— DSHBOTS-183：help 变体、q 列项目 key；DSHBOTS-208：{key}: {msg} 直达 + 任意交互 ——
 
 const DISPATCH_STUB = () => ({
   stateView() {
     return { projects: [{ key: 'web', name: 'Web', tasks: [] }, { key: 'bot', name: '', tasks: [] }] }
   },
-  dispatched: null,
-  async wechatDispatch(key, message) {
-    this.dispatched = { key, message }
-    return key.toLowerCase() === 'web' ? { id: 'p-web', key: 'web', name: 'Web' } : null
+  chatted: null,
+  async wechatChat(key, body, fallbackKey) {
+    this.chatted = { key, body, fallbackKey }
+    if (key && key.toLowerCase() !== 'web') return null
+    return { project: { id: 'p-web', key: 'web', name: 'Web' }, messageId: 'msg_1', runBots: ['bot_director'] }
   },
 })
 
@@ -524,41 +535,70 @@ test('wechat commands help/help 大小写变体都出帮助', async () => {
     const reply = await handleCommand({}, text)
     assert.ok(reply.includes('可用指令'), `「${text}」应输出帮助`)
     assert.ok(reply.includes('q'), '帮助里应提到 q 指令')
-    assert.ok(reply.includes('<key>: <消息>'), '帮助里应提到派单转发格式')
+    assert.ok(reply.includes('<key>: <消息>'), '帮助里应提到指定项目直达格式')
+    assert.ok(reply.includes('任意消息'), '帮助里应说明自由文本直达')
   }
 })
 
-test('wechat commands q 列出可派单项目 key，空列表给空态文案', async () => {
+test('wechat commands q 列出可选项目 key，空列表给空态文案', async () => {
   const service = DISPATCH_STUB()
   const reply = await handleCommand(service, 'q')
-  assert.ok(reply.startsWith('可派单的项目'))
+  assert.ok(reply.startsWith('可选的项目'))
   assert.ok(reply.includes('  web  Web'), 'key 与名称都应出现')
   assert.ok(reply.includes('  bot'), '无名称项目只列 key')
   assert.equal((await handleCommand(service, 'Q')), reply, '大小写不敏感')
 
   const empty = { stateView: () => ({ projects: [] }) }
-  assert.ok((await handleCommand(empty, 'q')).includes('当前没有可派单的项目'))
+  assert.ok((await handleCommand(empty, 'q')).includes('当前没有可选的项目'))
 })
 
-test('wechat commands 派单转发命中：按 key 调 wechatDispatch 并回执', async () => {
+test('wechat commands 指定项目直达命中：按 key 调 wechatChat 并回执', async () => {
   const service = DISPATCH_STUB()
   const reply = await handleCommand(service, 'web: 上线新版官网')
-  assert.ok(reply.includes('已转发到【Web】'))
-  assert.deepEqual(service.dispatched, { key: 'WEB', message: '上线新版官网' })
+  assert.ok(reply.includes('已直达【Web】'))
+  assert.deepEqual(service.chatted, { key: 'WEB', body: '上线新版官网', fallbackKey: undefined })
 
   // 全角冒号、key 大小写、消息里再含冒号只切第一段
   const reply2 = await handleCommand(service, 'WEB：改导航样式，备注：今晚发')
-  assert.ok(reply2.includes('已转发到【Web】'))
-  assert.deepEqual(service.dispatched, { key: 'WEB', message: '改导航样式，备注：今晚发' })
+  assert.ok(reply2.includes('已直达【Web】'))
+  assert.deepEqual(service.chatted, { key: 'WEB', body: '改导航样式，备注：今晚发', fallbackKey: undefined })
 })
 
-test('wechat commands 派单未命中 key 给出可用的 q 列表提示', async () => {
+test('wechat commands 直达未命中 key 给出可选项目列表提示', async () => {
   const service = DISPATCH_STUB()
   const reply = await handleCommand(service, 'nope: 干活')
   assert.ok(reply.includes('没有找到项目 NOPE'))
-  assert.ok(reply.includes('可派单的项目'))
+  assert.ok(reply.includes('可选的项目'))
   assert.ok(reply.includes('web'), '提示里应带可用 key 列表')
-  assert.equal(service.dispatched.key, 'NOPE', '未命中也要走一次解析定位')
+  assert.equal(service.chatted.key, 'NOPE', '未命中也要走一次解析定位')
+})
+
+test('wechat commands 任意交互：自由文本经绑定项目直达，同项目静默、换项目回执', async () => {
+  const service = DISPATCH_STUB()
+  const bindings = []
+  const ctx = { boundKey: 'web', bind: key => bindings.push(key) }
+
+  // 已绑定同项目：消息原文直达，无逐条回执（回复由运行回程推送）
+  const silent = await handleCommand(service, '把首页改成深色模式', ctx)
+  assert.equal(silent, '', '绑定项目内的自由文本应静默直达')
+  assert.deepEqual(service.chatted, { key: null, body: '把首页改成深色模式', fallbackKey: 'web' })
+  assert.deepEqual(bindings, ['web'], '路由成功后仍回写绑定（幂等）')
+
+  // 未绑定但恰一个项目时 commands 层不猜：由 service 决定（桩外的真实现自动选唯一项目）
+  const bound = { ...ctx, boundKey: 'bot' }
+  const ack = await handleCommand(service, '继续上次的事', bound)
+  assert.ok(ack.includes('已连接【Web】'), '切换到新项目应回连接确认')
+  assert.ok(service.chatted.fallbackKey === 'bot')
+
+  // 无绑定且多项目（真实现返回 no_target）：引导用 <key>: 先选一次
+  const multi = { stateView: () => ({ projects: [{ key: 'a' }, { key: 'b' }] }), async wechatChat() { return { error: 'no_target' } } }
+  const guide = await handleCommand(multi, '随便聊聊')
+  assert.ok(guide.includes('还没有选定直达的项目'))
+  assert.ok(guide.includes('  a') && guide.includes('  b'), '引导里带项目清单')
+
+  // 项目无可用总监：可读提示，不入对话
+  const ownerless = { stateView: () => ({ projects: [] }), async wechatChat() { return { error: 'no_owner', project: { key: 'web', name: 'Web' } } } }
+  assert.ok((await handleCommand(ownerless, '在吗')).includes('没有可用的总监 Bot'))
 })
 
 test('wechat commands 现有指令行为不变：状态/验收/驳回/详情照旧', async () => {
@@ -568,7 +608,9 @@ test('wechat commands 现有指令行为不变：状态/验收/驳回/详情照�
   assert.ok((await handleCommand(service, '验收 web-3 好')).includes('已验收 web-3'))
   assert.ok((await handleCommand(service, '驳回 web-3 差')).includes('已驳回 web-3'))
   assert.ok((await handleCommand(service, '详情 web-3')).includes('写登录页'))
-  assert.ok((await handleCommand({}, 'foo')).includes('未识别'))
+  // 非指令文本不再回「未识别」，直达路由由 wechatChat 承接
+  const free = await handleCommand(SERVICE_STUB(), 'foo')
+  assert.ok(free.includes('已连接【Web】'), '未绑定时的首条自由文本回连接确认')
 })
 
 class DispatchStubRuntime {
@@ -579,8 +621,8 @@ class DispatchStubRuntime {
   async cancelRun() { return true }
 }
 
-test('wechat dispatch 真 service：消息以用户身份插入项目会话并触发总监 chat 运行', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-wechat-dispatch-'))
+test('wechat 直达真 service：消息以用户身份插入项目会话并触发总监 chat 运行（trigger_type=wechat），回复推回微信', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-wechat-direct-'))
   const workspace = join(root, 'workspace')
   await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
   const config = resolveConfig({
@@ -594,30 +636,74 @@ test('wechat dispatch 真 service：消息以用户身份插入项目会话并�
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   service.attachRuntime(new DispatchStubRuntime())
   await service.initialize()
+  service.started = true
   try {
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     await service.createProject({ name: 'Dispatch Demo', key: 'DISPATCH', ownerBotId: director.id })
 
     // 小写 key 也要命中（COLLATE NOCASE 同 resolveTaskByIdentifier 口径）
     const reply = await handleCommand(service, 'dispatch: 上线新版官网')
-    assert.ok(reply.includes('已转发到【Dispatch Demo】'))
+    assert.ok(reply.includes('已直达【Dispatch Demo】'))
 
     const message = store.get("SELECT * FROM messages WHERE body = '上线新版官网'")
-    assert.ok(message, '转发消息必须落库到项目群聊')
+    assert.ok(message, '直达消息必须落库到项目群聊')
     assert.equal(message.project_id, store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id)
     assert.equal(message.sender_type, 'user')
     assert.equal(message.sender_id, service.localUserId, '以工作台用户身份插入')
 
     const outbox = store.get("SELECT * FROM outbox WHERE kind = 'chat_run'")
-    assert.ok(outbox, '转发必须入 chat_run outbox 触发一轮运行')
+    assert.ok(outbox, '直达必须入 chat_run outbox 触发一轮运行')
     assert.equal(outbox.status, 'delivered')
     assert.equal(outbox.idempotency_key, `chat:${message.id}:${director.id}`)
+    assert.equal(JSON.parse(outbox.payload_json).origin, 'wechat', '载荷带微信来源标记')
 
     const run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
     assert.ok(run, '必须派生 chat 运行')
     assert.equal(run.bot_id, director.id, '无 mention 时定向项目总监（owner_bot_id）')
+    assert.equal(run.trigger_type, 'wechat', '微信直达运行打 wechat 标记（回程推送依据）')
+
+    // 已绑定同项目（上一条 <key>: 已 bind）：自由文本静默直达同一位总监
+    const silent = await handleCommand(service, '顺带把首页也改了', { boundKey: 'DISPATCH', bind() {} })
+    assert.equal(silent, '', '绑定项目内的自由文本无逐条回执')
+    const freeMessage = store.get("SELECT * FROM messages WHERE body = '顺带把首页也改了'")
+    assert.equal(freeMessage.sender_id, service.localUserId)
+    const freeRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", freeMessage.id)
+    assert.equal(freeRun.bot_id, director.id)
+    assert.equal(freeRun.trigger_type, 'wechat')
+
+    // 回程：微信直达运行结束，bot 回复推回管理员；普通群聊运行不推
+    const pushed: string[] = []
+    ;(service as any).wechat = { notify(text: string) { pushed.push(text) } }
+    await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
+    assert.deepEqual(pushed, ['【director】收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
+    await service.finishRun({ runId: freeRun.id, status: 'failed', error: { message: '模型超时' } } as any)
+    assert.equal(pushed.at(-1), '【director】运行失败：模型超时', '失败提示同样推回')
+
+    await service.sendMessage(store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id, '工作台普通群聊消息', { type: 'user', id: service.localUserId })
+    const uiRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", store.get("SELECT id FROM messages WHERE body = '工作台普通群聊消息'").id)
+    assert.equal(uiRun.trigger_type, 'mention', '工作台消息不带微信标记')
+    const before = pushed.length
+    await service.finishRun({ runId: uiRun.id, status: 'succeeded', output: '普通群聊回复' } as any)
+    assert.equal(pushed.length, before, '普通群聊运行结束不推微信')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('wechat store 直达项目绑定：保存/读取随通道持久化，登出一并清空', async () => {
+  const { dir, store } = await openStore('wechat-bind-key-')
+  try {
+    assert.equal(store.getDirectProjectKey(), null)
+    store.saveDirectProjectKey('WEB')
+    assert.equal(store.getDirectProjectKey(), 'WEB', '绑定跨重启持久化在通道库')
+    store.saveDirectProjectKey('')
+    assert.equal(store.getDirectProjectKey(), null, '空值解除绑定')
+    store.saveDirectProjectKey('WEB')
+    store.clearCredentials()
+    assert.equal(store.getDirectProjectKey(), null, '登出清空直达绑定')
+    store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 })

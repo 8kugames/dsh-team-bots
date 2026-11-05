@@ -92,7 +92,7 @@ export const chatMethods = {
       data: row.data,
     }
   },
-  async sendMessage(projectId, bodyInput, actor = this.actor(), replyTo = null, imagesInput = []) {
+  async sendMessage(projectId, bodyInput, actor = this.actor(), replyTo = null, imagesInput = [], { origin = null } = {}) {
     const project = this.projectRow(projectId)
     if (project.status !== 'active') throw conflict('项目已归档')
     const body = text(bodyInput, 20_000)
@@ -167,7 +167,8 @@ export const chatMethods = {
     for (const bot of targets) {
       this.enqueueOutbox({
         kind: 'chat_run',
-        payload: { projectId: project.id, botId: bot.id, messageId },
+        // origin（'wechat'）：标记消息来自微信直达（DSHBOTS-208），运行结束把 bot 回复推回微信。
+        payload: { projectId: project.id, botId: bot.id, messageId, origin },
         projectId: project.id,
         sourceId: messageId,
         idempotencyKey: `chat:${messageId}:${bot.id}`,

@@ -341,7 +341,11 @@ export class WechatChannel {
       return
     }
     try {
-      const reply = await handleCommand(this.service, message.text)
+      // DSHBOTS-208 直达对话上下文：管理员会话绑定的项目 key（路由成功后由命令层回写）。
+      const reply = await handleCommand(this.service, message.text, {
+        boundKey: this.store.getDirectProjectKey?.() ?? null,
+        bind: key => this.store.saveDirectProjectKey?.(key),
+      })
       await this.sendTo(peerId, reply, signal)
     } catch (error) {
       if (isBusinessError(error)) {

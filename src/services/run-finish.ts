@@ -303,6 +303,7 @@ export const runFinishMethods = {
           body: cleanOutput || '模型未返回文本。',
           runId,
         })
+        this.notifyWechatChat(bot, run, cleanOutput || '模型未返回文本。')
         // 群聊回复后的自动记忆审查（可在设置关闭；与任务交付审查同一队列同一幂等键规则）。
         if (this.chatMemoryReviewEnabled()) {
           this.enqueueMemoryReview(project, bot, null, runId)
@@ -400,6 +401,7 @@ export const runFinishMethods = {
           body: `运行失败：${error?.message ?? '未知错误'}`,
           runId,
         })
+        this.notifyWechatChat(bot, run, `运行失败：${error?.message ?? '未知错误'}`)
       } else if (run.kind === 'solo_chat') {
         this.insertSoloMessage({
           botId: bot.id,
@@ -411,5 +413,17 @@ export const runFinishMethods = {
       }
     }
     if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
+  },
+
+  // 微信直达对话回程（DSHBOTS-208）：trigger_type='wechat' 的群聊运行结束时，
+  // 把 bot 回复（或失败提示）推回微信管理员，出站走通道既有合批/重试治理；
+  // 只推微信触发的运行，工作台群聊回复不受影响。推送失败不阻塞收尾主流程。
+  notifyWechatChat(bot, run, body) {
+    if (run?.trigger_type !== 'wechat' || !this.wechat) return
+    try {
+      this.wechat.notify(`【${bot?.name ?? 'Bot'}】${body}`)
+    } catch (error: any) {
+      this.logger.warn?.('dsh-team: 微信直达回复推送失败: %s', error?.message ?? error)
+    }
   },
 }

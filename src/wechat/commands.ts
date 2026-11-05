@@ -8,8 +8,10 @@ const HELP = [
   '  验收 <任务号> [评语]  通过验收，如：验收 web-3 做得好',
   '  驳回 <任务号> <理由>  退回重做，理由必填',
   '  详情 <任务号>        查看任务卡片',
-  '  q                   列出可派单的项目 key',
-  '  <key>: <消息>        转发消息到项目群聊由总监安排，如：web: 上线新版官网',
+  '  q                   列出项目 key',
+  '  <key>: <消息>        指定项目并直达其总监，如：web: 上线新版官网',
+  '',
+  '其余任意消息直接发给当前项目的总监，回复会推送到微信。',
 ].join('\n')
 
 /** 需要任务号的任务指令。 */
@@ -33,10 +35,13 @@ export class WechatBusinessError extends Error {
 /**
  * 把管理员消息解析为指令并执行。service 需要提供：
  * stateView() / taskByIdentifier(identifier) / wechatReview(identifier, {decision, comment})
- * / wechatDispatch(key, message)（派单转发：按 key 把消息插入项目群聊并触发运行，
- * 未命中返回 null；service.js 接线时实现，职责与 reviewFromBot 一致但 actor 为微信用户）。
+ * / wechatChat(key, message, fallbackKey)（直达对话：按 key（或绑定/唯一 active 项目）
+ * 把消息插入项目群聊并触发总监 chat 运行，回程推送见 run-finish；service.js 接线时实现，
+ * actor 为微信管理员映射的工作台用户）。
+ * ctx（DSHBOTS-208，通道侧传入）：{ boundKey: 当前绑定项目 key | null,
+ * bind(key): 路由成功后更新绑定 }；测试与无绑定场景可省略。
  */
-export async function handleCommand(service, rawText) {
+export async function handleCommand(service, rawText, ctx = null) {
   const body = String(rawText ?? '').trim()
   if (!body) return HELP
   const { verb, rest } = splitCommand(body)
@@ -84,14 +89,36 @@ export async function handleCommand(service, rawText) {
   if (dispatch) {
     const key = dispatch[1].toUpperCase()
     const message = dispatch[2].trim()
-    const project = await service.wechatDispatch(key, message)
-    if (!project) {
+    const chat = await service.wechatChat(key, message)
+    if (!chat) {
       return `没有找到项目 ${key}。${projectListText(service.stateView().projects ?? [])}`
     }
-    return `已转发到【${project.name || project.key}】群聊，总监会安排处理。`
+    if (chat.error === 'no_owner') return noOwnerText(chat.project)
+    ctx?.bind?.(chat.project.key)
+    return `已直达【${chat.project.name || chat.project.key}】总监，之后的回复会推送到微信；直接发消息即可继续对话。`
   }
 
-  return `未识别的指令。${HELP}`
+  // DSHBOTS-208 任意交互：非指令文本直达当前项目的总监，不再回「未识别的指令」。
+  const boundKey = ctx?.boundKey ?? null
+  const chat = await service.wechatChat(null, body, boundKey)
+  if (!chat || chat.error === 'no_target') {
+    return [
+      '还没有选定直达的项目，先用「<key>: <消息>」指定一次，之后的消息就会直接发给该项目的总监。',
+      projectListText(service.stateView().projects ?? []),
+    ].join('\n')
+  }
+  if (chat.error === 'no_owner') return noOwnerText(chat.project)
+  ctx?.bind?.(chat.project.key)
+  if (boundKey === chat.project.key) {
+    // 已绑定同项目：静默直达，总监回复由回程推送，不再逐条回执。
+    return ''
+  }
+  return `已连接【${chat.project.name || chat.project.key}】总监，直接发消息即可，回复会推送到这里；换项目用「<key>: <消息>」。`
+}
+
+/** 项目无可用总监（且消息无 @mention）时的可读提示。 */
+function noOwnerText(project) {
+  return `项目【${project.name || project.key}】没有可用的总监 Bot，无法直达。`
 }
 
 /** 拆出指令词与其余正文：任务类指令允许「验收web-3」这种无空格写法。 */
@@ -103,11 +130,11 @@ function splitCommand(body) {
   return { verb: parts[0], rest: parts.slice(1).join(' ').trim() }
 }
 
-/** q 列表与派单未命中提示共用的可派单项目清单文案。 */
+/** q 列表与直达未命中提示共用的可选项目清单文案。 */
 function projectListText(projects) {
   const list = projects ?? []
-  if (!list.length) return '当前没有可派单的项目。'
-  const lines = ['可派单的项目：']
+  if (!list.length) return '当前没有可选的项目。'
+  const lines = ['可选的项目：']
   for (const project of list) {
     lines.push(`  ${project.key}${project.name && project.name !== project.key ? `  ${project.name}` : ''}`)
   }

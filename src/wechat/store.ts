@@ -31,6 +31,7 @@ export class WechatStore {
         credentials_json TEXT,
         cursor TEXT NOT NULL DEFAULT '',
         admin_peer_id TEXT,
+        direct_project_key TEXT,
         updated_at TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS outbox (
@@ -49,8 +50,22 @@ export class WechatStore {
       );
     `)
     await this.migrateOutboxColumns()
+    await this.migrateChannelStateColumns()
     await this.secureFiles()
     return this
+  }
+
+  /**
+   * 旧库补列迁移：直达对话（DSHBOTS-208）引入项目绑定列之前的库缺这一列。
+   * 幂等：列已存在则跳过；补列无默认值，旧行语义等价于「未绑定」。
+   */
+  async migrateChannelStateColumns() {
+    const columns = new Set(
+      this.db.prepare('PRAGMA table_info(channel_state)').all().map(column => column.name),
+    )
+    if (!columns.has('direct_project_key')) {
+      this.db.exec('ALTER TABLE channel_state ADD COLUMN direct_project_key TEXT')
+    }
   }
 
   /**
@@ -106,6 +121,19 @@ export class WechatStore {
     ).run(String(peerId), nowIso())
   }
 
+  /** 直达对话（DSHBOTS-208）：管理员微信会话当前绑定的项目 key（未绑定为 null）。 */
+  getDirectProjectKey() {
+    return this.getState()?.direct_project_key ?? null
+  }
+
+  /** 绑定直达项目：`<key>: <消息>` 显式路由或自由文本成功路由后调用；空值解除绑定。 */
+  saveDirectProjectKey(key) {
+    this.db.prepare(
+      `INSERT INTO channel_state (id, direct_project_key, updated_at) VALUES (1, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET direct_project_key = excluded.direct_project_key, updated_at = excluded.updated_at`,
+    ).run(key ? String(key) : null, nowIso())
+  }
+
   /** 会话凭证（contextToken/clientId）：每个联系人一行，入站消息即刷新（UPSERT）。
    *  at 为该凭证最后刷新时间（epoch ms），供通道侧做过期判定。 */
   savePeer(peerId, { contextToken, clientId, at }) {
@@ -135,7 +163,7 @@ export class WechatStore {
    *  避免旧消息与旧账号的会话凭证在下次登录后外发。 */
   clearCredentials() {
     this.db.prepare(
-      "UPDATE channel_state SET credentials_json = NULL, cursor = '', admin_peer_id = NULL, updated_at = ? WHERE id = 1",
+      "UPDATE channel_state SET credentials_json = NULL, cursor = '', admin_peer_id = NULL, direct_project_key = NULL, updated_at = ? WHERE id = 1",
     ).run(nowIso())
     this.db.prepare('DELETE FROM peers').run()
     this.db.prepare('DELETE FROM outbox').run()

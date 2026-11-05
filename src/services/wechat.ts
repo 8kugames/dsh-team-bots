@@ -6,6 +6,7 @@
 import { createRequire } from 'node:module'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
+import { parseMentions } from '../util.js'
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
 // 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
@@ -82,17 +83,37 @@ export const wechatMethods = {
   },
 
   /**
-   * 微信派单转发（DSHBOTS-183）：按 key 定位 active 项目，把消息以工作台用户身份
-   * 插入该项目群聊并触发一轮 chat 运行（无 mention 时定向总监，由其自行安排任务）。
-   * 未命中 key 返回 null，提示文案由 commands.js 统一拼装（带 q 列表）。
+   * 微信直达对话（DSHBOTS-208，接替原派单转发 wechatDispatch）：把管理员消息以
+   * 工作台用户身份插入项目群聊并触发 chat 运行（无 mention 时定向项目总监），
+   * 运行结束的 bot 回复由 run-finish 按 trigger_type='wechat' 推回微信管理员。
+   * 返回：显式 key 未命中 → null；无可定向目标 → { error: 'no_target' }；
+   * 项目无可定向 Bot（无 mention 且总监不可用）→ { error: 'no_owner', project }；
+   * 成功 → { project, messageId, runBots }。key 为空时按 fallbackKey（通道绑定）
+   * 解析，仍未命中且恰有一个 active 项目时自动选中。
    */
-  async wechatDispatch(key, body) {
-    const project = this.store.get(
-      "SELECT * FROM projects WHERE key = ? COLLATE NOCASE AND status = 'active'",
-      String(key ?? '').trim(),
-    )
-    if (!project) return null
-    await this.sendMessage(project.id, String(body ?? ''), { type: 'user', id: this.localUserId })
-    return project
+  async wechatChat(key, body, fallbackKey = null) {
+    let project = null
+    if (key) {
+      project = this.store.get(
+        "SELECT * FROM projects WHERE key = ? COLLATE NOCASE AND status = 'active'",
+        String(key ?? '').trim(),
+      )
+      if (!project) return null
+    } else {
+      const actives = this.store.all("SELECT * FROM projects WHERE status = 'active'")
+      project = (fallbackKey
+        ? actives.find(row => row.key.toUpperCase() === String(fallbackKey).toUpperCase())
+        : null) ?? (actives.length === 1 ? actives[0] : null)
+      if (!project) return { error: 'no_target' }
+    }
+    const members = this.membersOf(project.id).filter(bot => bot.status === 'active')
+    const text = String(body ?? '')
+    // 无 mention 时 sendMessage 兜底定向 owner_bot_id：总监必须可用，否则消息发出无人接。
+    if (parseMentions(text, members).length === 0
+      && !members.some(bot => bot.id === project.owner_bot_id)) {
+      return { error: 'no_owner', project }
+    }
+    const result = await this.sendMessage(project.id, text, { type: 'user', id: this.localUserId }, null, [], { origin: 'wechat' })
+    return { project, ...result }
   },
 }
