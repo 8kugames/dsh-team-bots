@@ -34,17 +34,6 @@
     color: var(--ink-3);
     font-size: var(--fs-caption);
 }
-.usage-grid {
-    display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 12px;
-    /* 同一行的两张卡等高：矮的那张不再在卡片下方留一块空白。 */
-    align-items: stretch;
-}
-/* 面板数为奇数时（3 张）最后一张横跨整行，不留空网格单元——这是「分布明细漏空」的根因。 */
-.usage-grid > .usage-panel:last-child:nth-child(odd) {
-    grid-column: 1 / -1;
-}
 .usage-panel {
     padding: 16px;
     /* 卡内纵向 flex：图例与说明贴到卡片底部，等高时不再悬空。 */
@@ -61,20 +50,9 @@
 .usage-panel > .usage-note {
     padding-top: 10px;
 }
-/* 用量页骨架（DSHBOTS-81）：页面头单一声明窗口与口径，区块给真实标题 + 说明副行，
-   顶栏 H1 不再被一个灰字 caption 复述。所有颜色只用既有 token。 */
-.usage-page-head {
-    align-items: flex-end;
-    margin-bottom: 6px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--line);
-}
-.usage-head-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    min-width: 0;
-}
+/* 用量页骨架（DSHBOTS-81，DSHBOTS-214 起与其余三个一级页共用 page-shell 页壳）：
+   页面头/分组/槽位样式在 global-config.css，这里只保留窗口切换与面板内部样式。
+   所有颜色只用既有 token。 */
 .usage-window-row {
     display: flex;
     align-items: center;
@@ -91,42 +69,6 @@
     font: 500 var(--fs-caption) var(--mono);
     letter-spacing: 0.02em;
     white-space: nowrap;
-}
-.usage-head-desc {
-    color: var(--ink-3);
-    font-size: var(--fs-small);
-    line-height: 1.6;
-    max-width: 72ch;
-}
-.usage-section {
-    margin-top: 26px;
-}
-.usage-section:first-of-type {
-    margin-top: 18px;
-}
-.usage-section-head {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-    padding-bottom: 9px;
-    border-bottom: 1px solid var(--line);
-}
-.usage-h2 {
-    margin: 0;
-    color: var(--ink);
-    font-size: var(--fs-title);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-}
-.usage-desc {
-    margin: 4px 0 0;
-    color: var(--ink-3);
-    font-size: var(--fs-caption);
-    line-height: 1.7;
-    max-width: 80ch;
 }
 .usage-seg {
     display: flex;

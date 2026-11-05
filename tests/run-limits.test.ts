@@ -166,7 +166,8 @@ test('state 大视图带 runLimits 供回显，env 覆盖时给出标志', async
 
 test('全局配置页渲染运行时效卡与保存动作', () => {
   assert.match(source, /function renderRunLimitsCard\(\)/)
-  assert.match(source, /\$\{renderRunLimitsCard\(\)\}/)
+  // DSHBOTS-214 起全局配置页走 page-shell 槽位：运行时效卡与运维卡并排两个半宽槽位。
+  assert.match(source, /slot\('half', renderRunLimitsCard\(\)\)/)
   assert.match(source, /id="settings-run-timeout"/)
   assert.match(source, /id="settings-stall-watchdog"/)
   assert.match(source, /data-action="save-run-limits"/)

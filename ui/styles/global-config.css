@@ -7,11 +7,15 @@
 .global-page {
     display: flex;
     flex-direction: column;
-    gap: 26px;
+    gap: 24px;
 }
 
-/* ---------- 页头：标题 ---------- */
+/* ---------- 页头：标题 + 操作区 ---------- */
 .global-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
     padding: 22px 24px 20px;
     border: 1px solid var(--line);
     border-radius: 14px;
@@ -19,7 +23,15 @@
     box-shadow: var(--shadow-card);
 }
 .global-head-copy {
+    flex: 1 1 auto;
     min-width: 0;
+}
+.global-head-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    flex: 0 0 auto;
 }
 .global-eyebrow {
     margin: 0 0 8px;
@@ -158,6 +170,39 @@
     margin-bottom: 14px;
 }
 
+/* ---------- 通道卡：状态行 + 扫码区并排 ---------- */
+.wechat-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+}
+.wechat-card-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.wechat-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.wechat-admin {
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+}
+.wechat-admin strong {
+    color: var(--ink);
+    font-family: var(--mono);
+    font-weight: 500;
+}
+.wechat-qr-hint {
+    margin-top: 10px;
+}
+.wechat-card .wechat-qr {
+    flex: 0 0 auto;
+}
+
 /* ---------- 界面卡内部：字段两列 + 底部条 ---------- */
 .g-fields {
     display: grid;
@@ -198,5 +243,17 @@
     }
     .g-fields {
         grid-template-columns: minmax(0, 1fr);
+    }
+    .global-head {
+        flex-direction: column;
+    }
+    .global-head-actions {
+        align-items: flex-start;
+    }
+    .wechat-card {
+        flex-direction: column;
+    }
+    .wechat-card .wechat-qr {
+        align-self: center;
     }
 }

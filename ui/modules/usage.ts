@@ -7,6 +7,7 @@ import { CURRENCY_SYMBOL, attr, botById, costValue, esc, formatCost, formatNumbe
 import { api } from './api.js'
 import { t } from './i18n.js'
 import { renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './settings.js'
+import { pageHead, pageSection } from './page-shell.js'
 import { render } from '../app.js'
 
 // 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
@@ -317,38 +318,26 @@ function usageDayPanel(days) {
   </div>`
 }
 
-// 用量页区块：真实标题（H2）+ 一行口径说明。页面不再只剩一个与 H1 重复的灰字 caption。
-function usageSection(title, desc, body, headExtra = '') {
-  return `<section class="usage-section">
-    <div class="usage-section-head">
-      <div class="usage-section-title">
-        <h2 class="usage-h2">${esc(title)}</h2>
-        <p class="usage-desc">${esc(desc)}</p>
-      </div>
-      ${headExtra}
-    </div>
-    ${body}
-  </section>`
+// 用量页区块：序号 + 标题 + 说明 + 12 列槽位网格，与其余三个一级页共用同一分组语言。
+function usageSection(index, id, title, desc, body, headExtra = '') {
+  return pageSection({ index, id, title, desc, body, headExtra })
 }
 
-// 页面头：单一声明统计窗口与本页口径，避免各面板各说一套。
+// 页面头：标题跟随顶栏口径，右侧操作区放四档时间窗切换与 CSV 导出。
 // 时间窗切换（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今；汇总、分布明细、CSV 导出同窗口。
 function usagePageHead(usage, scopeText, exportLabel = '') {
   const windowText = usageWindowText(usage)
-  return `<div class="section-head usage-page-head">
-    <div class="usage-head-meta">
+  const actions = `
       <div class="usage-window-row">
         <span class="usage-window">${t('汇总窗口')}</span>
         <div class="seg" role="group" aria-label="${t('汇总窗口')}">
           ${USAGE_WINDOWS.map(item => `<button data-action="usage-window" data-window="${item.key}" aria-pressed="${usageWindowKey === item.key}"${usageWindowLoading ? ' disabled' : ''}>${t(item.label)}</button>`).join('')}
         </div>
       </div>
-      <span class="usage-head-desc">${t('usage.headDesc', { scope: scopeText, window: windowText, loading: usageWindowLoading ? t('usage.loading') : '' })}</span>
-    </div>
-    <div class="btn-row">
-      <button class="btn" data-action="export-usage-csv">${icon('download')}${t('usage.exportCsv')}${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
-    </div>
-  </div>`
+      <div class="btn-row">
+        <button class="btn" data-action="export-usage-csv">${icon('download')}${t('usage.exportCsv')}${exportLabel ? `（${esc(exportLabel)}）` : ''}</button>
+      </div>`
+  return pageHead('USAGE', usageViewTitle(), t('usage.headDesc', { scope: scopeText, window: windowText, loading: usageWindowLoading ? t('usage.loading') : '' }), actions)
 }
 
 function renderUsage() {

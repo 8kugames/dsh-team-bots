@@ -6,8 +6,22 @@ import { icon } from './icons.js'
 import { activeBots, activeProject, attr, botById, esc, pathCode, tildePath } from './util.js'
 import { notifyToggleView } from './cards.js'
 import { usageBotRow, usageCurrency, usageDayPanel, usageDayTitle, usageListPanel, usageMetricCards, usageModelPanel, usagePageHead, usageProjectRow, usageRunRow, usageSection, usageSnapshot, usageWindowText } from './usage.js'
+import { pageHead, pageNav, pageSection, pageShell, slot } from './page-shell.js'
 import { refresh, noProject } from '../app.js'
 import { renderPriceCard } from './modal-forms.js'
+
+// 分布面板的槽位排布：偶数张半宽成两列，奇数张时最后一张整行，避免留空网格单元。
+// panels 可为数组或键值对象，order 给出展示顺序。
+function usagePanelSlots(panels, order) {
+  const list = order.map(key => panels[key])
+  const last = list.length - 1
+  return list.map((body, index) => slot(index === last && list.length % 2 === 1 ? 'full' : 'half', body)).join('')
+}
+
+// 分组导航：只列当前视图真实存在的分组，避免死锚点。
+function usageNav(items) {
+  return pageNav(items, t('usage.navLabel'))
+}
 
 function renderUsageGlobal() {
   const usage = usageSnapshot()
@@ -42,33 +56,30 @@ function renderUsageGlobal() {
     unpriced > 0 ? `<div class="note warn-note">${t('usage.unpricedNote', { count: unpriced })}</div>` : '',
     Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${t('次运行的用量记录对不上，数据可能不完整。', { count: Number(reconciliation.mismatched) })}</div>` : '',
   ].join('')
-  return `
-    ${usagePageHead(usage, t('usage.headGlobalHint'))}
-    ${usageSection(
-      t('全局用量总览'),
-      t('usage.overviewGlobalDesc', { window: windowText }),
-      `${overviewNotes}${usageMetricCards(totals, t('usage.scopeGlobal'), usage)}`,
-    )}
-    ${usageSection(
-      t('usage.distTitle'),
-      t('usage.distGlobalDesc', { dayTitle, window: windowText }),
-      `<div class="usage-grid">${order.map(key => panels[key]).join('')}</div>`,
-      `<div class="usage-seg">
-        <span class="usage-seg-label">${t('usage.panelOrder')}</span>
-        <div class="seg" role="group" aria-label="${t('usage.panelOrder')}">
-          <button data-action="usage-scope" data-scope="global" aria-pressed="${focus === 'global'}">${t('usage.orderGlobal')}</button>
-          <button data-action="usage-scope" data-scope="model" aria-pressed="${focus === 'model'}">${t('usage.orderModel')}</button>
-          <button data-action="usage-scope" data-scope="bot" aria-pressed="${focus === 'bot'}">${t('usage.orderBot')}</button>
-          <button data-action="usage-scope" data-scope="project" aria-pressed="${focus === 'project'}">${t('usage.orderProject')}</button>
-        </div>
-      </div>`,
-    )}
-    ${usageSection(
-      t('usage.priceTitle'),
-      t('usage.priceDesc'),
-      renderPriceCard(),
-    )}
-  `
+  return pageShell(
+    usagePageHead(usage, t('usage.headGlobalHint')),
+    usageNav([
+      { id: 'u-overview', label: t('usage.overview') },
+      { id: 'u-distribution', label: t('usage.distTitle') },
+      { id: 'u-price', label: t('usage.priceTitle') },
+    ]),
+    [
+      usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewGlobalDesc', { window: windowText }),
+        slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeGlobal'), usage)}`)),
+      usageSection('02', 'u-distribution', t('usage.distTitle'), t('usage.distGlobalDesc', { dayTitle, window: windowText }),
+        usagePanelSlots(panels, order),
+        `<div class="usage-seg">
+          <span class="usage-seg-label">${t('usage.panelOrder')}</span>
+          <div class="seg" role="group" aria-label="${t('usage.panelOrder')}">
+            <button data-action="usage-scope" data-scope="global" aria-pressed="${focus === 'global'}">${t('usage.orderGlobal')}</button>
+            <button data-action="usage-scope" data-scope="model" aria-pressed="${focus === 'model'}">${t('usage.orderModel')}</button>
+            <button data-action="usage-scope" data-scope="bot" aria-pressed="${focus === 'bot'}">${t('usage.orderBot')}</button>
+            <button data-action="usage-scope" data-scope="project" aria-pressed="${focus === 'project'}">${t('usage.orderProject')}</button>
+          </div>
+        </div>`),
+      usageSection('03', 'u-price', t('usage.priceTitle'), t('usage.priceDesc'), slot('full', renderPriceCard())),
+    ],
+  )
 }
 
 // 群聊「用量」tab：本群消耗汇总 + 本群分模型 + 本群各 bot，内容严格限本群。
@@ -92,31 +103,30 @@ function renderUsageDomain() {
     unpriced > 0 ? `<div class="note warn-note">${t('usage.unpricedNote', { count: unpriced })}</div>` : '',
     tier ? '' : `<div class="usage-note">${t('下方分组明细暂不可用，上方汇总仍按本群统计。')}</div>`,
   ].join('')
-  return `
-    ${usagePageHead(usage, t('usage.headDomainHint'), t('usage.scopeDomain'))}
-    ${usageSection(
-      t('本群用量总览'),
-      t('usage.overviewDomainDesc', { window: windowText }),
-      `${overviewNotes}${usageMetricCards(totals, t('usage.scopeDomain'), usage)}`,
-    )}
-    ${usageSection(
-      t('usage.distTitleDomain'),
-      t('usage.distDomainDesc', { dayTitle, window: windowText }),
-      `<div class="usage-grid">
-        ${usageDayPanel(days)}
-        ${usageModelPanel(byModel, t('本群分模型'), '', currency)}
-        ${usageListPanel(t('本群各 Bot'), byBot.map(item => usageBotRow(item, maxBot, true, currency)), 'Bot')}
-      </div>`,
-    )}
-    ${drillBot ? usageSection(
-      t('usage.drillRunsTitle', { name: drillBot.name }),
-      t('usage.drillRunsDesc'),
-      `<div class="card usage-panel">
+  const panels = [
+    usageDayPanel(days),
+    usageModelPanel(byModel, t('本群分模型'), '', currency),
+    usageListPanel(t('本群各 Bot'), byBot.map(item => usageBotRow(item, maxBot, true, currency)), 'Bot'),
+  ]
+  const nav = [
+    { id: 'u-overview', label: t('usage.overview') },
+    { id: 'u-distribution', label: t('usage.distTitle') },
+  ]
+  const sections = [
+    usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewDomainDesc', { window: windowText }),
+      slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeDomain'), usage)}`)),
+    usageSection('02', 'u-distribution', t('usage.distTitleDomain'), t('usage.distDomainDesc', { dayTitle, window: windowText }),
+      usagePanelSlots(panels, panels.map((_, index) => index))),
+  ]
+  if (drillBot) {
+    nav.push({ id: 'u-runs', label: t('usage.drillRunsShort') })
+    sections.push(usageSection('03', 'u-runs', t('usage.drillRunsTitle', { name: drillBot.name }), t('usage.drillRunsDesc'),
+      slot('full', `<div class="card usage-panel">
         ${drillRuns.length === 0 ? `<div class="faint">${t('usage.drillEmpty')}</div>` : `<div class="run-list">${drillRuns.map(usageRunRow).join('')}</div>`}
-      </div>`,
-      `<button class="btn small" data-action="usage-clear-drill">${icon('close')}${t('usage.clearDrill')}</button>`,
-    ) : ''}
-  `
+      </div>`),
+      `<button class="btn small" data-action="usage-clear-drill">${icon('close')}${t('usage.clearDrill')}</button>`))
+  }
+  return pageShell(usagePageHead(usage, t('usage.headDomainHint'), t('usage.scopeDomain')), usageNav(nav), sections)
 }
 
 // 单聊「用量」tab：本 bot 汇总 + 本 bot 分模型，内容严格限本 bot。
@@ -136,30 +146,25 @@ function renderUsageSolo() {
     unpriced > 0 ? `<div class="note warn-note">${t('usage.unpricedNote', { count: unpriced })}</div>` : '',
     usage.solo && tier ? '' : `<div class="usage-note">${t('该 Bot 的单聊明细暂不可用。')}</div>`,
   ].join('')
-  return `
-    ${usagePageHead(usage, t('usage.headSoloHint'), t('usage.scopeSolo'))}
-    ${usageSection(
-      t('该 Bot 用量总览'),
-      t('usage.overviewSoloDesc', { window: windowText }),
-      `${overviewNotes}${usageMetricCards(totals, t('usage.scopeSolo'), usage)}`,
-    )}
-    ${usageSection(
-      t('usage.distTitleSolo'),
-      t('usage.distSoloDesc', { dayTitle, window: windowText }),
-      `<div class="usage-grid">
-        ${usageDayPanel(days)}
-        ${usageModelPanel(byModel, t('该 Bot 分模型'), '', currency)}
-      </div>`,
-    )}
-    ${usageSection(
-      t('usage.soloRunsTitle'),
-      t('usage.soloRunsDesc'),
-      `<div class="card usage-panel">
-        <div class="card-head"><h3>${t('usage.runDetailTitle')}</h3><span class="meta">${t('usage.runCount', { count: runs.length })}</span></div>
-        ${runs.length === 0 ? `<div class="faint">${t('usage.soloRunsEmpty')}</div>` : `<div class="run-list">${runs.map(usageRunRow).join('')}</div>`}
-      </div>`,
-    )}
-  `
+  return pageShell(
+    usagePageHead(usage, t('usage.headSoloHint'), t('usage.scopeSolo')),
+    usageNav([
+      { id: 'u-overview', label: t('usage.overview') },
+      { id: 'u-distribution', label: t('usage.distTitle') },
+      { id: 'u-runs', label: t('usage.runDetailTitle') },
+    ]),
+    [
+      usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewSoloDesc', { window: windowText }),
+        slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeSolo'), usage)}`)),
+      usageSection('02', 'u-distribution', t('usage.distTitleSolo'), t('usage.distSoloDesc', { dayTitle, window: windowText }),
+        usagePanelSlots({ days: usageDayPanel(days), model: usageModelPanel(byModel, t('该 Bot 分模型'), '', currency) }, ['days', 'model'])),
+      usageSection('03', 'u-runs', t('usage.soloRunsTitle'), t('usage.soloRunsDesc'),
+        slot('full', `<div class="card usage-panel">
+          <div class="card-head"><h3>${t('usage.runDetailTitle')}</h3><span class="meta">${t('usage.runCount', { count: runs.length })}</span></div>
+          ${runs.length === 0 ? `<div class="faint">${t('usage.soloRunsEmpty')}</div>` : `<div class="run-list">${runs.map(usageRunRow).join('')}</div>`}
+        </div>`)),
+    ],
+  )
 }
 
 // 全局配置页「运行时效」卡：超时中止与无进展看门狗（分钟），保存走 update_settings。
@@ -343,22 +348,6 @@ function currentScale() {
   return Number.isFinite(value) && value > 0 ? value : 1
 }
 
-// 分组信息架构（DSHBOTS-184）：一节 = 一组 = 一个锚点；组内是 12 列槽位，
-// 槽位负责跨列排布，modal-forms 的价格卡因此不必改自己的结构。
-function gsec(index, id, title, desc, body) {
-  return `
-      <section class="gsec" id="${id}" aria-labelledby="${id}-title">
-        <div class="gsec-head">
-          <span class="gsec-index mono">${index}</span>
-          <div class="gsec-copy">
-            <h3 class="gsec-title" id="${id}-title">${title}</h3>
-            <p class="gsec-desc">${desc}</p>
-          </div>
-        </div>
-        <div class="gsec-body">${body}</div>
-      </section>`
-}
-
 function renderGlobal() {
   const data = state.data
   const scale = currentScale()
@@ -366,23 +355,17 @@ function renderGlobal() {
   // 用 || 而非 ??：settingsView() 对未保存键返回 ''（见 core.js），空串必须回落 auto，否则三选项都不选中。
   const uiLanguage = data.settings?.ui_language || 'auto'
   const notify = notifyToggleView()
-  return `
-    <div class="global-page">
-      <header class="global-head">
-        <div class="global-head-copy">
-          <p class="global-eyebrow">GLOBAL CONFIGURATION</p>
-          <h2 class="global-title">${t('global.title')}</h2>
-          <p class="global-desc">${t('global.desc')}</p>
-        </div>
-      </header>
-      <nav class="global-nav" aria-label="${t('global.navLabel')}">
-        <a class="global-nav-item" href="#g-pref">${t('global.groupPref')}</a>
-        <a class="global-nav-item" href="#g-runtime">${t('global.groupRuntime')}</a>
-        <a class="global-nav-item" href="#g-about">${t('global.groupAbout')}</a>
-      </nav>
-      ${gsec('01', 'g-pref', t('global.groupPref'), t('global.groupPrefDesc'), `
-            <div class="g-slot g-slot--full">
-            <div class="card form-card g-card">
+  return pageShell(
+    pageHead('GLOBAL CONFIGURATION', t('global.title'), t('global.desc')),
+    pageNav([
+      { id: 'g-pref', label: t('global.groupPref') },
+      { id: 'g-runtime', label: t('global.groupRuntime') },
+      { id: 'g-about', label: t('global.groupAbout') },
+    ], t('global.navLabel')),
+    [
+      pageSection({
+        index: '01', id: 'g-pref', title: t('global.groupPref'), desc: t('global.groupPrefDesc'),
+        body: slot('full', `<div class="card form-card g-card">
               <div class="card-head">
                 <h3>${t('global.cardUi')}</h3>
                 <div class="btn-row"><button class="btn small" type="button" data-action="reset-scale">${icon('refresh')}${t('global.reset')}</button></div>
@@ -425,12 +408,18 @@ function renderGlobal() {
                 </div>
                 <div class="btn-row"><button class="btn small primary" type="button" data-action="save-ui-language">${esc(t('settings.uiLanguageSave'))}</button></div>
               </div>
-            </div>
-            </div>`)}
-      ${gsec('02', 'g-runtime', t('global.groupRuntime'), t('global.groupRuntimeDesc'), `<div class="g-slot g-slot--half">${renderRunLimitsCard()}</div><div class="g-slot g-slot--half">${renderOpsCard()}</div>`)}
-      ${gsec('03', 'g-about', t('global.groupAbout'), t('global.groupAboutDesc'), `<div class="g-slot g-slot--half">${dshPathsCard()}</div><div class="g-slot g-slot--half">${dshServiceCard()}</div>`)}
-    </div>
-  `
+            </div>`),
+      }),
+      pageSection({
+        index: '02', id: 'g-runtime', title: t('global.groupRuntime'), desc: t('global.groupRuntimeDesc'),
+        body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}`,
+      }),
+      pageSection({
+        index: '03', id: 'g-about', title: t('global.groupAbout'), desc: t('global.groupAboutDesc'),
+        body: `${slot('half', dshPathsCard())}${slot('half', dshServiceCard())}`,
+      }),
+    ],
+  )
 }
 
-export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, gsec, renderSettings, currentScale, renderGlobal }
+export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderSettings, currentScale, renderGlobal }

@@ -171,6 +171,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   route('/api/dsh-team/modules/usage.js', ['GET'], moduleScript('usage.js'))
   route('/api/dsh-team/modules/settings.js', ['GET'], moduleScript('settings.js'))
   route('/api/dsh-team/modules/global-pages.js', ['GET'], moduleScript('global-pages.js'))
+  route('/api/dsh-team/modules/page-shell.js', ['GET'], moduleScript('page-shell.js'))
   route('/api/dsh-team/modules/composer.js', ['GET'], moduleScript('composer.js'))
   route('/api/dsh-team/modules/tasks.js', ['GET'], moduleScript('tasks.js'))
   route('/api/dsh-team/modules/modal-layer.js', ['GET'], moduleScript('modal-layer.js'))

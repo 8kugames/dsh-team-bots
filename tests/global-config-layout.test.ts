@@ -207,7 +207,8 @@ test('技能页保留重扫技能入口（自配置页去重合并的唯一入�
 
 test('全局用量页承载模型价格规则卡，「设置价格」面板头按钮去重', async () => {
   const { html } = await renderPage('settings', 'renderUsageGlobal')
-  assert.match(html, /usage-h2">模型价格规则<\/h2>/, '价格规则卡应落在全局用量页')
+  assert.match(html, /gsec-title" id="u-price-title">模型价格规则<\/h3>/, '价格规则分组应落在全局用量页')
+  assert.match(html, /gsec-body"><div class="g-slot g-slot--full"><div class="card price-card"/, '价格卡落在整行槽位')
   assert.match(html, /class="card price-card"/, '价格卡样式类保留')
   assert.doesNotMatch(html, /设置价格/, '模型面板的「设置价格」按钮与价格卡入口去重后移除')
   stopTimers()

@@ -29,6 +29,14 @@ const source = readUiSource()
 const css = await uiStylesSource()
 const apiSource = readFileSync(fileURLToPath(new URL('../src/api.js', import.meta.url)), 'utf8')
 
+function fnBody(name) {
+  const start = source.indexOf(`function ${name}(`)
+  assert.ok(start >= 0, `缺少函数 ${name}`)
+  const end = source.indexOf('\n}\n', start)
+  assert.ok(end > start, `函数 ${name} 未正常收尾`)
+  return source.slice(start, end)
+}
+
 async function withStore(fn) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-usage-windows-'))
   const store = openDatabase(join(root, 'team.sqlite'))
@@ -178,12 +186,14 @@ test('⑤ 页面头提供四档时间窗切换，动作走按需取数而非 sta
 })
 
 test('⑥ 分布明细漏空修复：奇数面板横跨整行，同一行卡片等高', () => {
-  assert.match(
-    css,
-    /\.usage-grid > \.usage-panel:last-child:nth-child\(odd\) \{\s*grid-column: 1 \/ -1;/,
-    '奇数个面板时最后一张横跨整行，不留空网格单元',
-  )
-  assert.match(css, /\.usage-grid \{[^}]*align-items: stretch;/, '同一行的卡片等高')
+  // 面板跨度由 usagePanelSlots 计算：偶数半宽，奇数总数时最后一张整行，不留空网格单元。
+  const slots = fnBody('usagePanelSlots')
+  assert.match(slots, /index === last && list\.length % 2 === 1 \? 'full' : 'half'/, '奇数个面板时最后一张横跨整行')
+  assert.match(slots, /slot\(/, '面板包进槽位网格')
+  assert.match(slots, /order\.map/, '面板顺序可切换且不丢面板')
+  // 同一行的卡片等高：槽位与卡片都由 gsec-body 的网格拉伸。
+  assert.match(css, /\.gsec-body \{[^}]*align-items: stretch;/, '同一行的卡片等高')
+  assert.match(css, /\.g-slot > \.card \{[^}]*flex: 1 1 auto;/, '槽位内卡片撑满高度')
   assert.match(css, /\.usage-panel \{[^}]*flex-direction: column;/, '卡片内纵向 flex，图例与说明可贴底')
   assert.match(
     css,

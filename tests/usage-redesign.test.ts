@@ -19,22 +19,21 @@ function fnBody(name) {
   return source.slice(start, end)
 }
 
-const VIEWS = [
-  ['renderUsageGlobal', '全局用量总览'],
-  ['renderUsageDomain', '本群用量总览'],
-  ['renderUsageSolo', '该 Bot 用量总览'],
-]
+const VIEWS = ['renderUsageGlobal', 'renderUsageDomain', 'renderUsageSolo']
 
-test('① 三态共用同一套页面骨架（页面头 + 区块标题 + 说明副行）', () => {
-  for (const [fn, h2] of VIEWS) {
+test('① 三态共用同一套页面骨架（页头 + 序号分组 + 说明副行）', () => {
+  for (const fn of VIEWS) {
     const body = fnBody(fn)
     assert.match(body, /usagePageHead\(usage,/, `${fn} 应走统一页面头`)
-    assert.ok((body.match(/usageSection\(/g) ?? []).length >= 2, `${fn} 至少两个区块`)
-    assert.ok(body.includes(h2), `${fn} 应有区块标题「${h2}」`)
+    assert.ok((body.match(/usageSection\(/g) ?? []).length >= 2, `${fn} 至少两个分组`)
+    assert.match(body, /t\('usage\.overview'\)/, `${fn} 应有总览分组`)
+    assert.match(body, /t\('usage\.distTitle/, `${fn} 应有分布明细分组`)
   }
-  // 区块标题是真实标题（H2），不是灰字 caption。
-  assert.match(fnBody('usageSection'), /<h2 class="usage-h2">/, '区块标题用 H2')
-  assert.match(fnBody('usageSection'), /<p class="usage-desc">/, '区块标题带说明副行')
+  // 分组标题是真实标题（H3，与全局配置页同一层级），不是灰字 caption。
+  assert.match(fnBody('pageSection'), /<h3 class="gsec-title" id="\$\{id\}-title">/, '分组标题用 H3')
+  assert.match(fnBody('pageSection'), /<p class="gsec-desc">/, '分组标题带说明副行')
+  assert.match(fnBody('pageSection'), /<span class="gsec-index mono">\$\{index\}<\/span>/, '分组带序号')
+  assert.match(fnBody('pageSection'), /aria-labelledby="\$\{id\}-title"/, '分组与标题 aria 关联')
   // 顶栏 H1 不再被 caption 复述。
   assert.ok(!source.includes('本群用量 · '), '不再渲染与 H1 重复的本群 caption')
   assert.ok(!source.includes('本 Bot 用量 · '), '不再渲染与 H1 重复的单聊 caption')
