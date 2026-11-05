@@ -11,3 +11,4 @@ package-lock.json
 src/**/*.js
 ui/**/*.js
 tests/**/*.js
+scripts/**/*.test.js
