@@ -55,8 +55,8 @@ test('render() 重建 DOM 前打开渲染闸门，rAF 收尾复位', () => {
   assert.match(source, /rendering: false,/, 'state 初始应有 rendering 闸门字段')
   assert.match(
     source,
-    /state\.rendering = true[\s\S]{0,600}?app\.innerHTML = renderShell\(\)/,
-    '闸门必须在 innerHTML 重建之前打开',
+    /state\.rendering = true[\s\S]{0,600}?morph\(app, renderShell\(\)\)/,
+    '闸门必须在 DOM 写入之前打开',
   )
   assert.match(
     source,

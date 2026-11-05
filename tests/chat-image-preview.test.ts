@@ -59,7 +59,7 @@ test('缩略图取图共用查看器路径：会话级缓存 + 并发去重，�
 })
 
 test('渲染后补齐接线：hydrate 只处理未命中的瓦片，且不释放缓存 URL', () => {
-  assert.match(source, /app\.innerHTML = renderShell\(\)\n\s*\/\/[^\n]*\n\s*hydrateMessageImageThumbs\(app\)/, 'render() 全量重建后异步补齐缩略图')
+  assert.match(source, /morph\(app, renderShell\(\)\)\n\s*\/\/[^\n]*\n\s*hydrateMessageImageThumbs\(app\)/, 'render() 写入落地后异步补齐缩略图')
   const hydrateFn = extractFn(/async function hydrateMessageImageThumbs\(root = document\) \{[\s\S]*?\n\}/, 'hydrateMessageImageThumbs')
   assert.match(hydrateFn, /msg-image-tile\[data-image-id\]/, '按瓦片定位')
   assert.match(hydrateFn, /messageImageThumbUrl\(imageId\)/, '复用取图缓存')

@@ -122,8 +122,8 @@ test('composer 输入事件记录时间戳；compositionstart/end 维护组词�
 test('render() 重建前捕获 composer 光标，rAF 收尾恢复焦点与选区', () => {
   assert.match(
     source,
-    /const composerCaret = [\s\S]{0,1500}?app\.innerHTML = renderShell\(\)/,
-    '捕获必须发生在 innerHTML 重建之前',
+    /const composerCaret = [\s\S]{0,1500}?morph\(app, renderShell\(\)\)/,
+    '捕获必须发生在 DOM 写入之前',
   )
   assert.match(
     source,

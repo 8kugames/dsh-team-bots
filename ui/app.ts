@@ -12,6 +12,7 @@ import { renderChannel, renderSecretsPage } from './modules/global-pages.js'
 import { updateAutocomplete, moveAcSelection, closeAutocomplete, applyAutocomplete, currentDraft, pendingImagesFor, attachImageButton, composerImageStrip, resolveImageMediaType, addPendingImages, removePendingImage, thumbnailFallback, ensureComposerImageInput, parseFileUriList, insertTextAtCursor, hydrateMessageImageThumbs, ensureImageViewer, openMessageImage, closeImageViewer, openInlineImage, COMPOSER_AUTO_MAX_PX, composerPanelCap, applyComposerHeight, syncComposerBox, sendMessage, saveTaskFromForm } from './modules/composer.js'
 import { renderTasks, renderTerminal, renderBotsOverview, renderMembers, renderSkills, renderMemory, renderEvolution, taskGroupKey, taskChildrenKey, terminalOutputText, searchMemories, currentSkillVersion, skillVersions } from './modules/tasks.js'
 import { overlayOpen, markAppRenderPending, renderModalLayer, ensureModalRoot, noteModalScroll, flushAppRender } from './modules/modal-layer.js'
+import { morph } from './modules/dom-morph.js'
 import { openModal, closeModal, openTask, openSkillDetail, openTrajectory, openBot, reloadTaskModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, trapModalFocus, renderDirPicker, closeDirPicker, parseFallbackFields, normalizeTimeBudgetMinutes, modelOptions, effortOptions, fallbackModelOptions, renderPriceCard } from './modules/modal-forms.js'
 import { activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, loadOlderMessages, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote, dispatchTaskRow, dispatchRunRow, renderSoloChat, loadSoloDetail, renderSoloConfig } from './modules/chat.js'
 import { refreshAction } from './modules/page-shell.js'
@@ -50,7 +51,7 @@ setLanguage(document.documentElement.dataset.dshLanguage || 'auto')
 }
 
 // state.language（服务端 state() 顶层同源透传）与上次不一致时热切换：换字典 + 轻提示，
-// 下次 render 生效；首载只对齐不提示。render() 全量重建，滚动/弹窗由既有遮罩机制保持。
+// 下次 render 生效；首载只对齐不提示。渲染走原位补丁，文案随字典换，滚动与弹窗不受影响。
 function syncLanguage() {
   const language = state.data?.language
   if (!language || language === (state as { uiLanguage?: string }).uiLanguage) return
@@ -440,10 +441,9 @@ function panelAttrs(state, key) {
   return ` data-panel="${attr(key)}"${panelOpenAttr(state, key)}`
 }
 
-// board-scroll-restore —— render() 全量重建 DOM，聊天之外视图的滚动位随之归零：纵向滚动在
-// window 层（.main 撑高页面、body 无 overflow），任务看板 .board 另有横向滚动（overflow-x:auto），
-// 侧栏 .tree 自身纵向滚动且同样被重建。重建前记下三处、重建后原位恢复，2.8s 轮询不再把滚动中的
-// 用户拽回原点。窗口滚动仅在前后两次 render 同视图时恢复，切 tab 不携带上一视图的滚动位；
+// board-scroll-restore —— 视图滚动位：纵向在 window 层（.main 撑高页面、body 无 overflow），
+// 任务看板 .board 另有横向滚动，侧栏 .tree 自身纵向滚动。原位补丁（DSHBOTS-227）下三处都随节点
+// 活着，这里的「重建前记下、重建后恢复」只在回退全量重建时兜底；窗口滚动仅在前后两次同视图时恢复。
 // 聊天视图维持既有 savedChatScroll / chatAtBottom 逻辑不动。
 let lastRenderedView = null
 
@@ -491,9 +491,9 @@ function render() {
     return
   }
   state.ac = null
-  app.className = ''
-  // composer 持焦时的光标快照（DSHBOTS-123）：全量重建会拆走 #composer-input，先记选区与滚动，
-  // rAF 收尾恢复焦点与光标，配合轮询渲染闸门静默放行后「边打字边轮询」不打断输入。
+  if (app.className) app.className = ''
+  // composer 持焦时的光标快照（DSHBOTS-123）：回退全量重建时 #composer-input 会被拆走，先记选区与
+  // 滚动，rAF 收尾恢复；原位补丁路径下节点根本没动，这份恢复是空转。
   const activeBeforeRebuild = document.activeElement as HTMLInputElement
   const composerCaret = activeBeforeRebuild?.id === 'composer-input' ? {
     start: activeBeforeRebuild.selectionStart ?? 0,
@@ -507,11 +507,11 @@ function render() {
   // chat-scroll:render-gate —— 重建 DOM 的窗口内忽略聊天滚动事件：旧 .chat-messages 被拆走时可能补发
   // 一次 scroll 事件，若在此窗口送达会把「重建」误判成「用户上翻」。窗口在 rAF 收尾复位。
   state.rendering = true
-  // chat-scroll-restore:mark —— render() 全量重建 DOM，非贴底时先记下消息列表滚动位置，重建后原位恢复；
-  // 2.8s 轮询重渲染因此不再把上翻历史的用户拽回顶部；贴底（chatAtBottom）仍走下方 rAF 自动落底。
+  // chat-scroll-restore:mark —— 非贴底时先记下消息列表滚动位置，重建后原位恢复。
   const savedChatScroll = document.querySelector('.chat-messages')?.scrollTop ?? null
   const savedViewScroll = captureViewScroll(lastRenderedView === state.view)
-  app.innerHTML = renderShell()
+  // 原位补丁（DSHBOTS-227）：按身份键复用节点、只写变了的属性与文本，动画相位/焦点/滚动位随节点活下来；补不动才整页重建。
+  morph(app, renderShell())
   // 附图缩略图：模板嵌缓存命中者，未命中的在此异步补齐（会话级缓存去重，见 hydrateMessageImageThumbs）。
   hydrateMessageImageThumbs(app)
   if (!state.chatAtBottom && savedChatScroll !== null) {

@@ -67,7 +67,7 @@ test('restoreViewScroll：目标元素在重建后不存在时跳过该项，不
 
 test('渲染接线：render() 重建前按视图捕获，重建后恢复并记下本次视图', () => {
   assert.match(source, /let lastRenderedView = null/)
-  assert.match(source, /const savedViewScroll = captureViewScroll\(lastRenderedView === state\.view\)\n\s*app\.innerHTML = renderShell\(\)/)
+  assert.match(source, /const savedViewScroll = captureViewScroll\(lastRenderedView === state\.view\)\n(?:\s*\/\/[^\n]*\n)*\s*morph\(app, renderShell\(\)\)/)
   assert.match(source, /restoreViewScroll\(savedViewScroll\)\n\s*lastRenderedView = state\.view/)
 })
 

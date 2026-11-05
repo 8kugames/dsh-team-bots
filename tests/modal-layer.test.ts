@@ -173,8 +173,9 @@ test('接线①：index.html 的 #modal-root 在 #app 外、#toast-root 前，re
   const renderSrc = /function render\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(renderSrc, 'ui/app.js 缺少 render()')
   // 剥掉注释再断言：render() 代码里对 modal-root 零引用（注释里的说明文字不算）
-  assert.doesNotMatch(renderSrc.replace(/\/\/[^\n]*/g, ''), /modal-root/, 'render() 全量重建只写 #app，永不触碰 #modal-root')
-  assert.match(renderSrc, /app\.innerHTML = renderShell\(\)/)
+  assert.doesNotMatch(renderSrc.replace(/\/\/[^\n]*/g, ''), /modal-root/, 'render() 只补 #app，永不触碰 #modal-root')
+  // 原位补丁（DSHBOTS-227）：整页重建收进 morph() 兜底，render() 只留一行接线。
+  assert.match(renderSrc, /morph\(app, renderShell\(\)\)/)
 })
 
 test('接线②：renderModalLayer 独立于 renderShell，弹窗不再嵌入全量模板', () => {
@@ -201,10 +202,11 @@ const renderSrc = /function render\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
 assert.ok(renderSrc, 'ui/app.js 缺少 render()')
 
 // 迷你运行时：只实现 render() 与遮罩闸门用到的操作子集。
-// app.innerHTML 写入次数 = 整页重建次数（闪烁的直接来源）。
+// 两个口径分开盯：morphCalls = 这一拍有没有渲染（原位补丁尝试），writes = 有没有整页 innerHTML 重建（闪烁的直接来源）。
 const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
   const app = makeNode()
   const writes = withWriteCounter(app)
+  const morphCalls = []
   const viewer = makeNode({ hidden: viewerHidden })
   const root = makeNode()
   const state = { data: { version: 1 }, modal, view: 'chat', chatAtBottom: true, rendering: false }
@@ -218,7 +220,7 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
   const scope = new Function(
     'document', 'renderModal', 'HTMLElement', 'state', 'app', 'renderShell', 'hydrateMessageImageThumbs',
     'captureViewScroll', 'restoreViewScroll', 'syncChromeHeight', 'syncComposerBox', 'syncTerminalPoll',
-    'requestAnimationFrame', 'lastRenderedView',
+    'requestAnimationFrame', 'lastRenderedView', 'morph',
     `${fnSrc}\n${renderSrc}\nreturn { render, overlayOpen, flushAppRender, get pending() { return appRenderPending } }`,
   )(
     doc,
@@ -235,6 +237,9 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
     () => {},
     cb => { cb(); return 0 },
     null,
+    // 原位补丁在此迷你 DOM 上不做解析：记录「这一拍渲染过一次」并直接整页写，
+    // 于是 writes() 计整页重建次数、morphCalls 计渲染次数，两个口径都能盯。
+    (root, html) => { morphCalls.push(html); root.innerHTML = html },
   )
   // 注意：不能用展开（{...scope}）——展开会把 pending getter 求值成静态快照。
   return {
@@ -242,7 +247,7 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
     overlayOpen: scope.overlayOpen,
     flushAppRender: scope.flushAppRender,
     get pending() { return scope.pending },
-    app, writes, state, viewer, root,
+    app, writes, state, viewer, root, morphCalls,
   }
 }
 
@@ -250,6 +255,7 @@ test('遮罩闸门：弹窗开着时 render() 不重建 #app，只记 pending（
   const h = makeOverlayHarness({ modal: { type: 'task', title: '任务详情' } })
   h.render()
   assert.equal(h.writes(), 0, '遮罩开着时整页重建被跳过：半透明遮罩下不再透出闪烁')
+  assert.equal(h.morphCalls.length, 0, '遮罩开着时连原位补丁也不做：底页整片冻结')
   assert.equal(h.pending, true, '跳过时记 pending，遮罩关闭后补渲染')
   h.render()
   assert.equal(h.writes(), 0, '连续多次调用同样不重建')
@@ -264,6 +270,7 @@ test('遮罩闸门：body 级图片查看器同样不重建 #app，关闭后补�
   h.viewer.hidden = true
   h.flushAppRender()
   assert.equal(h.writes(), 1, '查看器关闭后补一次渲染')
+  assert.equal(h.morphCalls.length, 1, '补的这一次尝试一次原位补丁')
   h.flushAppRender()
   assert.equal(h.writes(), 1, 'pending 已清，不重复渲染')
 })
