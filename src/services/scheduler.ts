@@ -255,9 +255,43 @@ export const schedulerMethods = {
     throw error
   },
 
-  // 同一条会话上的运行必须串行；任务运行独占自己的会话，可与群聊回复并行。
+  // 同一条会话上的运行必须串行（原注释意图）；DSHBOTS-219 分身模型：串行键从「bot」
+  // 放细到「会话绑定维度」（= 一条分身通道）——单聊/各项目群聊/私信互不阻塞，
+  // 一路 pending（如单聊提权审批）不再挡死同一 bot 的其它通道。
+  // 键与 ensureSession 的绑定元组一一对应，同一会话的两条运行必得同键，串行不失效。
   claimKey(run) {
-    return run.kind === 'task' && run.task_id ? `task:${run.task_id}` : `bot:${run.bot_id}`
+    if (run.kind === 'task' && run.task_id) return `task:${run.task_id}`
+    return this.sessionLaneKey(run)
+  },
+  // 会话绑定的通道键（纯查库推导，无副作用）：task / solo / dm / project 四类绑定各归各道。
+  bindingLaneKey(binding) {
+    if (binding.kind === 'task' && binding.task_id) return `task:${binding.task_id}`
+    if (binding.kind === 'solo') return `solo:${binding.bot_id}`
+    if (binding.kind === 'dm') return `dm:${binding.bot_id}:${binding.project_id}`
+    return `project:${binding.bot_id}:${binding.project_id}`
+  },
+  // 非任务运行的通道键：按该运行实际会落到的会话推导（与 ensureSession 的 kind0 同一套映射）。
+  // solo_chat 与无项目 vision 落 solo 会话；chat/review/handle/memory_review 与带项目 vision
+  // 落项目会话；dm 落私信会话；dm_reply 按来信 origin 回对应会话（task_id 留空躲唯一索引，
+  // 任务通道只能从 bot_messages 解）；rollover_summary 复用指定旧会话，按该会话当前绑定
+  // 的通道键对齐（防与复用同一会话的群聊并发——runtime 的 pending 按会话一对一）。
+  sessionLaneKey(run) {
+    if (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) return `solo:${run.bot_id}`
+    if (run.kind === 'rollover_summary') {
+      if (!run.session_id) return `bot:${run.bot_id}`
+      const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', run.session_id)
+      return binding ? this.bindingLaneKey(binding) : `session:${run.session_id}`
+    }
+    if (run.kind === 'dm_reply') {
+      const message = run.trigger_ref
+        ? this.store.get('SELECT origin_kind, origin_task_id FROM bot_messages WHERE id = ?', run.trigger_ref)
+        : null
+      if (message?.origin_kind === 'task' && message.origin_task_id) return `task:${message.origin_task_id}`
+      if (message?.origin_kind === 'dm') return `dm:${run.bot_id}:${run.project_id}`
+      return `project:${run.bot_id}:${run.project_id}`
+    }
+    if (run.kind === 'dm') return `dm:${run.bot_id}:${run.project_id}`
+    return `project:${run.bot_id}:${run.project_id}`
   },
 
   // 运行超时由 runtime 的定时器负责；这里补充“还活着但没有任何进展”的判定。
@@ -416,7 +450,10 @@ export const schedulerMethods = {
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。
         // 非任务运行 LEFT JOIN 出的 task_status 为空，按运行自身判定，不受这条闸门影响。
+        // trigger_ref/session_id 供 claimKey 通道推导（dm_reply 按来信 origin、rollover_summary
+        // 按旧会话绑定）——在跑侧与候选侧必须算出同一个键，串行才不失效（DSHBOTS-219）。
         `SELECT r.bot_id, r.kind, r.task_id, r.project_id, r.mode, r.write_scopes, r.trigger_type,
+                r.trigger_ref, r.session_id,
                 t.status AS task_status
            FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
           WHERE r.status = 'running'`,

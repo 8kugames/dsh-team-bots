@@ -189,12 +189,13 @@ test('state 携带 solo 段：单聊消息、运行与 bot 视图', async () => 
   }
 })
 
-test('单聊与同 Bot 群聊串行、与任务运行并行、跨 Bot 单聊并行', async () => {
+test('单聊与同 Bot 群聊互不阻塞、同 Bot 单聊串行、跨 Bot 单聊并行（DSHBOTS-219 分身通道）', async () => {
   const { root, store, service, runtime, director, dev } = await soloSetup()
   try {
     const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id] })
     await service.createTask({ projectId: project.id, title: '长任务', assigneeBotId: dev.id, autoStart: true })
     await service.sendSoloMessage(dev.id, '单聊插个问题')
+    await service.sendSoloMessage(dev.id, '单聊第二条')
     await service.sendMessage(project.id, '@Builder 群里也回一句')
     await service.sendSoloMessage(director.id, '和总监单独聊聊')
 
@@ -202,21 +203,24 @@ test('单聊与同 Bot 群聊串行、与任务运行并行、跨 Bot 单聊并�
     await service.tick()
     const running = store.all("SELECT * FROM runs WHERE status = 'running'")
     const kinds = running.map(row => `${row.kind}:${row.bot_id}`)
-    // 任务运行（写锁在项目）+ 两个 bot 的单聊（各自目录）可同时跑
+    // 任务运行（写锁在项目）+ Builder 单聊（第一条）+ 总监单聊可同时跑
     assert.ok(kinds.includes(`task:${dev.id}`), running.map(r => r.kind).join(','))
     assert.ok(kinds.includes(`solo_chat:${dev.id}`))
     assert.ok(kinds.includes(`solo_chat:${director.id}`))
-    // 同一 bot 的群聊回复与单聊共用会话串行键，必须仍在排队
+    // 分身通道（DSHBOTS-219）：同一 bot 的群聊回复不再被单聊占道——即使单聊还挂着，群聊照常启动
+    assert.ok(kinds.includes(`chat:${dev.id}`), '单聊运行期间群聊回复应并行启动')
+    // 同一 bot 的第二条单聊仍走同一条 solo 通道，必须仍在排队
     const queued = store.all("SELECT * FROM runs WHERE status = 'queued'")
-    assert.ok(queued.some(row => row.kind === 'chat' && row.bot_id === dev.id))
+    assert.ok(queued.some(row => row.kind === 'solo_chat' && row.bot_id === dev.id), '同 bot 第二条单聊应串行排队')
 
     const devSolo = running.find(row => row.kind === 'solo_chat' && row.bot_id === dev.id)
     await runtime.complete(devSolo.id, 'succeeded', '单聊回复')
     await service.tick()
-    const chat = store.get("SELECT * FROM runs WHERE kind = 'chat' AND status = 'running'")
-    assert.ok(chat, '单聊结束后群聊回复才能启动')
-    await runtime.complete(chat.id, 'succeeded', '群聊回复')
-    await runtime.complete(director.id && running.find(row => row.kind === 'solo_chat' && row.bot_id === director.id).id, 'succeeded', '好')
+    const secondSolo = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id)
+    assert.ok(secondSolo, '首条单聊结束后第二条单聊才能启动')
+    await runtime.complete(secondSolo.id, 'succeeded', '第二条单聊回复')
+    await runtime.complete(running.find(row => row.kind === 'solo_chat' && row.bot_id === director.id).id, 'succeeded', '好')
+    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'chat' AND status = 'running'").id, 'succeeded', '群聊回复')
     await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'task' AND status = 'running'").id, 'succeeded', 'done')
   } finally {
     await closeQuietly(store)

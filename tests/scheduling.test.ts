@@ -172,8 +172,8 @@ test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
     assert.ok(chatRun, '群聊回复应在任务运行期间被调度')
     assert.ok(taskRun, '任务运行不应被群聊回复打断')
     assert.equal(chatRun.bot_id, dev.id)
-    // 同一条会话上的运行仍然串行：总监会话的群聊与验收不会并发。
-    assert.equal(service.claimKey(chatRun), `bot:${dev.id}`)
+    // 同一条会话上的运行仍然串行：总监会话的群聊与验收共用项目通道键（DSHBOTS-219 分身通道）。
+    assert.equal(service.claimKey(chatRun), `project:${dev.id}:${project.id}`)
     assert.equal(service.claimKey(taskRun), `task:${taskRun.task_id}`)
     await runtime.complete(chatRun.id)
     await runtime.complete(taskRun.id)
