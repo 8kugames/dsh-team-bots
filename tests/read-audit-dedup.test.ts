@@ -113,10 +113,11 @@ test('不同指纹不去重；嫌疑并发写运行号进围栏告警正文', as
     await writeFile(join(t.dir, 'a.txt'), 'a\n')
     t.service.auditReadRunWrites(runA, t.projectRow)
     // 场外造一条在跑的并发写运行（声明 src/ 范围），再在范围外弄脏
+    // 播种 bot 须确定性选取（LIMIT 1 无 ORDER BY 时行序未定义，选中在途运行的 Builder 会撞 one_active_run_per_bot）
     t.store.run(
       `INSERT INTO runs (id, project_id, bot_id, kind, mode, trigger_type, idempotency_key, queued_at, started_at, write_scopes)
        VALUES ('run_writer', ?, ?, 'task', 'write', 'manual', 'key-writer', ?, ?, ?)`,
-      t.projectRow.id, t.store.get('SELECT id FROM bots LIMIT 1').id, nowIso(), nowIso(), JSON.stringify(['src']),
+      t.projectRow.id, t.store.get("SELECT id FROM bots WHERE name = 'director'").id, nowIso(), nowIso(), JSON.stringify(['src']),
     )
     const runB = t.insertRun('run_two')
     t.service.fingerprints.set(runB.id, '')

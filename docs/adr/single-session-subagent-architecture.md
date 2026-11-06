@@ -175,7 +175,7 @@
   同窗口治理件：DSHBOTS-286（结转 512/压缩 64/任务亲和，ede0e91）随第 2 步落地。
 - **守门与回归**：全量 `npm test` 两轮 1563/1563 全绿（0 fail，同 HEAD 判据；较 D-295 基线 1562 +1=本卡 V1 四路合并例），`tsc -p tsconfig.json` 0 错。V1–V5 逐项终验证据见 §6 旁注；§5.1 清单 15 项↔测试文件对照表随本卡交付报告归档。
 - **V3 尾项 grep 清单留档**（dm 车道与任务绑定建行零残留）：①旧 `dm:<bot>:<project>` 车道键 src 全域零命中——现存 `dm:${message.id}`（src/services/runs.ts:156/274）为 dm 运行幂等键（messageId 维度），非车道键；②`INSERT INTO session_bindings` 全库仅 1 处（src/services/runtime/session.ts:414，ensureBotBinding，kind='bot'）——任务绑定建行零残留；③旧车道 kind 命中面均为有意保留：db-migrations 迁移期读旧 project 行（:310/:313）、questions/approvals 历史 `kind='solo'` alias 行承接（D-294 口径）、scheduler `kind='task'` 为 runs 运行类别语义非绑定车道、notify.ts 为注释。
-- **read-audit-dedup.test.ts:108 flake 归因留档（D-294 备案复核）**：根因=夹具 run_writer 播种取 `SELECT id FROM bots LIMIT 1` 无 ORDER BY——SQLite 行序未指定，查询计划器选中 director 则绿，选中已有 queued 运行的 Builder 即撞 `one_active_run_per_bot`（报 UNIQUE runs.bot_id），索引本身按设计工作。复核证据：D-294 已在改动前 HEAD 1abaa0c 一次性 worktree 复现 pair-run 四轮 fail 1,0,1,0、单文件恒绿（既有间歇 flake，非本迁移逻辑回归）；本卡 HEAD 复核单文件 3 轮+pair-run 4 轮+全量两轮全绿（间歇性本轮未再现）。修复候选一行（改查 director 或播种前腾槽），超出本卡写范围（既有测试文件仅核对引用），是否立小卡由 owner 定。
+- **read-audit-dedup.test.ts:108 flake 归因留档（D-294 备案复核）**：根因=夹具 run_writer 播种取 `SELECT id FROM bots LIMIT 1` 无 ORDER BY——SQLite 行序未指定，查询计划器选中 director 则绿，选中已有 queued 运行的 Builder 即撞 `one_active_run_per_bot`（报 UNIQUE runs.bot_id），索引本身按设计工作。复核证据：D-294 已在改动前 HEAD 1abaa0c 一次性 worktree 复现 pair-run 四轮 fail 1,0,1,0、单文件恒绿（既有间歇 flake，非本迁移逻辑回归）；本卡 HEAD 复核单文件 3 轮+pair-run 4 轮+全量两轮全绿（间歇性本轮未再现）。修复候选一行（改查 director 或播种前腾槽）→ owner 立卡 DSHBOTS-298 落地：一行改为确定性查询 `SELECT id FROM bots WHERE name = 'director'`（不用 `LIMIT 1` 无序播种），单文件 5 轮 + pair-run（read-audit-dedup+solo）5 轮零 flake、全量 1563/1563、tsc 0。
 
 ### 5.3 回归策略（204 个测试源文件（+编译产物）/ 1534 例）
 
