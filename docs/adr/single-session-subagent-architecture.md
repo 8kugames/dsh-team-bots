@@ -1,6 +1,6 @@
 # ADR：每 bot 单会话控制面 + 任务子智能体化（总监-组长-员工）
 
-- 状态：已拍板（owner 四问全答），待总监评审后按分期派实施卡
+- 状态：已实施（§5.2 五步全部收口，DSHBOTS-285→296；V1–V5 终验证据见 §6 旁注，守门与回归终验记录见 §5.2 DSHBOTS-296 实施记录）
 - 范围：dsh-team-bots 会话模型与任务执行链路的大版本级重构；全面切换，不做新旧并行开关
 - 结论一句话：工作区每个 bot 收敛为一条控制面会话（新绑定 `kind='bot'`，结转另计）；任务由总监派发给 bot，bot 按任务号开子智能体施工（写范围/沙箱从任务卡继承）；bot 会话串行/合批/插话；子智能体并发上限由 DSH 宿主设定，本项目不另设限。
 
@@ -160,6 +160,23 @@
 - **⑥ 用量归因——未破坏**：runs 仍是记账单元，用量随运行收尾入账、对账管线按 runs 行工作，单会话不改变归并口径；子智能体用量归宿主父会话的归集对账属账本接线实施卡（§4.2）。
 - **⑦ 结转/压缩阈值——评估结论：512/64 维持不改**。单控制面全量流量下轮次增速≈原四车道之和，压力确增；但会话实际瓶颈是上下文长度而非轮数，「64 轮闲时压缩留原会话 + 512 轮结转换会话」已构成高频总结/低频重置分层，任务亲和（§8.3）留在旧会话的流量可被压缩触发、不二次结转（alias 幂等守卫），行为一致。观察项：上线后若单会话轮次增速显著（日均 >100 轮量级），再评估下调结转阈值或提高压缩频率。
 
+实施记录（DSHBOTS-296，第 5 步守门与回归终验，架构迁移收官）：
+
+- **五步勾稽**（各步实施卡与关键 commit）：
+
+| 步 | 内容 | 实施卡 | 关键 commit |
+|---|---|---|---|
+| 1 | 库与绑定收敛（one_bot_binding/旧三索引删除/旧四道 alias 化/one_active_run_per_bot 机制） | DSHBOTS-285 | 7045f19、a7b6106、7635a3a |
+| 2 | 控制面会话收敛+入站路由收敛+激活串行索引（顺序逆转：3 先行 2 收口，争用口径 A） | DSHBOTS-288（拍板）、DSHBOTS-289、DSHBOTS-290、DSHBOTS-291 | c554aae/7c67de8、74ee32f、0f687bc/658e836/64c36b9/fd5a95c 等、ed2a7f3/761a966/606e249 等夹具收口组 |
+| 3 | 任务子智能体化（控制面提示词 + 子代理账本） | DSHBOTS-292（提示词+账本调查）、DSHBOTS-294（账本接线+isSolo 收口） | fdabd79/9f49a09、62d53a6/bc3b69f/d1a041e |
+| 4 | 收尾与治理适配（七项审计+滞留四态三档） | DSHBOTS-293、DSHBOTS-295 | 6808cf1/1abaa0c、127df13 |
+| 5 | 守门与回归终验（本卡） | DSHBOTS-296 | 本卡 commit（V1 四路合并例+ADR 收官） |
+
+  同窗口治理件：DSHBOTS-286（结转 512/压缩 64/任务亲和，ede0e91）随第 2 步落地。
+- **守门与回归**：全量 `npm test` 两轮 1563/1563 全绿（0 fail，同 HEAD 判据；较 D-295 基线 1562 +1=本卡 V1 四路合并例），`tsc -p tsconfig.json` 0 错。V1–V5 逐项终验证据见 §6 旁注；§5.1 清单 15 项↔测试文件对照表随本卡交付报告归档。
+- **V3 尾项 grep 清单留档**（dm 车道与任务绑定建行零残留）：①旧 `dm:<bot>:<project>` 车道键 src 全域零命中——现存 `dm:${message.id}`（src/services/runs.ts:156/274）为 dm 运行幂等键（messageId 维度），非车道键；②`INSERT INTO session_bindings` 全库仅 1 处（src/services/runtime/session.ts:414，ensureBotBinding，kind='bot'）——任务绑定建行零残留；③旧车道 kind 命中面均为有意保留：db-migrations 迁移期读旧 project 行（:310/:313）、questions/approvals 历史 `kind='solo'` alias 行承接（D-294 口径）、scheduler `kind='task'` 为 runs 运行类别语义非绑定车道、notify.ts 为注释。
+- **read-audit-dedup.test.ts:108 flake 归因留档（D-294 备案复核）**：根因=夹具 run_writer 播种取 `SELECT id FROM bots LIMIT 1` 无 ORDER BY——SQLite 行序未指定，查询计划器选中 director 则绿，选中已有 queued 运行的 Builder 即撞 `one_active_run_per_bot`（报 UNIQUE runs.bot_id），索引本身按设计工作。复核证据：D-294 已在改动前 HEAD 1abaa0c 一次性 worktree 复现 pair-run 四轮 fail 1,0,1,0、单文件恒绿（既有间歇 flake，非本迁移逻辑回归）；本卡 HEAD 复核单文件 3 轮+pair-run 4 轮+全量两轮全绿（间歇性本轮未再现）。修复候选一行（改查 director 或播种前腾槽），超出本卡写范围（既有测试文件仅核对引用），是否立小卡由 owner 定。
+
 ### 5.3 回归策略（204 个测试源文件（+编译产物）/ 1534 例）
 
 - **不动层**：纯函数与规则引擎测试——写范围判定、合批窗口/保护、死线数学、看门狗分级、计价对账、路径工具等，语义未变者原样保留。
@@ -185,13 +202,13 @@
 
 ## 6 验收标准（可测）
 
-| # | 标准 | 判定方式 |
-|---|---|---|
-| V1 | 每 bot 一会话 | 集成测试：对同一 bot 相继触发群聊、私信、任务派发、单聊，断言其 `alias=0` 绑定恰 1 行且 `kind='bot'`；schema 测试断言新唯一索引存在、旧三索引已删 |
-| V2 | DM 落控制面 | 测试：有运行中任务的 bot 收总监私信，断言无 `dm` kind 运行入队、消息落 bot 会话；内容被转交对应子智能体（账本/注入留痕） |
-| V3 | 任务子智能体化 | 测试：派发后断言不新建任务会话绑定；run_events 含带任务号标签的 `subagent_spawned`/`subagent_result`；交付报告仍落 task_comments 且卡转 in_review；grep 断言 `dm:<bot>:<project>` 车道与任务绑定建行代码零残留 |
-| V4 | 并发上限遵循宿主设定，本项目未额外设限 | 源码审查锚：断言插件源码无子代理并行上限常量、无项目侧计数/闸门逻辑，控制面提示词不含上限数字；宿主侧证据=宿主配置（家级 cordis patch `maxActiveSubagents`） |
-| V5 | 全功能迁移零回归 | 全量 `npm test` 通过；§5.1 清单 15 项每项至少 1 例守门测试通过并在实施卡列出对应测试文件 |
+| # | 标准 | 判定方式 | 终验证据（DSHBOTS-296） |
+|---|---|---|---|
+| V1 | 每 bot 一会话 | 集成测试：对同一 bot 相继触发群聊、私信、任务派发、单聊，断言其 `alias=0` 绑定恰 1 行且 `kind='bot'`；schema 测试断言新唯一索引存在、旧三索引已删 | tests/binding-convergence.test.ts 7 例全绿：索引面/唯一约束/存量迁移幂等/运行串行化/ensureBotBinding + 新增 V1 四路合并例（任务/群聊/私信/单聊四路相继触发，断言 alias=0 绑定恰 1 行 kind='bot'、无任何旧车道建行、四类运行同落该控制面会话） |
+| V2 | DM 落控制面 | 测试：有运行中任务的 bot 收总监私信，断言无 `dm` kind 运行入队、消息落 bot 会话；内容被转交对应子智能体（账本/注入留痕） | tests/dm.test.ts 5 例（dm 运行/忙时 steer/失败留痕/逐条放行/去重护栏）+ tests/solo.test.ts 争用例（bot 忙时消息挂起不落 runs 行）；「消息落 bot 会话」由 V1 四路合并例的 dm 分支守门（dm 运行 session_id=控制面绑定） |
+| V3 | 任务子智能体化 | 测试：派发后断言不新建任务会话绑定；run_events 含带任务号标签的 `subagent_spawned`/`subagent_result`；交付报告仍落 task_comments 且卡转 in_review；grep 断言 `dm:<bot>:<project>` 车道与任务绑定建行代码零残留 | tests/subagent-ledger.test.ts（标签正例断言 run_events 含任务号、runs 行数=1、无归属负例、根级注册面探针）；交付链落 task_comments+in_review 由 tests/review-auto.test.ts / review-queue-final-state.test.ts 守门（D-293 审计①）；grep 清单留档见 §5.2 DSHBOTS-296 实施记录 |
+| V4 | 并发上限遵循宿主设定，本项目未额外设限 | 源码审查锚：断言插件源码无子代理并行上限常量、无项目侧计数/闸门逻辑，控制面提示词不含上限数字；宿主侧证据=宿主配置（家级 cordis patch `maxActiveSubagents`） | tests/control-plane-subagent.test.ts（源码锚+提示词锚+门控负断言，2 例）；§3 口径未引入任何并行上限常量（grep 无命中，D-292/D-294 实施未新增） |
+| V5 | 全功能迁移零回归 | 全量 `npm test` 通过；§5.1 清单 15 项每项至少 1 例守门测试通过并在实施卡列出对应测试文件 | 全量 1563/1563 两轮 0 fail + tsc 0（同 HEAD 判据）；§5.1 15 项↔测试文件对照表随 DSHBOTS-296 交付报告归档（1 binding-convergence / 2 dm / 3 solo+chat / 4 scheduling+bot-pause-dispatch / 5 run-coalesce+outbox-coalesce / 6 notify-tool+dm / 7 review-auto+review-watchdog+review-queue-final-state / 8 session-rollover / 9 wechat 族+solo-wechat-push / 10 solo+solo-control-plane / 11 task-deadline / 12 stale-card-reminder+review-watchdog / 13 write-lock-state+control-plane-subagent / 14 prompt-budget+prompt-prefix-order+user-question-priority / 15 usage 族） |
 
 ## 7 风险与回退
 
