@@ -246,6 +246,9 @@ test('手动与自动入口幂等不双派：两个方向都复看同一运行',
       "SELECT * FROM outbox WHERE kind = 'review_delegate_auto' AND task_id = ?", first.id,
     )
     assert.equal(dupOutbox.status, 'delivered', '复看也算投递成功，不进重试')
+    // DSHBOTS-290：one_active_run_per_bot 下方向二的自动派生也占 owner 运行位——先完结
+    // 方向一的委派运行再验方向二（幂等语义与运行位无关）。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), manual.id)
 
     // 方向二：自动先派生（模拟交付链排的 outbox），手动按钮随后幂等复看。
     const second = await t.service.createTask({
@@ -392,6 +395,8 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
       description: '实现登录页。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", short.id)
+    // DSHBOTS-290：owner 忙时第二次委派走挂起（runId null）——先完结第一条再委派短卡。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), longView.id)
     const shortView = await t.service.taskReviewDelegate(short.id, t.actor)
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortView.id)
     const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
@@ -445,6 +450,8 @@ test('owner review 提示词超长防护：8K 截断同口径，保底字段在�
       description: '实现注册页。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", short.id)
+    // DSHBOTS-290：同上，两次入队间释放 owner 运行位。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), ownerRunId)
     const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'review')
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
     const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
@@ -494,6 +501,8 @@ test('handle 提示词超长防护：8K 截断同口径，保底字段与失败�
       description: '修复支付回调。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'blocked' WHERE id = ?", short.id)
+    // DSHBOTS-290：同上，两次入队间释放 owner 运行位。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), handleRunId)
     const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'handle')
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
     const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
@@ -548,5 +557,37 @@ test('交付带提问（attention）不派核验也不排总监验收：先让 o
     assert.equal(view.stage.stage, 'person')
     assert.equal(view.stage.action, 'answer')
     assert.equal(view.reviewStatus, 'none')
+  } finally { await t.close() }
+})
+
+// DSHBOTS-291 卡面增补②（D-290 红线臂 4d70a415：M5a owner_task busy 闸 0 直接覆盖）：
+// owner 真忙（有 queued/running 运行）时 enqueueOwnerTaskRun 返回 null 不落 runs 行、
+// 挂待处理队列；owner 空闲后 drainPendingMessages 建回一条 review 运行。
+// 现有用例都在第二次入队前把第一条 run 置 succeeded 释放 owner，未覆盖真忙场景。
+test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行，空闲 drain 建回一条', async () => {
+  const t = await setup()
+  try {
+    const task = await t.service.createTask({
+      projectId: t.project.id, title: '忙时验收', assigneeBotId: t.dev.id,
+      status: 'in_progress', postCard: false,
+    }, t.actor)
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_owner_busy', ?, ?, 'chat', 'read', 'test', 'running', 1, 'busy:owner_gate', ?)`,
+      t.project.id, t.director.id, new Date().toISOString(),
+    )
+    const pending = () => JSON.parse(t.store.setting(`bot_pending_msgs:${t.director.id}`) ?? '[]')
+    assert.equal(t.service.enqueueOwnerTaskRun(t.service.taskRow(task.id), 'review'), null, 'owner 真忙时返回 null')
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'review'")?.n, 0, '不落 runs 行')
+    assert.equal(pending().length, 1, '挂待处理队列')
+    assert.equal(pending()[0].kind, 'owner_task')
+
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_owner_busy'", new Date().toISOString())
+    t.service.drainPendingMessages()
+    const review = t.store.get("SELECT * FROM runs WHERE kind = 'review'")
+    assert.ok(review, 'owner 空闲后建回一条 review 运行')
+    assert.equal(review.bot_id, t.director.id)
+    assert.equal(review.task_id, task.id)
+    assert.deepEqual(pending(), [], '挂起队列清空')
   } finally { await t.close() }
 })

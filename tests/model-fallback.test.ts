@@ -224,6 +224,7 @@ test('自动回退：下一条运行不带 override，按 Bot 主模型下发', 
       sessionController: {
         resolveAgent: async () => ({ agent: { session: null } }),
         selectModel: async (arg) => { calls.push(arg); return { selected: arg } },
+        create: async () => ({ sessionId: 'sess-fallback-stub' }),
       },
     }
     const runtime = new DshRuntime({ ctx, config, store, logger: { info() {}, warn() {}, error() {} } })

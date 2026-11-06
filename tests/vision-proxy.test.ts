@@ -24,8 +24,8 @@ const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8
 const imageInput = () => [{ mediaType: 'image/png', data: TINY_PNG }]
 
 // 可控 modalities 的运行时：默认挂起全部运行供状态断言；auto=true 时全部自动收尾
-// （vision 按 failVision 成功转写/失败，其余运行一律成功回 'ok'）——同 bot 运行经
-// claimKey 严格串行，不自动收尾前一条，vision 派生运行就永远轮不到执行。
+// （vision 按 failVision 成功转写/失败，其余运行一律成功回 'ok'）——争用口径 A 下
+// 同 bot 至多一条活跃运行，不自动收尾前一条，后续运行就永远轮不到执行。
 class ModalitiesRuntime { declare modalities: unknown; declare failVision: boolean; declare auto: boolean; declare handler: (...args: unknown[]) => unknown;
   constructor(modalities, { failVision = false, auto = false } = {}) {
     this.modalities = modalities
@@ -68,6 +68,20 @@ async function waitFor(predicate, timeout = 3000) {
   throw new Error('timeout waiting for condition')
 }
 
+// 争用口径 A（DSHBOTS-289/290）：one_active_run_per_bot 激活后同 bot 同时至多一条
+// queued/running。sendXxx 的消息运行在 enqueueOutbox 里同步建行，bot 槽随即被占，
+// 而 vision 派生是无 busy 闸的直接 INSERT——忙时撞 UNIQUE 静默返回 null。所以凡
+// 「先发消息再派生/断言 vision」的用例都要先腾槽：占用运行对本套件只是夹具背景，
+// 直接置终态即可；auto 运行时的用例改为等运行自然收尾（waitForBotIdle）。
+const settleActiveRuns = (store) => store.run(
+  "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE status IN ('queued', 'running')",
+  new Date().toISOString(),
+)
+const waitForBotIdle = (store) => waitFor(() => {
+  const active = Number(store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued', 'running')")?.n ?? 0)
+  return active === 0 ? true : null
+})
+
 // proxy=true 时注入读图代理配置；runtime 见各用例。
 async function setup({ runtime, proxy = true }: { runtime?: unknown; proxy?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-team-vision-'))
@@ -86,8 +100,8 @@ async function setup({ runtime, proxy = true }: { runtime?: unknown; proxy?: boo
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   service.attachRuntime(runtime ?? new ModalitiesRuntime(['text']))
   await service.initialize()
-  // 起真实调度间隔：派生 vision 运行与原 chat 运行同 bot 串行，前者要等后者完结后
-  // 由下一拍 interval 领取（sendXxx 内的一次 tick 撞上 bot 槽占用会被跳过）。
+  // 起真实调度间隔：腾槽后派生的 vision 运行由下一拍 interval 领取执行（auto 运行时
+  // 随即自动收尾；否则 session-hold 停住供手工 finishRun 断言写回链路）。
   service.start()
   const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({
@@ -127,7 +141,11 @@ test('发送前预判：modalities 无 image 的带图消息直接派生 vision 
   const t = await setup({ runtime: new ModalitiesRuntime(['text']) })
   try {
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看看这张截图', t.actor, null, imageInput())
-    const run = await waitFor(() => t.visionRuns()[0])
+    // 争用口径 A：sendMessage 同步排上的 chat 运行占住 bot 槽，fire-and-forget 预判
+    // 撞 UNIQUE 静默让位——置终态腾槽后走同一真实入口补派生，验证预判派生语义。
+    settleActiveRuns(t.store)
+    const run = await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
+    assert.ok(run, '预判派生 vision 运行')
     assert.equal(run.kind, 'vision')
     assert.equal(run.mode, 'read', '只读转写')
     assert.equal(run.trigger_type, 'vision_proxy')
@@ -145,6 +163,7 @@ test('发送前预判：modalities 无 image 的带图消息直接派生 vision 
       t.store.get("SELECT 1 AS ok FROM outbox WHERE idempotency_key = ?", `chat:${sent.messageId}:${t.dev.id}`),
       '原 chat 运行照常派发',
     )
+    settleActiveRuns(t.store)
   } finally { await t.close() }
 })
 
@@ -205,6 +224,8 @@ test('同消息幂等：重复评估/重复派生/UNIQUE 撞车都只留一条 v
   try {
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看图', t.actor, null, imageInput())
     const message = { id: sent.messageId, project_id: t.project.id }
+    // 幂等语义在空闲态验证：先腾出 bot 槽（chat 运行置终态），重复调用都应同 id。
+    settleActiveRuns(t.store)
     const first = await considerVisionProxy(t.service, { bot: t.dev, message })
     const second = await considerVisionProxy(t.service, { bot: t.dev, message })
     const third = spawnVisionProxyRun(t.service, { bot: t.dev, message } as any)
@@ -220,6 +241,7 @@ test('同消息幂等：重复评估/重复派生/UNIQUE 撞车都只留一条 v
     })
     assert.equal(reactive.id, first.id, '兜底与主动共用幂等键')
     assert.equal(t.visionRuns().length, 1)
+    settleActiveRuns(t.store)
   } finally { await t.close() }
 })
 
@@ -230,8 +252,9 @@ test('能力声明缺失（modalities undefined）：主动预判不派生，失
     const message = { id: sent.messageId, project_id: t.project.id }
     assert.equal(await considerVisionProxy(t.service, { bot: t.dev, message }), null, '声明缺失不冒险派生')
     assert.equal(t.visionRuns().length, 0)
-    // 造一条带图失败的 chat 运行走真实 finishRun：错误表明模型无视觉 → 兜底派生 +
-    // 按现状落「运行失败：」bot 消息（不静默）。
+    // 腾出 bot 槽（chat 运行置终态）再造一条带图失败的 chat 运行走真实 finishRun：
+    // 错误表明模型无视觉 → 兜底派生 + 按现状落「运行失败：」bot 消息（不静默）。
+    settleActiveRuns(t.store)
     t.store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
        VALUES ('run_chat_fail', ?, ?, 'chat', 'write', 'chat', ?, 'running', 1, 'test:chatfail', ?)`,
@@ -262,6 +285,9 @@ test('全链路（群聊）：转写成功以「[图片转写]」system 消息�
   try {
     // 主动派生那条运行停在 running（Hold 语义），手工走真实 finishRun 收尾，聚焦写回链路。
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看图', t.actor, null, imageInput())
+    // chat 运行置终态腾槽后由真实主动入口派生（争用口径 A：忙时直接 INSERT 撞 UNIQUE）。
+    settleActiveRuns(t.store)
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
     const vision = await waitFor(() => t.visionRuns()[0])
     await t.service.finishRun({
       runId: vision.id,
@@ -289,10 +315,13 @@ test('全链路（群聊）：转写成功以「[图片转写]」system 消息�
 })
 
 test('全链路（单聊）：无项目 vision 运行可被调度执行，转写写回 solo_messages', async () => {
-  // modalities=['text']（无视觉）+ auto：单聊运行先完结让出 bot 槽，代理随后转写。
+  // modalities=['text']（无视觉）+ auto：solo_chat 运行先完结让出 bot 槽，代理随后转写。
   const t = await setup({ runtime: new ModalitiesRuntime(['text'], { auto: true }) })
   try {
     const sent = await t.service.sendSoloMessage(t.dev.id, '这张图是什么', t.actor, imageInput())
+    // auto 运行时先等 solo_chat 运行自然收尾腾槽，再走真实主动入口派生（同 bot 串行）。
+    await waitForBotIdle(t.store)
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId } })
     const writeback = await waitFor(() => t.store.get(
       "SELECT * FROM solo_messages WHERE bot_id = ? AND sender_type = 'system' AND body LIKE '[图片转写]%'",
       t.dev.id,
@@ -312,7 +341,9 @@ test('转写失败：只审计 vision.fallback，不写回消息、不重试（�
   const t = await setup({ runtime: new ModalitiesRuntime(undefined, { failVision: true, auto: true }) })
   try {
     const sent = await t.service.sendSoloMessage(t.dev.id, '看图', t.actor, imageInput())
-    // 声明缺失走兜底：手工触发派生（真实入口），随后自动收尾为失败。
+    // 声明缺失走兜底：等 solo_chat 运行自然收尾腾出 bot 槽，再手工触发派生（真实
+    // 入口），随后自动收尾为失败。
+    await waitForBotIdle(t.store)
     const vision = maybeSpawnVisionAfterFailure(t.service, {
       run: { id: 'run_x', kind: 'solo_chat', trigger_ref: sent.messageId, project_id: null },
       bot: t.dev,
@@ -334,6 +365,9 @@ test('转写提示词：中文结构化要求 + 原文引用 + 禁工具，群�
   const t = await setup({ runtime: new ModalitiesRuntime(['text']) })
   try {
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看看这张截图', t.actor, null, imageInput())
+    // chat 运行置终态腾槽后由真实主动入口派生，取派生行断言两态提示词。
+    settleActiveRuns(t.store)
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
     const vision = await waitFor(() => t.visionRuns()[0])
     const chatMessage = t.store.get('SELECT * FROM messages WHERE id = ?', sent.messageId)
     const groupPrompt = t.promptRuntime.promptFor({

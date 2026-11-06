@@ -5,6 +5,7 @@
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 db.js 的 addColumn/recordMigration 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, nowIso } from '../util.js'
+import { botInActiveProject } from './questions.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
 // project_id 可空：单聊会话没有项目归属（DSHBOTS-218），卡片锚点改落 solo_messages。
@@ -150,7 +151,8 @@ export const approvalsMethods = {
     if (!binding) return next()
 
     const store = this.store
-    const isSolo = binding.kind === 'solo' && !binding.project_id
+    // DSHBOTS-294：与 questions.ts 同款——solo 判定按「无 project 上下文的控制面会话」。
+    const isSolo = !binding.project_id && (binding.kind === 'solo' || (binding.kind === 'bot' && !botInActiveProject(store, binding.bot_id)))
     if (!binding.project_id && !isSolo) return next()
     const bot = store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
     const project = isSolo ? null : store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)

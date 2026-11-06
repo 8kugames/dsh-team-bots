@@ -53,8 +53,10 @@ async function setup() {
   })
   const wechatPushes: string[] = []
   ;(service as any).wechat = { notify(text: string) { wechatPushes.push(text) } }
+  // DSHBOTS-293：绑定夹具随四车道收敛改为 kind='bot' 控制面（与生产库一致，
+  // 原旧车道夹具会掩盖 notifyMemberFromBot 的控制面绑定解析）。
   const bindSession = ({ sessionId, botId }: { sessionId: string; botId: string }) => store.run(
-    `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, 'project', NULL, ?)`,
+    `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, 'bot', NULL, ?)`,
     sessionId, botId, project.id, new Date().toISOString(),
   )
   const insertRunningRun = (id: string, botId: string, kind = 'task', triggerType = 'manual') => {

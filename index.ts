@@ -4,6 +4,7 @@ import { installHttp } from './src/http.js'
 import { DshRuntime } from './src/runtime.js'
 import { TeamService } from './src/service.js'
 import { installSkillProvider } from './src/skills.js'
+import { installSubagentLedger } from './src/subagent-ledger.js'
 import { installTeamTools } from './src/tools.js'
 
 export const name = 'dsh-team-bots'
@@ -22,6 +23,7 @@ export function apply(ctx, config = {}) {
   service.attachRuntime(runtime)
   runtime.attach()
   installTeamTools(ctx, service)
+  installSubagentLedger(ctx, store, logger)
   installSkillProvider(ctx, resolved, logger, store)
   installHttp(ctx, service, logger)
 

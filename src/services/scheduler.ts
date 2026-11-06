@@ -47,14 +47,6 @@ export function runHoldsWriteLock({ kind, mode, taskStatus } = {} as any) {
 // task_run 的先写者赢是防重复派生闸，同样保持默认（先写者赢）不动。
 const OUTBOX_COALESCE_KINDS = new Set(['review_delegate_auto'])
 
-// 入站消息合批（DSHBOTS-231）：只合并「人发的消息运行」——同一条绑定道内、仍在排队的
-// chat / solo_chat 运行。任务运行、派生运行（review/handle/memory_review/vision）与私信
-// （dm/dm_reply，各自有按消息的回信契约）都不参与：合并它们会破坏既有的投递语义。
-const RUN_COALESCE_KINDS = new Set(['chat', 'solo_chat'])
-// 默认保守上限：一次运行最多合并 5 条消息、且只合并入队时间相差 30 秒内的排队消息。
-const COALESCE_MAX_MESSAGES_DEFAULT = 5
-const COALESCE_WINDOW_MS_DEFAULT = 30_000
-
 export const schedulerMethods = {
 
   // outbox：把「状态变更 → 建运行」这一跳变成可重放的持久交接。
@@ -270,105 +262,13 @@ export const schedulerMethods = {
     throw error
   },
 
-  // 同一条会话上的运行必须串行（原注释意图）；DSHBOTS-219 分身模型：串行键从「bot」
-  // 放细到「会话绑定维度」（= 一条分身通道）——单聊/各项目群聊/私信互不阻塞，
-  // 一路 pending（如单聊提权审批）不再挡死同一 bot 的其它通道。
-  // 键与 ensureSession 的绑定元组一一对应，同一会话的两条运行必得同键，串行不失效。
+  // 串行键（DSHBOTS-289，ADR §5.2-3）：控制面会话收敛为每 bot 单绑定后，串行维度统一
+  // 收敛到 bot——与 one_active_run_per_bot 唯一索引（UNIQUE(bot_id) WHERE queued/running）
+  // 同一口径：同 bot 任意两条运行（chat/task/dm/solo/review/…）互斥排队。原
+  // claimKey/bindingLaneKey/sessionLaneKey 三函数按 task/project/dm/solo 分道的推导
+  // 一并删除（四车道已不存在，键算不出第二个值）。
   claimKey(run) {
-    if (run.kind === 'task' && run.task_id) return `task:${run.task_id}`
-    return this.sessionLaneKey(run)
-  },
-  // 会话绑定的通道键（纯查库推导，无副作用）：task / solo / dm / project 四类绑定各归各道。
-  bindingLaneKey(binding) {
-    if (binding.kind === 'task' && binding.task_id) return `task:${binding.task_id}`
-    if (binding.kind === 'solo') return `solo:${binding.bot_id}`
-    if (binding.kind === 'dm') return `dm:${binding.bot_id}:${binding.project_id}`
-    return `project:${binding.bot_id}:${binding.project_id}`
-  },
-  // 非任务运行的通道键：按该运行实际会落到的会话推导（与 ensureSession 的 kind0 同一套映射）。
-  // solo_chat 与无项目 vision 落 solo 会话；chat/review/handle/memory_review 与带项目 vision
-  // 落项目会话；dm 落私信会话；dm_reply 按来信 origin 回对应会话（task_id 留空躲唯一索引，
-  // 任务通道只能从 bot_messages 解）；rollover_summary 复用指定旧会话，按该会话当前绑定
-  // 的通道键对齐（防与复用同一会话的群聊并发——runtime 的 pending 按会话一对一）。
-  sessionLaneKey(run) {
-    if (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) return `solo:${run.bot_id}`
-    if (run.kind === 'rollover_summary') {
-      if (!run.session_id) return `bot:${run.bot_id}`
-      const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', run.session_id)
-      return binding ? this.bindingLaneKey(binding) : `session:${run.session_id}`
-    }
-    if (run.kind === 'dm_reply') {
-      const message = run.trigger_ref
-        ? this.store.get('SELECT origin_kind, origin_task_id FROM bot_messages WHERE id = ?', run.trigger_ref)
-        : null
-      if (message?.origin_kind === 'task' && message.origin_task_id) return `task:${message.origin_task_id}`
-      if (message?.origin_kind === 'dm') return `dm:${run.bot_id}:${run.project_id}`
-      return `project:${run.bot_id}:${run.project_id}`
-    }
-    if (run.kind === 'dm') return `dm:${run.bot_id}:${run.project_id}`
-    return `project:${run.bot_id}:${run.project_id}`
-  },
-
-  // DSHBOTS-272 用户提问运行判定：kind='chat' 且触发消息是人发的（messages.sender_type='user'）。
-  // 通知降级（notify.ts 成员通知落群聊流）与 bot 回复 @mention 唤醒（run-finish.ts）触发的
-  // chat 运行，触发消息 sender_type='bot'，不算用户提问；出队置顶与合批保护只给人发的提问用。
-  isUserQuestionRun(run) {
-    if (run?.kind !== 'chat' || !run.trigger_ref) return false
-    const message = this.store.get('SELECT sender_type FROM messages WHERE id = ?', run.trigger_ref)
-    return message?.sender_type === 'user'
-  },
-
-  // 入站消息合批（DSHBOTS-231）：领取一条运行后，把同一条绑定道内仍在排队的消息运行合并
-  // 进来——被合并的运行置 canceled（error_code='MERGED'），消息 id 记入本运行的
-  // merged_messages，executeRun 据此把多条消息一次性注入同一轮上下文，不再一条消息一次运行。
-  // 只在 claimKey 相同的通道内合并，D-219 的四道解耦语义不变；合并窗口与条数上限走 settings。
-  // 并发安全：被合并的运行用「queued → canceled」原子更新抢占，抢不到（另一拍已领取）就跳过。
-  coalesceQueuedRuns(run) {
-    if (!RUN_COALESCE_KINDS.has(run.kind)) return []
-    const max = Number(this.store.setting('coalesce_max_messages', String(COALESCE_MAX_MESSAGES_DEFAULT)))
-    if (!Number.isFinite(max) || max <= 1) return []
-    const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
-    const claimedQueuedAt = Date.parse(run.queued_at)
-    const laneKey = this.claimKey(run)
-    // DSHBOTS-272 合批保护：用户提问（触发消息 sender_type='user'）不并入非用户触发的运行——
-    // 并入后提问只能挤在 Merged messages 段、没有直接回答锚点（事故形态=通知运行回一条轻备忘
-    // 就算处理完）。留队保住「一条提问一条正式回复」；出队序已把用户提问置顶，下一拍即领取。
-    const claimedIsUserQuestion = this.isUserQuestionRun(run)
-    const candidates = this.store.all(
-      `SELECT * FROM runs WHERE status = 'queued' AND id != ? AND kind = ?
-        ORDER BY queued_at LIMIT 100`,
-      run.id, run.kind,
-    )
-    const mergedIds = []
-    const mergedRuns = []
-    for (const candidate of candidates) {
-      if (mergedIds.length >= max - 1) break
-      if (!candidate.trigger_ref) continue
-      if (this.claimKey(candidate) !== laneKey) continue
-      // DSHBOTS-272：候选是用户提问而本运行非用户触发（通知/伙伴唤醒）→ 不并，见上方注释。
-      if (!claimedIsUserQuestion && this.isUserQuestionRun(candidate)) continue
-      const queuedAt = Date.parse(candidate.queued_at)
-      if (!Number.isFinite(queuedAt) || !Number.isFinite(claimedQueuedAt)) continue
-      if (queuedAt < claimedQueuedAt || queuedAt - claimedQueuedAt > windowMs) continue
-      const changed = this.store.run(
-        `UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'MERGED', error_message = ?
-         WHERE id = ? AND status = 'queued'`,
-        nowIso(), `消息已合并进运行 ${run.id}，不再单独执行`, candidate.id,
-      )
-      if (Number(changed?.changes ?? 0) !== 1) continue
-      mergedIds.push(candidate.trigger_ref)
-      mergedRuns.push(candidate)
-    }
-    if (!mergedIds.length) return []
-    this.store.run('UPDATE runs SET merged_messages = ? WHERE id = ?', JSON.stringify(mergedIds), run.id)
-    this.insertRunEvent(
-      run.id, 'runs_merged',
-      `同通道 ${mergedIds.length} 条排队消息合并进本次运行：${mergedIds.map(item => item.slice(-6)).join('、')}`,
-    )
-    for (const candidate of mergedRuns) {
-      this.insertRunEvent(candidate.id, 'merged_into', `排队消息已合并进运行 ${run.id}`)
-    }
-    return mergedRuns
+    return `bot:${run.bot_id}`
   },
 
   // 运行超时由 runtime 的定时器负责；这里补充“还活着但没有任何进展”的判定。
@@ -513,9 +413,10 @@ export const schedulerMethods = {
     return canceled
   },
 
-  // 滞留阈值兜底扫描（DSHBOTS-280）：in_review 超 24h / blocked 超 48h 的卡向项目
-  // owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），只提醒不自动处置——
-  // 不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick（与 D-194
+  // 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：in_review 超 24h /
+  // blocked 超 48h / 待执行（backlog/todo，D-295 调查：tasks 表无 'pending' 态）超 72h
+  // 的卡向项目 owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），只提醒不自动
+  // 处置——不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick（与 D-194
   // 验收守门同拍接入，不新增常驻进程）；判定与防重见 notify.ts 的纯函数与每日上限。
   // 逐卡容错：单卡异常只 warn，不拖垮整轮扫描。
   scanStaleCards() {
@@ -523,7 +424,7 @@ export const schedulerMethods = {
       `SELECT t.id, t.status, t.updated_at, t.number,
               p.id AS project_id, p.key AS project_key, p.owner_bot_id
          FROM tasks t JOIN projects p ON p.id = t.project_id
-        WHERE t.status IN ('in_review', 'blocked') AND p.status = 'active'`,
+        WHERE t.status IN ('in_review', 'blocked', 'todo', 'backlog') AND p.status = 'active'`,
     )
     const reminded = []
     for (const row of rows) {
@@ -621,11 +522,15 @@ export const schedulerMethods = {
       this.retryExpiredPlanWaits()
       // 陈旧排队运行守卫（DSHBOTS-110）：先于候选查询清掉任务已终态的 queued 任务运行。
       this.cancelStaleQueuedTaskRuns()
+      // 争用口径 A 收口（DSHBOTS-289）：bot 空闲时把挂起消息建回运行（合批成一条），
+      // 建回的 queued 行随本拍候选查询一并领取。
+      this.drainPendingMessages()
       // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超阈值即注入 owner 系统提醒；
       // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
       runReviewWatchdog(this)
-      // 滞留阈值兜底（DSHBOTS-280）：in_review/blocked 超 24h/48h 向 owner 只提醒
-      // 不自动处置；内部逐卡容错（单卡异常只 warn）。
+      // 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：in_review/blocked/
+      // 待执行（todo/backlog）超 24h/48h/72h 三档向 owner 只提醒不自动处置；
+      // 内部逐卡容错（单卡异常只 warn）。
       this.scanStaleCards()
       const activeRows = this.store.all(
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
@@ -701,7 +606,8 @@ export const schedulerMethods = {
         // DSHBOTS-112：单聊读图代理运行与 solo_chat 同样不带 project_id，豁免项目闸门。
         // DSHBOTS-145：结转摘要运行同理——单聊摘要运行不带 project_id，只有项目摘要运行
         // 才需要项目上下文；否则 solo 摘要会被误判 MISSING_CONTEXT 直接失败。
-        const needsProject = run.kind === 'rollover_summary'
+        // DSHBOTS-286：闲时压缩运行同理。
+        const needsProject = run.kind === 'rollover_summary' || run.kind === 'session_compact'
           ? Boolean(run.project_id)
           : run.kind !== 'solo_chat' && !(run.kind === 'vision' && !run.project_id)
         const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
@@ -778,9 +684,8 @@ export const schedulerMethods = {
           nowIso(), nowIso(), run.id,
         )
         if (Number(claimed.changes) !== 1) continue
-        // 入站消息合批（DSHBOTS-231）：领取后把同通道仍在排队的消息并进本次运行，
-        // 被合并的运行置 canceled/MERGED，消息 id 落到 merged_messages 供 executeRun 注入。
-        this.coalesceQueuedRuns(run)
+        // 消息合批（DSHBOTS-290 语义回补）：合批在 bot 空闲建回时完成（drainPendingMessages，
+        // 含 D-272 用户提问保护/窗口/上限），领取侧不二次合批——窗口/上限已在建回侧消费。
         // 借用了人的消息保底槽（超出并发上限放行）：记事件并占住额外槽，下一次归还前不再放第二条。
         if (human && activeTotal >= maxRuns) {
           humanSlotTaken = true

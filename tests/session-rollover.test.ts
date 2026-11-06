@@ -1,6 +1,6 @@
 // DSHBOTS-145：会话结转（单 bot 聊天会话超阈值后结转新会话并注入 bot 自写摘要）。
 // 覆盖：阈值未触发/触发、摘要未就绪继续复用旧会话（含幂等补排）、摘要就绪删旧绑定走新建、
-// 新会话首轮提示词注入摘要一次且清零后不重复注入、0=关闭、task/dm 不结转、
+// 新会话首轮提示词注入摘要一次且清零后不重复注入、0=关闭、task 亲和不结转、dm 落控制面单绑定、
 // 摘要运行路由回旧会话、finishRun 成功落库/失败留痕、单聊（无项目）结转、
 // 支撑索引迁移幂等、executeRun→摘要提示词→finishRun→下次复用开新会话的完整链路、
 // 消费闸（DSHBOTS-213）：非结转顶替会话的普通轮次不得消费摘要，阈值再触发直接结转不重排。
@@ -75,7 +75,8 @@ async function primeProject(service, store) {
   return { director, dev, project }
 }
 
-const bindSession = (store, { botId, projectId, sessionId, kind = 'project', taskId = null }) => {
+// 种子绑定默认即 bot 的 kind='bot' 控制面绑定（DSHBOTS-289 收敛后唯一活跃车道）。
+const bindSession = (store, { botId, projectId, sessionId, kind = 'bot', taskId = null }) => {
   store.run(
     'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     sessionId, botId, projectId, kind, taskId, new Date().toISOString(),
@@ -83,13 +84,13 @@ const bindSession = (store, { botId, projectId, sessionId, kind = 'project', tas
 }
 
 // 轮次口径 = runs 表按 session_id 的 COUNT(*)（不限 status），直接落库模拟历史运行。
-const seedRuns = (store, { projectId, botId, sessionId, count, kind = 'chat' }) => {
+const seedRuns = (store, { projectId, botId, sessionId, count, kind = 'chat', taskId = null }) => {
   const at = new Date().toISOString()
   for (let i = 0; i < count; i += 1) {
     store.run(
-      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at)
-       VALUES (?, ?, ?, ?, 'read', 'test', 'succeeded', 1, ?, ?, ?)`,
-      `run_seed_${sessionId}_${i}`, projectId, botId, kind, `seed:${sessionId}:${i}`, sessionId, at,
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at)
+       VALUES (?, ?, ?, ?, ?, 'read', 'test', 'succeeded', 1, ?, ?, ?)`,
+      `run_seed_${sessionId}_${i}`, projectId, botId, taskId, kind, `seed:${sessionId}:${i}`, sessionId, at,
     )
   }
 }
@@ -221,20 +222,23 @@ test('结转别名不跨 bot/项目：未绑定或其他项目的 session 不得
   const ctx = await setup()
   try {
     const { director, dev, project } = await primeProject(ctx.service, ctx.store)
-    const project2 = await ctx.service.createProject({ name: 'Rollover 其他项目', key: 'RLV2', ownerBotId: director.id, memberIds: [dev.id] })
+    // 单绑定模型（DSHBOTS-289）：同 bot 只有一条 kind='bot' 活跃绑定，跨项目场景改用
+    // 两个成员 bot 各占一个项目，结转后各自旧会话仍只能解析回自己的 bot/项目。
+    const dev2 = await ctx.service.createBot({ name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
+    const project2 = await ctx.service.createProject({ name: 'Rollover 其他项目', key: 'RLV2', ownerBotId: director.id, memberIds: [dev2.id] })
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
-    bindSession(ctx.store, { botId: dev.id, projectId: project2.id, sessionId: 'sess-old-2' })
-    seedRuns(ctx.store, { projectId: project2.id, botId: dev.id, sessionId: 'sess-old-2', count: TURNS })
+    bindSession(ctx.store, { botId: dev2.id, projectId: project2.id, sessionId: 'sess-old-2' })
+    seedRuns(ctx.store, { projectId: project2.id, botId: dev2.id, sessionId: 'sess-old-2', count: TURNS })
 
     const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
     ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '项目一交接摘要。')
-    ctx.store.setSetting(rolloverSummaryKey(dev.id, project2.id), '项目二交接摘要。')
+    ctx.store.setSetting(rolloverSummaryKey(dev2.id, project2.id), '项目二交接摘要。')
     await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
-    await runtime.ensureSession(dev, project2, { run: { kind: 'chat' } })
+    await runtime.ensureSession(dev2, project2, { run: { kind: 'chat' } })
 
     assert.equal(ctx.service.memberContextFor('sess-old').project.id, project.id, '旧会话不得漂到别的 bot/项目')
-    assert.equal(ctx.service.memberContextFor('sess-old-2').project.id, project2.id, '另一项目的旧会话只解析回本项目')
+    assert.equal(ctx.service.memberContextFor('sess-old-2').project.id, project2.id, '另一 bot/项目的旧会话只解析回本项目')
     assert.throws(
       () => ctx.service.memberContextFor('sess-never-bound'),
       /只有项目群中的 Bot 可以执行该操作/,
@@ -341,16 +345,19 @@ test('摘要运行路由回旧会话：ensureSession 直接复用 run.session_id
 test('finishRun 收尾：成功落 settings 并留 ready 痕，失败留 failed 痕且不写摘要', async () => {
   const ctx = await setup()
   try {
-    const { dev, project } = await primeProject(ctx.service, ctx.store)
-    const project2 = await ctx.service.createProject({ name: 'Rollover 2', key: 'RL2', ownerBotId: project.owner_bot_id, memberIds: [dev.id] })
+    const { director, dev, project } = await primeProject(ctx.service, ctx.store)
+    // 单绑定模型（DSHBOTS-289）：同 bot 只有一条 kind='bot' 活跃绑定，两个摘要运行分属
+    // 两个成员 bot 各自的项目控制面会话，success/failed 两分支互不共用 bot 名额。
+    const dev2 = await ctx.service.createBot({ name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
+    const project2 = await ctx.service.createProject({ name: 'Rollover 2', key: 'RL2', ownerBotId: director.id, memberIds: [dev2.id] })
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old-1' })
-    bindSession(ctx.store, { botId: dev.id, projectId: project2.id, sessionId: 'sess-old-2' })
+    bindSession(ctx.store, { botId: dev2.id, projectId: project2.id, sessionId: 'sess-old-2' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old-1', count: TURNS })
-    seedRuns(ctx.store, { projectId: project2.id, botId: dev.id, sessionId: 'sess-old-2', count: TURNS })
+    seedRuns(ctx.store, { projectId: project2.id, botId: dev2.id, sessionId: 'sess-old-2', count: TURNS })
 
     const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
     await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
-    await runtime.ensureSession(dev, project2, { run: { kind: 'chat' } })
+    await runtime.ensureSession(dev2, project2, { run: { kind: 'chat' } })
     const [summary1, summary2] = rolloverRuns(ctx.store)
 
     await ctx.service.finishRun({ runId: summary1.id, status: 'succeeded', output: '交接：进行中任务 X。' })
@@ -362,7 +369,7 @@ test('finishRun 收尾：成功落 settings 并留 ready 痕，失败留 failed 
     )
 
     await ctx.service.finishRun({ runId: summary2.id, status: 'failed', output: '', error: { message: 'boom' } })
-    assert.equal(ctx.store.setting(rolloverSummaryKey(dev.id, project2.id)), null, '失败不得写摘要')
+    assert.equal(ctx.store.setting(rolloverSummaryKey(dev2.id, project2.id)), null, '失败不得写摘要')
     assert.equal(
       ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'rollover_summary_failed'", summary2.id).length,
       1,
@@ -377,7 +384,8 @@ test('单聊结转：无项目上下文也能排摘要运行、落库并注入',
   const ctx = await setup({ turns: 2 })
   try {
     const { dev } = await primeProject(ctx.service, ctx.store)
-    bindSession(ctx.store, { botId: dev.id, projectId: null, sessionId: 'sess-solo', kind: 'solo' })
+    // 单聊会话即该 bot 的 kind='bot' 控制面绑定（project_id 空），不再有独立 solo 车道行。
+    bindSession(ctx.store, { botId: dev.id, projectId: null, sessionId: 'sess-solo' })
     seedRuns(ctx.store, { projectId: null, botId: dev.id, sessionId: 'sess-solo', count: 2, kind: 'solo_chat' })
 
     const host = captureHost([])
@@ -415,20 +423,22 @@ test('并发兜底：同一会话重复补排摘要运行不抛唯一约束错�
   }
 })
 
-test('task 与 dm 会话不结转：超阈值也不排摘要运行', async () => {
+test('task 与 dm 不再走独立车道：task 亲和回原会话，dm 落控制面单绑定，均不结转', async () => {
   const ctx = await setup({ turns: 1 })
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
+    // task 半边：kind='task' 绑定 + 带 task_id 的历史运行，未终态任务流量按 runs 归属回原会话。
     const task = await ctx.service.createTask({ projectId: project.id, title: '任务会话', assigneeBotId: dev.id }, ctx.service.actor())
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-task', kind: 'task', taskId: task.id })
-    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-task', count: 50, kind: 'task' })
-    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-dm', kind: 'dm' })
-    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-dm', count: 50, kind: 'dm' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-task', count: 50, kind: 'task', taskId: task.id })
+    // dm 半边：kind='dm' 车道已删，dm 流量落 bot 的 kind='bot' 控制面绑定；
+    // 该绑定无历史轮次，不触发结转。
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-dm' })
 
     const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
-    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task }), 'sess-task')
-    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'dm' } }), 'sess-dm')
-    assert.equal(rolloverRuns(ctx.store).length, 0, 'task/dm 不结转')
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task }), 'sess-task', '未终态任务按 runs 归属回原会话')
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'dm' } }), 'sess-dm', 'dm 流量应落控制面单绑定')
+    assert.equal(rolloverRuns(ctx.store).length, 0, 'task 亲和与 dm 控制面会话均不结转')
   } finally {
     await cleanup(ctx)
   }

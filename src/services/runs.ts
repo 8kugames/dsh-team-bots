@@ -16,6 +16,12 @@ import { isProviderUnavailableCode } from './model-fallback.js'
 import { effectiveSandbox } from './runtime/prompt.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 
+// 合批窗口与上限默认值（DSHBOTS-231/287，DSHBOTS-290 随语义回补从 scheduler.ts 迁来）：
+// 只合并入队时间相差 30 秒内的挂起消息，单组消息总数封顶 5；settings 可覆盖
+// （coalesce_window_ms / coalesce_max_messages）。
+const COALESCE_MAX_MESSAGES_DEFAULT = 5
+const COALESCE_WINDOW_MS_DEFAULT = 30_000
+
 // ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
 // 指纹行形如 " M dir/file"（前两字符状态位 + 空格 + 路径）；重命名 "R  old -> new"
 // 的新旧路径都算被触碰。带引号的 quoted 路径不解析（与产物清单同一口径，跳过）。
@@ -66,6 +72,187 @@ export function attributeWorkspaceChange({ before, after, concurrentWrites = [] 
 
 export const runsMethods = {
 
+  // ── 争用口径 A（DSHBOTS-289，ADR §5.2-2，owner 拍板）─────────────────────────
+  // one_active_run_per_bot 激活后，bot 忙（有 queued/running 运行）时入站消息不落 runs 行
+  // （第二条 queued 会直接撞唯一索引），挂入按 bot 的待处理队列（settings 持久化，重启不丢）；
+  // bot 空闲时 drainPendingMessages 把挂起消息建回运行——chat/solo_chat 同类合批成一条，
+  // dm/dm_reply 按一条来信一条回信契约逐条放行不合批；task/review 运行照常落 runs 行排队，
+  // 不被消息合批吞并（与本队列互斥串行，靠 claimKey=bot 的领取闸保证）。
+  botBusy(botId) {
+    return Boolean(this.store.get(
+      "SELECT id FROM runs WHERE bot_id = ? AND status IN ('queued', 'running')",
+      botId,
+    ))
+  },
+  pendingMessagesKey(botId) {
+    return `bot_pending_msgs:${botId}`
+  },
+  holdPendingMessage(botId, item) {
+    const key = this.pendingMessagesKey(botId)
+    const list = jsonParse(this.store.setting(key), [])
+    const safe = Array.isArray(list) ? list : []
+    if (safe.some(existing => existing?.messageId === item.messageId)) return
+    this.store.setSetting(key, JSON.stringify([...safe, item]))
+  },
+  // 建回运行（drainPendingMessages 专用）：直接落 runs 行（含合批 merged_messages），
+  // UNIQUE 撞车（并发领取窗口）返回 null 交由调用方把消息留队列下一拍重试。
+  insertHeldMessageRun(bot, group) {
+    const item = group.first
+    const mergedIds = group.merge.map(entry => entry.messageId)
+    const createdAt = nowIso()
+    const runId = id('run')
+    // 任务挂起项（DSHBOTS-290 busy 闸）：按入队时快照建回写运行——列面与
+    // enqueueTaskRun 的直接 INSERT 一致（task_id/write_scopes/备用模型三列），
+    // UNIQUE 撞车（并发领取窗口）与消息族同口径返回 null 留队列。
+    if (item.kind === 'task') {
+      const routing = item.routing ?? {}
+      try {
+        this.store.run(
+          `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+            attempt, idempotency_key, write_scopes, model_provider, model_model, model_effort, queued_at)
+           VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?, ?, ?, ?, ?)`,
+          runId, item.projectId, bot.id, item.taskId, item.triggerType, item.taskId,
+          `task:${item.taskId}:${Date.now()}:${runId}`, item.writeScopes ?? '[]',
+          routing.provider ?? null, routing.model ?? null, routing.effort ?? null, createdAt,
+        )
+      } catch (error: any) {
+        if (String(error).includes('UNIQUE')) return null
+        throw error
+      }
+      this.insertRunEvent(runId, 'queued', `bot 空闲，挂起任务建回运行（由 ${item.actorType}:${item.actorId} 触发）`)
+      if (routing.mode === 'fallback') {
+        this.insertRunEvent(runId, 'quota_fallback', `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref ?? ''}（预计 ${routing.resetAt ?? '未知'} 恢复）`)
+      } else if (routing.mode === 'wait') {
+        this.insertRunEvent(runId, 'quota_wait', `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`)
+      }
+      if (item.triggerType === 'board_resume') {
+        this.insertRunEvent(runId, 'board_resume', '看板拖入执行中，系统指令自动开工')
+      }
+      return runId
+    }
+    // owner 任务运行挂起项（review/handle/review_delegate，DSHBOTS-290 busy 闸）：
+    // 只读任务运行，按入队时快照建回，列面与 enqueueOwnerTaskRun 一致。
+    if (item.kind === 'owner_task') {
+      try {
+        this.store.run(
+          `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+            attempt, idempotency_key, queued_at)
+           VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?)`,
+          runId, item.projectId, bot.id, item.taskId, item.runKind, item.triggerType, item.taskId,
+          `${item.triggerType}:${item.taskId}:${Date.now()}:${runId}`, createdAt,
+        )
+      } catch (error: any) {
+        if (String(error).includes('UNIQUE')) return null
+        throw error
+      }
+      this.insertRunEvent(runId, 'queued', 'bot 空闲，挂起的 owner 任务运行建回（验收/接管）')
+      return runId
+    }
+    const spec = item.kind === 'chat'
+      ? { projectId: item.projectId, mode: 'read', trigger: item.origin === 'wechat' ? 'wechat' : 'mention', idem: `chat:${item.messageId}:${bot.id}` }
+      : item.kind === 'solo_chat'
+        ? { projectId: null, mode: 'write', trigger: item.triggerType === 'wechat' ? 'wechat' : 'mention', idem: `solo_chat:${item.messageId}` }
+        : item.kind === 'dm'
+          ? { projectId: item.projectId, mode: 'read', trigger: 'dm', idem: `dm:${item.messageId}` }
+          : { projectId: item.projectId, mode: 'read', trigger: 'dm_reply', idem: `dm_reply:${item.messageId}` }
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, merged_messages, queued_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 1, ?, ?, ?)`,
+        runId, spec.projectId, bot.id, item.kind, spec.mode, spec.trigger, item.messageId,
+        spec.idem, mergedIds.length ? JSON.stringify(mergedIds) : null, createdAt,
+      )
+    } catch (error: any) {
+      if (String(error).includes('UNIQUE')) return null
+      throw error
+    }
+    if (item.kind === 'dm') {
+      this.store.run(
+        "UPDATE bot_messages SET status = 'delivered', run_id = ? WHERE id = ?",
+        runId, item.messageId,
+      )
+    }
+    this.insertRunEvent(runId, 'queued',
+      `bot 空闲，待处理消息建回运行${mergedIds.length ? `（合批 ${mergedIds.length} 条）` : ''}`)
+    return runId
+  },
+  // D-272 用户提问判定（挂起消息向，DSHBOTS-290 语义回补）：按触发消息的 sender_type
+  // 判定——chat 查 messages、solo_chat 查 solo_messages（单聊消息独立表）。用户发的消息
+  // 是「提问」，bot 触发（通知降级、@mention 唤醒、回信）不算。
+  // 注：卡面原文写「chat/solo_chat 查 messages」，实测单聊落 solo_messages 表，按实际表改；
+  // dm/dm_reply 查 bot_messages（DSHBOTS-291 覆盖补测实测）——该表无 sender_type 列且
+  // from_bot_id 恒为 bot（bot 间私信），不存在用户触发形态，恒为 false（逐条放行不参与合批，
+  // 该标记对 dm 组也无分组意义）。
+  heldItemIsUserQuestion(item) {
+    if (item?.kind === 'chat') {
+      const row = this.store.get('SELECT sender_type FROM messages WHERE id = ?', item.messageId)
+      return row?.sender_type === 'user'
+    }
+    if (item?.kind === 'solo_chat') {
+      const row = this.store.get('SELECT sender_type FROM solo_messages WHERE id = ?', item.messageId)
+      return row?.sender_type === 'user'
+    }
+    return false
+  },
+  // 争用口径 A 收口：bot 空闲时把挂起消息建回运行。chat/solo_chat 各取首条建运行、其余
+  // 同 kind 并入 merged_messages 同轮注入（合批成一条）；dm/dm_reply 一次只放行一条（回信
+  // 契约），余量留队列下一拍。建行失败（并发撞 UNIQUE）的消息全部留队列，不丢消息。
+  // D-287 合批语义回补（DSHBOTS-290，ADR §2.3）：①D-272 用户提问保护——用户提问不并入
+  // 非用户触发的挂起组（并入后提问只能挤在 Merged messages 段、没有直接回答锚点），提问
+  // 组单独成组且优先放行；②窗口 coalesce_window_ms（默认 30s）——与组首入队时间差超过
+  // 窗口不并；③上限 coalesce_max_messages（默认 5）——单组消息总数（首条+合并）封顶。
+  drainPendingMessages() {
+    const prefix = 'bot_pending_msgs:'
+    const max = Number(this.store.setting('coalesce_max_messages', String(COALESCE_MAX_MESSAGES_DEFAULT)))
+    // max<=1 = 关闭合批（与 D-287 入队合并同口径）；非法值同样回退为不并。
+    const cap = Number.isFinite(max) && max > 1 ? max : 1
+    const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
+    const rows = this.store.all(`SELECT key, value FROM settings WHERE key LIKE '${prefix}%'`)
+    for (const row of rows) {
+      const botId = row.key.slice(prefix.length)
+      const items = jsonParse(row.value, [])
+      if (!Array.isArray(items) || !items.length) continue
+      if (this.botBusy(botId)) continue
+      const bot = this.store.get('SELECT * FROM bots WHERE id = ?', botId)
+      if (!bot || bot.status !== 'active') {
+        this.store.setSetting(this.pendingMessagesKey(botId), '[]')
+        continue
+      }
+      // 相邻同 kind 的 chat/solo_chat 挂起消息合成一组（用户提问只并入同为用户触发的组、
+      // 窗口内、未超上限）；dm/dm_reply/task 独立成组逐条放行。
+      const groups = []
+      for (const item of items) {
+        const last = groups[groups.length - 1]
+        const mergeableKind = item.kind === 'chat' || item.kind === 'solo_chat'
+        const withinWindow = Number.isFinite(windowMs)
+          && Date.parse(item.queuedAt ?? '') - Date.parse(last?.first?.queuedAt ?? '') <= windowMs
+        if (last && last.first.kind === item.kind && mergeableKind
+          && last.first.projectId === item.projectId
+          && last.merge.length + 1 < cap
+          && withinWindow
+          && this.heldItemIsUserQuestion(item) === this.heldItemIsUserQuestion(last.first)) {
+          last.merge.push(item)
+        } else {
+          groups.push({ first: item, merge: [] })
+        }
+      }
+      // 用户提问组优先放行（D-272 出队优先的队列侧对偶），sort 稳定保住组间先后。
+      groups.sort((a, b) => Number(this.heldItemIsUserQuestion(b.first)) - Number(this.heldItemIsUserQuestion(a.first)))
+      const consumed = new Set()
+      for (const group of groups) {
+        if (this.botBusy(botId)) break
+        const runId = this.insertHeldMessageRun(bot, group)
+        if (!runId) break
+        consumed.add(group.first.messageId)
+        for (const entry of group.merge) consumed.add(entry.messageId)
+        if (group.first.kind === 'dm' || group.first.kind === 'dm_reply') break
+      }
+      const leftover = items.filter(item => !consumed.has(item?.messageId))
+      this.store.setSetting(this.pendingMessagesKey(botId), JSON.stringify(leftover))
+    }
+  },
+
   // 建私信执行运行：目标 Bot 的 dm 会话收到来信，产出回信写入 bot_messages.reply。
   enqueueDmRun(message, target) {
     const existing = this.store.get(
@@ -73,6 +260,11 @@ export const runsMethods = {
       message.id,
     )
     if (existing) return existing.id
+    // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列（一条来信一条回信，不合批）。
+    if (this.botBusy(target.id)) {
+      this.holdPendingMessage(target.id, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
+      return null
+    }
     const runId = id('run')
     const createdAt = nowIso()
     this.store.run(
@@ -93,15 +285,15 @@ export const runsMethods = {
   deliverBotReply(message) {
     const caller = this.store.get('SELECT * FROM bots WHERE id = ?', message.from_bot_id)
     if (!caller || caller.status !== 'active') return null
-    const kind = message.origin_kind === 'task' ? 'task' : message.origin_kind === 'dm' ? 'dm' : 'project'
-    const binding = message.origin_kind === 'task' && message.origin_task_id
-      ? this.store.get(
-        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ? AND alias = 0",
-        caller.id, message.project_id, message.origin_task_id,
-      )
-      : this.store.get(
-        'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ? AND alias = 0',
-        caller.id, message.project_id, kind,
+    // 控制面收敛（DSHBOTS-289）：回信目标按收敛顺序解析——来源任务未终态时按 runs 归属
+    // 亲和回原任务会话（steer/排运行都指向它），否则落发送方的 kind='bot' 控制面单绑定。
+    const originTask = message.origin_kind === 'task' && message.origin_task_id
+      ? this.store.get('SELECT * FROM tasks WHERE id = ?', message.origin_task_id)
+      : null
+    const binding = (originTask ? this.runtime.taskAffinityBinding(originTask) : undefined)
+      ?? this.store.get(
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
+        caller.id,
       )
     // 无绑定（会话被轮换清理或首次私信）：走 dm_reply 运行，由 startRun 重建会话。
     let plan
@@ -151,6 +343,11 @@ export const runsMethods = {
       bot.id,
     )
     if (existing) return existing.id
+    // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
+    if (this.botBusy(bot.id)) {
+      this.holdPendingMessage(bot.id, { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
+      return null
+    }
     const runId = id('run')
     const createdAt = nowIso()
     this.store.run(
@@ -175,6 +372,11 @@ export const runsMethods = {
       bot.id,
     )
     if (existing) return existing.id
+    // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
+    if (this.botBusy(bot.id)) {
+      this.holdPendingMessage(bot.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
+      return null
+    }
     const runId = id('run')
     const createdAt = nowIso()
     // 微信直达（DSHBOTS-208）：trigger_type 记 'wechat'，运行收尾据此把 bot 回复推回微信管理员。

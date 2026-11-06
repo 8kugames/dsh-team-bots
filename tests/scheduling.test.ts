@@ -65,7 +65,12 @@ async function manualSetup() {
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  return { root, store, service, runtime, director, dev }
+  // DSHBOTS-290：bot 级串行（one_active_run_per_bot）下同 bot 双运行必串行（第二条直接挂起
+  // 不落 runs 行）；需要并行的用例把第二条任务/消息路由到 dev2 车道。
+  const dev2 = await service.createBot({
+    name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
+  })
+  return { root, store, service, runtime, director, dev, dev2 }
 }
 
 function runningRuns(store) {
@@ -90,14 +95,29 @@ async function closeQuietly(store, timeout = 2000) {
   } catch {}
 }
 
+// 驱动 tick 直到目标条件成立：任务交付级联出的 memory_review/核验运行会占住 bot 车道
+// （DSHBOTS-290 同 bot 至多一条活跃运行），逐拍完成中间运行让 bot 回到空闲，挂起的
+// 任务/消息才能建回。命中即停，不完成目标运行。构造与 tests/run-coalesce.test.js 同款。
+async function drainUntilStarted(service, runtime, predicate, maxTicks = 8) {
+  for (let i = 0; i < maxTicks; i += 1) {
+    if (predicate()) return true
+    await service.tick()
+    if (predicate()) return true
+    for (const runId of [...runtime.pendingRuns.keys()]) await runtime.complete(runId)
+  }
+  return Boolean(predicate())
+}
+
 test('同项目写运行串行，跨项目与只读运行可并行', async () => {
-  const { root, store, service, runtime, director, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev, dev2 } = await manualSetup()
   try {
-    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
-    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id] })
+    const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
+    const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     const first = await service.createTask({ projectId: alpha.id, title: 'A1', assigneeBotId: dev.id, autoStart: true })
-    await service.createTask({ projectId: alpha.id, title: 'A2', assigneeBotId: dev.id, autoStart: true })
-    await service.createTask({ projectId: beta.id, title: 'B1', assigneeBotId: dev.id, autoStart: true })
+    // A2 与 A1 同 bot 同项目：one_active_run_per_bot 下 A2 挂待处理队列（不落 runs 行），A1 结束后建回。
+    const second = await service.createTask({ projectId: alpha.id, title: 'A2', assigneeBotId: dev.id, autoStart: true })
+    // 跨项目并行需要异 bot 车道（DSHBOTS-290）：B1 走 dev2。
+    await service.createTask({ projectId: beta.id, title: 'B1', assigneeBotId: dev2.id, autoStart: true })
 
     service.started = true
     await service.tick()
@@ -110,10 +130,13 @@ test('同项目写运行串行，跨项目与只读运行可并行', async () =>
     assert.ok(running.every(run => run.mode === 'write'))
     assert.ok(runtime.started.some(item => item.taskId === first.id))
 
-    // 唯一的正在运行的 Alpha 写运行结束后，排队的第二个任务才会被领取。
+    // 唯一的正在运行的 Alpha 写运行结束后，挂起的第二个任务才会建回并被领取；
+    // 交付级联的 memory_review 运行先消化，让 dev 车道回到空闲。
     const alphaRun = running.find(run => run.project_id === alpha.id)
     await runtime.complete(alphaRun.id)
-    await service.tick()
+    const drained = await drainUntilStarted(service, runtime, () =>
+      runtime.started.some(item => item.taskId === second.id))
+    assert.ok(drained, 'A1 结束后 A2 应建回并被领取')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE project_id = ? AND status = 'running' AND mode = 'write'", alpha.id).n, 1)
   } finally {
     await closeQuietly(store)
@@ -122,15 +145,16 @@ test('同项目写运行串行，跨项目与只读运行可并行', async () =>
 })
 
 test('同项目写运行：声明的写范围不重叠时并行放行', async () => {
-  const { root, store, service, runtime, director, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Scopes', key: 'SCP', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Scopes', key: 'SCP', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     const first = await service.createTask({
       projectId: project.id, title: '改聊天模块', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
     })
+    // DSHBOTS-290：第二条走 dev2 车道，两条运行同时排队供闸门比对。
     const second = await service.createTask({
-      projectId: project.id, title: '改调度模块', assigneeBotId: dev.id,
+      projectId: project.id, title: '改调度模块', assigneeBotId: dev2.id,
       writeScopes: ['ui/modules/scheduler.js'], autoStart: true,
     })
 
@@ -154,29 +178,43 @@ test('同项目写运行：声明的写范围不重叠时并行放行', async ()
   }
 })
 
-test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
-  const { root, store, service, runtime, director, dev } = await manualSetup()
+test('同 Bot 任务运行与群聊回复串行（忙时挂起、空闲建回），跨 Bot 群聊不被他人任务挡住', async () => {
+  const { root, store, service, runtime, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     await service.createTask({ projectId: project.id, title: 'Long task', assigneeBotId: dev.id, autoStart: true })
     service.started = true
     await service.tick()
+    const taskRun = runningRuns(store).find(run => run.kind === 'task')
+    assert.ok(taskRun)
     assert.equal(runningRuns(store).length, 1)
 
-    await service.sendMessage(project.id, '@Builder 顺便回复一句')
-    await service.tick()
+    // DSHBOTS-290：dev 忙（one_active_run_per_bot）时 @Builder 的群聊回复不落 runs 行，
+    // 挂待处理队列；同一条消息里空闲 bot（Builder2）的 @ 照常落行调度。
+    await service.sendMessage(project.id, '@Builder @Builder2 顺便回复一句')
+    const heldForDev = JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]')
+    assert.equal(heldForDev.length, 1, '忙 bot 的群聊消息应挂待处理队列')
+    assert.equal(
+      store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'chat' AND bot_id = ?", dev.id).n,
+      0,
+      '挂起期间不得为忙 bot 建群聊运行',
+    )
 
-    const running = runningRuns(store)
-    const chatRun = running.find(run => run.kind === 'chat')
-    const taskRun = running.find(run => run.kind === 'task')
-    assert.ok(chatRun, '群聊回复应在任务运行期间被调度')
-    assert.ok(taskRun, '任务运行不应被群聊回复打断')
-    assert.equal(chatRun.bot_id, dev.id)
-    // 同一条会话上的运行仍然串行：总监会话的群聊与验收共用项目通道键（DSHBOTS-219 分身通道）。
-    assert.equal(service.claimKey(chatRun), `project:${dev.id}:${project.id}`)
-    assert.equal(service.claimKey(taskRun), `task:${taskRun.task_id}`)
-    await runtime.complete(chatRun.id)
+    await service.tick()
+    const otherChat = runningRuns(store).find(run => run.kind === 'chat' && run.bot_id === dev2.id)
+    assert.ok(otherChat, '空闲 bot 的群聊回复在他人任务运行期间照常被调度')
+    assert.equal(service.claimKey(otherChat), `bot:${dev2.id}`, '串行键已收敛到 bot（DSHBOTS-289）')
+    assert.ok(runningRuns(store).some(run => run.id === taskRun.id), '任务运行不被群聊回复打断')
+
+    // 任务结束（消化交付级联的 memory_review 等）后，挂起的群聊建回执行。
     await runtime.complete(taskRun.id)
+    const drained = await drainUntilStarted(service, runtime, () =>
+      Boolean(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id)))
+    assert.ok(drained, 'bot 空闲后挂起的群聊回复应建回执行')
+    const chatRun = runningRuns(store).find(run => run.kind === 'chat' && run.bot_id === dev.id)
+    assert.equal(chatRun.bot_id, dev.id)
+    assert.equal(service.claimKey(chatRun), `bot:${dev.id}`)
+    assert.deepEqual(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]'), [], '建回后挂起队列清空')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -184,12 +222,13 @@ test('同一 Bot 的任务运行与群聊回复互不阻塞', async () => {
 })
 
 test('出队顺序按任务优先级，紧急任务不被积压拖死', async () => {
-  const { root, store, service, runtime, director, dev } = await manualSetup()
+  const { root, store, service, runtime, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Prio', key: 'PRI', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Prio', key: 'PRI', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     // 同项目只有一个写运行槽位：先入队的低优先级任务不应挡住后入队的紧急任务。
-    await service.createTask({ projectId: project.id, title: 'Backlog', priority: 'low', assigneeBotId: dev.id, autoStart: true })
-    const urgent = await service.createTask({ projectId: project.id, title: 'Hotfix', priority: 'urgent', assigneeBotId: dev.id, autoStart: true })
+    // DSHBOTS-290：领取顺序的比对需要两条运行同时排队，两条任务分属 dev/dev2 车道。
+    const backlog = await service.createTask({ projectId: project.id, title: 'Backlog', priority: 'low', assigneeBotId: dev.id, autoStart: true })
+    const urgent = await service.createTask({ projectId: project.id, title: 'Hotfix', priority: 'urgent', assigneeBotId: dev2.id, autoStart: true })
 
     service.started = true
     await service.tick()
@@ -198,9 +237,12 @@ test('出队顺序按任务优先级，紧急任务不被积压拖死', async ()
     assert.equal(running.length, 1)
     assert.equal(running[0].task_id, urgent.id, '紧急任务应先于更早入队的低优先级任务领取')
 
-    // 紧急任务结束后，低优先级任务照旧被执行，队列不饿死。
+    // 紧急任务结束后，低优先级任务照旧被执行，队列不饿死
+    // （先消化交付级联的 memory_review/核验运行，再驱动下一拍）。
     await runtime.complete(running[0].id)
-    await service.tick()
+    const drained = await drainUntilStarted(service, runtime, () =>
+      runtime.started.some(item => item.taskId === backlog.id))
+    assert.ok(drained, '紧急任务结束后低优先级任务应被领取')
     const next = runningRuns(store).filter(run => run.kind === 'task')
     assert.equal(next.length, 1)
     assert.notEqual(next[0].task_id, urgent.id)
@@ -289,10 +331,16 @@ test('旧库的 session_bindings 迁移后可容纳每任务会话', async () =>
         'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',
         's3', 'b1', 'p1', 'task', 't2', now,
       )
-      // 但每 Bot 每项目只能有一个非任务会话
-      assert.throws(() => store.run(
+      // DSHBOTS-285：车道唯一索引已退役，project 车道行可共存（历史/过渡态），不再被拒
+      store.run(
         'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',
         's4', 'b1', 'p1', 'project', null, now,
+      )
+      // 收敛不变量：迁移已把旧 project 活跃行转为该 bot 的控制面绑定，每 bot 恰一条 kind='bot' 活跃绑定
+      assert.equal(store.get('SELECT kind FROM session_bindings WHERE session_id = ?', 's1').kind, 'bot')
+      assert.throws(() => store.run(
+        "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES (?,?,?,?,?,?,0)",
+        's5', 'b1', 'p1', 'bot', null, now,
       ))
     } finally {
       store.close()

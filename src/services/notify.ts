@@ -18,8 +18,10 @@ import { text } from '../util.js'
 export const RUN_PARTNER_NOTICE_CAP = 3
 export const PARTNER_NOTICE_DAILY_CAP = 5
 
-// ── 滞留阈值兜底（DSHBOTS-280）：in_review/blocked 非施工状态的超时提醒 ─────────
+// ── 滞留阈值兜底（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：四态三档梯度 ──────
 // 只提醒不自动处置：不自动关单、不自动转状态、不重派，验收与解阻由项目总监闭环（DSHBOTS-281 口径）。
+// 三档梯度（D-295）：待执行 72h 宽档 / in_review 24h / blocked 48h。
+export const STALE_PENDING_HOURS = 72
 export const STALE_REVIEW_HOURS = 24
 export const STALE_BLOCKED_HOURS = 48
 export const STALE_CARD_NOTICE_PREFIX = '【滞留提醒】'
@@ -27,22 +29,32 @@ export const STALE_CARD_NOTICE_PREFIX = '【滞留提醒】'
 // 滞留判定（纯函数，供 scheduler 扫描与守门测试共用；阈值内/外两向可测）。
 // 基准时间 = tasks.updated_at：blocked 无专门「进入 blocked」时间戳列，用 updated_at 近似
 // ——转 blocked 走 updateTask 必刷 updated_at，其后任何卡面更新同样只推迟提醒，不会漏报。
+// 待执行态锚（D-295 调查）：tasks 表无 'pending' 状态（TASK_STATUSES =
+// backlog/todo/in_progress/blocked/in_review/done/canceled，tasks.ts），实际待执行态
+// = 'backlog'（立卡未派、无 assignee——没人派）与 'todo'（已派未领——没人领），与
+// system.ts pendingRows ['todo','backlog'] 同口径；两态共用 72h 宽档。
+const STALE_PENDING_STATUSES = new Set(['backlog', 'todo'])
 export function staleCardHit({ status, updated_at, now = Date.now() } = {} as any) {
-  if (status !== 'in_review' && status !== 'blocked') return null
+  if (status !== 'in_review' && status !== 'blocked' && !STALE_PENDING_STATUSES.has(status)) return null
   const baseMs = updated_at ? new Date(updated_at).getTime() : NaN
   if (!Number.isFinite(baseMs)) return null
   const hours = (now - baseMs) / 3_600_000
-  const threshold = status === 'in_review' ? STALE_REVIEW_HOURS : STALE_BLOCKED_HOURS
+  const threshold = status === 'in_review'
+    ? STALE_REVIEW_HOURS
+    : status === 'blocked' ? STALE_BLOCKED_HOURS : STALE_PENDING_HOURS
   return hours > threshold ? { status, hours, threshold } : null
 }
 
 // D-269 口径文案 = 原因（滞留时长+阈值）+ 点名总监的处置方向（DSHBOTS-281：处置归项目
-// 总监自行闭环，不写「owner 可改/可用」转接话术；blocked 侧重派即自动重置死线窗口）。
+// 总监自行闭环，不写「owner 可改/可用」转接话术；blocked 侧重派即自动重置死线窗口；
+// 待执行 D-295：派发/推进/合并/取消都是总监动作——team_assign_task，不转接 owner）。
 export function staleCardNoticeBody({ identifier, status, hours } = {} as any) {
   const idle = Math.floor(hours)
-  return status === 'in_review'
-    ? `${STALE_CARD_NOTICE_PREFIX}${identifier} 待验收已滞留 ${idle} 小时（阈值 ${STALE_REVIEW_HOURS}h）：待总监验收收口（accept/return）。`
-    : `${STALE_CARD_NOTICE_PREFIX}${identifier} 受阻已滞留 ${idle} 小时（阈值 ${STALE_BLOCKED_HOURS}h）：待总监解阻/收口（重派即自动重置死线窗口）。`
+  if (status === 'in_review')
+    return `${STALE_CARD_NOTICE_PREFIX}${identifier} 待验收已滞留 ${idle} 小时（阈值 ${STALE_REVIEW_HOURS}h）：待总监验收收口（accept/return）。`
+  if (status === 'blocked')
+    return `${STALE_CARD_NOTICE_PREFIX}${identifier} 受阻已滞留 ${idle} 小时（阈值 ${STALE_BLOCKED_HOURS}h）：待总监解阻/收口（重派即自动重置死线窗口）。`
+  return `${STALE_CARD_NOTICE_PREFIX}${identifier} 待执行已滞留 ${idle} 小时（阈值 ${STALE_PENDING_HOURS}h）：待总监派发或推进（team_assign_task 派发/合并/取消）。`
 }
 
 export const notifyMethods = {
@@ -144,10 +156,13 @@ export const notifyMethods = {
       body: notice,
       mentions: [target.id],
     })
+    // DSHBOTS-293 旧车道残留修复：四车道收敛后（DSHBOTS-288/289）活跃绑定只有
+    // kind='bot' 一道，原 kind='project' 查询恒落空——成员通知的宿主通道永远降级
+    // 群聊流。改为按 bot 唯一控制面绑定解析（与 runs.ts/runtime/session.ts 同款），
+    // 不按 project_id 过滤：多项目 bot 的单条控制面绑定 project_id 只属创建时的项目。
     const binding = this.store.get(
-      "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'project' AND alias = 0",
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
       target.id,
-      project.id,
     )
     if (binding && typeof this.runtime?.steer === 'function') {
       try {

@@ -191,39 +191,54 @@ test('state 携带 solo 段：单聊消息、运行与 bot 视图', async () => 
   }
 })
 
-test('单聊与同 Bot 群聊互不阻塞、同 Bot 单聊合批、跨 Bot 单聊并行（DSHBOTS-219 分身通道）', async () => {
+test('单聊与同 Bot 群聊互相阻塞、跨 Bot 单聊并行（DSHBOTS-219 分身通道 · 争用口径 A 新语义）', async () => {
   const { root, store, service, runtime, director, dev } = await soloSetup()
   try {
+    // 记忆审查派生运行与本卡串行语义无关，关掉保时序确定。
+    store.setSetting('memory_review', '0')
+    store.setSetting('chat_memory_review', '0')
     const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id] })
     await service.createTask({ projectId: project.id, title: '长任务', assigneeBotId: dev.id, autoStart: true })
+    // 任务运行先落行占道（outbox 立即投递），同 bot 的单聊/群聊随后到达：全部挂起不落 runs 行。
     await service.sendSoloMessage(dev.id, '单聊插个问题')
     await service.sendSoloMessage(dev.id, '单聊第二条')
     await service.sendMessage(project.id, '@Builder 群里也回一句')
+    // 跨 bot 单聊：总监自己的控制面，照常建行并行。
     await service.sendSoloMessage(director.id, '和总监单独聊聊')
 
     service.started = true
     await service.tick()
     const running = store.all("SELECT * FROM runs WHERE status = 'running'")
     const kinds = running.map(row => `${row.kind}:${row.bot_id}`)
-    // 任务运行（写锁在项目）+ Builder 单聊（第一条）+ 总监单聊可同时跑
+    // 任务运行（占道）+ 总监单聊可同时跑；Builder 单聊与群聊都被占道挂起。
     assert.ok(kinds.includes(`task:${dev.id}`), running.map(r => r.kind).join(','))
-    assert.ok(kinds.includes(`solo_chat:${dev.id}`))
-    assert.ok(kinds.includes(`solo_chat:${director.id}`))
-    // 分身通道（DSHBOTS-219）：同一 bot 的群聊回复不再被单聊占道——即使单聊还挂着，群聊照常启动
-    assert.ok(kinds.includes(`chat:${dev.id}`), '单聊运行期间群聊回复应并行启动')
-    // DSHBOTS-231 合批：同 bot 第二条单聊在首条领取时合并进同一轮上下文，不再单独排队。
-    const queued = store.all("SELECT * FROM runs WHERE status = 'queued'")
-    assert.ok(!queued.some(row => row.kind === 'solo_chat' && row.bot_id === dev.id), '同 bot 第二条单聊应被合并，不再排队')
-    const devSolo = running.find(row => row.kind === 'solo_chat' && row.bot_id === dev.id)
-    assert.equal(JSON.parse(devSolo.merged_messages).length, 1, '首条单聊运行应携带被合并的第二条消息')
+    assert.ok(kinds.includes(`solo_chat:${director.id}`), '跨 bot 单聊应照常并行启动')
+    assert.ok(!kinds.includes(`solo_chat:${dev.id}`), '同 bot 单聊被任务占道挂起，不落 runs 行')
+    assert.ok(!kinds.includes(`chat:${dev.id}`), '同 bot 群聊同样被占道挂起')
+    assert.equal(store.all("SELECT * FROM runs WHERE bot_id = ? AND kind IN ('solo_chat', 'chat')", dev.id).length, 0, '挂起期间不落任何 runs 行')
+    // 留痕：第二条单聊与群聊按序挂 bot_pending_msgs:<bot>。
+    assert.deepEqual(
+      JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').map(item => item.kind),
+      ['solo_chat', 'solo_chat', 'chat'],
+      '挂起队列保序留痕',
+    )
 
+    // 任务收尾 → 空闲 drain：两条单聊合批建回一条运行（第二条并入 merged_messages），群聊仍留队列。
+    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'task' AND status = 'running'").id, 'succeeded', 'done')
+    await service.tick()
+    const devSolo = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id)
+    assert.ok(devSolo, '空闲后单聊合批建回开跑')
+    assert.equal(JSON.parse(devSolo.merged_messages).length, 1, '建回的单聊运行应携带被合并的第二条消息')
+    assert.ok(!store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ?", dev.id), '单聊建回期间群聊仍留队列')
+
+    // 单聊收尾 → 群聊建回开跑。
     await runtime.complete(devSolo.id, 'succeeded', '单聊回复')
     await service.tick()
-    const secondSolo = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id)
-    assert.ok(!secondSolo, '第二条单聊已合并进首条运行，不再单独启动')
-    await runtime.complete(running.find(row => row.kind === 'solo_chat' && row.bot_id === director.id).id, 'succeeded', '好')
-    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'chat' AND status = 'running'").id, 'succeeded', '群聊回复')
-    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'task' AND status = 'running'").id, 'succeeded', 'done')
+    assert.ok(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id), '群聊最终建回开跑')
+    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').length, 0, '建回后挂起队列清空')
+
+    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id).id, 'succeeded', '群聊回复')
+    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", director.id).id, 'succeeded', '好')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -305,9 +320,18 @@ test('runs 与 session_bindings 的 project_id 迁移为可空', async () => {
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
       now,
     )
-    // 每 bot 只能有一条单聊会话绑定
-    assert.throws(() => store.run(
+    // DSHBOTS-285：solo 车道唯一索引已退役，车道行可共存（历史/过渡态），不再被拒
+    store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo2', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
+      now,
+    )
+    // 收敛不变量：每 bot 恰一条 kind='bot' 活跃绑定
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
+      now,
+    )
+    assert.throws(() => store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot2', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
       now,
     ))
     assert.equal(store.all('PRAGMA foreign_key_check').length, 0)

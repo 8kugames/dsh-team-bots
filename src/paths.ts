@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import { lstat, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
@@ -116,6 +117,17 @@ export async function botWorkspaceDir(workspaceRoot, soloDir) {
   const info = await lstat(targetReal)
   if (!info.isDirectory()) throw new PathError('单聊工作区不是目录')
   return targetReal
+}
+
+// DSHBOTS-282 展示层路径：home 前缀的绝对路径转 ~/ 形式（隐私友好+展示简洁）。
+// 只用于提示词/文本输出层；一切真实路径解析/读写消费原始绝对路径，不经本函数。
+// 非 home 前缀路径原样返回；home 参数仅供测试注入，生产调用不传。
+export function displayPath(path, home = homedir()) {
+  if (path === null || path === undefined) return ''
+  const raw = String(path)
+  if (!raw) return ''
+  if (raw === home) return '~'
+  return raw.startsWith(`${home}${sep}`) ? `~${raw.slice(home.length)}` : raw
 }
 
 export function relativeWorkspacePath(workspaceRoot, absolutePath) {

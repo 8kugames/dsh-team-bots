@@ -185,12 +185,14 @@ test('提问 pending 未过期时，等待人类作答的运行不计入 stall',
 test('提问进入终态或窗口过期后，超龄运行照常被看门狗回收', async () => {
   const { root, store, service, runtime, director, dev } = await setup({ stallTimeoutMs: 30_000, questionTimeoutMs: 180_000 })
   try {
-    // 两个项目各挂一条超龄 run（同项目未声明写范围的写运行会保守串行，第二条起不了跑）：
+    // 两个项目各挂一条超龄 run（one_active_run_per_bot：同 bot 同时只有一条活跃，
+    // 第二条样本拆给另一个 bot，跨 bot 并行不受限）：
     // A 挂已答（终态）提问、expires_at 还在未来；B 挂泄漏 pending（窗口已过）。
+    const watcher = await service.createBot({ name: 'Watcher', role: '测试', instructions: 'Watch.', provider: 'fake', model: 'model-a' })
     const projectA = await service.createProject({ name: 'AskDone', key: 'ASD', ownerBotId: director.id, memberIds: [dev.id] })
-    const projectB = await service.createProject({ name: 'AskLeak', key: 'ASL', ownerBotId: director.id, memberIds: [dev.id] })
+    const projectB = await service.createProject({ name: 'AskLeak', key: 'ASL', ownerBotId: director.id, memberIds: [watcher.id] })
     const taskA = await service.createTask({ projectId: projectA.id, title: 'Answered', assigneeBotId: dev.id, autoStart: true })
-    const taskB = await service.createTask({ projectId: projectB.id, title: 'Leaked pending', assigneeBotId: dev.id, autoStart: true })
+    const taskB = await service.createTask({ projectId: projectB.id, title: 'Leaked pending', assigneeBotId: watcher.id, autoStart: true })
     service.started = true
     await service.tick()
     const runA = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task'", taskA.id)
@@ -260,12 +262,14 @@ test('审批 pending 未过期时，等待人类决策的运行不计入 stall',
 test('审批进入终态或窗口过期后，超龄运行照常被看门狗回收', async () => {
   const { root, store, service, runtime, director, dev } = await setup({ stallTimeoutMs: 30_000, approvalTimeoutMs: 180_000 })
   try {
-    // 两个项目各挂一条超龄 run（同项目未声明写范围的写运行会保守串行，第二条起不了跑）：
+    // 两个项目各挂一条超龄 run（one_active_run_per_bot：同 bot 同时只有一条活跃，
+    // 第二条样本拆给另一个 bot，跨 bot 并行不受限）：
     // A 挂已批准（终态）审批、expires_at 还在未来；B 挂泄漏 pending（窗口已过）。
+    const watcher = await service.createBot({ name: 'Watcher', role: '测试', instructions: 'Watch.', provider: 'fake', model: 'model-a' })
     const projectA = await service.createProject({ name: 'ApproveDone', key: 'APD', ownerBotId: director.id, memberIds: [dev.id] })
-    const projectB = await service.createProject({ name: 'ApproveLeak', key: 'APL', ownerBotId: director.id, memberIds: [dev.id] })
+    const projectB = await service.createProject({ name: 'ApproveLeak', key: 'APL', ownerBotId: director.id, memberIds: [watcher.id] })
     const taskA = await service.createTask({ projectId: projectA.id, title: 'Approved', assigneeBotId: dev.id, autoStart: true })
-    const taskB = await service.createTask({ projectId: projectB.id, title: 'Leaked pending', assigneeBotId: dev.id, autoStart: true })
+    const taskB = await service.createTask({ projectId: projectB.id, title: 'Leaked pending', assigneeBotId: watcher.id, autoStart: true })
     service.started = true
     await service.tick()
     const runA = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task'", taskA.id)

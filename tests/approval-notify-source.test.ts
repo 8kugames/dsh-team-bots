@@ -98,6 +98,8 @@ test('approvalsPending 明细带来源群聊 KEY 与任务 ID/任务名；无任
     assert.equal(projectItems[0].taskIdentifier, `${project.key}-${task.number}`, '项目内条目带任务标识')
 
     // 无任务锚定的审批（如纯群聊运行）不猜任务：字段留空，来源行只出群聊。
+    // one_active_run_per_bot（DSHBOTS-291）：同 bot 第二条活跃运行播种前先置终态释放。
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run-src'", '2026-01-01T00:00:01.500Z')
     store.run(
       `INSERT INTO runs(id, bot_id, task_id, kind, trigger_type, status, idempotency_key, session_id, queued_at)
        VALUES (?, ?, NULL, 'chat_run', 'chat', 'running', ?, ?, ?)`,

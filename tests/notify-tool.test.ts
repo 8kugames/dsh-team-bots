@@ -78,8 +78,8 @@ const outboxFor = (store, kind, like) =>
 test('target=member 双写：宿主通道 steer 投递 + 群聊留痕（来源 bot、@目标）', async () => {
   const t = await setup()
   try {
-    bindSession(t.store, { sessionId: 'sess-caller', botId: t.caller.id, projectId: t.project.id })
-    bindSession(t.store, { sessionId: 'sess-target', botId: t.target.id, projectId: t.project.id })
+    bindSession(t.store, { sessionId: 'sess-caller', botId: t.caller.id, projectId: t.project.id, kind: 'bot' })
+    bindSession(t.store, { sessionId: 'sess-target', botId: t.target.id, projectId: t.project.id, kind: 'bot' })
     const result = await t.service.notifyFromBot('sess-caller', {
       target: 'member', member: 'Builder', message: '请复核 D-243 的守门断言',
     })
@@ -102,8 +102,8 @@ test('target=member 降级单写：宿主句柄不可达 → 群聊流 insertMes
   try {
     // 运行时无 steer 句柄（宿主通道在服务层不可达）。
     delete t.runtime.steer
-    bindSession(t.store, { sessionId: 'sess-caller', botId: t.caller.id, projectId: t.project.id })
-    bindSession(t.store, { sessionId: 'sess-target', botId: t.target.id, projectId: t.project.id })
+    bindSession(t.store, { sessionId: 'sess-caller', botId: t.caller.id, projectId: t.project.id, kind: 'bot' })
+    bindSession(t.store, { sessionId: 'sess-target', botId: t.target.id, projectId: t.project.id, kind: 'bot' })
     const result = await t.service.notifyFromBot('sess-caller', {
       target: 'member', member: 'Builder', message: '宿主通道不可达时的兜底',
     })
@@ -124,8 +124,8 @@ test('target=member 失败降级：宿主通道投递抛错只 warn 不抛，转
   t.logger.warn = (...args: unknown[]) => warnings.push(args.join(' '))
   t.runtime.steerImpl = async () => { throw new Error('host channel down') }
   try {
-    bindSession(t.store, { sessionId: 'sess-caller', botId: t.caller.id, projectId: t.project.id })
-    bindSession(t.store, { sessionId: 'sess-target', botId: t.target.id, projectId: t.project.id })
+    bindSession(t.store, { sessionId: 'sess-caller', botId: t.caller.id, projectId: t.project.id, kind: 'bot' })
+    bindSession(t.store, { sessionId: 'sess-target', botId: t.target.id, projectId: t.project.id, kind: 'bot' })
     const result = await t.service.notifyFromBot('sess-caller', {
       target: 'member', member: 'Builder', message: '通道抖动',
     })

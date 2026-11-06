@@ -52,26 +52,25 @@ export const RUNS_INDEXES = `
   CREATE INDEX IF NOT EXISTS runs_bot_status_idx
     ON runs(bot_id, COALESCE(ended_at, queued_at) DESC);
 `
+// 注意：one_active_run_per_bot（同 bot 同时至多一条 queued/running，DSHBOTS-285/ADR §2.3）
+// 不放在这里——它的激活与 §5.2-2 入站路由收敛同车（见 activateBotRunSerialization 注释）。
 
 export const BINDINGS_DDL = `
   session_id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL DEFAULT 'project',
+  kind TEXT NOT NULL DEFAULT 'bot',
   task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL,
   alias INTEGER NOT NULL DEFAULT 0
 `
 
-// alias=1 是会话结转/失效替换后保留的授权别名：旧 session id 仍解析到同 bot/项目/车道，
-// 但不再作为活跃绑定参与「每 bot 每项目每车道一个会话」的唯一约束。
+// 库与绑定收敛（DSHBOTS-285，ADR §4.1）：活跃绑定收敛为每 bot 单条 kind='bot' 控制面绑定，
+// 旧 task/project/dm/solo 四道唯一索引删除；task_id 列保留仅供历史行解析。
+// 新库建表（db.js SCHEMA）与旧库迁移重建共用同一段 DDL，避免两处定义漂移。
 const BINDING_INDEXES = `
-  CREATE UNIQUE INDEX IF NOT EXISTS one_project_binding
-    ON session_bindings(bot_id, project_id, kind) WHERE task_id IS NULL AND project_id IS NOT NULL AND alias = 0;
-  CREATE UNIQUE INDEX IF NOT EXISTS one_task_binding
-    ON session_bindings(bot_id, project_id, kind, task_id) WHERE task_id IS NOT NULL AND alias = 0;
-  CREATE UNIQUE INDEX IF NOT EXISTS one_solo_binding
-    ON session_bindings(bot_id) WHERE kind = 'solo' AND project_id IS NULL AND task_id IS NULL AND alias = 0;
+  CREATE UNIQUE INDEX IF NOT EXISTS one_bot_binding
+    ON session_bindings(bot_id) WHERE kind = 'bot' AND alias = 0;
   CREATE INDEX IF NOT EXISTS session_bindings_task_idx ON session_bindings(task_id);
 `
 
@@ -110,6 +109,11 @@ export function runMigrations(db) {
   migrateSoloDirUnique(db)
   migrateMessages(db)
   migrateSessionBindingAlias(db)
+  migrateSessionBindingBotConvergence(db)
+  // one_active_run_per_bot 激活（DSHBOTS-289，ADR §5.2-2）：控制面会话收敛（上迁移）+
+  // 争用口径 A（enqueue 家族 bot 忙时挂待处理队列不落 runs 行）同车后激活——存量串行化
+  // （同 bot 多条 queued/running 只留最早一条，其余 canceled）+ 建 bot 级部分唯一索引。
+  activateBotRunSerialization(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -274,6 +278,70 @@ function migrateSessionBindingAlias(db) {
   db.exec('DROP INDEX IF EXISTS one_task_binding')
   db.exec('DROP INDEX IF EXISTS one_solo_binding')
   db.exec(BINDING_INDEXES)
+}
+
+// 库与绑定收敛（DSHBOTS-285，ADR §4.1/§5.2-1）：四车道收敛为每 bot 单条 kind='bot' 控制面绑定。
+// 索引部分无条件幂等（drop 旧三索引 + 建 one_bot_binding / one_active_run_per_bot）；
+// 数据部分记入 schema_migrations 账本只跑一次——中间版本（本卡已合、路由未收敛）的运行时会
+// 按需重建四车道，若每次开库都重跑 alias 化会把重建出来的车道会话反复作废。
+// 回退口径（ADR §7.2）：旧版本代码不含本迁移，alias 化后的旧道按需重建，历史 session id 仍可解析。
+// 冗余是有意兜底（DSHBOTS-288 备案，红线变异 M3/M4 存活的定性）：
+// - one_bot_binding 双重建（本迁移内 CREATE + runMigrations 末尾 BINDING_INDEXES）：两条路径
+//   （收敛迁移、表重建后的兜底）各自独立到达时都保证索引在，删任一处不红不等于它是死代码；
+// - 账本守卫的价值不在 UPDATE 幂等（UPDATE 重跑天然命中 0 行），而在挡住上述中间版本
+//   「运行时重建四车道 → 下次开库又被 alias 化作废」的循环；路由收敛合入后该窗口关闭，
+//   守卫转为纯防御留存。
+function migrateSessionBindingBotConvergence(db) {
+  db.exec(`
+    DROP INDEX IF EXISTS one_project_binding;
+    DROP INDEX IF EXISTS one_task_binding;
+    DROP INDEX IF EXISTS one_solo_binding;
+    CREATE UNIQUE INDEX IF NOT EXISTS one_bot_binding
+      ON session_bindings(bot_id) WHERE kind = 'bot' AND alias = 0;
+  `)
+  const ledger = db.prepare(
+    "SELECT 1 FROM schema_migrations WHERE name = 'session_binding_bot_convergence'",
+  ).get()
+  if (ledger) return
+  // 每 bot 复用其最新一条 project 活跃绑定转为 kind='bot'（session_id 是主键，转行即复用会话）；
+  // 无 project 会话的 bot（仅 task/dm/solo 道）不在库里造假 session，留待运行期 ensureBotBinding 新建。
+  db.exec(`
+    UPDATE session_bindings SET kind = 'bot'
+    WHERE alias = 0 AND kind = 'project'
+      AND session_id = (
+        SELECT p.session_id FROM session_bindings p
+        WHERE p.bot_id = session_bindings.bot_id AND p.alias = 0 AND p.kind = 'project'
+        ORDER BY p.created_at DESC, p.session_id DESC LIMIT 1
+      )
+  `)
+  db.exec(
+    "UPDATE session_bindings SET alias = 1 WHERE alias = 0 AND kind IN ('task', 'project', 'dm', 'solo')",
+  )
+  recordMigration(db, 'session_binding_bot_convergence')
+}
+
+// one_active_run_per_bot（同 bot 同时至多一条 queued/running，ADR §2.3）：机制在本卡（DSHBOTS-285）
+// 完整落地，但激活必须与 §5.2-2 入站路由收敛同车——现行运行时仍是「同 bot 多条 queued 领取时
+// 合批」（scheduler.coalesceQueuedRuns）与四车道并行，先建索引会让 enqueue 家族直接撞唯一约束
+// （实测全量 1540 例红 68，全部为 UNIQUE constraint failed: runs.bot_id）。步骤 2 把合批改为
+// 入队合并后，在 runMigrations 里调用本函数激活；本函数自身幂等，可重复执行。
+export function activateBotRunSerialization(db) {
+  // 存量运行串行化（ADR §2.3）：同 bot 多条 queued/running 只保留最早一条，其余置 canceled。
+  // 被收掉的均为未启动的排队运行，消息与运行留痕不丢（同 scheduler 合批的 MERGED 口径）。
+  db.prepare(
+    `UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'BOT_SERIALIZATION',
+       error_message = '库与绑定收敛（DSHBOTS-285）：同 bot 活跃运行串行化，本条不再单独执行'
+     WHERE status IN ('queued', 'running')
+       AND queued_at > (
+         SELECT MIN(r2.queued_at) FROM runs r2
+         WHERE r2.bot_id = runs.bot_id AND r2.status IN ('queued', 'running')
+       )`,
+  ).run(nowIso())
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_bot
+      ON runs(bot_id) WHERE status IN ('queued', 'running');
+  `)
+  recordMigration(db, 'bot_run_serialization')
 }
 
 // 单聊支持：runs 与 session_bindings 的 project_id 放宽为可空（项目外会话与运行），

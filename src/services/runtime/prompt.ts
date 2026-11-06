@@ -14,7 +14,7 @@ import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { taskDeadlineInfo } from '../tasks.js'
 import { readWriteScopes } from '../write-scopes.js'
-import { sanitizeTmpBotDirName } from '../../paths.js'
+import { displayPath, sanitizeTmpBotDirName } from '../../paths.js'
 
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
@@ -135,13 +135,13 @@ export const promptMethods = {
     const sharedSkills = this.config.skillRoot
     const sharedRules = [
       disabledSkills.length === 0
-        ? `- The shared skill library is mounted at \`${sharedSkills}/skills\`; use installed skills when relevant.`
-        : `- The shared skill library is mounted at \`${sharedSkills}/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
+        ? `- The shared skill library is mounted at \`${displayPath(sharedSkills)}/skills\`; use installed skills when relevant.`
+        : `- The shared skill library is mounted at \`${displayPath(sharedSkills)}/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
       bindings.length > 0
         ? `- Pinned skill versions for this project: ${bindings.map(item => `\`${item.slug}\`@${item.version ?? 'latest'}`).join(', ')}.`
         : '- No skill version is pinned for this project; use the current published version.',
       '- Work only inside this project workspace unless the user explicitly authorizes another mounted path.',
-      `- The shared skill library at \`${sharedSkills}\` is read-only for you; publish skill changes through \`team_propose_evolution\` so the user can approve them.`,
+      `- The shared skill library at \`${displayPath(sharedSkills)}\` is read-only for you; publish skill changes through \`team_propose_evolution\` so the user can approve them.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
@@ -150,7 +150,7 @@ export const promptMethods = {
     const projectSkillRules = projectSkills.length === 0
       ? []
       : [
-          `- Project skill pools are mounted at \`${projectDir}/.agents/skills\`, \`${projectDir}/.claude/skills\`, \`${projectDir}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
+          `- Project skill pools are mounted at \`${displayPath(projectDir)}/.agents/skills\`, \`${displayPath(projectDir)}/.claude/skills\`, \`${displayPath(projectDir)}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
           `- Project skills available here: ${projectSkills.map(skill => `\`${skill.name}\``).join(', ')}.`,
         ]
     const collaborationRules = taskSession
@@ -203,7 +203,7 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
       '## Current project',
       `- Name: ${project.name}`,
       `- Key: ${project.key}`,
-      `- Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
+      `- Workspace: ${displayPath(project.production_dir || join(this.config.workspace, project.slug))}`,
       `- Temp files discipline: write every temporary or intermediate file (scratch scripts, probe outputs, downloaded artifacts) under \`.tmp/bots/${sanitizeTmpBotDirName(bot.name)}/\` inside the workspace; create that directory if it is missing. Never scatter temp files elsewhere in the project.`,
       roleLine,
       '',
@@ -265,10 +265,10 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
       '',
       '## Solo conversation',
       `- This is a one-on-one conversation with the user, outside any project.`,
-      `- Your workspace for this conversation is \`${workspace}\`; work inside it when the user asks you to produce or store files.`,
+      `- Your workspace for this conversation is \`${displayPath(workspace)}\`; work inside it when the user asks you to produce or store files.`,
       '- Project tools (team_assign_task, team_review_task) do not apply here because there is no project context. If the user wants project work, suggest opening that project instead.',
       '- Use `team_remember` with scope bot or team for durable facts worth keeping; scope project is unavailable in this conversation. Never store secrets or credentials.',
-      `- The shared skill library is mounted at \`${this.config.skillRoot}/skills\`; use installed skills when relevant. The library at \`${this.config.skillRoot}\` is read-only for you; publish skill changes through \`team_propose_evolution\`.`,
+      `- The shared skill library is mounted at \`${displayPath(this.config.skillRoot)}/skills\`; use installed skills when relevant. The library at \`${displayPath(this.config.skillRoot)}\` is read-only for you; publish skill changes through \`team_propose_evolution\`.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
@@ -367,12 +367,28 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
 - Do not repeat the task description or anything already recorded in long-term memory.
 - Do not call any tool and do not write files. Reply with the summary text only.`
   },
+  // 闲时总结压缩运行提示词（DSHBOTS-286）：在原会话上下文里让 bot 自写连续性总结。
+  // 压缩 ≠ 结转：会话不换，总结只为收敛上下文头绪；宿主未暴露历史截断 API，
+  // 持久事实应趁此轮落记忆/任务评论（能力边界见 ADR「结转与压缩」）。
+  sessionCompactPrompt({ bot, project }) {
+    const header = project
+      ? [`Project: ${project.name} (${project.key})`, `You are: ${bot.name}`].join('\n')
+      : [`You are: ${bot.name}`, 'Mode: one-on-one conversation (outside projects)'].join('\n')
+    return `${header}
+
+# Session compaction request
+This conversation has grown long and is now idle. Write a working summary to keep future turns focused.
+- Write in Chinese, plain prose, at most 300 characters.
+- Cover: current focus, work in progress with its exact state, and the next concrete steps.
+- If any durable fact, decision or lesson emerged that is not yet recorded, persist it now with your memory tools (team_remember); everything else stays in this reply only.
+- Do not write files. Reply with the summary text only.`
+  },
   // 单聊运行提示词：没有项目上下文，只带本会话增量新消息。
   soloRunPrompt({ bot, chatMessage, extraMessages, sessionId }) {
     const header = [
       `You are: ${bot.name}`,
       'Mode: one-on-one conversation (outside projects)',
-      `Workspace: ${join(this.config.workspace, '_the_bots', bot.solo_dir)}`,
+      `Workspace: ${displayPath(join(this.config.workspace, '_the_bots', bot.solo_dir))}`,
     ].join('\n')
     const { rows: recent, incremental } = this.watermarkWindow({
       sessionId,
@@ -427,11 +443,12 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, extraMessages, sessionId })
     if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
     // 结转摘要（DSHBOTS-145）：先于 header 判定——单聊摘要运行没有项目，
-    // header 直接解引用 project 会炸。
+    // header 直接解引用 project 会炸。闲时压缩（DSHBOTS-286）同理。
     if (run.kind === 'rollover_summary') return this.rolloverSummaryPrompt({ run, bot, project })
+    if (run.kind === 'session_compact') return this.sessionCompactPrompt({ bot, project })
     const header = [
       `Project: ${project.name} (${project.key})`,
-      `Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
+      `Workspace: ${displayPath(project.production_dir || join(this.config.workspace, project.slug))}`,
       `You are: ${bot.name}`,
     ].join('\n')
     // 任务评论注入（DSHBOTS-254 收口）：最近 3 条、合计 ≤1.5k——每条正文 500 上限（1.5k/3 的
@@ -643,16 +660,19 @@ Before reporting delivery, self-run the reproducible verification and put the ev
 The previous run was interrupted by a host restart. Check the workspace and git status first to verify the current state, then resume from where it stopped; do not repeat external actions already performed (commits/publishes/messages).` : ''
       // agentTeam 门控（DSHBOTS-254 收口）：单卡内并行的执行口径——teammates/子代理、
       // 部件落项目 KEY-N 卡、交付前 wait_agent 汇总。拆分判据不在此重复（见上方提速拆分段）。
+      // DSHBOTS-292：并行执行的主力改「按任务号开子智能体」——子代理写继承控制面沙箱、
+      // 不受任务写范围调度闸门约束（ADR §2.4 三层补偿之②提示词写入边界）。
       const parallel = this.config.agentTeam ? `
 
+# Child agents by task number
+Execute each card in a dedicated child agent (subagent/subagent_fork) labeled with its task number (e.g. DSHBOTS-292); never merge cards into one agent — small single-file cards do yourself. Child writes inherit your session sandbox, not the task write-scope gates: pass the card's declared write scopes as the child's write boundary. Children report changed paths, verification with results, risks; merge and review their output yourself before delivering.` : ''
+      const parallelMerge = this.config.agentTeam ? `
+
 # Parallel work inside this task
-- Parallelize independent parts via teammates (at most ${this.config.maxTeammates}) or child agents (subagent/subagent_fork).
-- Record every part as a project task card (project KEY-N) with a disjoint write_scope, never on the host shared task board (task-N).
-- Before delivering: list_agents, wait_agent until idle, merge results into your report; resolve conflicting edits yourself.` : ''
+Parallelize independent parts via teammates (at most ${this.config.maxTeammates}) or the child agents above; keep every part on project KEY-N cards, never on the host shared task board (task-N). Before delivering: list_agents, wait_agent until idle, merge results; resolve conflicting edits yourself.` : ''
       return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}
 
-Do the task in the project workspace. Use tools as needed. End with a concise delivery report containing what changed, verification performed, and blockers or risks. Do not just describe what you would do.
-When the deliverable includes images, put the files in the workspace and reference them with markdown image syntax using workspace-relative paths (e.g. ![preview](assets/preview.png)); chat renders them as thumbnails. Only png/jpg/jpeg/gif/webp are served.${parallel}
+Do the task in the project workspace. End with a concise delivery report containing what changed, verification performed, and blockers or risks — not just a plan.${parallel}${parallelMerge}
 
 # Assigned task ${project.key}-${task.number}
 Title: ${task.title}
@@ -693,10 +713,11 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
     const quoteLine = this.quotedLineFor(chatMessage)
     // DSHBOTS-215 微信直达语境：多轮连续对话（项目会话复用），不要每条当新指令；
     // 派活意图要真建卡/派单；需要用户决策时用 ask_user_question（会转发到微信）。
+    // DSHBOTS-283 微信不渲染 Markdown：纯文本版式（空行+符号列表），禁 * # 原样字符。
     const wechatBlock = run.trigger_type === 'wechat' ? `
 
 # WeChat direct conversation
-This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you.` : ''
+This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you. WeChat renders no Markdown: use plain text with blank lines and - lists, never * or #.` : ''
     // DSHBOTS-272 用户提问锚点：触发消息是人发的（sender_type='user'）才注入；通知降级与
     // bot @mention 唤醒触发的运行（sender_type='bot'）不注入——事故根因之一是通知内容与用户
     // 提问同窗时无优先级指示，bot 回了条轻备忘就算处理完。
@@ -704,9 +725,10 @@ This message is from the project owner on WeChat — a real multi-turn conversat
 
 # Owner question priority
 This message is from the project owner — answer it directly in this reply. Background notifications in context must not substitute for the answer; handle them only after (or skip to next turn).` : ''
+    // DSHBOTS-283 回复分级：长文（交付/进展/评估）用 Markdown 固定小标题，短回复保持自然语言。
     return `${header}
 
-Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}${ownerQuestionBlock}
+Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item. Long replies (交付/进展/评估) use Markdown headings 结论/证据/风险/下一步; short replies stay natural.${wechatBlock}${ownerQuestionBlock}
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}

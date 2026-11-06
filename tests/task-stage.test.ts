@@ -168,13 +168,16 @@ test('服务级：in_progress 挂 running task 运行 → 正在执行；in_revi
   const { root, store, service } = await setup()
   try {
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    // 争用口径 A：同 bot 同时至多一条活跃运行——施工运行归开发 bot，与总监的核验
+    // 运行跨 bot 并行（one_active_run_per_bot 只限单 bot，跨 bot 不受限）。
+    const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
     const project = await service.createProject({ name: 'Task Stage 2', key: 'STG2', ownerBotId: director.id })
     const actor = service.actor()
     const runningTask = await service.createTask({ projectId: project.id, title: '执行中任务' }, actor)
     for (const status of ['todo', 'in_progress']) {
       await service.updateTask(runningTask.id, { status }, actor)
     }
-    seedRun(store, { id: 'run_work', projectId: project.id, botId: director.id, taskId: runningTask.id, status: 'running', kind: 'task', queuedAt: '2026-11-02T10:00:00.000Z' })
+    seedRun(store, { id: 'run_work', projectId: project.id, botId: dev.id, taskId: runningTask.id, status: 'running', kind: 'task', queuedAt: '2026-11-02T10:00:00.000Z' })
     const runningView = service.taskView(store.get('SELECT * FROM tasks WHERE id = ?', runningTask.id))
     assert.deepEqual(runningView.stage, { stage: 'working' })
     assert.equal(runningView.stageLabel, '正在执行')
