@@ -101,7 +101,7 @@
 
 ### 4.3 保持不变的件
 
-写范围判定纯函数与并行调度、死线规则（超线 queued 拒绝启动、run_events 留锚、重派重置窗口）、验收滞留三档收口、审批与提问机制、结转别名与运行归属索引、用量计价与对账管线、workspace 变更归因。
+写范围判定纯函数与并行调度、死线规则（超线 queued 拒绝启动、run_events 留锚、重派重置窗口）、滞留提醒四态三档收口（DSHBOTS-295 定稿梯度：待执行 backlog/todo 72h 宽档——tasks 表无 'pending' 态，实际待执行态=todo/backlog，与 system.ts pendingRows 同口径；in_review 24h / blocked 48h。同卡每日 ≤1，只提醒不自动处置；待执行处理动作归总监：文案点名 team_assign_task 派发/合并/取消，不转接 owner）、审批与提问机制、结转别名与运行归属索引、用量计价与对账管线、workspace 变更归因。
 
 ## 5 迁移方案（全面切换）
 

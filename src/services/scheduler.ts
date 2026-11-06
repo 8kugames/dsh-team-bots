@@ -413,9 +413,10 @@ export const schedulerMethods = {
     return canceled
   },
 
-  // 滞留阈值兜底扫描（DSHBOTS-280）：in_review 超 24h / blocked 超 48h 的卡向项目
-  // owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），只提醒不自动处置——
-  // 不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick（与 D-194
+  // 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：in_review 超 24h /
+  // blocked 超 48h / 待执行（backlog/todo，D-295 调查：tasks 表无 'pending' 态）超 72h
+  // 的卡向项目 owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），只提醒不自动
+  // 处置——不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick（与 D-194
   // 验收守门同拍接入，不新增常驻进程）；判定与防重见 notify.ts 的纯函数与每日上限。
   // 逐卡容错：单卡异常只 warn，不拖垮整轮扫描。
   scanStaleCards() {
@@ -423,7 +424,7 @@ export const schedulerMethods = {
       `SELECT t.id, t.status, t.updated_at, t.number,
               p.id AS project_id, p.key AS project_key, p.owner_bot_id
          FROM tasks t JOIN projects p ON p.id = t.project_id
-        WHERE t.status IN ('in_review', 'blocked') AND p.status = 'active'`,
+        WHERE t.status IN ('in_review', 'blocked', 'todo', 'backlog') AND p.status = 'active'`,
     )
     const reminded = []
     for (const row of rows) {
@@ -527,8 +528,9 @@ export const schedulerMethods = {
       // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超阈值即注入 owner 系统提醒；
       // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
       runReviewWatchdog(this)
-      // 滞留阈值兜底（DSHBOTS-280）：in_review/blocked 超 24h/48h 向 owner 只提醒
-      // 不自动处置；内部逐卡容错（单卡异常只 warn）。
+      // 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：in_review/blocked/
+      // 待执行（todo/backlog）超 24h/48h/72h 三档向 owner 只提醒不自动处置；
+      // 内部逐卡容错（单卡异常只 warn）。
       this.scanStaleCards()
       const activeRows = this.store.all(
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
