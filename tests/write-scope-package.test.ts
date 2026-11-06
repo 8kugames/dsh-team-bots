@@ -204,7 +204,10 @@ test('过滤掉 package.json 后仍相交：保守串行', async () => {
 
     const running = taskRuns(store, project.id, 'running')
     assert.equal(running.length, 1, '过滤后仍前缀相交必须串行')
-    assert.equal(taskRuns(store, project.id, 'queued').length, 1, '被闸门挡下的任务应留在队列里')
+    const gated = taskRuns(store, project.id, 'queued')
+    assert.equal(gated.length, 1, '被闸门挡下的任务应留在队列里')
+    assert.equal(gated[0].bot_id, dev2.id, '被挡下的是另一条 bot 车道上的排队运行')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE bot_id = ? AND status = 'running'", dev2.id).n, 0, '被挡下任务的 bot 没有在跑的运行')
     assert.equal(running[0].task_id, first.id, '先入队的任务应被领取')
     assert.equal(runParallelEventCount(store), 0, '串行时不记并行放行事件')
   } finally {
@@ -231,7 +234,10 @@ test('过滤后任一为空：仍按未声明保守串行', async () => {
 
     const running = taskRuns(store, project.id, 'running')
     assert.equal(running.length, 1, '一侧过滤后为空必须保守串行')
-    assert.equal(taskRuns(store, project.id, 'queued').length, 1, '另一侧应留在队列里')
+    const gated = taskRuns(store, project.id, 'queued')
+    assert.equal(gated.length, 1, '另一侧应留在队列里')
+    assert.equal(gated[0].bot_id, dev2.id, '被挡下的是另一条 bot 车道上的排队运行')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE bot_id = ? AND status = 'running'", dev2.id).n, 0, '被挡下任务的 bot 没有在跑的运行')
     assert.equal(running[0].task_id, first.id, '先入队的任务单独放行，随后占住写槽挡住下一条')
   } finally {
     await cleanup(root, store)
