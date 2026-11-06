@@ -191,6 +191,9 @@ test('⑥ active bot 全路径行为不变：新建即入队、通知照常、�
     const task = await service.createTask({ projectId: project.id, title: '正常卡', assigneeBotId: builder.id, writeScopes: ['src/a/'], autoStart: true })
     service.dispatchOutbox()
     assert.equal(runsCount(store, task.id), 1, 'active 新建派单照常建运行')
+    // one_active_run_per_bot（DSHBOTS-291）：第二张卡开工前先让首条运行终态释放 builder 槽位，
+    // 忙时派单会挂 bot_pending_msgs 待处理队列（另由挂起语义守门覆盖）。
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE task_id = ?", new Date().toISOString(), task.id)
     // 看板转进行中：发「已开始」+ 入队（todo → in_progress 联动）。
     const task2 = await service.createTask({ projectId: project.id, title: '拖拽正常卡', assigneeBotId: builder.id, writeScopes: ['src/b/'], autoStart: false })
     await service.updateTask(task2.id, { status: 'in_progress' }, userActor(service))
