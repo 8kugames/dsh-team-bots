@@ -377,6 +377,56 @@ export const sessionMethods = {
       this.sessionCreates.delete(key)
     }
   },
+  // 控制面绑定兜底（DSHBOTS-285，ADR §4.1）：迁移时无 project 会话可复用的 bot（仅 task/dm/solo
+  // 道）由运行期补建 kind='bot' 活跃绑定；已有则复用（宿主已失效的先退役再新建）。
+  // 入站路由收敛（ADR §5.2-2）后由 enqueue 家族统一调用，本步先落机制与守门。
+  async ensureBotBinding(bot, project) {
+    const existing = this.store.get(
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
+      bot.id,
+    )
+    if (existing) {
+      const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
+      if (!resolved?.error) return existing.session_id
+      this.retireBinding(existing.session_id)
+    }
+    const key = `${bot.id}:bot`
+    if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
+    const creating = (async () => {
+      const solo = !project
+      const cwd = await resolveSessionCwd(this.config, { solo, bot, project })
+      const created = await this.ctx.sessionController.create({
+        cwd,
+        ...(await this.defaultAgentPreset('project')),
+      })
+      const sessionId = created.sessionId
+      const agent = await this.ctx.sessionController.resolveAgent(sessionId)
+      if (agent?.error) throw new AppError('SESSION_FAILED', `创建 DSH Session 失败：${agent.error.message ?? '未知错误'}`)
+      if (this.ctx.sessionTitle?.rename) {
+        const liveSession = agent?.agent?.session ?? agent?.session
+        if (liveSession) {
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · 控制面`) } catch {}
+        }
+      }
+      this.store.run(
+        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+         VALUES (?, ?, ?, 'bot', NULL, ?, 0)
+         ON CONFLICT(session_id) DO NOTHING`,
+        sessionId,
+        bot.id,
+        project?.id ?? null,
+        new Date().toISOString(),
+      )
+      await this.selectModel(sessionId, bot, null)
+      return sessionId
+    })()
+    this.sessionCreates.set(key, creating)
+    try {
+      return await creating
+    } finally {
+      this.sessionCreates.delete(key)
+    }
+  },
   async startRun({ run, bot, project, task, chatMessage, extraMessages, sessionKind }: { run: { id: string; kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number; model_provider?: string; model_model?: string; model_effort?: string }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; timeBudgetMinutes?: number; time_budget_minutes?: number }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; extraMessages?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }[]; sessionKind: string }) {
     if (!this.ctx?.sessionController) throw new AppError('DSH_UNAVAILABLE', 'DSH Session 服务不可用')
     // 备用模型覆盖：派生运行在 runs 行里带 model_* 三列，指明这条运行改用备用模型下发。
