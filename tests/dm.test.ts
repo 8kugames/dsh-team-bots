@@ -8,7 +8,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 
 // 手动完成的 runtime：sessionBusy 可切换，steer 记录入数组。
-class ManualRuntime { declare started: any[]; declare steers: any[]; declare busySessions: any; declare handler: any;
+class ManualRuntime { declare started: any[]; declare steers: any[]; declare busySessions: any; declare handler: any; declare store: any;
   constructor() {
     this.started = []
     this.steers = []
@@ -22,6 +22,21 @@ class ManualRuntime { declare started: any[]; declare steers: any[]; declare bus
   async validateBotConfig() {}
 
   sessionBusy(sessionId) { return this.busySessions.has(sessionId) }
+
+  // 任务亲和绑定解析（对齐 src/services/runtime/session.ts 同名方法，DSHBOTS-286 亲和路由）：
+  // 回信投递按 runs.session_id 归位原任务会话；终态任务/无运行归属不享亲和。
+  taskAffinityBinding(task) {
+    if (!task?.id) return undefined
+    if (task.status === 'done' || task.status === 'canceled') return undefined
+    const row = this.store.get(
+      `SELECT session_id AS sid FROM runs
+        WHERE task_id = ? AND session_id IS NOT NULL
+        ORDER BY COALESCE(started_at, queued_at) DESC, rowid DESC LIMIT 1`,
+      task.id,
+    )
+    if (!row?.sid) return undefined
+    return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', row.sid)
+  }
 
   async startRun({ run }) {
     this.started.push({ runId: run.id, kind: run.kind, botId: run.bot_id })
@@ -62,6 +77,15 @@ async function setup() {
      VALUES (?, ?, ?, 'task', ?, ?)`,
     originSession, builder.id, project.id, task.id, new Date().toISOString(),
   )
+  // 任务的原执行运行（已终态，不占 builder 的活跃槽）：任务亲和绑定经 runs.session_id
+  // 解析回这条会话（控制面收敛后 dm 回信仍按亲和优先归位）。
+  const seededAt = new Date().toISOString()
+  store.run(
+    `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, ended_at)
+     VALUES ('run_dm_seed', ?, ?, ?, 'task', 'write', 'test', 'succeeded', 1, 'seed:dm_fixture', ?, ?, ?)`,
+    project.id, builder.id, task.id, originSession, seededAt, seededAt,
+  )
+  runtime.store = store
   return { root, store, service, runtime, project, builder, task, originSession }
 }
 
@@ -169,6 +193,94 @@ test('自私信与非成员被拒，目标不可用时私信失败留痕', async
     const row = store.get("SELECT * FROM bot_messages WHERE request_id = 'dead-ask'")
     assert.equal(row.status, 'failed')
     assert.match(row.reply, /目标 Bot 不可用/)
+  } finally {
+    await closeQuietly(state.store)
+  }
+})
+
+// DSHBOTS-291 覆盖缺口补测①（D-289 红线臂实测发现 dm 逐条放行无覆盖）：
+// 同一 bot 忙时挂起多条 dm，空闲 drain 后同一 tick 只放行一条（回信契约），余量留队列下一拍。
+test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运行，余量留队列', async () => {
+  const state = await setup()
+  globalThis.DM_ROOT = state.root
+  try {
+    const { store, service, project, builder, originSession } = state
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    // 总监忙：占一条 running 运行。
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_dm_busy', ?, ?, 'chat', 'read', 'test', 'running', 1, 'busy:dm_one_by_one', ?)`,
+      project.id, director.id, new Date().toISOString(),
+    )
+    const insertDm = (id: string) => {
+      store.run(
+        `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id, origin_kind, status, created_at)
+         VALUES (?, ?, ?, ?, ?, '在吗', ?, 'task', 'pending', ?)`,
+        id, project.id, builder.id, director.id, `req-${id}`, originSession, new Date().toISOString(),
+      )
+      return store.get('SELECT * FROM bot_messages WHERE id = ?', id)
+    }
+    const pending = () => JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]')
+    for (const mid of ['botm_dm1', 'botm_dm2', 'botm_dm3']) {
+      assert.equal(service.enqueueDmRun(insertDm(mid), director), null, '忙时 dm 不落 runs 行，挂待处理队列')
+    }
+    assert.equal(pending().length, 3, '三条 dm 全部挂起')
+
+    // 总监空闲：drain 只放行一条，两条留队列。
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_dm_busy'", new Date().toISOString())
+    service.drainPendingMessages()
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'dm'")?.n, 1, '同一 tick 只放行一条 dm')
+    assert.equal(pending().length, 2, '余量留队列下一拍')
+
+    // 下一拍：第一条终态后再放行第二条。
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE kind = 'dm'", new Date().toISOString())
+    service.drainPendingMessages()
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'dm'")?.n, 2, '下一拍再放行一条')
+    assert.equal(pending().length, 1, '最后一条仍在队列')
+  } finally {
+    await closeQuietly(state.store)
+  }
+})
+
+// DSHBOTS-291 覆盖缺口补测②（messageId 去重 + 建回护栏）：同一 bot 忙时重复入队同一
+// messageId，队列不累积重复项；重复挂起即便触发建回，idempotency_key 撞 UNIQUE 返 null 留队列。
+test('messageId 去重：忙时重复挂起不累积；建回撞 idempotency_key UNIQUE 返 null 留队列', async () => {
+  const state = await setup()
+  globalThis.DM_ROOT = state.root
+  try {
+    const { store, service, project, builder, originSession } = state
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_dup_busy', ?, ?, 'chat', 'read', 'test', 'running', 1, 'busy:dm_dedup', ?)`,
+      project.id, director.id, new Date().toISOString(),
+    )
+    store.run(
+      `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id, origin_kind, status, created_at)
+       VALUES ('botm_dup1', ?, ?, ?, 'req-dup', '在吗', ?, 'task', 'pending', ?)`,
+      project.id, builder.id, director.id, originSession, new Date().toISOString(),
+    )
+    const message = store.get('SELECT * FROM bot_messages WHERE id = ?', 'botm_dup1')
+    const pending = () => JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]')
+    assert.equal(service.enqueueDmRun(message, director), null)
+    assert.equal(service.enqueueDmRun(message, director), null, '重复入队同一 messageId 同样挂起')
+    assert.equal(pending().length, 1, '队列不累积重复项')
+
+    // 护栏：挂起项之外已存在同 idempotency_key 的运行（终态也算），空闲建回时 INSERT 撞
+    // UNIQUE → insertHeldMessageRun 返回 null，消息留队列下一拍，不丢也不重复建行。
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at, ended_at)
+       VALUES ('run_dup_collide', ?, ?, 'dm', 'read', 'dm', 'botm_dup1', 'succeeded', 1, 'dm:botm_dup1', ?, ?)`,
+      project.id, director.id, new Date().toISOString(), new Date().toISOString(),
+    )
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_dup_busy'", new Date().toISOString())
+    service.drainPendingMessages()
+    assert.equal(pending().length, 1, '建回撞 UNIQUE 返 null，挂起项留队列')
+    assert.equal(
+      store.get("SELECT COUNT(*) AS n FROM runs WHERE trigger_ref = 'botm_dup1' AND status IN ('queued', 'running')")?.n,
+      0,
+      '没有为重复挂起项建出第二条活跃运行',
+    )
   } finally {
     await closeQuietly(state.store)
   }

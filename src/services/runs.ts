@@ -178,9 +178,12 @@ export const runsMethods = {
     return runId
   },
   // D-272 用户提问判定（挂起消息向，DSHBOTS-290 语义回补）：按触发消息的 sender_type
-  // 判定——chat 查 messages、solo_chat 查 solo_messages（单聊消息独立表）、dm/dm_reply
-  // 查 bot_messages。用户发的消息是「提问」，bot 触发（通知降级、@mention 唤醒、回信）不算。
-  // 注：卡面原文写「chat/solo_chat 查 messages」，实测单聊落 solo_messages 表，按实际表改。
+  // 判定——chat 查 messages、solo_chat 查 solo_messages（单聊消息独立表）。用户发的消息
+  // 是「提问」，bot 触发（通知降级、@mention 唤醒、回信）不算。
+  // 注：卡面原文写「chat/solo_chat 查 messages」，实测单聊落 solo_messages 表，按实际表改；
+  // dm/dm_reply 查 bot_messages（DSHBOTS-291 覆盖补测实测）——该表无 sender_type 列且
+  // from_bot_id 恒为 bot（bot 间私信），不存在用户触发形态，恒为 false（逐条放行不参与合批，
+  // 该标记对 dm 组也无分组意义）。
   heldItemIsUserQuestion(item) {
     if (item?.kind === 'chat') {
       const row = this.store.get('SELECT sender_type FROM messages WHERE id = ?', item.messageId)
@@ -188,10 +191,6 @@ export const runsMethods = {
     }
     if (item?.kind === 'solo_chat') {
       const row = this.store.get('SELECT sender_type FROM solo_messages WHERE id = ?', item.messageId)
-      return row?.sender_type === 'user'
-    }
-    if (item?.kind === 'dm' || item?.kind === 'dm_reply') {
-      const row = this.store.get('SELECT sender_type FROM bot_messages WHERE id = ?', item.messageId)
       return row?.sender_type === 'user'
     }
     return false
