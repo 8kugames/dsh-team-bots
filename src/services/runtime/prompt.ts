@@ -693,10 +693,11 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
     const quoteLine = this.quotedLineFor(chatMessage)
     // DSHBOTS-215 微信直达语境：多轮连续对话（项目会话复用），不要每条当新指令；
     // 派活意图要真建卡/派单；需要用户决策时用 ask_user_question（会转发到微信）。
+    // DSHBOTS-283 微信不渲染 Markdown：纯文本版式（空行+符号列表），禁 * # 原样字符。
     const wechatBlock = run.trigger_type === 'wechat' ? `
 
 # WeChat direct conversation
-This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you.` : ''
+This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you. WeChat renders no Markdown: use plain text with blank lines and - lists, never * or #.` : ''
     // DSHBOTS-272 用户提问锚点：触发消息是人发的（sender_type='user'）才注入；通知降级与
     // bot @mention 唤醒触发的运行（sender_type='bot'）不注入——事故根因之一是通知内容与用户
     // 提问同窗时无优先级指示，bot 回了条轻备忘就算处理完。
@@ -704,9 +705,10 @@ This message is from the project owner on WeChat — a real multi-turn conversat
 
 # Owner question priority
 This message is from the project owner — answer it directly in this reply. Background notifications in context must not substitute for the answer; handle them only after (or skip to next turn).` : ''
+    // DSHBOTS-283 回复分级：长文（交付/进展/评估）用 Markdown 固定小标题，短回复保持自然语言。
     return `${header}
 
-Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}${ownerQuestionBlock}
+Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item. Long replies (交付/进展/评估) use Markdown headings 结论/证据/风险/下一步; short replies stay natural.${wechatBlock}${ownerQuestionBlock}
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}

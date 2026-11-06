@@ -6,6 +6,8 @@
 // ③出队优先：同车道内用户提问运行先于更早排队的通知运行领取（不被静默压后）；
 // ④提示层：chatRunPrompt 用户触发注入直接回答锚点，通知触发（sender_type='bot'）不注入；
 // 既有锚点（# Group message / Reply as 前缀）不回归（D-269 手法：源码级钉住）。
+// DSHBOTS-283 守门（同文件承载）：⑤群聊回复 Markdown 结构化分级锚点（长文固定小标题/
+// 短回复自然语言）+ 微信分支纯文本版式锚点（源码锚与渲染行为两层）。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -224,4 +226,43 @@ test('源码锚点：chatRunPrompt 锚点门控与既有文案前缀不回归（
   assert.ok(PROMPT_SRC.includes('# Group message\n'), '既有 # Group message 段落标题保留')
   assert.ok(PROMPT_SRC.includes('Reply as '), '既有 Reply as 前缀句保留')
   assert.ok(PROMPT_SRC.includes('# Merged messages'), 'D-231 合批段落保留')
+})
+
+test('提示层（D-283）：分级要求注入所有群聊提示，微信运行追加纯文本版式段', async () => {
+  const t = await setup()
+  try {
+    const userMsg = userMessage(t.service, t.project.id, '给我一份进展评估')
+    const runId = t.service.enqueueChatRun(t.project, t.dev, userMsg)
+    const msgRow = t.store.get('SELECT * FROM messages WHERE id = ?', userMsg)
+    const prompt = groupPrompt(t, chatRunRow(t, runId), msgRow)
+    assert.match(
+      prompt,
+      /Long replies \(交付\/进展\/评估\) use Markdown headings 结论\/证据\/风险\/下一步/,
+      '分级口径必须进群聊提示：长文用固定小标题',
+    )
+    assert.ok(prompt.includes('short replies stay natural'), '短回复保持自然语言豁免必须在场')
+    assert.ok(
+      prompt.indexOf('结论/证据/风险/下一步') < prompt.indexOf('# Group message'),
+      '分级要求属静态指令段，必须先于消息变化段（前缀缓存原则）',
+    )
+    assert.ok(!prompt.includes('WeChat renders no Markdown'), '非微信运行不得注入纯文本版式段')
+
+    const wxPrompt = groupPrompt(t, { ...chatRunRow(t, runId), trigger_type: 'wechat' }, msgRow)
+    assert.ok(wxPrompt.includes('WeChat renders no Markdown'), '微信运行必须注入纯文本版式提示')
+    assert.match(
+      wxPrompt,
+      /plain text with blank lines and - lists, never \* or #/,
+      '微信版式：空行+符号列表、禁 * # 原样字符',
+    )
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})
+
+test('源码锚点：D-283 chatRunPrompt 分级要求与微信纯文本分支被钉住', () => {
+  assert.ok(PROMPT_SRC.includes('结论/证据/风险/下一步'), '分级段：固定小标题在场')
+  assert.ok(PROMPT_SRC.includes('short replies stay natural'), '分级段：短回复自然语言豁免在场')
+  assert.ok(PROMPT_SRC.includes("run.trigger_type === 'wechat' ?"), '微信分支门控保留（差异化提示只进微信运行）')
+  assert.ok(PROMPT_SRC.includes('WeChat renders no Markdown'), '微信分支：纯文本版式提示在场')
+  assert.ok(PROMPT_SRC.includes('never * or #'), '微信分支：明示禁 * # 原样字符')
 })
