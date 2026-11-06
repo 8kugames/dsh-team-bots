@@ -12,6 +12,7 @@ import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relati
 import { TASK_BUDGET_ROUNDS, TRANSITIONS, taskDeadlineInfo } from './tasks.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
+import { staleCardHit } from './notify.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
@@ -512,8 +513,37 @@ export const schedulerMethods = {
     return canceled
   },
 
-  // 任务级死线判定（DSHBOTS-274）：纯同步——领取路径不得为此引入 await 边界，
-  // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
+  // 滞留阈值兜底扫描（DSHBOTS-280）：in_review 超 24h / blocked 超 48h 的卡向项目
+  // owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），只提醒不自动处置——
+  // 不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick（与 D-194
+  // 验收守门同拍接入，不新增常驻进程）；判定与防重见 notify.ts 的纯函数与每日上限。
+  // 逐卡容错：单卡异常只 warn，不拖垮整轮扫描。
+  scanStaleCards() {
+    const rows = this.store.all(
+      `SELECT t.id, t.status, t.updated_at, t.number,
+              p.id AS project_id, p.key AS project_key, p.owner_bot_id
+         FROM tasks t JOIN projects p ON p.id = t.project_id
+        WHERE t.status IN ('in_review', 'blocked') AND p.status = 'active'`,
+    )
+    const reminded = []
+    for (const row of rows) {
+      try {
+        const hit = staleCardHit(row)
+        if (!hit) continue
+        const delivered = this.notifyStaleCardOwner({
+          project: { id: row.project_id, key: row.project_key, owner_bot_id: row.owner_bot_id },
+          task: row,
+          hit,
+        })
+        if (delivered) reminded.push(row.id)
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: 滞留扫描单卡失败 %s: %s', row.id, error?.message ?? error)
+      }
+    }
+    return reminded
+  },
+
+  // 任务级死线判定（DSHBOTS-274）：纯同步——领取路径不得为此引入 await 边界，  // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
   taskPastDeadline(task) {
     const { deadlineMs } = taskDeadlineInfo(this.store, task)
     return deadlineMs !== null && Date.now() > deadlineMs
@@ -588,6 +618,9 @@ export const schedulerMethods = {
       // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超阈值即注入 owner 系统提醒；
       // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
       runReviewWatchdog(this)
+      // 滞留阈值兜底（DSHBOTS-280）：in_review/blocked 超 24h/48h 向 owner 只提醒
+      // 不自动处置；内部逐卡容错（单卡异常只 warn）。
+      this.scanStaleCards()
       const activeRows = this.store.all(
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。
