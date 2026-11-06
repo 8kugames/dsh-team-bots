@@ -257,6 +257,15 @@ test('新会话首条 prompt 带图片分片', async () => {
     })
 
     const bot = store.get('SELECT * FROM bots WHERE id = ?', director.id)
+    // 争用口径 A（DSHBOTS-289）：sendMessage 已同步给 director 排上 chat 运行，等
+    // FakeRuntime 自动收尾腾出 bot 槽，再播种本用例的 runs 行（同 bot 第二条活跃
+    // 行会撞 one_active_run_per_bot）。
+    const drainDeadline = Date.now() + 2000
+    while (Date.now() < drainDeadline) {
+      const active = Number(store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued', 'running')")?.n ?? 0)
+      if (active === 0) break
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
     store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, idempotency_key, queued_at)
        VALUES ('run-img', ?, ?, 'chat', 'write', 'chat_message', ?, 'running', 'img-test-key', ?)`,

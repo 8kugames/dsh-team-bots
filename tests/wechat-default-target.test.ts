@@ -113,6 +113,12 @@ test('② /tr <key>: 显式转发：进对应项目群聊（唯一例外通道�
     assert.ok(message, '/tr 消息必须落项目群聊')
     assert.equal(message.project_id, store.get("SELECT id FROM projects WHERE key = 'JHY'").id)
     assert.equal(message.sender_id, service.localUserId, '群聊直达保持以工作台用户身份插入')
+    // 争用口径 A（DSHBOTS-289）：同 bot 至多一条活跃运行——首条 /tr 的 chat 运行
+    // 对后续断言只是夹具背景，置终态腾出 director 槽，第二条 /tr 才能再建行。
+    store.run(
+      "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE bot_id = ? AND status IN ('queued', 'running')",
+      new Date().toISOString(), director.id,
+    )
     // 空格写法（既有语法不变）
     const space = await handleCommand(service, '/tr jhy 顺带改个样式', { boundKey: null, bind() {}, isAdmin: true })
     assert.ok(space.includes('已直达【JHY】'), `空格写法照旧：${space}`)

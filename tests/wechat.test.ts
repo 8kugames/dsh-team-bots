@@ -708,6 +708,17 @@ test('wechat 直达真 service：消息以用户身份插入项目会话并触�
     assert.equal(run.bot_id, director.id, '无 mention 时定向项目总监（owner_bot_id）')
     assert.equal(run.trigger_type, 'wechat', '微信直达运行打 wechat 标记（回程推送依据）')
 
+    // 回程：微信直达运行结束，bot 回复推回管理员；普通群聊运行不推
+    // DSHBOTS-217 回程排版：bot 名 + 分隔线（chatReply），失败加 [失败] 纯文字标头。
+    // 争用口径 A：chat 运行先收尾腾出 director 槽，自由文本的 solo_chat 运行才能
+    // 建行（同 bot 第二条活跃行会撞 one_active_run_per_bot）；群聊回复的记忆审查
+    // 会给 director 再排 memory_review 运行，本用例关掉以免占槽。
+    store.setSetting('chat_memory_review', '0')
+    const pushed: string[] = []
+    ;(service as any).wechat = { notify(text: string) { pushed.push(text) }, status: () => ({ adminPeerId: 'wx_admin_peer' }) }
+    await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
+    assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
+
     // 自由文本（含已绑定场景）不再进项目群聊：一律落 director 专属工作区（DSHBOTS-258）。
     // 该管理员首条 director 单聊：回执说明去向；之后静默。
     const silent = await handleCommand(service, '顺带把首页也改了', { boundKey: 'DISPATCH', bind() {} })
@@ -720,12 +731,6 @@ test('wechat 直达真 service：消息以用户身份插入项目会话并触�
     assert.ok(soloRun, '自由文本派生 solo_chat 运行')
     assert.equal(soloRun.trigger_type, 'wechat', '微信来源 solo 运行打 wechat 标记')
 
-    // 回程：微信直达运行结束，bot 回复推回管理员；普通群聊运行不推
-    // DSHBOTS-217 回程排版：bot 名 + 分隔线（chatReply），失败加 [失败] 纯文字标头。
-    const pushed: string[] = []
-    ;(service as any).wechat = { notify(text: string) { pushed.push(text) } }
-    await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
-    assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
     await service.finishRun({ runId: soloRun.id, status: 'failed', error: { message: '模型超时' } } as any)
     // DSHBOTS-267：失败只推「类别+摘要」，原始错误串不进微信。
     assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败（超时）：上游响应超时。', 'solo 通道失败提示同样推回（白名单分类）')
