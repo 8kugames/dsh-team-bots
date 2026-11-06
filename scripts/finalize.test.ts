@@ -80,12 +80,12 @@ function makeRepo(options: { redTest?: boolean; epermTest?: boolean; wordyGreenT
   chmodSync(join(work, 'node_modules', '.bin', 'tsc'), 0o755)
   writeFileSync(join(work, '.gitignore'), 'node_modules\n')
   writeFileSync(join(work, 'build.mjs'), 'console.log("build ok")\n')
-  // 测试脚本：默认跑 node --test tests/（绿色）；可切换成红色断言或 EPERM 假红。
+  // 测试脚本：默认跑 glob 形式（绿色）；可切换成红色断言或 EPERM 假红。
+  // 必须用 glob 而非目录参数：Node 22 把 `node --test tests/` 的目录参数当 glob 匹配不到文件，
+  // 退化成 require 该目录 → MODULE_NOT_FOUND（CI Node 22 红、本地 Node 26 绿）。
   const testScript = options.epermTest
     ? 'node eperm.mjs'
-    : options.redTest
-      ? 'node --test tests/'
-      : 'node --test tests/'
+    : 'node --test "tests/*.test.js"'
   writeFileSync(
     join(work, 'package.json'),
     `${JSON.stringify(
@@ -509,13 +509,28 @@ test('未传 --skip-version-bump：注入不在场，版本照常 bump（负锚�
 })
 
 test('内层测试环境不泄漏 NODE_TEST_CONTEXT / NODE_TEST_WORKER_ID：夹具 spawn env 剔除两键（源码锚点）', () => {
-  // 守门自身跑在 node --test 下，process.env 带 NODE_TEST_CONTEXT=child-*；原样透传时 Node 22（CI）
-  // 会把内层 `node --test tests/` 的目录参数当模块入口 require（MODULE_NOT_FOUND）。本地 Node 26
-  // 宽容不复现，端到端断言在本地恒绿、在 CI 恒红前拦不住，故本例钉住剔除语句在场（源码防回归锚），
-  // 不依赖 mkdtemp 端到端；行为锚点交给发版 CI 重跑。
+  // 守门自身跑在 node --test 下，process.env 带 NODE_TEST_CONTEXT=child-*；透传会让内层 node --test
+  // 继承递归标记而可能跳过子用例（假绿），故剔除两键。本地 Node 26 宽容不复现该层差异，
+  // 端到端断言在本地恒绿，故钉住剔除语句在场（源码防回归锚）。
   const source = readFileSync(join(repoRoot, 'scripts', 'finalize.test.ts'), 'utf8')
   assert.match(source, /delete env\.NODE_TEST_CONTEXT/, 'runFinalize 的 spawn env 应剔除 NODE_TEST_CONTEXT')
   assert.match(source, /delete env\.NODE_TEST_WORKER_ID/, 'runFinalize 的 spawn env 应剔除 NODE_TEST_WORKER_ID')
+})
+
+test('夹具内层测试脚本用 glob 而非目录参数：Node 22 会把目录参数当模块入口 require（源码锚点）', () => {
+  // Node 22（CI）的 --test 把位置参数按 glob 解析，`tests/` 匹配不到文件即退化为 require 目录 →
+  // MODULE_NOT_FOUND；本地 Node 26 宽容故恒绿。目录参数必须换成 glob 形式。
+  const source = readFileSync(join(repoRoot, 'scripts', 'finalize.test.ts'), 'utf8')
+  assert.match(
+    source,
+    /'node --test "tests\/\*\.test\.js"'/,
+    '夹具 test 脚本应使用 glob 形式 node --test "tests/*.test.js"',
+  )
+  assert.doesNotMatch(
+    source,
+    /'node --test tests\/'/,
+    '夹具 test 脚本不得使用目录参数 node --test tests/（Node 22 下 MODULE_NOT_FOUND）',
+  )
 })
 
 test('finalize.mjs 内层 npm test：test 步自身环境同样清两键（源码锚点，防回归）', () => {
