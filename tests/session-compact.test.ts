@@ -1,7 +1,7 @@
 // DSHBOTS-286：512 轮结转 + 每 64 轮闲时总结压缩（忙时推后/合批）。
 // 覆盖：默认值（512/64）与生效链、64 轮边界闲时触发、幂等不重排、忙时推后跨窗口合批、
 // 压缩≠结转（不 alias 化/不新建/不排 rollover）、compact=0 关闭、压缩运行路由回原会话
-// 与提示词/收尾留痕、结转后任务亲和路由（未终态任务落旧会话/新任务落新会话）、
+// 与提示词/收尾留痕、结转后任务亲和路由（未终态任务落旧会话/新任务落活跃控制面绑定）、
 // alias 会话不重复结转、旧会话（承接任务流量）仍被压缩触发。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -77,7 +77,8 @@ async function primeProject(service: any, store: any) {
   return { director, dev, project }
 }
 
-const bindSession = (store: any, { botId, projectId, sessionId, kind = 'project', taskId = null }) => {
+// 种子绑定默认即 bot 的 kind='bot' 控制面绑定（DSHBOTS-289 收敛后唯一活跃车道）。
+const bindSession = (store: any, { botId, projectId, sessionId, kind = 'bot', taskId = null }) => {
   store.run(
     'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     sessionId, botId, projectId, kind, taskId, new Date().toISOString(),
@@ -205,11 +206,11 @@ test('compact=0 关闭：跨任意轮数都不排压缩运行', async () => {
   }
 })
 
-test('结转后任务亲和：未终态任务消息落旧会话，新任务落新会话，alias 不重复结转，旧会话仍可被压缩触发', async () => {
+test('结转后任务亲和：未终态任务消息落旧会话，新任务落活跃控制面绑定，alias 不重复结转，旧会话仍可被压缩触发', async () => {
   const ctx = await setup({ rolloverTurns: 3, compactTurns: 0 })
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
-    // 任务 T1：未终态，历史运行都落在旧项目会话 sess-old（单绑定模型：任务流量与控制面同会话）。
+    // 任务 T1：未终态，历史运行都落在旧控制面会话 sess-old（单绑定模型：任务流量与控制面同会话）。
     const t1 = await ctx.service.createTask({ projectId: project.id, title: '旧任务', assigneeBotId: dev.id }, ctx.service.actor())
     ctx.store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", t1.id)
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
@@ -234,12 +235,28 @@ test('结转后任务亲和：未终态任务消息落旧会话，新任务落�
     assert.equal(host.created.length, createdAfterRollover, '亲和复用不得再新建会话')
     assert.equal(rolloverRuns(ctx.store).length, 0, 'alias 会话不得重排结转摘要')
 
-    // ③ 新任务（无 runs 归属）：落新会话（活跃绑定之后的任务车道新建）。
+    // ③ 新任务（无 runs 归属）：不享亲和，落 bot 的活跃控制面绑定（DSHBOTS-289 收敛后
+    //    不再开任务车道行，sess-new-1 即结转后的活跃控制面会话）。
     const t2 = await ctx.service.createTask({ projectId: project.id, title: '新任务', assigneeBotId: dev.id }, ctx.service.actor())
     const task2 = ctx.store.get('SELECT * FROM tasks WHERE id = ?', t2.id)
     const fresh = await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task: task2 })
-    assert.notEqual(fresh, 'sess-old', '新任务不得落旧会话')
-    assert.equal(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', fresh).kind, 'task', '新任务应开任务会话')
+    assert.equal(fresh, 'sess-new-1', '新任务应落活跃控制面绑定')
+    assert.equal(host.created.length, createdAfterRollover, '新任务不得新建会话')
+    assert.equal(
+      ctx.store.get("SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ? AND kind = 'task'", dev.id)?.n,
+      0,
+      '不得再开任务车道绑定行',
+    )
+    assert.equal(
+      ctx.store.get('SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ? AND alias = 0', dev.id)?.n,
+      1,
+      '活跃绑定仍只有控制面一条',
+    )
+    assert.equal(
+      ctx.store.get('SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ?', dev.id)?.n,
+      2,
+      '绑定行总数 = 活跃控制面一条 + 旧会话别名',
+    )
 
     // ④ 旧会话（alias、承接未终态任务流量）跨压缩窗口：仍应被压缩触发（设置页开压缩）。
     ctx.store.setSetting(SESSION_COMPACT_TURNS_KEY, '8')

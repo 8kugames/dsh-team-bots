@@ -1,6 +1,6 @@
 // DSHBOTS-285（ADR §5.2-1）库与绑定收敛守门：
-// ①新库索引面：one_bot_binding 存在、旧三车道索引已删；one_active_run_per_bot 机制已落地但
-//   激活与 §5.2-2 同车（现行合批=领取时合并，先建索引实测红 68 例），新库暂不建；
+// ①新库索引面：one_bot_binding 存在、旧三车道索引已删；one_active_run_per_bot 已随
+//   runMigrations 接线 activateBotRunSerialization（§5.2-2 已合），新库开库即建；
 // ②one_bot_binding 约束：同 bot 恰一条 kind='bot' 活跃绑定，alias 行不受限；
 // ③one_active_run_per_bot 约束：同 bot 至多一条 queued/running，终态释放后可再入队；
 // ④存量迁移：旧四道活跃行 alias 化、project 会话转 kind='bot' 复用、幂等重跑不变；
@@ -77,12 +77,12 @@ const revertToLegacyLanes = (store, rows) => {
   for (const row of rows) addBinding(store, row)
 }
 
-test('新库索引面：one_bot_binding 存在、旧三车道索引已删；one_active_run_per_bot 待 §5.2-2 激活', async (t) => {
+test('新库索引面：one_bot_binding 存在、旧三车道索引已删；one_active_run_per_bot 随 runMigrations 激活', async (t) => {
   const ctx = await setup()
   t.after(() => cleanup(ctx))
   const names = indexNames(ctx.store)
   assert.ok(names.includes('one_bot_binding'), 'one_bot_binding 应存在')
-  assert.ok(!names.includes('one_active_run_per_bot'), '激活前不应建 one_active_run_per_bot')
+  assert.ok(names.includes('one_active_run_per_bot'), 'runMigrations 已接线 activateBotRunSerialization，新库应自带 one_active_run_per_bot')
   for (const old of ['one_project_binding', 'one_task_binding', 'one_solo_binding']) {
     assert.ok(!names.includes(old), `旧索引 ${old} 应已删除`)
   }
@@ -161,7 +161,7 @@ test('存量迁移：旧四道活跃行 alias 化，最新 project 会话转 kin
   }
   const names = indexNames(store)
   assert.ok(names.includes('one_bot_binding'))
-  assert.ok(!names.includes('one_active_run_per_bot'), '运行串行化索引随 §5.2-2 激活，本步不建')
+  assert.ok(names.includes('one_active_run_per_bot'), 'runMigrations 已接线激活，迁移后 one_active_run_per_bot 应在场')
   for (const old of ['one_project_binding', 'one_task_binding', 'one_solo_binding']) {
     assert.ok(!names.includes(old), `旧索引 ${old} 应被迁移删除`)
   }
@@ -175,6 +175,9 @@ test('存量运行串行化：同 bot 多条 queued 只留最早一条，其余 
   t.after(() => cleanup(ctx))
   const { store } = ctx
   addBot(store, 'bot-a')
+  // 新库开库即带 one_active_run_per_bot（runMigrations 已接线激活）：先撤索引才能种出
+  // 存量老库「同 bot 多条 queued 并存」的形状，再走激活迁移验证串行化收口。
+  store.run('DROP INDEX IF EXISTS one_active_run_per_bot')
   const at = (ms) => new Date(Date.parse('2026-11-06T00:00:00Z') + ms).toISOString()
   addRun(store, { id: 'run-early', botId: 'bot-a', queuedAt: at(0) })
   addRun(store, { id: 'run-late', botId: 'bot-a', queuedAt: at(1_000) })
@@ -208,6 +211,10 @@ test('ensureBotBinding：无绑定 bot 运行期新建控制面会话，重复�
     sessionCreates: new Map(),
     selectModel: async () => {},
     defaultAgentPreset: async () => ({}),
+    // DSHBOTS-289 后 ensureBotBinding 自带策略面；本测只钉建行/复用，全部空实现。
+    applyFilePolicy() {},
+    shouldRolloverSession: () => false,
+    maybeCompactSession() {},
     retireBinding: sessionMethods.retireBinding,
   }
   addBot(store, 'bot-a')
