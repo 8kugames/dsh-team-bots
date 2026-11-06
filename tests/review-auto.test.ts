@@ -559,3 +559,35 @@ test('交付带提问（attention）不派核验也不排总监验收：先让 o
     assert.equal(view.reviewStatus, 'none')
   } finally { await t.close() }
 })
+
+// DSHBOTS-291 卡面增补②（D-290 红线臂 4d70a415：M5a owner_task busy 闸 0 直接覆盖）：
+// owner 真忙（有 queued/running 运行）时 enqueueOwnerTaskRun 返回 null 不落 runs 行、
+// 挂待处理队列；owner 空闲后 drainPendingMessages 建回一条 review 运行。
+// 现有用例都在第二次入队前把第一条 run 置 succeeded 释放 owner，未覆盖真忙场景。
+test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行，空闲 drain 建回一条', async () => {
+  const t = await setup()
+  try {
+    const task = await t.service.createTask({
+      projectId: t.project.id, title: '忙时验收', assigneeBotId: t.dev.id,
+      status: 'in_progress', postCard: false,
+    }, t.actor)
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_owner_busy', ?, ?, 'chat', 'read', 'test', 'running', 1, 'busy:owner_gate', ?)`,
+      t.project.id, t.director.id, new Date().toISOString(),
+    )
+    const pending = () => JSON.parse(t.store.setting(`bot_pending_msgs:${t.director.id}`) ?? '[]')
+    assert.equal(t.service.enqueueOwnerTaskRun(t.service.taskRow(task.id), 'review'), null, 'owner 真忙时返回 null')
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'review'")?.n, 0, '不落 runs 行')
+    assert.equal(pending().length, 1, '挂待处理队列')
+    assert.equal(pending()[0].kind, 'owner_task')
+
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_owner_busy'", new Date().toISOString())
+    t.service.drainPendingMessages()
+    const review = t.store.get("SELECT * FROM runs WHERE kind = 'review'")
+    assert.ok(review, 'owner 空闲后建回一条 review 运行')
+    assert.equal(review.bot_id, t.director.id)
+    assert.equal(review.task_id, task.id)
+    assert.deepEqual(pending(), [], '挂起队列清空')
+  } finally { await t.close() }
+})
