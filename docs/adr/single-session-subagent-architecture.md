@@ -95,6 +95,8 @@
 
 **限制（如实）**：① `subagent/start|end` 载荷不含父会话身份——scope 载体是不透明路由 carrier（「the carrier does not expose the subject's properties; event payloads carry the real subject」，dsh-scope `lib/types/index.d.ts`），而载荷只带子代理身份；父归属须与工具瀑布的 caller agent 按 child id/runId 配对，或按事件时刻该 bot 当前 running 的 `kind='task'` 运行归属。② 任务号标签不在宿主载荷里——宿主不解析业务标签，标签只存在于工具调用参数，必须从 `tools/pre-execute` 抓取。③ 作用域过滤的插件根级注册面与 cordis dispatch 的实际可达性未经运行实测（本卡只做可行性调查；接线实测属实施卡）。④ 命名队友（spawn_teammate）走 teammate 管理线，不在 subagent 生命周期事件覆盖内，账本如需覆盖另查。
 
+**限制③运行实测收口（DSHBOTS-294）**：结论=可达。方法=真 cordis `Context` + 真 dsh-scope `createScope` 子 scope 发射，插件根 ctx（untagged）监听同时命中 `emit`（`subagent/end` 形态）与 `waterfall`（`tools/pre-execute` 形态）两条派发面——与 dsh-scope 文档口径一致（「admits untagged listeners globally」，事件沿 scope 链上溯、从不下行）。探针固化为 `tests/fixtures/scope-reach-probe.mjs`，由 `tests/subagent-ledger.test.ts` 子进程执行（避免宿主 Context 句柄吊住测试进程；宿主安装缺失时探针自报 SKIP）。
+
 **落地口径（实施卡蓝图）**：`subagent_spawned` = `tools/pre-execute` 命中 `subagent`/`subagent_fork` 时，由 caller agent 解析 bot → 该 bot 当前 running 的 task 运行 → INSERT run_events（负载：任务号标签 + 参数摘要）；`subagent_result` = `tools/result`（或 `subagent/end` 配对）→ INSERT run_events（负载：stopReason + 末条产出截断摘要 + 任务号）。提示词层 bot 自报账本不必要，仅作事件缝不可用时的降级路径（§2.1-2 的「子智能体产出回报控制面」交付模板已承载回报面）。
 
 ### 4.3 保持不变的件
@@ -143,9 +145,12 @@
 - **第 3 步前半（控制面提示词）已落地**：任务分支新增静态段 `# Child agents by task number`（按任务号开专属子智能体/标签=任务号/不并卡/小卡亲做；写继承控制面沙箱+不受任务写范围调度闸门+卡面声明写范围=子代理写入边界；交付模板=子代理回报变更/验证/风险→bot 合并亲审后交付），`# Parallel work inside this task` 收窄为并行编排口径并引用之；静态前缀 1893/1900、三段指引 1102/1200 守住红线，段序/8k 截断尾/D-276 自校段/D-283 分级/D-272 提问锚点全部不动。守门=tests/control-plane-subagent.test.ts（三组锚点+段序+agentTeam 门控+恒英文）。
 - **第 3 步后半（子代理账本）完成可行性调查，结论可行**：宿主事件缝清单与限制见 §4.2.1；接线（tools 瀑布监听→run_events 落库）与 V3 的 run_events 断言属后续实施卡。
 
-实施记录（DSHBOTS-293，第 4 步收尾与治理适配审计）：
+实施记录（DSHBOTS-294，账本接线 + isSolo 收口）：
 
-七项逐项核对（守门：watchdog/deadline/stale 55 例 + usage/wechat 族 92 例全绿；发现破坏 1 处已修复）：
+- **第 3 步后半（子代理账本）已落地**：`src/subagent-ledger.ts` 于插件根 ctx 注册三缝——`tools/pre-execute` 命中 `subagent`/`subagent_fork` 时抓任务号标签、按 caller agent 会话解析 bot、落其 running `kind='task'` 运行的 `subagent_spawned`；`tools/result` 按 callId 配对（child id 出现在结果 JSON 即认领暂存的 `subagent/end` 终态）落 `subagent_result`（标签+stopReason+末条产出 400 字截断）；`subagent/end` 兜底归属=全库恰一个 bot 有 running task 运行且该 bot 无待配对瀑布调用（多 bot 并行时不冒认，等 `tools/result` 精确配对）。子代理不占 runs 行（§4.2）；监听异常全兜contained，不影响工具执行。守门=`tests/subagent-ledger.test.ts`（含标签正例/无归属与非 subagent 负例/根级注册面探针）。提示词层自报子代理清单的降级路径未启用（事件缝实测可达，无需降级）。
+- **isSolo 遗留拍板项已修（D-293 旁注收口）**：questions.ts/approvals.ts 的 solo 判定改按「无 project 上下文的控制面会话」——`binding.kind='bot'` 且绑定无 project 且该 bot 无活跃项目关系（成员或总监、项目未归档）才按单聊承接；历史 `kind='solo'` alias 行保持命中；仍处活跃项目的 bot 控制面绑定照旧透传/项目流，D-218 单聊承接与 D-190 总监闸门均不回退。守门=`tests/solo-control-plane.test.ts`（承接/透传/归档回退/alias 回归 ×提问与审批）。
+
+实施记录（DSHBOTS-293，第 4 步收尾与治理适配审计）：七项逐项核对（守门：watchdog/deadline/stale 55 例 + usage/wechat 族 92 例全绿；发现破坏 1 处已修复）：
 
 - **① run-finish 交付链——未破坏**：任务级幂等键（`review_auto:<task>`）合批、交付报告落 task_comments、同事务转 in_review（run-finish.ts:317-332）、review_delegate 复活重投（outbox coalescing 白名单）全部按 runs 行与 run.task_id 工作，不依赖车道会话；owner busy 闸下 owner_task 挂起建回后交付链照常。
 - **② review/看门狗——未破坏、无死锁**：judgeCard 按 runs.task_id 取数（`kind='task'` 行在单会话下仍逐卡存在）；watchdog H1 的 owner_task_run outbox → enqueueOwnerTaskRun 遇 owner busy 挂待处理队列、空闲 drain 建回（tests/review-auto.test.ts:567 守门）——owner 串行只推迟不丢派（挂起项幂等键 `owner_task:<task>:<kind>` 去重）。
