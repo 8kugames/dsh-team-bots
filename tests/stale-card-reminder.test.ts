@@ -1,10 +1,14 @@
 // tests/stale-card-reminder.test.ts —— DSHBOTS-280 守门：in_review/blocked 滞留阈值兜底。
+// DSHBOTS-295 扩待执行宽档：四态三档梯度（待执行 backlog/todo 72h / in_review 24h / blocked 48h）。
 // 锁定四支：
-//  ① 阈值常量在场（STALE_REVIEW_HOURS=24 / STALE_BLOCKED_HOURS=48，集中定义可调）；
-//  ② 两状态判定纯逻辑阈值内/外两向（in_review 23h/25h、blocked 47h/49h，非目标状态不判）；
+//  ① 阈值常量在场（STALE_PENDING_HOURS=72 / STALE_REVIEW_HOURS=24 / STALE_BLOCKED_HOURS=48，
+//     集中定义可调，三档梯度 72>48>24）；
+//  ② 各状态判定纯逻辑阈值内/外两向（pending 71h/73h、in_review 23h/25h、blocked 47h/49h，
+//     非目标状态不判）；
 //  ③ 同卡每日 ≤1 条防重（同日二次扫描静默：留痕不新增、返回空）；
 //  ④ D-269 口径文案点名总监（DSHBOTS-281：in_review→待总监验收收口；blocked→待总监解阻/收口，
-//     不再写「owner 可改/可用」转接话术），且只提醒不自动处置（扫描后卡状态原样不变）。
+//     D-295：待执行→待总监派发或推进 team_assign_task，均不写「owner 可改/可用」转接话术），
+//     且只提醒不自动处置（扫描后卡状态原样不变）。
 // 运行态用例依赖 mkdtemp：沙箱 EPERM 时按卡面口径 skip（源码级断言仍执行）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -15,16 +19,19 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import {
-  STALE_REVIEW_HOURS, STALE_BLOCKED_HOURS, STALE_CARD_NOTICE_PREFIX,
+  STALE_PENDING_HOURS, STALE_REVIEW_HOURS, STALE_BLOCKED_HOURS, STALE_CARD_NOTICE_PREFIX,
   staleCardHit, staleCardNoticeBody,
 } from '../src/services/notify.js'
 
 const H = 3_600_000
 const isoFromNow = (hours: number) => new Date(Date.now() - hours * H).toISOString()
 
-test('阈值常量在场：STALE_REVIEW_HOURS=24 / STALE_BLOCKED_HOURS=48', () => {
+test('阈值常量在场：三档梯度 72/48/24（D-295 待执行宽档）', () => {
+  assert.equal(STALE_PENDING_HOURS, 72, '待执行（backlog/todo）滞留阈值应为 72 小时宽档')
   assert.equal(STALE_REVIEW_HOURS, 24, 'in_review 滞留阈值应为 24 小时')
   assert.equal(STALE_BLOCKED_HOURS, 48, 'blocked 滞留阈值应为 48 小时')
+  assert.ok(STALE_PENDING_HOURS > STALE_BLOCKED_HOURS && STALE_BLOCKED_HOURS > STALE_REVIEW_HOURS,
+    '三档梯度应为 72>48>24（待执行放宽、验收最紧）')
 })
 
 test('两状态判定纯逻辑：阈值内/外两向，非目标状态与坏时间戳不判', () => {
@@ -41,6 +48,17 @@ test('两状态判定纯逻辑：阈值内/外两向，非目标状态与坏时�
   assert.ok(blocked, 'blocked 49h 应命中')
   assert.equal(blocked.status, 'blocked')
   assert.equal(blocked.threshold, STALE_BLOCKED_HOURS)
+  // 待执行两向（D-295）：tasks 表无 'pending' 态，实际待执行态 = todo（已派未领）与
+  // backlog（立卡未派）共用 72h 宽档；71h（内）不命中，73h（外）命中。
+  assert.equal(staleCardHit({ status: 'todo', updated_at: isoFromNow(71) }), null, 'todo 71h 未过 72h 宽档阈值')
+  const pendingTodo = staleCardHit({ status: 'todo', updated_at: isoFromNow(73) })
+  assert.ok(pendingTodo, 'todo 73h 应命中')
+  assert.equal(pendingTodo.status, 'todo')
+  assert.equal(pendingTodo.threshold, STALE_PENDING_HOURS)
+  assert.equal(staleCardHit({ status: 'backlog', updated_at: isoFromNow(71) }), null, 'backlog 71h 未过 72h 宽档阈值')
+  const pendingBacklog = staleCardHit({ status: 'backlog', updated_at: isoFromNow(73) })
+  assert.ok(pendingBacklog, 'backlog 73h 应命中（立卡没人派同样兜底）')
+  assert.equal(pendingBacklog.threshold, STALE_PENDING_HOURS)
   // 非目标状态（施工/终态）与不可解析时间戳一律不判。
   assert.equal(staleCardHit({ status: 'in_progress', updated_at: isoFromNow(100) }), null, '施工状态不在滞留兜底范围')
   assert.equal(staleCardHit({ status: 'done', updated_at: isoFromNow(100) }), null, '终态不判滞留')
@@ -61,6 +79,12 @@ test('D-269 口径文案：原因（滞留时长+阈值）+ 点名总监处置�
   assert.match(blocked, /待总监解阻/, 'blocked 文案应点名总监解阻')
   assert.match(blocked, /自动重置死线窗口/, 'blocked 文案含重派自动重置窗口口径（D-281）')
   assert.doesNotMatch(blocked, /owner 可[改用]/, '不得再写「owner 可改/可用」转接话术')
+  const pending = staleCardNoticeBody({ identifier: 'DSHBOTS-9', status: 'todo', hours: 80 })
+  assert.match(pending, /待执行已滞留 80 小时/, '待执行文案应含滞留时长')
+  assert.match(pending, /72h/, '待执行文案应含 72h 宽档阈值')
+  assert.match(pending, /待总监派发或推进/, '待执行文案应点名总监派发/推进')
+  assert.match(pending, /team_assign_task/, '待执行处置动作应点名 team_assign_task（派发/合并/取消）')
+  assert.doesNotMatch(pending, /owner 可[改用]/, '不得写「owner 可改/可用」转接话术')
 })
 
 // ── 运行态用例（EPERM 容忍 skip）───────────────────────────────────────────
@@ -110,7 +134,7 @@ const staleMessages = (t, taskId) => t.store.all(
   taskId, `${STALE_CARD_NOTICE_PREFIX}%`,
 )
 
-test('运行态：in_review/blocked 超阈值提醒 owner + 同日二次静默 + 只提醒不自动处置', async t => {
+test('运行态：pending/in_review/blocked 超阈值提醒 owner + 同日二次静默 + 只提醒不自动处置', async t => {
   let env
   try { env = await setup() } catch (error: any) {
     if (error?.code === 'EPERM') return t.skip(`mkdtemp EPERM：${error.message}`)
@@ -119,11 +143,13 @@ test('运行态：in_review/blocked 超阈值提醒 owner + 同日二次静默 +
   try {
     const reviewTask = await staleTask(env, { status: 'in_review', idleHours: 25 })
     const blockedTask = await staleTask(env, { status: 'blocked', idleHours: 49 })
+    const pendingTask = await staleTask(env, { status: 'todo', idleHours: 73 })
     const freshTask = await staleTask(env, { status: 'blocked', idleHours: 47 }) // 阈值内，不提醒
+    const freshPending = await staleTask(env, { status: 'todo', idleHours: 71 }) // 72h 宽档内，不提醒
     const first = env.service.scanStaleCards()
-    assert.deepEqual([...first].sort(), [reviewTask.id, blockedTask.id].sort(), '首轮应只提醒两张超阈值卡')
+    assert.deepEqual([...first].sort(), [reviewTask.id, blockedTask.id, pendingTask.id].sort(), '首轮应只提醒三张超阈值卡')
     // 留痕：进任务线程 + mentions 点名项目 owner（=总监）；文案点名总监处置方向。
-    for (const [task, re] of [[reviewTask, /待总监验收/], [blockedTask, /待总监解阻/]] as const) {
+    for (const [task, re] of [[reviewTask, /待总监验收/], [blockedTask, /待总监解阻/], [pendingTask, /待总监派发或推进（team_assign_task/]] as const) {
       const rows = staleMessages(env, task.id)
       assert.equal(rows.length, 1, '每卡首轮恰一条滞留提醒')
       assert.equal(rows[0].project_id, env.project.id, '留痕应落项目群聊流')
@@ -131,16 +157,17 @@ test('运行态：in_review/blocked 超阈值提醒 owner + 同日二次静默 +
       assert.match(rows[0].body, re, '文案应点名总监处置方向')
     }
     assert.equal(staleMessages(env, freshTask.id).length, 0, '阈值内卡不得提醒')
+    assert.equal(staleMessages(env, freshPending.id).length, 0, '72h 宽档内待执行卡不得提醒')
     // 同日二次扫描：同卡每日 ≤1 条，超限静默（留痕不新增、返回空）。
     const second = env.service.scanStaleCards()
     assert.equal(second.length, 0, '同日二次扫描应全部静默')
     assert.equal(staleMessages(env, reviewTask.id).length, 1, 'in_review 卡留痕不得翻倍')
     assert.equal(staleMessages(env, blockedTask.id).length, 1, 'blocked 卡留痕不得翻倍')
+    assert.equal(staleMessages(env, pendingTask.id).length, 1, '待执行卡留痕不得翻倍')
     // 只提醒不自动处置：卡状态原样不变（不关单/不转状态/不重派）。
-    const statuses = env.store.all(`SELECT id, status FROM tasks WHERE id IN ('${reviewTask.id}', '${blockedTask.id}')`)
-    assert.ok(statuses.every(row => ['in_review', 'blocked'].includes(row.status)), '扫描不得改变卡状态')
-    assert.equal(statuses.find(row => row.id === reviewTask.id).status, 'in_review', 'in_review 卡保持原状态')
-    assert.equal(statuses.find(row => row.id === blockedTask.id).status, 'blocked', 'blocked 卡保持原状态')
+    const statuses = env.store.all(`SELECT id, status FROM tasks WHERE id IN ('${reviewTask.id}', '${blockedTask.id}', '${pendingTask.id}')`)
+    assert.ok(statuses.every(row => ['in_review', 'blocked', 'todo'].includes(row.status)), '扫描不得改变卡状态')
+    assert.equal(statuses.find(row => row.id === pendingTask.id).status, 'todo', '待执行卡保持原状态')
     // 不重派：扫描后不得为滞留卡新建任何运行。
     const runs = env.store.all('SELECT id FROM runs WHERE task_id IN (?, ?)', reviewTask.id, blockedTask.id)
     assert.equal(runs.length, 0, '滞留提醒不得触发任何新运行（不重派）')
@@ -150,8 +177,10 @@ test('运行态：in_review/blocked 超阈值提醒 owner + 同日二次静默 +
 test('源码锚点：扫描点复用 scheduler 周期 tick（不新增常驻进程）', async () => {
   const { readFileSync } = await import('node:fs')
   const schedulerSrc = readFileSync(new URL('../src/services/scheduler.ts', import.meta.url), 'utf8')
-  assert.match(schedulerSrc, /runReviewWatchdog\(this\)\s*\n\s*\/\/ 滞留阈值兜底（DSHBOTS-280）[\s\S]*?this\.scanStaleCards\(\)/,
+  assert.match(schedulerSrc, /runReviewWatchdog\(this\)\s*\n\s*\/\/ 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）[\s\S]*?this\.scanStaleCards\(\)/,
     'tick 应在 D-194 守门同拍调用 scanStaleCards')
+  assert.match(schedulerSrc, /t\.status IN \('in_review', 'blocked', 'todo', 'backlog'\)/,
+    '扫描 IN 条件应含待执行两态 todo/backlog（D-295）')
   const notifySrc = readFileSync(new URL('../src/services/notify.ts', import.meta.url), 'utf8')
   assert.match(notifySrc, /date\(created_at\) = date\('now'\)/, '同卡每日 ≤1 防重应以当日留痕为口径')
 })
