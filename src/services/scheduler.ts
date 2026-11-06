@@ -9,6 +9,7 @@ import { applyRetention, reconcileUsage } from '../usage-reconcile.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { MAX_RATE_LIMIT_RETRIES, isQuotaExhausted, isRetryChainError } from './backoff.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
+import { TASK_BUDGET_ROUNDS, TRANSITIONS, taskDeadlineInfo } from './tasks.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
 
@@ -307,6 +308,15 @@ export const schedulerMethods = {
     return `project:${run.bot_id}:${run.project_id}`
   },
 
+  // DSHBOTS-272 用户提问运行判定：kind='chat' 且触发消息是人发的（messages.sender_type='user'）。
+  // 通知降级（notify.ts 成员通知落群聊流）与 bot 回复 @mention 唤醒（run-finish.ts）触发的
+  // chat 运行，触发消息 sender_type='bot'，不算用户提问；出队置顶与合批保护只给人发的提问用。
+  isUserQuestionRun(run) {
+    if (run?.kind !== 'chat' || !run.trigger_ref) return false
+    const message = this.store.get('SELECT sender_type FROM messages WHERE id = ?', run.trigger_ref)
+    return message?.sender_type === 'user'
+  },
+
   // 入站消息合批（DSHBOTS-231）：领取一条运行后，把同一条绑定道内仍在排队的消息运行合并
   // 进来——被合并的运行置 canceled（error_code='MERGED'），消息 id 记入本运行的
   // merged_messages，executeRun 据此把多条消息一次性注入同一轮上下文，不再一条消息一次运行。
@@ -319,6 +329,10 @@ export const schedulerMethods = {
     const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
     const claimedQueuedAt = Date.parse(run.queued_at)
     const laneKey = this.claimKey(run)
+    // DSHBOTS-272 合批保护：用户提问（触发消息 sender_type='user'）不并入非用户触发的运行——
+    // 并入后提问只能挤在 Merged messages 段、没有直接回答锚点（事故形态=通知运行回一条轻备忘
+    // 就算处理完）。留队保住「一条提问一条正式回复」；出队序已把用户提问置顶，下一拍即领取。
+    const claimedIsUserQuestion = this.isUserQuestionRun(run)
     const candidates = this.store.all(
       `SELECT * FROM runs WHERE status = 'queued' AND id != ? AND kind = ?
         ORDER BY queued_at LIMIT 100`,
@@ -330,6 +344,8 @@ export const schedulerMethods = {
       if (mergedIds.length >= max - 1) break
       if (!candidate.trigger_ref) continue
       if (this.claimKey(candidate) !== laneKey) continue
+      // DSHBOTS-272：候选是用户提问而本运行非用户触发（通知/伙伴唤醒）→ 不并，见上方注释。
+      if (!claimedIsUserQuestion && this.isUserQuestionRun(candidate)) continue
       const queuedAt = Date.parse(candidate.queued_at)
       if (!Number.isFinite(queuedAt) || !Number.isFinite(claimedQueuedAt)) continue
       if (queuedAt < claimedQueuedAt || queuedAt - claimedQueuedAt > windowMs) continue
@@ -496,6 +512,65 @@ export const schedulerMethods = {
     return canceled
   },
 
+  // 任务级死线判定（DSHBOTS-274）：纯同步——领取路径不得为此引入 await 边界，
+  // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
+  taskPastDeadline(task) {
+    const { deadlineMs } = taskDeadlineInfo(this.store, task)
+    return deadlineMs !== null && Date.now() > deadlineMs
+  },
+
+  // 任务级死线升级（DSHBOTS-274）：超线的 queued 施工运行拒绝启动——运行置 canceled
+  // （TASK_DEADLINE，run_events 留 task_deadline 锚），卡面落系统评论（D-269 口径引导
+  // owner 改 time_budget_minutes 延期后重派），status 转 blocked（走 updateTask 单一状态
+  // 流转漏斗，非法转换只评论不转），并复用系统消息通道通知 owner（notify.ts insertMessage
+  // 同款，进任务线程 + mentions 点名项目 owner）。幂等：enqueueTaskRun 同卡同时只有一条
+  // 活跃运行，运行取消后不再进候选，每次派发至多升级一次；延期重派后死线按新预算重算。
+  async escalateTaskPastDeadline(task, runId) {
+    const { deadlineMs } = taskDeadlineInfo(this.store, task)
+    if (deadlineMs === null || Date.now() <= deadlineMs) return false
+    const project = this.projectRow(task.project_id)
+    const identifier = `${project?.key ?? 'T'}-${task.number}`
+    const deadlineIso = new Date(deadlineMs).toISOString()
+    const body = `【${identifier}】超时中止（预算×${TASK_BUDGET_ROUNDS}）已到，任务未关单：owner 可改 time_budget_minutes 延期后重派（死线 ${deadlineIso}）。`
+    const now = nowIso()
+    const commentId = id('cmt')
+    this.store.transaction(() => {
+      this.store.run(
+        "UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'TASK_DEADLINE', error_message = ? WHERE id = ? AND status = 'queued'",
+        now, body, runId,
+      )
+      this.store.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'task_deadline', `整卡死线已到（${deadlineIso}），拒绝启动新施工运行`, now,
+      )
+      this.store.run(
+        'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        commentId, task.id, 'system', 'system', body, now,
+      )
+      this.addTaskEvent(task.id, 'commented', { type: 'system', id: 'system' }, { commentId, deadline: deadlineIso, runId })
+    })
+    if (TRANSITIONS[task.status]?.has('blocked')) {
+      try {
+        await this.updateTask(task.id, { status: 'blocked' }, { type: 'system', id: 'system' })
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: 死线转 blocked 失败 %s: %s', identifier, error?.message ?? error)
+      }
+    }
+    try {
+      this.insertMessage({
+        projectId: task.project_id,
+        senderType: 'system',
+        senderId: 'system',
+        taskId: task.id,
+        body,
+        mentions: project?.owner_bot_id ? [project.owner_bot_id] : [],
+      })
+    } catch (error: any) {
+      this.logger.warn?.('dsh-team: 死线 owner 通知失败 %s: %s', identifier, error?.message ?? error)
+    }
+    return true
+  },
+
   async tick() {
     if (this.ticking || !this.started) return
     this.ticking = true
@@ -546,13 +621,19 @@ export const schedulerMethods = {
       if (activeTotal >= maxRuns + 1) return
       // 出队顺序：任务运行按任务优先级（urgent 先），其余运行视同 high——用户交互不能被任务积压拖死；
       // 同优先级按入队时间，保证 FIFO 不饿死老运行。
+      // DSHBOTS-272 用户提问不被静默压后：不动用户运行的档位（同车道先入队的 review/handle
+      // 等人机运行契约不变，见 tests/avatar-lanes.test.js），改为把通知/伙伴唤醒触发的 chat
+      // 运行（触发消息 sender_type='bot'）降到机器流量档——同车道内用户提问（tier 1）必然
+      // 先于它领取，即使提问后到；通知备忘让位于一切人机交互与 urgent/high 任务。
       // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）的 queued 任务运行不再领取；
       // 只排 kind='task'，非任务运行不受影响。LEFT JOIN 出 NULL 的孤儿任务运行不过滤。
       const candidates = this.store.all(
         `SELECT r.* FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+          LEFT JOIN messages m ON m.id = r.trigger_ref
          WHERE r.status = 'queued'
            AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled'))
          ORDER BY CASE
+           WHEN r.kind = 'chat' AND m.sender_type = 'bot' THEN 2
            WHEN r.kind <> 'task' OR t.priority IS NULL THEN 1
            WHEN t.priority = 'urgent' THEN 0
            WHEN t.priority = 'high' THEN 1
@@ -640,6 +721,16 @@ export const schedulerMethods = {
                 nowIso(),
               )
             }
+            continue
+          }
+          // 任务级死线（DSHBOTS-274）：施工运行（kind='task'）领取前检查整卡死线——
+          // 死线 = 派发基准 + time_budget_minutes × TASK_BUDGET_ROUNDS（默认 2 轮，
+          // 延期阀见 tasks.ts updateTask）。超线即拒绝启动新施工运行并自动升级
+          // （评论 + blocked + owner 通知，escalateTaskPastDeadline）；
+          // review/handle 等派生运行不走此闸（kind!=='task' 豁免，死线只拦施工轮）。
+          // 判定同步、升级异步放行：不为本闸在领取路径引入 await 边界。
+          if (taskRow && this.taskPastDeadline(taskRow)) {
+            void this.escalateTaskPastDeadline(taskRow, run.id).catch(error => this.logger.warn?.('dsh-team: 死线升级失败 %s: %s', run.id, error?.message ?? error))
             continue
           }
         }

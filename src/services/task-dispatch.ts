@@ -11,6 +11,12 @@ import { filterIgnoredWriteScopes, parseWriteScopes, parseWriteScopesFromDescrip
 import { resolveSandboxOverride } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 
+// 勘误并卡提示（DSHBOTS-276，P1 派单质量前置）的判定常量：新卡标题含修正类关键词 +
+// 同项目同承接人近 7 天 done 卡写范围有交集，双条件同时命中才在卡面描述尾部追加并卡提示行。
+// 仅提示不拦截：D-82 重复卡闸、D-270 领取闸等既有拒绝行为一概不变。
+const CORRECTION_TITLE_RE = /修正|勘误|补充|改写/
+const RECENT_DONE_WINDOW_MS = 7 * 86_400_000
+
 export const taskDispatchMethods = {
   // 派发门禁（DSHBOTS-262）：暂停中的 Bot 不接新卡——新建派单、改派、重派一律拒绝，
   // 先恢复（bot status → active）再派；归档/移除等其余不可用态沿用 assertMember 既有口径。
@@ -19,12 +25,36 @@ export const taskDispatchMethods = {
     if (bot?.status === 'paused') throw badRequest(`Bot ${bot.name} 已暂停，先恢复再派卡`)
     this.assertMember(projectId, botId)
   },
+  // 无主卡领取开工的写范围声明闸门（DSHBOTS-270）：与 assignFromBot「派单必须声明写
+  // 范围」同口径的预判——卡面清单优先，空则从描述「写范围：」行兜底解析
+  // （parseWriteScopesFromDescription），再过忽略规则清洗（全部命中 .gitignore 被剔除
+  // = 实际未声明）。拒绝文案按 D-269 口径 = 原因 + 替代命令；带声明的卡直接放行。
+  assertClaimScopes(task, project) {
+    const declared = readWriteScopes(task.write_scopes)
+    const scopes = filterIgnoredWriteScopes(
+      declared.length ? declared : parseWriteScopesFromDescription(task.description),
+      this.projectWorkDir(project),
+    ).kept
+    if (scopes.length) return
+    throw badRequest(
+      `领取开工必须声明写范围：任务 ${project.key}-${task.number} 未声明写范围，`
+      + '其写运行会与同项目其他写运行全部保守串行，一条卡即可堵死队列。'
+      + '请先补声明再领取：用工作台 update_task / task_update_scopes 给该卡补 write_scopes，'
+      + '或在卡面描述里写一行「写范围：a, b」（由 parseWriteScopesFromDescription 兜底解析）；'
+      + '补声明后重新领取即可按声明范围并行。',
+    )
+  },
   // sandboxOverride 选项（DSHBOTS-156）：undefined=不动（重派未传 sandbox 时保留旧覆盖）；
   // null=显式清掉回落 bot 配置档（重派传 sandbox='inherit'）；字符串=收紧档（派发入口已校验）。
   async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride } = {} as any) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
     this.assertDispatchTarget(project.id, botId)
+    // 共享板无主卡声明闸门（DSHBOTS-270）：无主卡获得 owner 即领取开工——assignTask 稍后
+    // 会排 task_run outbox 进施工，未声明写范围的写运行被调度器按「未声明」保守串行
+    // （scheduler 既定语义不动），既堵自己也占道。与总监派单同口径在入口拒绝；
+    // 改派（卡已有 owner）与 autoStart=false 的重派/存量补挂流程不在此口。
+    if (!task.assignee_bot_id && autoStart !== false) this.assertClaimScopes(task, project)
     const active = this.store.get(
       "SELECT id, kind FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
       taskId,
@@ -188,7 +218,14 @@ export const taskDispatchMethods = {
     if (!binding) throw forbidden('只有项目群中的 Bot 可以执行该操作')
     if (!binding.project_id) throw forbidden('单聊会话不在项目中，无法管理任务')
     const project = this.projectRow(binding.project_id)
-    if (project.owner_bot_id !== binding.bot_id) throw forbidden('只有项目总监 Bot 可以执行该操作')
+    // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令/正确下一步。
+    if (project.owner_bot_id !== binding.bot_id) {
+      throw forbidden(
+        '只有项目总监 Bot 可以执行该操作：总监命令（如 team_assign_task 派单/重派、'
+        + 'team_review_task 验收关单、team_block_task 强制受阻）由项目 owner 总监 Bot 调用；'
+        + '成员请在项目群内向总监请求代为执行。',
+      )
+    }
     return { binding, project, actor: { type: 'bot', id: binding.bot_id } }
   },
   // 派单侧同写范围重复检测（DSHBOTS-82）：同一文件上叠 N 张小卡时，各卡各立各排，
@@ -207,6 +244,26 @@ export const taskDispatchMethods = {
       const other = readWriteScopes(row.write_scopes)
       if (other.length !== target.size) continue
       if ([...target].every(scope => other.includes(scope))) return row
+    }
+    return null
+  },
+  // 勘误并卡引导（DSHBOTS-276）：找同项目同承接人「近 7 天内 done」且写范围与本次声明有
+  // 交集（元素级，路径前缀不展开——与 D-82 完全一致检测同一口径的读取函数）的最近一张卡。
+  // 时间基准用 COALESCE(completed_at, updated_at)：done 终态时刻优先（D-69 回填保证存量行有值）。
+  findRecentDoneOverlapTask(projectId, assigneeBotId, scopes) {
+    const target = new Set(scopes)
+    if (!target.size) return null
+    const since = new Date(Date.now() - RECENT_DONE_WINDOW_MS).toISOString()
+    const candidates = this.store.all(
+      `SELECT id, number, title, write_scopes FROM tasks
+        WHERE project_id = ? AND assignee_bot_id = ? AND status = 'done'
+          AND COALESCE(completed_at, updated_at) >= ?
+        ORDER BY COALESCE(completed_at, updated_at) DESC`,
+      projectId, assigneeBotId, since,
+    )
+    for (const row of candidates) {
+      const other = readWriteScopes(row.write_scopes)
+      if (other.some(scope => target.has(scope))) return row
     }
     return null
   },
@@ -278,16 +335,27 @@ export const taskDispatchMethods = {
     const forceDuplicate = input.force_duplicate === true
     const urgentExempt = input.priority === 'urgent'
     if (duplicate && !forceDuplicate && !urgentExempt) {
+      // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令（改卡重派而非新开卡）。
       throw conflict(
-        `已存在同写范围任务 ${project.key}-${duplicate.number} ${duplicate.title}，请勿重复派单；`
-        + '若需合并多张小卡，请在原任务描述追加清单后重派原任务。'
-        + '紧急任务（priority=urgent）豁免此拦截，可立即派单施工。',
+        `已存在同写范围任务 ${project.key}-${duplicate.number} ${duplicate.title}，请勿重复派单：`
+        + '请用 team_assign_task 重派原任务改卡（task=原任务号，附 title/description 即修正卡面），不要为新内容新开卡；'
+        + '确需第二张同范围卡时传 force_duplicate=true（每次使用留审计）；紧急任务（priority=urgent）豁免此拦截，可立即派单施工。',
       )
+    }
+    // 勘误并卡提示（DSHBOTS-276，不强制）：双条件命中（标题关键词 + 近期 done 卡写范围交集）
+    // 时在卡面描述尾部追加一行并卡建议。仅追加描述，不拦截派单、不改任何拒绝行为；
+    // 未命中时描述原样透传，createTask 路径零变化。
+    let description = input.description
+    if (CORRECTION_TITLE_RE.test(String(input.title ?? ''))) {
+      const overlap = this.findRecentDoneOverlapTask(project.id, member.id, scopes)
+      if (overlap) {
+        description = `${input.description ? `${input.description}\n` : ''}(note: recent done card ${project.key}-${overlap.number} overlaps these scopes — consider merging follow-up corrections into one card)`
+      }
     }
     const task = await this.createTask({
       projectId: project.id,
       title: input.title,
-      description: input.description,
+      description,
       assigneeBotId: member.id,
       priority: input.priority,
       // 透传原始清单（DSHBOTS-168）：清洗+审计由 createTask 统一做（审计挂真实 taskId）。

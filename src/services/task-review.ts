@@ -21,7 +21,15 @@ export const taskReviewMethods = {
   /** 验收/退回的共用流程：owner Bot 会话与微信管理员共用。 */
   async applyReview(task, project, decision, comment, actor) {
     const identifier = `${project.key}-${task.number}`
-    if (task.status !== 'in_review') throw conflict(`任务 ${identifier} 不在待验收状态`)
+    // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令/正确下一步（工具调用返回层，
+    // 与 run-finish 群聊/微信失败终态白名单契约不同层，互不影响）。
+    if (task.status !== 'in_review') {
+      throw conflict(
+        `任务 ${identifier} 不在待验收状态（当前 ${task.status}）：`
+        + 'team_review_task 只验收已交付（in_review）的卡，请先等负责人交付；'
+        + '若卡面或目标有误，用 team_assign_task 重派原任务（task=原任务号，附 title/description 即改卡）修正。',
+      )
+    }
     if (decision === 'accept') {
       await this.updateTask(task.id, { status: 'done' }, actor)
       if (comment) await this.addComment(task.id, comment, actor)

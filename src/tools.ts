@@ -70,7 +70,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_assign_task',
-    description: 'Assign a task to a project bot. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); passing title/description/priority alongside `task` amends the card — the assignee is immediately notified to correct course per the new card. Without `task`, creates a new task that starts automatically. A new task whose write scopes exactly match an unfinished task in the same project is rejected as a duplicate dispatch; merge the cards into the existing task instead, or pass force_duplicate to override (audited). Consolidate before dispatch: one requirement goes into one card — amend and re-dispatch the existing card (or add subtask cards with parent_task_id for genuinely independent parts) instead of opening several sibling cards for the same need.',
+    description: 'The regular path to dispatch project work to a bot: create a new task card or re-dispatch/amend an existing one. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); passing title/description/priority alongside `task` amends the card — the assignee is immediately notified to correct course per the new card. Without `task`, creates a new task that starts automatically. A new task whose write scopes exactly match an unfinished task in the same project is rejected as a duplicate dispatch; merge the cards into the existing task instead, or pass force_duplicate to override (audited). Consolidate before dispatch: one requirement goes into one card — amend and re-dispatch the existing card (or add subtask cards with parent_task_id for genuinely independent parts) instead of opening several sibling cards for the same need.',
     parameters: {
       type: 'object',
       properties: {
@@ -101,7 +101,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_block_task',
-    description: 'Force-move an in-progress task to blocked and abort its queued/running runs. Only the project owner bot may use this. The stop rides the existing abort chain and is audited as task.force_blocked (run error code TASK_FORCE_BLOCKED). Use it to stop a runaway or wrong-headed execution; typically followed by re-dispatching the same task with an amended card.',
+    description: 'The regular path to force-stop a task: force-move an in-progress task to blocked and abort its queued/running runs. Only the project owner bot may use this. The stop rides the existing abort chain and is audited as task.force_blocked (run error code TASK_FORCE_BLOCKED). Use it to stop a runaway or wrong-headed execution; typically followed by re-dispatching the same task with an amended card.',
     parameters: {
       type: 'object',
       properties: {
@@ -120,7 +120,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_review_task',
-    description: 'Accept or return a delivered task that is waiting for owner review. Only the project owner bot may use this. `accept` marks the task done; `return` sends it back to the assignee for rework (a reason is required).',
+    description: 'The one and only regular path to close or return a delivered task: `accept` marks a waiting-for-review card done; `return` sends it back to the assignee for rework (a reason is required). Hand-editing the store or any side door does not close a card — when the delivery is not reviewable yet, wait for the assignee to deliver, or amend and re-dispatch it with team_assign_task. Only the project owner bot may use this.',
     parameters: {
       type: 'object',
       properties: {
@@ -343,14 +343,14 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_propose_evolution',
-    description: 'Propose a versioned change to your own instructions or to the shared skill library. A human must review and approve it; this tool never applies the change.',
+    description: 'Facts/preferences go to memory first (team_remember); propose evolution only for structural instruction/skill changes whose benefit clearly exceeds memory. Propose a versioned change to your own instructions or to the shared skill library. A human must review and approve it; this tool never applies the change.',
     parameters: {
       type: 'object',
       properties: {
         kind: { type: 'string', enum: ['bot_update', 'skill'], description: 'bot_update changes your role/instructions; skill publishes a reusable skill proposal' },
         title: { type: 'string', description: 'Short proposal title' },
         rationale: { type: 'string', description: 'Why this change is useful and what evidence supports it' },
-        instructions: { type: 'string', description: 'For bot_update: the complete replacement instructions' },
+        instructions: { type: 'string', description: 'For bot_update: 进化指令必须是原指令+新增内容的融合稿：保留原有指令全文再写改动，不是全新替换稿也不是增量补丁（保留率低于 60% 会被系统拒绝）' },
         slug: { type: 'string', description: 'For skill: lowercase skill slug' },
         name: { type: 'string', description: 'For skill: display name' },
         description: { type: 'string', description: 'For skill: one-line description' },

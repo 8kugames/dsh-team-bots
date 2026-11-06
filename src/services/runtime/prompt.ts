@@ -12,6 +12,7 @@ import { scanProjectSkills } from '../../project-skills.js'
 import { id, nowIso, parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
+import { taskDeadlineInfo } from '../tasks.js'
 import { readWriteScopes } from '../write-scopes.js'
 import { sanitizeTmpBotDirName } from '../../paths.js'
 
@@ -450,14 +451,25 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
     // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入。
     // 任务派生运行（review/handle/memory_review）与该任务共用同一时效上限，提示词必须同步告知，
     // 否则运行会在代理不知情的情况下被超时中止。
-    const timeBudgetBlockFor = (row) => {
+    // 任务级死线（DSHBOTS-274）：deadline 只由施工分支（下方 if (task)）传入，追加剩余时间一行；
+    // 预算耗尽改收尾轮口径。review/handle/memory_review 分支不传 deadline（死线豁免，不注入该行）。
+    const timeBudgetBlockFor = (row, deadline = null) => {
       const timeBudget = Number(row?.timeBudgetMinutes ?? row?.time_budget_minutes)
-      return Number.isFinite(timeBudget) && timeBudget > 0 ? `
+      if (!(Number.isFinite(timeBudget) && timeBudget > 0)) return ''
+      let deadlineLine = ''
+      if (deadline?.deadlineMs !== null && deadline?.deadlineMs !== undefined) {
+        const remainingMs = deadline.deadlineMs - Date.now()
+        deadlineLine = remainingMs > 0
+          ? `Deadline: ${new Date(deadline.deadlineMs).toISOString()} / ${Math.ceil(remainingMs / 60_000)} min remaining.`
+          : `Deadline: ${new Date(deadline.deadlineMs).toISOString()} passed — 超线，本轮是收尾轮，优先可交付小步。`
+      }
+      return `
 
 # Time budget
 This task must be delivered within ${timeBudget} minutes; the run is aborted when the budget expires.
 Plan the depth of your work accordingly. If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
-The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).` : ''
+The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).
+${deadlineLine}`.trimEnd()
     }
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
       // 超长防护（DSHBOTS-113，事故 m_33bddb；DSHBOTS-140 扩到 owner review / handle）：
@@ -586,7 +598,8 @@ ${(sourceRun?.output ?? '').slice(0, 4000)}`
       // （8k 截断 + 盲区标记），建卡上限 40k 的长卡不再整段进提示词。
       const description = truncateTaskDescription(task.description)
       // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
-      const timeBudgetBlock = timeBudgetBlockFor(task)
+      // 任务级死线（DSHBOTS-274）：施工分支传入整卡死线，时效段追加剩余时间/收尾轮口径。
+      const timeBudgetBlock = timeBudgetBlockFor(task, taskDeadlineInfo(this.store, task))
       // 紧急豁免（DSHBOTS-126）：urgent 任务卡追加豁免指令（用户口径 m08196-2）——
       // 无视车道排队立即开工；非 urgent 完全不注入，保持既有车道纪律。
       const urgentExemptionBlock = task.priority === 'urgent' ? `
@@ -611,6 +624,16 @@ Before closing: if this task cannot be finished in one run or new closing condit
 # Splitting for speed
 Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery. One card per part: parent_task_id to this task, blocked_by where order matters. Not the project owner? Propose the split in your delivery report. Example: API card (src/api/) + docs card, run concurrently.`
       // splitting-guidance:end
+      // delivery-selfcheck:start —— 交付前自校段（DSHBOTS-276，P1 派单质量前置）：治 GS 实测
+      // 34% 补丁/返工卡——交付报告缺自跑验证证据。所有任务卡无条件注入，置于卡头
+      // Status 与 Description 之间（D-269 只追加手法）：不动既有锚点前缀与 D-274 时效段
+      // （tests/prompt-budget ≤1900 静态前缀不打红、8k 截断「描述后即结尾」断言不打红、
+      // tests/prompt-prefix-order 段序不打红——三守门实测后选定此位）。
+      const deliverySelfcheckBlock = `
+
+# Delivery self-check
+Before reporting delivery, self-run the reproducible verification and put the evidence in the delivery report: the exact test/build commands you ran with their results, the list of files you changed, and the counts or links the acceptance criteria name (grep hits, test pass counts, commit hashes). Verify your own claims first — re-run the target tests and re-check the anchors yourself; do not report delivery on unverified work. Self-checking is always cheaper than rework: a delivery report without evidence will be returned.`
+      // delivery-selfcheck:end
       // recovery note（DSHBOTS-135）：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
       // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
       // 本段只在重排队后的第一次执行出现。与时效段（D-125）、豁免段（D-126）、纪律段（D-132）互不干扰。
@@ -634,7 +657,7 @@ When the deliverable includes images, put the files in the workspace and referen
 # Assigned task ${project.key}-${task.number}
 Title: ${task.title}
 Priority: ${task.priority}
-Status: ${task.status}
+Status: ${task.status}${deliverySelfcheckBlock}
 Description:
 ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}`
     }
@@ -674,9 +697,16 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
 
 # WeChat direct conversation
 This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you.` : ''
+    // DSHBOTS-272 用户提问锚点：触发消息是人发的（sender_type='user'）才注入；通知降级与
+    // bot @mention 唤醒触发的运行（sender_type='bot'）不注入——事故根因之一是通知内容与用户
+    // 提问同窗时无优先级指示，bot 回了条轻备忘就算处理完。
+    const ownerQuestionBlock = chatMessage?.sender_type === 'user' ? `
+
+# Owner question priority
+This message is from the project owner — answer it directly in this reply. Background notifications in context must not substitute for the answer; handle them only after (or skip to next turn).` : ''
     return `${header}
 
-Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}
+Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}${ownerQuestionBlock}
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
