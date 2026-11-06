@@ -106,17 +106,17 @@ export function effectiveTaskTimeBudgetMinutes(config, getSetting: (key: string)
   return !env && stallMinutes > 0 ? stallMinutes : config.taskTimeBudgetMinutes
 }
 
-// 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > 页面保存值 >
-// 默认 256；0 = 关闭。消费点（runtime.ensureSession 复用检查）每次现算，改值对
-// 下一次会话复用生效。
+// 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > settings 表
+// 保存值 > 默认 512（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 会话复用检查，
+// DSHBOTS-289 起为 ensureBotBinding 复用分支）每次现算，改值对下一次会话复用生效。
 export function effectiveSessionRolloverTurns(config, getSetting: (key: string) => unknown = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_TURNS')
   const saved = savedInt(getSetting(SESSION_ROLLOVER_TURNS_KEY), SESSION_ROLLOVER_TURNS_RANGE)
   return !env && saved !== null ? saved : config.sessionRolloverTurns
 }
 
-// 闲时压缩窗口生效值（DSHBOTS-286）：优先级与结转一致——env 显式 > 页面保存值 >
-// 默认 64；0 = 关闭。消费点（runtime.ensureSession 复用检查）每次现算。
+// 闲时压缩窗口生效值（DSHBOTS-286）：优先级与结转一致——env 显式 > settings 表保存值 >
+// 默认 64（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 会话复用检查）每次现算。
 export function effectiveSessionCompactTurns(config, getSetting: (key: string) => unknown = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_COMPACT_TURNS')
   const saved = savedInt(getSetting(SESSION_COMPACT_TURNS_KEY), SESSION_COMPACT_TURNS_RANGE)
@@ -215,10 +215,11 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     ),
     // 会话结转阈值（DSHBOTS-145）：0 = 关闭；「轮次」口径 = runs 表按 session_id 的
     // COUNT(*)（不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实
-    // 增长一致）。生效值可被全局配置页 session_rollover_turns 覆盖。
+    // 增长一致）。生效值可被 settings 表 session_rollover_turns 覆盖（env 显式 > 表值 > 默认，
+    // 设置页暂未开放该字段，见 effectiveSessionRolloverTurns）。
     sessionRolloverTurns: int(config.sessionRolloverTurns ?? process.env.DSH_TEAM_SESSION_ROLLOVER_TURNS, 512, 0, 10_000),
     // 闲时总结压缩窗口（DSHBOTS-286）：默认每 64 轮，0 = 关闭；生效值见
-    // effectiveSessionCompactTurns（env > 页面保存值 > 默认）。
+    // effectiveSessionCompactTurns（env 显式 > settings 表保存值 > 默认，设置页暂未开放）。
     sessionCompactTurns: int(config.sessionCompactTurns ?? process.env.DSH_TEAM_SESSION_COMPACT_TURNS, 64, 0, 10_000),
     // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超此分钟数 = 滞留。生效值可被
     // 全局设置 review_idle_minutes 覆盖（effectiveReviewIdleMinutes），0 = 关闭。

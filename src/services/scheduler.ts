@@ -270,43 +270,13 @@ export const schedulerMethods = {
     throw error
   },
 
-  // 同一条会话上的运行必须串行（原注释意图）；DSHBOTS-219 分身模型：串行键从「bot」
-  // 放细到「会话绑定维度」（= 一条分身通道）——单聊/各项目群聊/私信互不阻塞，
-  // 一路 pending（如单聊提权审批）不再挡死同一 bot 的其它通道。
-  // 键与 ensureSession 的绑定元组一一对应，同一会话的两条运行必得同键，串行不失效。
+  // 串行键（DSHBOTS-289，ADR §5.2-3）：控制面会话收敛为每 bot 单绑定后，串行维度统一
+  // 收敛到 bot——与 one_active_run_per_bot 唯一索引（UNIQUE(bot_id) WHERE queued/running）
+  // 同一口径：同 bot 任意两条运行（chat/task/dm/solo/review/…）互斥排队。原
+  // claimKey/bindingLaneKey/sessionLaneKey 三函数按 task/project/dm/solo 分道的推导
+  // 一并删除（四车道已不存在，键算不出第二个值）。
   claimKey(run) {
-    if (run.kind === 'task' && run.task_id) return `task:${run.task_id}`
-    return this.sessionLaneKey(run)
-  },
-  // 会话绑定的通道键（纯查库推导，无副作用）：task / solo / dm / project 四类绑定各归各道。
-  bindingLaneKey(binding) {
-    if (binding.kind === 'task' && binding.task_id) return `task:${binding.task_id}`
-    if (binding.kind === 'solo') return `solo:${binding.bot_id}`
-    if (binding.kind === 'dm') return `dm:${binding.bot_id}:${binding.project_id}`
-    return `project:${binding.bot_id}:${binding.project_id}`
-  },
-  // 非任务运行的通道键：按该运行实际会落到的会话推导（与 ensureSession 的 kind0 同一套映射）。
-  // solo_chat 与无项目 vision 落 solo 会话；chat/review/handle/memory_review 与带项目 vision
-  // 落项目会话；dm 落私信会话；dm_reply 按来信 origin 回对应会话（task_id 留空躲唯一索引，
-  // 任务通道只能从 bot_messages 解）；rollover_summary 复用指定旧会话，按该会话当前绑定
-  // 的通道键对齐（防与复用同一会话的群聊并发——runtime 的 pending 按会话一对一）。
-  sessionLaneKey(run) {
-    if (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) return `solo:${run.bot_id}`
-    if (run.kind === 'rollover_summary' || run.kind === 'session_compact') {
-      if (!run.session_id) return `bot:${run.bot_id}`
-      const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', run.session_id)
-      return binding ? this.bindingLaneKey(binding) : `session:${run.session_id}`
-    }
-    if (run.kind === 'dm_reply') {
-      const message = run.trigger_ref
-        ? this.store.get('SELECT origin_kind, origin_task_id FROM bot_messages WHERE id = ?', run.trigger_ref)
-        : null
-      if (message?.origin_kind === 'task' && message.origin_task_id) return `task:${message.origin_task_id}`
-      if (message?.origin_kind === 'dm') return `dm:${run.bot_id}:${run.project_id}`
-      return `project:${run.bot_id}:${run.project_id}`
-    }
-    if (run.kind === 'dm') return `dm:${run.bot_id}:${run.project_id}`
-    return `project:${run.bot_id}:${run.project_id}`
+    return `bot:${run.bot_id}`
   },
 
   // DSHBOTS-272 用户提问运行判定：kind='chat' 且触发消息是人发的（messages.sender_type='user'）。
@@ -618,6 +588,9 @@ export const schedulerMethods = {
       this.retryExpiredPlanWaits()
       // 陈旧排队运行守卫（DSHBOTS-110）：先于候选查询清掉任务已终态的 queued 任务运行。
       this.cancelStaleQueuedTaskRuns()
+      // 争用口径 A 收口（DSHBOTS-289）：bot 空闲时把挂起消息建回运行（合批成一条），
+      // 建回的 queued 行随本拍候选查询一并领取。
+      this.drainPendingMessages()
       // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超阈值即注入 owner 系统提醒；
       // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
       runReviewWatchdog(this)
