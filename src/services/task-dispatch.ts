@@ -11,6 +11,12 @@ import { filterIgnoredWriteScopes, parseWriteScopes, parseWriteScopesFromDescrip
 import { resolveSandboxOverride } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 
+// 勘误并卡提示（DSHBOTS-276，P1 派单质量前置）的判定常量：新卡标题含修正类关键词 +
+// 同项目同承接人近 7 天 done 卡写范围有交集，双条件同时命中才在卡面描述尾部追加并卡提示行。
+// 仅提示不拦截：D-82 重复卡闸、D-270 领取闸等既有拒绝行为一概不变。
+const CORRECTION_TITLE_RE = /修正|勘误|补充|改写/
+const RECENT_DONE_WINDOW_MS = 7 * 86_400_000
+
 export const taskDispatchMethods = {
   // 派发门禁（DSHBOTS-262）：暂停中的 Bot 不接新卡——新建派单、改派、重派一律拒绝，
   // 先恢复（bot status → active）再派；归档/移除等其余不可用态沿用 assertMember 既有口径。
@@ -241,6 +247,26 @@ export const taskDispatchMethods = {
     }
     return null
   },
+  // 勘误并卡引导（DSHBOTS-276）：找同项目同承接人「近 7 天内 done」且写范围与本次声明有
+  // 交集（元素级，路径前缀不展开——与 D-82 完全一致检测同一口径的读取函数）的最近一张卡。
+  // 时间基准用 COALESCE(completed_at, updated_at)：done 终态时刻优先（D-69 回填保证存量行有值）。
+  findRecentDoneOverlapTask(projectId, assigneeBotId, scopes) {
+    const target = new Set(scopes)
+    if (!target.size) return null
+    const since = new Date(Date.now() - RECENT_DONE_WINDOW_MS).toISOString()
+    const candidates = this.store.all(
+      `SELECT id, number, title, write_scopes FROM tasks
+        WHERE project_id = ? AND assignee_bot_id = ? AND status = 'done'
+          AND COALESCE(completed_at, updated_at) >= ?
+        ORDER BY COALESCE(completed_at, updated_at) DESC`,
+      projectId, assigneeBotId, since,
+    )
+    for (const row of candidates) {
+      const other = readWriteScopes(row.write_scopes)
+      if (other.some(scope => target.has(scope))) return row
+    }
+    return null
+  },
   // 派单清洗（DSHBOTS-168）：写范围声明的程序化质量闸门，三入口共用——
   // createTask（owner 派单路径权威清洗）、assignFromBot（经 createTask 同一清洗）、
   // taskUpdateScopes（改卡入口）。两步：
@@ -316,10 +342,20 @@ export const taskDispatchMethods = {
         + '确需第二张同范围卡时传 force_duplicate=true（每次使用留审计）；紧急任务（priority=urgent）豁免此拦截，可立即派单施工。',
       )
     }
+    // 勘误并卡提示（DSHBOTS-276，不强制）：双条件命中（标题关键词 + 近期 done 卡写范围交集）
+    // 时在卡面描述尾部追加一行并卡建议。仅追加描述，不拦截派单、不改任何拒绝行为；
+    // 未命中时描述原样透传，createTask 路径零变化。
+    let description = input.description
+    if (CORRECTION_TITLE_RE.test(String(input.title ?? ''))) {
+      const overlap = this.findRecentDoneOverlapTask(project.id, member.id, scopes)
+      if (overlap) {
+        description = `${input.description ? `${input.description}\n` : ''}(note: recent done card ${project.key}-${overlap.number} overlaps these scopes — consider merging follow-up corrections into one card)`
+      }
+    }
     const task = await this.createTask({
       projectId: project.id,
       title: input.title,
-      description: input.description,
+      description,
       assigneeBotId: member.id,
       priority: input.priority,
       // 透传原始清单（DSHBOTS-168）：清洗+审计由 createTask 统一做（审计挂真实 taskId）。

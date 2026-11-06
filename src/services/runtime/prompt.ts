@@ -624,6 +624,16 @@ Before closing: if this task cannot be finished in one run or new closing condit
 # Splitting for speed
 Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery. One card per part: parent_task_id to this task, blocked_by where order matters. Not the project owner? Propose the split in your delivery report. Example: API card (src/api/) + docs card, run concurrently.`
       // splitting-guidance:end
+      // delivery-selfcheck:start —— 交付前自校段（DSHBOTS-276，P1 派单质量前置）：治 GS 实测
+      // 34% 补丁/返工卡——交付报告缺自跑验证证据。所有任务卡无条件注入，置于卡头
+      // Status 与 Description 之间（D-269 只追加手法）：不动既有锚点前缀与 D-274 时效段
+      // （tests/prompt-budget ≤1900 静态前缀不打红、8k 截断「描述后即结尾」断言不打红、
+      // tests/prompt-prefix-order 段序不打红——三守门实测后选定此位）。
+      const deliverySelfcheckBlock = `
+
+# Delivery self-check
+Before reporting delivery, self-run the reproducible verification and put the evidence in the delivery report: the exact test/build commands you ran with their results, the list of files you changed, and the counts or links the acceptance criteria name (grep hits, test pass counts, commit hashes). Verify your own claims first — re-run the target tests and re-check the anchors yourself; do not report delivery on unverified work. Self-checking is always cheaper than rework: a delivery report without evidence will be returned.`
+      // delivery-selfcheck:end
       // recovery note（DSHBOTS-135）：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
       // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
       // 本段只在重排队后的第一次执行出现。与时效段（D-125）、豁免段（D-126）、纪律段（D-132）互不干扰。
@@ -647,7 +657,7 @@ When the deliverable includes images, put the files in the workspace and referen
 # Assigned task ${project.key}-${task.number}
 Title: ${task.title}
 Priority: ${task.priority}
-Status: ${task.status}
+Status: ${task.status}${deliverySelfcheckBlock}
 Description:
 ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}`
     }
