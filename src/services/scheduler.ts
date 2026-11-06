@@ -512,6 +512,13 @@ export const schedulerMethods = {
     return canceled
   },
 
+  // 任务级死线判定（DSHBOTS-274）：纯同步——领取路径不得为此引入 await 边界，
+  // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
+  taskPastDeadline(task) {
+    const { deadlineMs } = taskDeadlineInfo(this.store, task)
+    return deadlineMs !== null && Date.now() > deadlineMs
+  },
+
   // 任务级死线升级（DSHBOTS-274）：超线的 queued 施工运行拒绝启动——运行置 canceled
   // （TASK_DEADLINE，run_events 留 task_deadline 锚），卡面落系统评论（D-269 口径引导
   // owner 改 time_budget_minutes 延期后重派），status 转 blocked（走 updateTask 单一状态
@@ -721,7 +728,11 @@ export const schedulerMethods = {
           // 延期阀见 tasks.ts updateTask）。超线即拒绝启动新施工运行并自动升级
           // （评论 + blocked + owner 通知，escalateTaskPastDeadline）；
           // review/handle 等派生运行不走此闸（kind!=='task' 豁免，死线只拦施工轮）。
-          if (taskRow && (await this.escalateTaskPastDeadline(taskRow, run.id))) continue
+          // 判定同步、升级异步放行：不为本闸在领取路径引入 await 边界。
+          if (taskRow && this.taskPastDeadline(taskRow)) {
+            void this.escalateTaskPastDeadline(taskRow, run.id).catch(error => this.logger.warn?.('dsh-team: 死线升级失败 %s: %s', run.id, error?.message ?? error))
+            continue
+          }
         }
         const claimed = this.store.run(
           "UPDATE runs SET status = 'running', started_at = ?, last_progress_at = ? WHERE id = ? AND status = 'queued'",

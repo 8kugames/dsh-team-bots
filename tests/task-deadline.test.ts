@@ -103,6 +103,16 @@ async function overdueTask(t, { budget = 5, backdateMs = 60 * 60_000 } = {}) {
   return { taskId, run1 }
 }
 
+// 死线升级经 fire-and-forget 异步落库（领取路径保持同步），测试侧短轮询收敛。
+async function waitFor(fn, ms = 2000) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    if (fn()) return true
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  return fn()
+}
+
 test('b) 超线拒绝启动新 task 运行 + 升级：canceled TASK_DEADLINE + 卡面评论 + blocked + owner 通知', async () => {
   const t = await setup()
   try {
@@ -110,11 +120,11 @@ test('b) 超线拒绝启动新 task 运行 + 升级：canceled TASK_DEADLINE + �
     const run2 = t.service.enqueueTaskRun(t.service.taskRow(taskId), 'task_started', { type: 'user', id: 'u1' })
     t.service.started = true
     await t.service.tick()
+    assert.ok(await waitFor(() => t.store.get('SELECT status FROM runs WHERE id = ?', run2)?.status === 'canceled'), '超线的施工运行必须拒绝启动')
     const runRow = t.store.get('SELECT * FROM runs WHERE id = ?', run2)
-    assert.equal(runRow.status, 'canceled', '超线的施工运行必须拒绝启动')
     assert.equal(runRow.error_code, 'TASK_DEADLINE', '拒绝原因码 TASK_DEADLINE')
     assert.ok(t.runtime.started.length === 0, '超线运行不得进入执行层')
-    assert.equal(t.store.get('SELECT status FROM tasks WHERE id = ?', taskId).status, 'blocked', '任务自动转 blocked')
+    assert.ok(await waitFor(() => t.store.get('SELECT status FROM tasks WHERE id = ?', taskId)?.status === 'blocked'), '任务自动转 blocked')
     const comment = t.store.get('SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1', taskId)
     assert.match(comment.body, /超时中止（预算×2）已到，任务未关单：owner 可改 time_budget_minutes 延期后重派/, '卡面评论走 D-269 引导口径')
     const notice = t.store.get('SELECT * FROM messages WHERE task_id = ? AND sender_type = \'system\' ORDER BY created_at DESC LIMIT 1', taskId)
