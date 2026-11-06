@@ -1,6 +1,8 @@
-// tests/run-coalesce.test.js —— DSHBOTS-231 入站消息合批守门。
-// 用户拍板：同一会话/同一 bot 排队尚未处理的多条消息，领取 run 时合并注入同一次运行，
-// 不再一条消息一次运行。守四条边界：
+// tests/run-coalesce.test.js —— DSHBOTS-231 入站消息合批守门（DSHBOTS-287 改入队合并）。
+// 用户拍板：同一会话/同一 bot 排队尚未处理的多条消息，合并注入同一次运行，
+// 不再一条消息一次运行。DSHBOTS-287 起合批时机从「领取时」改为「入队时」：
+// 第二条起的消息入队即并入最早的排队运行（自身置 canceled/MERGED），领取侧不再二次合批。
+// 守四条边界：
 // ①同一条绑定道内多条排队 → 单次运行携带全部消息（群聊与单聊各一组）；
 // ②跨道（跨项目/跨会话类别）不合批，D-219 四道解耦语义不回退；
 // ③合并条数上限走 settings，默认保守；
@@ -185,10 +187,12 @@ test('合并条数上限走 settings：每条运行最多合并到上限，剩�
     t.service.started = true
     await t.service.tick()
 
-    // 同一通道严格串行：第一条运行带走前两条，后两条继续排队。
+    // 入队合并（DSHBOTS-287）：上限在入队时即生效——m2 并入首条，m3 满额后自成一队，
+    // m4 再并入 m3 的运行；领取时不再二次合批。
+    // 同一通道严格串行：第一条运行带走前两条，m3 的运行（已并 m4）继续排队。
     assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1)
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 1)
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'queued'").n, 2)
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 2)
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'queued'").n, 1)
     assert.deepEqual(t.runtime.started[0].extraMessages.map(item => item.id), [ids[1]], '第一次运行携带前两条')
 
     // 第一条运行结束后，剩下的两条组成第二次运行。
@@ -204,31 +208,35 @@ test('合并条数上限走 settings：每条运行最多合并到上限，剩�
   }
 })
 
-test('合并窗口走 settings：窗口外的排队消息不合并，保持排队', async () => {
+test('合并窗口走 settings：窗口外的目标运行不吸收新消息，新消息保持排队', async () => {
   const t = await setup()
   try {
     t.store.setSetting('coalesce_window_ms', '60000')
-    const m1 = say(t.service, t.project.id, '窗口内第一条')
+    const m1 = say(t.service, t.project.id, '窗口外最早一条（已老化）')
     const m2 = say(t.service, t.project.id, '窗口内第二条')
-    const m3 = say(t.service, t.project.id, '窗口外第三条')
-    t.service.enqueueChatRun(t.project, t.dev, m1)
-    t.service.enqueueChatRun(t.project, t.dev, m2)
-    const lateRunId = t.service.enqueueChatRun(t.project, t.dev, m3)
-    // 把第三条的入队时间推到一小时后：与最早那条的相差远超合并窗口。
+    const m3 = say(t.service, t.project.id, '窗口内第三条')
+    const firstRunId = t.service.enqueueChatRun(t.project, t.dev, m1)
+    // 把最早一条的入队时间推到一小时前：后续消息与它的相差远超合并窗口。
     t.store.run(
       'UPDATE runs SET queued_at = ? WHERE id = ?',
-      new Date(Date.now() + 3_600_000).toISOString(), lateRunId,
+      new Date(Date.now() - 3_600_000).toISOString(), firstRunId,
     )
+    // 第二条：唯一候选是老化的首条，窗口外 → 不并，自成一队。
+    const secondRunId = t.service.enqueueChatRun(t.project, t.dev, m2)
+    // 第三条：老化的首条仍在窗口外，但第二条刚入队在窗口内 → 并入第二条的运行。
+    t.service.enqueueChatRun(t.project, t.dev, m3)
 
-    const primary = t.store.get('SELECT * FROM runs WHERE trigger_ref = ?', m1)
-    const mergedRuns = t.service.coalesceQueuedRuns(primary)
-
-    assert.deepEqual(mergedRuns.map(row => row.trigger_ref), [m2], '窗口内的第二条合并进来')
-    assert.equal(t.store.get('SELECT status FROM runs WHERE id = ?', lateRunId).status, 'queued', '窗口外的第三条保持排队')
+    const first = t.store.get('SELECT * FROM runs WHERE id = ?', firstRunId)
+    const second = t.store.get('SELECT * FROM runs WHERE id = ?', secondRunId)
+    assert.equal(first.status, 'queued', '窗口外的最早运行保持排队')
+    assert.ok(!first.merged_messages, '窗口外运行不吸收新消息')
+    assert.equal(second.status, 'queued', '窗口内的第二条保持排队')
     assert.equal(
-      t.store.get('SELECT merged_messages FROM runs WHERE id = ?', primary.id).merged_messages,
-      JSON.stringify([m2]),
+      second.merged_messages,
+      JSON.stringify([m3]),
+      '窗口内的第三条并入第二条的运行',
     )
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 1)
   } finally {
     await cleanup(t.root, t.store)
   }

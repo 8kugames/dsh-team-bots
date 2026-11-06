@@ -165,6 +165,8 @@ export const runsMethods = {
       triggerType === 'wechat' ? '微信消息触发（项目外单聊直达）' : '单聊消息触发',
       createdAt,
     )
+    // 入队合并（DSHBOTS-287）：同车道已有更早的排队运行时，本消息并入该运行，不再单独排队。
+    this.mergeRunIntoQueuedLane(this.runRow(runId))
     return runId
   },
   enqueueChatRun(project, bot, messageId, origin = null) {
@@ -189,6 +191,8 @@ export const runsMethods = {
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued', triggerType === 'wechat' ? '微信群聊消息触发（直达）' : '群聊消息触发', createdAt,
     )
+    // 入队合并（DSHBOTS-287）：同车道已有更早的排队运行时，本消息并入该运行，不再单独排队。
+    this.mergeRunIntoQueuedLane(this.runRow(runId))
     return runId
   },
   async cancelRunInternal(runId, updateTask = true) {
