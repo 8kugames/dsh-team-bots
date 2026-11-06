@@ -76,7 +76,7 @@
 
 ### 4.2 runs 与 run_events
 
-- `runs` 仍是控制面轮次的记账单元：`kind` 收敛为 `task`（施工/交付）与 `chat`（群聊/私信/单聊/回信，`trigger_type`/`trigger_ref` 区分来源）；`session_id` 一律指向 bot 控制面会话；`one_active_run_per_task` 保留（任务排队语义不变），新增 `one_active_run_per_bot`。
+- `runs` 仍是控制面轮次的记账单元：`kind` 收敛为 `task`（施工/交付）与 `chat`（群聊/私信/单聊/回信，`trigger_type`/`trigger_ref` 区分来源）；`session_id` 一律指向 bot 控制面会话；`one_active_run_per_task` 保留（任务排队语义不变），新增 `one_active_run_per_bot`（实施勘误：现行运行时合批=「同 bot 多条 queued 领取时合并」（scheduler.coalesceQueuedRuns），先建该索引实测全量红 68 例（UNIQUE runs.bot_id），其激活须随 §5.2-2 入站合批改「入队合并」后同车落地，机制与存量串行化迁移已随第 1 步落地）。
 - 子智能体不占 runs 行（其宿主子会话由宿主管理）：生命周期记入所属运行的 run_events（`subagent_spawned` / `subagent_result`，负载任务号标签与摘要）；用量由宿主归并进父会话后在 run 收尾随会话用量入账（归集口径在实施卡对账）。
 - 交付报告归属不变：任务级幂等键 + `task_comments` 落库 + 卡转 `in_review`，报告本体属于任务卡而非会话。
 - 任务卡状态机、工具面（team_assign_task / team_review_task / 评论/通知）不变。
@@ -115,7 +115,7 @@
 4. **收尾与治理适配**：run-finish 交付、review/看门狗、死线、滞留、steer/插话、微信出站、用量归因、结转。
 5. **守门与回归**：测试重写与新增不变量守门（§5.3），全量绿后发版。
 
-顺序依赖：2 依赖 1；3 依赖 2；4 与 3 可部分并行（不同文件面）；5 收口。每步都是可独立验收的实施卡，但合入同一版本发布——全面切换，不存在新旧并存的中间发布。
+顺序依赖：2 依赖 1；3 依赖 2；4 与 3 可部分并行（不同文件面）；5 收口。每步都是可独立验收的实施卡，但合入同一版本发布——全面切换，不存在新旧并存的中间发布。实施勘误（DSHBOTS-285 实测）：`one_active_run_per_bot` 的激活点从第 1 步移至第 2 步——它与现行「领取时合批」语义冲突（同 bot 多条 queued 共存是现行合批前提），第 1 步仅落地机制（activateBotRunSerialization：存量串行化+建索引）与守门，第 2 步改「入队合并」后激活。
 
 ### 5.3 回归策略（204 个测试源文件（+编译产物）/ 1534 例）
 
