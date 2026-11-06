@@ -12,6 +12,7 @@ import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relati
 import { TASK_BUDGET_ROUNDS, TRANSITIONS, taskDeadlineInfo } from './tasks.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
+import { staleCardHit } from './notify.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
@@ -512,26 +513,61 @@ export const schedulerMethods = {
     return canceled
   },
 
-  // 任务级死线判定（DSHBOTS-274）：纯同步——领取路径不得为此引入 await 边界，
-  // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
+  // 滞留阈值兜底扫描（DSHBOTS-280）：in_review 超 24h / blocked 超 48h 的卡向项目
+  // owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），只提醒不自动处置——
+  // 不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick（与 D-194
+  // 验收守门同拍接入，不新增常驻进程）；判定与防重见 notify.ts 的纯函数与每日上限。
+  // 逐卡容错：单卡异常只 warn，不拖垮整轮扫描。
+  scanStaleCards() {
+    const rows = this.store.all(
+      `SELECT t.id, t.status, t.updated_at, t.number,
+              p.id AS project_id, p.key AS project_key, p.owner_bot_id
+         FROM tasks t JOIN projects p ON p.id = t.project_id
+        WHERE t.status IN ('in_review', 'blocked') AND p.status = 'active'`,
+    )
+    const reminded = []
+    for (const row of rows) {
+      try {
+        const hit = staleCardHit(row)
+        if (!hit) continue
+        const delivered = this.notifyStaleCardOwner({
+          project: { id: row.project_id, key: row.project_key, owner_bot_id: row.owner_bot_id },
+          task: row,
+          hit,
+        })
+        if (delivered) reminded.push(row.id)
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: 滞留扫描单卡失败 %s: %s', row.id, error?.message ?? error)
+      }
+    }
+    return reminded
+  },
+
+  // 任务级死线判定（DSHBOTS-274）：纯同步——领取路径不得为此引入 await 边界，  // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
   taskPastDeadline(task) {
     const { deadlineMs } = taskDeadlineInfo(this.store, task)
     return deadlineMs !== null && Date.now() > deadlineMs
   },
 
-  // 任务级死线升级（DSHBOTS-274）：超线的 queued 施工运行拒绝启动——运行置 canceled
-  // （TASK_DEADLINE，run_events 留 task_deadline 锚），卡面落系统评论（D-269 口径引导
-  // owner 改 time_budget_minutes 延期后重派），status 转 blocked（走 updateTask 单一状态
-  // 流转漏斗，非法转换只评论不转），并复用系统消息通道通知 owner（notify.ts insertMessage
-  // 同款，进任务线程 + mentions 点名项目 owner）。幂等：enqueueTaskRun 同卡同时只有一条
-  // 活跃运行，运行取消后不再进候选，每次派发至多升级一次；延期重派后死线按新预算重算。
+  // 任务级死线升级（DSHBOTS-274；DSHBOTS-281 口径升级）：超线的 queued 施工运行拒绝启动
+  // ——运行置 canceled（TASK_DEADLINE，run_events 留 task_deadline 锚），卡面落系统评论
+  // （D-269 口径=原因+事实：点名项目总监，重派即自动重置死线窗口，不再写转接 owner 的话术），
+  // status 转 blocked（走 updateTask 单一状态流转漏斗，非法转换只评论不转），并复用系统消息
+  // 通道通知项目总监（notify.ts insertMessage 同款，进任务线程 + mentions 点名 owner_bot_id）。
+  // 幂等：enqueueTaskRun 同卡同时只有一条活跃运行，运行取消后不再进候选，每次派发至多升级
+  // 一次；重派即新窗口（基准=最新 queued_at），新窗口内预算×2 耗尽仍照常拦截。
   async escalateTaskPastDeadline(task, runId) {
     const { deadlineMs } = taskDeadlineInfo(this.store, task)
     if (deadlineMs === null || Date.now() <= deadlineMs) return false
     const project = this.projectRow(task.project_id)
     const identifier = `${project?.key ?? 'T'}-${task.number}`
     const deadlineIso = new Date(deadlineMs).toISOString()
-    const body = `【${identifier}】超时中止（预算×${TASK_BUDGET_ROUNDS}）已到，任务未关单：owner 可改 time_budget_minutes 延期后重派（死线 ${deadlineIso}）。`
+    // 点名总监（projects.owner_bot_id）：留痕正文带总监花名，mentions 同点位名，收件人即第一负责人。
+    const directorName = project?.owner_bot_id
+      ? this.botRow(project.owner_bot_id)?.name ?? '总监'
+      : '总监'
+    const windowMinutes = Number(task.time_budget_minutes) * TASK_BUDGET_ROUNDS
+    const body = `【${identifier}】超时中止（预算×${TASK_BUDGET_ROUNDS}）已到，任务未关单：总监 ${directorName} 重派即自动重置死线窗口（新窗口剩余 ${windowMinutes} 分钟），请消化处理（死线 ${deadlineIso}）。`
     const now = nowIso()
     const commentId = id('cmt')
     this.store.transaction(() => {
@@ -566,7 +602,7 @@ export const schedulerMethods = {
         mentions: project?.owner_bot_id ? [project.owner_bot_id] : [],
       })
     } catch (error: any) {
-      this.logger.warn?.('dsh-team: 死线 owner 通知失败 %s: %s', identifier, error?.message ?? error)
+      this.logger.warn?.('dsh-team: 死线总监通知失败 %s: %s', identifier, error?.message ?? error)
     }
     return true
   },
@@ -588,6 +624,9 @@ export const schedulerMethods = {
       // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超阈值即注入 owner 系统提醒；
       // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
       runReviewWatchdog(this)
+      // 滞留阈值兜底（DSHBOTS-280）：in_review/blocked 超 24h/48h 向 owner 只提醒
+      // 不自动处置；内部逐卡容错（单卡异常只 warn）。
+      this.scanStaleCards()
       const activeRows = this.store.all(
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。

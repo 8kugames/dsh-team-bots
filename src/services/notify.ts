@@ -18,6 +18,33 @@ import { text } from '../util.js'
 export const RUN_PARTNER_NOTICE_CAP = 3
 export const PARTNER_NOTICE_DAILY_CAP = 5
 
+// ── 滞留阈值兜底（DSHBOTS-280）：in_review/blocked 非施工状态的超时提醒 ─────────
+// 只提醒不自动处置：不自动关单、不自动转状态、不重派，验收与解阻由项目总监闭环（DSHBOTS-281 口径）。
+export const STALE_REVIEW_HOURS = 24
+export const STALE_BLOCKED_HOURS = 48
+export const STALE_CARD_NOTICE_PREFIX = '【滞留提醒】'
+
+// 滞留判定（纯函数，供 scheduler 扫描与守门测试共用；阈值内/外两向可测）。
+// 基准时间 = tasks.updated_at：blocked 无专门「进入 blocked」时间戳列，用 updated_at 近似
+// ——转 blocked 走 updateTask 必刷 updated_at，其后任何卡面更新同样只推迟提醒，不会漏报。
+export function staleCardHit({ status, updated_at, now = Date.now() } = {} as any) {
+  if (status !== 'in_review' && status !== 'blocked') return null
+  const baseMs = updated_at ? new Date(updated_at).getTime() : NaN
+  if (!Number.isFinite(baseMs)) return null
+  const hours = (now - baseMs) / 3_600_000
+  const threshold = status === 'in_review' ? STALE_REVIEW_HOURS : STALE_BLOCKED_HOURS
+  return hours > threshold ? { status, hours, threshold } : null
+}
+
+// D-269 口径文案 = 原因（滞留时长+阈值）+ 点名总监的处置方向（DSHBOTS-281：处置归项目
+// 总监自行闭环，不写「owner 可改/可用」转接话术；blocked 侧重派即自动重置死线窗口）。
+export function staleCardNoticeBody({ identifier, status, hours } = {} as any) {
+  const idle = Math.floor(hours)
+  return status === 'in_review'
+    ? `${STALE_CARD_NOTICE_PREFIX}${identifier} 待验收已滞留 ${idle} 小时（阈值 ${STALE_REVIEW_HOURS}h）：待总监验收收口（accept/return）。`
+    : `${STALE_CARD_NOTICE_PREFIX}${identifier} 受阻已滞留 ${idle} 小时（阈值 ${STALE_BLOCKED_HOURS}h）：待总监解阻/收口（重派即自动重置死线窗口）。`
+}
+
 export const notifyMethods = {
   // 伙伴提醒配额闸（DSHBOTS-267）：放行返回 true；超限静默丢弃（warn 留痕）返回 false。
   // run 归属不到（发起方无活跃运行）时不设限——空闲/人工会话的零星通知无循环风险。
@@ -46,6 +73,33 @@ export const notifyMethods = {
   recordPartnerNotice(runId, targetId) {
     if (!runId || !targetId) return
     this.insertRunEvent(runId, 'partner_notice', `partner_notice:${targetId}`)
+  },
+
+  // 滞留提醒投递（DSHBOTS-280）：等价 owner 通知通道——与 D-274 死线升级同款
+  // （insertMessage 系统留痕进任务线程 + mentions 点名项目 owner）。
+  // 防重＝同卡每日 ≤1 条，以当日已有同前缀系统留痕为准，超限静默（只 warn 不投递）。
+  // 口径说明：D-267 配额闸（allowPartnerNotice）按 run_events type='partner_notice'
+  // 的 run 维度计数，run_id 非空挂不上无 run 的 scheduler 扫描；带 run 上下文的
+  // notifyMemberFromBot 路径照旧走同一配额流，本扫描路径的防重落点即消息留痕流。
+  notifyStaleCardOwner({ project, task, hit }) {
+    const identifier = `${project.key}-${task.number}`
+    const already = this.store.get(
+      "SELECT id FROM messages WHERE task_id = ? AND sender_type = 'system' AND body LIKE ? AND date(created_at) = date('now') LIMIT 1",
+      task.id, `${STALE_CARD_NOTICE_PREFIX}%`,
+    )
+    if (already) {
+      this.logger.warn?.('dsh-team: 滞留提醒同卡每日上限（1 条），静默跳过：%s', identifier)
+      return false
+    }
+    this.insertMessage({
+      projectId: project.id,
+      senderType: 'system',
+      senderId: 'system',
+      taskId: task.id,
+      body: staleCardNoticeBody({ identifier, status: hit.status, hours: hit.hours }),
+      mentions: project.owner_bot_id ? [project.owner_bot_id] : [],
+    })
+    return true
   },
 
   // 工具入口：target=member 通知本项目另一成员；target=task 提醒本项目执行中任务。

@@ -133,8 +133,14 @@ function makeRepo(options: { redTest?: boolean; epermTest?: boolean; wordyGreenT
 }
 
 function runFinalize(work, args = []) {
+  // 本守门跑在 node --test 下，process.env 带着 NODE_TEST_CONTEXT=child-* / NODE_TEST_WORKER_ID。
+  // 原样透传给内层时，Node 22（CI）会把内层 `node --test tests/` 的目录参数当模块入口 require
+  // （MODULE_NOT_FOUND，本地 Node 26 宽容不复现＝本地绿 CI 红）。仓库口径：内层测试的 spawn
+  // 环境必须剔除这两个标记（finalize.mjs 自身 test 步同款处理）。
   const env: Record<string, string | undefined> = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
   delete env.DSH_SKIP_VERSION_BUMP
+  delete env.NODE_TEST_CONTEXT
+  delete env.NODE_TEST_WORKER_ID
   return spawnSync(process.execPath, [join(work, 'scripts', 'finalize.mjs'), ...args], {
     cwd: work,
     encoding: 'utf8',
@@ -146,6 +152,7 @@ type FinalizeStep = { name: string; ok: boolean; error?: string }
 type FinalizeResult = {
   ok: boolean
   card: string | null
+  skipVersionBump: boolean
   failedStep: string | null
   error: string | null
   steps: FinalizeStep[]
@@ -426,4 +433,97 @@ test('收口工具随仓库分发：调用方式与参数齐备', (t) => {
   } finally {
     rmSync(repo.base, { recursive: true, force: true })
   }
+})
+
+test('--skip-version-bump：commit 步骤注入 DSH_SKIP_VERSION_BUMP=1，纯文档提交不 bump 版本', (t) => {
+  const repo = setup(t)
+  if (!repo) return
+  const { work } = repo
+  try {
+    // 源码锚点：参数解析在场 + 注入点以参数为条件地落在 commit 调用上（与 release.mjs 快照提交同款手法）。
+    const source = readFileSync(scriptSrc, 'utf8')
+    assert.match(source, /flag\('--skip-version-bump'\)/, '应解析 --skip-version-bump 参数')
+    assert.match(
+      source,
+      /SKIP_VERSION_BUMP \? \{ env: \{ DSH_SKIP_VERSION_BUMP: '1' \} \} : \{\}/,
+      'commit 步骤应以参数为条件注入 DSH_SKIP_VERSION_BUMP=1',
+    )
+
+    writeFileSync(join(work, 'release-notes.md'), '纯文档提交，不发版\n')
+    const run = runFinalize(work, [
+      '--files',
+      'release-notes.md',
+      '--message',
+      'docs(fixture): 纯文档提交',
+      '--card',
+      CARD,
+      '--skip-version-bump',
+    ])
+    const result = parseResult(run)
+    assert.ok(result, 'stdout 应输出结构化 JSON')
+    assert.equal(run.status, 0, run.stderr)
+    assert.equal(result.ok, true)
+    assert.equal(result.skipVersionBump, true, 'stdout JSON 应留痕 skipVersionBump:true')
+    // 行为验证：钩子被跳过——版本保持原值，package.json 不被追加进提交。
+    assert.equal(
+      JSON.parse(git(work, ['show', 'HEAD:package.json'])).version,
+      '0.2.350',
+      '传参时版本不应被 bump',
+    )
+    const commits = result.summary.commits ?? []
+    assert.equal(commits.length, 1)
+    assert.ok(!(commits[0].extraFiles ?? []).includes('package.json'), '钩子不应追加 package.json')
+    const committed = git(work, ['show', '--name-only', '--format=', 'HEAD']).split('\n').filter(Boolean)
+    assert.deepEqual(committed, ['release-notes.md'], '提交应只含清单文件')
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('未传 --skip-version-bump：注入不在场，版本照常 bump（负锚，防恒注入）', (t) => {
+  const repo = setup(t)
+  if (!repo) return
+  const { work } = repo
+  try {
+    writeFileSync(join(work, 'a.txt'), 'a\n')
+    const run = runFinalize(work, ['--files', 'a.txt', '--message', `feat(fixture): 交付（${CARD}）`])
+    const result = parseResult(run)
+    assert.ok(result, 'stdout 应输出结构化 JSON')
+    assert.equal(run.status, 0, run.stderr)
+    assert.equal(result.ok, true)
+    assert.equal(result.skipVersionBump, false, '未传参数应留痕 skipVersionBump:false')
+    // 行为负锚：不传参数时钩子照常 bump（版本变化 + package.json 被追加进提交）。
+    // 若实现退化为恒注入，下面两条断言会先红。
+    assert.notEqual(
+      JSON.parse(git(work, ['show', 'HEAD:package.json'])).version,
+      '0.2.350',
+      '不传参数时版本应被钩子 bump',
+    )
+    assert.ok(
+      ((result.summary.commits ?? [])[0]?.extraFiles ?? []).includes('package.json'),
+      'package.json 应被钩子追加进提交（extraFiles）',
+    )
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('内层测试环境不泄漏 NODE_TEST_CONTEXT / NODE_TEST_WORKER_ID：夹具 spawn env 剔除两键（源码锚点）', () => {
+  // 守门自身跑在 node --test 下，process.env 带 NODE_TEST_CONTEXT=child-*；原样透传时 Node 22（CI）
+  // 会把内层 `node --test tests/` 的目录参数当模块入口 require（MODULE_NOT_FOUND）。本地 Node 26
+  // 宽容不复现，端到端断言在本地恒绿、在 CI 恒红前拦不住，故本例钉住剔除语句在场（源码防回归锚），
+  // 不依赖 mkdtemp 端到端；行为锚点交给发版 CI 重跑。
+  const source = readFileSync(join(repoRoot, 'scripts', 'finalize.test.ts'), 'utf8')
+  assert.match(source, /delete env\.NODE_TEST_CONTEXT/, 'runFinalize 的 spawn env 应剔除 NODE_TEST_CONTEXT')
+  assert.match(source, /delete env\.NODE_TEST_WORKER_ID/, 'runFinalize 的 spawn env 应剔除 NODE_TEST_WORKER_ID')
+})
+
+test('finalize.mjs 内层 npm test：test 步自身环境同样清两键（源码锚点，防回归）', () => {
+  const source = readFileSync(scriptSrc, 'utf8')
+  assert.match(
+    source,
+    /\{ \.\.\.process\.env, NODE_TEST_CONTEXT: undefined, NODE_TEST_WORKER_ID: undefined \}/,
+    'test 步应清掉 NODE_TEST_CONTEXT / NODE_TEST_WORKER_ID（undefined 键不进子进程环境）',
+  )
+  assert.match(source, /run\('npm', \['test'\], \{ env \}\)/, '清后的 env 应传给内层 npm test')
 })
