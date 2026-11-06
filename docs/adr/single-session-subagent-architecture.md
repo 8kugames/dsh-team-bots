@@ -143,6 +143,18 @@
 - **第 3 步前半（控制面提示词）已落地**：任务分支新增静态段 `# Child agents by task number`（按任务号开专属子智能体/标签=任务号/不并卡/小卡亲做；写继承控制面沙箱+不受任务写范围调度闸门+卡面声明写范围=子代理写入边界；交付模板=子代理回报变更/验证/风险→bot 合并亲审后交付），`# Parallel work inside this task` 收窄为并行编排口径并引用之；静态前缀 1893/1900、三段指引 1102/1200 守住红线，段序/8k 截断尾/D-276 自校段/D-283 分级/D-272 提问锚点全部不动。守门=tests/control-plane-subagent.test.ts（三组锚点+段序+agentTeam 门控+恒英文）。
 - **第 3 步后半（子代理账本）完成可行性调查，结论可行**：宿主事件缝清单与限制见 §4.2.1；接线（tools 瀑布监听→run_events 落库）与 V3 的 run_events 断言属后续实施卡。
 
+实施记录（DSHBOTS-293，第 4 步收尾与治理适配审计）：
+
+七项逐项核对（守门：watchdog/deadline/stale 55 例 + usage/wechat 族 92 例全绿；发现破坏 1 处已修复）：
+
+- **① run-finish 交付链——未破坏**：任务级幂等键（`review_auto:<task>`）合批、交付报告落 task_comments、同事务转 in_review（run-finish.ts:317-332）、review_delegate 复活重投（outbox coalescing 白名单）全部按 runs 行与 run.task_id 工作，不依赖车道会话；owner busy 闸下 owner_task 挂起建回后交付链照常。
+- **② review/看门狗——未破坏、无死锁**：judgeCard 按 runs.task_id 取数（`kind='task'` 行在单会话下仍逐卡存在）；watchdog H1 的 owner_task_run outbox → enqueueOwnerTaskRun 遇 owner busy 挂待处理队列、空闲 drain 建回（tests/review-auto.test.ts:567 守门）——owner 串行只推迟不丢派（挂起项幂等键 `owner_task:<task>:<kind>` 去重）。
+- **③ 死线——拦截仍成立**：任务运行挂待处理队列期间无 runs 行，死线闸不可见；但 drain 建回的是 queued 行，调度器领取路径的 taskPastDeadline 闸（scheduler.ts kind='task' 领取分支）在起跑前拦截并升级（TASK_DEADLINE 取消+blocked+评论+owner 通知），与直接入队语义一致；挂起项 messageId 去重只建一次，不反复建回。
+- **④ steer/插话——一处旧车道残留，已修复**：notifyMemberFromBot 宿主通道绑定查询仍查 `kind='project'`（四车道收敛后恒落空，成员通知永远降级群聊流、即时投递形同虚设），修复为 `kind='bot' AND alias=0` 唯一控制面绑定，且不按 project_id 过滤（多项目 bot 单绑定的 project_id 只属创建时项目；与 runs.ts/session.ts 解析同款）。tests/notify-tool.test.ts 夹具同步改 kind='bot'（原夹具播种旧车道行掩盖了该断点）。task-notify 卡面变更 steer / task-runs 评论直通 / notify 任务提醒均经 runs.session_id（运行行自带）不受影响；questions 应答按 questions.session_id 回注原会话仍可达。旁注（卡外待核）：questions.ts/approvals.ts 的 `isSolo = binding.kind==='solo'` 在收敛后仅历史 alias 行可命中，项目外 solo bot 的控制面绑定（kind='bot'、project_id 空）现走 next() 透传原生面板而非工作台单聊卡片记录，D-218 单聊承接语义在单会话模型下的归属待实施卡核对。
+- **⑤ 微信出站——未破坏**：insertHeldMessageRun 建回时 trigger 保真——chat 组按 `item.origin==='wechat'`、solo_chat 组按 `item.triggerType==='wechat'` 落 trigger_type='wechat'，挂起回建不丢微信标记；run-finish 微信直达回程按 run.trigger_type='wechat' 门禁照常。
+- **⑥ 用量归因——未破坏**：runs 仍是记账单元，用量随运行收尾入账、对账管线按 runs 行工作，单会话不改变归并口径；子智能体用量归宿主父会话的归集对账属账本接线实施卡（§4.2）。
+- **⑦ 结转/压缩阈值——评估结论：512/64 维持不改**。单控制面全量流量下轮次增速≈原四车道之和，压力确增；但会话实际瓶颈是上下文长度而非轮数，「64 轮闲时压缩留原会话 + 512 轮结转换会话」已构成高频总结/低频重置分层，任务亲和（§8.3）留在旧会话的流量可被压缩触发、不二次结转（alias 幂等守卫），行为一致。观察项：上线后若单会话轮次增速显著（日均 >100 轮量级），再评估下调结转阈值或提高压缩频率。
+
 ### 5.3 回归策略（204 个测试源文件（+编译产物）/ 1534 例）
 
 - **不动层**：纯函数与规则引擎测试——写范围判定、合批窗口/保护、死线数学、看门狗分级、计价对账、路径工具等，语义未变者原样保留。
