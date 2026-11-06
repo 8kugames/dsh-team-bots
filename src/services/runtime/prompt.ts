@@ -12,6 +12,7 @@ import { scanProjectSkills } from '../../project-skills.js'
 import { id, nowIso, parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
+import { taskDeadlineInfo } from '../tasks.js'
 import { readWriteScopes } from '../write-scopes.js'
 import { sanitizeTmpBotDirName } from '../../paths.js'
 
@@ -450,14 +451,25 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
     // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入。
     // 任务派生运行（review/handle/memory_review）与该任务共用同一时效上限，提示词必须同步告知，
     // 否则运行会在代理不知情的情况下被超时中止。
-    const timeBudgetBlockFor = (row) => {
+    // 任务级死线（DSHBOTS-274）：deadline 只由施工分支（下方 if (task)）传入，追加剩余时间一行；
+    // 预算耗尽改收尾轮口径。review/handle/memory_review 分支不传 deadline（死线豁免，不注入该行）。
+    const timeBudgetBlockFor = (row, deadline = null) => {
       const timeBudget = Number(row?.timeBudgetMinutes ?? row?.time_budget_minutes)
-      return Number.isFinite(timeBudget) && timeBudget > 0 ? `
+      if (!(Number.isFinite(timeBudget) && timeBudget > 0)) return ''
+      let deadlineLine = ''
+      if (deadline?.deadlineMs !== null && deadline?.deadlineMs !== undefined) {
+        const remainingMs = deadline.deadlineMs - Date.now()
+        deadlineLine = remainingMs > 0
+          ? `Deadline: ${new Date(deadline.deadlineMs).toISOString()} / ${Math.ceil(remainingMs / 60_000)} min remaining.`
+          : `Deadline: ${new Date(deadline.deadlineMs).toISOString()} passed — 超线，本轮是收尾轮，优先可交付小步。`
+      }
+      return `
 
 # Time budget
 This task must be delivered within ${timeBudget} minutes; the run is aborted when the budget expires.
 Plan the depth of your work accordingly. If you judge the task cannot be finished within that time, deliver a usable partial result on schedule and state clearly in your delivery report the remaining work and why the budget could not be met.
-The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).` : ''
+The effective timeout is the smaller of this budget and the global run timeout (runTimeoutMs).
+${deadlineLine}`.trimEnd()
     }
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
       // 超长防护（DSHBOTS-113，事故 m_33bddb；DSHBOTS-140 扩到 owner review / handle）：
@@ -586,7 +598,8 @@ ${(sourceRun?.output ?? '').slice(0, 4000)}`
       // （8k 截断 + 盲区标记），建卡上限 40k 的长卡不再整段进提示词。
       const description = truncateTaskDescription(task.description)
       // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
-      const timeBudgetBlock = timeBudgetBlockFor(task)
+      // 任务级死线（DSHBOTS-274）：施工分支传入整卡死线，时效段追加剩余时间/收尾轮口径。
+      const timeBudgetBlock = timeBudgetBlockFor(task, taskDeadlineInfo(this.store, task))
       // 紧急豁免（DSHBOTS-126）：urgent 任务卡追加豁免指令（用户口径 m08196-2）——
       // 无视车道排队立即开工；非 urgent 完全不注入，保持既有车道纪律。
       const urgentExemptionBlock = task.priority === 'urgent' ? `

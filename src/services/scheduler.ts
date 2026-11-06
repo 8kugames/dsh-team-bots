@@ -9,6 +9,7 @@ import { applyRetention, reconcileUsage } from '../usage-reconcile.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { MAX_RATE_LIMIT_RETRIES, isQuotaExhausted, isRetryChainError } from './backoff.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
+import { TASK_BUDGET_ROUNDS, TRANSITIONS, taskDeadlineInfo } from './tasks.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
 
@@ -511,6 +512,58 @@ export const schedulerMethods = {
     return canceled
   },
 
+  // 任务级死线升级（DSHBOTS-274）：超线的 queued 施工运行拒绝启动——运行置 canceled
+  // （TASK_DEADLINE，run_events 留 task_deadline 锚），卡面落系统评论（D-269 口径引导
+  // owner 改 time_budget_minutes 延期后重派），status 转 blocked（走 updateTask 单一状态
+  // 流转漏斗，非法转换只评论不转），并复用系统消息通道通知 owner（notify.ts insertMessage
+  // 同款，进任务线程 + mentions 点名项目 owner）。幂等：enqueueTaskRun 同卡同时只有一条
+  // 活跃运行，运行取消后不再进候选，每次派发至多升级一次；延期重派后死线按新预算重算。
+  async escalateTaskPastDeadline(task, runId) {
+    const { deadlineMs } = taskDeadlineInfo(this.store, task)
+    if (deadlineMs === null || Date.now() <= deadlineMs) return false
+    const project = this.projectRow(task.project_id)
+    const identifier = `${project?.key ?? 'T'}-${task.number}`
+    const deadlineIso = new Date(deadlineMs).toISOString()
+    const body = `【${identifier}】超时中止（预算×${TASK_BUDGET_ROUNDS}）已到，任务未关单：owner 可改 time_budget_minutes 延期后重派（死线 ${deadlineIso}）。`
+    const now = nowIso()
+    const commentId = id('cmt')
+    this.store.transaction(() => {
+      this.store.run(
+        "UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'TASK_DEADLINE', error_message = ? WHERE id = ? AND status = 'queued'",
+        now, body, runId,
+      )
+      this.store.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'task_deadline', `整卡死线已到（${deadlineIso}），拒绝启动新施工运行`, now,
+      )
+      this.store.run(
+        'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        commentId, task.id, 'system', 'system', body, now,
+      )
+      this.addTaskEvent(task.id, 'commented', { type: 'system', id: 'system' }, { commentId, deadline: deadlineIso, runId })
+    })
+    if (TRANSITIONS[task.status]?.has('blocked')) {
+      try {
+        await this.updateTask(task.id, { status: 'blocked' }, { type: 'system', id: 'system' })
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: 死线转 blocked 失败 %s: %s', identifier, error?.message ?? error)
+      }
+    }
+    try {
+      this.insertMessage({
+        projectId: task.project_id,
+        senderType: 'system',
+        senderId: 'system',
+        taskId: task.id,
+        body,
+        mentions: project?.owner_bot_id ? [project.owner_bot_id] : [],
+      })
+    } catch (error: any) {
+      this.logger.warn?.('dsh-team: 死线 owner 通知失败 %s: %s', identifier, error?.message ?? error)
+    }
+    return true
+  },
+
   async tick() {
     if (this.ticking || !this.started) return
     this.ticking = true
@@ -663,6 +716,12 @@ export const schedulerMethods = {
             }
             continue
           }
+          // 任务级死线（DSHBOTS-274）：施工运行（kind='task'）领取前检查整卡死线——
+          // 死线 = 派发基准 + time_budget_minutes × TASK_BUDGET_ROUNDS（默认 2 轮，
+          // 延期阀见 tasks.ts updateTask）。超线即拒绝启动新施工运行并自动升级
+          // （评论 + blocked + owner 通知，escalateTaskPastDeadline）；
+          // review/handle 等派生运行不走此闸（kind!=='task' 豁免，死线只拦施工轮）。
+          if (taskRow && (await this.escalateTaskPastDeadline(taskRow, run.id))) continue
         }
         const claimed = this.store.run(
           "UPDATE runs SET status = 'running', started_at = ?, last_progress_at = ? WHERE id = ? AND status = 'queued'",
