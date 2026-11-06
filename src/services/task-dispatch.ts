@@ -188,7 +188,14 @@ export const taskDispatchMethods = {
     if (!binding) throw forbidden('只有项目群中的 Bot 可以执行该操作')
     if (!binding.project_id) throw forbidden('单聊会话不在项目中，无法管理任务')
     const project = this.projectRow(binding.project_id)
-    if (project.owner_bot_id !== binding.bot_id) throw forbidden('只有项目总监 Bot 可以执行该操作')
+    // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令/正确下一步。
+    if (project.owner_bot_id !== binding.bot_id) {
+      throw forbidden(
+        '只有项目总监 Bot 可以执行该操作：总监命令（如 team_assign_task 派单/重派、'
+        + 'team_review_task 验收关单、team_block_task 强制受阻）由项目 owner 总监 Bot 调用；'
+        + '成员请在项目群内向总监请求代为执行。',
+      )
+    }
     return { binding, project, actor: { type: 'bot', id: binding.bot_id } }
   },
   // 派单侧同写范围重复检测（DSHBOTS-82）：同一文件上叠 N 张小卡时，各卡各立各排，
@@ -278,10 +285,11 @@ export const taskDispatchMethods = {
     const forceDuplicate = input.force_duplicate === true
     const urgentExempt = input.priority === 'urgent'
     if (duplicate && !forceDuplicate && !urgentExempt) {
+      // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令（改卡重派而非新开卡）。
       throw conflict(
-        `已存在同写范围任务 ${project.key}-${duplicate.number} ${duplicate.title}，请勿重复派单；`
-        + '若需合并多张小卡，请在原任务描述追加清单后重派原任务。'
-        + '紧急任务（priority=urgent）豁免此拦截，可立即派单施工。',
+        `已存在同写范围任务 ${project.key}-${duplicate.number} ${duplicate.title}，请勿重复派单：`
+        + '请用 team_assign_task 重派原任务改卡（task=原任务号，附 title/description 即修正卡面），不要为新内容新开卡；'
+        + '确需第二张同范围卡时传 force_duplicate=true（每次使用留审计）；紧急任务（priority=urgent）豁免此拦截，可立即派单施工。',
       )
     }
     const task = await this.createTask({
