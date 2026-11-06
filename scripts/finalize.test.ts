@@ -56,7 +56,7 @@ function makeTempDir() {
 // 临时仓库：本地 bare 远端 + 工作仓库（dev 分支）。
 // 仓库里装上真实的 .githooks/pre-commit + scripts/version-bump.mjs，验证收口工具与版本 bump 钩子共存：
 // 钩子会改 package.json 并追加进同一笔提交（工具需如实记录为 extraFiles）。
-function makeRepo(options: { redTest?: boolean; epermTest?: boolean } = {}) {
+function makeRepo(options: { redTest?: boolean; epermTest?: boolean; wordyGreenTest?: boolean } = {}) {
   const base = makeTempDir()
   const remote = join(base, 'remote.git')
   const work = join(base, 'work')
@@ -104,6 +104,14 @@ function makeRepo(options: { redTest?: boolean; epermTest?: boolean } = {}) {
     writeFileSync(
       join(work, 'tests', 'red.test.js'),
       "import assert from 'node:assert/strict'\nimport { test } from 'node:test'\ntest('red', () => { assert.equal(1, 2) })\n",
+    )
+  }
+  // 用例名里出现 "AssertionError" 字样的绿色用例：守门不能把它误判成红。
+  if (options.wordyGreenTest) {
+    writeFileSync(
+      join(work, 'tests', 'wordy.test.js'),
+      "import assert from 'node:assert/strict'\nimport { test } from 'node:test'\n"
+      + "test('AssertionError 计数口径：全绿仍算绿', () => { assert.equal(1, 1) })\n",
     )
   }
   if (options.epermTest) {
@@ -162,7 +170,7 @@ function remoteSha(work, ref) {
   return line.split(/\s+/)[0] ?? ''
 }
 
-function setup(t, options: { redTest?: boolean; epermTest?: boolean } = {}) {
+function setup(t, options: { redTest?: boolean; epermTest?: boolean; wordyGreenTest?: boolean } = {}) {
   try {
     return makeRepo(options)
   } catch (error) {
@@ -296,6 +304,24 @@ test('测试红即中止：AssertionError>0 时在 test 步中止，不产生任
     assert.match(result.error, /AssertionError/)
     assert.equal(git(work, ['rev-parse', 'HEAD']), headBefore, '不应产生新提交')
     assert.equal(git(work, ['status', '--porcelain', '--', 'a.txt']).includes('a.txt'), true, '文件应保持未提交')
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('用例名里出现 "AssertionError" 字样的全绿套件：不得误判成红', (t) => {
+  const repo = setup(t, { wordyGreenTest: true })
+  if (!repo) return
+  const { work } = repo
+  try {
+    writeFileSync(join(work, 'a.txt'), 'a\n')
+    const run = runFinalize(work, ['--files', 'a.txt', '--message', `feat(fixture): 交付（${CARD}）`])
+    const result = parseResult(run)
+    assert.ok(result, 'stdout 应输出结构化 JSON')
+    assert.equal(result.ok, true, `全绿套件应判绿：${result.error ?? ''}`)
+    const testStep = result.steps.find(step => step.name === 'test')
+    assert.ok(testStep, '应有 test 步骤')
+    assert.equal(testStep.ok, true)
   } finally {
     rmSync(repo.base, { recursive: true, force: true })
   }

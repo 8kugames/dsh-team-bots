@@ -302,13 +302,33 @@ function typecheck() {
 
 // 步骤 ④：测试。判定口径与 scripts/release.test.ts 同款：AssertionError=0 才算绿。
 // 沙箱里 EPERM/EACCES 属环境性假红（脚本 skip），不计入红；断言失败才是真红。
+//
+// 注意：不能拿输出里出现的字面量 "AssertionError" 计数——用例标题/日志里出现这个词
+// （例如守门自身的用例名）会让全绿套件被误判成红。改为解析测试运行器的失败统计：
+//   · TAP 汇总 "# fail N"、spec 汇总 "ℹ fail N"
+//   · 逐行失败标记 "not ok N"（TAP）、"✖ 用例名"（spec）
+// 三者取最大值，得到真实失败用例数。
+function countTestFailures(output) {
+  // 先剥 ANSI 颜色码（TTY 下 node 的 spec 输出会给 "✖"/"ℹ fail" 上色），否则行首匹配不到。
+  const plain = output.replace(/\u001b\[[0-9;]*m/g, '')
+  // 权威计数：测试运行器的失败汇总（TAP "# fail N" / spec "ℹ fail N"）。
+  const counters = []
+  for (const match of plain.matchAll(/^\s*#\s*fail\s+(\d+)\s*$/gm)) counters.push(Number(match[1]))
+  for (const match of plain.matchAll(/^\s*ℹ\s*fail\s+(\d+)\s*$/gm)) counters.push(Number(match[1]))
+  if (counters.length) return Math.max(...counters)
+  // 没有汇总行（进程中途崩溃等）：退回逐行失败标记。
+  const notOkLines = (plain.match(/^\s*not ok \d+/gm) ?? []).length
+  const specFailLines = (plain.match(/^\s*✖\s+/gm) ?? []).length
+  return Math.max(0, notOkLines, specFailLines)
+}
+
 function test() {
   // node --test 会给子进程打 NODE_TEST_CONTEXT 标记；若收口工具本身跑在测试进程里，
   // 内层 npm test 会被判定为「递归调用」而跳过用例（假绿）。这里清掉标记，保证测试真的跑。
   const env = { ...process.env, NODE_TEST_CONTEXT: undefined, NODE_TEST_WORKER_ID: undefined }
   const result = run('npm', ['test'], { env })
   const output = `${result.stdout || ''}${result.stderr || ''}`
-  const assertionErrors = (output.match(/AssertionError/g) ?? []).length
+  const assertionErrors = countTestFailures(output)
   const environmentBlocked = /EPERM|EACCES/.test(output)
   const tail = output.trim().length > 2000 ? `…${output.trim().slice(-2000)}` : output.trim()
   if (assertionErrors > 0) {
@@ -317,7 +337,7 @@ function test() {
       result,
     )
   }
-  // 退出码非零且没有断言失败：EPERM/EACCES 属环境性假红（沙箱限制），不算交付失败；
+  // 退出码非零且没有真实失败用例：EPERM/EACCES 属环境性假红（沙箱限制），不算交付失败；
   // 其余非零退出（进程崩溃、用例异常退出等）一律算红，收口中止。
   if (result.code !== 0 && !environmentBlocked) {
     throw new FinalizeError(
@@ -329,7 +349,7 @@ function test() {
   return {
     exitCode: result.code,
     assertionErrors,
-    // 退出码非零但没有断言失败：按环境性假红处理（如沙箱 EPERM），不算交付失败。
+    // 退出码非零但没有真实失败用例：按环境性假红处理（如沙箱 EPERM），不算交付失败。
     environmentBlocked: result.code !== 0 && environmentBlocked,
     output: tail,
   }
