@@ -81,6 +81,22 @@
 - 交付报告归属不变：任务级幂等键 + `task_comments` 落库 + 卡转 `in_review`，报告本体属于任务卡而非会话。
 - 任务卡状态机、工具面（team_assign_task / team_review_task / 评论/通知）不变。
 
+#### 4.2.1 子代理账本宿主能力调查（DSHBOTS-292，结论：可行）
+
+插件能否拦截宿主 `subagent`/`subagent_fork` 工具调用——能。宿主暴露两条互补的缝（类型声明与实现均为一手核实，宿主安装根 `/opt/homebrew/lib/node_modules/@deepseek-ai/dsh/`）：
+
+1. **通用工具调用瀑布**（`@deepseek-ai/dsh-tools` `lib/types/events.d.ts`，waterfall/emit）：
+   - `tools/pre-execute`（:17）：exec 携带工具名、解析后参数、caller agent——派发前可见，subagent/subagent_fork 调用的 `description`/标签（任务号）在此可读；
+   - `tools/execute`（:28）around-dispatch、`tools/post-execute`（:40）规范化结果瀑布、`tools/result`（:48）只读 emit——子代理终态结果在此可回收；
+   - 三缝均为 agent 作用域过滤（dsh-scope：scoped 注册只收本 agent 调用；路由型 carrier 沿父链走到根，插件根 ctx 监听可达全部调用）。
+2. **专用子代理生命周期事件**（`@deepseek-ai/dsh-subagent` `lib/types/index.d.ts` Events 声明，`lib/index.js` `createActivationObserver` 对每个 local/external activation residency epoch 发布）：
+   - `subagent/start`：载荷 `{runId, provider, id(child session id), local}`；
+   - `subagent/end`：同身份 + `stopReason` + `lastAssistantMessage`（末条产出，可作摘要源）。
+
+**限制（如实）**：① `subagent/start|end` 载荷不含父会话身份——scope 载体是不透明路由 carrier（「the carrier does not expose the subject's properties; event payloads carry the real subject」，dsh-scope `lib/types/index.d.ts`），而载荷只带子代理身份；父归属须与工具瀑布的 caller agent 按 child id/runId 配对，或按事件时刻该 bot 当前 running 的 `kind='task'` 运行归属。② 任务号标签不在宿主载荷里——宿主不解析业务标签，标签只存在于工具调用参数，必须从 `tools/pre-execute` 抓取。③ 作用域过滤的插件根级注册面与 cordis dispatch 的实际可达性未经运行实测（本卡只做可行性调查；接线实测属实施卡）。④ 命名队友（spawn_teammate）走 teammate 管理线，不在 subagent 生命周期事件覆盖内，账本如需覆盖另查。
+
+**落地口径（实施卡蓝图）**：`subagent_spawned` = `tools/pre-execute` 命中 `subagent`/`subagent_fork` 时，由 caller agent 解析 bot → 该 bot 当前 running 的 task 运行 → INSERT run_events（负载：任务号标签 + 参数摘要）；`subagent_result` = `tools/result`（或 `subagent/end` 配对）→ INSERT run_events（负载：stopReason + 末条产出截断摘要 + 任务号）。提示词层 bot 自报账本不必要，仅作事件缝不可用时的降级路径（§2.1-2 的「子智能体产出回报控制面」交付模板已承载回报面）。
+
 ### 4.3 保持不变的件
 
 写范围判定纯函数与并行调度、死线规则（超线 queued 拒绝启动、run_events 留锚、重派重置窗口）、验收滞留三档收口、审批与提问机制、结转别名与运行归属索引、用量计价与对账管线、workspace 变更归因。
@@ -121,6 +137,11 @@
 
 - **顺序逆转（2 与 3 对调）**：第 3 步「控制面会话收敛」先行——ensureSession/sessionKindFor/bindingLaneKey/claimKey 统一解析 `kind='bot'` 控制面绑定（ensureBotBinding 兜底），删除 task/project/dm/solo 四车道建行；第 2 步「激活 one_active_run_per_bot + 入站路由收敛」随后收口。理由：bot 级唯一索引要求跨 kind 串行，先收敛会话可让争用设计只在「单控制面会话」上做，避免在四车道上先实现一遍再拆。
 - **task-vs-chat 争用口径 A（待处理队列）**：bot 忙（存在 queued/running 运行）时到达的**消息**不落 runs 行，进入按 bot 维度的待处理队列（settings 持久化或内存实现）；bot 空闲后（运行收尾或下一拍 tick 检查挂起队列）把积压消息合批成一条运行。task 运行与消息互斥排队、不互相吞并：task/review 运行不被消息合批吞并；dm/dm_reply 按回信契约（一条来信一条回信）不参与合批。入队侧判定 bot 忙即挂起（不建 run 行，不撞 `one_active_run_per_bot` 唯一约束）。
+
+实施记录（DSHBOTS-292）：
+
+- **第 3 步前半（控制面提示词）已落地**：任务分支新增静态段 `# Child agents by task number`（按任务号开专属子智能体/标签=任务号/不并卡/小卡亲做；写继承控制面沙箱+不受任务写范围调度闸门+卡面声明写范围=子代理写入边界；交付模板=子代理回报变更/验证/风险→bot 合并亲审后交付），`# Parallel work inside this task` 收窄为并行编排口径并引用之；静态前缀 1893/1900、三段指引 1102/1200 守住红线，段序/8k 截断尾/D-276 自校段/D-283 分级/D-272 提问锚点全部不动。守门=tests/control-plane-subagent.test.ts（三组锚点+段序+agentTeam 门控+恒英文）。
+- **第 3 步后半（子代理账本）完成可行性调查，结论可行**：宿主事件缝清单与限制见 §4.2.1；接线（tools 瀑布监听→run_events 落库）与 V3 的 run_events 断言属后续实施卡。
 
 ### 5.3 回归策略（204 个测试源文件（+编译产物）/ 1534 例）
 
