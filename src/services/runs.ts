@@ -16,6 +16,12 @@ import { isProviderUnavailableCode } from './model-fallback.js'
 import { effectiveSandbox } from './runtime/prompt.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 
+// 合批窗口与上限默认值（DSHBOTS-231/287，DSHBOTS-290 随语义回补从 scheduler.ts 迁来）：
+// 只合并入队时间相差 30 秒内的挂起消息，单组消息总数封顶 5；settings 可覆盖
+// （coalesce_window_ms / coalesce_max_messages）。
+const COALESCE_MAX_MESSAGES_DEFAULT = 5
+const COALESCE_WINDOW_MS_DEFAULT = 30_000
+
 // ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
 // 指纹行形如 " M dir/file"（前两字符状态位 + 空格 + 路径）；重命名 "R  old -> new"
 // 的新旧路径都算被触碰。带引号的 quoted 路径不解析（与产物清单同一口径，跳过）。
@@ -93,6 +99,37 @@ export const runsMethods = {
   insertHeldMessageRun(bot, group) {
     const item = group.first
     const mergedIds = group.merge.map(entry => entry.messageId)
+    const createdAt = nowIso()
+    const runId = id('run')
+    // 任务挂起项（DSHBOTS-290 busy 闸）：按入队时快照建回写运行——列面与
+    // enqueueTaskRun 的直接 INSERT 一致（task_id/write_scopes/备用模型三列），
+    // UNIQUE 撞车（并发领取窗口）与消息族同口径返回 null 留队列。
+    if (item.kind === 'task') {
+      const routing = item.routing ?? {}
+      try {
+        this.store.run(
+          `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+            attempt, idempotency_key, write_scopes, model_provider, model_model, model_effort, queued_at)
+           VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?, ?, ?, ?, ?)`,
+          runId, item.projectId, bot.id, item.taskId, item.triggerType, item.taskId,
+          `task:${item.taskId}:${Date.now()}:${runId}`, item.writeScopes ?? '[]',
+          routing.provider ?? null, routing.model ?? null, routing.effort ?? null, createdAt,
+        )
+      } catch (error: any) {
+        if (String(error).includes('UNIQUE')) return null
+        throw error
+      }
+      this.insertRunEvent(runId, 'queued', `bot 空闲，挂起任务建回运行（由 ${item.actorType}:${item.actorId} 触发）`)
+      if (routing.mode === 'fallback') {
+        this.insertRunEvent(runId, 'quota_fallback', `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref ?? ''}（预计 ${routing.resetAt ?? '未知'} 恢复）`)
+      } else if (routing.mode === 'wait') {
+        this.insertRunEvent(runId, 'quota_wait', `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`)
+      }
+      if (item.triggerType === 'board_resume') {
+        this.insertRunEvent(runId, 'board_resume', '看板拖入执行中，系统指令自动开工')
+      }
+      return runId
+    }
     const spec = item.kind === 'chat'
       ? { projectId: item.projectId, mode: 'read', trigger: item.origin === 'wechat' ? 'wechat' : 'mention', idem: `chat:${item.messageId}:${bot.id}` }
       : item.kind === 'solo_chat'
@@ -100,8 +137,6 @@ export const runsMethods = {
         : item.kind === 'dm'
           ? { projectId: item.projectId, mode: 'read', trigger: 'dm', idem: `dm:${item.messageId}` }
           : { projectId: item.projectId, mode: 'read', trigger: 'dm_reply', idem: `dm_reply:${item.messageId}` }
-    const runId = id('run')
-    const createdAt = nowIso()
     try {
       this.store.run(
         `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
@@ -124,11 +159,38 @@ export const runsMethods = {
       `bot 空闲，待处理消息建回运行${mergedIds.length ? `（合批 ${mergedIds.length} 条）` : ''}`)
     return runId
   },
+  // D-272 用户提问判定（挂起消息向，DSHBOTS-290 语义回补）：按触发消息的 sender_type
+  // 判定——chat 查 messages、solo_chat 查 solo_messages（单聊消息独立表）、dm/dm_reply
+  // 查 bot_messages。用户发的消息是「提问」，bot 触发（通知降级、@mention 唤醒、回信）不算。
+  // 注：卡面原文写「chat/solo_chat 查 messages」，实测单聊落 solo_messages 表，按实际表改。
+  heldItemIsUserQuestion(item) {
+    if (item?.kind === 'chat') {
+      const row = this.store.get('SELECT sender_type FROM messages WHERE id = ?', item.messageId)
+      return row?.sender_type === 'user'
+    }
+    if (item?.kind === 'solo_chat') {
+      const row = this.store.get('SELECT sender_type FROM solo_messages WHERE id = ?', item.messageId)
+      return row?.sender_type === 'user'
+    }
+    if (item?.kind === 'dm' || item?.kind === 'dm_reply') {
+      const row = this.store.get('SELECT sender_type FROM bot_messages WHERE id = ?', item.messageId)
+      return row?.sender_type === 'user'
+    }
+    return false
+  },
   // 争用口径 A 收口：bot 空闲时把挂起消息建回运行。chat/solo_chat 各取首条建运行、其余
   // 同 kind 并入 merged_messages 同轮注入（合批成一条）；dm/dm_reply 一次只放行一条（回信
   // 契约），余量留队列下一拍。建行失败（并发撞 UNIQUE）的消息全部留队列，不丢消息。
+  // D-287 合批语义回补（DSHBOTS-290，ADR §2.3）：①D-272 用户提问保护——用户提问不并入
+  // 非用户触发的挂起组（并入后提问只能挤在 Merged messages 段、没有直接回答锚点），提问
+  // 组单独成组且优先放行；②窗口 coalesce_window_ms（默认 30s）——与组首入队时间差超过
+  // 窗口不并；③上限 coalesce_max_messages（默认 5）——单组消息总数（首条+合并）封顶。
   drainPendingMessages() {
     const prefix = 'bot_pending_msgs:'
+    const max = Number(this.store.setting('coalesce_max_messages', String(COALESCE_MAX_MESSAGES_DEFAULT)))
+    // max<=1 = 关闭合批（与 D-287 入队合并同口径）；非法值同样回退为不并。
+    const cap = Number.isFinite(max) && max > 1 ? max : 1
+    const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
     const rows = this.store.all(`SELECT key, value FROM settings WHERE key LIKE '${prefix}%'`)
     for (const row of rows) {
       const botId = row.key.slice(prefix.length)
@@ -140,14 +202,26 @@ export const runsMethods = {
         this.store.setSetting(this.pendingMessagesKey(botId), '[]')
         continue
       }
-      // 相邻同 kind 的 chat/solo_chat 挂起消息合成一组；dm/dm_reply 独立成组逐条放行。
+      // 相邻同 kind 的 chat/solo_chat 挂起消息合成一组（用户提问只并入同为用户触发的组、
+      // 窗口内、未超上限）；dm/dm_reply/task 独立成组逐条放行。
       const groups = []
       for (const item of items) {
         const last = groups[groups.length - 1]
-        if (last && last.first.kind === item.kind
-          && (item.kind === 'chat' || item.kind === 'solo_chat')) last.merge.push(item)
-        else groups.push({ first: item, merge: [] })
+        const mergeableKind = item.kind === 'chat' || item.kind === 'solo_chat'
+        const withinWindow = Number.isFinite(windowMs)
+          && Date.parse(item.queuedAt ?? '') - Date.parse(last?.first?.queuedAt ?? '') <= windowMs
+        if (last && last.first.kind === item.kind && mergeableKind
+          && last.first.projectId === item.projectId
+          && last.merge.length + 1 < cap
+          && withinWindow
+          && this.heldItemIsUserQuestion(item) === this.heldItemIsUserQuestion(last.first)) {
+          last.merge.push(item)
+        } else {
+          groups.push({ first: item, merge: [] })
+        }
       }
+      // 用户提问组优先放行（D-272 出队优先的队列侧对偶），sort 稳定保住组间先后。
+      groups.sort((a, b) => Number(this.heldItemIsUserQuestion(b.first)) - Number(this.heldItemIsUserQuestion(a.first)))
       const consumed = new Set()
       for (const group of groups) {
         if (this.botBusy(botId)) break
