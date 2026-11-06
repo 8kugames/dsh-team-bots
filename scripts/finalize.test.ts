@@ -146,6 +146,7 @@ type FinalizeStep = { name: string; ok: boolean; error?: string }
 type FinalizeResult = {
   ok: boolean
   card: string | null
+  skipVersionBump: boolean
   failedStep: string | null
   error: string | null
   steps: FinalizeStep[]
@@ -423,6 +424,79 @@ test('收口工具随仓库分发：调用方式与参数齐备', (t) => {
     assert.equal(typeof pkg.scripts?.finalize, 'string', 'package.json 应提供 finalize 入口')
     assert.equal(pkg.scripts.finalize, 'node scripts/finalize.mjs')
     assert.match(git(work, ['log', '-1', '--format=%s']), /./)
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('--skip-version-bump：commit 步骤注入 DSH_SKIP_VERSION_BUMP=1，纯文档提交不 bump 版本', (t) => {
+  const repo = setup(t)
+  if (!repo) return
+  const { work } = repo
+  try {
+    // 源码锚点：参数解析在场 + 注入点以参数为条件地落在 commit 调用上（与 release.mjs 快照提交同款手法）。
+    const source = readFileSync(scriptSrc, 'utf8')
+    assert.match(source, /flag\('--skip-version-bump'\)/, '应解析 --skip-version-bump 参数')
+    assert.match(
+      source,
+      /SKIP_VERSION_BUMP \? \{ env: \{ DSH_SKIP_VERSION_BUMP: '1' \} \} : \{\}/,
+      'commit 步骤应以参数为条件注入 DSH_SKIP_VERSION_BUMP=1',
+    )
+
+    writeFileSync(join(work, 'release-notes.md'), '纯文档提交，不发版\n')
+    const run = runFinalize(work, [
+      '--files',
+      'release-notes.md',
+      '--message',
+      'docs(fixture): 纯文档提交',
+      '--card',
+      CARD,
+      '--skip-version-bump',
+    ])
+    const result = parseResult(run)
+    assert.ok(result, 'stdout 应输出结构化 JSON')
+    assert.equal(run.status, 0, run.stderr)
+    assert.equal(result.ok, true)
+    assert.equal(result.skipVersionBump, true, 'stdout JSON 应留痕 skipVersionBump:true')
+    // 行为验证：钩子被跳过——版本保持原值，package.json 不被追加进提交。
+    assert.equal(
+      JSON.parse(git(work, ['show', 'HEAD:package.json'])).version,
+      '0.2.350',
+      '传参时版本不应被 bump',
+    )
+    const commits = result.summary.commits ?? []
+    assert.equal(commits.length, 1)
+    assert.ok(!(commits[0].extraFiles ?? []).includes('package.json'), '钩子不应追加 package.json')
+    const committed = git(work, ['show', '--name-only', '--format=', 'HEAD']).split('\n').filter(Boolean)
+    assert.deepEqual(committed, ['release-notes.md'], '提交应只含清单文件')
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('未传 --skip-version-bump：注入不在场，版本照常 bump（负锚，防恒注入）', (t) => {
+  const repo = setup(t)
+  if (!repo) return
+  const { work } = repo
+  try {
+    writeFileSync(join(work, 'a.txt'), 'a\n')
+    const run = runFinalize(work, ['--files', 'a.txt', '--message', `feat(fixture): 交付（${CARD}）`])
+    const result = parseResult(run)
+    assert.ok(result, 'stdout 应输出结构化 JSON')
+    assert.equal(run.status, 0, run.stderr)
+    assert.equal(result.ok, true)
+    assert.equal(result.skipVersionBump, false, '未传参数应留痕 skipVersionBump:false')
+    // 行为负锚：不传参数时钩子照常 bump（版本变化 + package.json 被追加进提交）。
+    // 若实现退化为恒注入，下面两条断言会先红。
+    assert.notEqual(
+      JSON.parse(git(work, ['show', 'HEAD:package.json'])).version,
+      '0.2.350',
+      '不传参数时版本应被钩子 bump',
+    )
+    assert.ok(
+      ((result.summary.commits ?? [])[0]?.extraFiles ?? []).includes('package.json'),
+      'package.json 应被钩子追加进提交（extraFiles）',
+    )
   } finally {
     rmSync(repo.base, { recursive: true, force: true })
   }

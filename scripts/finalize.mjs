@@ -26,6 +26,8 @@
 //     --message "feat(x): 交付说明" --card DSHBOTS-273 --push
 //   参数：--files <清单>（逗号分隔文件，分号分隔批次） --message <提交信息前缀> --card <项目卡号>
 //        --push --build-remote --branch <期望分支，默认 dev> --remote <远端，默认 origin>
+//        --skip-version-bump 纯文档/不发版提交不 bump 版本：commit 步骤环境注入
+//        DSH_SKIP_VERSION_BUMP=1（与 release.mjs 快照提交同款手法）；未传时注入不在场，行为不变
 // 输出：stdout 为结构化 JSON（可直接给脚本消费）；stderr 为过程日志。
 // 零依赖：只用 node:child_process / node:fs / node:path / node:url。
 import { spawnSync } from 'node:child_process'
@@ -63,6 +65,7 @@ const MESSAGE = (option('--message') ?? '').trim()
 const CARD_OPTION = (option('--card') ?? '').trim()
 const PUSH = flag('--push')
 const BUILD_REMOTE = flag('--build-remote')
+const SKIP_VERSION_BUMP = flag('--skip-version-bump')
 const EXPECTED_BRANCH = (option('--branch') ?? DEFAULT_BRANCH).trim()
 const REMOTE = (option('--remote') ?? DEFAULT_REMOTE).trim()
 
@@ -374,7 +377,12 @@ function commit() {
     }
 
     const message = composeMessage(card, index, BATCHES.length)
-    const commitResult = git(['commit', '-m', message])
+    // --skip-version-bump：commit 环境注入 DSH_SKIP_VERSION_BUMP=1，跳过 .githooks/pre-commit
+    // 的版本 bump（与 release.mjs 快照提交同款手法）；未传参数时注入不在场，行为不变。
+    const commitResult = git(
+      ['commit', '-m', message],
+      SKIP_VERSION_BUMP ? { env: { DSH_SKIP_VERSION_BUMP: '1' } } : {},
+    )
     if (commitResult.code !== 0) {
       throw new FinalizeError(`批次 ${index + 1} 提交失败：${describe(commitResult)}`, commitResult)
     }
@@ -505,6 +513,7 @@ const result = {
   card: CARD_OPTION || null,
   push: PUSH,
   buildRemote: BUILD_REMOTE,
+  skipVersionBump: SKIP_VERSION_BUMP,
   startedAt: new Date().toISOString(),
   finishedAt: null,
   steps,
