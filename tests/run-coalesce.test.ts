@@ -1,12 +1,16 @@
-// tests/run-coalesce.test.js —— DSHBOTS-231 入站消息合批守门（DSHBOTS-287 改入队合并）。
-// 用户拍板：同一会话/同一 bot 排队尚未处理的多条消息，合并注入同一次运行，
-// 不再一条消息一次运行。DSHBOTS-287 起合批时机从「领取时」改为「入队时」：
-// 第二条起的消息入队即并入最早的排队运行（自身置 canceled/MERGED），领取侧不再二次合批。
-// 守四条边界：
-// ①同一条绑定道内多条排队 → 单次运行携带全部消息（群聊与单聊各一组）；
-// ②跨道（跨项目/跨会话类别）不合批，D-219 四道解耦语义不回退；
-// ③合并条数上限走 settings，默认保守；
-// ④合并窗口走 settings，窗口外的排队消息不合并。
+// tests/run-coalesce.test.js —— 入站消息合批守门（D-231 拍板语义；D-287 入队合并；
+// D-289 争用口径 A 后由 DSHBOTS-290 改钉「bot 忙挂待处理队列 + 空闲建回时合批」）。
+// 用户拍板：同一 bot 排队尚未处理的多条消息，合并注入同一次运行，不再一条消息一次运行。
+// 现行时机：bot 忙时消息挂 bot_pending_msgs:<bot>（不落 runs 行）；bot 空闲时
+// drainPendingMessages 建回运行——chat/solo_chat 相邻同 kind（同项目）合批成一条
+// （merged_messages 注入），首条消息的运行立即执行、后续消息并入下一次建回。
+// 守五条边界：
+// ①同 bot 多条挂起消息 → 空闲后单次运行携带全部消息（群聊与单聊各一组）；
+// ②跨项目/跨 kind 不合批（D-219 解耦在合批键上保留：kind+projectId）；
+// ③合并条数上限走 settings（coalesce_max_messages，默认 5，≤1 关闭）；
+// ④合并窗口走 settings（coalesce_window_ms，默认 30s，与组首入队时间差超窗不并）；
+// ⑤并发护栏（M4 模拟竞争）：建回 INSERT 撞 UNIQUE（botBusy 检查后、INSERT 前被抢占）
+// 返回 null 不抛错，消息全量留队列不丢（D-287 原子抢占守卫的口径 A 后继）。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -50,7 +54,6 @@ async function setup() {
   const runtime = new ManualRuntime()
   service.attachRuntime(runtime)
   await service.initialize()
-  // 关闭自动调度，由测试显式驱动 tick。
   service.started = false
   const director = store.get("SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)")
   const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
@@ -87,156 +90,212 @@ function groupPrompt(t, run, chatMessage, extraMessages) {
   })
 }
 
-test('群聊同通道多条排队消息合并成一次运行，单次运行携带全部消息', async () => {
+const heldItems = (t, botId = t.dev.id) =>
+  JSON.parse(t.store.setting(`bot_pending_msgs:${botId}`) ?? '[]')
+
+test('群聊挂起消息空闲后合并成一次运行，单次运行携带全部消息', async () => {
   const t = await setup()
   try {
+    // 首条消息立即入队开跑（bot 空闲），后续两条在运行期到达 → 挂起。
     const m1 = say(t.service, t.project.id, '第一条：先看一下现状')
-    const m2 = say(t.service, t.project.id, '第二条：顺便把测试补上')
-    const m3 = say(t.service, t.project.id, '第三条：最后跑一遍验证')
-    for (const messageId of [m1, m2, m3]) t.service.enqueueChatRun(t.project, t.dev, messageId)
-
+    t.service.enqueueChatRun(t.project, t.dev, m1)
     t.service.started = true
     await t.service.tick()
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1, '首条消息先开跑')
 
-    const running = t.store.all("SELECT * FROM runs WHERE status = 'running'")
-    const merged = t.store.all("SELECT * FROM runs WHERE error_code = 'MERGED' ORDER BY queued_at")
-    assert.equal(running.length, 1, '同通道三条排队消息只应领取一次运行')
-    assert.equal(merged.length, 2, '另外两条应被合并取消')
-    assert.equal(t.runtime.started.length, 1, '只应启动一次运行')
-    const primary = t.runtime.started[0]
-    assert.equal(primary.chatMessage.id, m1, '触发消息应是最早的那条')
-    assert.deepEqual(primary.extraMessages.map(item => item.id), [m2, m3], '合并消息应按入队顺序全部携带')
+    const m2 = say(t.service, t.project.id, '第二条：顺便把测试补上')
+    const m3 = say(t.service, t.project.id, '第三条：最后跑一遍验证')
+    assert.equal(t.service.enqueueChatRun(t.project, t.dev, m2), null, 'bot 忙时第二条挂起不落 runs 行')
+    assert.equal(t.service.enqueueChatRun(t.project, t.dev, m3), null, 'bot 忙时第三条挂起不落 runs 行')
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [m2, m3], '挂起队列保序')
 
-    // 提示词：三条消息都进同一轮上下文，合批消息不再回烧进尾窗（正文只出现一次）。
-    const runRow = t.store.get('SELECT * FROM runs WHERE id = ?', running[0].id)
-    const prompt = groupPrompt(t, runRow, primary.chatMessage, primary.extraMessages)
-    for (const body of ['第一条：先看一下现状', '第二条：顺便把测试补上', '第三条：最后跑一遍验证']) {
+    await t.runtime.complete(t.runtime.started[0].runId)
+    await t.service.tick()
+
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1, '空闲后挂起消息合批建回一条运行')
+    const second = t.runtime.started[1]
+    assert.equal(second.chatMessage.id, m2, '建回运行的触发消息是挂起最早的那条')
+    assert.deepEqual(second.extraMessages.map(item => item.id), [m3], '后续挂起消息按序并入同轮上下文')
+
+    const runRow = t.store.get("SELECT * FROM runs WHERE id = ?", second.runId)
+    const prompt = groupPrompt(t, runRow, second.chatMessage, second.extraMessages)
+    for (const body of ['第二条：顺便把测试补上', '第三条：最后跑一遍验证']) {
       assert.ok(prompt.includes(body), `提示词应包含消息正文：${body}`)
     }
     assert.ok(prompt.includes('# Merged messages'), '合批段落应出现')
-    assert.equal(prompt.split('第二条：顺便把测试补上').length - 1, 1, '合批消息正文只出现一次')
     assert.equal(prompt.split('第三条：最后跑一遍验证').length - 1, 1, '合批消息正文只出现一次')
+    assert.deepEqual(heldItems(t), [], '建回后挂起队列清空')
   } finally {
     await cleanup(t.root, t.store)
   }
 })
 
-test('单聊通道多条排队消息同样合并，单聊与群聊提示词都带合批段', async () => {
+test('单聊挂起消息同样合批，单聊提示词带合批段', async () => {
   const t = await setup()
   try {
     const bodies = ['单聊第一条：在吗', '单聊第二点：帮我看下这个报错', '单聊第三点：改完跑一下测试']
     const ids = bodies.map(body => t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body }))
-    for (const messageId of ids) t.service.enqueueSoloChatRun(t.dev, messageId)
-
+    t.service.enqueueSoloChatRun(t.dev, ids[0])
     t.service.started = true
     await t.service.tick()
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1, '首条单聊先开跑')
 
-    const running = t.store.all("SELECT * FROM runs WHERE status = 'running'")
-    assert.equal(running.length, 1, '单聊同通道三条排队消息只应领取一次运行')
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 2)
-    const primary = t.runtime.started[0]
-    assert.equal(primary.chatMessage.id, ids[0])
-    assert.deepEqual(primary.extraMessages.map(item => item.id), [ids[1], ids[2]])
+    t.service.enqueueSoloChatRun(t.dev, ids[1])
+    t.service.enqueueSoloChatRun(t.dev, ids[2])
+    assert.deepEqual(heldItems(t).map(item => item.messageId), ids.slice(1), '单聊挂起保序')
+
+    await t.runtime.complete(t.runtime.started[0].runId)
+    await t.service.tick()
+
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1)
+    const second = t.runtime.started[1]
+    assert.equal(second.chatMessage.id, ids[1])
+    assert.deepEqual(second.extraMessages.map(item => item.id), [ids[2]])
 
     const botRow = t.store.get('SELECT * FROM bots WHERE id = ?', t.dev.id)
     const prompt = t.promptRuntime.promptFor({
-      run: running[0], bot: botRow, project: null, task: null,
-      chatMessage: primary.chatMessage, extraMessages: primary.extraMessages, sessionId: 's-solo-coalesce',
+      run: t.store.get('SELECT * FROM runs WHERE id = ?', second.runId), bot: botRow, project: null, task: null,
+      chatMessage: second.chatMessage, extraMessages: second.extraMessages, sessionId: 's-solo-coalesce',
     })
-    for (const body of bodies) assert.ok(prompt.includes(body), `单聊提示词应包含消息正文：${body}`)
+    for (const body of bodies.slice(1)) assert.ok(prompt.includes(body), `单聊提示词应包含消息正文：${body}`)
     assert.ok(prompt.includes('# Merged messages'), '单聊合批段落应出现')
   } finally {
     await cleanup(t.root, t.store)
   }
 })
 
-test('跨绑定道不合批：同 bot 跨项目与单聊各自独立领取，D-219 四道解耦不回退', async () => {
+test('跨项目/跨 kind 不合批：同 bot 串行逐条运行，挂起消息不跨项目并入同一轮', async () => {
   const t = await setup()
   try {
-    // 同一个 bot 分布在三条项目通道 + 一条单聊通道，每条通道各一条消息。
-    const lanes = [t.project]
-    for (const [name, key] of [['Beta', 'BET'], ['Gamma', 'GAM']]) {
-      lanes.push(await t.service.createProject({ name, key, ownerBotId: t.director.id, memberIds: [t.dev.id] }))
-    }
-    for (const lane of lanes) {
-      t.service.enqueueChatRun(lane, t.dev, say(t.service, lane.id, `来自 ${lane.key} 的消息`))
-    }
-    const soloId = t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body: '单聊消息' })
-    t.service.enqueueSoloChatRun(t.dev, soloId)
-
+    const beta = await t.service.createProject({ name: 'Beta', key: 'BET', ownerBotId: t.director.id, memberIds: [t.dev.id] })
+    // 首条（项目一）开跑后，项目二消息与单聊消息相继到达。
+    const m1 = say(t.service, t.project.id, '来自 COA 的消息')
+    t.service.enqueueChatRun(t.project, t.dev, m1)
     t.service.started = true
     await t.service.tick()
 
-    const running = t.store.all("SELECT * FROM runs WHERE status = 'running'")
-    assert.equal(running.length, 4, '三条项目通道 + 单聊通道各自领取一条运行')
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 0, '跨道不合批')
-    assert.equal(t.runtime.started.length, 4, '四条通道各启动一次运行')
-    assert.ok(t.runtime.started.every(item => item.extraMessages.length === 0), '跨道运行不应携带合并消息')
+    const m2 = say(t.service, beta.id, '来自 BET 的消息')
+    t.service.enqueueChatRun(beta, t.dev, m2)
+    const soloId = t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body: '单聊消息' })
+    t.service.enqueueSoloChatRun(t.dev, soloId)
+    assert.equal(heldItems(t).length, 2, '两条挂起（不同项目/不同 kind）')
+
+    await t.runtime.complete(t.runtime.started[0].runId)
+    await t.service.tick()
+    // bot 级串行：一次只建回一条运行（首个挂起组），且不吞并另一项目的消息。
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1, 'bot 级串行：同时只有一条在跑')
+    const second = t.runtime.started[1]
+    assert.equal(second.chatMessage.id, m2, '建回的是最早挂起组（项目二消息）')
+    assert.deepEqual(second.extraMessages.map(item => item.id), [], '不得跨项目并入同一轮')
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [soloId], '单聊挂起留队列下一拍')
+
+    await t.runtime.complete(t.runtime.started[1].runId)
+    await t.service.tick()
+    const third = t.runtime.started[2]
+    assert.equal(third.chatMessage.id, soloId, '单聊消息最终独立成运行')
+    assert.deepEqual(heldItems(t), [], '全部消化')
   } finally {
     await cleanup(t.root, t.store)
   }
 })
 
-test('合并条数上限走 settings：每条运行最多合并到上限，剩下的下一拍再组成新运行', async () => {
+test('合并条数上限走 settings：单组封顶，超出部分下一拍再组成新运行', async () => {
   const t = await setup()
   try {
     t.store.setSetting('coalesce_max_messages', '2')
     const ids = [1, 2, 3, 4].map(index => say(t.service, t.project.id, `消息 ${index}`))
-    for (const messageId of ids) t.service.enqueueChatRun(t.project, t.dev, messageId)
-
+    t.service.enqueueChatRun(t.project, t.dev, ids[0])
     t.service.started = true
     await t.service.tick()
+    // 运行期到达三条：m2、m3、m4 全部挂起。
+    for (const messageId of ids.slice(1)) t.service.enqueueChatRun(t.project, t.dev, messageId)
 
-    // 入队合并（DSHBOTS-287）：上限在入队时即生效——m2 并入首条，m3 满额后自成一队，
-    // m4 再并入 m3 的运行；领取时不再二次合批。
-    // 同一通道严格串行：第一条运行带走前两条，m3 的运行（已并 m4）继续排队。
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1)
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 2)
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'queued'").n, 1)
-    assert.deepEqual(t.runtime.started[0].extraMessages.map(item => item.id), [ids[1]], '第一次运行携带前两条')
-
-    // 第一条运行结束后，剩下的两条组成第二次运行。
     await t.runtime.complete(t.runtime.started[0].runId)
     await t.service.tick()
+    // 上限 2：第一组建回只带 m2+m3，m4 留队列（bot 随即忙，同拍不建第二组）。
     assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1)
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 2)
     const second = t.runtime.started[1]
-    assert.equal(second.chatMessage.id, ids[2])
-    assert.deepEqual(second.extraMessages.map(item => item.id), [ids[3]], '第二次运行携带后两条')
+    assert.equal(second.chatMessage.id, ids[1], '第二组以 m2 为首')
+    assert.deepEqual(second.extraMessages.map(item => item.id), [ids[2]], '单组封顶 2 条（首条+合并 1 条）')
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [ids[3]], 'm4 留队列')
+
+    await t.runtime.complete(t.runtime.started[1].runId)
+    await t.service.tick()
+    const third = t.runtime.started[2]
+    assert.equal(third.chatMessage.id, ids[3], 'm4 下一拍独立成运行')
+    assert.deepEqual(third.extraMessages, [])
   } finally {
     await cleanup(t.root, t.store)
   }
 })
 
-test('合并窗口走 settings：窗口外的目标运行不吸收新消息，新消息保持排队', async () => {
+test('合并窗口走 settings：与组首入队时间差超窗的挂起消息不并入，独立成组', async () => {
   const t = await setup()
   try {
     t.store.setSetting('coalesce_window_ms', '60000')
     const m1 = say(t.service, t.project.id, '窗口外最早一条（已老化）')
+    t.service.enqueueChatRun(t.project, t.dev, m1)
+    t.service.started = true
+    await t.service.tick()
+
     const m2 = say(t.service, t.project.id, '窗口内第二条')
     const m3 = say(t.service, t.project.id, '窗口内第三条')
-    const firstRunId = t.service.enqueueChatRun(t.project, t.dev, m1)
-    // 把最早一条的入队时间推到一小时前：后续消息与它的相差远超合并窗口。
-    t.store.run(
-      'UPDATE runs SET queued_at = ? WHERE id = ?',
-      new Date(Date.now() - 3_600_000).toISOString(), firstRunId,
-    )
-    // 第二条：唯一候选是老化的首条，窗口外 → 不并，自成一队。
-    const secondRunId = t.service.enqueueChatRun(t.project, t.dev, m2)
-    // 第三条：老化的首条仍在窗口外，但第二条刚入队在窗口内 → 并入第二条的运行。
+    t.service.enqueueChatRun(t.project, t.dev, m2)
     t.service.enqueueChatRun(t.project, t.dev, m3)
+    // 把 m2 的挂起入队时间推到一小时前：m3 与它的相差远超合并窗口。
+    const items = heldItems(t)
+    items[0].queuedAt = new Date(Date.now() - 3_600_000).toISOString()
+    t.store.setSetting(`bot_pending_msgs:${t.dev.id}`, JSON.stringify(items))
 
-    const first = t.store.get('SELECT * FROM runs WHERE id = ?', firstRunId)
-    const second = t.store.get('SELECT * FROM runs WHERE id = ?', secondRunId)
-    assert.equal(first.status, 'queued', '窗口外的最早运行保持排队')
-    assert.ok(!first.merged_messages, '窗口外运行不吸收新消息')
-    assert.equal(second.status, 'queued', '窗口内的第二条保持排队')
+    await t.runtime.complete(t.runtime.started[0].runId)
+    await t.service.tick()
+
+    // m2 老化自成一组；m3 与 m2 超窗不并，留队列下一拍。
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1)
+    const second = t.runtime.started[1]
+    assert.equal(second.chatMessage.id, m2, '老化的 m2 独立建回')
+    assert.deepEqual(second.extraMessages.map(item => item.id), [], '窗口外的 m3 不得并入老化的 m2')
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [m3], 'm3 留队列')
+
+    await t.runtime.complete(t.runtime.started[1].runId)
+    await t.service.tick()
+    assert.equal(t.runtime.started[2].chatMessage.id, m3, 'm3 下一拍独立成运行')
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})
+
+test('M4 模拟竞争：建回前 bot 被抢占则消息全量留队列；INSERT 撞 UNIQUE 返回 null 不抛错', async () => {
+  const t = await setup()
+  try {
+    const m1 = say(t.service, t.project.id, '等待建回的消息')
+    // bot 空闲 → 消息直接落 runs 排队（占用 bot），再挂起一条待建回消息。
+    const occupyId = t.service.enqueueChatRun(t.project, t.dev, m1)
+    assert.ok(occupyId, '空闲时首条消息正常落 runs 行')
+    const m2 = say(t.service, t.project.id, '挂起待建回的消息')
+    t.service.enqueueChatRun(t.project, t.dev, m2)
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [m2])
+
+    // 竞争路径一（busy 闸）：建回检查时 bot 已被抢占 → 跳过，消息留队列不丢。
+    t.service.drainPendingMessages()
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [m2], 'bot 被抢占时挂起消息必须留队列')
     assert.equal(
-      second.merged_messages,
-      JSON.stringify([m3]),
-      '窗口内的第三条并入第二条的运行',
+      t.store.get("SELECT COUNT(*) AS n FROM runs WHERE trigger_ref = ?", m2).n,
+      0,
+      '被抢占期间不得为挂起消息建 runs 行',
     )
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'MERGED'").n, 1)
+
+    // 竞争路径二（UNIQUE 护栏）：绕过 busy 检查直接建回（模拟 busy 检查与 INSERT 之间
+    // 的并发窗口）——INSERT 撞 one_active_run_per_bot，必须被捕获返回 null 而非抛错。
+    const group = { first: heldItems(t)[0], merge: [] }
+    let guardResult = 'no-throw'
+    try {
+      guardResult = t.service.insertHeldMessageRun(t.dev, group)
+    } catch {
+      guardResult = 'threw'
+    }
+    assert.equal(guardResult, null, 'UNIQUE 撞车必须返回 null（被拒重试），不得抛错带崩当前拍')
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [m2], '护栏拒后消息不丢')
   } finally {
     await cleanup(t.root, t.store)
   }
