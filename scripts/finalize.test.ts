@@ -133,8 +133,14 @@ function makeRepo(options: { redTest?: boolean; epermTest?: boolean; wordyGreenT
 }
 
 function runFinalize(work, args = []) {
+  // 本守门跑在 node --test 下，process.env 带着 NODE_TEST_CONTEXT=child-* / NODE_TEST_WORKER_ID。
+  // 原样透传给内层时，Node 22（CI）会把内层 `node --test tests/` 的目录参数当模块入口 require
+  // （MODULE_NOT_FOUND，本地 Node 26 宽容不复现＝本地绿 CI 红）。仓库口径：内层测试的 spawn
+  // 环境必须剔除这两个标记（finalize.mjs 自身 test 步同款处理）。
   const env: Record<string, string | undefined> = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
   delete env.DSH_SKIP_VERSION_BUMP
+  delete env.NODE_TEST_CONTEXT
+  delete env.NODE_TEST_WORKER_ID
   return spawnSync(process.execPath, [join(work, 'scripts', 'finalize.mjs'), ...args], {
     cwd: work,
     encoding: 'utf8',
@@ -500,4 +506,24 @@ test('未传 --skip-version-bump：注入不在场，版本照常 bump（负锚�
   } finally {
     rmSync(repo.base, { recursive: true, force: true })
   }
+})
+
+test('内层测试环境不泄漏 NODE_TEST_CONTEXT / NODE_TEST_WORKER_ID：夹具 spawn env 剔除两键（源码锚点）', () => {
+  // 守门自身跑在 node --test 下，process.env 带 NODE_TEST_CONTEXT=child-*；原样透传时 Node 22（CI）
+  // 会把内层 `node --test tests/` 的目录参数当模块入口 require（MODULE_NOT_FOUND）。本地 Node 26
+  // 宽容不复现，端到端断言在本地恒绿、在 CI 恒红前拦不住，故本例钉住剔除语句在场（源码防回归锚），
+  // 不依赖 mkdtemp 端到端；行为锚点交给发版 CI 重跑。
+  const source = readFileSync(join(repoRoot, 'scripts', 'finalize.test.ts'), 'utf8')
+  assert.match(source, /delete env\.NODE_TEST_CONTEXT/, 'runFinalize 的 spawn env 应剔除 NODE_TEST_CONTEXT')
+  assert.match(source, /delete env\.NODE_TEST_WORKER_ID/, 'runFinalize 的 spawn env 应剔除 NODE_TEST_WORKER_ID')
+})
+
+test('finalize.mjs 内层 npm test：test 步自身环境同样清两键（源码锚点，防回归）', () => {
+  const source = readFileSync(scriptSrc, 'utf8')
+  assert.match(
+    source,
+    /\{ \.\.\.process\.env, NODE_TEST_CONTEXT: undefined, NODE_TEST_WORKER_ID: undefined \}/,
+    'test 步应清掉 NODE_TEST_CONTEXT / NODE_TEST_WORKER_ID（undefined 键不进子进程环境）',
+  )
+  assert.match(source, /run\('npm', \['test'\], \{ env \}\)/, '清后的 env 应传给内层 npm test')
 })
