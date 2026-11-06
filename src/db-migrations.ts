@@ -281,6 +281,12 @@ function migrateSessionBindingAlias(db) {
 // 数据部分记入 schema_migrations 账本只跑一次——中间版本（本卡已合、路由未收敛）的运行时会
 // 按需重建四车道，若每次开库都重跑 alias 化会把重建出来的车道会话反复作废。
 // 回退口径（ADR §7.2）：旧版本代码不含本迁移，alias 化后的旧道按需重建，历史 session id 仍可解析。
+// 冗余是有意兜底（DSHBOTS-288 备案，红线变异 M3/M4 存活的定性）：
+// - one_bot_binding 双重建（本迁移内 CREATE + runMigrations 末尾 BINDING_INDEXES）：两条路径
+//   （收敛迁移、表重建后的兜底）各自独立到达时都保证索引在，删任一处不红不等于它是死代码；
+// - 账本守卫的价值不在 UPDATE 幂等（UPDATE 重跑天然命中 0 行），而在挡住上述中间版本
+//   「运行时重建四车道 → 下次开库又被 alias 化作废」的循环；路由收敛合入后该窗口关闭，
+//   守卫转为纯防御留存。
 function migrateSessionBindingBotConvergence(db) {
   db.exec(`
     DROP INDEX IF EXISTS one_project_binding;
