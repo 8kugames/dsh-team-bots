@@ -305,9 +305,18 @@ test('runs 与 session_bindings 的 project_id 迁移为可空', async () => {
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
       now,
     )
-    // 每 bot 只能有一条单聊会话绑定
-    assert.throws(() => store.run(
+    // DSHBOTS-285：solo 车道唯一索引已退役，车道行可共存（历史/过渡态），不再被拒
+    store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo2', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
+      now,
+    )
+    // 收敛不变量：每 bot 恰一条 kind='bot' 活跃绑定
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
+      now,
+    )
+    assert.throws(() => store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot2', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
       now,
     ))
     assert.equal(store.all('PRAGMA foreign_key_check').length, 0)

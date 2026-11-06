@@ -289,10 +289,16 @@ test('旧库的 session_bindings 迁移后可容纳每任务会话', async () =>
         'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',
         's3', 'b1', 'p1', 'task', 't2', now,
       )
-      // 但每 Bot 每项目只能有一个非任务会话
-      assert.throws(() => store.run(
+      // DSHBOTS-285：车道唯一索引已退役，project 车道行可共存（历史/过渡态），不再被拒
+      store.run(
         'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',
         's4', 'b1', 'p1', 'project', null, now,
+      )
+      // 收敛不变量：迁移已把旧 project 活跃行转为该 bot 的控制面绑定，每 bot 恰一条 kind='bot' 活跃绑定
+      assert.equal(store.get('SELECT kind FROM session_bindings WHERE session_id = ?', 's1').kind, 'bot')
+      assert.throws(() => store.run(
+        "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES (?,?,?,?,?,?,0)",
+        's5', 'b1', 'p1', 'bot', null, now,
       ))
     } finally {
       store.close()
