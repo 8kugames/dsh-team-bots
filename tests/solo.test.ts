@@ -312,26 +312,27 @@ test('runs 与 session_bindings 的 project_id 迁移为可空', async () => {
     assert.equal(runsInfo.find(column => column.name === 'project_id').notnull, 0)
     assert.equal(bindingsInfo.find(column => column.name === 'project_id').notnull, 0)
     const now = new Date().toISOString()
+    // 播种 bot 须确定性选取（多行表 LIMIT 1 无 ORDER BY 时行序未定义）
     store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
-       VALUES ('r-solo', NULL, (SELECT id FROM bots LIMIT 1), 'solo_chat', 'write', 'mention', 'queued', 1, 'k-solo', ?)`, now,
+       VALUES ('r-solo', NULL, (SELECT id FROM bots WHERE name = 'director'), 'solo_chat', 'write', 'mention', 'queued', 1, 'k-solo', ?)`, now,
     )
     store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo', (SELECT id FROM bots WHERE name = 'director'), NULL, 'solo', NULL, ?)",
       now,
     )
     // DSHBOTS-285：solo 车道唯一索引已退役，车道行可共存（历史/过渡态），不再被拒
     store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo2', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo2', (SELECT id FROM bots WHERE name = 'director'), NULL, 'solo', NULL, ?)",
       now,
     )
     // 收敛不变量：每 bot 恰一条 kind='bot' 活跃绑定
     store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot', (SELECT id FROM bots WHERE name = 'director'), NULL, 'bot', NULL, ?, 0)",
       now,
     )
     assert.throws(() => store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot2', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot2', (SELECT id FROM bots WHERE name = 'director'), NULL, 'bot', NULL, ?, 0)",
       now,
     ))
     assert.equal(store.all('PRAGMA foreign_key_check').length, 0)
