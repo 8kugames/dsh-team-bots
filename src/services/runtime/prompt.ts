@@ -367,6 +367,22 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
 - Do not repeat the task description or anything already recorded in long-term memory.
 - Do not call any tool and do not write files. Reply with the summary text only.`
   },
+  // 闲时总结压缩运行提示词（DSHBOTS-286）：在原会话上下文里让 bot 自写连续性总结。
+  // 压缩 ≠ 结转：会话不换，总结只为收敛上下文头绪；宿主未暴露历史截断 API，
+  // 持久事实应趁此轮落记忆/任务评论（能力边界见 ADR「结转与压缩」）。
+  sessionCompactPrompt({ bot, project }) {
+    const header = project
+      ? [`Project: ${project.name} (${project.key})`, `You are: ${bot.name}`].join('\n')
+      : [`You are: ${bot.name}`, 'Mode: one-on-one conversation (outside projects)'].join('\n')
+    return `${header}
+
+# Session compaction request
+This conversation has grown long and is now idle. Write a working summary to keep future turns focused.
+- Write in Chinese, plain prose, at most 300 characters.
+- Cover: current focus, work in progress with its exact state, and the next concrete steps.
+- If any durable fact, decision or lesson emerged that is not yet recorded, persist it now with your memory tools (team_remember); everything else stays in this reply only.
+- Do not write files. Reply with the summary text only.`
+  },
   // 单聊运行提示词：没有项目上下文，只带本会话增量新消息。
   soloRunPrompt({ bot, chatMessage, extraMessages, sessionId }) {
     const header = [
@@ -427,8 +443,9 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, extraMessages, sessionId })
     if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
     // 结转摘要（DSHBOTS-145）：先于 header 判定——单聊摘要运行没有项目，
-    // header 直接解引用 project 会炸。
+    // header 直接解引用 project 会炸。闲时压缩（DSHBOTS-286）同理。
     if (run.kind === 'rollover_summary') return this.rolloverSummaryPrompt({ run, bot, project })
+    if (run.kind === 'session_compact') return this.sessionCompactPrompt({ bot, project })
     const header = [
       `Project: ${project.name} (${project.key})`,
       `Workspace: ${displayPath(project.production_dir || join(this.config.workspace, project.slug))}`,

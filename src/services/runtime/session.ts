@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { AppError } from '../../errors.js'
 import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
-import { effectiveRunLimits, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
+import { effectiveRunLimits, effectiveSessionCompactTurns, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey, sessionCompactMarkerKey } from '../../config.js'
 import { imageContentPartsForMessage } from '../message-images.js'
 import { restoreDefaultModel } from './model-restore.js'
 import { applyBotToolPolicy } from '../../tools.js'
@@ -199,14 +199,17 @@ export const sessionMethods = {
       return {}
     }
   },
-  // 结转判定（DSHBOTS-145）：旧会话是否该让位。返回 true 表示旧绑定已删、调用方走新建路径；
-  // false 表示继续复用旧会话。
-  // - 阈值 0 = 关闭（配置见 config.js 的 sessionRolloverTurns）；
+  // 结转判定（DSHBOTS-145 / DSHBOTS-286）：旧会话是否该让位。返回 true 表示旧绑定已
+  // alias 化、调用方走新建路径；false 表示继续复用旧会话。
+  // - 阈值 0 = 关闭（配置见 config.js 的 sessionRolloverTurns，默认 512）；
   // - 「轮次」口径 = runs 表按 session_id 的 COUNT(*)，不限 status——失败运行的提示词同样
   //   已进会话历史，count-all 才与真实增长一致；
+  // - 幂等（DSHBOTS-286）：alias 行永不触发结转——判定只作用于活跃绑定；已结转的旧会话
+  //   即使轮数继续增长（承接未终态任务流量），也只参与闲时压缩，不再二次结转；
   // - 摘要就绪（settings 有值）→ 立即结转；
   // - 摘要未就绪 → 幂等补排一条摘要运行（不阻塞对话，摘要就绪后下一次复用自然结转）。
   shouldRolloverSession({ bot, project, existing }) {
+    if (existing?.alias) return false
     const turns = effectiveSessionRolloverTurns(this.config, key => this.store.setting(key))
     if (turns <= 0) return false
     const count = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0
@@ -248,13 +251,83 @@ export const sessionMethods = {
     )
     return runId
   },
+  // 任务亲和绑定解析（DSHBOTS-286，ADR「结转后的任务亲和路由」）：按 task_id 从 runs 表
+  // 显式解析其原会话——结转只把绑定行 alias 化，runs.task_id→session_id 的历史归属不动。
+  // 未终态任务的后续消息据此回到原会话（即使该绑定已是 alias 行，如结转后的旧控制面会话）；
+  // 新任务（无 runs 归属）与终态任务不享亲和，落活跃绑定/新建路径。
+  // 与 D-285 单绑定模型共存：kind='bot' 唯一活跃绑定只决定「新流量」的家，任务亲和优先于它。
+  taskAffinityBinding(task) {
+    if (!task?.id) return undefined
+    // 终态任务的会话不再需要亲和：done/canceled 与调度器候选过滤同口径。
+    if (task.status === 'done' || task.status === 'canceled') return undefined
+    const row = this.store.get(
+      `SELECT session_id AS sid FROM runs
+        WHERE task_id = ? AND session_id IS NOT NULL
+        ORDER BY COALESCE(started_at, queued_at) DESC, rowid DESC LIMIT 1`,
+      task.id,
+    )
+    if (!row?.sid) return undefined
+    return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', row.sid)
+  },
+  // 入队闲时总结压缩运行（DSHBOTS-286）：复用旧会话（runs.session_id 指明）的只读运行，
+  // 让 bot 在原上下文里自写连续性总结。压缩 ≠ 结转：不 alias 化绑定、不写 rollover_pending，
+  // 总结完成后留原会话。幂等键带窗口号：同窗口并发/重复触发由唯一约束兜住。
+  enqueueSessionCompact({ bot, project, sessionId, window }) {
+    const runId = id('run')
+    const queuedAt = new Date().toISOString()
+    const inserted = this.store.run(
+      `INSERT OR IGNORE INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, queued_at)
+       VALUES (?, ?, ?, 'session_compact', 'read', 'session_compact', ?, 'queued', 1, ?, ?, ?)`,
+      runId,
+      project?.id ?? null,
+      bot.id,
+      sessionId,
+      `session_compact:${sessionId}:${window}`,
+      sessionId,
+      queuedAt,
+    )
+    if (!inserted.changes) return runId
+    this.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'),
+      runId,
+      'queued',
+      `会话轮次跨过 ${window * effectiveSessionCompactTurns(this.config, key => this.store.setting(key))} 边界，闲时排队总结压缩`,
+      queuedAt,
+    )
+    return runId
+  },
+  // 闲时压缩判定（DSHBOTS-286）：会话复用时检查轮次是否跨过新的压缩窗口。
+  // - 窗口 N 轮（session_compact_turns，0 = 关闭），轮次口径与结转一致；
+  // - 闲 = 该会话除当前运行外无 queued/running 运行；忙时推后（标记不动，下次复用再判，
+  //   跨多个窗口合批为一次）；
+  // - 对仍在承接流量的会话生效：含 alias 旧会话（未终态任务流量）与 task/dm 短生命周期会话。
+  maybeCompactSession({ bot, project, existing, currentRunId }) {
+    const every = effectiveSessionCompactTurns(this.config, key => this.store.setting(key))
+    if (every <= 0 || !existing?.session_id) return
+    const sessionId = existing.session_id
+    const turns = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', sessionId)?.n ?? 0
+    const marker = Number(this.store.setting(sessionCompactMarkerKey(sessionId)) ?? 0)
+    const window = Math.floor(turns / every)
+    if (window <= Math.floor(marker / every)) return
+    const busy = this.store.get(
+      "SELECT id FROM runs WHERE session_id = ? AND status IN ('queued', 'running') AND id != ?",
+      sessionId,
+      currentRunId ?? '',
+    )
+    if (busy) return
+    this.enqueueSessionCompact({ bot, project, sessionId, window })
+    // 标记推进到窗口下界：即使压缩运行后续失败也不回退，失败留痕由下一窗口再补。
+    this.store.setSetting(sessionCompactMarkerKey(sessionId), String(window * every))
+  },
   async ensureSession(bot, project, { run, task, sessionKind, modelOverride } = {} as any) {
     // DSHBOTS-238：成员 bot 工具层兜底——隐藏总监专权工具（子代理生成工具由 preset 全局
     // 注册，成员默认可见）。仅作用于项目绑定会话；solo 无项目上下文，本策略自然不触发。
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
-    // 结转摘要运行（DSHBOTS-145）：必须回到被结转的旧会话写摘要，且不能参与阈值判定——
-    // 否则摘要运行自己又会触发一次结转；solo 摘要运行也没有项目上下文，不查项目。
-    if (run?.kind === 'rollover_summary' && run.session_id) {
+    // 结转摘要运行（DSHBOTS-145）与闲时压缩运行（DSHBOTS-286）：必须回到原会话执行，
+    // 且不能参与阈值判定——否则这两类运行自己又会触发结转/压缩；solo 摘要运行也没有
+    // 项目上下文，不查项目。
+    if ((run?.kind === 'rollover_summary' || run?.kind === 'session_compact') && run.session_id) {
       const resolved = await this.ctx.sessionController.resolveAgent(run.session_id)
       if (!resolved?.error) {
         this.applyFilePolicy(resolved, bot, run, task)
@@ -274,13 +347,15 @@ export const sessionMethods = {
     const kind = kind0 === 'task' && !task ? 'project' : kind0
     const taskId = kind === 'task' ? task.id : null
     const solo = kind === 'solo'
+    // 任务亲和（DSHBOTS-286）：活跃 task 绑定优先；没有时按 runs 归属解析未终态任务的
+    // 原会话（含 alias 行——结转后未终态任务的后续消息仍落旧会话）。
     const existing = taskId
-      ? this.store.get(
+      ? (this.store.get(
         "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ? AND alias = 0",
         bot.id,
         project.id,
         taskId,
-      )
+      ) ?? this.taskAffinityBinding(task))
       : solo
         ? this.store.get(
           "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'solo' AND project_id IS NULL AND task_id IS NULL AND alias = 0",
@@ -297,16 +372,18 @@ export const sessionMethods = {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
         // 会话结转（DSHBOTS-145）：只对长期复用的会话（项目群聊 / 单聊）生效，任务会话与
-        // 私信会话生命周期短，不结转。超阈值且摘要已就绪 → 删旧绑定落到下方新建路径，
-        // 摘要由新会话首轮提示词注入；摘要未就绪 → 补排一次摘要运行，本轮继续复用旧会话，
-        // 不阻塞对话。
-        const rollover = kind !== 'task' && kind !== 'dm'
+        // 私信会话生命周期短，不结转；alias 行（亲和复用的旧会话）永不结转（DSHBOTS-286
+        // 幂等）。超阈值且摘要已就绪 → 旧绑定 alias 化落到下方新建路径，摘要由新会话首轮
+        // 提示词注入；摘要未就绪 → 补排一次摘要运行，本轮继续复用旧会话，不阻塞对话。
+        const rollover = !existing.alias && kind !== 'task' && kind !== 'dm'
           && this.shouldRolloverSession({ bot, project, existing })
         rolledOver = rollover
         if (!rollover) {
           this.applyFilePolicy(resolved, bot, run, task)
           applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
           await this.selectModel(existing.session_id, bot, modelOverride)
+          // 闲时压缩（DSHBOTS-286）：复用即「仍在承接流量」，跨过窗口且闲时排队总结压缩。
+          this.maybeCompactSession({ bot, project, existing, currentRunId: run?.id })
           return existing.session_id
         }
       }

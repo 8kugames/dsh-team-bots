@@ -133,6 +133,7 @@ interface TeamConfig {
   stallTimeoutMs: number
   taskTimeBudgetMinutes: number
   sessionRolloverTurns: number
+  sessionCompactTurns: number
   reviewIdleMinutes: number
   uiLanguage: UiLanguage
   chatReplyMaxChars: number

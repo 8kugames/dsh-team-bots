@@ -292,7 +292,7 @@ export const schedulerMethods = {
   // 的通道键对齐（防与复用同一会话的群聊并发——runtime 的 pending 按会话一对一）。
   sessionLaneKey(run) {
     if (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) return `solo:${run.bot_id}`
-    if (run.kind === 'rollover_summary') {
+    if (run.kind === 'rollover_summary' || run.kind === 'session_compact') {
       if (!run.session_id) return `bot:${run.bot_id}`
       const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', run.session_id)
       return binding ? this.bindingLaneKey(binding) : `session:${run.session_id}`
@@ -701,7 +701,8 @@ export const schedulerMethods = {
         // DSHBOTS-112：单聊读图代理运行与 solo_chat 同样不带 project_id，豁免项目闸门。
         // DSHBOTS-145：结转摘要运行同理——单聊摘要运行不带 project_id，只有项目摘要运行
         // 才需要项目上下文；否则 solo 摘要会被误判 MISSING_CONTEXT 直接失败。
-        const needsProject = run.kind === 'rollover_summary'
+        // DSHBOTS-286：闲时压缩运行同理。
+        const needsProject = run.kind === 'rollover_summary' || run.kind === 'session_compact'
           ? Boolean(run.project_id)
           : run.kind !== 'solo_chat' && !(run.kind === 'vision' && !run.project_id)
         const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null

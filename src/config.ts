@@ -39,11 +39,18 @@ export const REVIEW_AUTO_CLOSE_KEY = 'review_auto_close'
 export const REVIEW_ESCALATE_KEY = 'review_idle_escalate_multiple'
 export const REVIEW_ESCALATE_RANGE = [2, 10]
 
-// ── 会话结转（DSHBOTS-145）─────────────────────────────────────────────────
+// ── 会话结转与闲时压缩（DSHBOTS-145 / DSHBOTS-286）─────────────────────────
 // 同一绑定会话累计运行轮数超过阈值后结转：先排一次 bot 自写交接摘要，摘要就绪后
-// 删旧绑定开新会话并把摘要注入新会话首条对话提示词。0 = 关闭（阈值不生效）。
+// 旧绑定 alias 化并开新会话，摘要注入新会话首条对话提示词。0 = 关闭（阈值不生效）。
+// 结转阈值默认 512（DSHBOTS-286 由 256 上调）；alias 会话不重复结转。
 export const SESSION_ROLLOVER_TURNS_KEY = 'session_rollover_turns'
 export const SESSION_ROLLOVER_TURNS_RANGE = [0, 10_000]
+
+// 每 N 轮闲时总结压缩（DSHBOTS-286）：轮次口径与结转一致（runs 按 session_id
+// COUNT(*)）；跨越 N 的倍数且会话闲时入队 kind='session_compact' 总结运行，
+// 忙时推后、跨窗口合批。压缩 ≠ 结转（留原会话）。0 = 关闭。
+export const SESSION_COMPACT_TURNS_KEY = 'session_compact_turns'
+export const SESSION_COMPACT_TURNS_RANGE = [0, 10_000]
 
 // 保存值必须是范围内的整数；非法或越界按未保存处理（回退默认），不做钳制。
 // 空串/null（未保存）必须先于数值化判空：Number('') 是 0，会把「未保存」误判成
@@ -108,6 +115,14 @@ export function effectiveSessionRolloverTurns(config, getSetting: (key: string) 
   return !env && saved !== null ? saved : config.sessionRolloverTurns
 }
 
+// 闲时压缩窗口生效值（DSHBOTS-286）：优先级与结转一致——env 显式 > 页面保存值 >
+// 默认 64；0 = 关闭。消费点（runtime.ensureSession 复用检查）每次现算。
+export function effectiveSessionCompactTurns(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_SESSION_COMPACT_TURNS')
+  const saved = savedInt(getSetting(SESSION_COMPACT_TURNS_KEY), SESSION_COMPACT_TURNS_RANGE)
+  return !env && saved !== null ? saved : config.sessionCompactTurns
+}
+
 // 验收滞留阈值生效值（DSHBOTS-194）：优先级与会话结转一致——env 显式 > 保存值 >
 // 默认 30 分钟；0 = 关闭。消费点（scheduler 验收守门、runLimitsView 透出）每次
 // 现算，改值对下一轮扫描生效；env 标志供 UI 提示「环境变量已覆盖」。
@@ -127,6 +142,10 @@ export const rolloverSummaryKey = (botId, projectId) => `rollover_summary:${botI
 // 结转摘要的待注入目标会话键（DSHBOTS-213）：结转开新会话时记录新会话 id，摘要只允许被
 // 该目标会话的提示词消费，防止被其他会话的普通轮次提前清零。
 export const rolloverPendingKey = (botId, projectId) => `rollover_pending:${botId}:${projectId ?? 'solo'}`
+
+// 闲时压缩的窗口标记键（DSHBOTS-286）：按会话隔离，值 = 已被压缩运行覆盖到的轮数
+// （窗口下界）。忙时推后依赖「标记不动」，闲时跨越窗口才入队并推进标记。
+export const sessionCompactMarkerKey = (sessionId) => `session_compact_marker:${sessionId}`
 
 // ── UI 语言（DSHBOTS-162）─────────────────────────────────────────────────
 // 全局配置页语言下拉：auto = 跟随 DSH 宿主设定（缺省），zh/en = 显式覆盖。
@@ -197,7 +216,10 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 会话结转阈值（DSHBOTS-145）：0 = 关闭；「轮次」口径 = runs 表按 session_id 的
     // COUNT(*)（不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实
     // 增长一致）。生效值可被全局配置页 session_rollover_turns 覆盖。
-    sessionRolloverTurns: int(config.sessionRolloverTurns ?? process.env.DSH_TEAM_SESSION_ROLLOVER_TURNS, 256, 0, 10_000),
+    sessionRolloverTurns: int(config.sessionRolloverTurns ?? process.env.DSH_TEAM_SESSION_ROLLOVER_TURNS, 512, 0, 10_000),
+    // 闲时总结压缩窗口（DSHBOTS-286）：默认每 64 轮，0 = 关闭；生效值见
+    // effectiveSessionCompactTurns（env > 页面保存值 > 默认）。
+    sessionCompactTurns: int(config.sessionCompactTurns ?? process.env.DSH_TEAM_SESSION_COMPACT_TURNS, 64, 0, 10_000),
     // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超此分钟数 = 滞留。生效值可被
     // 全局设置 review_idle_minutes 覆盖（effectiveReviewIdleMinutes），0 = 关闭。
     reviewIdleMinutes: int(config.reviewIdleMinutes ?? process.env.DSH_TEAM_REVIEW_IDLE_MINUTES, 30, 0, 1440),
