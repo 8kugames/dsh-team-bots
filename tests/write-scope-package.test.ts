@@ -69,7 +69,11 @@ async function manualSetup() {
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  return { root, store, service, runtime, director, dev }
+  // DSHBOTS-290：bot 级串行（one_active_run_per_bot）下并行断言需要异 bot——补第二成员。
+  const dev2 = await service.createBot({
+    name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
+  })
+  return { root, store, service, runtime, director, dev, dev2 }
 }
 
 function taskRuns(store, projectId, status) {
@@ -124,16 +128,16 @@ async function enqueueTask({ service, store, project, dev, actor, title, scopes,
 }
 
 test('双方写范围快照都带 package.json、其余路径不相交：tick 后同时 running', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   const actor: Actor = { type: 'user', id: 'u1' }
   try {
-    const project = await service.createProject({ name: 'PkgParallel', key: 'PKG', ownerBotId: director.id, memberIds: [dev.id] }, actor)
+    const project = await service.createProject({ name: 'PkgParallel', key: 'PKG', ownerBotId: director.id, memberIds: [dev.id, dev2.id] }, actor)
     await enqueueTask({
       service, store, project, dev, actor, title: '改 UI 模块',
       scopes: ['ui/modules'], snapshotScopes: ['package.json', 'ui/modules'],
     })
     await enqueueTask({
-      service, store, project, dev, actor, title: '改服务模块',
+      service, store, project, dev: dev2, actor, title: '改服务模块',
       scopes: ['src/services'], snapshotScopes: ['package.json', 'src/services'],
     })
 
@@ -153,16 +157,16 @@ test('双方写范围快照都带 package.json、其余路径不相交：tick �
 })
 
 test('一方真实改动 scripts/version-bump.mjs 与另一方 src/x：不相交照常并行', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   const actor: Actor = { type: 'user', id: 'u1' }
   try {
-    const project = await service.createProject({ name: 'RealPath', key: 'REA', ownerBotId: director.id, memberIds: [dev.id] }, actor)
+    const project = await service.createProject({ name: 'RealPath', key: 'REA', ownerBotId: director.id, memberIds: [dev.id, dev2.id] }, actor)
     const first = await enqueueTask({
       service, store, project, dev, actor, title: '改版本脚本',
       scopes: ['scripts/version-bump.mjs'], snapshotScopes: ['package.json', 'scripts/version-bump.mjs'],
     })
     await enqueueTask({
-      service, store, project, dev, actor, title: '改源码',
+      service, store, project, dev: dev2, actor, title: '改源码',
       scopes: ['src/x'],
     })
 
@@ -182,16 +186,16 @@ test('一方真实改动 scripts/version-bump.mjs 与另一方 src/x：不相交
 })
 
 test('过滤掉 package.json 后仍相交：保守串行', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   const actor: Actor = { type: 'user', id: 'u1' }
   try {
-    const project = await service.createProject({ name: 'PkgOverlap', key: 'PKO', ownerBotId: director.id, memberIds: [dev.id] }, actor)
+    const project = await service.createProject({ name: 'PkgOverlap', key: 'PKO', ownerBotId: director.id, memberIds: [dev.id, dev2.id] }, actor)
     const first = await enqueueTask({
       service, store, project, dev, actor, title: '改服务目录',
       scopes: ['src/services'], snapshotScopes: ['package.json', 'src/services'],
     })
     await enqueueTask({
-      service, store, project, dev, actor, title: '改服务文件',
+      service, store, project, dev: dev2, actor, title: '改服务文件',
       scopes: ['src/services/tasks.js'], snapshotScopes: ['package.json', 'src/services/tasks.js'],
     })
 
@@ -209,16 +213,16 @@ test('过滤掉 package.json 后仍相交：保守串行', async () => {
 })
 
 test('过滤后任一为空：仍按未声明保守串行', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   const actor: Actor = { type: 'user', id: 'u1' }
   try {
-    const project = await service.createProject({ name: 'PkgEmpty', key: 'PKE', ownerBotId: director.id, memberIds: [dev.id] }, actor)
+    const project = await service.createProject({ name: 'PkgEmpty', key: 'PKE', ownerBotId: director.id, memberIds: [dev.id, dev2.id] }, actor)
     const first = await enqueueTask({
       service, store, project, dev, actor, title: '只碰版本号',
       scopes: ['package.json'], snapshotScopes: ['package.json'],
     })
     await enqueueTask({
-      service, store, project, dev, actor, title: '改源码',
+      service, store, project, dev: dev2, actor, title: '改源码',
       scopes: ['src/x'],
     })
 
