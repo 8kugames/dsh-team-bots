@@ -359,6 +359,26 @@ test('重复收口被拒：清单文件已提交时在 commit 步拒绝（防收
   }
 })
 
+test('可选远端构建：无配置时跳过并提示，不算失败', (t) => {
+  const repo = setup(t)
+  if (!repo) return
+  const { work } = repo
+  try {
+    writeFileSync(join(work, 'a.txt'), 'a\n')
+    const run = runFinalize(work, ['--files', 'a.txt', '--message', `feat(fixture): 交付（${CARD}）`, '--build-remote'])
+    const result = parseResult(run)
+    assert.ok(result, 'stdout 应输出结构化 JSON')
+    assert.equal(result.ok, true, `无远端构建配置时应跳过而非失败：${result.error ?? ''}`)
+    const step = result.steps.find(item => item.name === 'build-remote')
+    assert.ok(step, '应有 build-remote 步骤')
+    assert.equal(step.ok, true)
+    assert.equal(result.summary.buildRemote?.skipped, true)
+    assert.match(result.summary.buildRemote?.reason ?? '', /跳过/)
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
 test('收口工具随仓库分发：调用方式与参数齐备', (t) => {
   const repo = setup(t)
   if (!repo) return
