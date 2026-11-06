@@ -66,6 +66,102 @@ export function attributeWorkspaceChange({ before, after, concurrentWrites = [] 
 
 export const runsMethods = {
 
+  // ── 争用口径 A（DSHBOTS-289，ADR §5.2-2，owner 拍板）─────────────────────────
+  // one_active_run_per_bot 激活后，bot 忙（有 queued/running 运行）时入站消息不落 runs 行
+  // （第二条 queued 会直接撞唯一索引），挂入按 bot 的待处理队列（settings 持久化，重启不丢）；
+  // bot 空闲时 drainPendingMessages 把挂起消息建回运行——chat/solo_chat 同类合批成一条，
+  // dm/dm_reply 按一条来信一条回信契约逐条放行不合批；task/review 运行照常落 runs 行排队，
+  // 不被消息合批吞并（与本队列互斥串行，靠 claimKey=bot 的领取闸保证）。
+  botBusy(botId) {
+    return Boolean(this.store.get(
+      "SELECT id FROM runs WHERE bot_id = ? AND status IN ('queued', 'running')",
+      botId,
+    ))
+  },
+  pendingMessagesKey(botId) {
+    return `bot_pending_msgs:${botId}`
+  },
+  holdPendingMessage(botId, item) {
+    const key = this.pendingMessagesKey(botId)
+    const list = jsonParse(this.store.setting(key), [])
+    const safe = Array.isArray(list) ? list : []
+    if (safe.some(existing => existing?.messageId === item.messageId)) return
+    this.store.setSetting(key, JSON.stringify([...safe, item]))
+  },
+  // 建回运行（drainPendingMessages 专用）：直接落 runs 行（含合批 merged_messages），
+  // UNIQUE 撞车（并发领取窗口）返回 null 交由调用方把消息留队列下一拍重试。
+  insertHeldMessageRun(bot, group) {
+    const item = group.first
+    const mergedIds = group.merge.map(entry => entry.messageId)
+    const spec = item.kind === 'chat'
+      ? { projectId: item.projectId, mode: 'read', trigger: item.origin === 'wechat' ? 'wechat' : 'mention', idem: `chat:${item.messageId}:${bot.id}` }
+      : item.kind === 'solo_chat'
+        ? { projectId: null, mode: 'write', trigger: item.triggerType === 'wechat' ? 'wechat' : 'mention', idem: `solo_chat:${item.messageId}` }
+        : item.kind === 'dm'
+          ? { projectId: item.projectId, mode: 'read', trigger: 'dm', idem: `dm:${item.messageId}` }
+          : { projectId: item.projectId, mode: 'read', trigger: 'dm_reply', idem: `dm_reply:${item.messageId}` }
+    const runId = id('run')
+    const createdAt = nowIso()
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, merged_messages, queued_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 1, ?, ?, ?)`,
+        runId, spec.projectId, bot.id, item.kind, spec.mode, spec.trigger, item.messageId,
+        spec.idem, mergedIds.length ? JSON.stringify(mergedIds) : null, createdAt,
+      )
+    } catch (error: any) {
+      if (String(error).includes('UNIQUE')) return null
+      throw error
+    }
+    if (item.kind === 'dm') {
+      this.store.run(
+        "UPDATE bot_messages SET status = 'delivered', run_id = ? WHERE id = ?",
+        runId, item.messageId,
+      )
+    }
+    this.insertRunEvent(runId, 'queued',
+      `bot 空闲，待处理消息建回运行${mergedIds.length ? `（合批 ${mergedIds.length} 条）` : ''}`)
+    return runId
+  },
+  // 争用口径 A 收口：bot 空闲时把挂起消息建回运行。chat/solo_chat 各取首条建运行、其余
+  // 同 kind 并入 merged_messages 同轮注入（合批成一条）；dm/dm_reply 一次只放行一条（回信
+  // 契约），余量留队列下一拍。建行失败（并发撞 UNIQUE）的消息全部留队列，不丢消息。
+  drainPendingMessages() {
+    const prefix = 'bot_pending_msgs:'
+    const rows = this.store.all(`SELECT key, value FROM settings WHERE key LIKE '${prefix}%'`)
+    for (const row of rows) {
+      const botId = row.key.slice(prefix.length)
+      const items = jsonParse(row.value, [])
+      if (!Array.isArray(items) || !items.length) continue
+      if (this.botBusy(botId)) continue
+      const bot = this.store.get('SELECT * FROM bots WHERE id = ?', botId)
+      if (!bot || bot.status !== 'active') {
+        this.store.setSetting(this.pendingMessagesKey(botId), '[]')
+        continue
+      }
+      // 相邻同 kind 的 chat/solo_chat 挂起消息合成一组；dm/dm_reply 独立成组逐条放行。
+      const groups = []
+      for (const item of items) {
+        const last = groups[groups.length - 1]
+        if (last && last.first.kind === item.kind
+          && (item.kind === 'chat' || item.kind === 'solo_chat')) last.merge.push(item)
+        else groups.push({ first: item, merge: [] })
+      }
+      const consumed = new Set()
+      for (const group of groups) {
+        if (this.botBusy(botId)) break
+        const runId = this.insertHeldMessageRun(bot, group)
+        if (!runId) break
+        consumed.add(group.first.messageId)
+        for (const entry of group.merge) consumed.add(entry.messageId)
+        if (group.first.kind === 'dm' || group.first.kind === 'dm_reply') break
+      }
+      const leftover = items.filter(item => !consumed.has(item?.messageId))
+      this.store.setSetting(this.pendingMessagesKey(botId), JSON.stringify(leftover))
+    }
+  },
+
   // 建私信执行运行：目标 Bot 的 dm 会话收到来信，产出回信写入 bot_messages.reply。
   enqueueDmRun(message, target) {
     const existing = this.store.get(
@@ -73,6 +169,11 @@ export const runsMethods = {
       message.id,
     )
     if (existing) return existing.id
+    // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列（一条来信一条回信，不合批）。
+    if (this.botBusy(target.id)) {
+      this.holdPendingMessage(target.id, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
+      return null
+    }
     const runId = id('run')
     const createdAt = nowIso()
     this.store.run(
@@ -93,15 +194,15 @@ export const runsMethods = {
   deliverBotReply(message) {
     const caller = this.store.get('SELECT * FROM bots WHERE id = ?', message.from_bot_id)
     if (!caller || caller.status !== 'active') return null
-    const kind = message.origin_kind === 'task' ? 'task' : message.origin_kind === 'dm' ? 'dm' : 'project'
-    const binding = message.origin_kind === 'task' && message.origin_task_id
-      ? this.store.get(
-        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ? AND alias = 0",
-        caller.id, message.project_id, message.origin_task_id,
-      )
-      : this.store.get(
-        'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ? AND alias = 0',
-        caller.id, message.project_id, kind,
+    // 控制面收敛（DSHBOTS-289）：回信目标按收敛顺序解析——来源任务未终态时按 runs 归属
+    // 亲和回原任务会话（steer/排运行都指向它），否则落发送方的 kind='bot' 控制面单绑定。
+    const originTask = message.origin_kind === 'task' && message.origin_task_id
+      ? this.store.get('SELECT * FROM tasks WHERE id = ?', message.origin_task_id)
+      : null
+    const binding = (originTask ? this.runtime.taskAffinityBinding(originTask) : undefined)
+      ?? this.store.get(
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
+        caller.id,
       )
     // 无绑定（会话被轮换清理或首次私信）：走 dm_reply 运行，由 startRun 重建会话。
     let plan
@@ -151,6 +252,11 @@ export const runsMethods = {
       bot.id,
     )
     if (existing) return existing.id
+    // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
+    if (this.botBusy(bot.id)) {
+      this.holdPendingMessage(bot.id, { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
+      return null
+    }
     const runId = id('run')
     const createdAt = nowIso()
     this.store.run(
@@ -165,8 +271,6 @@ export const runsMethods = {
       triggerType === 'wechat' ? '微信消息触发（项目外单聊直达）' : '单聊消息触发',
       createdAt,
     )
-    // 入队合并（DSHBOTS-287）：同车道已有更早的排队运行时，本消息并入该运行，不再单独排队。
-    this.mergeRunIntoQueuedLane(this.runRow(runId))
     return runId
   },
   enqueueChatRun(project, bot, messageId, origin = null) {
@@ -177,6 +281,11 @@ export const runsMethods = {
       bot.id,
     )
     if (existing) return existing.id
+    // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
+    if (this.botBusy(bot.id)) {
+      this.holdPendingMessage(bot.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
+      return null
+    }
     const runId = id('run')
     const createdAt = nowIso()
     // 微信直达（DSHBOTS-208）：trigger_type 记 'wechat'，运行收尾据此把 bot 回复推回微信管理员。
@@ -191,8 +300,6 @@ export const runsMethods = {
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued', triggerType === 'wechat' ? '微信群聊消息触发（直达）' : '群聊消息触发', createdAt,
     )
-    // 入队合并（DSHBOTS-287）：同车道已有更早的排队运行时，本消息并入该运行，不再单独排队。
-    this.mergeRunIntoQueuedLane(this.runRow(runId))
     return runId
   },
   async cancelRunInternal(runId, updateTask = true) {

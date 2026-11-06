@@ -110,6 +110,10 @@ export function runMigrations(db) {
   migrateMessages(db)
   migrateSessionBindingAlias(db)
   migrateSessionBindingBotConvergence(db)
+  // one_active_run_per_bot 激活（DSHBOTS-289，ADR §5.2-2）：控制面会话收敛（上迁移）+
+  // 争用口径 A（enqueue 家族 bot 忙时挂待处理队列不落 runs 行）同车后激活——存量串行化
+  // （同 bot 多条 queued/running 只留最早一条，其余 canceled）+ 建 bot 级部分唯一索引。
+  activateBotRunSerialization(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')

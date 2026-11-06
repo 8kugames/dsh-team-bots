@@ -320,7 +320,7 @@ export const sessionMethods = {
     // 标记推进到窗口下界：即使压缩运行后续失败也不回退，失败留痕由下一窗口再补。
     this.store.setSetting(sessionCompactMarkerKey(sessionId), String(window * every))
   },
-  async ensureSession(bot, project, { run, task, sessionKind, modelOverride } = {} as any) {
+  async ensureSession(bot, project, { run, task, modelOverride } = {} as any) {
     // DSHBOTS-238：成员 bot 工具层兜底——隐藏总监专权工具（子代理生成工具由 preset 全局
     // 注册，成员默认可见）。仅作用于项目绑定会话；solo 无项目上下文，本策略自然不触发。
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
@@ -337,48 +337,48 @@ export const sessionMethods = {
       }
       this.retireBinding(run.session_id)
     }
-    // 任务运行使用独立会话，与该项目总监会话互不阻塞；dm 运行用独立私信会话；
-    // 单聊运行（solo_chat）没有项目，落在 bot 自己的 _the_bots/<dir> 专属会话；其余运行共用项目会话。
-    // sessionKind 由调用方显式指定（dm_reply 投递回任务会话等跨类别场景）。
-    const kind0 = sessionKind
-      ?? (run?.kind === 'task' && task ? 'task' : run?.kind === 'dm' ? 'dm' : run?.kind === 'solo_chat' ? 'solo' : 'project')
-    // 任务会话的兜底：任务行已被删除时退回项目会话，
-    // 避免 task.id 空引用把整条运行链路炸掉。
-    const kind = kind0 === 'task' && !task ? 'project' : kind0
-    const taskId = kind === 'task' ? task.id : null
-    const solo = kind === 'solo'
-    // 任务亲和（DSHBOTS-286）：活跃 task 绑定优先；没有时按 runs 归属解析未终态任务的
-    // 原会话（含 alias 行——结转后未终态任务的后续消息仍落旧会话）。
-    const existing = taskId
-      ? (this.store.get(
-        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'task' AND task_id = ? AND alias = 0",
-        bot.id,
-        project.id,
-        taskId,
-      ) ?? this.taskAffinityBinding(task))
-      : solo
-        ? this.store.get(
-          "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'solo' AND project_id IS NULL AND task_id IS NULL AND alias = 0",
-          bot.id,
-        )
-        : this.store.get(
-          'SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = ? AND alias = 0',
-          bot.id,
-          project.id,
-          kind,
-        )
+    // ② 任务亲和（DSHBOTS-286/289，ADR §5.2-3）：未终态任务按 runs 归属回原会话——含
+    // dm_reply 经 sessionTaskFor 解析出的任务（executeRun 已把任务行透传进来）与结转后
+    // alias 行上的旧任务流量；终态任务不享亲和，落下方控制面单绑定。
+    const affinity = this.taskAffinityBinding(task)
+    if (affinity) {
+      const resolved = await this.ctx.sessionController.resolveAgent(affinity.session_id)
+      if (!resolved?.error) {
+        this.applyFilePolicy(resolved, bot, run, task)
+        applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+        await this.selectModel(affinity.session_id, bot, modelOverride)
+        // 任务会话同样在承接流量：跨过压缩窗口且闲时排队总结压缩
+        // （结转仍豁免——任务会话生命周期短，DSHBOTS-286 口径不变）。
+        this.maybeCompactSession({ bot, project, existing: affinity, currentRunId: run?.id })
+        return affinity.session_id
+      }
+      this.retireBinding(affinity.session_id)
+    }
+    // ③ 控制面会话收敛（DSHBOTS-289，ADR §5.2-3）：其余运行（chat/solo_chat/dm/dm_reply/
+    // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 的 kind='bot' 单绑定
+    // 控制面会话——task/project/dm/solo 四车道建行已删除，ensureBotBinding 是唯一建行点。
+    return this.ensureBotBinding(bot, project, { run, task, modelOverride })
+  },
+  // 控制面会话兜底与唯一建行点（DSHBOTS-285 落机制，DSHBOTS-289 生产接线，ADR §4.1/§5.2-3）：
+  // ensureSession 收敛顺序的终点——rollover/compact 复用、任务亲和之外的运行一律解析到
+  // 该 bot 的 kind='bot' 单绑定控制面会话；已有则复用（宿主失效或结转时退役重建）。
+  // 复用分支补齐与旧 ensureSession 同款的策略面：applyFilePolicy / applyBotToolPolicy /
+  // selectModel / maybeCompactSession / rolloverPending 消费闸。
+  async ensureBotBinding(bot, project, { run, task, modelOverride } = {} as any) {
+    const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
+    const existing = this.store.get(
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
+      bot.id,
+    )
     let rolledOver = false
     if (existing) {
       const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
       if (!resolved?.error) {
-        // 会话结转（DSHBOTS-145）：只对长期复用的会话（项目群聊 / 单聊）生效，任务会话与
-        // 私信会话生命周期短，不结转；alias 行（亲和复用的旧会话）永不结转（DSHBOTS-286
-        // 幂等）。超阈值且摘要已就绪 → 旧绑定 alias 化落到下方新建路径，摘要由新会话首轮
-        // 提示词注入；摘要未就绪 → 补排一次摘要运行，本轮继续复用旧会话，不阻塞对话。
-        const rollover = !existing.alias && kind !== 'task' && kind !== 'dm'
-          && this.shouldRolloverSession({ bot, project, existing })
-        rolledOver = rollover
-        if (!rollover) {
+        // 结转（DSHBOTS-145）：控制面会话长期承接全量流量，照旧阈值判定——摘要就绪即
+        // alias 化落到下方重建路径，摘要由新会话首轮提示词注入；未就绪补排摘要运行，
+        // 本轮继续复用。alias 行不可能走到这里（查询条件 alias=0），幂等由查询保证。
+        rolledOver = this.shouldRolloverSession({ bot, project, existing })
+        if (!rolledOver) {
           this.applyFilePolicy(resolved, bot, run, task)
           applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
           await this.selectModel(existing.session_id, bot, modelOverride)
@@ -387,84 +387,7 @@ export const sessionMethods = {
           return existing.session_id
         }
       }
-      // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名，
-      // 落到下方新建路径（DSHBOTS-256：别名保留旧 session 的 bot/项目归属）。
-      this.retireBinding(existing.session_id)
-    }
-    const key = `${bot.id}:${solo ? 'solo' : project.id}:${kind}:${taskId ?? ''}`
-    if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
-    const creating = (async () => {
-      const cwd = await resolveSessionCwd(this.config, { solo, bot, project })
-      const created = await this.ctx.sessionController.create({
-        cwd,
-        ...(await this.defaultAgentPreset(kind)),
-      })
-      const sessionId = created.sessionId
-      const agent = await this.ctx.sessionController.resolveAgent(sessionId)
-      if (agent?.error) throw new AppError('SESSION_FAILED', `创建 DSH Session 失败：${agent.error.message ?? '未知错误'}`)
-      if (this.ctx.sessionTitle?.rename) {
-        const title = kind === 'task'
-          ? `${bot.name} · ${project.key}-${task.number}`
-          : kind === 'dm'
-            ? `${bot.name} · ${project.name} · DM`
-            : solo
-              ? `${bot.name} · 单聊`
-              : `${bot.name} · ${project.name}`
-        // rename 只接受活动 agent 的 session 对象；没有就不改标题，
-        // 不再传 sessionId 字符串兜底（宿主会抛 "not live in this store"）。
-        // rename 是同步接口（返回标题快照而非 Promise），失败不得阻断会话创建。
-        const liveSession = agent?.agent?.session ?? agent?.session
-        if (liveSession) {
-          try { this.ctx.sessionTitle.rename(liveSession, title) } catch {}
-        }
-      }
-      this.applyFilePolicy(agent, bot, run, task)
-      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
-      this.store.run(
-        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
-         VALUES (?, ?, ?, ?, ?, ?, 0)
-         ON CONFLICT(session_id) DO NOTHING`,
-        sessionId,
-        bot.id,
-        solo ? null : project.id,
-        kind,
-        taskId,
-        new Date().toISOString(),
-      )
-      // 结转消费闸（DSHBOTS-213）：新会话成为摘要的唯一注入目标——否则旧会话在摘要就绪
-      // 前后被非结转路径顶替（如宿主重启失效）时，替身会话的普通轮次会把摘要提前消费掉。
-      if (rolledOver) this.store.setSetting(rolloverPendingKey(bot.id, solo ? null : project.id), sessionId)
-      await this.selectModel(sessionId, bot, modelOverride)
-      // 挂到 DSH 原生工作区分组（可选增强）：registry 经 ctx.get 读取，宿主未装就整体跳过；
-      // 挂载失败只在 workspace-groups 内 warn，绝不影响会话返回与运行。
-      const registry = this.ctx.get?.('workspaceRegistry')
-      if (registry) {
-        await attachSessionToWorkspace(registry, {
-          cwd,
-          title: workspaceGroupTitle({ kind, project, bot }),
-          sessionId,
-        }, this.logger)
-      }
-      return sessionId
-    })()
-    this.sessionCreates.set(key, creating)
-    try {
-      return await creating
-    } finally {
-      this.sessionCreates.delete(key)
-    }
-  },
-  // 控制面绑定兜底（DSHBOTS-285，ADR §4.1）：迁移时无 project 会话可复用的 bot（仅 task/dm/solo
-  // 道）由运行期补建 kind='bot' 活跃绑定；已有则复用（宿主已失效的先退役再新建）。
-  // 入站路由收敛（ADR §5.2-2）后由 enqueue 家族统一调用，本步先落机制与守门。
-  async ensureBotBinding(bot, project) {
-    const existing = this.store.get(
-      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
-      bot.id,
-    )
-    if (existing) {
-      const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
-      if (!resolved?.error) return existing.session_id
+      // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名（DSHBOTS-256）。
       this.retireBinding(existing.session_id)
     }
     const key = `${bot.id}:bot`
@@ -485,6 +408,8 @@ export const sessionMethods = {
           try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · 控制面`) } catch {}
         }
       }
+      this.applyFilePolicy(agent, bot, run, task)
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
       this.store.run(
         `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
          VALUES (?, ?, ?, 'bot', NULL, ?, 0)
@@ -494,7 +419,21 @@ export const sessionMethods = {
         project?.id ?? null,
         new Date().toISOString(),
       )
-      await this.selectModel(sessionId, bot, null)
+      // 结转消费闸（DSHBOTS-213）：新会话成为摘要的唯一注入目标——否则旧会话在摘要就绪
+      // 前后被非结转路径顶替（如宿主重启失效）时，替身会话的普通轮次会把摘要提前消费掉。
+      if (rolledOver) this.store.setSetting(rolloverPendingKey(bot.id, project?.id ?? null), sessionId)
+      await this.selectModel(sessionId, bot, modelOverride)
+      // 挂到 DSH 原生工作区分组（可选增强）：控制面会话落在项目工作区时归项目组
+      // （solo 无项目上下文，cwd 已是 bot 专属目录，天然一组，无需挂载）。
+      // registry 经 ctx.get 读取，宿主未装就整体跳过；挂载失败只在 workspace-groups 内 warn。
+      const registry = this.ctx.get?.('workspaceRegistry')
+      if (registry && project) {
+        await attachSessionToWorkspace(registry, {
+          cwd,
+          title: workspaceGroupTitle({ kind: 'bot', project, bot }),
+          sessionId,
+        }, this.logger)
+      }
       return sessionId
     })()
     this.sessionCreates.set(key, creating)
@@ -513,7 +452,8 @@ export const sessionMethods = {
     const effectiveBot = modelOverride
       ? { ...bot, provider: modelOverride.provider, model: modelOverride.model, effort: modelOverride.effort ?? null }
       : bot
-    const sessionId = await this.ensureSession(bot, project, { run, task, sessionKind, modelOverride })
+    // sessionKind 入参保留兼容（调用方仍传），控制面收敛后不再参与会话解析。
+    const sessionId = await this.ensureSession(bot, project, { run, task, modelOverride })
     let prompt = this.promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId })
     // recovery note（DSHBOTS-135）：恢复标记已被上面的首条提示词消费，即刻清零——
     // 恢复提醒只对「重排队后的第一次执行」注入一次，后续运行回到标准提示词。

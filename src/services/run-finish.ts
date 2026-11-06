@@ -534,8 +534,8 @@ export const runFinishMethods = {
   // ── Bot 群聊回复 mention 唤醒（DSHBOTS-252）────────────────────────────
   // 与用户消息同语义（chat.ts sendMessage）：@xxx 用 parseMentions 解析 active 成员、
   // 显式 @ 优先（bot 路径无引用兜底道）、目标 slice(0,3)；派发走既有 chat_run outbox →
-  // enqueueChatRun，串行车道沿用 D-219 的 project lane（sessionLaneKey 对 kind='chat'
-  // 恒为 project:<bot>:<project>），不新建串行道。防循环三护栏：
+  // enqueueChatRun，串行车道经 DSHBOTS-289 收敛为 claimKey=bot:<bot>（bot 级串行），
+  // 不新建串行道。防循环三护栏：
   //   ① 禁自唤醒——解析结果剔除回复 bot 自身；
   //   ② 链路深度 ≤2——chatMentionChainDepth 回溯来源链，本回复链深达 2 即不再派发；
   //   ③ 任务卡双保险——taskId 非空的消息不参与派发（群聊 messages 表无 kind 列，
