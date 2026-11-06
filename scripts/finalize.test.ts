@@ -243,6 +243,8 @@ test('工作树不干净：preflight 拒绝并给出替代命令，远端零变�
   try {
     writeFileSync(join(work, 'a.txt'), 'a\n')
     writeFileSync(join(work, 'stray.txt'), 'not declared\n')
+    // 已入库文件的改动排在 porcelain 列表首位：路径必须原样出现在拒绝文案里（不被截首字符）。
+    writeFileSync(join(work, 'build.mjs'), 'console.log("build changed")\n')
     const headsBefore = git(work, ['ls-remote', '--heads', 'origin'])
     const run = runFinalize(work, ['--files', 'a.txt', '--message', `feat(fixture): 交付（${CARD}）`, '--push'])
     const result = parseResult(run)
@@ -250,6 +252,8 @@ test('工作树不干净：preflight 拒绝并给出替代命令，远端零变�
     assert.equal(result.ok, false)
     assert.equal(result.failedStep, 'preflight')
     assert.match(result.error, /工作树不干净/)
+    assert.match(result.error, /build\.mjs/, '拒绝文案应原样给出路径')
+    assert.match(result.error, /stray\.txt/)
     assert.match(result.error, /git restore/, '拒绝文案应带替代命令（D-269 口径）')
     assert.equal(git(work, ['ls-remote', '--heads', 'origin']), headsBefore, '远端分支不应变化')
   } finally {

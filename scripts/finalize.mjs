@@ -124,6 +124,14 @@ function gitText(args, options = {}) {
   return result.stdout.trim()
 }
 
+// 不做 trim 的 git 输出：git status --porcelain -z 的首条目以「状态位 + 空格」开头，
+// trim 会吃掉这个前导空格、把路径首字符削掉（实测出现 "rc/xxx" 这类截断路径）。
+function gitRaw(args, options = {}) {
+  const result = git(args, options)
+  if (result.code !== 0) throw new FinalizeError(`git ${args.join(' ')} 失败：${describe(result)}`, result)
+  return result.stdout
+}
+
 function short(sha) {
   return String(sha ?? '').slice(0, 7)
 }
@@ -158,7 +166,7 @@ function parsePorcelainZ(raw) {
 }
 
 function dirtyPaths() {
-  return parsePorcelainZ(gitText(['status', '--porcelain', '-z', '--untracked-files=all']))
+  return parsePorcelainZ(gitRaw(['status', '--porcelain', '-z', '--untracked-files=all']))
 }
 
 // 纯路径列表的解析（git diff --name-only -z / git show --name-only -z）：条目就是路径本身。
