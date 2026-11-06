@@ -19,12 +19,36 @@ export const taskDispatchMethods = {
     if (bot?.status === 'paused') throw badRequest(`Bot ${bot.name} 已暂停，先恢复再派卡`)
     this.assertMember(projectId, botId)
   },
+  // 无主卡领取开工的写范围声明闸门（DSHBOTS-270）：与 assignFromBot「派单必须声明写
+  // 范围」同口径的预判——卡面清单优先，空则从描述「写范围：」行兜底解析
+  // （parseWriteScopesFromDescription），再过忽略规则清洗（全部命中 .gitignore 被剔除
+  // = 实际未声明）。拒绝文案按 D-269 口径 = 原因 + 替代命令；带声明的卡直接放行。
+  assertClaimScopes(task, project) {
+    const declared = readWriteScopes(task.write_scopes)
+    const scopes = filterIgnoredWriteScopes(
+      declared.length ? declared : parseWriteScopesFromDescription(task.description),
+      this.projectWorkDir(project),
+    ).kept
+    if (scopes.length) return
+    throw badRequest(
+      `领取开工必须声明写范围：任务 ${project.key}-${task.number} 未声明写范围，`
+      + '其写运行会与同项目其他写运行全部保守串行，一条卡即可堵死队列。'
+      + '请先补声明再领取：用工作台 update_task / task_update_scopes 给该卡补 write_scopes，'
+      + '或在卡面描述里写一行「写范围：a, b」（由 parseWriteScopesFromDescription 兜底解析）；'
+      + '补声明后重新领取即可按声明范围并行。',
+    )
+  },
   // sandboxOverride 选项（DSHBOTS-156）：undefined=不动（重派未传 sandbox 时保留旧覆盖）；
   // null=显式清掉回落 bot 配置档（重派传 sandbox='inherit'）；字符串=收紧档（派发入口已校验）。
   async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride } = {} as any) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
     this.assertDispatchTarget(project.id, botId)
+    // 共享板无主卡声明闸门（DSHBOTS-270）：无主卡获得 owner 即领取开工——assignTask 稍后
+    // 会排 task_run outbox 进施工，未声明写范围的写运行被调度器按「未声明」保守串行
+    // （scheduler 既定语义不动），既堵自己也占道。与总监派单同口径在入口拒绝；
+    // 改派（卡已有 owner）与 autoStart=false 的重派/存量补挂流程不在此口。
+    if (!task.assignee_bot_id && autoStart !== false) this.assertClaimScopes(task, project)
     const active = this.store.get(
       "SELECT id, kind FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
       taskId,

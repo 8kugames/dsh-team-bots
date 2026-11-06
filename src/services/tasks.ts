@@ -273,6 +273,18 @@ export const tasksMethods = {
     }
     if (patch.assigneeBotId !== undefined) {
       if (patch.assigneeBotId) this.assertDispatchTarget(task.project_id, patch.assigneeBotId)
+      // 共享板无主卡声明闸门（DSHBOTS-270）：无主卡经编辑表单获得 owner，与 assignTask
+      // 领取是同一条「获得 owner 即将进施工」链路，同口径过闸；同一次 patch 里补的
+      // write_scopes / 描述「写范围：」行一并纳入判定——补声明后放行。
+      if (patch.assigneeBotId && !task.assignee_bot_id) {
+        this.assertClaimScopes({
+          ...task,
+          write_scopes: patch.writeScopes === undefined
+            ? task.write_scopes
+            : JSON.stringify(parseWriteScopes(patch.writeScopes)),
+          description: patch.description === undefined ? task.description : text(patch.description, 40_000),
+        }, this.projectRow(task.project_id))
+      }
       updates.assignee_bot_id = patch.assigneeBotId || null
     }
     if (patch.position !== undefined) updates.position = Number(patch.position) || 0
