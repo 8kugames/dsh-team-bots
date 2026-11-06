@@ -295,7 +295,10 @@ function typecheck() {
 // 步骤 ④：测试。判定口径与 scripts/release.test.ts 同款：AssertionError=0 才算绿。
 // 沙箱里 EPERM/EACCES 属环境性假红（脚本 skip），不计入红；断言失败才是真红。
 function test() {
-  const result = run('npm', ['test'])
+  // node --test 会给子进程打 NODE_TEST_CONTEXT 标记；若收口工具本身跑在测试进程里，
+  // 内层 npm test 会被判定为「递归调用」而跳过用例（假绿）。这里清掉标记，保证测试真的跑。
+  const env = { ...process.env, NODE_TEST_CONTEXT: undefined, NODE_TEST_WORKER_ID: undefined }
+  const result = run('npm', ['test'], { env })
   const output = `${result.stdout || ''}${result.stderr || ''}`
   const assertionErrors = (output.match(/AssertionError/g) ?? []).length
   const environmentBlocked = /EPERM|EACCES/.test(output)
@@ -303,6 +306,15 @@ function test() {
   if (assertionErrors > 0) {
     throw new FinalizeError(
       `npm test 失败：AssertionError 计数 ${assertionErrors}（须为 0 才算绿）。测试输出尾部：\n${tail}`,
+      result,
+    )
+  }
+  // 退出码非零且没有断言失败：EPERM/EACCES 属环境性假红（沙箱限制），不算交付失败；
+  // 其余非零退出（进程崩溃、用例异常退出等）一律算红，收口中止。
+  if (result.code !== 0 && !environmentBlocked) {
+    throw new FinalizeError(
+      `npm test 失败：退出码 ${result.code} 且 AssertionError 计数为 0（既非断言失败也非 EPERM/EACCES 环境性假红）。`
+      + `测试输出尾部：\n${tail}`,
       result,
     )
   }
