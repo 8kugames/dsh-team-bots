@@ -147,7 +147,13 @@ export const taskRunMethods = {
     return runId
   },
   enqueueOwnerTaskRun(task, kind) {
-    const project = this.projectRow(task.project_id)
+    // 验收竞态收敛（DSHBOTS-275）：入队前终态预检——任务已 done/canceled 时直接跳过，
+    // 不产生 review/handle run 行（GS 实测交付排队与 owner 关单竞态空跑约 1/8）。
+    // 以库内最新状态为准（调用方传入的 task 行可能已过期）；入队后才到终态的残留排队运行
+    // 仍由 cancelSupersededQueuedRuns「任务已结束，排队运行被清理」兜底清理，语义不变。
+    const current = this.taskRow(task.id)
+    if (!current || current.status === 'done' || current.status === 'canceled') return null
+    const project = this.projectRow(current.project_id)
     const owner = project.owner_bot_id
       ? this.store.get("SELECT * FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
       : null
