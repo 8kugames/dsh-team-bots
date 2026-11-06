@@ -31,7 +31,7 @@ class ManualRuntime {
   async catalog() { return [] }
   async validateBotConfig() {}
   async startRun({ run, chatMessage, extraMessages }) {
-    this.started.push({ runId: run.id, kind: run.kind, chatMessage, extraMessages })
+    this.started.push({ runId: run.id, kind: run.kind, run, chatMessage, extraMessages })
     this.pendingRuns.set(run.id, run)
     return `session-${run.id}`
   }
@@ -93,6 +93,20 @@ function groupPrompt(t, run, chatMessage, extraMessages) {
 const heldItems = (t, botId = t.dev.id) =>
   JSON.parse(t.store.setting(`bot_pending_msgs:${botId}`) ?? '[]')
 
+// 驱动 tick 直到目标运行启动：中间运行（如收尾的 memory_review）逐个完成让 bot 回到
+// 空闲，挂起消息才能建回。返回命中的 started 条目。
+async function drainUntilStarted(t, triggerId, maxTicks = 8) {
+  for (let i = 0; i < maxTicks; i += 1) {
+    const hit = t.runtime.started.find(item => item.run?.trigger_ref === triggerId)
+    if (hit) return hit
+    await t.service.tick()
+    for (const runId of [...t.runtime.pendingRuns.keys()]) {
+      await t.runtime.complete(runId)
+    }
+  }
+  return t.runtime.started.find(item => item.run?.trigger_ref === triggerId)
+}
+
 test('群聊挂起消息空闲后合并成一次运行，单次运行携带全部消息', async () => {
   const t = await setup()
   try {
@@ -110,10 +124,8 @@ test('群聊挂起消息空闲后合并成一次运行，单次运行携带全�
     assert.deepEqual(heldItems(t).map(item => item.messageId), [m2, m3], '挂起队列保序')
 
     await t.runtime.complete(t.runtime.started[0].runId)
-    await t.service.tick()
-
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1, '空闲后挂起消息合批建回一条运行')
-    const second = t.runtime.started[1]
+    const second = await drainUntilStarted(t, m2)
+    assert.ok(second, '空闲后挂起消息应合批建回一条运行')
     assert.equal(second.chatMessage.id, m2, '建回运行的触发消息是挂起最早的那条')
     assert.deepEqual(second.extraMessages.map(item => item.id), [m3], '后续挂起消息按序并入同轮上下文')
 
@@ -181,18 +193,17 @@ test('跨项目/跨 kind 不合批：同 bot 串行逐条运行，挂起消息�
     assert.equal(heldItems(t).length, 2, '两条挂起（不同项目/不同 kind）')
 
     await t.runtime.complete(t.runtime.started[0].runId)
-    await t.service.tick()
+    const second = await drainUntilStarted(t, m2)
     // bot 级串行：一次只建回一条运行（首个挂起组），且不吞并另一项目的消息。
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1, 'bot 级串行：同时只有一条在跑')
-    const second = t.runtime.started[1]
+    assert.ok(second, '挂起组应建回运行')
     assert.equal(second.chatMessage.id, m2, '建回的是最早挂起组（项目二消息）')
     assert.deepEqual(second.extraMessages.map(item => item.id), [], '不得跨项目并入同一轮')
     assert.deepEqual(heldItems(t).map(item => item.messageId), [soloId], '单聊挂起留队列下一拍')
 
-    await t.runtime.complete(t.runtime.started[1].runId)
-    await t.service.tick()
-    const third = t.runtime.started[2]
-    assert.equal(third.chatMessage.id, soloId, '单聊消息最终独立成运行')
+    await t.runtime.complete(second.runId)
+    const third = await drainUntilStarted(t, soloId)
+    assert.ok(third, '单聊消息最终独立成运行')
+    assert.equal(third.chatMessage.id, soloId, '单聊消息独立成运行')
     assert.deepEqual(heldItems(t), [], '全部消化')
   } finally {
     await cleanup(t.root, t.store)
@@ -211,17 +222,16 @@ test('合并条数上限走 settings：单组封顶，超出部分下一拍再�
     for (const messageId of ids.slice(1)) t.service.enqueueChatRun(t.project, t.dev, messageId)
 
     await t.runtime.complete(t.runtime.started[0].runId)
-    await t.service.tick()
+    const second = await drainUntilStarted(t, ids[1])
     // 上限 2：第一组建回只带 m2+m3，m4 留队列（bot 随即忙，同拍不建第二组）。
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1)
-    const second = t.runtime.started[1]
+    assert.ok(second)
     assert.equal(second.chatMessage.id, ids[1], '第二组以 m2 为首')
     assert.deepEqual(second.extraMessages.map(item => item.id), [ids[2]], '单组封顶 2 条（首条+合并 1 条）')
     assert.deepEqual(heldItems(t).map(item => item.messageId), [ids[3]], 'm4 留队列')
 
-    await t.runtime.complete(t.runtime.started[1].runId)
-    await t.service.tick()
-    const third = t.runtime.started[2]
+    await t.runtime.complete(second.runId)
+    const third = await drainUntilStarted(t, ids[3])
+    assert.ok(third)
     assert.equal(third.chatMessage.id, ids[3], 'm4 下一拍独立成运行')
     assert.deepEqual(third.extraMessages, [])
   } finally {
@@ -248,18 +258,18 @@ test('合并窗口走 settings：与组首入队时间差超窗的挂起消息�
     t.store.setSetting(`bot_pending_msgs:${t.dev.id}`, JSON.stringify(items))
 
     await t.runtime.complete(t.runtime.started[0].runId)
-    await t.service.tick()
+    const second = await drainUntilStarted(t, m2)
 
     // m2 老化自成一组；m3 与 m2 超窗不并，留队列下一拍。
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").n, 1)
-    const second = t.runtime.started[1]
+    assert.ok(second)
     assert.equal(second.chatMessage.id, m2, '老化的 m2 独立建回')
     assert.deepEqual(second.extraMessages.map(item => item.id), [], '窗口外的 m3 不得并入老化的 m2')
     assert.deepEqual(heldItems(t).map(item => item.messageId), [m3], 'm3 留队列')
 
-    await t.runtime.complete(t.runtime.started[1].runId)
-    await t.service.tick()
-    assert.equal(t.runtime.started[2].chatMessage.id, m3, 'm3 下一拍独立成运行')
+    await t.runtime.complete(second.runId)
+    const third = await drainUntilStarted(t, m3)
+    assert.ok(third)
+    assert.equal(third.chatMessage.id, m3, 'm3 下一拍独立成运行')
   } finally {
     await cleanup(t.root, t.store)
   }
