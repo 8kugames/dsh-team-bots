@@ -159,8 +159,8 @@ test('调度视图：运行只取 queued/running，项目外运行标「单聊�
   const { root, store, service, director, dev } = await setup()
   try {
     const alpha = await service.createProject({ name: 'Alpha 项目', key: 'ALPHA', ownerBotId: director.id, memberIds: [dev.id] })
-    insertRun(store, { id: 'run-queued', projectId: alpha.id, botId: dev.id, status: 'queued', queuedAt: '2026-01-01T00:00:00.000Z' })
-    insertRun(store, { id: 'run-running', projectId: alpha.id, botId: dev.id, status: 'running', queuedAt: '2026-02-01T00:00:00.000Z' })
+    // one_active_run_per_bot（DSHBOTS-291）：同 bot 至多一条活跃运行，旧「queued+running+solo
+    // 三活同 bot」夹具不再可造。活跃位给项目外单聊运行（兼测「单聊」标注），终态行验证剔除。
     insertRun(store, { id: 'run-solo', projectId: null, botId: dev.id, kind: 'solo_chat', status: 'running', queuedAt: '2026-03-01T00:00:00.000Z' })
     insertRun(store, { id: 'run-done', projectId: alpha.id, botId: dev.id, status: 'succeeded', queuedAt: '2026-04-01T00:00:00.000Z' })
     insertRun(store, { id: 'run-failed', projectId: alpha.id, botId: dev.id, status: 'failed', queuedAt: '2026-05-01T00:00:00.000Z' })
@@ -169,14 +169,13 @@ test('调度视图：运行只取 queued/running，项目外运行标「单聊�
 
     const view = await service.state(alpha.id, dev.id)
     const ids = view.dispatch.runs.map(run => run.id)
-    assert.deepEqual(ids.sort(), ['run-queued', 'run-running', 'run-solo'])
+    assert.deepEqual(ids, ['run-solo'], '只取活跃（queued/running）运行，终态与他人的不进视图')
     // 复用 runView 形状
-    const queued = view.dispatch.runs.find(run => run.id === 'run-queued')
-    assert.equal(queued.botName, 'Builder')
-    assert.equal(queued.kind, 'task')
-    assert.equal(queued.projectKey, 'ALPHA')
+    const solo = view.dispatch.runs.find(run => run.id === 'run-solo')
+    assert.equal(solo.botName, 'Builder')
+    assert.equal(solo.kind, 'solo_chat')
     // 项目外运行没有项目 key，标「单聊」
-    assert.equal(view.dispatch.runs.find(run => run.id === 'run-solo').projectKey, '单聊')
+    assert.equal(solo.projectKey, '单聊')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
