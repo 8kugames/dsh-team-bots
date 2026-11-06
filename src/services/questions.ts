@@ -83,6 +83,15 @@ function cleanQuestionItem(item) {
   return cleaned
 }
 
+// DSHBOTS-294：该 bot 是否仍有活跃项目语境（成员或总监）。无语境的控制面会话按单聊承接。
+export function botInActiveProject(store, botId) {
+  if (!botId) return false
+  return Boolean(
+    store.get("SELECT 1 AS ok FROM project_members m JOIN projects p ON p.id = m.project_id WHERE m.member_type = 'bot' AND m.member_id = ? AND p.status = 'active' LIMIT 1", botId)
+      ?? store.get("SELECT 1 AS ok FROM projects WHERE owner_bot_id = ? AND status = 'active' LIMIT 1", botId),
+  )
+}
+
 export const questionsMethods = {
   // 由 core.attachRuntime 调用：注册宿主事件。runtime.ctx 不存在（测试桩）时跳过注册，
   // 但 pending Map 无条件初始化——handleQuestionRequest 直调（测试）也依赖它。
@@ -117,7 +126,10 @@ export const questionsMethods = {
     if (!binding) return next()
 
     const store = this.store
-    const isSolo = binding.kind === 'solo' && !binding.project_id
+    // DSHBOTS-294：四车道收敛后 solo 判定改按「无 project 上下文的控制面会话」——
+    // kind='bot' 且绑定无 project、该 bot 亦无活跃项目关系（成员或总监；历史 kind='solo'
+    // alias 行保持命中）才由工作台单聊卡片承接；有项目语境照旧走项目流，owner 闸门不回退。
+    const isSolo = !binding.project_id && (binding.kind === 'solo' || (binding.kind === 'bot' && !botInActiveProject(store, binding.bot_id)))
     if (!binding.project_id && !isSolo) return next()
     const bot = store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
     const project = isSolo ? null : store.get('SELECT * FROM projects WHERE id = ?', binding.project_id)
