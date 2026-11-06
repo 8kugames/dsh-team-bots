@@ -144,10 +144,13 @@ export const notifyMethods = {
       body: notice,
       mentions: [target.id],
     })
+    // DSHBOTS-293 旧车道残留修复：四车道收敛后（DSHBOTS-288/289）活跃绑定只有
+    // kind='bot' 一道，原 kind='project' 查询恒落空——成员通知的宿主通道永远降级
+    // 群聊流。改为按 bot 唯一控制面绑定解析（与 runs.ts/runtime/session.ts 同款），
+    // 不按 project_id 过滤：多项目 bot 的单条控制面绑定 project_id 只属创建时的项目。
     const binding = this.store.get(
-      "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'project' AND alias = 0",
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
       target.id,
-      project.id,
     )
     if (binding && typeof this.runtime?.steer === 'function') {
       try {
