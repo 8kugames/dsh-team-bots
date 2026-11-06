@@ -310,3 +310,38 @@ test('M4 模拟竞争：建回前 bot 被抢占则消息全量留队列；INSERT
     await cleanup(t.root, t.store)
   }
 })
+
+// DSHBOTS-291 卡面增补①（D-290 红线臂 4d70a415：M4 跨项目不合批键 0 覆盖）：
+// 现有跨项目用例两条挂起项 kind 不同（chat vs solo_chat），kind 判定已必然分组、projectId
+// 分支恒不可达——本例两条挂起项同为 chat、分属不同项目，钉住「跨项目同 kind 不合批」键。
+test('跨项目同 kind 不合批（回归）：两条 chat 分属不同项目，各成独立运行', async () => {
+  const t = await setup()
+  try {
+    const beta = await t.service.createProject({ name: 'Beta', key: 'BET', ownerBotId: t.director.id, memberIds: [t.dev.id] })
+    const m1 = say(t.service, t.project.id, 'COA 首条先开跑')
+    t.service.enqueueChatRun(t.project, t.dev, m1)
+    t.service.started = true
+    await t.service.tick()
+
+    const mCoa = say(t.service, t.project.id, 'COA 第二条')
+    const mBeta = say(t.service, beta.id, 'BET 第一条')
+    assert.equal(t.service.enqueueChatRun(t.project, t.dev, mCoa), null, '忙时 COA 消息挂起')
+    assert.equal(t.service.enqueueChatRun(beta, t.dev, mBeta), null, '忙时 BET 消息挂起')
+    assert.equal(heldItems(t).length, 2, '两条同 kind（chat）挂起')
+
+    await t.runtime.complete(t.runtime.started[0].runId)
+    const second = await drainUntilStarted(t, mCoa)
+    assert.ok(second, 'COA 挂起组先建回')
+    assert.equal(second.chatMessage.id, mCoa, '建回的是 COA 组')
+    assert.deepEqual(second.extraMessages.map(item => item.id), [], 'BET 消息不得因同 kind 跨项目并入 COA 运行')
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [mBeta], 'BET 消息留队列下一拍')
+
+    await t.runtime.complete(second.runId)
+    const third = await drainUntilStarted(t, mBeta)
+    assert.ok(third, 'BET 消息最终独立成运行')
+    assert.equal(third.chatMessage.id, mBeta)
+    assert.deepEqual(heldItems(t), [], '全部消化')
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})
