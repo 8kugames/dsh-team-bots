@@ -204,12 +204,12 @@ export const sessionMethods = {
   // - 阈值 0 = 关闭（配置见 config.js 的 sessionRolloverTurns，默认 512）；
   // - 「轮次」口径 = runs 表按 session_id 的 COUNT(*)，不限 status——失败运行的提示词同样
   //   已进会话历史，count-all 才与真实增长一致；
-  // - 幂等（DSHBOTS-286）：alias 行永不触发结转——判定只作用于活跃绑定；已结转的旧会话
+  // - 幂等（DSHBOTS-286）：alias 行永不触发结转——本判定只在活跃绑定上被调用
+  //   （唯一调用点 ensureSession 以 !existing.alias 前置短路保证）；已结转的旧会话
   //   即使轮数继续增长（承接未终态任务流量），也只参与闲时压缩，不再二次结转；
   // - 摘要就绪（settings 有值）→ 立即结转；
   // - 摘要未就绪 → 幂等补排一条摘要运行（不阻塞对话，摘要就绪后下一次复用自然结转）。
   shouldRolloverSession({ bot, project, existing }) {
-    if (existing?.alias) return false
     const turns = effectiveSessionRolloverTurns(this.config, key => this.store.setting(key))
     if (turns <= 0) return false
     const count = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0

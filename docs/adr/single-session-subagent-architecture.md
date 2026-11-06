@@ -117,6 +117,11 @@
 
 顺序依赖：2 依赖 1；3 依赖 2；4 与 3 可部分并行（不同文件面）；5 收口。每步都是可独立验收的实施卡，但合入同一版本发布——全面切换，不存在新旧并存的中间发布。实施勘误（DSHBOTS-285 实测）：`one_active_run_per_bot` 的激活点从第 1 步移至第 2 步——它与现行「领取时合批」语义冲突（同 bot 多条 queued 共存是现行合批前提），第 1 步仅落地机制（activateBotRunSerialization：存量串行化+建索引）与守门，第 2 步改「入队合并」后激活。
 
+实施记录（DSHBOTS-288，owner 已拍板）：
+
+- **顺序逆转（2 与 3 对调）**：第 3 步「控制面会话收敛」先行——ensureSession/sessionKindFor/bindingLaneKey/claimKey 统一解析 `kind='bot'` 控制面绑定（ensureBotBinding 兜底），删除 task/project/dm/solo 四车道建行；第 2 步「激活 one_active_run_per_bot + 入站路由收敛」随后收口。理由：bot 级唯一索引要求跨 kind 串行，先收敛会话可让争用设计只在「单控制面会话」上做，避免在四车道上先实现一遍再拆。
+- **task-vs-chat 争用口径 A（待处理队列）**：bot 忙（存在 queued/running 运行）时到达的**消息**不落 runs 行，进入按 bot 维度的待处理队列（settings 持久化或内存实现）；bot 空闲后（运行收尾或下一拍 tick 检查挂起队列）把积压消息合批成一条运行。task 运行与消息互斥排队、不互相吞并：task/review 运行不被消息合批吞并；dm/dm_reply 按回信契约（一条来信一条回信）不参与合批。入队侧判定 bot 忙即挂起（不建 run 行，不撞 `one_active_run_per_bot` 唯一约束）。
+
 ### 5.3 回归策略（204 个测试源文件（+编译产物）/ 1534 例）
 
 - **不动层**：纯函数与规则引擎测试——写范围判定、合批窗口/保护、死线数学、看门狗分级、计价对账、路径工具等，语义未变者原样保留。
@@ -181,7 +186,7 @@
 
 - 512 轮结转 = 新任务/新会话走新 bot 控制面会话；旧会话绑定行 alias 化（alias=1 授权别名，DSHBOTS-256 机制：旧 session id 仍可解析历史归属，`runs_session_idx` 继续服务运行归属）。
 - 摘要既有机制不变：达阈值先补排 `kind='rollover_summary'` 只读运行，bot 在旧会话自写交接摘要；就绪后下一次复用即结转，摘要经 `rollover_pending` 消费闸（DSHBOTS-213）由新会话首轮提示词注入（src/services/run-finish.ts 收尾写 settings、src/services/runtime/prompt.ts `rolloverSummaryBlock`）。
-- alias 幂等：rollover 判定只作用于活跃绑定（alias=0）/活跃会话，alias 行永不触发结转——已结转旧会话即使因未终态任务继续承接流量、轮数继续增长，也不再二次结转。
+- alias 幂等：rollover 判定只作用于活跃绑定（alias=0）/活跃会话，alias 行永不触发结转——已结转旧会话即使因未终态任务继续承接流量、轮数继续增长，也不再二次结转。守卫位置在唯一调用点 `ensureSession` 的 `!existing.alias` 前置短路（DSHBOTS-288 删除了 `shouldRolloverSession` 内不可达的同义守卫死代码）。
 
 ### 8.3 结转后的任务亲和路由
 
