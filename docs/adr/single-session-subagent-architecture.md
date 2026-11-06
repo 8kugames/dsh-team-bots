@@ -192,11 +192,11 @@
 
 结转只把绑定行 alias 化，runs.task_id→session_id 的历史归属不动。结转后的入站路由按任务归属判定，不能只靠活跃绑定推导任务归属：在跑/未终态（status 不在 done/canceled）任务的后续消息仍落其原会话（即使该绑定已是 alias 行）；新任务与终态任务不享亲和，无归属消息落活跃绑定（新会话）。
 
-实现为显式的 runs 归属解析（`taskAffinityBinding`，src/services/runtime/session.ts）：取该任务最近一次运行的 session_id（`ORDER BY COALESCE(started_at, queued_at) DESC`），映射到其绑定行（含 alias 行）。解析顺序：
+实现为显式的 runs 归属解析（`taskAffinityBinding`，src/services/runtime/session.ts）：取该任务最近一次运行的 session_id（`ORDER BY COALESCE(started_at, queued_at) DESC`），映射到其绑定行（含 alias 行）。解析顺序按运行类别分支：task 运行（带任务上下文）= 1→2→4，非 task 运行 = 3→4（亲和解析只作用于带任务上下文的运行）：
 
 1. 活跃 task 绑定（alias=0）；
 2. 未终态任务的 runs 归属解析（含 alias 行）；
-3. 活跃 lane 绑定；
+3. 活跃 bot 控制面绑定（kind='bot'，alias=0）；
 4. 新建会话。
 
 与 DSHBOTS-285 单绑定模型（`kind='bot'`，每 bot 恰一条 alias=0 活跃绑定，§4.1）共存：单绑定只决定「新流量」的家；任务亲和优先级高于活跃绑定，未终态任务消息据此回到旧会话。
@@ -214,5 +214,5 @@
 
 - `ctx.sessionController` API 面无压缩/截断方法。证据：宿主类型声明 `node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/index.d.ts`（SessionController：create/resolveAgent/selectModel/prompt/cancel/fork/rename/events/wait/…，无一压缩或截断项）；本仓库 src 的用法即其中 create/resolveAgent/selectModel/prompt/cancel（src/services/runtime/session.ts、lifecycle.ts、notify.ts）。
 - 宿主另有独立压缩缝隙 `ctx.compaction: CompactionEngine`，与 sessionController 同以 cordis Context 增强声明（宿主安装根 /opt/homebrew/lib/node_modules/@deepseek-ai/dsh/ 下 `node_modules/@deepseek-ai/dsh-compaction/lib/types/index.d.ts`）：`compactNow`（闲时显式压缩，把有用历史区间替换为一个总结节点）、`compactRegion`（按区间强制折叠）、`compactIfNeeded`（压力自动策略）；实现为 `BasicCompactionEngine`（`@deepseek-ai/dsh-compaction-basic`），人命令 `/compact`（`@deepseek-ai/dsh-command-compact`）即架在此缝上。它属上下文窗口层的「区间折叠为总结节点」，不是截断丢弃。
-- 截断式 API 无：grep `truncat` 在宿主自有包（宿主 lib/ 与 @deepseek-ai/*）零命中，仅 @types/node 等三方 SDK 类型文件命中，与插件无关。
+- 截断式 API 无：grep `truncat` 宿主自有 lib/ 0 命中、@deepseek-ai/*/lib 1169 命中，但均非会话历史截断 API，结论不变（宿主无会话历史截断 API）；另有 @types/node 等三方 SDK 类型文件命中，与插件无关。
 - 落地口径：session_compact 仍为原会话内的总结运行——bot 自写连续性总结并借机把持久事实落入记忆/任务评论，会话历史本体不截断；真正的上下文重置仍是 512 轮结转。宿主 `compactNow` 缝隙即 session_compact 运行收尾处可选的接入点（插件 ctx 运行时可达性在实施卡实测后接入）。
