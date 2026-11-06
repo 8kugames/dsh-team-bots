@@ -122,12 +122,11 @@ test('合批保护：用户提问不并入通知触发的运行，留队保住�
     const userMsg = userMessage(t.service, t.project.id, '请回答我的问题：结论是什么')
     const noticeRunId = t.service.enqueueChatRun(t.project, t.dev, noticeMsg)
     const userRunId = t.service.enqueueChatRun(t.project, t.dev, userMsg)
-    const noticeRun = chatRunRow(t, noticeRunId)
-    const merged = t.service.coalesceQueuedRuns(noticeRun)
-    assert.equal(merged.length, 0, '用户提问不得被并进通知触发的运行')
+    // 入队合并（DSHBOTS-287）：用户提问入队时不会并入非用户触发的排队运行。
     const userRun = chatRunRow(t, userRunId)
     assert.equal(userRun.status, 'queued', '用户提问运行必须留队等待自己的正式回复')
     assert.notEqual(userRun.error_code, 'MERGED', '用户提问运行不得被合并取消')
+    const noticeRun = chatRunRow(t, noticeRunId)
     assert.ok(!noticeRun.merged_messages, '通知运行不得携带用户提问作为合批消息')
   } finally {
     await cleanup(t.root, t.store)
@@ -140,16 +139,20 @@ test('合批不回退：用户触发运行仍合批排队用户消息，通知�
     const m1 = userMessage(t.service, t.project.id, '第一条用户消息')
     const m2 = userMessage(t.service, t.project.id, '第二条用户消息')
     const r1 = t.service.enqueueChatRun(t.project, t.dev, m1)
-    t.service.enqueueChatRun(t.project, t.dev, m2)
-    const mergedUser = t.service.coalesceQueuedRuns(chatRunRow(t, r1))
-    assert.equal(mergedUser.length, 1, '用户触发的运行仍合批排队的用户消息（D-231 不回退）')
+    const r2 = t.service.enqueueChatRun(t.project, t.dev, m2)
+    assert.equal(chatRunRow(t, r2).error_code, 'MERGED', '用户消息在入队时即并入更早的用户运行（D-231 不回退）')
+    assert.equal(chatRunRow(t, r1).merged_messages, JSON.stringify([m2]), '更早的用户运行携带第二条消息')
 
+    // 先清空车道（领取并完结第一条），再验通知运行之间的合批。
+    t.service.started = true
+    await t.service.tick()
+    await t.runtime.complete(t.runtime.started[0].runId)
     const n1 = noticeMessage(t.service, t.project.id, '【通知】备忘一', t.director.id)
     const n2 = noticeMessage(t.service, t.project.id, '【通知】备忘二', t.director.id)
     const rn1 = t.service.enqueueChatRun(t.project, t.dev, n1)
-    t.service.enqueueChatRun(t.project, t.dev, n2)
-    const mergedNotice = t.service.coalesceQueuedRuns(chatRunRow(t, rn1))
-    assert.equal(mergedNotice.length, 1, '通知运行之间仍照旧合批')
+    const rn2 = t.service.enqueueChatRun(t.project, t.dev, n2)
+    assert.equal(chatRunRow(t, rn2).error_code, 'MERGED', '通知运行之间仍照旧合批')
+    assert.equal(chatRunRow(t, rn1).merged_messages, JSON.stringify([n2]))
   } finally {
     await cleanup(t.root, t.store)
   }
@@ -202,8 +205,8 @@ test('提示层：用户触发的 chat 运行注入直接回答锚点，通知�
 test('源码锚点：调度保护与出队置顶的代码路径被钉住', () => {
   assert.ok(SCHEDULER_SRC.includes('isUserQuestionRun(run)'), 'scheduler.ts 应有用户提问判定方法')
   assert.ok(
-    SCHEDULER_SRC.includes('if (!claimedIsUserQuestion && this.isUserQuestionRun(candidate)) continue'),
-    '合批保护守卫必须在 coalesceQueuedRuns 候选循环内（用户提问不被通知运行吸收）',
+    SCHEDULER_SRC.includes('if (runIsUserQuestion && !this.isUserQuestionRun(target)) continue'),
+    '合批保护守卫必须在 mergeRunIntoQueuedLane 候选循环内（用户提问不被通知运行吸收）',
   )
   assert.ok(
     SCHEDULER_SRC.includes("LEFT JOIN messages m ON m.id = r.trigger_ref"),
