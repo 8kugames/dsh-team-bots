@@ -246,6 +246,9 @@ test('手动与自动入口幂等不双派：两个方向都复看同一运行',
       "SELECT * FROM outbox WHERE kind = 'review_delegate_auto' AND task_id = ?", first.id,
     )
     assert.equal(dupOutbox.status, 'delivered', '复看也算投递成功，不进重试')
+    // DSHBOTS-290：one_active_run_per_bot 下方向二的自动派生也占 owner 运行位——先完结
+    // 方向一的委派运行再验方向二（幂等语义与运行位无关）。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), manual.id)
 
     // 方向二：自动先派生（模拟交付链排的 outbox），手动按钮随后幂等复看。
     const second = await t.service.createTask({
@@ -392,6 +395,8 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
       description: '实现登录页。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", short.id)
+    // DSHBOTS-290：owner 忙时第二次委派走挂起（runId null）——先完结第一条再委派短卡。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), longView.id)
     const shortView = await t.service.taskReviewDelegate(short.id, t.actor)
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortView.id)
     const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
@@ -445,6 +450,8 @@ test('owner review 提示词超长防护：8K 截断同口径，保底字段在�
       description: '实现注册页。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", short.id)
+    // DSHBOTS-290：同上，两次入队间释放 owner 运行位。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), ownerRunId)
     const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'review')
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
     const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
@@ -494,6 +501,8 @@ test('handle 提示词超长防护：8K 截断同口径，保底字段与失败�
       description: '修复支付回调。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'blocked' WHERE id = ?", short.id)
+    // DSHBOTS-290：同上，两次入队间释放 owner 运行位。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), handleRunId)
     const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'handle')
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
     const shortTask = t.store.get('SELECT * FROM tasks WHERE id = ?', short.id)
