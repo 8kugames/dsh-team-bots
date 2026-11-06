@@ -167,3 +167,47 @@
 ### 7.2 回退策略（全面切换下如何回退）
 
 全面切换没有运行时开关，回退=发版级回退：①发版前对库做快照备份；②出问题时回退包版本（npm 版本钉扎/tag 回退）并恢复快照；③旧道绑定已 alias 化，旧版本代码按原逻辑遇无绑定会按需重建四车道，库内消息与运行留痕不丢。不做双写双读的并行期，回退窗口即下一个修复发版，代价已在拍板时接受。
+
+## 8 结转与压缩（DSHBOTS-286）
+
+单道收敛后全部车道流量挤一条控制面会话，轮次寿命需要补齐治理：结转阈值提到 512 轮并明确结转后的路由；新增 64 轮闲时总结压缩。
+
+### 8.1 阈值与轮次口径
+
+- 结转阈值 256→512：配置键 `session_rollover_turns` 不变（0=关闭，全局设置页可覆盖；生效链 env > 页面保存值 > 默认，src/config.ts `effectiveSessionRolloverTurns`）。
+- 「轮次」口径 = runs 表按 session_id 的 `COUNT(*)`，不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实增长一致（src/services/runtime/session.ts `shouldRolloverSession`）。
+
+### 8.2 结转语义与 alias 幂等
+
+- 512 轮结转 = 新任务/新会话走新 bot 控制面会话；旧会话绑定行 alias 化（alias=1 授权别名，DSHBOTS-256 机制：旧 session id 仍可解析历史归属，`runs_session_idx` 继续服务运行归属）。
+- 摘要既有机制不变：达阈值先补排 `kind='rollover_summary'` 只读运行，bot 在旧会话自写交接摘要；就绪后下一次复用即结转，摘要经 `rollover_pending` 消费闸（DSHBOTS-213）由新会话首轮提示词注入（src/services/run-finish.ts 收尾写 settings、src/services/runtime/prompt.ts `rolloverSummaryBlock`）。
+- alias 幂等：rollover 判定只作用于活跃绑定（alias=0）/活跃会话，alias 行永不触发结转——已结转旧会话即使因未终态任务继续承接流量、轮数继续增长，也不再二次结转。
+
+### 8.3 结转后的任务亲和路由
+
+结转只把绑定行 alias 化，runs.task_id→session_id 的历史归属不动。结转后的入站路由按任务归属判定，不能只靠活跃绑定推导任务归属：在跑/未终态（status 不在 done/canceled）任务的后续消息仍落其原会话（即使该绑定已是 alias 行）；新任务与终态任务不享亲和，无归属消息落活跃绑定（新会话）。
+
+实现为显式的 runs 归属解析（`taskAffinityBinding`，src/services/runtime/session.ts）：取该任务最近一次运行的 session_id（`ORDER BY COALESCE(started_at, queued_at) DESC`），映射到其绑定行（含 alias 行）。解析顺序：
+
+1. 活跃 task 绑定（alias=0）；
+2. 未终态任务的 runs 归属解析（含 alias 行）；
+3. 活跃 lane 绑定；
+4. 新建会话。
+
+与 DSHBOTS-285 单绑定模型（`kind='bot'`，每 bot 恰一条 alias=0 活跃绑定，§4.1）共存：单绑定只决定「新流量」的家；任务亲和优先级高于活跃绑定，未终态任务消息据此回到旧会话。
+
+### 8.4 64 轮闲时总结压缩
+
+- 新增配置 `session_compact_turns`（默认 64，0=关闭，可覆盖；生效链同 §8.1，src/config.ts `effectiveSessionCompactTurns`）。
+- 触发：会话复用时轮次跨过 64 倍数边界且会话闲（该会话除当前运行外无其他 queued/running 运行）→ 入队 `kind='session_compact'` 只读总结运行，回原会话执行（src/services/runtime/session.ts `maybeCompactSession`）。
+- 机制形态复用 rollover_summary：trigger_ref=session_id、幂等键 `session_compact:<sessionId>:<window>`、窗口标记 `session_compact_marker:<sessionId>` 存 settings（src/config.ts）。
+- 忙时推后：窗口标记不动，待下次复用且闲时再判；跨多个窗口合批为一次。
+- 生效面：对仍在承接流量的会话生效——含旧会话上未终态任务产生的流量，即 alias 会话也可被压缩触发。
+- 压缩≠结转：压缩后留原会话，不 alias 化绑定、不写 rollover_pending；窗口标记在入队时推进到窗口下界，运行失败不回退，由下一窗口再补。
+
+### 8.5 宿主能力调查（证据）
+
+- `ctx.sessionController` API 面无压缩/截断方法。证据：宿主类型声明 `node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/index.d.ts`（SessionController：create/resolveAgent/selectModel/prompt/cancel/fork/rename/events/wait/…，无一压缩或截断项）；本仓库 src 的用法即其中 create/resolveAgent/selectModel/prompt/cancel（src/services/runtime/session.ts、lifecycle.ts、notify.ts）。
+- 宿主另有独立压缩缝隙 `ctx.compaction: CompactionEngine`，与 sessionController 同以 cordis Context 增强声明（宿主安装根 /opt/homebrew/lib/node_modules/@deepseek-ai/dsh/ 下 `node_modules/@deepseek-ai/dsh-compaction/lib/types/index.d.ts`）：`compactNow`（闲时显式压缩，把有用历史区间替换为一个总结节点）、`compactRegion`（按区间强制折叠）、`compactIfNeeded`（压力自动策略）；实现为 `BasicCompactionEngine`（`@deepseek-ai/dsh-compaction-basic`），人命令 `/compact`（`@deepseek-ai/dsh-command-compact`）即架在此缝上。它属上下文窗口层的「区间折叠为总结节点」，不是截断丢弃。
+- 截断式 API 无：grep `truncat` 在宿主自有包（宿主 lib/ 与 @deepseek-ai/*）零命中，仅 @types/node 等三方 SDK 类型文件命中，与插件无关。
+- 落地口径：session_compact 仍为原会话内的总结运行——bot 自写连续性总结并借机把持久事实落入记忆/任务评论，会话历史本体不截断；真正的上下文重置仍是 512 轮结转。宿主 `compactNow` 缝隙即 session_compact 运行收尾处可选的接入点（插件 ctx 运行时可达性在实施卡实测后接入）。

@@ -242,6 +242,17 @@ export const runFinishMethods = {
       if (this.rate[run.project_id]) delete this.rate[run.project_id]
       return
     }
+    if (run.kind === 'session_compact') {
+      // 闲时总结压缩（DSHBOTS-286）：成功留痕即可——压缩 ≠ 结转，会话不换、不写
+      // rollover 槽；总结正文留在运行产出里，窗口标记已在入队时推进，失败由下一窗口再补。
+      this.insertRunEvent(
+        runId,
+        status === 'succeeded' && cleanOutput ? 'session_compact_done' : 'session_compact_failed',
+        status === 'succeeded' && cleanOutput ? '会话总结压缩完成，留原会话继续' : `会话总结压缩未生成：${error?.message ?? '模型未返回文本'}`,
+      )
+      if (this.rate[run.project_id]) delete this.rate[run.project_id]
+      return
+    }
     if (run.kind === 'review' || run.kind === 'handle') {
       const label = run.kind === 'review' ? '验收' : '受阻处理'
       if (run.task_id) {
