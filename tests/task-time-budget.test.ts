@@ -40,11 +40,13 @@ async function setup({ runTimeoutMs }: { runTimeoutMs?: number } = {}) {
   return { root, store, service, config }
 }
 
-// 真实 startRun 的最小宿主替身：existing 绑定分支只需 resolveAgent/selectModel/prompt/cancel。
+// 真实 startRun 的最小宿主替身：复用分支只需 resolveAgent/selectModel/prompt/cancel；
+// 无 kind='bot' 绑定时 ensureBotBinding 会走 create 新建控制面会话（DSHBOTS-289）。
 const stubHost = () => ({
   sessionController: {
     resolveAgent: async () => ({}),
     selectModel: async () => ({}),
+    create: async () => ({ sessionId: 'sess-budget-stub' }),
     prompt: async () => ({}),
     cancel: async () => {},
   },
@@ -320,6 +322,9 @@ test('startRun 启动期定格：带时效任务上限 = min(全局, budget)，�
         `${task.title}：运行超时上限应为 min(全局, budget)`,
       )
       timers.push((runtime.pendingByRun.get(run.id) as { timer: ReturnType<typeof setTimeout> }).timer)
+      // one_active_run_per_bot（DSHBOTS-289）：同 bot 至多一条 queued/running——本轮定格
+      // 断言完即置终态释放名额，下一轮才能再种 running 运行。
+      ctx.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), run.id)
     }
   } finally {
     for (const timer of timers) clearTimeout(timer)
