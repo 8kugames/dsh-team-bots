@@ -184,6 +184,15 @@ export const taskRunMethods = {
     const runId = id('run')
     const createdAt = nowIso()
     const triggerType = kind === 'review' ? 'review_requested' : 'blocked_handoff'
+    // busy 闸（DSHBOTS-290）：owner 忙时 review/handle 运行同样不落 runs 行（撞
+    // one_active_run_per_bot），挂待处理队列空闲建回——与 enqueueTaskRun 同口径。
+    if (this.botBusy(owner.id)) {
+      this.holdPendingMessage(owner.id, {
+        kind: 'owner_task', messageId: `owner_task:${current.id}:${kind}`, taskId: current.id,
+        projectId: project.id, runKind: kind, triggerType, queuedAt: createdAt,
+      })
+      return null
+    }
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
         attempt, idempotency_key, queued_at)

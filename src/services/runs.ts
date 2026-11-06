@@ -130,6 +130,24 @@ export const runsMethods = {
       }
       return runId
     }
+    // owner 任务运行挂起项（review/handle/review_delegate，DSHBOTS-290 busy 闸）：
+    // 只读任务运行，按入队时快照建回，列面与 enqueueOwnerTaskRun 一致。
+    if (item.kind === 'owner_task') {
+      try {
+        this.store.run(
+          `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+            attempt, idempotency_key, queued_at)
+           VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?)`,
+          runId, item.projectId, bot.id, item.taskId, item.runKind, item.triggerType, item.taskId,
+          `${item.triggerType}:${item.taskId}:${Date.now()}:${runId}`, createdAt,
+        )
+      } catch (error: any) {
+        if (String(error).includes('UNIQUE')) return null
+        throw error
+      }
+      this.insertRunEvent(runId, 'queued', 'bot 空闲，挂起的 owner 任务运行建回（验收/接管）')
+      return runId
+    }
     const spec = item.kind === 'chat'
       ? { projectId: item.projectId, mode: 'read', trigger: item.origin === 'wechat' ? 'wechat' : 'mention', idem: `chat:${item.messageId}:${bot.id}` }
       : item.kind === 'solo_chat'
