@@ -11,6 +11,8 @@ import { TeamService } from '../src/service.js'
 // 走真实 tick() 出队路径（入队 → tick → 数同时 running 的任务运行），
 // 不直接调私有函数绕过出队逻辑；写范围重叠/未声明的语义细节由
 // tests/write-scopes.test.js 在纯函数层覆盖，这里只锁集成行为。
+// DSHBOTS-290：one_active_run_per_bot 下同 bot 至多一条活跃运行，写闸门的
+// 并行/串行只在跨 bot 维度可观测——并行/串行侧任务各挂一个成员 bot。
 
 // 手动完成的 runtime：startRun 后运行保持 running，直到测试显式调用 complete。
 // 构造与 tests/scheduling.test.js 的 ManualRuntime 保持一致，便于对照阅读。
@@ -65,7 +67,15 @@ async function manualSetup({ maxConcurrentRuns }: { maxConcurrentRuns?: number }
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  return { root, store, service, runtime, director, dev }
+  // DSHBOTS-290：bot 级串行（one_active_run_per_bot）下同 bot 双任务必串行（第二条直接挂起
+  // 不落 runs 行）；写范围闸门与 bot 无关，需要同时排队的并行用例分属不同 bot 车道。
+  const dev2 = await service.createBot({
+    name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
+  })
+  const dev3 = await service.createBot({
+    name: 'Builder3', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
+  })
+  return { root, store, service, runtime, director, dev, dev2, dev3 }
 }
 
 // 任务跑完会派生 chat/审查运行，统计并行度只看 kind='task'，避免被派生运行污染。
@@ -107,15 +117,16 @@ async function cleanup(root, store) {
 }
 
 test('同项目两条写任务：目录级写范围不相交，一次 tick 后同时 running', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Parallel', key: 'PAR', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Parallel', key: 'PAR', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     const first = await service.createTask({
       projectId: project.id, title: '改 UI 模块', assigneeBotId: dev.id,
       writeScopes: ['ui/modules'], autoStart: true,
     })
+    // DSHBOTS-290：第二条走 dev2 车道，两条运行同时排队供闸门比对。
     const second = await service.createTask({
-      projectId: project.id, title: '改服务模块', assigneeBotId: dev.id,
+      projectId: project.id, title: '改服务模块', assigneeBotId: dev2.id,
       writeScopes: ['src/services'], autoStart: true,
     })
 
@@ -140,9 +151,9 @@ test('同项目两条写任务：目录级写范围不相交，一次 tick 后�
 })
 
 test('并行放行事件记在后领取的运行上：首条运行无事件，第二条与在跑写范围不重叠时放行', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Second', key: 'SEC', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Second', key: 'SEC', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     const first = await service.createTask({
       projectId: project.id, title: '先改 UI 模块', assigneeBotId: dev.id,
       writeScopes: ['ui/modules'], autoStart: true,
@@ -156,8 +167,9 @@ test('并行放行事件记在后领取的运行上：首条运行无事件，�
     assert.ok(firstRun)
     assert.equal(runParallelEventCount(store, firstRun.id), 0, '首条写运行不应记并行放行事件')
 
+    // DSHBOTS-290：第二条走 dev2 车道——首条在跑时同 bot 新任务只会挂起，不会落 runs 行。
     const second = await service.createTask({
-      projectId: project.id, title: '再改服务模块', assigneeBotId: dev.id,
+      projectId: project.id, title: '再改服务模块', assigneeBotId: dev2.id,
       writeScopes: ['src/services'], autoStart: true,
     })
     await service.tick()
@@ -174,15 +186,16 @@ test('并行放行事件记在后领取的运行上：首条运行无事件，�
 })
 
 test('同项目两条写任务：写范围按目录前缀重叠时只放行一条', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'Overlap', key: 'OVL', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Overlap', key: 'OVL', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     await service.createTask({
       projectId: project.id, title: '改单个文件', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
     })
+    // DSHBOTS-290：第二条走 dev2 车道，被闸门挡下时是它自己 bot 上的排队行。
     await service.createTask({
-      projectId: project.id, title: '改整个目录', assigneeBotId: dev.id,
+      projectId: project.id, title: '改整个目录', assigneeBotId: dev2.id,
       writeScopes: ['ui/modules'], autoStart: true,
     })
 
@@ -190,59 +203,72 @@ test('同项目两条写任务：写范围按目录前缀重叠时只放行一�
     await service.tick()
 
     assert.equal(taskRuns(store, project.id, 'running').length, 1, '前缀重叠的写范围必须串行')
-    assert.equal(taskRuns(store, project.id, 'queued').length, 1, '被闸门挡下的任务应留在队列里')
+    const gated = taskRuns(store, project.id, 'queued')
+    assert.equal(gated.length, 1, '被闸门挡下的任务应留在队列里')
+    assert.equal(gated[0].bot_id, dev2.id, '被挡下的是另一条 bot 车道上的排队运行')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE bot_id = ? AND status = 'running'", dev2.id).n, 0, '被挡下任务的 bot 没有在跑的运行')
   } finally {
     await cleanup(root, store)
   }
 })
 
 test('同项目两条写任务：一侧声明一侧未声明时保守串行', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'HalfScope', key: 'HSC', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'HalfScope', key: 'HSC', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     await service.createTask({
       projectId: project.id, title: '声明了范围', assigneeBotId: dev.id,
       writeScopes: ['src/app.js'], autoStart: true,
     })
+    // DSHBOTS-290：第二条走 dev2 车道，未声明一侧被保守挡下时留它自己 bot 的排队行。
     await service.createTask({
-      projectId: project.id, title: '没声明范围', assigneeBotId: dev.id, autoStart: true,
+      projectId: project.id, title: '没声明范围', assigneeBotId: dev2.id, autoStart: true,
     })
 
     service.started = true
     await service.tick()
 
     assert.equal(taskRuns(store, project.id, 'running').length, 1, '任一侧未声明写范围必须保守串行')
-    assert.equal(taskRuns(store, project.id, 'queued').length, 1)
+    const gated = taskRuns(store, project.id, 'queued')
+    assert.equal(gated.length, 1)
+    assert.equal(gated[0].bot_id, dev2.id, '被挡下的是另一条 bot 车道上的排队运行')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE bot_id = ? AND status = 'running'", dev2.id).n, 0, '被挡下任务的 bot 没有在跑的运行')
   } finally {
     await cleanup(root, store)
   }
 })
 
 test('同项目两条写任务：两侧都未声明时保守串行', async () => {
-  const { root, store, service, director, dev } = await manualSetup()
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
   try {
-    const project = await service.createProject({ name: 'NoScope', key: 'NSC', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'NoScope', key: 'NSC', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     await service.createTask({ projectId: project.id, title: '任务甲', assigneeBotId: dev.id, autoStart: true })
-    await service.createTask({ projectId: project.id, title: '任务乙', assigneeBotId: dev.id, autoStart: true })
+    // DSHBOTS-290：第二条走 dev2 车道，两侧未声明的保守串行同样留它自己 bot 的排队行。
+    await service.createTask({ projectId: project.id, title: '任务乙', assigneeBotId: dev2.id, autoStart: true })
 
     service.started = true
     await service.tick()
 
     assert.equal(taskRuns(store, project.id, 'running').length, 1, '两侧都未声明写范围必须保守串行')
-    assert.equal(taskRuns(store, project.id, 'queued').length, 1)
+    const gated = taskRuns(store, project.id, 'queued')
+    assert.equal(gated.length, 1)
+    assert.equal(gated[0].bot_id, dev2.id, '被挡下的是另一条 bot 车道上的排队运行')
+    assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE bot_id = ? AND status = 'running'", dev2.id).n, 0, '被挡下任务的 bot 没有在跑的运行')
   } finally {
     await cleanup(root, store)
   }
 })
 
 test('回归保护：maxConcurrentRuns=3 且写范围互不相交时，三条任务同时 running 不被误判冲突', async () => {
-  const { root, store, service, director, dev } = await manualSetup({ maxConcurrentRuns: 3 })
+  const { root, store, service, director, dev, dev2, dev3 } = await manualSetup({ maxConcurrentRuns: 3 })
   try {
-    const project = await service.createProject({ name: 'Trio', key: 'TRI', ownerBotId: director.id, memberIds: [dev.id] })
+    const project = await service.createProject({ name: 'Trio', key: 'TRI', ownerBotId: director.id, memberIds: [dev.id, dev2.id, dev3.id] })
+    // DSHBOTS-290：三条并行车道分属三个 bot，one_active_run_per_bot 不约束跨 bot 并行。
+    const laneBots = [dev, dev2, dev3]
     const disjointScopes = [['ui/modules'], ['src/services'], ['tests/unit']]
     for (const [index, writeScopes] of disjointScopes.entries()) {
       await service.createTask({
-        projectId: project.id, title: `并行任务 ${index + 1}`, assigneeBotId: dev.id,
+        projectId: project.id, title: `并行任务 ${index + 1}`, assigneeBotId: laneBots[index].id,
         writeScopes, autoStart: true,
       })
     }
