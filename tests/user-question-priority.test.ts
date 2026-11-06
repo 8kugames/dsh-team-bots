@@ -101,15 +101,15 @@ function groupPrompt(t, run, chatMessage) {
 const SCHEDULER_SRC = readFileSync(fileURLToPath(new URL('../src/services/scheduler.ts', import.meta.url)), 'utf8')
 const PROMPT_SRC = readFileSync(fileURLToPath(new URL('../src/services/runtime/prompt.ts', import.meta.url)), 'utf8')
 
-test('判定：isUserQuestionRun 按触发消息 sender_type 区分用户提问与通知运行', async () => {
+test('判定：heldItemIsUserQuestion 按触发消息 sender_type 区分用户提问与通知消息', async () => {
   const t = await setup()
   try {
     const userMsg = userMessage(t.service, t.project.id, '评估一下 GS 生产数据')
     const noticeMsg = noticeMessage(t.service, t.project.id, '【通知】备忘一条', t.director.id)
-    const userRunId = t.service.enqueueChatRun(t.project, t.dev, userMsg)
-    const noticeRunId = t.service.enqueueChatRun(t.project, t.dev, noticeMsg)
-    assert.equal(t.service.isUserQuestionRun(chatRunRow(t, userRunId)), true, '用户消息触发的 chat 运行是用户提问')
-    assert.equal(t.service.isUserQuestionRun(chatRunRow(t, noticeRunId)), false, '通知（bot 消息）触发的 chat 运行不是用户提问')
+    // DSHBOTS-290：run 向判定随 mergeRunIntoQueuedLane 删除，语义迁到挂起消息向
+    // （drainPendingMessages 分组用 heldItemIsUserQuestion）。
+    assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', messageId: userMsg }), true, '用户消息触发的 chat 运行是用户提问')
+    assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', messageId: noticeMsg }), false, '通知（bot 消息）触发的 chat 运行不是用户提问')
   } finally {
     await cleanup(t.root, t.store)
   }
