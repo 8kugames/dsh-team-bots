@@ -10,6 +10,29 @@ import { publishSkill, rollbackSkill, skillSnapshot, stageSkill, syncSkills } fr
 import { scanProjectSkills } from '../project-skills.js'
 import { id, jsonParse, nowIso, parseDisabledSkills, sha256, slugify, text } from '../util.js'
 
+// DSHBOTS-271 融合稿闸门：进化 bot_update 的 instructions 必须是「原指令+新增内容」的融合稿，
+// 纯替换稿会把原提示词整体顶掉。保留率 = 原 instructions 的非空行（trim 后）在提案稿
+// 行集合中的保留占比；低于阈值即拒绝（原因+替代指引，D-269 口径）。
+// 原 instructions 为空（首次立指令）没有可保留内容，保留率恒为 1，直接放行并在 diff 留痕。
+export const MERGE_KEEP_RATIO = 0.6
+export const MERGE_DRAFT_GUIDANCE = '进化指令必须是原指令+新增内容的融合稿：保留原有指令全文再写改动，不是全新替换稿也不是增量补丁'
+
+export function mergeKeepRatio(original: unknown, proposed: unknown): number {
+  const originLines = String(original ?? '').split('\n').map(line => line.trim()).filter(Boolean)
+  if (!originLines.length) return 1
+  const proposedLines = new Set(String(proposed ?? '').split('\n').map(line => line.trim()).filter(Boolean))
+  const kept = originLines.filter(line => proposedLines.has(line)).length
+  return kept / originLines.length
+}
+
+// 创建侧与应用侧（applyProposal 审批落地前）共用同一闸门函数，防创建后 bots.instructions
+// 已被 updateBot 直改通道改写、或绕过创建路径提交的纯替换稿落地。
+export function assertMergeDraft(original: unknown, proposed: unknown): number {
+  const ratio = mergeKeepRatio(original, proposed)
+  if (ratio >= MERGE_KEEP_RATIO) return ratio
+  throw badRequest(`原指令保留率 ${(ratio * 100).toFixed(0)}%，低于 ${MERGE_KEEP_RATIO * 100}%：${MERGE_DRAFT_GUIDANCE}`)
+}
+
 
 
 export const proposalsMethods = {
@@ -24,6 +47,10 @@ export const proposalsMethods = {
     }
     if (kind === 'skill' && !input.payload?.content) throw badRequest('技能提案必须包含内容')
     const payload = input.payload ?? {}
+    // 融合稿闸门（DSHBOTS-271）：bot_update 带 instructions 时按当前原稿校验保留率；skill 提案不经过此闸门。
+    if (kind === 'bot_update' && payload.instructions !== undefined) {
+      assertMergeDraft(this.botRow(input.botId).instructions, payload.instructions)
+    }
     const canary = this.proposalCanary(input, kind)
     const diff = kind === 'bot_update' ? this.botProposalDiff(input.botId, payload) : this.skillProposalDiff(payload)
     const proposalId = id('prop')
@@ -51,7 +78,10 @@ export const proposalsMethods = {
       if (payload[field] === undefined) continue
       const before = bot[field] ?? null
       if (String(before ?? '') === String(payload[field] ?? '')) continue
-      diff[field] = { from: before, to: payload[field] }
+      const entry: { from: unknown; to: unknown; firstInstructions?: boolean } = { from: before, to: payload[field] }
+      // 首次立指令留痕（DSHBOTS-271）：原 instructions 为空时融合闸门放行，diff 标记首立。
+      if (field === 'instructions' && !String(before ?? '').trim()) entry.firstInstructions = true
+      diff[field] = entry
     }
     return diff
   },
@@ -135,6 +165,11 @@ export const proposalsMethods = {
   },
   async applyProposal(proposal, payload, canary, actor) {
     if (proposal.kind === 'bot_update') {
+      // 应用侧复核（DSHBOTS-271）：审批落地前按 bots.instructions 当前值重跑同一闸门——
+      // 创建提案后原指令可能已被 updateBot 直改通道改写，此处防过期的融合稿或绕过创建路径的纯替换稿落地。
+      if (payload.instructions !== undefined) {
+        assertMergeDraft(this.botRow(proposal.bot_id).instructions, payload.instructions)
+      }
       await this.updateBot(proposal.bot_id, {
         ...(payload.role !== undefined ? { role: payload.role } : {}),
         ...(payload.instructions !== undefined ? { instructions: payload.instructions } : {}),
