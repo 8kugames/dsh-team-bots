@@ -674,9 +674,16 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
 
 # WeChat direct conversation
 This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their WeChat and their reply comes back to you.` : ''
+    // DSHBOTS-272 用户提问锚点：触发消息是人发的（sender_type='user'）才注入；通知降级与
+    // bot @mention 唤醒触发的运行（sender_type='bot'）不注入——事故根因之一是通知内容与用户
+    // 提问同窗时无优先级指示，bot 回了条轻备忘就算处理完。
+    const ownerQuestionBlock = chatMessage?.sender_type === 'user' ? `
+
+# Owner question priority
+This message is from the project owner — answer it directly in this reply. Background notifications in context must not substitute for the answer; handle them only after (or skip to next turn).` : ''
     return `${header}
 
-Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}
+Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item.${wechatBlock}${ownerQuestionBlock}
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}

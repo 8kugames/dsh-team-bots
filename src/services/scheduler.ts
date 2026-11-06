@@ -307,6 +307,15 @@ export const schedulerMethods = {
     return `project:${run.bot_id}:${run.project_id}`
   },
 
+  // DSHBOTS-272 用户提问运行判定：kind='chat' 且触发消息是人发的（messages.sender_type='user'）。
+  // 通知降级（notify.ts 成员通知落群聊流）与 bot 回复 @mention 唤醒（run-finish.ts）触发的
+  // chat 运行，触发消息 sender_type='bot'，不算用户提问；出队置顶与合批保护只给人发的提问用。
+  isUserQuestionRun(run) {
+    if (run?.kind !== 'chat' || !run.trigger_ref) return false
+    const message = this.store.get('SELECT sender_type FROM messages WHERE id = ?', run.trigger_ref)
+    return message?.sender_type === 'user'
+  },
+
   // 入站消息合批（DSHBOTS-231）：领取一条运行后，把同一条绑定道内仍在排队的消息运行合并
   // 进来——被合并的运行置 canceled（error_code='MERGED'），消息 id 记入本运行的
   // merged_messages，executeRun 据此把多条消息一次性注入同一轮上下文，不再一条消息一次运行。
@@ -319,6 +328,10 @@ export const schedulerMethods = {
     const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
     const claimedQueuedAt = Date.parse(run.queued_at)
     const laneKey = this.claimKey(run)
+    // DSHBOTS-272 合批保护：用户提问（触发消息 sender_type='user'）不并入非用户触发的运行——
+    // 并入后提问只能挤在 Merged messages 段、没有直接回答锚点（事故形态=通知运行回一条轻备忘
+    // 就算处理完）。留队保住「一条提问一条正式回复」；出队序已把用户提问置顶，下一拍即领取。
+    const claimedIsUserQuestion = this.isUserQuestionRun(run)
     const candidates = this.store.all(
       `SELECT * FROM runs WHERE status = 'queued' AND id != ? AND kind = ?
         ORDER BY queued_at LIMIT 100`,
@@ -330,6 +343,8 @@ export const schedulerMethods = {
       if (mergedIds.length >= max - 1) break
       if (!candidate.trigger_ref) continue
       if (this.claimKey(candidate) !== laneKey) continue
+      // DSHBOTS-272：候选是用户提问而本运行非用户触发（通知/伙伴唤醒）→ 不并，见上方注释。
+      if (!claimedIsUserQuestion && this.isUserQuestionRun(candidate)) continue
       const queuedAt = Date.parse(candidate.queued_at)
       if (!Number.isFinite(queuedAt) || !Number.isFinite(claimedQueuedAt)) continue
       if (queuedAt < claimedQueuedAt || queuedAt - claimedQueuedAt > windowMs) continue
@@ -546,13 +561,19 @@ export const schedulerMethods = {
       if (activeTotal >= maxRuns + 1) return
       // 出队顺序：任务运行按任务优先级（urgent 先），其余运行视同 high——用户交互不能被任务积压拖死；
       // 同优先级按入队时间，保证 FIFO 不饿死老运行。
+      // DSHBOTS-272 用户提问不被静默压后：不动用户运行的档位（同车道先入队的 review/handle
+      // 等人机运行契约不变，见 tests/avatar-lanes.test.js），改为把通知/伙伴唤醒触发的 chat
+      // 运行（触发消息 sender_type='bot'）降到机器流量档——同车道内用户提问（tier 1）必然
+      // 先于它领取，即使提问后到；通知备忘让位于一切人机交互与 urgent/high 任务。
       // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）的 queued 任务运行不再领取；
       // 只排 kind='task'，非任务运行不受影响。LEFT JOIN 出 NULL 的孤儿任务运行不过滤。
       const candidates = this.store.all(
         `SELECT r.* FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+          LEFT JOIN messages m ON m.id = r.trigger_ref
          WHERE r.status = 'queued'
            AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled'))
          ORDER BY CASE
+           WHEN r.kind = 'chat' AND m.sender_type = 'bot' THEN 2
            WHEN r.kind <> 'task' OR t.priority IS NULL THEN 1
            WHEN t.priority = 'urgent' THEN 0
            WHEN t.priority = 'high' THEN 1
