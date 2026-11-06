@@ -14,7 +14,7 @@ import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { taskDeadlineInfo } from '../tasks.js'
 import { readWriteScopes } from '../write-scopes.js'
-import { sanitizeTmpBotDirName } from '../../paths.js'
+import { displayPath, sanitizeTmpBotDirName } from '../../paths.js'
 
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
@@ -135,13 +135,13 @@ export const promptMethods = {
     const sharedSkills = this.config.skillRoot
     const sharedRules = [
       disabledSkills.length === 0
-        ? `- The shared skill library is mounted at \`${sharedSkills}/skills\`; use installed skills when relevant.`
-        : `- The shared skill library is mounted at \`${sharedSkills}/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
+        ? `- The shared skill library is mounted at \`${displayPath(sharedSkills)}/skills\`; use installed skills when relevant.`
+        : `- The shared skill library is mounted at \`${displayPath(sharedSkills)}/skills\`; use installed skills when relevant. The following skills are disabled for this project and must not be invoked: ${disabledSkills.map(slug => `\`${slug}\``).join(', ')}.`,
       bindings.length > 0
         ? `- Pinned skill versions for this project: ${bindings.map(item => `\`${item.slug}\`@${item.version ?? 'latest'}`).join(', ')}.`
         : '- No skill version is pinned for this project; use the current published version.',
       '- Work only inside this project workspace unless the user explicitly authorizes another mounted path.',
-      `- The shared skill library at \`${sharedSkills}\` is read-only for you; publish skill changes through \`team_propose_evolution\` so the user can approve them.`,
+      `- The shared skill library at \`${displayPath(sharedSkills)}\` is read-only for you; publish skill changes through \`team_propose_evolution\` so the user can approve them.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
@@ -150,7 +150,7 @@ export const promptMethods = {
     const projectSkillRules = projectSkills.length === 0
       ? []
       : [
-          `- Project skill pools are mounted at \`${projectDir}/.agents/skills\`, \`${projectDir}/.claude/skills\`, \`${projectDir}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
+          `- Project skill pools are mounted at \`${displayPath(projectDir)}/.agents/skills\`, \`${displayPath(projectDir)}/.claude/skills\`, \`${displayPath(projectDir)}/.codex/skills\`; skills found there are available in this project and take precedence over a shared skill with the same name.`,
           `- Project skills available here: ${projectSkills.map(skill => `\`${skill.name}\``).join(', ')}.`,
         ]
     const collaborationRules = taskSession
@@ -203,7 +203,7 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
       '## Current project',
       `- Name: ${project.name}`,
       `- Key: ${project.key}`,
-      `- Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
+      `- Workspace: ${displayPath(project.production_dir || join(this.config.workspace, project.slug))}`,
       `- Temp files discipline: write every temporary or intermediate file (scratch scripts, probe outputs, downloaded artifacts) under \`.tmp/bots/${sanitizeTmpBotDirName(bot.name)}/\` inside the workspace; create that directory if it is missing. Never scatter temp files elsewhere in the project.`,
       roleLine,
       '',
@@ -265,10 +265,10 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
       '',
       '## Solo conversation',
       `- This is a one-on-one conversation with the user, outside any project.`,
-      `- Your workspace for this conversation is \`${workspace}\`; work inside it when the user asks you to produce or store files.`,
+      `- Your workspace for this conversation is \`${displayPath(workspace)}\`; work inside it when the user asks you to produce or store files.`,
       '- Project tools (team_assign_task, team_review_task) do not apply here because there is no project context. If the user wants project work, suggest opening that project instead.',
       '- Use `team_remember` with scope bot or team for durable facts worth keeping; scope project is unavailable in this conversation. Never store secrets or credentials.',
-      `- The shared skill library is mounted at \`${this.config.skillRoot}/skills\`; use installed skills when relevant. The library at \`${this.config.skillRoot}\` is read-only for you; publish skill changes through \`team_propose_evolution\`.`,
+      `- The shared skill library is mounted at \`${displayPath(this.config.skillRoot)}/skills\`; use installed skills when relevant. The library at \`${displayPath(this.config.skillRoot)}\` is read-only for you; publish skill changes through \`team_propose_evolution\`.`,
       '- You cannot change your own role, model, instructions or skills directly; propose the change instead.',
       '- Never invent file changes or tool results. Report blockers precisely.',
       '- Reply in the user’s language.',
@@ -372,7 +372,7 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
     const header = [
       `You are: ${bot.name}`,
       'Mode: one-on-one conversation (outside projects)',
-      `Workspace: ${join(this.config.workspace, '_the_bots', bot.solo_dir)}`,
+      `Workspace: ${displayPath(join(this.config.workspace, '_the_bots', bot.solo_dir))}`,
     ].join('\n')
     const { rows: recent, incremental } = this.watermarkWindow({
       sessionId,
@@ -431,7 +431,7 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
     if (run.kind === 'rollover_summary') return this.rolloverSummaryPrompt({ run, bot, project })
     const header = [
       `Project: ${project.name} (${project.key})`,
-      `Workspace: ${project.production_dir || join(this.config.workspace, project.slug)}`,
+      `Workspace: ${displayPath(project.production_dir || join(this.config.workspace, project.slug))}`,
       `You are: ${bot.name}`,
     ].join('\n')
     // 任务评论注入（DSHBOTS-254 收口）：最近 3 条、合计 ≤1.5k——每条正文 500 上限（1.5k/3 的
