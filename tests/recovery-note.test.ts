@@ -46,6 +46,8 @@ const captureHost = (sink) => ({
   sessionController: {
     resolveAgent: async () => ({}),
     selectModel: async () => ({}),
+    // DSHBOTS-289 后无 kind='bot' 绑定时 ensureBotBinding 走新建路径，桩需提供 create。
+    create: async () => ({ sessionId: 'sess-recovery-stub' }),
     prompt: async (request) => { sink.push(request.content.map(part => part.text ?? '').join('\n')) },
     cancel: async () => {},
   },
