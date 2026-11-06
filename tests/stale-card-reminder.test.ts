@@ -3,8 +3,8 @@
 //  ① 阈值常量在场（STALE_REVIEW_HOURS=24 / STALE_BLOCKED_HOURS=48，集中定义可调）；
 //  ② 两状态判定纯逻辑阈值内/外两向（in_review 23h/25h、blocked 47h/49h，非目标状态不判）；
 //  ③ 同卡每日 ≤1 条防重（同日二次扫描静默：留痕不新增、返回空）；
-//  ④ D-269 口径文案含替代命令（in_review→team_review_task；blocked→time_budget_minutes/updateTask），
-//     且只提醒不自动处置（扫描后卡状态原样不变）。
+//  ④ D-269 口径文案点名总监（DSHBOTS-281：in_review→待总监验收收口；blocked→待总监解阻/收口，
+//     不再写「owner 可改/可用」转接话术），且只提醒不自动处置（扫描后卡状态原样不变）。
 // 运行态用例依赖 mkdtemp：沙箱 EPERM 时按卡面口径 skip（源码级断言仍执行）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -48,17 +48,19 @@ test('两状态判定纯逻辑：阈值内/外两向，非目标状态与坏时�
   assert.equal(staleCardHit({ status: 'in_review' }), null, '缺时间戳不判')
 })
 
-test('D-269 口径文案：原因（滞留时长+阈值）+ 替代命令', () => {
+test('D-269 口径文案：原因（滞留时长+阈值）+ 点名总监处置（不再转接 owner）', () => {
   const review = staleCardNoticeBody({ identifier: 'DSHBOTS-9', status: 'in_review', hours: 30 })
   assert.ok(review.startsWith(STALE_CARD_NOTICE_PREFIX), '文案应带滞留提醒前缀（防重锚点）')
   assert.match(review, /30 小时/, '文案应含滞留时长')
   assert.match(review, /24h/, '文案应含阈值')
-  assert.match(review, /team_review_task/, 'in_review 文案应含替代命令 team_review_task')
+  assert.match(review, /待总监验收/, 'in_review 文案应点名总监验收')
+  assert.doesNotMatch(review, /owner 可[改用]/, '不得再写「owner 可改/可用」转接话术')
   const blocked = staleCardNoticeBody({ identifier: 'DSHBOTS-9', status: 'blocked', hours: 55 })
   assert.match(blocked, /55 小时/, 'blocked 文案应含滞留时长')
-  assert.match(blocked, /48h/, 'blocked 文案应含阈值')
-  assert.match(blocked, /time_budget_minutes/, 'blocked 文案应含替代动作 time_budget_minutes')
-  assert.match(blocked, /updateTask/, 'blocked 文案应含替代动作 updateTask')
+  assert.match(blocked, /48h/, '文案应含阈值')
+  assert.match(blocked, /待总监解阻/, 'blocked 文案应点名总监解阻')
+  assert.match(blocked, /自动重置死线窗口/, 'blocked 文案含重派自动重置窗口口径（D-281）')
+  assert.doesNotMatch(blocked, /owner 可[改用]/, '不得再写「owner 可改/可用」转接话术')
 })
 
 // ── 运行态用例（EPERM 容忍 skip）───────────────────────────────────────────
@@ -120,13 +122,13 @@ test('运行态：in_review/blocked 超阈值提醒 owner + 同日二次静默 +
     const freshTask = await staleTask(env, { status: 'blocked', idleHours: 47 }) // 阈值内，不提醒
     const first = env.service.scanStaleCards()
     assert.deepEqual([...first].sort(), [reviewTask.id, blockedTask.id].sort(), '首轮应只提醒两张超阈值卡')
-    // 留痕：进任务线程 + mentions 点名项目 owner；文案含替代命令。
-    for (const [task, re] of [[reviewTask, /team_review_task/], [blockedTask, /time_budget_minutes|updateTask/]] as const) {
+    // 留痕：进任务线程 + mentions 点名项目 owner（=总监）；文案点名总监处置方向。
+    for (const [task, re] of [[reviewTask, /待总监验收/], [blockedTask, /待总监解阻/]] as const) {
       const rows = staleMessages(env, task.id)
       assert.equal(rows.length, 1, '每卡首轮恰一条滞留提醒')
       assert.equal(rows[0].project_id, env.project.id, '留痕应落项目群聊流')
       assert.ok(JSON.parse(rows[0].mentions_json).includes(env.director.id), '留痕应 @ 项目 owner')
-      assert.match(rows[0].body, re, '文案应含对应替代命令')
+      assert.match(rows[0].body, re, '文案应点名总监处置方向')
     }
     assert.equal(staleMessages(env, freshTask.id).length, 0, '阈值内卡不得提醒')
     // 同日二次扫描：同卡每日 ≤1 条，超限静默（留痕不新增、返回空）。

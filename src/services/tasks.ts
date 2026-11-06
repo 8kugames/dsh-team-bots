@@ -59,7 +59,7 @@ export function ensureTaskTerminalTimeBackfill(store) {
 }
 
 // 任务级死线 schema（DSHBOTS-274）：tasks.budget_updated_at 记最近一次 time_budget_minutes
-// 实改时刻，是延期阀的重算基准锚点。外置自管迁移（tasks_canceled_at 同款先例，db.js 不再加行）。
+// 实改时刻，标记新预算生效点（死线长度随新预算重算；基准锚点见 taskDeadlineInfo=最新派发）。
 export function ensureTaskDeadlineSchema(store) {
   if (store.get('SELECT 1 AS ok FROM schema_migrations WHERE name = ?', 'tasks_budget_updated_at')) return
   const columns = store.all('PRAGMA table_info(tasks)').map(row => row.name)
@@ -72,44 +72,46 @@ export function ensureTaskDeadlineSchema(store) {
 // 允许轮数（DSHBOTS-274）：整卡死线 = 派发基准 + time_budget_minutes × TASK_BUDGET_ROUNDS。
 export const TASK_BUDGET_ROUNDS = 2
 
-// 任务级死线纯计算（DSHBOTS-274，tests/task-deadline.test.js 守门）：
+// 任务级死线纯计算（DSHBOTS-274 立卡，DSHBOTS-281 基准升级）：
 // 治「time_budget_minutes 只约束单运行、多轮派发各自重置预算、累计耗时无上限」。
-// - 派发基准：改过预算（延期阀）取最近一次改预算之后的首个派发（无则退回首次派发）；
-//   未改过预算取首次派发——多轮派发自身不重置窗口；
-// - owner 改 time_budget_minutes 延期后重派，新派发即新基准，拿到完整新窗口；
+// - 派发基准 = 最新一次派发（latestDispatchAt）：重派即新窗口——重派动作本身视为预算决策，
+//   存量老卡重派不再立即升级，也无需先实改 time_budget_minutes 延期；
+// - 延期阀兼容：owner 实改预算后死线按新预算×轮数从最新派发基准重算；改后尚未重派时
+//   基准仍取最新派发（不早于旧口径的「退回首次派发」），budget_updated_at 只标记新预算生效；
+// - 真超时仍拦截：新窗口内预算×轮数耗尽后，下一次领取照常升级（escalateTaskPastDeadline）；
 // - 无预算（NULL/≤0）或无派发记录返回 null，死线不约束（与 D-131 无时效口径一致）。
-export const taskDeadlineMs = ({ budgetMinutes, firstDispatchAt, firstDispatchSinceBudgetChangeAt }) => {
+export const taskDeadlineMs = ({ budgetMinutes, firstDispatchAt, latestDispatchAt }) => {
   const minutes = Number(budgetMinutes)
   if (!Number.isFinite(minutes) || minutes <= 0) return null
-  const baseRaw = firstDispatchSinceBudgetChangeAt ?? firstDispatchAt
+  const baseRaw = latestDispatchAt ?? firstDispatchAt
   const base = baseRaw ? Date.parse(baseRaw) : NaN
   if (!Number.isFinite(base)) return null
   return base + minutes * TASK_BUDGET_ROUNDS * 60_000
 }
 
-// 任务级死线信息（DSHBOTS-274）：派发时刻口径 = runs 表 kind='task' 的 queued_at
-// （入队即派发；started_at 领取后才写，未被领取过的派发拿不到时刻，故不用 started_at）。
-// review/handle 等派生运行 kind!=='task' 天然不计入派发史。
+// 任务级死线信息（DSHBOTS-274；DSHBOTS-281 基准=最新派发）：派发时刻口径 = runs 表
+// kind='task' 的 queued_at（入队即派发；started_at 领取后才写，未被领取过的派发拿不到
+// 时刻，故不用 started_at）。review/handle 等派生运行 kind!=='task' 天然不计入派发史。
 export function taskDeadlineInfo(store, task) {
   ensureTaskDeadlineSchema(store)
   const firstDispatchAt = store.get(
     "SELECT MIN(queued_at) AS v FROM runs WHERE task_id = ? AND kind = 'task'",
     task.id,
   )?.v ?? null
-  const firstDispatchSinceBudgetChangeAt = task.budget_updated_at
-    ? store.get(
-      "SELECT MIN(queued_at) AS v FROM runs WHERE task_id = ? AND kind = 'task' AND queued_at >= ?",
-      task.id, task.budget_updated_at,
-    )?.v ?? null
-    : null
+  // 重派即新窗口：每次派发都把死线基准推到本次 queued_at，重派（含无主卡领取）自动重置，
+  // 不依赖任何显式预算实改（与 D-274「改后首个派发」同构，把重派本身视为预算决策）。
+  const latestDispatchAt = store.get(
+    "SELECT MAX(queued_at) AS v FROM runs WHERE task_id = ? AND kind = 'task'",
+    task.id,
+  )?.v ?? null
   return {
     deadlineMs: taskDeadlineMs({
       budgetMinutes: task.time_budget_minutes,
       firstDispatchAt,
-      firstDispatchSinceBudgetChangeAt,
+      latestDispatchAt,
     }),
     firstDispatchAt,
-    firstDispatchSinceBudgetChangeAt,
+    latestDispatchAt,
   }
 }
 
@@ -349,8 +351,8 @@ export const tasksMethods = {
       updates.write_scopes = JSON.stringify(parseWriteScopes(patch.writeScopes))
     }
     // 延期阀（DSHBOTS-274）：update_task 实改 time_budget_minutes 后整卡死线按新预算重算——
-    // 记 budget_updated_at，死线基准切到「改预算之后的首个派发」（无则退回首次派发），
-    // owner 延期后重派即拿到完整新窗口（计算见 taskDeadlineMs）。
+    // 记 budget_updated_at 标记新预算生效；派发基准统一为最新派发（DSHBOTS-281 重派即新窗口），
+    // 改预算与重派各自独立生效，改后重派拿到「新预算 × 新窗口」。
     if (patch.timeBudgetMinutes !== undefined || patch.time_budget_minutes !== undefined) {
       const rawBudget = patch.timeBudgetMinutes ?? patch.time_budget_minutes
       const budget = Number(rawBudget) > 0 ? clampNumber(rawBudget, 1, 10_080, null) : null

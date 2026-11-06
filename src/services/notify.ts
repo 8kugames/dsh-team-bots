@@ -19,7 +19,7 @@ export const RUN_PARTNER_NOTICE_CAP = 3
 export const PARTNER_NOTICE_DAILY_CAP = 5
 
 // ── 滞留阈值兜底（DSHBOTS-280）：in_review/blocked 非施工状态的超时提醒 ─────────
-// 只提醒不自动处置：不自动关单、不自动转状态、不重派，验收与解阻决策归 owner。
+// 只提醒不自动处置：不自动关单、不自动转状态、不重派，验收与解阻由项目总监闭环（DSHBOTS-281 口径）。
 export const STALE_REVIEW_HOURS = 24
 export const STALE_BLOCKED_HOURS = 48
 export const STALE_CARD_NOTICE_PREFIX = '【滞留提醒】'
@@ -36,12 +36,13 @@ export function staleCardHit({ status, updated_at, now = Date.now() } = {} as an
   return hours > threshold ? { status, hours, threshold } : null
 }
 
-// D-269 口径文案 = 原因（滞留时长）+ 替代动作（命令入口），只提醒不含自动处置。
+// D-269 口径文案 = 原因（滞留时长+阈值）+ 点名总监的处置方向（DSHBOTS-281：处置归项目
+// 总监自行闭环，不写「owner 可改/可用」转接话术；blocked 侧重派即自动重置死线窗口）。
 export function staleCardNoticeBody({ identifier, status, hours } = {} as any) {
   const idle = Math.floor(hours)
   return status === 'in_review'
-    ? `${STALE_CARD_NOTICE_PREFIX}${identifier} 待验收已滞留 ${idle} 小时（阈值 ${STALE_REVIEW_HOURS}h）：owner 可用 team_review_task 验收收口（accept/return）。`
-    : `${STALE_CARD_NOTICE_PREFIX}${identifier} 受阻已滞留 ${idle} 小时（阈值 ${STALE_BLOCKED_HOURS}h）：owner 可改 time_budget_minutes 延期或 updateTask 解阻/收口。`
+    ? `${STALE_CARD_NOTICE_PREFIX}${identifier} 待验收已滞留 ${idle} 小时（阈值 ${STALE_REVIEW_HOURS}h）：待总监验收收口（accept/return）。`
+    : `${STALE_CARD_NOTICE_PREFIX}${identifier} 受阻已滞留 ${idle} 小时（阈值 ${STALE_BLOCKED_HOURS}h）：待总监解阻/收口（重派即自动重置死线窗口）。`
 }
 
 export const notifyMethods = {
