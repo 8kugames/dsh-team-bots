@@ -15,6 +15,7 @@ import { openDatabase } from '../src/db.js'
 import { runMigrations, activateBotRunSerialization } from '../src/db-migrations.js'
 import { resolveConfig } from '../src/config.js'
 import { sessionMethods } from '../src/services/runtime/session.js'
+import { TeamService } from '../src/service.js'
 
 const MIGRATION_NAME = 'session_binding_bot_convergence'
 const OLD_LANE_INDEXES = `
@@ -233,5 +234,151 @@ test('ensureBotBinding：无绑定 bot 运行期新建控制面会话，重复�
     store.get("SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = 'bot-a' AND kind = 'bot' AND alias = 0").n,
     1,
     '每 bot 恰一条 kind=bot 活跃绑定',
+  )
+})
+
+// ── V1 四路合并（DSHBOTS-296，ADR §6 V1 终验）──────────────────────────
+// 同一 bot 相继触发任务派发/群聊/私信/单聊四条入站路，断言收敛不变量：
+// alias=0 绑定恰 1 行 kind='bot'，四类运行全部落同一条控制面会话。
+// startRun 只镜像真实现的会话面（ensureSession 解析 + runs.session_id 写回，
+// 见 src/services/runtime/session.ts startRun），不拉起 prompt 管线。
+class ControlPlaneRuntime {
+  declare started: any[]; declare steers: any[]; declare busySessions: any; declare handler: any
+  declare store: any; declare config: any; declare ctx: any; declare logger: any
+  declare sessionCreates: any; declare sessionCounter: any
+
+  constructor(config: any) {
+    this.started = []
+    this.steers = []
+    this.busySessions = new Set()
+    this.sessionCounter = 0
+    this.config = config
+    this.logger = { info() {}, warn() {}, error() {} }
+    this.sessionCreates = new Map()
+    this.ctx = {
+      sessionController: {
+        resolveAgent: async () => ({}),
+        selectModel: async () => ({}),
+        create: async () => ({ sessionId: `sess-cp-${++this.sessionCounter}` }),
+      },
+    }
+  }
+
+  setCompletionHandler(handler: any) { this.handler = handler }
+  async catalog() { return [] }
+  async validateBotConfig() {}
+  sessionBusy(sessionId: string) { return this.busySessions.has(sessionId) }
+  async selectModel() {}
+  async defaultAgentPreset() { return {} }
+  applyFilePolicy() {}
+  shouldRolloverSession() { return false }
+  maybeCompactSession() {}
+  taskAffinityBinding(task: any) { return sessionMethods.taskAffinityBinding.call(this, task) }
+  ensureBotBinding(bot: any, project: any, opts: any) { return sessionMethods.ensureBotBinding.call(this, bot, project, opts) }
+  retireBinding(sessionId: string) { return sessionMethods.retireBinding.call(this, sessionId) }
+
+  async startRun({ run, bot, project, task }: any) {
+    const sessionId = await sessionMethods.ensureSession.call(this, bot, project, { run, task })
+    this.store.run('UPDATE runs SET session_id = ? WHERE id = ?', sessionId, run.id)
+    this.started.push({ runId: run.id, kind: run.kind })
+    return sessionId
+  }
+
+  async steer(sessionId: string, text: string) { this.steers.push({ sessionId, text }); return true }
+  async cancelRun() { return true }
+  complete(runId: string, status = 'succeeded', output = 'done') {
+    return this.handler({ runId, status, output, error: null })
+  }
+}
+
+test('V1 四路合并：同 bot 任务/群聊/私信/单聊相继触发，alias=0 绑定恰 1 行 kind=bot 且四类运行同落控制面会话', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-binding-v1-'))
+  const workspace = join(root, 'workspace')
+  await mkdir(join(workspace, '.agents'), { recursive: true })
+  const config = resolveConfig({
+    workspace, dataDir: join(root, 'data'), skillRoot: join(workspace, '.agents'),
+    modelCacheMs: 0, schedulerIntervalMs: 60_000,
+  })
+  t.after(async () => {
+    try { store.close() } catch {}
+    await rm(root, { recursive: true, force: true })
+  })
+  const store = openDatabase(config.dbPath)
+  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
+  const runtime = new ControlPlaneRuntime(config)
+  runtime.store = store
+  service.attachRuntime(runtime)
+  await service.initialize()
+  service.started = false
+  store.setSetting('memory_review', '0')
+  store.setSetting('chat_memory_review', '0')
+
+  const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
+  const project = await service.createProject({ name: 'V1', key: 'VONE', memberIds: [dev.id] })
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+
+  // 任务派发（autoStart 立即落 queued 占道，其余三路随后到达全部挂起）。
+  await service.createTask({ projectId: project.id, title: 'V1 四路合并', assigneeBotId: dev.id, autoStart: true })
+  // 群聊：@提及路由到 Builder。
+  await service.sendMessage(project.id, '@Builder 群里报个进度')
+  // 私信：总监 → Builder（与 dm.test.ts 同款 bot_messages 形状），忙时入队挂起。
+  store.run(
+    `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id, origin_kind, status, created_at)
+     VALUES ('botm_v1_dm', ?, ?, ?, 'v1-dm', '私聊问一句', 'sess-director-ui', 'dm', 'pending', ?)`,
+    project.id, director.id, dev.id, new Date().toISOString(),
+  )
+  const dmMessage = store.get('SELECT * FROM bot_messages WHERE id = ?', 'botm_v1_dm')
+  assert.equal(service.enqueueDmRun(dmMessage, dev), null, 'bot 忙时 dm 不落 runs 行，挂待处理队列')
+  // 单聊。
+  await service.sendSoloMessage(dev.id, '单聊问一句')
+
+  // 串行放行：开闸后逐拍启动/收尾，直到挂起队列与活跃运行清空。startRun 的会话解析
+  // 异步落地（executeRun 不阻塞 tick），完成运行前先等 runs.session_id 写回。
+  const waitFor = async (fn: () => any, ms = 3000) => {
+    const deadline = Date.now() + ms
+    for (;;) {
+      const value = fn()
+      if (value) return value
+      if (Date.now() >= deadline) return value
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }
+  service.started = true
+  for (let i = 0; i < 16; i++) {
+    await service.tick()
+    const running = store.get("SELECT id FROM runs WHERE status = 'running' LIMIT 1")
+    if (running) {
+      const landed = await waitFor(() =>
+        store.get('SELECT session_id AS s FROM runs WHERE id = ?', running.id).s)
+      assert.ok(landed, '运行启动应完成会话解析并写回 session_id')
+      await runtime.complete(running.id, 'succeeded', 'done')
+      continue
+    }
+    const held = JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]')
+    const active = store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued', 'running')").n
+    if (!held.length && !active) break
+  }
+  assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').length, 0, '挂起队列应清空')
+
+  // V1 核心断言：alias=0 绑定恰 1 行 kind='bot'；四类运行全部落同一条控制面会话。
+  const activeBindings = store.all("SELECT * FROM session_bindings WHERE bot_id = ? AND alias = 0", dev.id)
+  assert.equal(activeBindings.length, 1, '四路触发后 alias=0 绑定应恰 1 行')
+  assert.equal(activeBindings[0].kind, 'bot', '绑定 kind 应为 bot')
+  assert.equal(
+    store.get("SELECT COUNT(*) AS n FROM session_bindings WHERE kind != 'bot'").n,
+    0,
+    '四路全程不应建出任何旧车道绑定',
+  )
+  const bindingSession = activeBindings[0].session_id
+  for (const kind of ['task', 'chat', 'dm', 'solo_chat']) {
+    const run = store.get("SELECT * FROM runs WHERE bot_id = ? AND kind = ?", dev.id, kind)
+    assert.ok(run, `四路中缺少 ${kind} 运行`)
+    assert.equal(run.session_id, bindingSession, `${kind} 运行应落 bot 控制面会话`)
+  }
+  // dm 回信（dm_reply）落发起方 director 自己的控制面绑定，不影响 Builder 的单绑定不变量。
+  assert.equal(
+    store.all('SELECT DISTINCT session_id FROM runs WHERE bot_id = ? AND kind IN (\'task\',\'chat\',\'dm\',\'solo_chat\')', dev.id).length,
+    1,
+    'Builder 四路运行应只用到一条会话',
   )
 })
