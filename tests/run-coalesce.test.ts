@@ -90,8 +90,8 @@ function groupPrompt(t, run, chatMessage, extraMessages) {
   })
 }
 
-const heldItems = (t, botId = t.dev.id) =>
-  JSON.parse(t.store.setting(`bot_pending_msgs:${botId}`) ?? '[]')
+const heldItems = (t, botId = t.dev.id, domain = t.project.id) =>
+  JSON.parse(t.store.setting(`bot_pending_msgs:${botId}:${domain}`) ?? '[]')
 
 // 驱动 tick 直到目标运行启动：中间运行（如收尾的 memory_review）逐个完成让 bot 回到
 // 空闲，挂起消息才能建回。返回命中的 started 条目。
@@ -405,9 +405,9 @@ test('DSHBOTS-304 双投（消息族）：胜利方运行共存时挂起项清�
        VALUES ('run_winner', ?, ?, 'chat', 'read', 'mention', ?, 'running', 1, ?, ?, ?, ?)`,
       t.project.id, t.dev.id, m1, `chat:${m1}:${t.dev.id}`, now, now, now,
     )
-    // 失败方：m1 已落挂起（双投兜底产物），m2 因忙正常挂起。
-    t.service.holdPendingMessage(t.dev.id, { kind: 'chat', messageId: m1, projectId: t.project.id, origin: null, queuedAt: now })
-    t.service.holdPendingMessage(t.dev.id, { kind: 'chat', messageId: m2, projectId: t.project.id, origin: null, queuedAt: now })
+    // 失败方：m1 已落挂起（双投兜底产物），m2 因忙正常挂起（域键=项目域，DSHBOTS-308）。
+    t.service.holdPendingMessage(t.dev.id, t.project.id, { kind: 'chat', messageId: m1, projectId: t.project.id, origin: null, queuedAt: now })
+    t.service.holdPendingMessage(t.dev.id, t.project.id, { kind: 'chat', messageId: m2, projectId: t.project.id, origin: null, queuedAt: now })
     // 胜利方运行期间 drain：bot 忙整体跳过建回，但去重清扫在忙检查之前——m1（幂等键
     // 已被胜利方占用）当拍即消账，m2 原地保留。
     t.service.drainPendingMessages()
@@ -435,7 +435,7 @@ test('DSHBOTS-304 双投（任务族）：任务终态后挂起快照作废不�
       t.project.id, t.dev.id, task.id, now, now,
     )
     t.store.run("UPDATE tasks SET status = 'done' WHERE id = ?", task.id)
-    t.service.holdPendingMessage(t.dev.id, {
+    t.service.holdPendingMessage(t.dev.id, t.project.id, {
       kind: 'task', messageId: `task:${task.id}`, taskId: task.id,
       projectId: t.project.id, triggerType: 'assigned',
       actorType: 'system', actorId: 'system', writeScopes: '[]',

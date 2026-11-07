@@ -85,8 +85,12 @@ export const runsMethods = {
   // task_id 维度的 one_active_run_per_task 撞车不在内：重试下一拍 active 预检即自愈。
   isRunBotUniqueViolation(error) {
     const message = String(error?.message ?? error)
+    // DSHBOTS-308：索引改 (bot_id, COALESCE(project_id,'~solo')) 表达式后，撞车文本可能
+    // 只含 COALESCE 列名而不再含 runs.bot_id——放宽匹配并保持旧文本兼容；task 维度的
+    // one_active_run_per_task 撞车仍不在内（口径不变）。
     return message.includes('UNIQUE')
-      && (message.includes('runs.bot_id') || message.includes('one_active_run_per_bot'))
+      && (message.includes('runs.bot_id') || message.includes('one_active_run_per_bot')
+        || message.includes('COALESCE(project_id'))
   },
   // DSHBOTS-304 同拍双投合并辅助：按幂等键 / task_id 找既有 active 运行（双投胜利方）。
   activeRunByIdempotencyKey(key) {
@@ -119,17 +123,21 @@ export const runsMethods = {
     if (!idem) return true
     return Boolean(this.store.get('SELECT id FROM runs WHERE idempotency_key = ?', idem))
   },
-  botBusy(botId) {
+  // DSHBOTS-308（owner 拍板跨工作区并行）：bot 串行域从 bot 全局收窄为 (bot, 工作区)，
+  // domain = project_id ?? '~solo'，与 D-299 one_bot_binding 的 COALESCE 口径一致——
+  // 不同工作区的运行互不占位，可并行。
+  botBusy(botId, domain) {
     return Boolean(this.store.get(
-      "SELECT id FROM runs WHERE bot_id = ? AND status IN ('queued', 'running')",
+      "SELECT id FROM runs WHERE bot_id = ? AND COALESCE(project_id, '~solo') = ? AND status IN ('queued', 'running')",
       botId,
+      domain,
     ))
   },
-  pendingMessagesKey(botId) {
-    return `bot_pending_msgs:${botId}`
+  pendingMessagesKey(botId, domain) {
+    return `bot_pending_msgs:${botId}:${domain}`
   },
-  holdPendingMessage(botId, item) {
-    const key = this.pendingMessagesKey(botId)
+  holdPendingMessage(botId, domain, item) {
+    const key = this.pendingMessagesKey(botId, domain)
     const list = jsonParse(this.store.setting(key), [])
     const safe = Array.isArray(list) ? list : []
     if (safe.some(existing => existing?.messageId === item.messageId)) return
@@ -249,24 +257,50 @@ export const runsMethods = {
     // max<=1 = 关闭合批（与 D-287 入队合并同口径）；非法值同样回退为不并。
     const cap = Number.isFinite(max) && max > 1 ? max : 1
     const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
+    // DSHBOTS-308 旧键一次性迁移：308 前队列键无域段（bot_pending_msgs:<botId>），按
+    // item.projectId ?? '~solo' 并入对应域键后删旧键（先写后删、按 messageId 去重，中断
+    // 重跑幂等），防丢挂起消息——chat 项有 projectId、solo 项无=天然落 '~solo' 域。
+    for (const row of this.store.all(`SELECT key, value FROM settings WHERE key LIKE '${prefix}%'`)) {
+      const rest = row.key.slice(prefix.length)
+      if (rest.includes(':')) continue
+      const legacy = jsonParse(row.value, [])
+      if (Array.isArray(legacy)) {
+        for (const item of legacy) {
+          const domain = item?.projectId ?? '~solo'
+          const key = this.pendingMessagesKey(rest, domain)
+          const list = jsonParse(this.store.setting(key), [])
+          const safe = Array.isArray(list) ? list : []
+          if (!safe.some(existing => existing?.messageId === item?.messageId)) {
+            this.store.setSetting(key, JSON.stringify([...safe, item]))
+          }
+        }
+      }
+      this.store.run('DELETE FROM settings WHERE key = ?', row.key)
+    }
     const rows = this.store.all(`SELECT key, value FROM settings WHERE key LIKE '${prefix}%'`)
     for (const row of rows) {
-      const botId = row.key.slice(prefix.length)
+      const rest = row.key.slice(prefix.length)
+      const colon = rest.indexOf(':')
+      if (colon === -1) continue
+      const botId = rest.slice(0, colon)
+      const domain = rest.slice(colon + 1)
       let items = jsonParse(row.value, [])
       if (!Array.isArray(items) || !items.length) continue
       // DSHBOTS-304 挂起项去重清扫（建回前预检）：双投失败方挂起项与胜利方运行共存时——
       // 消息族建回永撞全局 UNIQUE idempotency_key 成永生占位，任务族按恒新幂等键重复建行；
       // 清扫在分组前完成，被覆盖/作废项直接消账，余项自然重组（同组合并不受影响）。
+      // 幂等键/task 维度与域无关（全局口径），保持现状。
       const kept = items.filter(item => !this.heldItemSuperseded(botId, item))
       if (kept.length !== items.length) {
-        this.store.setSetting(this.pendingMessagesKey(botId), JSON.stringify(kept))
+        this.store.setSetting(this.pendingMessagesKey(botId, domain), JSON.stringify(kept))
         if (!kept.length) continue
         items = kept
       }
-      if (this.botBusy(botId)) continue
+      // DSHBOTS-308：busy 只看本域（bot, domain），他工作区队列本轮照常建回（并行）。
+      if (this.botBusy(botId, domain)) continue
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', botId)
       if (!bot || bot.status !== 'active') {
-        this.store.setSetting(this.pendingMessagesKey(botId), '[]')
+        this.store.setSetting(this.pendingMessagesKey(botId, domain), '[]')
         continue
       }
       // 相邻同 kind 的 chat/solo_chat 挂起消息合成一组（用户提问只并入同为用户触发的组、
@@ -291,7 +325,7 @@ export const runsMethods = {
       groups.sort((a, b) => Number(this.heldItemIsUserQuestion(b.first)) - Number(this.heldItemIsUserQuestion(a.first)))
       const consumed = new Set()
       for (const group of groups) {
-        if (this.botBusy(botId)) break
+        if (this.botBusy(botId, domain)) break
         const runId = this.insertHeldMessageRun(bot, group)
         if (!runId) break
         consumed.add(group.first.messageId)
@@ -299,7 +333,7 @@ export const runsMethods = {
         if (group.first.kind === 'dm' || group.first.kind === 'dm_reply') break
       }
       const leftover = items.filter(item => !consumed.has(item?.messageId))
-      this.store.setSetting(this.pendingMessagesKey(botId), JSON.stringify(leftover))
+      this.store.setSetting(this.pendingMessagesKey(botId, domain), JSON.stringify(leftover))
     }
   },
 
@@ -311,8 +345,10 @@ export const runsMethods = {
     )
     if (existing) return existing.id
     // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列（一条来信一条回信，不合批）。
-    if (this.botBusy(target.id)) {
-      this.holdPendingMessage(target.id, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
+    // 域=dm 所属项目（项目外私信 project_id 为 NULL → '~solo'，DSHBOTS-308）。
+    const domain = message.project_id ?? '~solo'
+    if (this.botBusy(target.id, domain)) {
+      this.holdPendingMessage(target.id, domain, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
       return null
     }
     const runId = id('run')
@@ -328,7 +364,7 @@ export const runsMethods = {
       if (this.isRunBotUniqueViolation(error)) {
         const merged = this.activeRunByIdempotencyKey(`dm:${message.id}`)
         if (merged) return merged
-        this.holdPendingMessage(target.id, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
+        this.holdPendingMessage(target.id, domain, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
         return null
       }
       throw error
@@ -398,7 +434,8 @@ export const runsMethods = {
       if (this.isRunBotUniqueViolation(error)) {
         const merged = this.activeRunByIdempotencyKey(`dm_reply:${message.id}`)
         if (merged) return merged
-        this.holdPendingMessage(caller.id, { kind: 'dm_reply', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
+        const domain = message.project_id ?? '~solo'
+        this.holdPendingMessage(caller.id, domain, { kind: 'dm_reply', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
         return null
       }
       throw error
@@ -416,8 +453,9 @@ export const runsMethods = {
     )
     if (existing) return existing.id
     // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
-    if (this.botBusy(bot.id)) {
-      this.holdPendingMessage(bot.id, { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
+    // solo_chat 运行 project_id 恒 NULL → 域恒 '~solo'（DSHBOTS-308）。
+    if (this.botBusy(bot.id, '~solo')) {
+      this.holdPendingMessage(bot.id, '~solo', { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
       return null
     }
     const runId = id('run')
@@ -433,7 +471,7 @@ export const runsMethods = {
       if (this.isRunBotUniqueViolation(error)) {
         const merged = this.activeRunByIdempotencyKey(`solo_chat:${messageId}`)
         if (merged) return merged
-        this.holdPendingMessage(bot.id, { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
+        this.holdPendingMessage(bot.id, '~solo', { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
         return null
       }
       throw error
@@ -455,8 +493,9 @@ export const runsMethods = {
     )
     if (existing) return existing.id
     // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
-    if (this.botBusy(bot.id)) {
-      this.holdPendingMessage(bot.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
+    // 域=chat 所属项目（DSHBOTS-308）。
+    if (this.botBusy(bot.id, project.id)) {
+      this.holdPendingMessage(bot.id, project.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
       return null
     }
     const runId = id('run')
@@ -474,7 +513,7 @@ export const runsMethods = {
       if (this.isRunBotUniqueViolation(error)) {
         const merged = this.activeRunByIdempotencyKey(`chat:${messageId}:${bot.id}`)
         if (merged) return merged
-        this.holdPendingMessage(bot.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
+        this.holdPendingMessage(bot.id, project.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
         return null
       }
       throw error

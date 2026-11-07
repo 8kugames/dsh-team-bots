@@ -124,7 +124,7 @@ export const taskRunMethods = {
     // task:<id>：挂起队列按 messageId 去重/消费，任务项无消息 id 不能留空。
     // DSHBOTS-300：快照构造提为 hold 闭包——busy 分支与下文「查后插竞态撞 UNIQUE」
     // 兜底（DSHBOTS-300）共用同一挂起项，杜绝两处漂移。
-    const hold = () => this.holdPendingMessage(task.assignee_bot_id, {
+    const hold = () => this.holdPendingMessage(task.assignee_bot_id, task.project_id, {
       kind: 'task', messageId: `task:${task.id}`, taskId: task.id,
       projectId: task.project_id, triggerType,
       actorType: actor.type, actorId: actor.id, writeScopes,
@@ -134,7 +134,7 @@ export const taskRunMethods = {
       },
       queuedAt: createdAt,
     })
-    if (this.botBusy(task.assignee_bot_id)) {
+    if (this.botBusy(task.assignee_bot_id, task.project_id)) {
       hold()
       return null
     }
@@ -204,11 +204,11 @@ export const taskRunMethods = {
     // busy 闸（DSHBOTS-290）：owner 忙时 review/handle 运行同样不落 runs 行（撞
     // one_active_run_per_bot），挂待处理队列空闲建回——与 enqueueTaskRun 同口径。
     // DSHBOTS-300：挂起项提为 hold 闭包，busy 分支与查后插竞态兜底共用。
-    const hold = () => this.holdPendingMessage(owner.id, {
+    const hold = () => this.holdPendingMessage(owner.id, project.id, {
       kind: 'owner_task', messageId: `owner_task:${current.id}:${kind}`, taskId: current.id,
       projectId: project.id, runKind: kind, triggerType, queuedAt: createdAt,
     })
-    if (this.botBusy(owner.id)) {
+    if (this.botBusy(owner.id, project.id)) {
       hold()
       return null
     }
