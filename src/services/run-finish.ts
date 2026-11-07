@@ -6,7 +6,7 @@
 
 import { runUsageTotals } from '../usage.js'
 import { id, nowIso, parseMentions, text } from '../util.js'
-import { bool, rolloverSummaryKey, SUBAGENT_DELIVERY_GATE_KEY } from '../config.js'
+import { rolloverSummaryKey } from '../config.js'
 import {
   isQuotaExhausted,
   isRateLimitError,
@@ -314,31 +314,18 @@ export const runFinishMethods = {
         const task = this.taskRow(run.task_id)
         const ownerReview = (task.review_target ?? 'user') === 'owner_bot'
         let autoReviewQueued = false
-        // 子代理施工硬闸（DSHBOTS-311）：task 施工运行交付须有 subagent_spawned 账目
-        //（D-294 subagent-ledger 落 run_events）才转 in_review——owner 铁律不依赖模型自觉。
-        // 无账目：运行正常完结、交付文本照落评论，但任务留原状态（不转 in_review），评论
-        // 附提示引导重做；例外通道=settings subagent_delivery_gate=0（默认开）。review/
-        // handle/消息族运行不经此闸；返工后的每次交付同样过闸。
-        const gateOn = bool(this.store.setting(SUBAGENT_DELIVERY_GATE_KEY, '1'), true)
-        const spawned = this.store.get(
-          "SELECT id FROM run_events WHERE run_id = ? AND type = 'subagent_spawned' LIMIT 1",
-          runId,
-        )
-        const gated = gateOn && !spawned
+        // 子代理施工硬闸已解除（原 DSHBOTS-311）：交付不再要求子代理施工账目，
+        // 施工方式由 bot 自选（亲做或派「bot 名+任务号」子代理），账本（D-294）仍照记。
         this.store.transaction(() => {
-          if (!gated) {
-            this.store.run(
-              `UPDATE tasks SET status = 'in_review', version = version + 1, updated_at = ?
-               WHERE id = ? AND status NOT IN ('done', 'canceled')`,
-              endedAt, task.id,
-            )
-          }
+          this.store.run(
+            `UPDATE tasks SET status = 'in_review', version = version + 1, updated_at = ?
+             WHERE id = ? AND status NOT IN ('done', 'canceled')`,
+            endedAt, task.id,
+          )
           this.store.run(
             'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
             id('cmt'), task.id, 'bot', bot.id,
-            gated
-              ? `${cleanOutput || '运行完成，但模型未返回文本。'}\n\n（DSHBOTS-311 硬闸：本运行未经子代理施工，交付未转验收——请按任务号开专属子代理实施后重新交付；确有例外请联系 owner 关闭闸门 settings subagent_delivery_gate=0。）`
-              : cleanOutput || '运行完成，但模型未返回文本。',
+            cleanOutput || '运行完成，但模型未返回文本。',
             endedAt,
           )
           this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, { runId, identifier: `${project.key}-${task.number}` })

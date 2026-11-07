@@ -1,12 +1,10 @@
-// tests/control-plane-subagent.test.ts —— DSHBOTS-292 守门：任务子智能体化（控制面提示词）。
-// ADR §5.2-3 / §2.1-2/§2.4：任务派发落 bot 控制面会话后，提示 bot 按任务号开子智能体施工。
+// tests/control-plane-subagent.test.ts —— 子智能体化解除后的执行口径守门。
 // 锁三组锚点：
-//  ① 按任务号开子智能体——每卡一个专属子智能体、标签=任务号、不许多卡并给一个子智能体、
-//     小卡/单文件可亲自做；
+//  ① 施工方式自选——亲做或派专属子代理均可、派时命名 <bot 名>-<任务号>、不许多卡并给
+//     一个子代理（强制每卡子代理 + 交付硬闸已解除，治施工堵塞）；
 //  ② 写范围/沙箱继承——子代理写继承控制面会话沙箱、不受任务写范围调度闸门约束，
 //     卡面声明写范围作为子智能体提示词的写入边界（ADR §2.4 三层补偿之②）；
-//  ③ 交付模板——子智能体回报（变更/验证/风险）→ bot 合并并亲自审查 → 再出交付报告
-//     （D-276 自校段口径的子代理版）。
+//  ③ 交付模板——子智能体回报（变更/验证/风险）→ bot 合并并亲自审查 → 再出交付报告。
 // 预算与段序红线由 tests/prompt-budget.test.ts / tests/prompt-prefix-order.test.ts 守门，
 // 本文件只钉新段内容与门控。
 import { test } from 'node:test'
@@ -60,12 +58,12 @@ test('任务提示词三组锚点：按任务号开子智能体 + 写范围/沙�
     const prompt = t.runtime.promptFor({
       run: { kind: 'task' }, bot: t.dev, project: t.project, task: rowOf(t.store, card.id),
     })
-    // ① 按任务号开子智能体：专属、带任务号标签、不并卡、小卡例外。
-    assert.match(prompt, /# Child agents by task number/, '应有按任务号开子智能体段')
-    assert.match(prompt, /dedicated child agent \(subagent\/subagent_fork\) labeled with its task number/, '每卡一个专属子智能体且标签=任务号')
+    // ① 施工方式自选：亲做或派子代理、派时命名 bot 名+任务号、不并卡。
+    assert.match(prompt, /# Child agents by task number/, '应有子智能体执行口径段')
+    assert.match(prompt, /Execute each card yourself, or hand it to a dedicated child agent/, '亲做与派子代理均为合法路径')
+    assert.match(prompt, /named <your bot name>-<task number>/, '派子代理命名 bot 名+任务号')
     assert.match(prompt, /never merge cards into one agent/, '不许把多张卡合并给一个子智能体')
-    assert.match(prompt, /every card runs in a dedicated child agent/, '每卡都在专属子代理执行（DSHBOTS-311 无小卡豁免）')
-    assert.doesNotMatch(prompt, /small single-file cards do yourself/, '小卡亲做豁免句已删（DSHBOTS-311 与硬闸口径一致）')
+    assert.doesNotMatch(prompt, /every card runs in a dedicated child agent/, '强制每卡子代理口径已解除')
     // ② 写范围/沙箱继承：继承控制面沙箱、绕过调度闸门、卡面写范围=写入边界。
     assert.match(prompt, /Child writes inherit your session sandbox, not the task write-scope gates/, '应声明写继承沙箱且不受任务写范围调度闸门约束')
     assert.match(prompt, /pass the card's declared write scopes as the child's write boundary/, '卡面声明写范围应作为子智能体写入边界')
