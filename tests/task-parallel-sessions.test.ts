@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
+import { sessionMethods } from '../src/services/runtime/session.js'
 
 const renames = []
 
@@ -119,4 +120,76 @@ test('源码锚：任务专属会话命名口径与串行豁免', () => {
   assert.match(migrationSource, /kind <> 'task'/, 'bot 串行索引豁免任务运行')
   const taskRunsSource = readFileSync(fileURLToPath(new URL('../src/services/task-runs.ts', import.meta.url)), 'utf8')
   assert.doesNotMatch(taskRunsSource, /holdPendingMessage\(task\.assignee_bot_id/, '任务入队不再挂待处理队列')
+})
+
+// 总监侧运行（review/handle，owner_task 运行族）不吃任务亲和：亲和按 assignee 归属解析，
+// 会把总监的核验/受阻处置运行开进成员的任务专属会话——会话绑定属成员（ownerContextFor
+// 按 session_bindings 判身份，总监专权工具 403，与 D-306 治的验收错位同款），总监话语
+// 也会混进成员任务上下文。应落总监自己的 (owner,project) 控制面绑定（ensureSession ③）。
+// 守门三向：①blocked 卡上 handle 运行落总监控制面，不进成员任务会话；②in_review 卡上
+// review 运行同样落总监控制面；③成员自己的 task 运行照旧亲和回任务会话（不回归）。
+test('总监侧 review/handle 运行不进成员任务会话，落总监控制面绑定', async () => {
+  const t = await setup()
+  try {
+    const { store, service, director, dev, project } = t
+    const rt = {
+      store, config: service.config, logger: { info() {}, warn() {}, error() {} },
+      sessionCreates: new Map(),
+      ctx: {
+        sessionController: {
+          resolveAgent: async () => ({}),
+          selectModel: async () => ({}),
+          create: async () => { throw new Error('本测全部走既有绑定，不应新建会话') },
+        },
+      },
+      selectModel: async () => {},
+      defaultAgentPreset: async () => ({}),
+      applyFilePolicy() {},
+      shouldRolloverSession: () => false,
+      maybeCompactSession() {},
+      taskAffinityBinding: sessionMethods.taskAffinityBinding,
+      ensureTaskSession: sessionMethods.ensureTaskSession,
+      ensureBotBinding: sessionMethods.ensureBotBinding,
+      retireBinding: sessionMethods.retireBinding,
+    } as any
+    const resolve = (bot, run, task) => sessionMethods.ensureSession.call(rt, bot, project, { run, task })
+
+    const card = await service.createTask({ projectId: project.id, title: '受阻卡', assigneeBotId: dev.id, writeScopes: ['src/x/'], postCard: false }, { type: 'bot', id: director.id })
+    const task = service.taskRow(card.id)
+    const now = new Date().toISOString()
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES ('sess-task-x', ?, ?, 'task', ?, 0, ?)",
+      dev.id, project.id, task.id, now,
+    )
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, alias, created_at) VALUES ('sess-owner-cp', ?, ?, 'bot', 0, ?)",
+      director.id, project.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_dev_work', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'own:1', 'sess-task-x', ?, ?)`,
+      project.id, dev.id, task.id, now, now,
+    )
+
+    store.run("UPDATE tasks SET status = 'blocked' WHERE id = ?", task.id)
+    assert.equal(
+      await resolve(director, { id: 'run_handle', kind: 'handle', bot_id: director.id }, service.taskRow(task.id)),
+      'sess-owner-cp',
+      'blocked 卡上的 handle 运行落总监控制面绑定，不进成员任务会话',
+    )
+
+    store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", task.id)
+    assert.equal(
+      await resolve(director, { id: 'run_review', kind: 'review', bot_id: director.id }, service.taskRow(task.id)),
+      'sess-owner-cp',
+      'in_review 卡上的 review 运行落总监控制面绑定',
+    )
+
+    store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", task.id)
+    assert.equal(
+      await resolve(dev, { id: 'run_rework', kind: 'task', bot_id: dev.id }, service.taskRow(task.id)),
+      'sess-task-x',
+      '成员自己的施工运行照旧亲和回任务会话（不回归）',
+    )
+  } finally { await t.close() }
 })
