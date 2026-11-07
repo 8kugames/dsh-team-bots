@@ -120,6 +120,8 @@ export function runMigrations(db) {
   activateBotRunSerialization(db)
   // DSHBOTS-308：串行域收窄为 (bot, 工作区)，见 activateBotRunSerializationDomain。
   activateBotRunSerializationDomain(db)
+  // 任务运行豁免 bot 串行域（单 bot 多任务并行）：见 exemptTaskRunsFromBotSerialization。
+  exemptTaskRunsFromBotSerialization(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -393,6 +395,20 @@ export function activateBotRunSerializationDomain(db) {
       ON runs(bot_id, COALESCE(project_id, '~solo')) WHERE status IN ('queued', 'running');
   `)
   recordMigration(db, 'bot_run_serialization_domain')
+}
+
+// 任务运行豁免 bot 串行域（单 bot 多任务并行）：one_active_run_per_bot 加 kind <> 'task'
+// 谓词——施工运行不再受「同 (bot, 工作区) 至多一条活跃运行」约束，可多卡并行；任务维度的
+// 重复由 one_active_run_per_task 兜底，写安全由调度器写范围闸门兜底。review/handle（owner_task）
+// 与消息族照旧串行。不追改存量（历史串行取消行为不回滚）。
+export function exemptTaskRunsFromBotSerialization(db) {
+  db.exec(`
+    DROP INDEX IF EXISTS one_active_run_per_bot;
+    CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_bot
+      ON runs(bot_id, COALESCE(project_id, '~solo'))
+      WHERE status IN ('queued', 'running') AND kind <> 'task';
+  `)
+  recordMigration(db, 'task_runs_exempt_bot_serialization')
 }
 
 // 单聊支持：runs 与 session_bindings 的 project_id 放宽为可空（项目外会话与运行），

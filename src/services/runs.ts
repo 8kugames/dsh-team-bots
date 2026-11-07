@@ -126,9 +126,11 @@ export const runsMethods = {
   // DSHBOTS-308（owner 拍板跨工作区并行）：bot 串行域从 bot 全局收窄为 (bot, 工作区)，
   // domain = project_id ?? '~solo'，与 D-299 one_bot_binding 的 COALESCE 口径一致——
   // 不同工作区的运行互不占位，可并行。
+  // 任务运行豁免（单 bot 多任务并行）：任务在独立任务会话执行，不再占消息族的
+  // bot 车道——busy 判定只看非任务运行，chat/dm/solo 消息不必等任务跑完。
   botBusy(botId, domain) {
     return Boolean(this.store.get(
-      "SELECT id FROM runs WHERE bot_id = ? AND COALESCE(project_id, '~solo') = ? AND status IN ('queued', 'running')",
+      "SELECT id FROM runs WHERE bot_id = ? AND COALESCE(project_id, '~solo') = ? AND status IN ('queued', 'running') AND kind <> 'task'",
       botId,
       domain,
     ))

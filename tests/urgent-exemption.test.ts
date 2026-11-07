@@ -95,6 +95,17 @@ const cleanup = async ({ root, store }) => {
 
 const taskRow = (store, id) => store.get('SELECT * FROM tasks WHERE id = ?', id)
 
+// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
+const heldItems = (store, botId) => {
+  const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
+}
+
 const taskMessages = (store, taskId) =>
   store.all('SELECT * FROM messages WHERE task_id = ? ORDER BY created_at', taskId)
 
@@ -128,7 +139,7 @@ test('提示词注入：urgent 任务卡注入豁免指令（车道豁免 + git 
   }
 })
 
-test('urgent 新卡对同写范围拒单守卫放行：落卡带 priority、run 挂起空闲建回、创建消息报备与在办卡共用车道（新语义）', async () => {
+test('urgent 新卡对同写范围拒单守卫放行：落卡带 priority、派发直落 runs 行、创建消息报备与在办卡共用车道（新语义）', async () => {
   const ctx = await setup()
   try {
     const { director, dev, gate } = await seedProject(ctx.service, ctx.store)
@@ -155,24 +166,24 @@ test('urgent 新卡对同写范围拒单守卫放行：落卡带 priority、run 
       `创建消息应报备共用车道，实际消息：${JSON.stringify(bodies)}`,
     )
 
-    // 争用口径 A（新语义）：GATE-1 的运行还占着 Builder，urgent 派发不撞唯一索引——
-    // 挂 bot_pending_msgs 待处理队列（返回 null、不落 runs 行）。
+    // 任务运行豁免 bot 串行域（单 bot 多任务并行）：GATE-1 的运行还占着 Builder，
+    // urgent 派发也不再挂起——直落 runs 行（同项目并行安全由写范围闸门兜底）。
     await ctx.service.tick()
-    assert.equal(
-      Number(ctx.store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ?", urgent.id)?.n ?? 0),
-      0,
-      'bot 忙时 urgent 运行挂起，不落 runs 行',
-    )
-    const held = JSON.parse(ctx.store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]')
+    const urgentRun = ctx.store.get("SELECT * FROM runs WHERE task_id = ?", urgent.id)
+    assert.ok(urgentRun, 'urgent 派发直落 runs 行（不挂起）')
     assert.ok(
-      held.some(item => item.messageId === `task:${urgent.id}`),
-      'urgent 派发应挂待处理队列留痕',
+      ['queued', 'running'].includes(urgentRun.status),
+      `urgent 运行已建行（排队或开跑），实际 ${urgentRun.status}`,
+    )
+    assert.ok(
+      !heldItems(ctx.store, dev.id).some(item => item.messageId === `task:${urgent.id}`),
+      'urgent 派发不进挂起队列',
     )
 
-    // 在办运行置终态释放 bot → 空闲 drain 建回：urgent 卡照常立即施工（入队或开跑，均在办）。
+    // 在办运行（GATE-1）置终态释放 → 写闸门放行：urgent 卡照常立即施工（入队或开跑，均在办）。
     ctx.store.run(
-      "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE bot_id = ? AND status IN ('queued', 'running')",
-      new Date().toISOString(), dev.id,
+      "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE bot_id = ? AND task_id != ? AND status IN ('queued', 'running')",
+      new Date().toISOString(), dev.id, urgent.id,
     )
     await ctx.service.tick()
     const run = ctx.store.get("SELECT * FROM runs WHERE task_id = ? AND status IN ('queued', 'running')", urgent.id)
