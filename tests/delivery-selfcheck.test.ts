@@ -83,7 +83,7 @@ test('a1) 源码锚：自校段为固定追加段（marker 对 + 关键文案被
 
 test('a2) 源码锚：D-274 时效段结构原样（Deadline 行 + 时效模板链），自校段不触碰静态前缀三段', () => {
   assert.ok(PROMPT_SRC.includes('Deadline: ${new Date(deadline.deadlineMs).toISOString()} / ${Math.ceil(remainingMs / 60_000)} min remaining.'), 'D-274 剩余时间行原样')
-  assert.ok(PROMPT_SRC.includes('超线，本轮是收尾轮'), 'D-274 耗尽收尾轮文案原样')
+  assert.ok(PROMPT_SRC.includes('this is a wrap-up turn'), 'D-274 耗尽收尾轮文案原样')
   assert.ok(PROMPT_SRC.includes('# Time budget'), '时效段标题锚点原样')
   assert.ok(PROMPT_SRC.includes('${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}'), '任务模板尾部链（描述→评论→时效→豁免→恢复）原样——自校段不插进 8k 截断度量区')
 })

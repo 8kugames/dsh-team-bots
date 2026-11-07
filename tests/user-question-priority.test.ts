@@ -343,7 +343,7 @@ test('提示层（D-283）：分级要求注入所有群聊提示，微信运行
     const prompt = groupPrompt(t, chatRunRow(t, runId), msgRow)
     assert.match(
       prompt,
-      /Long replies \(交付\/进展\/评估\) use Markdown headings 结论\/证据\/风险\/下一步/,
+      /Long replies \(deliveries, progress updates, assessments\) use Markdown headings 结论\/证据\/风险\/下一步/,
       '分级口径必须进群聊提示：长文用固定小标题',
     )
     assert.ok(prompt.includes('short replies stay natural'), '短回复保持自然语言豁免必须在场')
