@@ -185,6 +185,10 @@ export default {
   "移出项目": "from the project",
   "空闲中": "Idle",
   "系统设置已保存": "System settings saved",
+  // Settings conflict 3-way merge (B2/DSHBOTS-325)
+  "配置已被他人修改，以下字段双方都改过、以最新保存为准，请复核：": "Settings were changed by someone else; these fields were edited on both sides and keep the latest saved values, please review: ",
+  "配置已被他人修改：你的改动未与对方冲突，已合并回表单，请重新保存": "Settings were changed by someone else; your edits do not conflict and were merged back into the form, please save again",
+  "配置已被他人修改，本次没有待保存的改动": "Settings were changed by someone else; there was nothing pending to save",
   "终端": "Terminal",
   "缓存写": "Cache write",
   "缓存读": "Cache read",

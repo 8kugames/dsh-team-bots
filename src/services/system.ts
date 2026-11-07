@@ -98,6 +98,8 @@ export const systemMethods = {
       // 用量快照默认按 30 日窗口（DSHBOTS-121）：与页面默认档一致，其余三档按需单独取。
       usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null, window: '30d', cacheTtlMs: this.config.usageSnapshotCacheMs }),
       settings: this.settingsView(),
+      // 设置页乐观并发令牌（B2/DSHBOTS-325）：UI 保存时随 patch 回传，不匹配即 409。
+      settingsRevision: this.settingsRevision(),
       // 可编辑提示词段（B1/DSHBOTS-324）：全局配置页「团队指令」分组唯一真值。
       promptSegments: this.promptSegmentsView(),
       runLimits: this.runLimitsView(),

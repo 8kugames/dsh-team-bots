@@ -4,7 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, APPROVAL_TIMEOUT_KEY, QUESTION_TIMEOUT_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE, REVIEW_IDLE_MINUTES_KEY, REVIEW_IDLE_MINUTES_RANGE } from '../config.js'
-import { badRequest, notFound } from '../errors.js'
+import { badRequest, conflict, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
 import { syncSkills } from '../skills.js'
@@ -162,6 +162,12 @@ export const coreMethods = {
   budgetCurrency() {
     return String(this.store.setting('budget_currency', 'CNY') || 'CNY').toUpperCase()
   },
+  // 设置页乐观并发令牌（B2/DSHBOTS-325）：updateSettings 每次成功保存 +1，
+  // UI 保存时携带读取时的值，不匹配即 conflict 409（多标签/多人同时改不静默互覆）。
+  // 只覆盖 settingsView 键域；prompt_overrides 是独立编辑面，不混入本令牌。
+  settingsRevision() {
+    return Number(this.store.setting('settings_revision', '0')) || 0
+  },
   settingsView() {
     const keys = [
       'budget_currency', 'global_token_budget', 'global_cost_budget',
@@ -191,7 +197,14 @@ export const coreMethods = {
       reviewIdleMinutes,
     }
   },
-  updateSettings(patch, actor = this.actor()) {
+  updateSettings(patch, actor = this.actor(), expectedRevision = undefined) {
+    // 乐观并发（B2/DSHBOTS-325）：UI 带上读取时的 revision，不一致即 409——后保存者
+    // 不静默覆盖先保存者的改动。不带 revision 的旧调用形态保持原行为（兼容脚本/旧 UI）。
+    if (expectedRevision !== undefined && expectedRevision !== null && String(expectedRevision) !== '') {
+      if (Number(expectedRevision) !== this.settingsRevision()) {
+        throw conflict('配置已被其他人或窗口修改，本次保存被拒绝；请刷新后基于最新值重新编辑')
+      }
+    }
     const values: any = {}
     for (const [key, value] of Object.entries(patch ?? {})) {
       if (!Object.keys(this.settingsView()).includes(key)) throw badRequest(`不支持的设置项：${key}`)
@@ -260,6 +273,9 @@ export const coreMethods = {
     }
     this.store.transaction(() => {
       for (const [key, value] of Object.entries(values)) this.store.setSetting(key, value)
+      // 乐观并发令牌随保存推进（B2/DSHBOTS-325）：settings_revision 不是 settingsView 键，
+      // 不可经 patch 直接写，只在这里单调递增。
+      this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
       this.audit(actor, 'settings.update', 'settings', 'global', 'global', values)
       // 运行时效单列一条 global.run_limits 审计，便于按目标检索改值历史。
       const limitKeys = Object.keys(RUN_LIMIT_RANGES)

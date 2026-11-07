@@ -78,6 +78,7 @@ interface TeamActionPayload {
   answer?: string
   segment?: string
   text?: string
+  revision?: number
   command?: string
   code?: string
   decision?: string

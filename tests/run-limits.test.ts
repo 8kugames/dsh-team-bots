@@ -175,7 +175,8 @@ test('全局配置页渲染运行时效卡与保存动作', () => {
   // 输入 name 与后端 settings 键一致，保存走 update_settings。
   assert.match(source, /name="run_timeout_minutes"/)
   assert.match(source, /name="stall_watchdog_minutes"/)
-  assert.match(source, /run_timeout_minutes: value\('settings-run-timeout'\)/)
+  // B2/DSHBOTS-325 起三处设置保存统一走 saveSettingsWithMerge（key→inputId 映射驱动）。
+  assert.match(source, /run_timeout_minutes: 'settings-run-timeout'/)
   // 生效语义说明：进行中不追溯。
   assert.match(source, /进行中的运行不追溯/)
 })

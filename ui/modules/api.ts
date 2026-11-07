@@ -17,7 +17,12 @@ export async function api(action, payload = {}, { quiet = false } = {}) {
       const message = body?.error?.message ?? (response.status === 401 || response.status === 403
         ? t("登录状态已失效，请回到 DSH Web 登录后重新打开。")
         : t("请求失败，请稍后重试。"))
-      throw new Error(message)
+      // B2/DSHBOTS-325：错误带码与状态（如 CONFLICT/409），调用方可按错误类别接管处理
+      // （静默 quiet 模式下自走合并/提示路径），其余调用方不受影响。
+      const error = new Error(message) as Error & { code?: string | null; status?: number }
+      error.code = body?.error?.code ?? null
+      error.status = response.status
+      throw error
     }
     return body.data
   } catch (error: any) {
@@ -27,6 +32,23 @@ export async function api(action, payload = {}, { quiet = false } = {}) {
     state.busy -= 1
   }
 }
+
+// ===== settings-merge:start =====
+// 设置草稿三方合并（B2/DSHBOTS-325）：base=发送时服务端值、patch=用户提交值、
+// serverNow=409 后重取的服务端值。用户没改的字段不参与；对方没改的字段保留用户草稿
+// （贴回表单，编辑不丢）；双方都改的字段以服务端为准，字段名进 conflicts 供提示复核。
+export function mergeSettingsDraft(base, patch, serverNow) {
+  const merged = {}
+  const conflicts = []
+  for (const [key, value] of Object.entries(patch ?? {})) {
+    const baseValue = String(base?.[key] ?? '')
+    if (String(value) === baseValue) continue
+    if (String(serverNow?.[key] ?? '') === baseValue) merged[key] = value
+    else conflicts.push(key)
+  }
+  return { merged, conflicts }
+}
+// ===== settings-merge:end =====
 
 // IM 式已读：群聊可见时把水位推到最后一条消息，服务端据此算未读数。
 // 只在群聊视图上报；切到任务/设置等 tab 不算数。
