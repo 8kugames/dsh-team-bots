@@ -63,6 +63,7 @@ async function setup({ maxConcurrentRuns }: { maxConcurrentRuns?: number } = {})
   const runtime = new ManualRuntime()
   service.attachRuntime(runtime)
   await service.initialize()
+  store.setSetting('subagent_delivery_gate', '0') // DSHBOTS-311 夹具：本文件用例非闸主题，关闸保持既有交付流
   // 关闭自动调度，由测试显式驱动 tick。
   service.started = false
   const director = store.get("SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)")

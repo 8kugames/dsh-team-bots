@@ -665,7 +665,7 @@ The previous run was interrupted by a host restart. Check the workspace and git 
       const parallel = this.config.agentTeam ? `
 
 # Child agents by task number
-Execute each card in a dedicated child agent (subagent/subagent_fork) labeled with its task number (e.g. DSHBOTS-292); never merge cards into one agent — small single-file cards do yourself. Child writes inherit your session sandbox, not the task write-scope gates: pass the card's declared write scopes as the child's write boundary. Children report changed paths, verification with results, risks; merge and review their output yourself before delivering.` : ''
+Execute each card in a dedicated child agent (subagent/subagent_fork) labeled with its task number (KEY-N); never merge cards into one agent — every card runs in a dedicated child agent. Child writes inherit your session sandbox, not the task write-scope gates: pass the card's declared write scopes as the child's write boundary. Children report changed paths, verification with results, risks; merge and review their output yourself before delivering.` : ''
       const parallelMerge = this.config.agentTeam ? `
 
 # Parallel work inside this task

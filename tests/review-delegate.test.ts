@@ -73,6 +73,7 @@ async function setup({ auto = false } = {}) {
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
   service.attachRuntime(auto ? new AutoRuntime() : new HoldRuntime())
   await service.initialize()
+  store.setSetting('subagent_delivery_gate', '0') // DSHBOTS-311 夹具：本文件用例非闸主题，关闸保持既有交付流
   service.started = true
   const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({

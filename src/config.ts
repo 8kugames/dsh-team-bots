@@ -14,6 +14,10 @@ export const bool = (value, fallback = false) => {
   return /^(1|true|yes|on)$/i.test(String(value))
 }
 
+// 子代理施工硬闸开关（DSHBOTS-311）：task 运行交付须有 subagent_spawned 账目才转
+// in_review；默认 1 开，0 = owner 例外通道（关闭闸门）。
+export const SUBAGENT_DELIVERY_GATE_KEY = 'subagent_delivery_gate'
+
 const int = (value, fallback, min, max) => {
   const parsed = Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(parsed)) return fallback

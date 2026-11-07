@@ -115,6 +115,7 @@ async function setup() {
   const runtime = new FakeRuntime(service)
   service.attachRuntime(runtime)
   await service.initialize()
+  store.setSetting('subagent_delivery_gate', '0') // DSHBOTS-311 夹具：本文件用例非闸主题，关闸保持既有交付流
   service.started = true
   return { root, workspace, dataDir, config, store, service, runtime }
 }
