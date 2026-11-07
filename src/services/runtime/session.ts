@@ -387,7 +387,13 @@ export const sessionMethods = {
     // ② 任务亲和（DSHBOTS-286/289，ADR §5.2-3）：未终态任务按 runs 归属回原会话——含
     // dm_reply 经 sessionTaskFor 解析出的任务（executeRun 已把任务行透传进来）与结转后
     // alias 行上的旧任务流量；终态任务不享亲和，落下方控制面单绑定。
-    const affinity = this.taskAffinityBinding(task)
+    // 总监侧运行（review/handle，owner_task 运行族）除外：亲和按 assignee 归属解析，会把
+    // 总监的核验/受阻处置运行开进成员任务会话——绑定属成员（ownerContextFor 按绑定行判
+    // 身份，总监专权工具 403，与 D-306 治的验收错位同款），且总监话语混进成员任务上下文。
+    // 一律落 ③ 总监自己的 (owner,project) 控制面绑定。
+    const affinity = (run?.kind === 'review' || run?.kind === 'handle')
+      ? undefined
+      : this.taskAffinityBinding(task)
     if (affinity) {
       const resolved = await this.ctx.sessionController.resolveAgent(affinity.session_id)
       if (!resolved?.error) {
