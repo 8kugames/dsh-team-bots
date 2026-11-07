@@ -4,6 +4,84 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.2.393
+
+### 中文
+
+本版是 0.2.379～0.2.393 的开发成果。**v0.2.378 与 v0.2.367 已从 npm 撤回**，registry 上的 `latest` 仍停在 0.2.364，因此从 npm 使用者的视角看，本版一次性带来 0.2.378 及其之后的全部变化。
+
+**架构（会话与调度模型）**
+
+- **串行域收窄**：bot 的串行域从「bot 级」收窄为 **(bot, 工作区)**——同一 bot 在不同工作区可以并行，只在同一工作区之内互斥。唯一活跃运行索引与待处理队列键同步域化，历史遗留的旧队列键在首次 drain 时按工作区并入对应域，消息不丢。
+- **任务运行豁免 bot 串行域**：任务类运行不再占用 bot 的串行域，**单 bot 可以同时推进多张卡**；任务之间仍由写范围交叠闸负责串行——写范围不交叠即真并行，交叠则按闸门顺序排队。
+- **每卡一张任务专属会话**：每张任务卡首开一张「bot 名 + 任务号」的专属会话，卡线程消息、核验回执、返工往返都落在这张卡自己的会话里，不再挤进总监会话。
+- **施工方式自选**：解除强制子智能体化，施工方式回「亲做，或派 <bot 名>-<任务号> 专属子代理」自选——强制子代理硬闸与交付硬闸造成施工堵塞，本版一并解除。
+- **bot 会话名后缀改 8 位 uuid**：会话列表里 bot 级会话的显示名后缀从「控制面」改为 8 位 uuid 前缀（中文语境「控制面」是生造词，用户看不懂）。存量会话名不追溯，只影响新建/重建的会话。
+
+**稳定性（并发与运行时长）**
+
+- **入队 UNIQUE-safe 双层修复**：入队时撞「同 bot 唯一活跃运行」索引不再抛错，而是落进该域的待处理队列；失败方在落挂起前复查既有运行，命中即与成功方合并消账。两层都收口，撞车不再被外层记为投递失败。
+- **review/handle 运行预算分档**：验收与处置类运行的超时上限改为 `min(全局上限, 分档)`，**分档默认 10 分钟**；settings 的 `review_timeout_minutes` 可覆盖（取值区间 3–60），环境变量 `DSH_TEAM_REVIEW_TIMEOUT_MINUTES` 优先。群聊/私信/单聊沿用全局上限。
+- **纪律三层产品化**：验收核验指令只落在总监侧模板（成员 bot 模板只留自校段，有源码级守门钉住边界）；`team_assign_task` 建卡与重派两路都拦截把「核验/审计/复核」类任务派给**成员 bot**（派给 owner bot 不受限）；再叠加一层**派单策略闸**——按 assignee 的 file_policy 拦截写卡派给只读 bot，workspace-write / danger-full-access 放行。
+
+**产品改进**
+
+- **审批/提问倒计时默认 5 分钟且全局可调**：新增 `approval_timeout_minutes` 与 `question_timeout_minutes` 两个 settings 键（分钟整数，取值区间 1–60），默认值经 3 → 10 → 5 分钟最终定为 5 分钟；优先级为环境变量 > settings > 默认值。
+- **提权审批卡带来源群聊标识**：审批卡头部补上来源群聊的 `[KEY]` 群名标识，单聊来源显示「单聊」，多卡列表与单卡两路口径一致。
+- **滞留提醒四态三档**：待执行 72h、待验收 24h、受阻 48h 三个滞留阈值；滞留后每日至多提醒一次，**只提醒不自动处置**。
+- **展示路径脱敏为 ~ 前缀**：提示词与文本输出里 home 目录的绝对路径统一转成 `~/` 形式（隐私友好、也更短）；一切真实的路径解析与读写仍使用原始绝对路径。
+- **群聊回复 Markdown 分级**：长回复固定带小标题，短回复保持自然语言，微信通道走纯文本版式。
+
+**修复**
+
+- **flake 夹具**：测试夹具播种时用无序 `LIMIT 1` 取行导致的间歇性失败（SQLite 不保证行序）改成确定性查询，这类 flaky 不再随机出现。
+- **发布提交摘要取自 release-notes**：发布工具生成合并到 main 的提交标题不再用「release: vX（dev 快照 <sha>）」这类占位文案，改从 `docs/release-notes.md` 的对应版本小节取变更摘要；缺说明文件、缺对应版本小节或中文段无摘要，即在 preflight 阶段拒绝发版（远端零改动）。
+- **验收期卡线程消息路由**：验收期（`in_review`）的卡线程消息改路由给项目 owner bot，修掉「验收指令落 assignee 会话后被身份闸拒绝」的权限错位；`in_progress`/`blocked`/`todo` 维持 assignee 亲和不变。
+
+**升级路径与回退**
+
+- **从 0.2.364 直接升到 0.2.393**：registry 上 0.2.365～0.2.378 没有留下可安装版本（0.2.367 与 0.2.378 曾短暂发布后撤回），升级只需一步。数据库迁移自动且幂等（重复启动不会重复改结构），历史上已前移的库会被迁移账本识别并跳过。
+- **代码与数据库必须同版本**：旧代码配新库缺少 busy 闸，并发多运行会直接撞唯一索引；升级到本版后该错配窗口关闭。
+- **回退按发版级回退**：本版没有运行时开关，回退需回退包版本与 tag，并恢复发版前的库快照；升级前建议先对库做一次快照备份。
+
+### English
+
+This release ships the work developed for 0.2.379–0.2.393. **v0.2.378 and v0.2.367 have been withdrawn from npm**, so the registry's `latest` tag is still 0.2.364 — from the point of view of an actual npm user, this release therefore brings everything from v0.2.378 onwards in one step.
+
+**Architecture (sessions and scheduling)**
+
+- **Narrower serialisation domain**: a bot's serialisation domain shrinks from "per bot" to **(bot, workspace)** — one bot can now work in parallel across different workspaces and only serialises inside a single workspace. The unique-active-run index and the pending-message queue key are domainised accordingly, and legacy queue keys are merged into their domain on first drain without losing messages.
+- **Task runs are exempt from the bot serialisation domain**: task runs no longer occupy the bot's serialisation domain, so **one bot can drive several cards at once**. Tasks are still serialised by the overlapping-write-scope gate: disjoint write scopes run truly in parallel, overlapping ones queue in gate order.
+- **One dedicated session per card**: every task card opens its own session named "<bot name> · <task number>". The card's thread messages, review receipts and rework round-trips all land in that card's own session instead of crowding the director's session.
+- **Construction method is your choice**: mandatory subagent enforcement is removed — build it yourself or dispatch a dedicated "<bot name>-<task number>" subagent. The mandatory-subagent gate and the delivery gate that blocked construction are both dropped in this release.
+- **Bot session names end in an 8-character uuid**: the suffix of a bot-level session's display name changed from "控制面" to an 8-character uuid prefix ("控制面" is an invented Chinese term users cannot parse). Existing session names are not renamed retroactively.
+
+**Stability (concurrency and run budgets)**
+
+- **UNIQUE-safe enqueueing, fixed on two levels**: hitting the "one active run per bot" index no longer throws; the run lands in that domain's pending queue instead. The losing side re-checks for an existing run before parking the item and merges with the winner when it finds one. Both levels are closed, so a collision is no longer recorded as a delivery failure.
+- **Tiered budgets for review/handle runs**: the timeout ceiling of review and handling runs becomes `min(global limit, tier)`, with the **tier defaulting to 10 minutes**. The `review_timeout_minutes` setting overrides it (range 3–60) and `DSH_TEAM_REVIEW_TIMEOUT_MINUTES` takes priority. Group chats, DMs and one-to-one chats keep the global limit.
+- **Discipline productised in three layers**: review instructions live only in the director-side templates (member bots keep a self-check section; a source-level guard pins the boundary); `team_assign_task` refuses to assign tasks whose title or description contains "核验/审计/复核" to **member bots** (owner bots are unaffected); a third layer, the **dispatch policy gate**, refuses to dispatch write-scoped cards to read-only bots based on the assignee's file policy.
+
+**Product improvements**
+
+- **Approval/question countdown defaults to 5 minutes and is globally configurable**: two new settings, `approval_timeout_minutes` and `question_timeout_minutes` (whole minutes, range 1–60), settle on a 5-minute default after passing through 3 and 10 minutes. Environment variables win over settings, settings win over the default.
+- **Privilege-approval cards name their source chat**: the card header now carries the source group's `[KEY]` name chip, single chats show "单聊", and both the list view and the single-card view agree.
+- **Stall reminders in four states, three thresholds**: 72h for pending execution, 24h for pending review, 48h for blocked. A stalled card is reminded at most once a day and is **only reminded, never auto-handled**.
+- **Paths displayed with a `~` prefix**: absolute home-directory paths in prompts and text output become `~/…` (privacy friendlier and shorter); all real path resolution and I/O keep using the original absolute paths.
+- **Graded Markdown replies in group chats**: long replies always carry headings, short replies stay natural language, and the WeChat channel uses a plain-text layout.
+
+**Fixes**
+
+- **Flaky fixtures**: intermittent failures caused by unordered `LIMIT 1` row selection during test fixture seeding (SQLite does not guarantee row order) were replaced with deterministic queries.
+- **The release commit summary comes from release-notes**: the title of the commit that lands dev on main no longer uses placeholder text such as "release: vX（dev 快照 <sha>）"; it takes the change summary from the matching version section of `docs/release-notes.md`. A missing notes file, a missing version section or an empty Chinese summary makes the release tool refuse to publish, with zero remote changes.
+- **Card-thread routing during review**: card-thread messages in the `in_review` state are routed to the project owner bot, fixing the permission mismatch where a review instruction landed in the assignee's session and was rejected by the identity gate. `in_progress`/`blocked`/`todo` keep their assignee affinity.
+
+**Upgrade path and rollback**
+
+- **Upgrade straight from 0.2.364 to 0.2.393**: no installable 0.2.365–0.2.378 exists on the registry (0.2.367 and 0.2.378 were published briefly and then withdrawn), so the upgrade is a single step. Database migrations are automatic and idempotent (restarting does not re-apply them), and a library that was already migrated ahead of time is recognised by the migration ledger and skipped.
+- **Code and database must move together**: old code against a new database has no busy gate, so concurrent runs hit the unique index directly; upgrading to this release closes that mismatch window.
+- **Roll back at the release level**: this release has no runtime switch, so a rollback must revert the package version and the tag and restore a pre-release database snapshot. Take a database snapshot before upgrading.
+
 ## v0.2.378
 
 ### 中文

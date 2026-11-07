@@ -156,7 +156,7 @@ function runRelease(work, args = []) {
   })
 }
 
-type ReleaseStep = { name: string; ok: boolean; error?: string; mode?: string; sameTree?: boolean; dryRun?: boolean }
+type ReleaseStep = { name: string; ok: boolean; error?: string; mode?: string; sameTree?: boolean; dryRun?: boolean; baseMatch?: string }
 type ReleaseResult = {
   ok: boolean
   version: string | null
