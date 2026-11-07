@@ -1,6 +1,14 @@
 // Diagnostics for path and permission problems. It prints the resolved layout
 // and reports anything that would stop the service from writing to its own
 // directories.
+//
+// 退出码分级（A5/DSHBOTS-329，吸收原型 dsh-superagent 守护脚本的 outcome 语义）：
+// 让 CI/定时巡检能区分「自己能修」与「必须叫人」——
+//   0  ok：目录可写、host refs 全部存在
+//   1  目录/权限问题（workspace/data/skill 目录缺失或不可写）：多为环境可修复
+//   2  host refs 缺失（patch 文件指向不存在的绝对路径）：必须人工改 patch 文件
+//   3  两类问题同时存在
+// 退出码按「最高严重级」落：problems 含两类时取 3，只有一类取对应码。
 import { accessSync, constants, existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
@@ -83,11 +91,13 @@ function main() {
   console.log('')
 
   let problems = 0
+  let pathProblems = 0
+  let refProblems = 0
   for (const [label, path, optional] of targets) {
     const info = describe(path)
     const canWrite = info.dir ? writable(info.target ?? path) : false
     const ok = info.dir && canWrite
-    if (!ok && !optional) problems += 1
+    if (!ok && !optional) { problems += 1; pathProblems += 1 }
     console.log(`${label.padEnd(11)} ${path}`)
     console.log(`${''.padEnd(11)} ${info.label}${ok ? ', writable' : info.dir ? ', NOT writable' : ''}${optional && !ok ? ' (optional)' : ''}`)
   }
@@ -105,7 +115,7 @@ function main() {
     }
     for (const ref of refs) {
       const ok = existsSync(ref)
-      if (!ok) problems += 1
+      if (!ok) { problems += 1; refProblems += 1 }
       console.log(`${''.padEnd(11)} ${ok ? 'ok      ' : 'MISSING '} ${ref}`)
     }
     if (refs.some(ref => !existsSync(ref))) {
@@ -117,7 +127,8 @@ function main() {
   console.log(problems === 0
     ? 'ok: all team directories exist and are writable'
     : `${problems} problem(s); see README "故障排查"`)
-  process.exit(problems === 0 ? 0 : 1)
+  // 退出码分级（A5/DSHBOTS-329）：1=目录/权限、2=host refs（人工配置）、3=两类并存。
+  process.exit(problems === 0 ? 0 : pathProblems > 0 && refProblems > 0 ? 3 : refProblems > 0 ? 2 : 1)
 }
 
 const invokedDirectly = process.argv[1]
