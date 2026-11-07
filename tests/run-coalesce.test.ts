@@ -90,8 +90,21 @@ function groupPrompt(t, run, chatMessage, extraMessages) {
   })
 }
 
-const heldItems = (t, botId = t.dev.id, domain = t.project.id) =>
-  JSON.parse(t.store.setting(`bot_pending_msgs:${botId}:${domain}`) ?? '[]')
+// DSHBOTS-308 域化：挂起队列按 (bot, 工作区) 分键（bot_pending_msgs:<bot>:<domain>）。
+// 默认读该 bot 全部域键并合并（域无关视角），需要精确域时传 domain。
+const heldItems = (t, botId = t.dev.id, domain?: string) => {
+  if (domain !== undefined) {
+    return JSON.parse(t.store.setting(`bot_pending_msgs:${botId}:${domain}`) ?? '[]')
+  }
+  const rows = t.store.all('SELECT key, value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
+  const merged = []
+  for (const row of rows) {
+    if (!String(row.key).startsWith(`bot_pending_msgs:${botId}:`)) continue
+    const items = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(items)) merged.push(...items)
+  }
+  return merged
+}
 
 // 驱动 tick 直到目标运行启动：中间运行（如收尾的 memory_review）逐个完成让 bot 回到
 // 空闲，挂起消息才能建回。返回命中的 started 条目。
@@ -176,7 +189,7 @@ test('单聊挂起消息同样合批，单聊提示词带合批段', async () =>
   }
 })
 
-test('跨项目/跨 kind 不合批：同 bot 串行逐条运行，挂起消息不跨项目并入同一轮', async () => {
+test('跨项目/跨 kind 不合批（DSHBOTS-308 域化）：跨工作区消息不被本工作区占道阻塞，各域独立建行', async () => {
   const t = await setup()
   try {
     const beta = await t.service.createProject({ name: 'Beta', key: 'BET', ownerBotId: t.director.id, memberIds: [t.dev.id] })
@@ -187,24 +200,25 @@ test('跨项目/跨 kind 不合批：同 bot 串行逐条运行，挂起消息�
     await t.service.tick()
 
     const m2 = say(t.service, beta.id, '来自 BET 的消息')
-    t.service.enqueueChatRun(beta, t.dev, m2)
+    const betaRunId = t.service.enqueueChatRun(beta, t.dev, m2)
     const soloId = t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body: '单聊消息' })
-    t.service.enqueueSoloChatRun(t.dev, soloId)
-    assert.equal(heldItems(t).length, 2, '两条挂起（不同项目/不同 kind）')
+    const soloRunId = t.service.enqueueSoloChatRun(t.dev, soloId)
+    // 串行域=(bot,工作区)（DSHBOTS-308）：跨工作区不被本工作区占道阻塞——两条直接建行，
+    // 不落本 bot 的挂起队列（本域队列为空）。
+    assert.ok(betaRunId, '跨工作区消息不受本工作区占道阻塞，直接建行')
+    assert.ok(soloRunId, '单聊域独立，不受群聊域占道阻塞')
+    assert.equal(heldItems(t).length, 0, '跨域消息不落挂起队列')
+    assert.equal(t.store.get('SELECT project_id FROM runs WHERE id = ?', betaRunId).project_id, beta.id, 'BET 运行落 BET 域')
+    assert.equal(t.store.get('SELECT project_id FROM runs WHERE id = ?', soloRunId).project_id, null, '单聊运行落 solo 域')
 
-    await t.runtime.complete(t.runtime.started[0].runId)
-    const second = await drainUntilStarted(t, m2)
-    // bot 级串行：一次只建回一条运行（首个挂起组），且不吞并另一项目的消息。
-    assert.ok(second, '挂起组应建回运行')
-    assert.equal(second.chatMessage.id, m2, '建回的是最早挂起组（项目二消息）')
-    assert.deepEqual(second.extraMessages.map(item => item.id), [], '不得跨项目并入同一轮')
-    assert.deepEqual(heldItems(t).map(item => item.messageId), [soloId], '单聊挂起留队列下一拍')
-
-    await t.runtime.complete(second.runId)
-    const third = await drainUntilStarted(t, soloId)
-    assert.ok(third, '单聊消息最终独立成运行')
-    assert.equal(third.chatMessage.id, soloId, '单聊消息独立成运行')
-    assert.deepEqual(heldItems(t), [], '全部消化')
+    // 三条消息各自独立成轮：互不并入对方 extraMessages（合批只在同 kind+同域内发生）。
+    await t.service.tick()
+    const coaRun = t.runtime.started.find(item => item.run?.trigger_ref === m1)
+    const betaRun = t.runtime.started.find(item => item.run?.trigger_ref === m2)
+    const soloRun = t.runtime.started.find(item => item.run?.trigger_ref === soloId)
+    assert.ok(coaRun && betaRun && soloRun, '三条消息各自起一轮运行')
+    assert.deepEqual(betaRun.extraMessages.map(item => item.id), [], 'BET 消息不得并入 COA 运行')
+    assert.deepEqual(soloRun.extraMessages.map(item => item.id), [], '单聊消息不得并入群聊运行')
   } finally {
     await cleanup(t.root, t.store)
   }
@@ -314,7 +328,7 @@ test('M4 模拟竞争：建回前 bot 被抢占则消息全量留队列；INSERT
 // DSHBOTS-291 卡面增补①（D-290 红线臂 4d70a415：M4 跨项目不合批键 0 覆盖）：
 // 现有跨项目用例两条挂起项 kind 不同（chat vs solo_chat），kind 判定已必然分组、projectId
 // 分支恒不可达——本例两条挂起项同为 chat、分属不同项目，钉住「跨项目同 kind 不合批」键。
-test('跨项目同 kind 不合批（回归）：两条 chat 分属不同项目，各成独立运行', async () => {
+test('跨项目同 kind 不合批（回归·DSHBOTS-308 域化）：同域挂起待建回、跨域直接独立成轮', async () => {
   const t = await setup()
   try {
     const beta = await t.service.createProject({ name: 'Beta', key: 'BET', ownerBotId: t.director.id, memberIds: [t.dev.id] })
@@ -325,22 +339,24 @@ test('跨项目同 kind 不合批（回归）：两条 chat 分属不同项目�
 
     const mCoa = say(t.service, t.project.id, 'COA 第二条')
     const mBeta = say(t.service, beta.id, 'BET 第一条')
-    assert.equal(t.service.enqueueChatRun(t.project, t.dev, mCoa), null, '忙时 COA 消息挂起')
-    assert.equal(t.service.enqueueChatRun(beta, t.dev, mBeta), null, '忙时 BET 消息挂起')
-    assert.equal(heldItems(t).length, 2, '两条同 kind（chat）挂起')
+    assert.equal(t.service.enqueueChatRun(t.project, t.dev, mCoa), null, '同域忙时 COA 消息挂起')
+    const betaRunId = t.service.enqueueChatRun(beta, t.dev, mBeta)
+    // 跨域并行（DSHBOTS-308）：BET 消息不因 COA 域占道而挂起，直接建行。
+    assert.ok(betaRunId, '跨域消息直接建行，不挂起')
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [mCoa], '只有同域 COA 消息挂起')
+    assert.equal(t.store.get('SELECT project_id FROM runs WHERE id = ?', betaRunId).project_id, beta.id, 'BET 运行落 BET 域')
 
     await t.runtime.complete(t.runtime.started[0].runId)
     const second = await drainUntilStarted(t, mCoa)
-    assert.ok(second, 'COA 挂起组先建回')
+    assert.ok(second, 'COA 挂起组建回')
     assert.equal(second.chatMessage.id, mCoa, '建回的是 COA 组')
-    assert.deepEqual(second.extraMessages.map(item => item.id), [], 'BET 消息不得因同 kind 跨项目并入 COA 运行')
-    assert.deepEqual(heldItems(t).map(item => item.messageId), [mBeta], 'BET 消息留队列下一拍')
-
-    await t.runtime.complete(second.runId)
-    const third = await drainUntilStarted(t, mBeta)
-    assert.ok(third, 'BET 消息最终独立成运行')
-    assert.equal(third.chatMessage.id, mBeta)
+    assert.deepEqual(second.extraMessages.map(item => item.id), [], 'BET 消息不得并入 COA 运行（不同域）')
     assert.deepEqual(heldItems(t), [], '全部消化')
+
+    await t.service.tick()
+    const betaRun = t.runtime.started.find(item => item.run?.trigger_ref === mBeta)
+    assert.ok(betaRun, 'BET 消息独立成运行')
+    assert.deepEqual(betaRun.extraMessages.map(item => item.id), [], 'BET 运行不带其他消息')
   } finally {
     await cleanup(t.root, t.store)
   }
@@ -374,15 +390,17 @@ test('查后插竞态撞 one_active_run_per_bot：入队不抛错落挂起队列
     const dmRunId = t.service.enqueueDmRun(dmMessage, t.dev)
     t.service.botBusy = realBusy
     assert.equal(chatRunId, null, 'chat 撞 UNIQUE 返 null 不抛错')
-    assert.equal(soloRunId, null, 'solo_chat 同款兜底')
     assert.equal(dmRunId, null, 'dm 同款兜底')
-    assert.deepEqual(heldItems(t).map(item => item.kind), ['chat', 'solo_chat', 'dm'], '三族消息全部落挂起队列')
+    // DSHBOTS-308 域化：solo_chat 落 solo 域，与对端 chat 运行（COA 域）不同域——不撞
+    // UNIQUE，直接建行（跨工作区并行）；同域的 chat/dm 照旧挂起。
+    assert.ok(soloRunId, 'solo_chat 跨域不受对端运行影响，直接建行')
+    assert.deepEqual(heldItems(t).map(item => item.kind), ['chat', 'dm'], '同域两族消息落挂起队列')
 
     // 对端运行结束，bot 空闲：挂起消息建回运行（chat 先建回，余量留队列下一拍）。
     t.store.run("UPDATE runs SET status = 'canceled', ended_at = ? WHERE id = 'run_race_peer'", new Date().toISOString())
     t.service.drainPendingMessages()
     assert.ok(t.store.get("SELECT id FROM runs WHERE trigger_ref = ? AND status = 'queued'", m), '空闲后挂起消息建回运行')
-    assert.deepEqual(heldItems(t).map(item => item.kind), ['solo_chat', 'dm'], '建回消化 chat，余量留队列')
+    assert.deepEqual(heldItems(t).map(item => item.kind), ['dm'], '建回消化 chat，dm 留队列')
   } finally {
     await cleanup(t.root, t.store)
   }
