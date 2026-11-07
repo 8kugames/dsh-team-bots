@@ -15,7 +15,34 @@ export const taskReviewMethods = {
     const { project, actor } = this.ownerContextFor(sessionId)
     if (!['accept', 'return'].includes(input.decision)) throw badRequest('验收结果只能是 accept 或 return')
     const task = this.resolveBotTask(project, input.task)
+    // 验收机械闸（DSHBOTS-318）只拦真验收动作（in_review 卡）：非待验收状态保持既有
+    // 校验顺序，仍由 applyReview 抛 in_review conflict，闸不抢跑。
+    if (task.status === 'in_review') this.assertReviewSubagentVerified(sessionId, input.comment)
     return this.applyReview(task, project, input.decision, input.comment, actor)
+  },
+
+  // 验收机械闸（DSHBOTS-318）：把「验收必须经由子代理」从提示约束升级为机械约束——
+  // owner bot 的 team_review_task 前置校验调用方当前活跃运行的子代理账目
+  // （run_events 的 subagent_spawned），无账目即拒绝；comment 显式注明「兜底验收」
+  // 放行（对应 router 硬流程第 4 条：子代理失败重试一次仍失败时 director 兜底）。
+  // 仅机器人路径：微信管理员/看板 owner 走 applyReview，不经过本闸。
+  assertReviewSubagentVerified(sessionId, comment) {
+    if (comment?.includes('兜底验收')) return
+    const run = this.store.get(
+      "SELECT id FROM runs WHERE session_id = ? AND status IN ('running', 'queued') ORDER BY queued_at DESC LIMIT 1",
+      sessionId,
+    )
+    const ledger = run && this.store.get(
+      "SELECT id FROM run_events WHERE run_id = ? AND type = 'subagent_spawned' LIMIT 1",
+      run.id,
+    )
+    if (ledger) return
+    // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 正确下一步。
+    throw badRequest(
+      '当前运行没有子代理账目（subagent_spawned），验收必须先经子代理核验：'
+      + '先派验收子代理（subagent/subagent_fork）做范围比对/目标测试/红线预测，把结论作为 comment；'
+      + '如需 director 兜底，在 comment 里注明「兜底验收」。',
+    )
   },
 
   /** 验收/退回的共用流程：owner Bot 会话与微信管理员共用。 */

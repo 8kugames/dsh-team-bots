@@ -4,6 +4,40 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.2.395
+
+### 中文
+
+本版一次带出两笔变更：一笔修掉总监侧运行落到成员任务会话的错位，一笔把 director「验收须经子代理」从提示约束升级为机械约束。0.2.394 未单独发版（已取消），其内容并入本版。
+
+**修复**
+
+- **总监侧 review/handle 运行不再吃任务亲和**：落总监自己控制面绑定（生产实测：受阻卡上的 handle 运行被亲和进成员任务专属会话，devops 会话同时承接 devops 施工与 director 处置两条运行、14 条 director review/handle 运行无一落总监会话；错位后果=绑定行属成员致 ownerContextFor 403、总监专权工具调不动、总监话语混进成员任务上下文；成员自己 task/dm_reply 卡线程亲和、in_review 改判、结转 alias 亲均不变）。
+
+**产品化**
+
+- **director 验收机械闸**：team_review_task 前置校验调用方当前活跃运行的子代理账目（run_events 的 subagent_spawned），无账目且未注明「兜底验收」即拒绝（文案=原因+先派验收子代理做范围比对/目标测试/红线预测+兜底声明路径）；comment 含「兜底验收」放行；微信管理员/看板走 applyReview 不经闸；非 in_review 仍先走既有 conflict。背景：owner 拍板 director 应作为 router（收需求→子代理分析→派单；收验收→子代理检查→转发），本闸把「验收必须经由子代理」从提示约束升级为机械约束。
+
+**升级路径与回退**
+
+本版无数据库结构变更、无新配置项，从 0.2.393 直接升到 0.2.395 即可，迁移账本不产生新条目。回退按发版级回退——本版没有运行时开关，回退需回退包版本与 tag，并恢复发版前的库快照。
+
+### English
+
+This release carries two changes at once: a fix for the director's runs landing in a member's task session, and the promotion of the director's "acceptance must go through a subagent" rule from a prompt-level constraint to a mechanical one. v0.2.394 was never released on its own (it was cancelled) and its content is folded into this release.
+
+**Fixes**
+
+- **The director's review/handle runs no longer follow task affinity**: they now land in the director's own control-plane binding. Production evidence from the previous release: a handle run on a blocked card was affinity-bound into a member's dedicated task session, so a single devops session carried both the devops construction run and the director's handling run, and none of the 14 director review/handle runs landed in the director session. The consequences of that mismatch: the binding row belongs to a member, so `ownerContextFor` answers 403, the director's privileged tools stop working, and the director's words leak into a member's task context. A member's own task runs, `dm_reply` card-thread affinity, `in_review` re-judgement and the carried-over alias affinity are all unchanged.
+
+**Productisation**
+
+- **The director's acceptance gate**: `team_review_task` first checks the caller's currently active run for subagent accounting (`subagent_spawned` in `run_events`); with no accounting and no "兜底验收" note in the comment, the call is rejected, and the message states the reason and the next step — dispatch an acceptance subagent for scope comparison, target tests and red-line prediction, or declare the fallback explicitly. A comment containing "兜底验收" is let through; the WeChat administrator path and the board path call `applyReview` directly and are not gated; a card that is not `in_review` still hits the pre-existing conflict check first. Background: the owner ruled that the director should act as a router (take a requirement → subagent analysis → dispatch; take an acceptance → subagent check → forward), and this gate turns "acceptance must go through a subagent" from a prompt constraint into a mechanical one.
+
+**Upgrade path and rollback**
+
+This release changes no database schema and adds no new setting: upgrade straight from 0.2.393 to 0.2.395, and the migration ledger gains no new entry. Rollback is release-level — there is no runtime switch, so roll back the package version and the tag, and restore the pre-release database snapshot.
+
 ## v0.2.393
 
 ### 中文
