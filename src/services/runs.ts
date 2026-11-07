@@ -78,6 +78,16 @@ export const runsMethods = {
   // bot 空闲时 drainPendingMessages 把挂起消息建回运行——chat/solo_chat 同类合批成一条，
   // dm/dm_reply 按一条来信一条回信契约逐条放行不合批；task/review 运行照常落 runs 行排队，
   // 不被消息合批吞并（与本队列互斥串行，靠 claimKey=bot 的领取闸保证）。
+  // DSHBOTS-300：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后各自
+  // INSERT，后者撞 one_active_run_per_bot——以唯一索引为串行化真值，命中即视为
+  // 「查后插之间 bot 转忙」，入队路径按争用口径 A 落挂起队列返 null（outbox 对 null
+  // 按「已消费/挂起」收单），绝不向上抛（直抛会被计为投递失败重试耗尽置 failed）。
+  // task_id 维度的 one_active_run_per_task 撞车不在内：重试下一拍 active 预检即自愈。
+  isRunBotUniqueViolation(error) {
+    const message = String(error?.message ?? error)
+    return message.includes('UNIQUE')
+      && (message.includes('runs.bot_id') || message.includes('one_active_run_per_bot'))
+  },
   botBusy(botId) {
     return Boolean(this.store.get(
       "SELECT id FROM runs WHERE bot_id = ? AND status IN ('queued', 'running')",
@@ -267,12 +277,20 @@ export const runsMethods = {
     }
     const runId = id('run')
     const createdAt = nowIso()
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, 'dm', 'read', 'dm', ?, 'queued', 1, ?, ?)`,
-      runId, message.project_id, target.id, message.id, `dm:${message.id}`, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, queued_at)
+         VALUES (?, ?, ?, 'dm', 'read', 'dm', ?, 'queued', 1, ?, ?)`,
+        runId, message.project_id, target.id, message.id, `dm:${message.id}`, createdAt,
+      )
+    } catch (error: any) {
+      if (this.isRunBotUniqueViolation(error)) {
+        this.holdPendingMessage(target.id, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
+        return null
+      }
+      throw error
+    }
     this.store.run(
       "UPDATE bot_messages SET status = 'delivered', run_id = ? WHERE id = ?",
       runId, message.id,
@@ -326,13 +344,21 @@ export const runsMethods = {
     // 幂等：outbox 重投时不能重复建运行，否则唯一索引会直接把重试打成失败。
     const existingRun = this.store.get('SELECT id FROM runs WHERE idempotency_key = ?', `dm_reply:${message.id}`)
     if (existingRun) return existingRun.id
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, NULL, 'dm_reply', 'read', 'dm_reply', ?, 'queued', 1, ?, ?)`,
-      runId, message.project_id, caller.id,
-      message.id, `dm_reply:${message.id}`, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, queued_at)
+         VALUES (?, ?, ?, NULL, 'dm_reply', 'read', 'dm_reply', ?, 'queued', 1, ?, ?)`,
+        runId, message.project_id, caller.id,
+        message.id, `dm_reply:${message.id}`, createdAt,
+      )
+    } catch (error: any) {
+      if (this.isRunBotUniqueViolation(error)) {
+        this.holdPendingMessage(caller.id, { kind: 'dm_reply', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
+        return null
+      }
+      throw error
+    }
     this.insertRunEvent(runId, 'queued', '私信回信排队投递给发送方会话')
     return runId
   },
@@ -352,12 +378,20 @@ export const runsMethods = {
     }
     const runId = id('run')
     const createdAt = nowIso()
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, NULL, ?, 'solo_chat', 'write', ?, ?, 'queued', 1, ?, ?)`,
-      runId, bot.id, triggerType, messageId, `solo_chat:${messageId}`, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, queued_at)
+         VALUES (?, NULL, ?, 'solo_chat', 'write', ?, ?, 'queued', 1, ?, ?)`,
+        runId, bot.id, triggerType, messageId, `solo_chat:${messageId}`, createdAt,
+      )
+    } catch (error: any) {
+      if (this.isRunBotUniqueViolation(error)) {
+        this.holdPendingMessage(bot.id, { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
+        return null
+      }
+      throw error
+    }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
@@ -383,12 +417,20 @@ export const runsMethods = {
     const createdAt = nowIso()
     // 微信直达（DSHBOTS-208）：trigger_type 记 'wechat'，运行收尾据此把 bot 回复推回微信管理员。
     const triggerType = origin === 'wechat' ? 'wechat' : 'mention'
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, 'chat', 'read', ?, ?, 'queued', 1, ?, ?)`,
-      runId, project.id, bot.id, triggerType, messageId, `chat:${messageId}:${bot.id}`, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, queued_at)
+         VALUES (?, ?, ?, 'chat', 'read', ?, ?, 'queued', 1, ?, ?)`,
+        runId, project.id, bot.id, triggerType, messageId, `chat:${messageId}:${bot.id}`, createdAt,
+      )
+    } catch (error: any) {
+      if (this.isRunBotUniqueViolation(error)) {
+        this.holdPendingMessage(bot.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
+        return null
+      }
+      throw error
+    }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued', triggerType === 'wechat' ? '微信群聊消息触发（直达）' : '群聊消息触发', createdAt,
