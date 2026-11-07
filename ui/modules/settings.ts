@@ -222,6 +222,44 @@ function renderRunLimitsCard() {
     </div>`
 }
 
+// 团队指令段（B1/DSHBOTS-324）：四段可编辑提示词的查看与编辑。
+// defaultChanged 徽标提示「内置默认已升级」；保存即经后端预算校验（拆卡三段 ≤1200），
+// 改动只对之后启动的会话生效（identity 段随会话冻结，进行中会话不唤醒）。
+const PROMPT_SEGMENT_LABEL_KEYS = {
+  communication: 'global.promptSegCommunication',
+  subtask: 'global.promptSegSubtask',
+  splitting: 'global.promptSegSplitting',
+  selfcheck: 'global.promptSegSelfcheck',
+}
+const PROMPT_SEGMENT_HINT_KEYS = {
+  communication: 'global.promptSegCommunicationHint',
+  subtask: 'global.promptSegSubtaskHint',
+  splitting: 'global.promptSegSplittingHint',
+  selfcheck: 'global.promptSegSelfcheckHint',
+}
+function renderPromptSegmentsCard() {
+  const segments = state.data.promptSegments ?? []
+  if (!segments.length) return ''
+  return `
+    <div class="card form-card g-card">
+      <div class="card-head"><h3>${t('global.promptSegmentsTitle')}</h3><span class="meta">${t('global.promptSegmentsMeta')}</span></div>
+      ${segments.map(segment => `
+        <div class="field" style="margin-top:12px">
+          <label for="prompt-seg-${attr(segment.key)}">${t(PROMPT_SEGMENT_LABEL_KEYS[segment.key] ?? '')}
+            ${segment.override ? `<span class="unread-badge">${t('global.promptSegCustom')}</span>` : ''}
+            ${segment.defaultChanged ? `<span class="unread-badge">${t('global.promptSegDefaultChanged')}</span>` : ''}
+          </label>
+          <textarea class="input" id="prompt-seg-${attr(segment.key)}" rows="4" style="min-height:72px;font:inherit">${esc(segment.effectiveText ?? '')}</textarea>
+          <div class="hint">${t(PROMPT_SEGMENT_HINT_KEYS[segment.key] ?? '')}</div>
+          <div class="btn-row" style="margin-top:8px">
+            <button class="btn small" type="button" data-action="save-prompt-segment" data-segment="${attr(segment.key)}">${t('global.save')}</button>
+            <button class="btn small" type="button" data-action="reset-prompt-segment" data-segment="${attr(segment.key)}"${segment.override ? '' : ' disabled'}>${t('global.promptSegReset')}</button>
+          </div>
+        </div>`).join('')}
+      <div class="hint">${t('global.promptSegmentsHint')}</div>
+    </div>`
+}
+
 function renderOpsCard() {
   const settings = state.data.settings ?? {}
   const currency = settings.budget_currency || 'CNY'
@@ -391,6 +429,7 @@ function renderGlobal() {
     pageNav([
       { id: 'g-pref', label: t('global.groupPref') },
       { id: 'g-runtime', label: t('global.groupRuntime') },
+      { id: 'g-prompts', label: t('global.groupPrompts') },
       { id: 'g-about', label: t('global.groupAbout') },
     ], t('global.navLabel')),
     [
@@ -446,11 +485,15 @@ function renderGlobal() {
         body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}`,
       }),
       pageSection({
-        index: '03', id: 'g-about', title: t('global.groupAbout'), desc: t('global.groupAboutDesc'),
+        index: '03', id: 'g-prompts', title: t('global.groupPrompts'), desc: t('global.groupPromptsDesc'),
+        body: slot('full', renderPromptSegmentsCard()),
+      }),
+      pageSection({
+        index: '04', id: 'g-about', title: t('global.groupAbout'), desc: t('global.groupAboutDesc'),
         body: `${slot('half', dshPathsCard())}${slot('half', dshServiceCard())}`,
       }),
     ],
   )
 }
 
-export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderSettings, currentScale, renderGlobal }
+export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderPromptSegmentsCard, renderSettings, currentScale, renderGlobal }

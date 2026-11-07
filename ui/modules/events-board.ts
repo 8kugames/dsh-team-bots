@@ -123,6 +123,21 @@ export async function handleBoardAction(action, target) {
       toast(t("运行时效已保存"), 'success')
       break
     }
+    // 团队指令段（B1/DSHBOTS-324）：保存/恢复默认；预算校验在后端，失败经 api 报错 toast。
+    case 'save-prompt-segment': {
+      const segment = target.dataset.segment
+      const text = (document.getElementById(`prompt-seg-${segment}`) as HTMLTextAreaElement | null)?.value ?? ''
+      await api('update_prompt_segment', { segment, text })
+      await loadState(state.projectId)
+      toast(t("团队指令已保存，新会话生效"), 'success')
+      break
+    }
+    case 'reset-prompt-segment': {
+      await api('update_prompt_segment', { segment: target.dataset.segment, text: '' })
+      await loadState(state.projectId)
+      toast(t("已恢复默认指令"), 'success')
+      break
+    }
     case 'reconcile-usage': {
       const result = await api('reconcile_usage', {})
       const reconciliation = result?.reconciliation ?? {}

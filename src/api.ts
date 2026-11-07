@@ -16,7 +16,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'question_answer', 'questions_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
-  'settings', 'update_settings', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
+  'settings', 'update_settings', 'update_prompt_segment', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
   'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout', 'notify_receipts',
   'run_command', 'cancel_command', 'terminal_state',
@@ -190,6 +190,9 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.settingsView()
     case 'update_settings':
       return service.updateSettings(payload.patch ?? payload, actor)
+    case 'update_prompt_segment':
+      // 可编辑提示词段（B1/DSHBOTS-324）：空文本=恢复默认；保存经预算校验并审计。
+      return service.updatePromptSegment(required(payload.segment, 'segment'), String(payload.text ?? ''), actor)
     case 'export_usage_csv':
       return {
         filename: `dsh-team-usage${payload.window ? `-${payload.window}` : ''}-${new Date().toISOString().slice(0, 10)}.csv`,

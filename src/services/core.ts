@@ -16,6 +16,7 @@ import { ensureTaskTimesSchema, ensureTaskTerminalTimeBackfill } from './tasks.j
 import { ensureRecoverySchema } from './recovery-schema.js'
 import { ensureRolloverSchema } from './rollover-schema.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
+import { PROMPT_SEGMENT_DEFAULTS, PROMPT_SEGMENT_MAX_CHARS, PROMPT_TRIO_BUDGET, parsePromptOverrides, promptOverridesHash, taskGuidanceTrioLength } from './runtime/prompt.js'
 import { id, nowIso } from '../util.js'
 
 
@@ -269,6 +270,63 @@ export const coreMethods = {
     })
     return this.settingsView()
   },
+
+  // 可编辑提示词段（B1/DSHBOTS-324）：只读视图。defaultChanged = 覆盖保存时的内置默认
+  // 指纹与当前默认不一致（升级改了默认文本），UI 据此给「保留我的文本 / 恢复新默认」取舍。
+  promptSegmentsView() {
+    const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
+    return Object.entries(PROMPT_SEGMENT_DEFAULTS).map(([key, defaultText]) => {
+      const override = overrides?.[key] ?? null
+      return {
+        key,
+        defaultText,
+        override: override ? {
+          text: String(override.text ?? ''),
+          baseHash: String(override.base_hash ?? ''),
+          updatedAt: String(override.updated_at ?? ''),
+          updatedBy: String(override.updated_by ?? ''),
+        } : null,
+        defaultChanged: Boolean(override && override.base_hash !== promptOverridesHash(defaultText)),
+        effectiveText: override?.text ?? defaultText,
+      }
+    })
+  },
+
+  // 保存/恢复一个提示词段：空文本或与默认一致 = 恢复默认（删覆盖）；有覆盖走预算校验
+  // （拆卡三段 ≤1200 与 tests/prompt-budget 同口径）+ 2000 字上限。保存即审计。
+  // 不唤醒任何会话：identity 段随会话冻结（D-91），改动只对新会话生效。
+  updatePromptSegment(segment, text, actor = this.actor()) {
+    if (!Object.hasOwn(PROMPT_SEGMENT_DEFAULTS, segment)) throw badRequest(`未知提示词段：${segment}`)
+    const clean = String(text ?? '').replace(/\r\n/g, '\n').trim()
+    const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
+    if (!clean || clean === PROMPT_SEGMENT_DEFAULTS[segment]) {
+      if (overrides?.[segment]) {
+        delete overrides[segment]
+        this.store.setSetting('prompt_overrides', JSON.stringify(overrides))
+        this.audit(actor, 'prompt_segment.reset', 'settings', segment, {})
+      }
+      return this.promptSegmentsView()
+    }
+    if (clean.length > PROMPT_SEGMENT_MAX_CHARS) {
+      throw badRequest(`提示词段正文上限 ${PROMPT_SEGMENT_MAX_CHARS} 字符（实测 ${clean.length}）`)
+    }
+    if (segment === 'subtask' || segment === 'splitting') {
+      const trio = taskGuidanceTrioLength({ ...overrides, [segment]: { text: clean } }, this.config)
+      if (trio > PROMPT_TRIO_BUDGET) {
+        throw badRequest(`拆卡指引三段合计超预算（实测 ${trio} > ${PROMPT_TRIO_BUDGET} 字符），请缩短文本`)
+      }
+    }
+    overrides[segment] = {
+      text: clean,
+      base_hash: promptOverridesHash(PROMPT_SEGMENT_DEFAULTS[segment]),
+      updated_at: nowIso(),
+      updated_by: `${actor?.type ?? 'user'}:${actor?.id ?? 'local'}`,
+    }
+    this.store.setSetting('prompt_overrides', JSON.stringify(overrides))
+    this.audit(actor, 'prompt_segment.update', 'settings', segment, { chars: clean.length })
+    return this.promptSegmentsView()
+  },
+
   start() {
     if (this.started) return
     this.started = true

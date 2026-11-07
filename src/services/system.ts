@@ -98,6 +98,8 @@ export const systemMethods = {
       // 用量快照默认按 30 日窗口（DSHBOTS-121）：与页面默认档一致，其余三档按需单独取。
       usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null, window: '30d', cacheTtlMs: this.config.usageSnapshotCacheMs }),
       settings: this.settingsView(),
+      // 可编辑提示词段（B1/DSHBOTS-324）：全局配置页「团队指令」分组唯一真值。
+      promptSegments: this.promptSegmentsView(),
       runLimits: this.runLimitsView(),
       // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
       activeRuns: Number(this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')")?.count ?? 0),

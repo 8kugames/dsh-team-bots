@@ -107,11 +107,11 @@ async function renderPage(module, fn, data?) {
   return { html: mod[fn](), state }
 }
 
-test('配置页三分组，导航锚点与 section 一一对应', async () => {
+test('配置页四分组，导航锚点与 section 一一对应', async () => {
   const { html } = await renderPage('settings', 'renderGlobal')
   assert.match(html, /class="global-page"/, '页面根应为 .global-page')
   const sections = [...html.matchAll(/<section class="gsec" id="(g-[a-z]+)"/g)].map((m) => m[1])
-  assert.deepEqual(sections, ['g-pref', 'g-runtime', 'g-about'], '配置页应为 偏好/运行/关于 三分组')
+  assert.deepEqual(sections, ['g-pref', 'g-runtime', 'g-prompts', 'g-about'], '配置页应为 偏好/运行/团队指令/关于 四分组')
   const anchors = [...html.matchAll(/class="global-nav-item" href="#(g-[a-z]+)"/g)].map((m) => m[1])
   assert.deepEqual(anchors, sections, '导航锚点必须与分组一一对应')
   for (const id of sections) {
@@ -124,13 +124,13 @@ test('配置页三分组，导航锚点与 section 一一对应', async () => {
 
 test('配置页分组头保留序号、标题与说明', async () => {
   const { html } = await renderPage('settings', 'renderGlobal')
-  for (const index of ['01', '02', '03']) {
+  for (const index of ['01', '02', '03', '04']) {
     assert.match(html, new RegExp(`class="gsec-index mono">${index}</`), `缺分组序号 ${index}`)
   }
-  for (const index of ['04', '05']) {
+  for (const index of ['05']) {
     assert.doesNotMatch(html, new RegExp(`class="gsec-index mono">${index}</`), `分组 ${index} 不应存在`)
   }
-  for (const title of ['偏好', '运行与预算', '关于与系统状态']) {
+  for (const title of ['偏好', '运行与预算', '团队指令', '关于与系统状态']) {
     assert.ok(html.includes(title), `缺分组标题 ${title}`)
   }
   for (const title of ['环境与版本', '接入与计价']) {
@@ -188,7 +188,7 @@ test('密钥页承载密钥管理卡：列表 + 待审请求 + 保存表单', as
   stopTimers()
 })
 
-test('关于内容回迁配置页第三分组：DSH 路径/服务卡 + 检查更新 + 投递失败提示', async () => {
+test('关于内容回迁配置页第四分组：DSH 路径/服务卡 + 检查更新 + 投递失败提示', async () => {
   const { html } = await renderPage('settings', 'renderGlobal', { outbox: { pending: 1, failed: 2, delivered: 10 } })
   assert.match(html, /<h3>DSH 路径<\/h3>/, 'DSH 路径卡应回迁配置页')
   assert.match(html, /<h3>DSH 服务<\/h3>/, 'DSH 服务卡应回迁配置页')

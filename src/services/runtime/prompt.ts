@@ -7,6 +7,7 @@
 // 前缀缓存按最长公共前缀匹配，静态段放在变化段之后会让跨卡派发在描述处分叉、
 // 固定段吃不到缓存。调整任何模板段顺序都必须保持该原则（tests/prompt-prefix-order.test.ts 守门）。
 
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
 import { id, nowIso, parseDisabledSkills } from '../../util.js'
@@ -44,6 +45,63 @@ export const COMMUNICATION_RULES = [
   '- When a decision is needed, ask one concrete question at a time, with just enough context to answer it.',
   '- Before sending, reread the draft and cut every sentence whose removal does not change what the reader does or knows.',
 ]
+
+// 可编辑提示词段（B1/DSHBOTS-324，吸收原型 src/app/prompts.ts 分段模型）：团队可改四段正文，
+// 覆盖存 settings 'prompt_overrides' JSON（text + base_hash 保存时的内置默认指纹）；
+// 升级后默认变了 → promptSegmentsView 标 defaultChanged，面板给「保留我的文本 / 恢复新默认」
+// 取舍（defaultChanged 解决的是「升级冲掉定制」，与 proposals.ts MERGE_KEEP_RATIO 的
+// 「防替换稿顶掉原指令」是两回事）。会话冻结语义不变（D-91）：改文本只对新会话生效。
+// 预算红线（ADR §5.1 #14）：subtask/splitting 与不可编辑的 parallel 段合计 ≤1200、
+// 整静态前缀 ≤1900（tests/prompt-budget），updatePromptSegment 保存时同口径校验。
+// 工具描述与固定通知仍留在代码，不可被本机制改写（对齐原型 docs/004-prompts 优先级）。
+export const PROMPT_SEGMENT_DEFAULTS = {
+  communication: COMMUNICATION_RULES.map(line => line.replace(/^- /, '')).join('\n'),
+  subtask: 'Before closing: if this task cannot be finished in one run or new closing conditions emerge, file subtasks via team_assign_task with parent_task_id and report in the group — no verbal-only follow-ups. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.',
+  splitting: 'Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery. One card per part: parent_task_id to this task, blocked_by where order matters. Not the project owner? Propose the split in your delivery report. Example: API card (src/api/) + docs card, run concurrently.',
+  selfcheck: 'Before reporting delivery, self-run the reproducible verification and put the evidence in the delivery report: the exact test/build commands you ran with their results, the list of files you changed, and the counts or links the acceptance criteria name (grep hits, test pass counts, commit hashes). Verify your own claims first — re-run the target tests and re-check the anchors yourself; do not report delivery on unverified work. Self-checking is always cheaper than rework: a delivery report without evidence will be returned.',
+}
+export const PROMPT_SEGMENT_MAX_CHARS = 2000
+export const PROMPT_TRIO_BUDGET = 1200
+
+// settings 'prompt_overrides' 解析：坏数据一律降级为空覆盖（不抛错，默认段兜底）。
+export function parsePromptOverrides(raw) {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+// 内置默认指纹：defaultChanged 判据（保存时的 base_hash 与当前默认比对）。
+export function promptOverridesHash(text) {
+  return createHash('sha256').update(String(text ?? '')).digest('hex').slice(0, 16)
+}
+
+// 并行段正文（不可编辑，B1 三段预算的第三段）：promptFor 与保存校验共用同一份文本。
+export function parallelMergeBody(maxTeammates) {
+  return `Parallelize independent parts via teammates (at most ${maxTeammates}) or the child agents above; keep every part on project KEY-N cards, never on the host shared task board (task-N). Before delivering: list_agents, wait_agent until idle, merge results; resolve conflicting edits yourself.`
+}
+
+// 通信段正文 → 身份段规则行：每非空行一条，统一 '- ' 前缀（覆盖文本允许不带项目符）。
+export function promptSegmentRules(text) {
+  return String(text ?? '').split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => `- ${line.replace(/^- /, '')}`)
+}
+
+// 拆卡指引三段合计长度（保存校验与 tests/prompt-budget 同口径，去尾随空白后按字符计）。
+export function taskGuidanceTrioLength(overrides, config) {
+  const resolve = segment => overrides?.[segment]?.text ?? PROMPT_SEGMENT_DEFAULTS[segment]
+  const maxTeammates = config?.maxTeammates ?? 2
+  return [
+    `# Subtask discipline\n${resolve('subtask')}`,
+    `# Splitting for speed\n${resolve('splitting')}`,
+    `# Parallel work inside this task\n${parallelMergeBody(maxTeammates)}`,
+  ].map(text => text.replace(/\s+$/, '')).reduce((sum, text) => sum + text.length, 0)
+}
 
 // 沙箱档位按运行类型收紧：一切非写运行（mode!=='write'，如 dm/dm_reply/chat/review 等）
 // 物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
@@ -105,6 +163,16 @@ export const promptMethods = {
       }
     }
     return text
+  },
+
+  // 可编辑段当前生效文本（B1/DSHBOTS-324）：覆盖优先，缺省回内置默认。
+  // 每次求值一次 settings 读 + JSON 解析；identity 段随会话冻结只算一次，任务段每运行一次。
+  promptSegmentText(segment) {
+    const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
+    const override = overrides?.[segment]
+    return (override && typeof override.text === 'string' && override.text.trim())
+      ? override.text
+      : PROMPT_SEGMENT_DEFAULTS[segment] ?? ''
   },
 
   buildIdentityPrompt(sessionId) {
@@ -186,7 +254,7 @@ export const promptMethods = {
             '- When a task can be split, use `subagent` / `subagent_fork` to spawn child agents for parallel acceleration. Child-agent file writes are not governed by tasks.write_scopes dispatch gates (they inherit the parent session sandbox); before dispatching, check for write-scope conflicts with other members, and review child-agent output yourself before delivering it.',
             '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
             '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
-            ...COMMUNICATION_RULES,
+            ...promptSegmentRules(this.promptSegmentText('communication')),
           ]
         : [
             '- You are a long-lived teammate. Your replies in the project group are visible to the user and other bots.',
@@ -198,7 +266,7 @@ export const promptMethods = {
             '- Use `team_remember` for durable facts, preferences, decisions or lessons worth keeping. Never store secrets or credentials.',
             '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
             '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
-            ...COMMUNICATION_RULES,
+            ...promptSegmentRules(this.promptSegmentText('communication')),
           ]
     // DSHBOTS-238：成员 bot 子代理并行指引（静态段，前缀缓存区）。
     // 「生成子代理/组建临时团队」能力由宿主 preset 全局注册（subagent / subagent_fork /
@@ -640,10 +708,11 @@ This task is urgent and exempt from lane queuing discipline: start immediately, 
       // ≤1200 字符，tests/prompt-budget.test.ts 守门）：主项做不完或出现新收口条件就
       // 立产品级子卡。所有任务卡无条件注入，与时效段（D-125）、紧急豁免段（D-126）
       // 互不干扰：本段不读 priority/time_budget，后两者不读本段。
+      // B1/DSHBOTS-324：正文可被 settings 'prompt_overrides' 覆盖（标题与段序不动）。
       const subtaskDisciplineBlock = `
 
 # Subtask discipline
-Before closing: if this task cannot be finished in one run or new closing conditions emerge, file subtasks via team_assign_task with parent_task_id and report in the group — no verbal-only follow-ups. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.`
+${this.promptSegmentText('subtask')}`
       // 提速拆分引导（DSHBOTS-212；DSHBOTS-254 去重收口）：
       // 拆分判据（2+ 独立部分 + 写范围不相交 + 拆后合并成本更低）+ 角色现实（无派单权限
       // 就在交付报告里提拆分方案）。静态段（不随卡变化）：与纪律段同为全局前缀，置于
@@ -651,7 +720,7 @@ Before closing: if this task cannot be finished in one run or new closing condit
       const splittingGuidanceBlock = `
 
 # Splitting for speed
-Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery. One card per part: parent_task_id to this task, blocked_by where order matters. Not the project owner? Propose the split in your delivery report. Example: API card (src/api/) + docs card, run concurrently.`
+${this.promptSegmentText('splitting')}`
       // delivery-selfcheck:start —— 交付前自校段（DSHBOTS-276，P1 派单质量前置）：治 GS 实测
       // 34% 补丁/返工卡——交付报告缺自跑验证证据。所有任务卡无条件注入，置于卡头
       // Status 与 Description 之间（D-269 只追加手法）：不动既有锚点前缀与 D-274 时效段
@@ -660,7 +729,7 @@ Split only when all hold: the task has 2+ independent parts, parts have disjoint
       const deliverySelfcheckBlock = `
 
 # Delivery self-check
-Before reporting delivery, self-run the reproducible verification and put the evidence in the delivery report: the exact test/build commands you ran with their results, the list of files you changed, and the counts or links the acceptance criteria name (grep hits, test pass counts, commit hashes). Verify your own claims first — re-run the target tests and re-check the anchors yourself; do not report delivery on unverified work. Self-checking is always cheaper than rework: a delivery report without evidence will be returned.`
+${this.promptSegmentText('selfcheck')}`
       // delivery-selfcheck:end
       // recovery note（DSHBOTS-135）：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
       // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
@@ -679,7 +748,7 @@ Execute each card yourself, or hand it to a dedicated child agent (subagent/suba
       const parallelMerge = this.config.agentTeam ? `
 
 # Parallel work inside this task
-Parallelize independent parts via teammates (at most ${this.config.maxTeammates}) or the child agents above; keep every part on project KEY-N cards, never on the host shared task board (task-N). Before delivering: list_agents, wait_agent until idle, merge results; resolve conflicting edits yourself.` : ''
+${parallelMergeBody(this.config.maxTeammates)}` : ''
       return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}
 
 Do the task in the project workspace. End with a concise delivery report containing what changed, verification performed, and blockers or risks — not just a plan.${parallel}${parallelMerge}
