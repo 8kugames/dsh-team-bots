@@ -74,10 +74,6 @@ export default {
   "sidebar.globalConfig": "Global settings",
   "sidebar.switchToDsh": "Switch to the native DSH web UI",
   "sidebar.dshNative": "Native DSH UI",
-  "sidebar.tasksActive": "${count} tasks in progress",
-  "sidebar.idle": "Team idle",
-  "sidebar.botsCount": "${count} bots",
-  "sidebar.pendingReviews": "${count} in review",
   // Topbar stats & actions
   "topbar.taskOne": "task",
   "topbar.taskMany": "tasks",

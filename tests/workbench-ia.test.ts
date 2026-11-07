@@ -85,15 +85,17 @@ test('② system.js：记忆查询按上下文收敛、提案全量', () => {
   assert.match(soloCtx, /scope_type = 'bot' AND scope_id = \?/, '单聊记忆仅该 bot scope')
 })
 
-// DSHBOTS-77 定下侧栏状态行「全局口径、不随上下文跳变」；DSHBOTS-105 把计数从 activeRuns（一切运行）
-// 切到 activeTasks（任务 in_progress），单聊头部等其余「运行中」文案不在此列。
-test('DSHBOTS-105 侧栏状态行读全局 activeTasks，不随上下文分支', () => {
+// DSHBOTS-77/105 曾定侧栏状态行「全局口径 activeTasks」；DSHBOTS-301 owner 拍板整块移除
+// sidebar-meta 状态行（圆点+团队空闲·任务数·Bots 数·待审数），守门改为钉「不再回归」：
+// 区块、activeTasks 死代码与四个状态行 i18n 键全部不存在；topbar 仍按项目口径不受影响。
+test('DSHBOTS-301 侧栏状态行整块移除，不残留区块/死代码/死键', () => {
   const shell = /function renderShell\(\) \{[\s\S]*?\n\}/.exec(source)?.[0] ?? ''
   assert.ok(shell, '找不到 renderShell')
-  assert.match(shell, /const activeTasks = Number\(data\?\.activeTasks \?\? 0\)/, '状态行任务数读全局字段 activeTasks，无上下文分支')
-  assert.ok(!shell.includes('soloRuns'), 'renderShell 不再按单聊/群聊分别数运行')
-  assert.match(shell, /class="dot \$\{activeTasks \? 'amber' : ''\}"/, '状态点判空与文案读同一全局变量')
-  assert.match(shell, /\$\{activeTasks \? t\('sidebar\.tasksActive', \{ count: activeTasks \}\) : t\('sidebar\.idle'\)\}/, '状态行文案用任务口径')
+  assert.ok(!shell.includes('sidebar-meta'), 'sidebar-meta 区块不回归')
+  assert.ok(!shell.includes('activeTasks'), '状态行 activeTasks 死代码不回归')
+  assert.ok(!source.includes('sidebar.tasksActive') && !source.includes('sidebar.idle')
+    && !source.includes('sidebar.botsCount') && !source.includes('sidebar.pendingReviews'), '状态行四 i18n 键不再被引用')
+  assert.ok(!shell.includes('soloRuns'), 'renderShell 不按单聊/群聊分别数运行')
   assert.match(shell, /const projectRunning = project\?\.stats\?\.running \?\? 0/, 'topbar 运行数拆回项目口径')
   assert.match(shell, /<b>\$\{projectRunning\}<\/b> \$\{projectRunning === 1/, 'topbar-meta 读项目口径变量')
 })

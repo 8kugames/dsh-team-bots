@@ -225,8 +225,6 @@ function renderShell() {
   const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
   // 跨项目待答提问（DSHBOTS-116）：与审批同口径，顶层全局聚合。
   const pendingQuestions = data?.pendingQuestions ?? { count: 0, items: [] }
-  // 侧栏状态行任务口径（DSHBOTS-105）：全库任务 in_progress 计数，不随群聊/单聊上下文跳变；topbar 仍按项目口径。
-  const activeTasks = Number(data?.activeTasks ?? 0)
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
   // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。四页页壳页（DSHBOTS-216）冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；无横幅时 main-head 整块不渲染，避免空粘头残影。
@@ -352,14 +350,6 @@ function renderShell() {
           <a class="global-config dsh-official-link" href="/index.html" title="${t('sidebar.switchToDsh')}">
             ${icon('external')}<span>${t('sidebar.dshNative')}</span>
           </a>
-          <div class="sidebar-meta">
-            <span class="dot ${activeTasks ? 'amber' : ''}"></span>
-            <span>${activeTasks ? t('sidebar.tasksActive', { count: activeTasks }) : t('sidebar.idle')}</span>
-            <span class="sidebar-meta-sep">·</span>
-            <span>${t('sidebar.botsCount', { count: activeBots.length })}</span>
-            <span class="sidebar-meta-sep">·</span>
-            <span>${t('sidebar.pendingReviews', { count: pendingProposals() })}</span>
-          </div>
         </div>
       </aside>
       <main class="main">
