@@ -517,3 +517,53 @@ test('system 区会话级冻结，记忆块走 runtime context 尾部快照', as
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// DSHBOTS-300 守门：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后
+// 各自 INSERT，后者撞 one_active_run_per_bot 直抛——outbox 计为投递失败重试耗尽置
+// failed。单进程可测等价：预插同 bot queued 运行（对端落行）后把 botBusy 桩成 false
+// （模拟竞态窗），断言 enqueueTaskRun/enqueueOwnerTaskRun 不抛错、落挂起队列、
+// bot 空闲后 drainPendingMessages 建回运行。
+test('查后插竞态撞 one_active_run_per_bot：task/owner_task 入队落挂起队列不抛错，空闲建回', async () => {
+  const { root, store, service, director, dev } = await manualSetup()
+  try {
+    const project = await service.createProject({ name: 'Race', key: 'RCE', ownerBotId: director.id, memberIds: [dev.id] })
+    // 两个任务分道：task 走 enqueueTaskRun、owner 验收走 enqueueOwnerTaskRun——同 task_id
+    // 会互撞 one_active_run_per_task，建回断言需要两条互不冲突的运行。
+    const task = await service.createTask({ projectId: project.id, title: 'R1 竞态任务', assigneeBotId: dev.id })
+    const reviewTask = await service.createTask({ projectId: project.id, title: 'R2 待验收任务', assigneeBotId: dev.id })
+    const now = new Date().toISOString()
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_race_dev', ?, ?, 'chat', 'read', 'mention', 'race-peer-1', 'queued', 1, 'race:dev', ?)`,
+      project.id, dev.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_race_owner', ?, ?, 'chat', 'read', 'mention', 'race-peer-2', 'queued', 1, 'race:owner', ?)`,
+      project.id, director.id, now,
+    )
+    // 模拟对端进程在「本进程 busy 过检之后、INSERT 之前」落行：busy 检查桩成 false。
+    const realBusy = service.botBusy.bind(service)
+    service.botBusy = () => false
+    const taskRunId = service.enqueueTaskRun(task, 'task_created', { type: 'system', id: 'system' })
+    const ownerRunId = service.enqueueOwnerTaskRun(reviewTask, 'review')
+    service.botBusy = realBusy
+    assert.equal(taskRunId, null, 'task_run 撞 UNIQUE 返 null 不抛错')
+    assert.equal(ownerRunId, null, 'owner_task_run 同款兜底')
+    const devHeld = JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]')
+    assert.equal(devHeld.at(-1)?.kind, 'task', '任务挂起项入队')
+    const ownerHeld = JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]')
+    assert.ok(ownerHeld.some(item => item.kind === 'owner_task'), 'owner 任务挂起项入队')
+
+    // 对端运行结束，bot 空闲：挂起项建回运行。
+    store.run("UPDATE runs SET status = 'canceled', ended_at = ? WHERE id IN ('run_race_dev', 'run_race_owner')", now)
+    service.drainPendingMessages()
+    assert.ok(store.get("SELECT id FROM runs WHERE kind = 'task' AND task_id = ? AND status = 'queued'", task.id), '挂起任务建回运行')
+    assert.ok(store.get("SELECT id FROM runs WHERE kind = 'review' AND task_id = ? AND status = 'queued'", reviewTask.id), '挂起 owner 验收建回运行')
+    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').length, 0, 'dev 挂起队列清空')
+    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]').length, 0, 'owner 挂起队列清空')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})

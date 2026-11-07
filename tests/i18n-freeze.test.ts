@@ -27,7 +27,7 @@ function installDomStubs() {
     innerHTML: '', textContent: '', hidden: false, focus: noop, blur: noop,
     getBoundingClientRect: () => ({ top: 0, left: 0, width: 0, height: 0 }),
   })
-  globalThis.location = { search: '', href: 'http://localhost/', origin: 'http://localhost', pathname: '/' }
+  globalThis.location = { search: '', href: 'http://localhost/', origin: 'http://localhost', pathname: '/' } as unknown as Location
   globalThis.document = {
     getElementById: () => el(),
     createElement: () => el(),
@@ -45,7 +45,7 @@ function installDomStubs() {
     },
     activeElement: null,
   } as unknown as Document
-  globalThis.window = globalThis
+  globalThis.window = globalThis as unknown as Window & typeof globalThis
   globalThis.addEventListener = noop as unknown as typeof globalThis.addEventListener
   globalThis.matchMedia = (() => ({ matches: false, addEventListener: noop })) as unknown as typeof globalThis.matchMedia
   globalThis.requestAnimationFrame = ((fn: FrameRequestCallback) => setTimeout(fn, 0)) as typeof globalThis.requestAnimationFrame

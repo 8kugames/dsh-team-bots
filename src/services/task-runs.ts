@@ -122,26 +122,39 @@ export const taskRunMethods = {
     // drainPendingMessages 建回（insertHeldMessageRun 的 task 分支）。入队时快照
     // （写范围/备用模型路由）随挂起项保存，不因延迟建回漂移。messageId 用合成键
     // task:<id>：挂起队列按 messageId 去重/消费，任务项无消息 id 不能留空。
+    // DSHBOTS-300：快照构造提为 hold 闭包——busy 分支与下文「查后插竞态撞 UNIQUE」
+    // 兜底（DSHBOTS-300）共用同一挂起项，杜绝两处漂移。
+    const hold = () => this.holdPendingMessage(task.assignee_bot_id, {
+      kind: 'task', messageId: `task:${task.id}`, taskId: task.id,
+      projectId: task.project_id, triggerType,
+      actorType: actor.type, actorId: actor.id, writeScopes,
+      routing: {
+        mode: routing.mode, ref: routing.ref ?? null, resetAt: routing.resetAt ?? null,
+        provider: fallbackProvider, model: fallbackModel, effort: fallbackEffort,
+      },
+      queuedAt: createdAt,
+    })
     if (this.botBusy(task.assignee_bot_id)) {
-      this.holdPendingMessage(task.assignee_bot_id, {
-        kind: 'task', messageId: `task:${task.id}`, taskId: task.id,
-        projectId: task.project_id, triggerType,
-        actorType: actor.type, actorId: actor.id, writeScopes,
-        routing: {
-          mode: routing.mode, ref: routing.ref ?? null, resetAt: routing.resetAt ?? null,
-          provider: fallbackProvider, model: fallbackModel, effort: fallbackEffort,
-        },
-        queuedAt: createdAt,
-      })
+      hold()
       return null
     }
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, write_scopes, model_provider, model_model, model_effort, queued_at)
-       VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?, ?, ?, ?, ?)`,
-      runId, task.project_id, task.assignee_bot_id, task.id, triggerType, task.id,
-      `task:${task.id}:${Date.now()}:${runId}`, writeScopes, fallbackProvider, fallbackModel, fallbackEffort, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, write_scopes, model_provider, model_model, model_effort, queued_at)
+         VALUES (?, ?, ?, ?, 'task', 'write', ?, ?, 'queued', 1, ?, ?, ?, ?, ?, ?)`,
+        runId, task.project_id, task.assignee_bot_id, task.id, triggerType, task.id,
+        `task:${task.id}:${Date.now()}:${runId}`, writeScopes, fallbackProvider, fallbackModel, fallbackEffort, createdAt,
+      )
+    } catch (error: any) {
+      // DSHBOTS-300：查后插竞态撞 one_active_run_per_bot——按忙口径挂起返 null 不抛
+      //（task_id 维度撞车不在此兜，重试下一拍 active 预检自愈）。
+      if (this.isRunBotUniqueViolation(error)) {
+        hold()
+        return null
+      }
+      throw error
+    }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued', `由 ${actor.type}:${actor.id} 触发`, createdAt,
@@ -186,20 +199,30 @@ export const taskRunMethods = {
     const triggerType = kind === 'review' ? 'review_requested' : 'blocked_handoff'
     // busy 闸（DSHBOTS-290）：owner 忙时 review/handle 运行同样不落 runs 行（撞
     // one_active_run_per_bot），挂待处理队列空闲建回——与 enqueueTaskRun 同口径。
+    // DSHBOTS-300：挂起项提为 hold 闭包，busy 分支与查后插竞态兜底共用。
+    const hold = () => this.holdPendingMessage(owner.id, {
+      kind: 'owner_task', messageId: `owner_task:${current.id}:${kind}`, taskId: current.id,
+      projectId: project.id, runKind: kind, triggerType, queuedAt: createdAt,
+    })
     if (this.botBusy(owner.id)) {
-      this.holdPendingMessage(owner.id, {
-        kind: 'owner_task', messageId: `owner_task:${current.id}:${kind}`, taskId: current.id,
-        projectId: project.id, runKind: kind, triggerType, queuedAt: createdAt,
-      })
+      hold()
       return null
     }
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?)`,
-      runId, project.id, owner.id, task.id, kind, triggerType, task.id,
-      `${kind}:${task.id}:${Date.now()}:${runId}`, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, queued_at)
+         VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?)`,
+        runId, project.id, owner.id, task.id, kind, triggerType, task.id,
+        `${kind}:${task.id}:${Date.now()}:${runId}`, createdAt,
+      )
+    } catch (error: any) {
+      if (this.isRunBotUniqueViolation(error)) {
+        hold()
+        return null
+      }
+      throw error
+    }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
