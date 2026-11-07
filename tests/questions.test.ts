@@ -623,3 +623,37 @@ test('迟到回投失败（run 已结束/宿主不再认领）：答案仍落库
     } finally { await rm(root, { recursive: true, force: true }) }
   }
 })
+
+// DSHBOTS-312 来源群聊标识（数据面守门）：审批视图与列表均带 project_key/project_name，
+// 单聊（project_id 空）归 null+solo（D-218 口径）——UI 据此渲染 [KEY] 群名 chip 或「单聊」。
+test('审批来源标识：群聊向带 projectKey/projectName，单聊向归 null+solo', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await primeProject(store, service, 'LabelSrc')
+    const now = new Date().toISOString()
+    store.run(
+      `INSERT INTO approvals(id, project_id, bot_id, tool_name, status, created_at, expires_at)
+       VALUES ('apr_src_proj', ?, ?, 'run_command', 'pending', ?, ?)`,
+      project.id, director.id, now, new Date(Date.now() + 300_000).toISOString(),
+    )
+    store.run(
+      `INSERT INTO approvals(id, project_id, bot_id, tool_name, status, created_at, expires_at)
+       VALUES ('apr_src_solo', NULL, ?, 'run_command', 'pending', ?, ?)`,
+      director.id, now, new Date(Date.now() + 300_000).toISOString(),
+    )
+    // 列表口径（JOIN 产物）：群聊向带 key/name。
+    const listed = service.approvalsForProject(project.id).find(row => row.id === 'apr_src_proj')
+    assert.equal(listed.projectKey, 'LABELSRC', '列表带 projectKey（D-240 JOIN 既有）')
+    assert.equal(listed.projectName, 'LabelSrc', '列表带 projectName')
+    // 单行口径（DSHBOTS-312 新增）：approvalView 直查也补齐来源字段。
+    const projView = service.approvalView(store.get('SELECT * FROM approvals WHERE id = ?', 'apr_src_proj'))
+    assert.equal(projView.projectKey, 'LABELSRC', 'approvalView 单行路径带 projectKey')
+    assert.equal(projView.projectName, 'LabelSrc', 'approvalView 单行路径带 projectName')
+    assert.equal(projView.scope, 'project')
+    const soloView = service.approvalView(store.get('SELECT * FROM approvals WHERE id = ?', 'apr_src_solo'))
+    assert.equal(soloView.projectKey, null, '单聊向 projectKey=null（归「单聊」）')
+    assert.equal(soloView.projectName, null)
+    assert.equal(soloView.scope, 'solo', 'scope=solo 供 UI 显示单聊 chip')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

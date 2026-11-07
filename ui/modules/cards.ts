@@ -126,7 +126,7 @@ function approvalCardMarkup(approval, deciding = false, showSource = false) {
         <span class="approval-icon is-${attr(status)}">${approvalIcon(APPROVAL_STATE_ICON[status] ?? 'clock')}</span>
         <div class="approval-head-main">
           <div class="message-meta approval-meta"><strong>${esc(approval.botName)}</strong><span class="approval-ask">${t("请求提权")}</span><span>${esc(formatTime(approval.created_at))}</span></div>
-          <div class="approval-tools"><span class="approval-chip mono">${esc(approval.tool_name)}</span>${target ? `<span class="approval-chip mono approval-chip-path" title="${attr(target.title)}">${esc(target.text)}</span>` : ''}</div>
+          <div class="approval-tools"><span class="approval-chip mono">${esc(approval.tool_name)}</span>${approval.projectKey ? `<span class="approval-chip mono" title="${attr(approval.projectName ?? '')}">[${attr(approval.projectKey)}] ${esc(approval.projectName ?? '')}</span>` : `<span class="approval-chip mono">${t("单聊")}</span>`}${target ? `<span class="approval-chip mono approval-chip-path" title="${attr(target.title)}">${esc(target.text)}</span>` : ''}</div>
         </div>
       </div>
       ${showSource ? approvalSourceLine(approval) : ''}
