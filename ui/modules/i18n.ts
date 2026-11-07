@@ -47,3 +47,13 @@ export function t(key, params = null) {
     params[name] === undefined || params[name] === null ? match : String(params[name])
   ))
 }
+
+// 静默取值：字典里没有该键时原样返回，不告警。
+// 给后端下发的自由文本用（轨迹里的工具名、运行结束原因等）——它们大多不是词典键，
+// 原样显示即可，不该刷 console.warn；落在词典里的（如后端兜底写的中文词）照常翻译。
+export function tMaybe(key, fallback = key) {
+  const dict = DICTS[current] ?? zh
+  if (dict[key] !== undefined) return dict[key]
+  if (zh[key] !== undefined) return zh[key]
+  return fallback
+}

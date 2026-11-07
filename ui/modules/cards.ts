@@ -39,7 +39,14 @@ function approvalExpiresMs(expiresAt) {
 // 五态：pending（唯一强调态）/ allowed / rejected / timeout / cancelled。
 // pending 之外四态统一走「已决」排版：无倒计时无按钮、正文降 --ink-2、卡片回中性底；
 // 红色只出现在 rejected 的左侧条与 pill 小点，其余中性。
-const APPROVAL_STATUS = { pending: t("等待审批"), allowed: t("已允许一次"), rejected: t("已拒绝"), timeout: t("已超时"), cancelled: t("已取消") }
+// 状态文案走 getter 现取：模块顶层求值早于 setLanguage，顶层固化会让英文界面留中文。
+const APPROVAL_STATUS = {
+  get pending() { return t('等待审批') },
+  get allowed() { return t('已允许一次') },
+  get rejected() { return t('已拒绝') },
+  get timeout() { return t('已超时') },
+  get cancelled() { return t('已取消') },
+}
 // 各态图标：盾牌（待批）/ 对勾（已放行）/ 叉（已拒绝）/ 时钟（超时）/ 禁止（取消）。
 // ui/modules/icons.js 不在本卡写范围，shield 与 ban 两枚路径在此内联；check/close/clock 走既有图标表。
 const APPROVAL_ICON_PATHS = {
@@ -151,7 +158,12 @@ function renderApprovalCard(message) {
 // ===== question-card:start 提问卡片（DSHBOTS-116 UI）=====
 // 四态：pending（唯一强调态，可作答）/ answered / expired / timeout。
 // 与审批卡片同骨架：pending 有倒计时 + 进度条 + 作答区，已决态只留状态 pill 与答案摘要。
-const QUESTION_STATUS = { pending: t("等待回答"), answered: t("已回答"), expired: t("已取消"), timeout: t("已超时") }
+const QUESTION_STATUS = {
+  get pending() { return t('等待回答') },
+  get answered() { return t('已回答') },
+  get expired() { return t('已取消') },
+  get timeout() { return t('已超时') },
+}
 const QUESTION_STATE_ICON = { pending: 'message', answered: 'check', expired: 'close', timeout: 'clock' }
 const QUESTION_URGENT_MS = 15_000
 const questionBadgeText = (count) => (Number(count) > 99 ? '99+' : String(Number(count) || 0))
@@ -518,7 +530,9 @@ function renderMessage(message) {
 
 // ===== Bot 私信（项目群聊视图的折叠面板，数据来自 state.directMessages）=====
 
-const DM_STATUS = { pending: t("待回复"), delivered: t("已送达"), replied: t("已回复"), failed: t("失败") }
+// 私信状态码集合：只判定「是否已知状态」，标签文案统一走 t('dm.' + status) 现取，
+// 不在模块顶层固化（顶层求值早于 setLanguage，固化会让英文界面留中文）。
+const DM_STATUS_KEYS = new Set(['pending', 'delivered', 'replied', 'failed'])
 const DM_STATUS_TONE = { pending: '', delivered: 'violet', replied: 'green', failed: 'red' }
 
 function renderDirectMessagesCard() {
@@ -531,7 +545,7 @@ function renderDirectMessagesCard() {
         <div class="subpanel-row">
           <div class="subpanel-row-head">
             <strong>${esc(dm.fromName)} → ${esc(dm.toName)}</strong>
-            <span class="pill ${DM_STATUS_TONE[dm.status] ?? ''}">${esc(dm.status in DM_STATUS ? t('dm.' + dm.status) : dm.status)}</span>
+            <span class="pill ${DM_STATUS_TONE[dm.status] ?? ''}">${esc(DM_STATUS_KEYS.has(dm.status) ? t('dm.' + dm.status) : dm.status)}</span>
             <span class="faint">${esc(formatTime(dm.createdAt))}</span>
             ${dm.repliedAt ? `<span class="faint">${t('dm.repliedAt', { time: formatTime(dm.repliedAt) })}</span>` : ''}
             <span class="subpanel-tag">#${esc(dm.id)}</span>

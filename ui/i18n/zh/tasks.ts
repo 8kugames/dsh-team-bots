@@ -49,7 +49,6 @@ export default {
   "task.time7d": "近 7 天",
   "task.time30d": "近 30 天",
   "task.timeAll": "全部时间",
-  "task.sortLabel": "任务排序",
   "task.sortCreatedDesc": "创建时间 新→旧",
   "task.sortCreatedAsc": "创建时间 旧→新",
   "task.sortCompletedDesc": "完成时间 新→旧",
