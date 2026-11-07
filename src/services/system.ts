@@ -12,6 +12,7 @@ import { projectSkillRoots } from '../project-skills.js'
 import { resolveUiLanguage } from './locale.js'
 import { effectiveUiLanguage } from '../config.js'
 import { nowIso } from '../util.js'
+import { staleCardHit } from './notify.js'
 
 // 插件自身版本：进程启动时从部署副本 package.json 定格，即当前生效版本。
 // health() 与「DSH 服务」卡展示同源（DSHBOTS-143）。
@@ -106,6 +107,8 @@ export const systemMethods = {
       pendingApprovals: this.approvalsPending(),
       // 跨项目待答聚合（DSHBOTS-116）：同口径，提问卡片出现在群聊，顶部入口给全局可见性。
       pendingQuestions: this.questionsPending(),
+      // needs-attention 聚合（A2/DSHBOTS-322）：待验收/滞留卡/系统问题，UI 顶部收口唯一真值。
+      needsAttention: this.needsAttentionView(),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,
@@ -438,6 +441,42 @@ export const systemMethods = {
       projects: this.store.get('SELECT COUNT(*) AS count FROM projects')?.count ?? 0,
       queued: this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status = 'queued'")?.count ?? 0,
       running: this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status = 'running'")?.count ?? 0,
+      // needs-attention 聚合（A2/DSHBOTS-322）：外部巡检与 UI 顶部收口同源。
+      needsAttention: this.needsAttentionView(),
     }
+  },
+
+  // needs-attention 聚合（A2/DSHBOTS-322，吸收 superagent 原型 overview「三问」+ B9 系统问题口径）：
+  // 把散在各域的「需要人」事项收进一个只读聚合，供 health()（外部巡检）与 state（UI 顶部收口）
+  // 同源消费。反双真值：只做 COUNT 与既有谓词的复算，不改任何状态真值——待审/待答谓词与
+  // approvalsPending/questionsPending 同式，滞留判定复用 notify.js 的 staleCardHit 纯函数
+  // （与 scheduler 扫描同一口径），投递失败取 outboxCounts 的 failed 终态。
+  // B9 升级语义落在既有终态上：outbox failed = 退避重试耗尽（defer 不计数，D-136）；
+  // 微信通道异常取 channel status 的权威 phase（connecting 是扫码过渡态不算异常）——
+  // 不另建失败计数表（报告 D5 警示：原型「记录不删」类技术债不搬）。
+  // runs.attention_json 的待答面（answer_attention）无 UI 消费者，且 question 卡已覆盖
+  // 提问入口，这里不发明不可行动的数字。
+  needsAttentionView() {
+    const staleRows = this.store.all(
+      `SELECT status, updated_at FROM tasks
+       WHERE status IN ('in_review', 'blocked', 'backlog', 'todo') AND updated_at IS NOT NULL LIMIT 500`,
+    )
+    const needsYou = {
+      approvals: Number(this.store.get("SELECT COUNT(*) AS count FROM approvals WHERE status = 'pending'")?.count ?? 0),
+      questions: Number(this.store.get("SELECT COUNT(*) AS count FROM questions WHERE status = 'pending'")?.count ?? 0),
+      reviews: Number(this.store.get("SELECT COUNT(*) AS count FROM tasks WHERE status = 'in_review'")?.count ?? 0),
+      stale: staleRows.filter(row => staleCardHit(row)).length,
+    }
+    const issues = []
+    const outboxFailed = Number(this.outboxCounts().failed ?? 0)
+    if (outboxFailed > 0) {
+      const oldest = this.store.get("SELECT created_at FROM outbox WHERE status = 'failed' ORDER BY created_at LIMIT 1")
+      issues.push({ kind: 'outbox_failed', count: outboxFailed, since: oldest?.created_at ?? null })
+    }
+    const wechat = this.wechatStatus()
+    if (wechat.enabled && wechat.phase && !['connected', 'connecting'].includes(wechat.phase)) {
+      issues.push({ kind: 'wechat_channel', phase: wechat.phase, message: wechat.error ?? null })
+    }
+    return { needsYou, issues }
   },
 }

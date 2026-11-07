@@ -137,4 +137,9 @@ export default {
   "（未选择）": "(not selected)",
   "（共": " (",
   "（未命名项目）": "(unnamed project)",
+  // needs-attention 顶部收口（A2/DSHBOTS-322）：「需要你处理」注册于 en/tasks.ts
+  "待验收": "To review",
+  "滞留卡": "Stale cards",
+  "投递失败": "Failed deliveries",
+  "通道异常": "Channel issue",
 }

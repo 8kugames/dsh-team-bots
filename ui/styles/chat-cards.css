@@ -183,6 +183,35 @@
     gap: 8px;
 }
 .approval-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
+/* needs-attention 顶部收口（A2/DSHBOTS-322）：Quiet by default——计数全 0 且无系统问题时
+   整条不渲染。与审批/提问窄条同形容器，一行 chips 直接跳转对应页面，不展开明细菜单。 */
+.attention-banner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--star-wash);
+}
+.attention-banner-label {
+    flex: 0 0 auto;
+    color: var(--ink-3);
+    font: 500 var(--fs-small) var(--sans);
+}
+.attention-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink);
+    font: 500 var(--fs-small) var(--sans);
+    cursor: pointer;
+}
+.attention-chip:hover { border-color: var(--line-2); }
 /* 来源定位行（DSHBOTS-240）：顶部跨会话审批通知的卡片多一行「来源群聊（项目名/KEY）+ 任务 ID/任务名」，
    让 owner 不跳转即可判断该批谁。群聊卡片不带这些字段，不渲染该行。 */
 .approval-source {
