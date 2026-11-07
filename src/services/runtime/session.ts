@@ -288,6 +288,19 @@ export const sessionMethods = {
     if (!task?.id) return undefined
     // 终态任务的会话不再需要亲和：done/canceled 与调度器候选过滤同口径。
     if (task.status === 'done' || task.status === 'canceled') return undefined
+    // 验收期话语权在总监（DSHBOTS-306）：in_review 期间卡线程消息（验收指令/评论直通/
+    // dm_reply 回投等经此亲和的流量）改判项目 owner bot 的控制面绑定——否则按 assignee
+    // 亲和落承接 bot 会话，验收动作 team_review_task 又仅 owner bot 可调（D-190），指令
+    // 路由与动作权限错位、每卡都要绕一步。本分支优先于下方 runs 归属亲和（含 D-286 结转
+    // 后的 alias 旧会话）：验收期短暂，按当前 owner 会话走；退回 todo 即恢复 assignee 亲和。
+    if (task.status === 'in_review') {
+      const ownerBotId = this.store.get('SELECT owner_bot_id FROM projects WHERE id = ?', task.project_id)?.owner_bot_id
+      if (!ownerBotId) return undefined
+      return this.store.get(
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'bot' AND alias = 0",
+        ownerBotId, task.project_id,
+      )
+    }
     const row = this.store.get(
       `SELECT session_id AS sid FROM runs
         WHERE task_id = ? AND session_id IS NOT NULL
