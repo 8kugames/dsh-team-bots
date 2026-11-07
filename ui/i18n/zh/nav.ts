@@ -74,10 +74,6 @@ export default {
   "sidebar.globalConfig": "全局配置",
   "sidebar.switchToDsh": "切换到 DSH 原生 Web 界面",
   "sidebar.dshNative": "DSH 原生界面",
-  "sidebar.tasksActive": "${count} 个任务中",
-  "sidebar.idle": "团队空闲",
-  "sidebar.botsCount": "${count} Bots",
-  "sidebar.pendingReviews": "${count} 待审",
   // 顶栏统计与操作
   "topbar.taskOne": "任务",
   "topbar.taskMany": "任务",
