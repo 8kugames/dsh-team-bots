@@ -203,7 +203,7 @@ test('同 Bot 任务运行与群聊回复串行（忙时挂起、空闲建回）
     await service.tick()
     const otherChat = runningRuns(store).find(run => run.kind === 'chat' && run.bot_id === dev2.id)
     assert.ok(otherChat, '空闲 bot 的群聊回复在他人任务运行期间照常被调度')
-    assert.equal(service.claimKey(otherChat), `bot:${dev2.id}`, '串行键已收敛到 bot（DSHBOTS-289）')
+    assert.equal(service.claimKey(otherChat), `bot:${dev2.id}:${otherChat.project_id ?? '~solo'}`, '串行键已收敛到 (bot, 工作区)（DSHBOTS-308）')
     assert.ok(runningRuns(store).some(run => run.id === taskRun.id), '任务运行不被群聊回复打断')
 
     // 任务结束（消化交付级联的 memory_review 等）后，挂起的群聊建回执行。

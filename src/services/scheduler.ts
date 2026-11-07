@@ -262,13 +262,13 @@ export const schedulerMethods = {
     throw error
   },
 
-  // 串行键（DSHBOTS-289，ADR §5.2-3）：控制面会话收敛为每 bot 单绑定后，串行维度统一
-  // 收敛到 bot——与 one_active_run_per_bot 唯一索引（UNIQUE(bot_id) WHERE queued/running）
-  // 同一口径：同 bot 任意两条运行（chat/task/dm/solo/review/…）互斥排队。原
-  // claimKey/bindingLaneKey/sessionLaneKey 三函数按 task/project/dm/solo 分道的推导
-  // 一并删除（四车道已不存在，键算不出第二个值）。
+  // 串行键（DSHBOTS-308，DSHBOTS-289 的 bot 全局串行收窄）：串行域 = (bot, 工作区)，
+  // domain 取 run.project_id ?? '~solo'（与 D-299 one_bot_binding 的 COALESCE 口径一致，
+  // 项目外 solo/单聊落 bot 自有工作区）。跨工作区并行由 owner 拍板；同域运行仍互斥。
+  // domain 以 run.project_id 为准：dm_reply 入队处即落 origin 推导的 project_id
+  // （deliverBotReply 写 message.project_id，见 runs.ts），键推导不读 trigger_ref/session_id。
   claimKey(run) {
-    return `bot:${run.bot_id}`
+    return `bot:${run.bot_id}:${run.project_id ?? '~solo'}`
   },
 
   // 运行超时由 runtime 的定时器负责；这里补充“还活着但没有任何进展”的判定。
@@ -536,10 +536,9 @@ export const schedulerMethods = {
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。
         // 非任务运行 LEFT JOIN 出的 task_status 为空，按运行自身判定，不受这条闸门影响。
-        // trigger_ref/session_id 供 claimKey 通道推导（dm_reply 按来信 origin、rollover_summary
-        // 按旧会话绑定）——在跑侧与候选侧必须算出同一个键，串行才不失效（DSHBOTS-219）。
+        // claimKey 串行域 = (bot, 工作区)（DSHBOTS-308）：键只读 bot_id/project_id（均在列面），
+        // 在跑侧与候选侧算的是同一 run 行的同一列，串行不失效（承 DSHBOTS-219 口径）。
         `SELECT r.bot_id, r.kind, r.task_id, r.project_id, r.mode, r.write_scopes, r.trigger_type,
-                r.trigger_ref, r.session_id,
                 t.status AS task_status
            FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
           WHERE r.status = 'running'`,
