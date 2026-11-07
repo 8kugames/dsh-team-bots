@@ -354,21 +354,28 @@ export const sessionMethods = {
       }
       this.retireBinding(affinity.session_id)
     }
-    // ③ 控制面会话收敛（DSHBOTS-289，ADR §5.2-3）：其余运行（chat/solo_chat/dm/dm_reply/
-    // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 的 kind='bot' 单绑定
-    // 控制面会话——task/project/dm/solo 四车道建行已删除，ensureBotBinding 是唯一建行点。
+    // ③ 控制面会话收敛（DSHBOTS-289/299，ADR §5.2-3）：其余运行（chat/dm/dm_reply/
+    // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 在所属域的 kind='bot'
+    // 控制面会话——项目运行落 (bot, project) 绑定（每项目每 bot 一条，DSHBOTS-299 三分域），
+    // solo_chat/项目外流量落 (bot, NULL) 绑定即该 bot 专属工作区 solo 会话；ensureBotBinding
+    // 是唯一建行点。
     return this.ensureBotBinding(bot, project, { run, task, modelOverride })
   },
-  // 控制面会话兜底与唯一建行点（DSHBOTS-285 落机制，DSHBOTS-289 生产接线，ADR §4.1/§5.2-3）：
-  // ensureSession 收敛顺序的终点——rollover/compact 复用、任务亲和之外的运行一律解析到
-  // 该 bot 的 kind='bot' 单绑定控制面会话；已有则复用（宿主失效或结转时退役重建）。
+  // 控制面会话兜底与唯一建行点（DSHBOTS-285 落机制，289 生产接线，299 会话域三分，
+  // ADR §4.1/§5.2-3）：ensureSession 收敛顺序的终点——rollover/compact 复用、任务亲和
+  // 之外的运行一律解析到该 bot 在 (bot, project) 维度的 kind='bot' 控制面绑定；已有则复用
+  // （宿主失效或结转时退役重建）。project 为 NULL 即 solo 域：绑定行 project_id 亦为 NULL，
+  // 会话 cwd 落该 bot 专属工作区（resolveSessionCwd 的 solo 分支），与项目控制面双域分离。
   // 复用分支补齐与旧 ensureSession 同款的策略面：applyFilePolicy / applyBotToolPolicy /
   // selectModel / maybeCompactSession / rolloverPending 消费闸。
   async ensureBotBinding(bot, project, { run, task, modelOverride } = {} as any) {
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
+    // DSHBOTS-299：查询带 project 维度（IS 比 = 多兼容 NULL——solo 域按 (bot, NULL) 命中），
+    // 同一 bot 跨项目各自独立成会话，项目流量不再被单条全局绑定吸走。
     const existing = this.store.get(
-      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0 AND project_id IS ?",
       bot.id,
+      project?.id ?? null,
     )
     let rolledOver = false
     if (existing) {
@@ -390,7 +397,9 @@ export const sessionMethods = {
       // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名（DSHBOTS-256）。
       this.retireBinding(existing.session_id)
     }
-    const key = `${bot.id}:bot`
+    // DSHBOTS-299：建行去重键同样带 project 维度——同 bot 在 A 项目与 solo 域并发首建
+    // 互不挤兑，也不共用同一条 in-flight Promise（solo 会话 cwd 与项目会话不同）。
+    const key = `${bot.id}:${project?.id ?? 'solo'}:bot`
     if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
     const creating = (async () => {
       const solo = !project
