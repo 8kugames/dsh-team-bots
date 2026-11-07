@@ -235,27 +235,20 @@ test('结转后任务亲和：未终态任务消息落旧会话，新任务落�
     assert.equal(host.created.length, createdAfterRollover, '亲和复用不得再新建会话')
     assert.equal(rolloverRuns(ctx.store).length, 0, 'alias 会话不得重排结转摘要')
 
-    // ③ 新任务（无 runs 归属）：不享亲和，落 bot 的活跃控制面绑定（DSHBOTS-289 收敛后
-    //    不再开任务车道行，sess-new-1 即结转后的活跃控制面会话）。
+    // ③ 新任务（无 runs 归属）：不享亲和，也不进控制面绑定——开「bot 名+任务号」专属
+    //    任务会话（单 bot 多任务并行），落 kind='task' 绑定行。
     const t2 = await ctx.service.createTask({ projectId: project.id, title: '新任务', assigneeBotId: dev.id }, ctx.service.actor())
     const task2 = ctx.store.get('SELECT * FROM tasks WHERE id = ?', t2.id)
     const fresh = await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task: task2 })
-    assert.equal(fresh, 'sess-new-1', '新任务应落活跃控制面绑定')
-    assert.equal(host.created.length, createdAfterRollover, '新任务不得新建会话')
+    assert.equal(fresh, 'sess-new-2', '新任务开专属任务会话（结转已用 sess-new-1）')
+    const taskBinding = ctx.store.get("SELECT * FROM session_bindings WHERE session_id = ?", fresh)
+    assert.equal(taskBinding.kind, 'task', '任务会话绑定行 kind=task')
+    assert.equal(taskBinding.task_id, t2.id, '任务会话绑定行带 task_id')
+    assert.equal(taskBinding.alias, 0)
     assert.equal(
-      ctx.store.get("SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ? AND kind = 'task'", dev.id)?.n,
-      0,
-      '不得再开任务车道绑定行',
-    )
-    assert.equal(
-      ctx.store.get('SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ? AND alias = 0', dev.id)?.n,
+      ctx.store.get("SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0", dev.id)?.n,
       1,
-      '活跃绑定仍只有控制面一条',
-    )
-    assert.equal(
-      ctx.store.get('SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ?', dev.id)?.n,
-      2,
-      '绑定行总数 = 活跃控制面一条 + 旧会话别名',
+      '活跃控制面绑定仍只有一条（任务会话不占控制面绑定）',
     )
 
     // ④ 旧会话（alias、承接未终态任务流量）跨压缩窗口：仍应被压缩触发（设置页开压缩）。

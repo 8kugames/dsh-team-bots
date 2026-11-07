@@ -1,7 +1,7 @@
 // tests/run-coalesce.test.js —— 入站消息合批守门（D-231 拍板语义；D-287 入队合并；
 // D-289 争用口径 A 后由 DSHBOTS-290 改钉「bot 忙挂待处理队列 + 空闲建回时合批」）。
 // 用户拍板：同一 bot 排队尚未处理的多条消息，合并注入同一次运行，不再一条消息一次运行。
-// 现行时机：bot 忙时消息挂 bot_pending_msgs:<bot>（不落 runs 行）；bot 空闲时
+// 现行时机：bot 忙时消息挂 bot_pending_msgs:<bot>:<domain>（不落 runs 行）；bot 空闲时
 // drainPendingMessages 建回运行——chat/solo_chat 相邻同 kind（同项目）合批成一条
 // （merged_messages 注入），首条消息的运行立即执行、后续消息并入下一次建回。
 // 守五条边界：
@@ -255,7 +255,7 @@ test('合并窗口走 settings：与组首入队时间差超窗的挂起消息�
     // 把 m2 的挂起入队时间推到一小时前：m3 与它的相差远超合并窗口。
     const items = heldItems(t)
     items[0].queuedAt = new Date(Date.now() - 3_600_000).toISOString()
-    t.store.setSetting(`bot_pending_msgs:${t.dev.id}`, JSON.stringify(items))
+    t.store.setSetting(`bot_pending_msgs:${t.dev.id}:${t.project.id}`, JSON.stringify(items))
 
     await t.runtime.complete(t.runtime.started[0].runId)
     const second = await drainUntilStarted(t, m2)
@@ -446,23 +446,18 @@ test('DSHBOTS-304 双投（任务族）：任务终态后挂起快照作废不�
     assert.deepEqual(heldItems(t), [], '终态任务的挂起快照清扫消账')
     assert.equal(Number(t.store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', task.id)?.n ?? 0), 1, '不重复建 task 运行')
 
-    // 场景二（catch 合并分支布线）：占道者是别项运行（INSERT 撞 bot_id 唯一）但同任务
-    // active 运行已在（双投时序）→ 返回胜利方 id 消算，不落挂起。
+    // 场景二（同任务幂等合并）：同任务 active 运行已在（双投时序）→ 入队预检返回胜利方
+    // id 消算，不新建行、不落挂起（任务入队已无 busy 挂起路径，幂等收敛在入队预检）。
     const task2 = await t.service.createTask({ projectId: t.project.id, title: '双投任务二', assigneeBotId: t.dev.id })
     t.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
-       VALUES ('run_peer2', ?, ?, 'chat', 'read', 'mention', 'peer2', 'queued', 1, 'race:peer2', ?)`,
-      t.project.id, t.dev.id, now,
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_winner_task2', ?, ?, ?, 'task', 'write', 'assigned', 'running', 1, 'wtask2:1', ?)`,
+      t.project.id, t.dev.id, task2.id, now,
     )
-    const realByTask = t.service.activeRunByTaskId.bind(t.service)
-    t.service.activeRunByTaskId = () => 'run_winner_task2'
-    const realBusy = t.service.botBusy.bind(t.service)
-    t.service.botBusy = () => false
     const mergedRunId = t.service.enqueueTaskRun(t.service.taskRow(task2.id), 'assigned', { type: 'system', id: 'system' })
-    t.service.botBusy = realBusy
-    t.service.activeRunByTaskId = realByTask
-    assert.equal(mergedRunId, 'run_winner_task2', 'catch 命中同任务 active → 返胜利方 id')
-    assert.deepEqual(heldItems(t), [], '合并成功不落挂起（无永生项）')
+    assert.equal(mergedRunId, 'run_winner_task2', '同任务 active 已在 → 返胜利方 id')
+    assert.equal(Number(t.store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', task2.id)?.n ?? 0), 1, '不重复建行')
+    assert.deepEqual(heldItems(t), [], '合并不落挂起（无永生项）')
   } finally {
     await cleanup(t.root, t.store)
   }

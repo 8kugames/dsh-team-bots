@@ -395,6 +395,12 @@ export const sessionMethods = {
       }
       this.retireBinding(affinity.session_id)
     }
+    // ②½ 任务专属会话（单 bot 多任务并行）：施工运行（kind='task'）无亲和会话时（首次
+    // 开工）不开进控制面绑定，而是建一张「bot 名+任务号」专属会话——每张卡一个独立
+    // 上下文，同 bot 多卡并行互不串味；返工/续做的后续运行经上方 ② 任务亲和回到本会话。
+    if (run?.kind === 'task' && task && project) {
+      return this.ensureTaskSession(bot, project, { run, task, modelOverride })
+    }
     // ③ 控制面会话收敛（DSHBOTS-289/299，ADR §5.2-3）：其余运行（chat/dm/dm_reply/
     // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 在所属域的 kind='bot'
     // 控制面会话——项目运行落 (bot, project) 绑定（每项目每 bot 一条，DSHBOTS-299 三分域），
@@ -409,6 +415,57 @@ export const sessionMethods = {
   // 会话 cwd 落该 bot 专属工作区（resolveSessionCwd 的 solo 分支），与项目控制面双域分离。
   // 复用分支补齐与旧 ensureSession 同款的策略面：applyFilePolicy / applyBotToolPolicy /
   // selectModel / maybeCompactSession / rolloverPending 消费闸。
+  // 任务专属会话（单 bot 多任务并行）：每张施工卡一张「bot 名+任务号」会话——会话列表
+  // 显示名 `${bot.name} · ${project.key}-${task.number}`（D-315 命名口径），绑定行 kind='task'
+  // 带 task_id（任务亲和解析与 one_bot_binding 的 kind='bot' 谓词互不干扰）。生命周期短：
+  // 不参与结转（会话轮次上限照旧兜底），压缩由亲和复用分支的 maybeCompactSession 承接。
+  // 并发首建去重键带 task 维度，同任务并发首建共用同一 in-flight Promise。
+  async ensureTaskSession(bot, project, { run, task, modelOverride } = {} as any) {
+    const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
+    const key = `${bot.id}:${project.id}:task:${task.id}`
+    if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
+    const creating = (async () => {
+      const cwd = await resolveSessionCwd(this.config, { solo: false, bot, project })
+      const created = await this.ctx.sessionController.create({
+        cwd,
+        ...(await this.defaultAgentPreset('project')),
+      })
+      const sessionId = created.sessionId
+      const agent = await this.ctx.sessionController.resolveAgent(sessionId)
+      if (agent?.error) throw new AppError('SESSION_FAILED', `创建 DSH Session 失败：${agent.error.message ?? '未知错误'}`)
+      if (this.ctx.sessionTitle?.rename) {
+        const liveSession = agent?.agent?.session ?? agent?.session
+        if (liveSession) {
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${project.key}-${task.number}`) } catch {}
+        }
+      }
+      this.applyFilePolicy(agent, bot, run, task)
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
+      this.store.run(
+        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+         VALUES (?, ?, ?, 'task', ?, ?, 0)
+         ON CONFLICT(session_id) DO NOTHING`,
+        sessionId, bot.id, project.id, task.id, new Date().toISOString(),
+      )
+      await this.selectModel(sessionId, bot, modelOverride)
+      // 挂到项目工作区分组（与控制面会话同组）：任务会话在宿主列表里归入所属项目。
+      const registry = this.ctx.get?.('workspaceRegistry')
+      if (registry) {
+        await attachSessionToWorkspace(registry, {
+          cwd,
+          title: workspaceGroupTitle({ kind: 'bot', project, bot }),
+          sessionId,
+        }, this.logger)
+      }
+      return sessionId
+    })()
+    this.sessionCreates.set(key, creating)
+    try {
+      return await creating
+    } finally {
+      this.sessionCreates.delete(key)
+    }
+  },
   async ensureBotBinding(bot, project, { run, task, modelOverride } = {} as any) {
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
     // DSHBOTS-299：查询带 project 维度（IS 比 = 多兼容 NULL——solo 域按 (bot, NULL) 命中），

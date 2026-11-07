@@ -267,7 +267,11 @@ export const schedulerMethods = {
   // 项目外 solo/单聊落 bot 自有工作区）。跨工作区并行由 owner 拍板；同域运行仍互斥。
   // domain 以 run.project_id 为准：dm_reply 入队处即落 origin 推导的 project_id
   // （deliverBotReply 写 message.project_id，见 runs.ts），键推导不读 trigger_ref/session_id。
+  // 施工运行（kind='task'）豁免 bot 串行域（单 bot 多任务并行）：串行键按任务维度取
+  // task:<id>，同任务至多一条（one_active_run_per_task 同口径），同 bot 不同任务可并行；
+  // 并行安全由写范围闸门兜底（声明重叠即串行），与 bot 串行域互不替代。
   claimKey(run) {
+    if (run.kind === 'task' && run.task_id) return `task:${run.task_id}`
     return `bot:${run.bot_id}:${run.project_id ?? '~solo'}`
   },
 

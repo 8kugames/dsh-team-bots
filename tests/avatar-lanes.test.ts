@@ -1,8 +1,8 @@
-// tests/avatar-lanes.test.js —— 争用口径 A（DSHBOTS-289/290）后的 bot 级串行守门。
-// 原分身通道隔离（DSHBOTS-219 单聊/群聊/私信互不阻塞）已被 one_active_run_per_bot 取代：
-// 同 bot 任意两条运行互斥——忙时入站消息不落 runs 行，挂 settings 键 bot_pending_msgs:<bot>，
-// 空闲后 drainPendingMessages 合批建回；跨 bot 并行不受限。
-// claimKey 已收敛为 bot:<bot_id>（单控制面单绑定），不再按 task/project/dm/solo 分道。
+// tests/avatar-lanes.test.js —— 争用口径 A（DSHBOTS-289/290）后的串行守门。
+// DSHBOTS-308：串行域收窄为 (bot, 工作区)，domain = project_id ?? '~solo'——
+// 同 bot 同工作区互斥：忙时入站消息不落 runs 行，挂 settings 键 bot_pending_msgs:<bot>:<domain>，
+// 空闲后 drainPendingMessages 合批建回；同一 bot 跨工作区并行（键不同即不互斥），跨 bot 并行不受限。
+// claimKey 收敛为 bot:<bot_id>:<domain>（施工运行 kind='task' 豁免串行域，按 task:<id> 取键）。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -59,8 +59,17 @@ function seedRun(store, { kind, botId, projectId = null, taskId = null, triggerR
   return store.get('SELECT * FROM runs WHERE id = ?', runId)
 }
 
-const heldItems = (store, botId) =>
-  JSON.parse(store.setting(`bot_pending_msgs:${botId}`) ?? '[]')
+// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取，
+// 测试不假设某个具体域（同一 bot 可同时有项目域与 solo 域的挂起项）。
+const heldItems = (store, botId) => {
+  const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
+}
 
 async function cleanup(root, store) {
   const deadline = Date.now() + 2000
@@ -73,7 +82,7 @@ async function cleanup(root, store) {
   await rm(root, { recursive: true, force: true })
 }
 
-test('claimKey 键位守门（新语义）：每类运行收敛到同一 bot 键，跨 bot 键互不相同', async () => {
+test('claimKey 键位守门（新语义）：每类运行收敛到 (bot, 工作区) 键，同域同键、跨域异键', async () => {
   const { root, store, service, director, dev } = await laneSetup()
   try {
     const project = await service.createProject({ name: 'Lane', key: 'LANE', ownerBotId: director.id, memberIds: [dev.id] })
@@ -82,22 +91,31 @@ test('claimKey 键位守门（新语义）：每类运行收敛到同一 bot 键
     const handleTask = await service.createTask({ projectId: project.id, title: '受阻任务', assigneeBotId: dev.id })
     const key = (run) => service.claimKey(run)
 
-    // 争用口径 A：task/chat/review/handle/memory_review/vision/solo_chat/dm 全部收敛到
-    // bot:<bot_id>（与 one_active_run_per_bot 同口径），分道推导已删除。
+    // 串行域 = (bot, 工作区)（DSHBOTS-308）：chat/review/handle/memory_review/vision/
+    // solo_chat/dm 全部收敛到 bot:<bot_id>:<域>；施工运行（kind='task'）豁免 bot 串行域
+    // （单 bot 多任务并行），串行键按任务维度 task:<task_id>（one_active_run_per_task 同口径）。
     for (const seeded of [
-      seedRun(store, { kind: 'task', botId: dev.id, projectId: project.id, taskId: task.id, mode: 'write' }),
       seedRun(store, { kind: 'chat', botId: dev.id, projectId: project.id }),
       seedRun(store, { kind: 'memory_review', botId: dev.id, projectId: project.id }),
       seedRun(store, { kind: 'vision', botId: dev.id, projectId: project.id }),
-      seedRun(store, { kind: 'solo_chat', botId: dev.id, mode: 'write' }),
-      seedRun(store, { kind: 'vision', botId: dev.id }),
       seedRun(store, { kind: 'dm', botId: dev.id, projectId: project.id }),
     ]) {
-      assert.equal(key(seeded), `bot:${dev.id}`, `${seeded.kind} 应收敛到 bot 键`)
+      assert.equal(key(seeded), `bot:${dev.id}:${project.id}`, `${seeded.kind} 应收敛到 bot 域键`)
     }
-    // owner 侧运行（验收/受阻处理）同样是总监自己的 bot 键。
-    assert.equal(key(seedRun(store, { kind: 'review', botId: director.id, projectId: project.id, taskId: reviewTask.id })), `bot:${director.id}`)
-    assert.equal(key(seedRun(store, { kind: 'handle', botId: director.id, projectId: project.id, taskId: handleTask.id })), `bot:${director.id}`)
+    assert.equal(key(seedRun(store, { kind: 'solo_chat', botId: dev.id, mode: 'write' })), `bot:${dev.id}:~solo`, 'solo_chat 落 solo 域键')
+    assert.equal(key(seedRun(store, { kind: 'vision', botId: dev.id })), `bot:${dev.id}:~solo`, '项目外 vision 落 solo 域键')
+    assert.equal(key(seedRun(store, { kind: 'task', botId: dev.id, projectId: project.id, taskId: task.id, mode: 'write' })), `task:${task.id}`, '施工运行按任务维度串行（bot 串行豁免）')
+    // owner 侧运行（验收/受阻处理）同样是总监自己域键。
+    assert.equal(key(seedRun(store, { kind: 'review', botId: director.id, projectId: project.id, taskId: reviewTask.id })), `bot:${director.id}:${project.id}`)
+    assert.equal(key(seedRun(store, { kind: 'handle', botId: director.id, projectId: project.id, taskId: handleTask.id })), `bot:${director.id}:${project.id}`)
+    // 同域同键（互斥）、跨域异键（并行不互斥）、跨 bot 异键。
+    const sameDomain = seedRun(store, { kind: 'chat', botId: dev.id, projectId: project.id })
+    const twin = seedRun(store, { kind: 'chat', botId: dev.id, projectId: project.id })
+    const otherDomain = seedRun(store, { kind: 'chat', botId: dev.id })
+    const otherBot = seedRun(store, { kind: 'chat', botId: director.id, projectId: project.id })
+    assert.equal(key(sameDomain), key(twin), '同 bot 同工作区同键（互斥）')
+    assert.notEqual(key(sameDomain), key(otherDomain), '同 bot 跨工作区异键（并行不互斥）')
+    assert.notEqual(key(sameDomain), key(otherBot), '跨 bot 异键')
   } finally {
     await cleanup(root, store)
   }
@@ -117,35 +135,35 @@ test('claimKey 键位守门（新语义）：dm_reply 不再按来信 origin 归
       )
       return seedRun(store, { kind: 'dm_reply', botId: director.id, projectId: project.id, triggerRef: messageId })
     }
-    // 回任务/私信/项目会话的回信运行都落发送方 bot 自己的控制面键。
-    assert.equal(service.claimKey(seedDm('task', task.id)), `bot:${director.id}`, 'dm_reply 回任务会话应归发送方 bot 键')
-    assert.equal(service.claimKey(seedDm('dm')), `bot:${director.id}`, 'dm_reply 回私信会话应归发送方 bot 键')
-    assert.equal(service.claimKey(seedDm('project')), `bot:${director.id}`, 'dm_reply 回项目会话应归发送方 bot 键')
+    // 回任务/私信/项目会话的回信运行都落发送方 bot 自己的域键。
+    assert.equal(service.claimKey(seedDm('task', task.id)), `bot:${director.id}:${project.id}`, 'dm_reply 回任务会话应归发送方 bot 域键')
+    assert.equal(service.claimKey(seedDm('dm')), `bot:${director.id}:${project.id}`, 'dm_reply 回私信会话应归发送方 bot 域键')
+    assert.equal(service.claimKey(seedDm('project')), `bot:${director.id}:${project.id}`, 'dm_reply 回项目会话应归发送方 bot 域键')
 
-    // rollover_summary 与复用会话的绑定状态解耦：键只看 bot 自身。
+    // rollover_summary 与复用会话的绑定状态解耦：键只看 bot 自身域。
     const sessionId = `sess-${id('roll')}`
     store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, 'project', NULL, ?)",
       sessionId, director.id, project.id, nowIso(),
     )
     const bound = seedRun(store, { kind: 'rollover_summary', botId: director.id, projectId: project.id, sessionId })
-    assert.equal(service.claimKey(bound), `bot:${director.id}`, 'rollover_summary 收敛到 bot 键')
+    assert.equal(service.claimKey(bound), `bot:${director.id}:${project.id}`, 'rollover_summary 收敛到 bot 域键')
     store.run('DELETE FROM session_bindings WHERE session_id = ?', sessionId)
-    assert.equal(service.claimKey(bound), `bot:${director.id}`, '绑定删除后键不变（不再读会话绑定）')
+    assert.equal(service.claimKey(bound), `bot:${director.id}:${project.id}`, '绑定删除后键不变（不再读会话绑定）')
   } finally {
     await cleanup(root, store)
   }
 })
 
-test('单聊占道时同 bot 群聊挂起、跨 bot 群聊并行（新语义）：空闲后挂起消息逐类建回', async () => {
+test('单聊占道时同域消息挂起、跨工作区并行（DSHBOTS-308 域化）：空闲后挂起消息逐类建回', async () => {
   const { root, store, service, runtime, director, dev } = await laneSetup()
   try {
     const alpha = await service.createProject({ name: 'Alpha', key: 'ALP', ownerBotId: director.id, memberIds: [dev.id] })
     const beta = await service.createProject({ name: 'Beta', key: 'BET', ownerBotId: director.id, memberIds: [dev.id, director.id] })
-    // 单聊先跑起来（ManualRuntime 不收尾即模拟卡在提权/提问 pending）。
+    // 单聊先跑起来（ManualRuntime 不收尾即模拟卡在提权/提问 pending）——单聊域 = '~solo'。
     await service.sendSoloMessage(dev.id, '单聊里申请提权')
     await service.sendSoloMessage(dev.id, '单聊追问第二条')
-    // 同 bot 的甲项目群聊：忙时挂起，不落 runs 行。
+    // 同 bot 的甲项目群聊：跨工作区（域不同）不占道，直接建行并行（DSHBOTS-308 域化）。
     await service.sendMessage(alpha.id, '@Builder 甲项目问一句')
     // 跨 bot 的乙项目群聊（@总监）：照常并行。
     await service.sendMessage(beta.id, '@director 乙项目也问一句')
@@ -155,27 +173,26 @@ test('单聊占道时同 bot 群聊挂起、跨 bot 群聊并行（新语义）�
 
     const running = store.all("SELECT * FROM runs WHERE status = 'running'")
     assert.ok(running.some(row => row.kind === 'solo_chat' && row.bot_id === dev.id), '首条单聊应运行中')
+    assert.ok(running.some(row => row.kind === 'chat' && row.bot_id === dev.id && row.project_id === alpha.id), 'DSHBOTS-308：同 bot 跨工作区群聊并行启动')
     assert.ok(running.some(row => row.kind === 'chat' && row.bot_id === director.id && row.project_id === beta.id), '跨 bot 群聊应并行启动')
-    assert.ok(!running.some(row => row.kind === 'chat' && row.bot_id === dev.id), '同 bot 群聊被单聊占道，不得并行')
-    assert.equal(store.all("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ?", dev.id).length, 0, '同 bot 群聊不落 runs 行')
-    // 留痕：挂起队列按序保存第二条单聊与甲项目群聊。
+    assert.equal(store.all("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND project_id = ?", dev.id, alpha.id).length, 1, '跨工作区群聊直接落 runs 行（不挂起）')
+    // 留痕：同域（单聊域）第二条单聊挂起；跨域（甲项目）群聊直接建行、不进挂起队列。
     const heldBefore = heldItems(store, dev.id)
-    assert.deepEqual(heldBefore.map(item => item.kind), ['solo_chat', 'chat'], '挂起队列保序留痕')
+    assert.deepEqual(heldBefore.map(item => item.kind), ['solo_chat'], '同域第二条单聊挂起留痕，跨域群聊不挂起')
 
-    // 单聊收尾 → 空闲 drain：第二条单聊先建回（用户提问组保序），甲项目群聊仍留队列。
+    // 单聊收尾 → 空闲 drain：第二条单聊建回开跑（同域），甲项目群聊跨域照跑不受影响。
     const soloRun = running.find(row => row.kind === 'solo_chat' && row.bot_id === dev.id)
     await runtime.complete(soloRun.id)
     await service.tick()
     const secondSolo = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id)
     assert.ok(secondSolo, '空闲后第二条单聊建回开跑')
     assert.equal(secondSolo.trigger_ref, heldBefore.find(item => item.kind === 'solo_chat').messageId, '建回运行的触发消息来自挂起队列')
-    assert.ok(!store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ?", dev.id), '单聊重建期间群聊仍留队列')
-    assert.deepEqual(heldItems(store, dev.id).map(item => item.kind), ['chat'], '单聊建回后队列只剩群聊')
+    assert.ok(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND project_id = ? AND status = 'running'", dev.id, alpha.id), '跨工作区群聊不受单聊域收尾影响，照跑')
+    assert.deepEqual(heldItems(store, dev.id), [], '单聊建回后挂起队列清空')
 
-    // 第二条单聊收尾 → 群聊建回开跑。
+    // 第二条单聊收尾 → 无残留挂起。
     await runtime.complete(secondSolo.id)
     await service.tick()
-    assert.ok(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id), '群聊最终建回开跑')
     assert.deepEqual(heldItems(store, dev.id), [], '建回后挂起队列清空')
   } finally {
     await cleanup(root, store)
@@ -197,6 +214,7 @@ test('私信与群聊同道分离不回退为并行（新语义）：dm 占道�
     }
     const firstRunId = service.enqueueDmRun(seedDmMessage(), dev)
     assert.ok(firstRunId, '空闲时第一条 dm 直接落 runs 行')
+    // DSHBOTS-308 域化：dm 与群聊同属该项目工作区（同一域）——同域仍互斥，第二条 dm 挂起。
     assert.equal(service.enqueueDmRun(seedDmMessage(), dev), null, 'dm 占道时第二条 dm 挂起不落 runs 行')
     await service.sendMessage(project.id, '@Builder 群里同步一句')
 
@@ -233,7 +251,7 @@ test('同会话串行不回退：总监验收运行占道时，同 bot 群聊挂
     const task = await service.createTask({ projectId: project.id, title: '待验收', assigneeBotId: dev.id })
     // 总监验收运行（review，落总监 bot）先入队。
     service.enqueueOwnerTaskRun(task, 'review')
-    // 同项目 @总监 的群聊随后到达：总监忙，挂待处理队列。
+    // 同项目 @总监 的群聊随后到达：同域（同一工作区）总监忙，挂待处理队列（DSHBOTS-308 域化）。
     const messageId = service.insertMessage({
       projectId: project.id, senderType: 'user', senderId: service.localUserId,
       body: '@director 群里问总监', mentions: [director.id],

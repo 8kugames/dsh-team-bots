@@ -178,7 +178,7 @@ test('同项目写运行：声明的写范围不重叠时并行放行', async ()
   }
 })
 
-test('同 Bot 任务运行与群聊回复串行（忙时挂起、空闲建回），跨 Bot 群聊不被他人任务挡住', async () => {
+test('同 Bot 任务运行与群聊回复并行（任务豁免 bot 串行域），跨 Bot 群聊不被他人任务挡住', async () => {
   const { root, store, service, runtime, director, dev, dev2 } = await manualSetup()
   try {
     const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
@@ -189,32 +189,23 @@ test('同 Bot 任务运行与群聊回复串行（忙时挂起、空闲建回）
     assert.ok(taskRun)
     assert.equal(runningRuns(store).length, 1)
 
-    // DSHBOTS-290：dev 忙（one_active_run_per_bot）时 @Builder 的群聊回复不落 runs 行，
-    // 挂待处理队列；同一条消息里空闲 bot（Builder2）的 @ 照常落行调度。
+    // 任务运行豁免 bot 串行域（单 bot 多任务并行）：dev 的任务在跑时，@Builder 的群聊
+    // 回复不再挂待处理队列——chat 与 task 分属不同串行键，同 bot 也可并行。
     await service.sendMessage(project.id, '@Builder @Builder2 顺便回复一句')
-    const heldForDev = JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]')
-    assert.equal(heldForDev.length, 1, '忙 bot 的群聊消息应挂待处理队列')
-    assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'chat' AND bot_id = ?", dev.id).n,
-      0,
-      '挂起期间不得为忙 bot 建群聊运行',
-    )
-
     await service.tick()
+    const devChat = runningRuns(store).find(run => run.kind === 'chat' && run.bot_id === dev.id)
+    assert.ok(devChat, '任务在跑时同 bot 群聊回复照常调度（不再挂起）')
+    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}:${project.id}`) ?? '[]').length, 0, '无挂起项')
+    assert.equal(service.claimKey(devChat), `bot:${dev.id}:${devChat.project_id ?? '~solo'}`, 'chat 串行键仍为 (bot, 工作区)')
+    assert.equal(service.claimKey(taskRun), `task:${taskRun.task_id}`, 'task 串行键按任务维度')
     const otherChat = runningRuns(store).find(run => run.kind === 'chat' && run.bot_id === dev2.id)
-    assert.ok(otherChat, '空闲 bot 的群聊回复在他人任务运行期间照常被调度')
-    assert.equal(service.claimKey(otherChat), `bot:${dev2.id}:${otherChat.project_id ?? '~solo'}`, '串行键已收敛到 (bot, 工作区)（DSHBOTS-308）')
+    assert.ok(otherChat, '空闲 bot 的群聊回复照常被调度')
     assert.ok(runningRuns(store).some(run => run.id === taskRun.id), '任务运行不被群聊回复打断')
 
-    // 任务结束（消化交付级联的 memory_review 等）后，挂起的群聊建回执行。
     await runtime.complete(taskRun.id)
-    const drained = await drainUntilStarted(service, runtime, () =>
-      Boolean(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id)))
-    assert.ok(drained, 'bot 空闲后挂起的群聊回复应建回执行')
-    const chatRun = runningRuns(store).find(run => run.kind === 'chat' && run.bot_id === dev.id)
-    assert.equal(chatRun.bot_id, dev.id)
-    assert.equal(service.claimKey(chatRun), `bot:${dev.id}`)
-    assert.deepEqual(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]'), [], '建回后挂起队列清空')
+    await runtime.complete(devChat.id)
+    await runtime.complete(otherChat.id)
+    assert.ok(runningRuns(store).every(run => run.id !== taskRun.id), '任务运行收尾')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -548,20 +539,18 @@ test('查后插竞态撞 one_active_run_per_bot：task/owner_task 入队落挂�
     const taskRunId = service.enqueueTaskRun(task, 'task_created', { type: 'system', id: 'system' })
     const ownerRunId = service.enqueueOwnerTaskRun(reviewTask, 'review')
     service.botBusy = realBusy
-    assert.equal(taskRunId, null, 'task_run 撞 UNIQUE 返 null 不抛错')
-    assert.equal(ownerRunId, null, 'owner_task_run 同款兜底')
-    const devHeld = JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]')
-    assert.equal(devHeld.at(-1)?.kind, 'task', '任务挂起项入队')
-    const ownerHeld = JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]')
+    // 任务运行豁免 bot 串行域：即使 bot 有排队运行，任务入队直插不撞索引、不挂起。
+    assert.ok(taskRunId, 'task_run 直插落行（busy 不再拦截任务）')
+    assert.ok(store.get("SELECT id FROM runs WHERE id = ? AND kind = 'task' AND status = 'queued'", taskRunId), '任务运行已落 queued')
+    assert.equal(ownerRunId, null, 'owner_task_run 撞 UNIQUE 返 null 不抛错（照旧兜底）')
+    const ownerHeld = JSON.parse(store.setting(`bot_pending_msgs:${director.id}:${project.id}`) ?? '[]')
     assert.ok(ownerHeld.some(item => item.kind === 'owner_task'), 'owner 任务挂起项入队')
 
     // 对端运行结束，bot 空闲：挂起项建回运行。
     store.run("UPDATE runs SET status = 'canceled', ended_at = ? WHERE id IN ('run_race_dev', 'run_race_owner')", now)
     service.drainPendingMessages()
-    assert.ok(store.get("SELECT id FROM runs WHERE kind = 'task' AND task_id = ? AND status = 'queued'", task.id), '挂起任务建回运行')
     assert.ok(store.get("SELECT id FROM runs WHERE kind = 'review' AND task_id = ? AND status = 'queued'", reviewTask.id), '挂起 owner 验收建回运行')
-    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').length, 0, 'dev 挂起队列清空')
-    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]').length, 0, 'owner 挂起队列清空')
+    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${director.id}:${project.id}`) ?? '[]').length, 0, 'owner 挂起队列清空')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
