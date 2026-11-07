@@ -455,7 +455,9 @@ export const sessionMethods = {
       if (this.ctx.sessionTitle?.rename) {
         const liveSession = agent?.agent?.session ?? agent?.session
         if (liveSession) {
-          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · 控制面`) } catch {}
+          // 会话列表显示名（DSHBOTS-315）：bot 级会话后缀取 8 位 uuid 前缀——
+          // 「控制面」在中文语境是生造词，用户看不懂（英文 controller 无妨）。
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${sessionId.slice(0, 8)}`) } catch {}
         }
       }
       this.applyFilePolicy(agent, bot, run, task)
