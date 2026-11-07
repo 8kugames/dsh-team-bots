@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { sessionMethods } from '../src/services/runtime/session.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
@@ -611,4 +612,48 @@ test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/han
   assert.match(reviewSide, /Do NOT call team_review_task/, '委派核验模板保持不代 owner 裁决')
   assert.match(reviewSide, /team_review_task with decision "accept"/, 'owner 验收模板保持裁决入口')
   assert.match(reviewSide, /「子代理核验：」/, '委派核验结论锚保持')
+})
+
+// DSHBOTS-306 验收期亲和改判 owner：任务 in_review 后卡线程消息按 assignee 任务亲和
+// （D-286）落承接 bot 会话，而验收动作 team_review_task 仅 owner bot 可调（D-190）——
+// 指令路由与动作权限错位，每卡绕一步。守门四向：①in_review 亲和改判项目 owner bot 的
+// 控制面绑定（优先于 runs 归属/结转亲和）；②in_progress 维持 assignee 亲和（含结转后
+// alias 旧会话，D-286 不回归）；③done 无亲和不变；④退回 todo 恢复 assignee 亲和。
+test('DSHBOTS-306 验收期亲和改判 owner：in_review 落总监控制面，in_progress 维持 assignee 亲和', async () => {
+  const t = await setup()
+  try {
+    const { store, service, director, dev, project } = t
+    const affinity = (task) => sessionMethods.taskAffinityBinding.call(service, task)
+    const task = await service.createTask({ projectId: project.id, title: '亲和任务', assigneeBotId: dev.id })
+    const now = new Date().toISOString()
+    // assignee 任务会话（alias=1 模拟 D-286 结转后的旧任务绑定）+ 该任务的运行归属。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES (?, ?, ?, 'task', ?, 1, ?)",
+      'sess-task-dev', dev.id, project.id, task.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at)
+       VALUES ('run_aff_dev', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'aff:1', 'sess-task-dev', ?)`,
+      project.id, dev.id, task.id, now,
+    )
+    // 总监控制面绑定（D-299 三分：每 (owner, project) 一条 kind='bot'）。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, alias, created_at) VALUES (?, ?, ?, 'bot', 0, ?)",
+      'sess-director-proj', director.id, project.id, now,
+    )
+
+    store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id))?.session_id, 'sess-task-dev', 'in_progress 维持 assignee 任务会话亲和（含结转 alias 行）')
+
+    store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", task.id)
+    const ownerBinding = affinity(service.taskRow(task.id))
+    assert.equal(ownerBinding?.session_id, 'sess-director-proj', 'in_review 亲和改判总监控制面会话（优先于 runs 归属/结转亲和）')
+    assert.equal(ownerBinding?.bot_id, director.id, '亲和目标是项目 owner bot')
+
+    store.run("UPDATE tasks SET status = 'done' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id)), undefined, 'done 无亲和（既有口径不变）')
+
+    store.run("UPDATE tasks SET status = 'todo' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id))?.session_id, 'sess-task-dev', '退回 todo 恢复 assignee 亲和')
+  } finally { await t.close() }
 })
