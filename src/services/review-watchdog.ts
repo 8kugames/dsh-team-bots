@@ -13,7 +13,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { bool, effectiveReviewIdleMinutes, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE } from '../config.js'
+import { effectiveReviewIdleMinutes, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE } from '../config.js'
 import { messageLocale, systemAlertLabel } from './locale.js'
 
 // 单卡去重/判定表（settings 键，JSON map）：{ taskId: { tier, verdict, basis, at, action? } }。
@@ -117,9 +117,17 @@ export function effectiveReviewEscalateMultiple(getSetting) {
   return Number.isFinite(raw) && raw >= min && raw <= max ? raw : min
 }
 
-// 自动收口总开关：默认开（程序化收口是本卡产品目标），0 = 关闭自动 accept/return 只提醒。
+// 自动收口三态（B3/DSHBOTS-326 observe 干跑档）：'0' 关（只提醒，不判定留痕）、
+// 'observe' 干跑（判定 + task_events 留痕，不收口——新自动化的安全上线路径：人回看
+// 观察记录确认无误后再切开）、'1' 开（判定 + 程序化收口）。canary=小范围生效，
+// observe=完全不生效，两档语义不同。
+export function reviewAutoCloseMode(service) {
+  const value = String(service.store.setting(REVIEW_AUTO_CLOSE_KEY, '1') ?? '1')
+  return value === 'observe' ? 'observe' : value === '0' ? 'off' : 'on'
+}
+
 export function reviewAutoCloseEnabled(service) {
-  return bool(service.store.setting(REVIEW_AUTO_CLOSE_KEY, '1'), true)
+  return reviewAutoCloseMode(service) === 'on'
 }
 
 const alertedTier = (value) => {
@@ -190,6 +198,8 @@ export function runReviewWatchdog(service) {
     const { minutes } = effectiveReviewIdleMinutes(service.config, key => service.store.setting(key))
     const escalateMultiple = effectiveReviewEscalateMultiple(key => service.store.setting(key))
     const autoCloseEnabled = reviewAutoCloseEnabled(service)
+    const observeMode = reviewAutoCloseMode(service) === 'observe'
+    const observed: any[] = []
     const rows = service.store.all(`
       SELECT t.id, t.project_id, t.updated_at, t.assignee_bot_id, p.key AS project_key, t.number,
         t.review_target,
@@ -208,7 +218,7 @@ export function runReviewWatchdog(service) {
     // 回收即落库（H5）：卡离开 in_review 的摘除不依赖后续是否有卡触发提醒。
     if (recovered.length > 0) persist()
     if (minutes <= 0) {
-      return { skipped: 'disabled', alerted: [], escalated: [], recovered }
+      return { skipped: 'disabled', alerted: [], escalated: [], recovered, observed: [] }
     }
     const alerted = []
     const escalated = []
@@ -226,17 +236,29 @@ export function runReviewWatchdog(service) {
         // 的卡先按一档提醒，跨档升级由下一轮扫描完成，避免一口气连发两档消息。
         const fireTier = prevTier === 0 ? 1 : tier
         const judgment = judgeCard(service, row)
-        const actionable = autoCloseEnabled
-          && (judgment.verdict === 'A' || (judgment.verdict === 'B' && row.assignee_bot_id))
+        const closeEligible = judgment.verdict === 'A' || (judgment.verdict === 'B' && row.assignee_bot_id)
+        const actionable = autoCloseEnabled && closeEligible
+        // observe 干跑（B3/DSHBOTS-326）：本会收口的判定只留痕不执行——task_events 记
+        // would 动作与依据，任务详情时间线可回看；卡状态不变、applyReview 不调用。
+        const observable = observeMode && closeEligible
         const entry: any = { tier: fireTier, verdict: judgment.verdict, basis: judgment.basis, at: new Date().toISOString() }
-        if (actionable) entry.action = judgment.verdict === 'A' ? 'accept' : 'return'
+        if (actionable || observable) entry.action = judgment.verdict === 'A' ? 'accept' : 'return'
         map[row.id] = entry
         persist()
         const label = `${row.project_key}-${row.number}`
         const idleMinutes = Math.floor(idleMs / 60_000)
+        if (observable) {
+          const would = judgment.verdict === 'A' ? 'accept' : 'return'
+          service.addTaskEvent(row.id, 'review_watchdog_observe', SYSTEM_ACTOR, {
+            verdict: judgment.verdict, would, basis: judgment.basis, tier: fireTier,
+          })
+          observed.push({ id: row.id, label, verdict: judgment.verdict, would })
+        }
         if (actionable) {
           autoClose(service, row, judgment, fireTier)
         } else {
+          // C（或开关关闭/observe 干跑）：仅提醒；滞留达阈值×倍数升级语气二次催办（H2）。
+          // observe 模式的 A/B 卡同样走提醒（干跑不能把催办也干掉），另加判定留痕事件。
           // C（或开关关闭）：仅提醒；滞留达阈值×倍数升级语气二次催办（H2）。
           // 前缀按 locale 落库（DSHBOTS-228）：缺省英文 [SYSTEM ALERT]，中文环境【系统指令】。
           const alertPrefix = systemAlertLabel(messageLocale(service.config, key => service.store.setting(key), service.runtime?.ctx?.get?.('loader')))
@@ -262,7 +284,7 @@ export function runReviewWatchdog(service) {
         service.logger?.warn?.('review watchdog card %s failed: %s', row.id, cardError?.message ?? cardError)
       }
     }
-    return { alerted, escalated, recovered }
+    return { alerted, escalated, recovered, observed }
   } catch (error: any) {
     service.logger?.warn?.('review watchdog failed: %s', error?.message ?? error)
     return { alerted: [], escalated: [], recovered: [], error: String(error?.message ?? error) }

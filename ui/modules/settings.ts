@@ -179,7 +179,6 @@ function renderRunLimitsCard() {
   const stallValue = savedStall !== '' ? savedStall : String(limits.stallTimeoutMinutes ?? 30)
   // 验收滞留阈值（DSHBOTS-235）：未保存回填生效值；'0'（关闭守门）同样合法不短路。
   const reviewIdleValue = savedReviewIdle !== '' ? savedReviewIdle : String(limits.reviewIdleMinutes ?? 30)
-  const autoCloseOn = savedAutoClose !== '0'
   const envNames = [
     limits.runTimeoutEnv ? 'DSH_TEAM_RUN_TIMEOUT_MS' : '',
     limits.stallTimeoutEnv ? 'DSH_TEAM_STALL_TIMEOUT_MS' : '',
@@ -207,8 +206,9 @@ function renderRunLimitsCard() {
         <div class="field"><label id="settings-review-idle-label" for="settings-review-idle">${t('global.reviewIdleLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="1440" id="settings-review-idle" name="review_idle_minutes" value="${attr(reviewIdleValue)}"></div>
         <div class="field"><label id="settings-review-auto-close-label" for="settings-review-auto-close">${t('global.reviewAutoCloseLabel')}</label>
           <select class="select" id="settings-review-auto-close" name="review_auto_close">
-            <option value="1" ${autoCloseOn ? 'selected' : ''}>${t('global.on')}</option>
-            <option value="0" ${!autoCloseOn ? 'selected' : ''}>${t('global.off')}</option>
+            <option value="1" ${settings.review_auto_close === '1' ? 'selected' : ''}>${t('global.on')}</option>
+            <option value="observe" ${settings.review_auto_close === 'observe' ? 'selected' : ''}>${t('global.observe')}</option>
+            <option value="0" ${settings.review_auto_close === '0' ? 'selected' : ''}>${t('global.off')}</option>
           </select>
         </div>
       </div>

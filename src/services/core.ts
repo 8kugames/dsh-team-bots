@@ -250,7 +250,10 @@ export const coreMethods = {
       }
     }
     if (values[REVIEW_AUTO_CLOSE_KEY] !== undefined && values[REVIEW_AUTO_CLOSE_KEY] !== '') {
-      if (!['0', '1'].includes(values[REVIEW_AUTO_CLOSE_KEY])) throw badRequest(`${REVIEW_AUTO_CLOSE_KEY} 必须是 0 或 1`)
+      // 三态（B3/DSHBOTS-326）：0 关闭 / observe 干跑（判定留痕不收口）/ 1 开启。
+      if (!['0', '1', 'observe'].includes(values[REVIEW_AUTO_CLOSE_KEY])) {
+        throw badRequest(`${REVIEW_AUTO_CLOSE_KEY} 必须是 0、observe 或 1`)
+      }
     }
     {
       const [escMin, escMax] = REVIEW_ESCALATE_RANGE
