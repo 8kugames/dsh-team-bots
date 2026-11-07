@@ -746,3 +746,73 @@ test('DSHBOTS-306 验收期亲和改判 owner：in_review 落总监控制面，i
     assert.equal(affinity(service.taskRow(task.id))?.session_id, 'sess-task-dev', '退回 todo 恢复 assignee 亲和')
   } finally { await t.close() }
 })
+
+// 总监核验运行不得劫持任务亲和：真实交付链是「assignee 施工（早）→ 交付 in_review →
+// review_delegate 核验运行落总监控制面（晚）→ 退回重做」。D-306 的 runs 归属亲和按
+// COALESCE(started_at, queued_at) DESC 取最近一条运行会话，不区分 bot/kind——核验运行
+// 一旦存在，退回后的重做 task 运行与卡线程回信全部亲和到总监会话（「成员任务卡发给
+// 总监」）。守门三向：①成员卡退回 in_progress 亲和仍是 assignee 任务会话；②owner 卡
+// （assignee=总监）退回后亲和回总监自己的任务会话而非控制面；③改派新 bot 无旧运行
+// 归属，落新建路径（undefined）。
+test('核验运行不劫持任务亲和：退回重做后 assignee 任务会话亲和不变', async () => {
+  const t = await setup()
+  try {
+    const { store, service, director, dev, project } = t
+    const affinity = (task) => sessionMethods.taskAffinityBinding.call(service, task)
+    const now = new Date().toISOString()
+    const later = new Date(Date.now() + 60_000).toISOString()
+    const task = await service.createTask({ projectId: project.id, title: '重做任务', assigneeBotId: dev.id })
+    // assignee 专属任务会话 + 施工运行（先发生）。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES (?, ?, ?, 'task', ?, 0, ?)",
+      'sess-task-dev2', dev.id, project.id, task.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_work', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'affix:1', 'sess-task-dev2', ?, ?)`,
+      project.id, dev.id, task.id, now, now,
+    )
+    // 总监控制面绑定 + 核验运行（后发生，生产中由交付自动委派落总监控制面会话）。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, alias, created_at) VALUES (?, ?, ?, 'bot', 0, ?)",
+      'sess-director-proj2', director.id, project.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_review', ?, ?, ?, 'review', 'read', 'review_delegate', 'succeeded', 1, 'affix:2', 'sess-director-proj2', ?, ?)`,
+      project.id, director.id, task.id, later, later,
+    )
+
+    store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id))?.session_id, 'sess-director-proj2', 'in_review 亲和照旧改判总监控制面（D-306 不变）')
+
+    store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", task.id)
+    const after = affinity(service.taskRow(task.id))
+    assert.equal(after?.session_id, 'sess-task-dev2', '退回重做后亲和回 assignee 任务会话，核验运行不得劫持')
+    assert.equal(after?.bot_id, dev.id, '亲和绑定归属 assignee bot')
+
+    // owner 卡：assignee=总监时，核验运行同为总监所跑——亲和仍要回到总监的任务会话，
+    // 而不是「最近一条运行」的控制面会话。
+    const ownerCard = await service.createTask({ projectId: project.id, title: '总监自建卡', assigneeBotId: director.id })
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES (?, ?, ?, 'task', ?, 0, ?)",
+      'sess-task-owner', director.id, project.id, ownerCard.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_owner_work', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'affix:3', 'sess-task-owner', ?, ?)`,
+      project.id, director.id, ownerCard.id, now, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_owner_review', ?, ?, ?, 'review', 'read', 'review_delegate', 'succeeded', 1, 'affix:4', 'sess-director-proj2', ?, ?)`,
+      project.id, director.id, ownerCard.id, later, later,
+    )
+    store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", ownerCard.id)
+    assert.equal(affinity(service.taskRow(ownerCard.id))?.session_id, 'sess-task-owner', 'owner 卡退回后亲和回总监任务会话，不落控制面')
+
+    // 改派新 bot：新负责人在卡上没有施工运行，无旧归属亲和，走新建任务会话路径。
+    store.run("UPDATE tasks SET assignee_bot_id = ? WHERE id = ?", dev.id, ownerCard.id)
+    assert.equal(affinity(service.taskRow(ownerCard.id)), undefined, '改派后无旧归属亲和，落新建路径')
+  } finally { await t.close() }
+})

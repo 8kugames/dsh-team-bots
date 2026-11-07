@@ -279,8 +279,9 @@ export const sessionMethods = {
     )
     return runId
   },
-  // 任务亲和绑定解析（DSHBOTS-286，ADR「结转后的任务亲和路由」）：按 task_id 从 runs 表
-  // 显式解析其原会话——结转只把绑定行 alias 化，runs.task_id→session_id 的历史归属不动。
+  // 任务亲和绑定解析（DSHBOTS-286，ADR「结转后的任务亲和路由」）：按 task_id + 当前负责人
+  // 从 runs 表显式解析其施工会话（负责人自己的 task 运行）——结转只把绑定行 alias 化，
+  // runs.task_id→session_id 的历史归属不动。
   // 未终态任务的后续消息据此回到原会话（即使该绑定已是 alias 行，如结转后的旧控制面会话）；
   // 新任务（无 runs 归属）与终态任务不享亲和，落活跃绑定/新建路径。
   // 与 D-285 单绑定模型共存：kind='bot' 唯一活跃绑定只决定「新流量」的家，任务亲和优先于它。
@@ -301,11 +302,16 @@ export const sessionMethods = {
         ownerBotId, task.project_id,
       )
     }
+    // runs 归属亲和只认「当前负责人的施工运行」（bot_id=assignee + kind='task'）：
+    // 卡上的 owner 侧运行（review_delegate 核验/handle 受阻处置）虽带 task_id，但落的是
+    // 总监控制面会话——不过滤时退回重做后的重做运行与卡线程回信会按「最近一条运行」
+    // 亲和到总监会话（成员任务卡发给总监）。改派新负责人同理无旧归属，落新建任务会话。
+    if (!task.assignee_bot_id) return undefined
     const row = this.store.get(
       `SELECT session_id AS sid FROM runs
-        WHERE task_id = ? AND session_id IS NOT NULL
+        WHERE task_id = ? AND session_id IS NOT NULL AND bot_id = ? AND kind = 'task'
         ORDER BY COALESCE(started_at, queued_at) DESC, rowid DESC LIMIT 1`,
-      task.id,
+      task.id, task.assignee_bot_id,
     )
     if (!row?.sid) return undefined
     return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', row.sid)
