@@ -27,6 +27,25 @@ const hookSrc = join(repoRoot, '.githooks', 'pre-commit')
 const VERSION = '0.2.338'
 const PREVIOUS_VERSION = '0.2.337'
 
+// 发布说明文件内容：对应版本小节的中文段带条目粗体小标题，英文段不参与摘要。
+function releaseNotes(version: string): string {
+  return [
+    '# 发版说明',
+    '',
+    `## v${version}`,
+    '',
+    '### 中文',
+    '',
+    '- **第一项变更**：说明文字。',
+    '- **第二项变更**：说明文字。',
+    '',
+    '### English',
+    '',
+    '- **First change**: english text.',
+    '',
+  ].join('\n')
+}
+
 // 搭建用的 git 命令：显式跳过版本 bump，避免污染测试里的版本号。
 function git(cwd, args) {
   return execFileSync('git', args, {
@@ -57,7 +76,7 @@ function makeTempDir() {
 // 临时仓库：本地 bare 远端 + 工作仓库（dev 分支 + 与 dev 无共同历史的 main 孤儿分支）。
 // 仓库里装上真实的 .githooks/pre-commit + scripts/version-bump.mjs：工具若漏传
 // DSH_SKIP_VERSION_BUMP=1，快照提交会被 bump 钩子改掉版本号，用例随即失败。
-function makeRepo(options: { mainMode?: string } = {}) {
+function makeRepo(options: { mainMode?: string; notes?: 'missing' | 'wrong-version' } = {}) {
   const base = makeTempDir()
   const remote = join(base, 'remote.git')
   const work = join(base, 'work')
@@ -70,6 +89,14 @@ function makeRepo(options: { mainMode?: string } = {}) {
   copyFileSync(hookSrc, join(work, '.githooks', 'pre-commit'))
   chmodSync(join(work, '.githooks', 'pre-commit'), 0o755)
   writeFileSync(join(work, 'package.json'), `${JSON.stringify({ name: 'dsh-team-bots', version: VERSION }, null, 2)}\n`)
+  // 发布摘要来源：dev 树里的 docs/release-notes.md 对应版本小节（工具据此生成发布提交标题）。
+  if (options.notes !== 'missing') {
+    mkdirSync(join(work, 'docs'), { recursive: true })
+    const notes = options.notes === 'wrong-version'
+      ? releaseNotes('9.9.9')
+      : releaseNotes(VERSION)
+    writeFileSync(join(work, 'docs', 'release-notes.md'), notes)
+  }
 
   git(remote, ['init', '-q', '--bare'])
   git(work, ['init', '-q', '-b', 'dev'])
@@ -129,7 +156,7 @@ function runRelease(work, args = []) {
   })
 }
 
-type ReleaseStep = { name: string; ok: boolean; error?: string; mode?: string; sameTree?: boolean; dryRun?: boolean }
+type ReleaseStep = { name: string; ok: boolean; error?: string; mode?: string; sameTree?: boolean; dryRun?: boolean; baseMatch?: string }
 type ReleaseResult = {
   ok: boolean
   version: string | null
@@ -154,7 +181,7 @@ function remoteSha(work, ref) {
   return line.split(/\s+/)[0] ?? ''
 }
 
-function setup(t, options: { mainMode?: string } = {}) {
+function setup(t, options: { mainMode?: string; notes?: 'missing' | 'wrong-version' } = {}) {
   try {
     return makeRepo(options)
   } catch (error) {
@@ -204,6 +231,15 @@ test('正常路径：孤儿 main 落 dev 树快照，五步全绿且包内版本
     const mainSha = remoteSha(work, 'refs/heads/main')
     assert.equal(remoteSha(work, `refs/tags/v${VERSION}`), mainSha)
     assert.match(git(work, ['log', '-1', '--format=%s', 'origin/main']), /^release: v0\.2\.338/)
+    // 发布提交标题取 release-notes.md 的变更摘要：不含占位信息，摘要来自中文段条目粗体小标题。
+    const subject = git(work, ['log', '-1', '--format=%s', 'origin/main'])
+    assert.match(subject, /第一项变更、第二项变更/)
+    assert.doesNotMatch(subject, /dev 快照/)
+    assert.doesNotMatch(subject, /dev-snapshot/)
+    const body = git(work, ['log', '-1', '--format=%B', 'origin/main'])
+    assert.match(body, /^dev-snapshot: [0-9a-f]{40}$/m, '正文 trailer 应带 dev 快照 sha')
+    // 英文段不参与摘要。
+    assert.doesNotMatch(subject, /First change/)
 
     // 收尾回到 dev，且 dev 与 main 内容同步。
     assert.equal(git(work, ['symbolic-ref', '--short', 'HEAD']), 'dev')
@@ -296,6 +332,68 @@ test('main 可快进时走 fast-forward：合并后 main == dev 且不新增提�
     assert.equal(git(work, ['rev-parse', 'main']), devSha, '快进后 main 应等于 dev')
     assert.equal(remoteSha(work, 'refs/heads/main'), devSha)
     assert.equal(remoteSha(work, `refs/tags/v${VERSION}`), devSha)
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('缺 docs/release-notes.md：拒绝发版，远端零改动', (t) => {
+  const repo = setup(t, { notes: 'missing' })
+  if (!repo) return
+  const { work } = repo
+  try {
+    const headsBefore = git(work, ['ls-remote', '--heads', 'origin'])
+    const run = runRelease(work)
+    const result = parseResult(run)
+    assert.notEqual(run.status, 0, '缺发版说明应拒绝发版')
+    assert.equal(result.ok, false)
+    assert.equal(result.failedStep, 'preflight')
+    assert.match(result.error, /release-notes\.md/)
+    assert.equal(git(work, ['ls-remote', '--heads', 'origin']), headsBefore, '远端分支不应变化')
+    assert.equal(git(work, ['ls-remote', '--tags', 'origin']).trim(), '', '远端不应出现 tag')
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('release-notes.md 缺对应版本小节：拒绝发版，远端零改动', (t) => {
+  const repo = setup(t, { notes: 'wrong-version' })
+  if (!repo) return
+  const { work } = repo
+  try {
+    const headsBefore = git(work, ['ls-remote', '--heads', 'origin'])
+    const run = runRelease(work)
+    const result = parseResult(run)
+    assert.notEqual(run.status, 0, '缺对应版本小节应拒绝发版')
+    assert.equal(result.ok, false)
+    assert.equal(result.failedStep, 'preflight')
+    assert.match(result.error, /v0\.2\.338/)
+    assert.equal(git(work, ['ls-remote', '--heads', 'origin']), headsBefore, '远端分支不应变化')
+    assert.equal(git(work, ['ls-remote', '--tags', 'origin']).trim(), '', '远端不应出现 tag')
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
+test('main 提交信息为新格式（dev-snapshot trailer）：快照基点仍能识别（格式兼容回归，非 trailer 解析承重）', (t) => {
+  const repo = setup(t)
+  if (!repo) return
+  const { work } = repo
+  try {
+    // 把 main 的发版提交改成新格式：标题带摘要、正文带 dev-snapshot trailer。
+    const base = git(work, ['rev-parse', 'main'])
+    git(work, ['checkout', '-q', 'main'])
+    git(work, ['commit', '--amend', '-q', '-m', 'release: v0.2.337 摘要标题', '-m', `dev-snapshot: ${base}`])
+    git(work, ['push', '-q', '--force', 'origin', 'main'])
+    git(work, ['checkout', '-q', 'dev'])
+
+    const run = runRelease(work)
+    const result = parseResult(run)
+    assert.equal(run.status, 0, run.stderr)
+    assert.equal(result.ok, true)
+    const mergeStep = result.steps.find(step => step.name === 'merge-main')
+    assert.equal(mergeStep.mode, 'snapshot', '新格式提交信息下仍应识别出快照基点')
+    assert.equal(mergeStep.baseMatch, 'version-only')
   } finally {
     rmSync(repo.base, { recursive: true, force: true })
   }

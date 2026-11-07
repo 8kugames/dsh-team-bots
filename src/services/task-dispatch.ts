@@ -31,6 +31,18 @@ export const taskDispatchMethods = {
     if (bot?.status === 'paused') throw badRequest(`Bot ${bot.name} 已暂停，先恢复再派卡`)
     this.assertMember(projectId, botId)
   },
+  // 派单策略闸（DSHBOTS-314）：写卡（write_scopes 非空）不派 file_policy=read-only 的
+  // bot——否则执行到落盘才撞只读沙箱（近期多次会话中断的真实根因之一），前移到派单时
+  // 显式拦截。无策略值按可写放行（锚：兼容存量空值）；owner 备选「按预设自动降级」不
+  // 采用，拒绝回执更显式、卡面归属与预期一致，后续要自动降级再立卡。
+  assertWritableDispatch(botId, writeScopes) {
+    if (!writeScopes?.length) return
+    if (this.botRow(botId)?.file_policy !== 'read-only') return
+    const name = this.store.get('SELECT name FROM bots WHERE id = ?', botId)?.name ?? botId
+    throw badRequest(
+      `assignee ${name} 为只读策略，不能承接写任务：改派可写 bot、或调整该 bot 文件策略后重派（DSHBOTS-314 派单策略闸）。`,
+    )
+  },
   // 核验纪律派单闸（DSHBOTS-303）：核验/审计/复核类卡不派成员 bot（owner 硬口径）——
   // 该类工作由总监（owner bot）自有子代理执行。与 D-302 提示词边界守门（review-auto 源码锚）
   // 构成双层防线：提示词管会话内指引，本闸管派单行为。派给 director 本身不受限。
@@ -322,6 +334,8 @@ export const taskDispatchMethods = {
       if (['done', 'canceled'].includes(task.status)) throw conflict(`任务 ${project.key}-${task.number} 已结束，不能重派`)
       // 核验纪律派单闸（DSHBOTS-303）：重派/改卡按生效卡面（本次传入优先，缺省回落原卡）。
       this.assertNotVerificationDispatch(project, member.id, input.title ?? task.title, input.description ?? task.description)
+      // 派单策略闸（DSHBOTS-314）：重派按原卡声明写范围同闸（重派不改写范围，D-232 口径）。
+      this.assertWritableDispatch(member.id, readWriteScopes(task.write_scopes))
       // 任务卡修正闭环（DSHBOTS-232 ①）：重派可同时改卡面（标题/描述/优先级）——先经
       // updateTask 落卡，卡面变化由其统一触发点通知负责人修正，再走原重派链路。
       // 写范围不在此口改：入队运行快照与调度闸门消费的不是同一份数据，
@@ -344,6 +358,8 @@ export const taskDispatchMethods = {
     // 闸门按清洗后清单预判（DSHBOTS-168）：全部命中忽略规则 = 实际未声明，落上面的
     // 拒绝。原清单透传 createTask 做权威清洗+审计（审计需真实 taskId），此处只预览不落账。
     const scopes = filterIgnoredWriteScopes(parsedScopes, this.projectWorkDir(project)).kept
+    // 派单策略闸（DSHBOTS-314）：写卡派只读 bot 在入口拒绝；重派分支按原卡声明补一道。
+    this.assertWritableDispatch(member.id, scopes)
     if (!scopes.length) {
       throw badRequest(
         '派单必须声明写范围：传 write_scopes 路径数组，或在描述里写一行「写范围：a, b」。'

@@ -1,11 +1,11 @@
-// src/services/runtime/prompt.js —— 提示词构造域
+// src/services/runtime/prompt.ts —— 提示词构造域
 // 按运行类型拼装系统提示词、单聊提示词与引用行，并套用文件权限档位。
 // 本文件只放方法体，方法挂到 DshRuntime 原型上（见 src/runtime.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 //
-// 模板段序原则：各运行提示词一律「静态指令段前置、每卡/每消息变化字段后置」。
-// 前缀缓存按最长公共前缀匹配，静态段在变体之后会导致跨卡派发在描述处分叉、
-// 固定段吃不到缓存。调整任一模板段顺序时必须保持该原则（tests/prompt-prefix-order.test.js 守门）。
+// 段序原则：运行提示词一律「静态指令段前置、随卡/随消息变化的字段后置」。
+// 前缀缓存按最长公共前缀匹配，静态段放在变化段之后会让跨卡派发在描述处分叉、
+// 固定段吃不到缓存。调整任何模板段顺序都必须保持该原则（tests/prompt-prefix-order.test.ts 守门）。
 
 import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
@@ -19,32 +19,32 @@ import { displayPath, sanitizeTmpBotDirName } from '../../paths.js'
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
 
-// system 区按 session id 冻结的 LRU 上限：防会话累积泄漏（session_bindings 只增不改，
-// 死会话不再求值，条目只会等 LRU 淘汰）。
+// 系统提示词按会话 id 冻结的 LRU 上限：session_bindings 只增不改，死会话不再求值，
+// 靠上限淘汰防会话累积泄漏。
 export const PROMPT_FREEZE_LIMIT = 256
 
-// 增量尾窗（DSHBOTS-96 P1-1）：无水位（新会话/进程重启）回退尾 12 条全量窗给足上下文；
-// 有水位只注入其后新消息；上限 24 条兜住多 run 并发共用 session 时的积压。
+// 增量尾窗（DSHBOTS-96 P1-1）：无水位（新会话或进程重启）回退尾 12 条全量窗给足上下文；
+// 有水位只注入其后的新消息；上限 24 条兜住多运行并发共用会话时的积压。
 export const RECENT_FALLBACK_LIMIT = 12
 export const RECENT_INCREMENTAL_LIMIT = 24
 
-// 无信息量的 system 短状态通知（DSHBOTS-96 P3-1）：状态已由 Open tasks 与任务评论通道
-// 覆盖，不再重复进尾窗（命中即整条跳过，不占窗位）。
+// 无信息量的系统短状态通知（DSHBOTS-96 P3-1）：状态已由 Open tasks 与任务评论通道覆盖，
+// 不再重复进尾窗（命中即整条跳过，不占窗位）。
 export const NOISE_SYSTEM_BODY = /^(已写入.+记忆。|任务 \S+ 验收通过。|密钥 \S+ 的请求被拒绝。)$/
 
-// 沙箱档位按运行类型收紧：一切非写运行（dm/dm_reply/chat/memory_review/solo_chat/review/handle
-// 等 mode!=='write'）物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
-// run 为空（无运行上下文的会话建立）保持 bot.file_policy 现行为。
+// 沙箱档位按运行类型收紧：一切非写运行（mode!=='write'，如 dm/dm_reply/chat/review 等）
+// 物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
+// 无运行上下文（run 为空）时同样保持 bot.file_policy。
 export function sandboxModeForRun(run, bot) {
   return run && run.mode !== 'write' ? 'read-only' : bot?.file_policy
 }
 
 // 生效沙箱档（DSHBOTS-156）：任务派发可选 sandbox 覆盖后的最终口径，run_events 与视图共用。
-// - 非 write 运行恒 read-only（来源 run_type）：覆盖只作用于任务写运行，dm_reply 回投
-//   任务会话等读运行不得因任务带覆盖而放宽只读；
-// - 写运行取 tasks.sandbox_override（来源 override），且只在不比 bot 配置档更宽时生效
+// - 非写运行恒 read-only（来源 run_type）：覆盖只作用于写运行，dm_reply 回投任务会话等
+//   读运行不得因任务带覆盖而放宽只读；
+// - 写运行取 tasks.sandbox_override（来源 override），只在不比 bot 配置档更宽时生效
 //   （只收紧不放大：运行侧兜底，防旁路落库的旧覆盖在换负责人后放大权限）；
-// - 其余回落 bot.file_policy（来源 bot_config）；run 为空保持 bot.file_policy 现行为。
+// - 其余回落 bot.file_policy（来源 bot_config）。
 // 覆盖或配置档不合法（不在 SANDBOX_MODES）时不采用，落 bot_config 由 applyFilePolicy 拦截。
 export function effectiveSandbox(run, bot, task) {
   if (run && run.mode !== 'write') return { mode: 'read-only', source: 'run_type' }
@@ -58,9 +58,9 @@ export function effectiveSandbox(run, bot, task) {
 
 const sessionIdOf = context => context?.agent?.id ?? context?.session?.id ?? context?.sessionId
 
-// 任务描述超长截断管线（DSHBOTS-113，事故 m_33bddb；DSHBOTS-254 起任务分支与 review/handle 同口径）：
-// 任务全文拼进提示词可能顶爆 400 上下文，超过 8K 字符截断并注明，消费方据此只基于
-// 截断内可见的部分下结论并声明盲区；标题/状态/写范围/任务评论在截断点之外恒在场。
+// 任务描述截断（DSHBOTS-113 事故 m_33bddb；DSHBOTS-254 起任务分支与 review/handle 同口径）：
+// 全文拼进提示词可能顶爆 400 上下文，超过 8K 字符即截断并注明，消费方只基于可见部分
+// 下结论并声明盲区；标题/状态/写范围/任务评论在截断点之外恒在场。
 function truncateTaskDescription(raw) {
   const text = raw || '(no description)'
   return text.length > 8_000
@@ -69,11 +69,10 @@ function truncateTaskDescription(raw) {
 }
 
 export const promptMethods = {
-  // system 区会话级冻结（D-85 方案 B）：首次求值后按 session id 缓存字节，
-  // 同会话后续每次宿主 assemble 都命中缓存，保证 system 区逐字节稳定，
-  // 前缀缓存不被本插件作废；连带把 secrets/skill_bindings/项目技能扫描
-  // 等求值压缩到每会话一次。空结果不冻结（会话建立早期 binding 未落库时
-  // 返回 ''，等首次非空结果再定格）。易变的记忆块不走这里，见 memoryContextFor。
+  // 系统提示词会话级冻结（D-85 方案 B）：首次求值后按会话 id 缓存字节，同会话此后逐字节
+  // 稳定，前缀缓存不被本插件作废；密钥、技能绑定、项目技能扫描等求值也随之压缩到每会话
+  // 一次。空结果不冻结（会话建立早期绑定未落库时返回 ''，等首次非空结果再定格）。
+  // 易变的记忆块不走这里，见 memoryContextFor。
   systemPromptFor(context) {
     const sessionId = sessionIdOf(context)
     if (sessionId) {
@@ -212,10 +211,10 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
     ].filter(Boolean).join('\n')
   },
 
-  // 记忆块（D-85 方案 A）：不再进 system 区（那会每步重烧全前缀缓存），改注册为
-  // 宿主 systemPrompt.context() 的动态贡献——宿主把它渲染成历史尾部的 user 快照，
-  // 文本变化时才追加新快照，前缀缓存不动，进行中会话仍能看到新落库的记忆。
-  // 因此本方法不做会话冻结：宿主每步重求值是有意为之，只有这一条小 SQL。
+  // 记忆块（D-85 方案 A）：不进系统区（那会每步重烧全前缀缓存），改注册为宿主
+  // systemPrompt.context() 的动态贡献——宿主把它渲染成历史尾部的用户快照，文本变化时
+  // 才追加新快照，前缀缓存不动，进行中会话仍能看到新落库的记忆。因此本方法不做会话
+  // 冻结：宿主每步重求值是有意为之，只有一条小查询。
   memoryContextFor(context) {
     const sessionId = sessionIdOf(context)
     const binding = this.bindingOfSession(sessionId)
@@ -275,13 +274,12 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
     ].filter(Boolean).join('\n')
   },
 
-  // 把按运行类型收紧后的档位（effectiveSandbox）写成宿主 session 的文件沙箱覆盖。
-  // 宿主原生写路径 setSandboxMode(session, mode) 就是 session.append('sandbox/mode', { mode })，
-  // 这里等价直调（插件不依赖宿主包），事件 log-only、replay 持久、下次受限调用生效。
-  // 会话已是目标档位就不重复追加；设置失败只告警不阻断会话（沙箱回落宿主默认）。
-  // DSHBOTS-156：档位口径含任务派发覆盖（只收紧不放大）；带运行上下文时把生效档与来源
-  // 落 run_events（type='sandbox_mode'，复用会话也每次留档——run_events 是运行时间线，
-  // 每条运行都该有自己的一档记录，与 sandbox/mode 追加的去重无关）。
+  // 把收紧后的档位（effectiveSandbox）写成宿主会话的文件沙箱覆盖：等价直调宿主的
+  // setSandboxMode(session, mode)，即 session.append('sandbox/mode', { mode })（插件不依赖
+  // 宿主包），事件 log-only、replay 持久、下次受限调用生效。已是目标档位就不重复追加；
+  // 失败只告警不阻断会话（沙箱回落宿主默认）。
+  // DSHBOTS-156：带运行上下文时把生效档与来源落 run_events（type='sandbox_mode'）——
+  // run_events 是运行时间线，复用会话的每条运行也各自留档，与 sandbox/mode 追加的去重无关。
   applyFilePolicy(agent, bot, run?, task?) {
     const { mode, source } = effectiveSandbox(run, bot, task)
     if (!SANDBOX_MODES.includes(mode)) return
@@ -306,15 +304,15 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
     }
   },
 
-  // 增量水位尾窗（DSHBOTS-96 P1-1）：每 session 维护已注入的 rowid 水位，此后每轮只注入
+  // 增量水位尾窗（DSHBOTS-96 P1-1）：每会话维护已注入的 rowid 水位，此后每轮只注入
   // 水位之后的新消息，替代旧的「尾 12 条×240 摘录每轮重烧」。语义：
-  // - 无水位（新会话首次注入/进程重启）→ 回退尾 RECENT_FALLBACK_LIMIT 条全量窗；
-  // - 有水位 → rowid > 水位的新消息（rowid 单调递增，与 created_at 排序一致）；
-  // - 水位推进到取窗时刻该表 scope 内最大 rowid，只前进不回退；空窗也推进（越过触发消息）；
-  // - 多 run 并发共用同一 session：先取窗者把积压新消息一次带走并前移水位，后取窗者窗口
-  //   为空——两条 prompt 进同一宿主 session 历史，消息不丢不重；
+  // - 无水位（新会话或进程重启）→ 回退尾 RECENT_FALLBACK_LIMIT 条全量窗；
+  // - 有水位 → 取 rowid > 水位的新消息（rowid 单调递增，与 created_at 排序一致）；
+  // - 水位推进到取窗时刻该表 scope 内最大 rowid，只进不退；空窗也推进（越过触发消息）；
+  // - 多运行并发共用同一会话：先取窗者带走积压并前移水位，后取窗者窗口为空——
+  //   两条提示词进同一宿主会话历史，消息不丢不重；
   // - excludeId 排除本轮触发消息（正文已在 # Group message / # Solo message 完整呈现，不再双份）。
-  // sessionId 为空（无会话上下文的直接调用）时不读不写水位，等价旧的固定尾窗。
+  // 无会话上下文时不读不写水位，等价旧的固定尾窗。
   watermarkWindow({ sessionId, table, columns, where, params, excludeId }) {
     const advance = this.store.get(`SELECT MAX(rowid) AS m FROM ${table} WHERE ${where}`, ...params)?.m ?? null
     const watermark = sessionId ? this.messageWatermarks.get(sessionId) : undefined
@@ -338,7 +336,7 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
   },
 
   // 结转摘要块（DSHBOTS-145）：新会话首轮提示词注入旧会话的交接摘要。
-  // 一次性语义（照 recovery note 手法）：读到的同时即刻清零，同一摘要只注入一次。
+  // 一次性语义（同 recovery note 手法）：读到即清零，同一摘要只注入一次。
   // 消费闸（DSHBOTS-213）：仅当本轮会话就是结转新建的目标会话（pending 标记命中）才消费；
   // 无摘要或目标不是本会话时返回空串，摘要保留到真正的结转，防止被无关轮次提前清零。
   rolloverSummaryBlock(bot, project, sessionId) {
@@ -368,8 +366,8 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
 - Do not call any tool and do not write files. Reply with the summary text only.`
   },
   // 闲时总结压缩运行提示词（DSHBOTS-286）：在原会话上下文里让 bot 自写连续性总结。
-  // 压缩 ≠ 结转：会话不换，总结只为收敛上下文头绪；宿主未暴露历史截断 API，
-  // 持久事实应趁此轮落记忆/任务评论（能力边界见 ADR「结转与压缩」）。
+  // 压缩不等于结转：会话不换，总结只为收敛上下文头绪；宿主未暴露历史截断接口，
+  // 持久事实应趁此轮落记忆或任务评论（能力边界见 ADR「结转与压缩」）。
   sessionCompactPrompt({ bot, project }) {
     const header = project
       ? [`Project: ${project.name} (${project.key})`, `You are: ${bot.name}`].join('\n')
@@ -418,8 +416,8 @@ ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}${this.mergedMessagesBlo
 ${recentBlock}`
   },
   // 读图代理运行提示词（DSHBOTS-112）：代理模型把消息附图转写成中文结构化文本，
-  // 供无视觉能力的主模型在后续轮次消费。图片分片由 startRun 随首条 prompt 自动
-  // 附带（imageContentPartsForMessage 统一群聊/单聊口径），这里只出指令。
+  // 供无视觉能力的主模型在后续轮次消费。图片分片由 startRun 随首条提示词自动附带
+  // （imageContentPartsForMessage 统一群聊/单聊口径），这里只出指令。
   visionRunPrompt({ bot, project, chatMessage }) {
     const header = [
       project ? `Project: ${project.name} (${project.key})` : 'Mode: one-on-one conversation (outside projects)',
@@ -451,8 +449,8 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
       `Workspace: ${displayPath(project.production_dir || join(this.config.workspace, project.slug))}`,
       `You are: ${bot.name}`,
     ].join('\n')
-    // 任务评论注入（DSHBOTS-254 收口）：最近 3 条、合计 ≤1.5k——每条正文 500 上限（1.5k/3 的
-    // 按比例缩减）+ 拼接后 1500 硬顶（兜住行前缀开销），最坏 ~4k → 1.5k。
+    // 任务评论注入（DSHBOTS-254 收口）：最近 3 条、合计 ≤1.5k——每条正文 500 上限
+    // （按 1.5k/3 比例缩减）+ 拼接后 1500 硬顶（兜住行前缀开销），最坏 ~4k 压到 1.5k。
     const taskComments = task
       ? this.store.all(
         'SELECT id, author_type, author_id, body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 3',
@@ -465,11 +463,11 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
         .map(item => `- [c_${item.id.slice(-6)}] ${item.author_type}:${item.author_id}: ${item.body.length > 500 ? `${item.body.slice(0, 500)}…` : item.body}`)
         .join('\n')
         .slice(0, 1_500)}`
-    // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入。
-    // 任务派生运行（review/handle/memory_review）与该任务共用同一时效上限，提示词必须同步告知，
-    // 否则运行会在代理不知情的情况下被超时中止。
-    // 任务级死线（DSHBOTS-274）：deadline 只由施工分支（下方 if (task)）传入，追加剩余时间一行；
-    // 预算耗尽改收尾轮口径。review/handle/memory_review 分支不传 deadline（死线豁免，不注入该行）。
+    // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传或为 NULL 则完全不注入。
+    // 任务派生运行（review/handle/memory_review）与该任务共用同一时效上限，提示词必须同步
+    // 告知，否则运行会在代理不知情的情况下被超时中止。
+    // 任务级死线（DSHBOTS-274）：死线只由施工分支（下方 if (task)）传入，追加剩余时间一行；
+    // 预算耗尽改收尾轮口径。review/handle/memory_review 分支不传死线（豁免，不注入该行）。
     const timeBudgetBlockFor = (row, deadline = null) => {
       const timeBudget = Number(row?.timeBudgetMinutes ?? row?.time_budget_minutes)
       if (!(Number.isFinite(timeBudget) && timeBudget > 0)) return ''
@@ -478,7 +476,7 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
         const remainingMs = deadline.deadlineMs - Date.now()
         deadlineLine = remainingMs > 0
           ? `Deadline: ${new Date(deadline.deadlineMs).toISOString()} / ${Math.ceil(remainingMs / 60_000)} min remaining.`
-          : `Deadline: ${new Date(deadline.deadlineMs).toISOString()} passed — 超线，本轮是收尾轮，优先可交付小步。`
+          : `Deadline: ${new Date(deadline.deadlineMs).toISOString()} passed — the budget is exhausted; this is a wrap-up turn, prioritize a small deliverable step.`
       }
       return `
 
@@ -489,14 +487,14 @@ The effective timeout is the smaller of this budget and the global run timeout (
 ${deadlineLine}`.trimEnd()
     }
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
-      // 超长防护（DSHBOTS-113，事故 m_33bddb；DSHBOTS-140 扩到 owner review / handle）：
+      // 超长防护（DSHBOTS-113 事故 m_33bddb；DSHBOTS-140 扩到 owner review/handle）：
       // 任务派生分支共用 truncateTaskDescription 的同一截断点与盲区口径（任务分支见 DSHBOTS-254）。
       const writeScopes = readWriteScopes(task.write_scopes)
       const declaredScopes = writeScopes.length ? writeScopes.join(', ') : '(none declared)'
       const description = truncateTaskDescription(task.description)
       if (run.kind === 'review') {
-        // 委派核验模板（DSHBOTS-107 review-verification）：核验工作由 subagent 并行完成，
-        // 结论以「子代理核验：」开头落任务评论（finishRun 自动写回），不代 owner 裁决。
+        // 委派核验模板（DSHBOTS-107 review-verification）：核验工作由子代理并行完成，
+        // 结论以「子代理核验：」开头落任务评论（finishRun 自动写回），不代负责人裁决。
         if (run.trigger_type === 'review_delegate') {
           return `${header}
 
@@ -614,8 +612,8 @@ ${(sourceRun?.output ?? '').slice(0, 4000)}`
       // 超长防护（DSHBOTS-254）：任务分支与 review/handle 同口径复用 truncateTaskDescription
       // （8k 截断 + 盲区标记），建卡上限 40k 的长卡不再整段进提示词。
       const description = truncateTaskDescription(task.description)
-      // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传/NULL 则完全不注入，提示词与无时效任务一致。
-      // 任务级死线（DSHBOTS-274）：施工分支传入整卡死线，时效段追加剩余时间/收尾轮口径。
+      // 时效要求（DSHBOTS-125/131）：time_budget_minutes 未传或为 NULL 则完全不注入，提示词与无时效任务一致。
+      // 任务级死线（DSHBOTS-274）：施工分支传入整卡死线，时效段追加剩余时间或收尾轮口径。
       const timeBudgetBlock = timeBudgetBlockFor(task, taskDeadlineInfo(this.store, task))
       // 紧急豁免（DSHBOTS-126）：urgent 任务卡追加豁免指令（用户口径 m08196-2）——
       // 无视车道排队立即开工；非 urgent 完全不注入，保持既有车道纪律。
@@ -623,29 +621,27 @@ ${(sourceRun?.output ?? '').slice(0, 4000)}`
 
 # Urgent exemption
 This task is urgent and exempt from lane queuing discipline: start immediately, without waiting for other tasks' file lanes to clear. If in-flight edits to the same files exist in the workspace, first run git status to record the scene, then commit only this card's files by exact pathspec — never add/checkout/stash others' changes.` : ''
-      // subtask-discipline:start —— 子任务拆解纪律（DSHBOTS-132；DSHBOTS-254 与提速拆分/并行段
-      // 语义去重，三段合计 ≤1200 字符，tests/prompt-budget.test.ts 守门）：主项做不完或出现新
-      // 收口条件 → 立产品级子卡。所有任务卡无条件注入，与时效段（D-125）、紧急豁免段（D-126）
+      // 子任务拆解纪律（DSHBOTS-132；DSHBOTS-254 与提速拆分/并行段语义去重，三段合计
+      // ≤1200 字符，tests/prompt-budget.test.ts 守门）：主项做不完或出现新收口条件就
+      // 立产品级子卡。所有任务卡无条件注入，与时效段（D-125）、紧急豁免段（D-126）
       // 互不干扰：本段不读 priority/time_budget，后两者不读本段。
       const subtaskDisciplineBlock = `
 
 # Subtask discipline
 Before closing: if this task cannot be finished in one run or new closing conditions emerge, file subtasks via team_assign_task with parent_task_id and report in the group — no verbal-only follow-ups. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.`
-      // subtask-discipline:end
-      // splitting-guidance:start —— 提速拆分引导（DSHBOTS-212；DSHBOTS-254 去重收口）：
-      // 拆分判据（2+ 独立部分 + 写范围不相交 + 拆后合并成本更低）+ 角色现实（无派单权限就在
-      // 交付报告里提拆分方案）。静态段（不随卡变化）：与纪律段同为全局前缀，置于 # Assigned task
-      // 之前，护住前缀缓存。
+      // 提速拆分引导（DSHBOTS-212；DSHBOTS-254 去重收口）：
+      // 拆分判据（2+ 独立部分 + 写范围不相交 + 拆后合并成本更低）+ 角色现实（无派单权限
+      // 就在交付报告里提拆分方案）。静态段（不随卡变化）：与纪律段同为全局前缀，置于
+      // # Assigned task 之前，护住前缀缓存。
       const splittingGuidanceBlock = `
 
 # Splitting for speed
 Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery. One card per part: parent_task_id to this task, blocked_by where order matters. Not the project owner? Propose the split in your delivery report. Example: API card (src/api/) + docs card, run concurrently.`
-      // splitting-guidance:end
       // delivery-selfcheck:start —— 交付前自校段（DSHBOTS-276，P1 派单质量前置）：治 GS 实测
       // 34% 补丁/返工卡——交付报告缺自跑验证证据。所有任务卡无条件注入，置于卡头
       // Status 与 Description 之间（D-269 只追加手法）：不动既有锚点前缀与 D-274 时效段
-      // （tests/prompt-budget ≤1900 静态前缀不打红、8k 截断「描述后即结尾」断言不打红、
-      // tests/prompt-prefix-order 段序不打红——三守门实测后选定此位）。
+      // （tests/prompt-budget ≤1900 静态前缀、8k 截断「描述后即结尾」、tests/prompt-prefix-order
+      // 段序三守门实测后选定此位）。
       const deliverySelfcheckBlock = `
 
 # Delivery self-check
@@ -658,14 +654,13 @@ Before reporting delivery, self-run the reproducible verification and put the ev
 
 # Recovery note
 The previous run was interrupted by a host restart. Check the workspace and git status first to verify the current state, then resume from where it stopped; do not repeat external actions already performed (commits/publishes/messages).` : ''
-      // agentTeam 门控（DSHBOTS-254 收口）：单卡内并行的执行口径——teammates/子代理、
+      // agentTeam 门控（DSHBOTS-254 收口）：单卡内并行的执行口径——队友/子代理、
       // 部件落项目 KEY-N 卡、交付前 wait_agent 汇总。拆分判据不在此重复（见上方提速拆分段）。
-      // DSHBOTS-292：并行执行的主力改「按任务号开子智能体」——子代理写继承控制面沙箱、
-      // 不受任务写范围调度闸门约束（ADR §2.4 三层补偿之②提示词写入边界）。
+      // 子代理化解除（DSHBOTS-311 硬闸撤销）：亲做与派子代理均可，派时命名 bot 名+任务号。
       const parallel = this.config.agentTeam ? `
 
 # Child agents by task number
-Execute each card in a dedicated child agent (subagent/subagent_fork) labeled with its task number (e.g. DSHBOTS-292); never merge cards into one agent — small single-file cards do yourself. Child writes inherit your session sandbox, not the task write-scope gates: pass the card's declared write scopes as the child's write boundary. Children report changed paths, verification with results, risks; merge and review their output yourself before delivering.` : ''
+Execute each card yourself, or hand it to a dedicated child agent (subagent/subagent_fork) named <your bot name>-<task number> (e.g. Builder-ORD-3); never merge cards into one agent. Child writes inherit your session sandbox, not the task write-scope gates: pass the card's declared write scopes as the child's write boundary. Children report changed paths, verification with results, risks; merge and review their output yourself before delivering.` : ''
       const parallelMerge = this.config.agentTeam ? `
 
 # Parallel work inside this task
@@ -728,7 +723,7 @@ This message is from the project owner — answer it directly in this reply. Bac
     // DSHBOTS-283 回复分级：长文（交付/进展/评估）用 Markdown 固定小标题，短回复保持自然语言。
     return `${header}
 
-Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item. Long replies (交付/进展/评估) use Markdown headings 结论/证据/风险/下一步; short replies stay natural.${wechatBlock}${ownerQuestionBlock}
+Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up. If the message requires another bot to do work, use team_assign_task instead of pretending to assign it. Use team_recall with a m_/c_/run id when you need the full text of a truncated item. Long replies (deliveries, progress updates, assessments) use Markdown headings 结论/证据/风险/下一步; short replies stay natural.${wechatBlock}${ownerQuestionBlock}
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}

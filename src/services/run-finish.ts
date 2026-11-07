@@ -314,6 +314,8 @@ export const runFinishMethods = {
         const task = this.taskRow(run.task_id)
         const ownerReview = (task.review_target ?? 'user') === 'owner_bot'
         let autoReviewQueued = false
+        // 子代理施工硬闸已解除（原 DSHBOTS-311）：交付不再要求子代理施工账目，
+        // 施工方式由 bot 自选（亲做或派「bot 名+任务号」子代理），账本（D-294）仍照记。
         this.store.transaction(() => {
           this.store.run(
             `UPDATE tasks SET status = 'in_review', version = version + 1, updated_at = ?
@@ -322,7 +324,9 @@ export const runFinishMethods = {
           )
           this.store.run(
             'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-            id('cmt'), task.id, 'bot', bot.id, cleanOutput || '运行完成，但模型未返回文本。', endedAt,
+            id('cmt'), task.id, 'bot', bot.id,
+            cleanOutput || '运行完成，但模型未返回文本。',
+            endedAt,
           )
           this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, { runId, identifier: `${project.key}-${task.number}` })
           // 自动核验委派（DSHBOTS-113）：与 in_review 迁移同一事务触发留痕；实际派生由

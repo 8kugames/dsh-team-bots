@@ -117,27 +117,9 @@ export const taskRunMethods = {
     const fallbackProvider = routing.mode === 'fallback' ? routing.provider : null
     const fallbackModel = routing.mode === 'fallback' ? routing.model : null
     const fallbackEffort = routing.mode === 'fallback' ? routing.effort : null
-    // busy 闸（DSHBOTS-290，争用口径 A 对齐）：one_active_run_per_bot 激活后 bot 忙时
-    // 直接 INSERT 会撞唯一索引——与消息族同口径改挂待处理队列，bot 空闲时由
-    // drainPendingMessages 建回（insertHeldMessageRun 的 task 分支）。入队时快照
-    // （写范围/备用模型路由）随挂起项保存，不因延迟建回漂移。messageId 用合成键
-    // task:<id>：挂起队列按 messageId 去重/消费，任务项无消息 id 不能留空。
-    // DSHBOTS-300：快照构造提为 hold 闭包——busy 分支与下文「查后插竞态撞 UNIQUE」
-    // 兜底（DSHBOTS-300）共用同一挂起项，杜绝两处漂移。
-    const hold = () => this.holdPendingMessage(task.assignee_bot_id, {
-      kind: 'task', messageId: `task:${task.id}`, taskId: task.id,
-      projectId: task.project_id, triggerType,
-      actorType: actor.type, actorId: actor.id, writeScopes,
-      routing: {
-        mode: routing.mode, ref: routing.ref ?? null, resetAt: routing.resetAt ?? null,
-        provider: fallbackProvider, model: fallbackModel, effort: fallbackEffort,
-      },
-      queuedAt: createdAt,
-    })
-    if (this.botBusy(task.assignee_bot_id)) {
-      hold()
-      return null
-    }
+    // 单 bot 多任务并行（任务运行豁免 bot 串行域）：任务运行直插 queued，不再查 bot 忙
+    // 挂待处理队列——重复施工由 one_active_run_per_task 唯一索引兜底（上方 active 预检 +
+    // 下方 catch 合并），写安全由调度器写范围闸门兜底。消息族/owner_task 照旧走 busy 闸。
     try {
       this.store.run(
         `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
@@ -147,16 +129,9 @@ export const taskRunMethods = {
         `task:${task.id}:${Date.now()}:${runId}`, writeScopes, fallbackProvider, fallbackModel, fallbackEffort, createdAt,
       )
     } catch (error: any) {
-      // DSHBOTS-300：查后插竞态撞 one_active_run_per_bot——按忙口径挂起返 null 不抛
-      //（task_id 维度撞车不在此兜，重试下一拍 active 预检自愈）。
-      // DSHBOTS-304：双投胜利方的同任务 active 运行已在→合并返回其 id 消算，不落挂起
-      //（否则胜利方运行结束后 drain 按恒新幂等键建出重复 task 运行）。
-      if (this.isRunBotUniqueViolation(error)) {
-        const merged = this.activeRunByTaskId(task.id)
-        if (merged) return merged
-        hold()
-        return null
-      }
+      // 查后插竞态撞 one_active_run_per_task（bot 维度索引已不含 task 运行）——双投胜利方
+      // 的同任务 active 运行已在→合并返回其 id 消算，不抛不挂起（D-304 口径沿用到任务维度）。
+      if (this.activeRunByTaskId(task.id)) return this.activeRunByTaskId(task.id)
       throw error
     }
     this.store.run(
@@ -204,11 +179,11 @@ export const taskRunMethods = {
     // busy 闸（DSHBOTS-290）：owner 忙时 review/handle 运行同样不落 runs 行（撞
     // one_active_run_per_bot），挂待处理队列空闲建回——与 enqueueTaskRun 同口径。
     // DSHBOTS-300：挂起项提为 hold 闭包，busy 分支与查后插竞态兜底共用。
-    const hold = () => this.holdPendingMessage(owner.id, {
+    const hold = () => this.holdPendingMessage(owner.id, project.id, {
       kind: 'owner_task', messageId: `owner_task:${current.id}:${kind}`, taskId: current.id,
       projectId: project.id, runKind: kind, triggerType, queuedAt: createdAt,
     })
-    if (this.botBusy(owner.id)) {
+    if (this.botBusy(owner.id, project.id)) {
       hold()
       return null
     }

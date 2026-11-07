@@ -279,8 +279,9 @@ export const sessionMethods = {
     )
     return runId
   },
-  // 任务亲和绑定解析（DSHBOTS-286，ADR「结转后的任务亲和路由」）：按 task_id 从 runs 表
-  // 显式解析其原会话——结转只把绑定行 alias 化，runs.task_id→session_id 的历史归属不动。
+  // 任务亲和绑定解析（DSHBOTS-286，ADR「结转后的任务亲和路由」）：按 task_id + 当前负责人
+  // 从 runs 表显式解析其施工会话（负责人自己的 task 运行）——结转只把绑定行 alias 化，
+  // runs.task_id→session_id 的历史归属不动。
   // 未终态任务的后续消息据此回到原会话（即使该绑定已是 alias 行，如结转后的旧控制面会话）；
   // 新任务（无 runs 归属）与终态任务不享亲和，落活跃绑定/新建路径。
   // 与 D-285 单绑定模型共存：kind='bot' 唯一活跃绑定只决定「新流量」的家，任务亲和优先于它。
@@ -288,11 +289,29 @@ export const sessionMethods = {
     if (!task?.id) return undefined
     // 终态任务的会话不再需要亲和：done/canceled 与调度器候选过滤同口径。
     if (task.status === 'done' || task.status === 'canceled') return undefined
+    // 验收期话语权在总监（DSHBOTS-306）：in_review 期间卡线程消息（验收指令/评论直通/
+    // dm_reply 回投等经此亲和的流量）改判项目 owner bot 的控制面绑定——否则按 assignee
+    // 亲和落承接 bot 会话，验收动作 team_review_task 又仅 owner bot 可调（D-190），指令
+    // 路由与动作权限错位、每卡都要绕一步。本分支优先于下方 runs 归属亲和（含 D-286 结转
+    // 后的 alias 旧会话）：验收期短暂，按当前 owner 会话走；退回 todo 即恢复 assignee 亲和。
+    if (task.status === 'in_review') {
+      const ownerBotId = this.store.get('SELECT owner_bot_id FROM projects WHERE id = ?', task.project_id)?.owner_bot_id
+      if (!ownerBotId) return undefined
+      return this.store.get(
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND project_id = ? AND kind = 'bot' AND alias = 0",
+        ownerBotId, task.project_id,
+      )
+    }
+    // runs 归属亲和只认「当前负责人的施工运行」（bot_id=assignee + kind='task'）：
+    // 卡上的 owner 侧运行（review_delegate 核验/handle 受阻处置）虽带 task_id，但落的是
+    // 总监控制面会话——不过滤时退回重做后的重做运行与卡线程回信会按「最近一条运行」
+    // 亲和到总监会话（成员任务卡发给总监）。改派新负责人同理无旧归属，落新建任务会话。
+    if (!task.assignee_bot_id) return undefined
     const row = this.store.get(
       `SELECT session_id AS sid FROM runs
-        WHERE task_id = ? AND session_id IS NOT NULL
+        WHERE task_id = ? AND session_id IS NOT NULL AND bot_id = ? AND kind = 'task'
         ORDER BY COALESCE(started_at, queued_at) DESC, rowid DESC LIMIT 1`,
-      task.id,
+      task.id, task.assignee_bot_id,
     )
     if (!row?.sid) return undefined
     return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', row.sid)
@@ -382,6 +401,12 @@ export const sessionMethods = {
       }
       this.retireBinding(affinity.session_id)
     }
+    // ②½ 任务专属会话（单 bot 多任务并行）：施工运行（kind='task'）无亲和会话时（首次
+    // 开工）不开进控制面绑定，而是建一张「bot 名+任务号」专属会话——每张卡一个独立
+    // 上下文，同 bot 多卡并行互不串味；返工/续做的后续运行经上方 ② 任务亲和回到本会话。
+    if (run?.kind === 'task' && task && project) {
+      return this.ensureTaskSession(bot, project, { run, task, modelOverride })
+    }
     // ③ 控制面会话收敛（DSHBOTS-289/299，ADR §5.2-3）：其余运行（chat/dm/dm_reply/
     // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 在所属域的 kind='bot'
     // 控制面会话——项目运行落 (bot, project) 绑定（每项目每 bot 一条，DSHBOTS-299 三分域），
@@ -396,6 +421,57 @@ export const sessionMethods = {
   // 会话 cwd 落该 bot 专属工作区（resolveSessionCwd 的 solo 分支），与项目控制面双域分离。
   // 复用分支补齐与旧 ensureSession 同款的策略面：applyFilePolicy / applyBotToolPolicy /
   // selectModel / maybeCompactSession / rolloverPending 消费闸。
+  // 任务专属会话（单 bot 多任务并行）：每张施工卡一张「bot 名+任务号」会话——会话列表
+  // 显示名 `${bot.name} · ${project.key}-${task.number}`（D-315 命名口径），绑定行 kind='task'
+  // 带 task_id（任务亲和解析与 one_bot_binding 的 kind='bot' 谓词互不干扰）。生命周期短：
+  // 不参与结转（会话轮次上限照旧兜底），压缩由亲和复用分支的 maybeCompactSession 承接。
+  // 并发首建去重键带 task 维度，同任务并发首建共用同一 in-flight Promise。
+  async ensureTaskSession(bot, project, { run, task, modelOverride } = {} as any) {
+    const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
+    const key = `${bot.id}:${project.id}:task:${task.id}`
+    if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
+    const creating = (async () => {
+      const cwd = await resolveSessionCwd(this.config, { solo: false, bot, project })
+      const created = await this.ctx.sessionController.create({
+        cwd,
+        ...(await this.defaultAgentPreset('project')),
+      })
+      const sessionId = created.sessionId
+      const agent = await this.ctx.sessionController.resolveAgent(sessionId)
+      if (agent?.error) throw new AppError('SESSION_FAILED', `创建 DSH Session 失败：${agent.error.message ?? '未知错误'}`)
+      if (this.ctx.sessionTitle?.rename) {
+        const liveSession = agent?.agent?.session ?? agent?.session
+        if (liveSession) {
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${project.key}-${task.number}`) } catch {}
+        }
+      }
+      this.applyFilePolicy(agent, bot, run, task)
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
+      this.store.run(
+        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+         VALUES (?, ?, ?, 'task', ?, ?, 0)
+         ON CONFLICT(session_id) DO NOTHING`,
+        sessionId, bot.id, project.id, task.id, new Date().toISOString(),
+      )
+      await this.selectModel(sessionId, bot, modelOverride)
+      // 挂到项目工作区分组（与控制面会话同组）：任务会话在宿主列表里归入所属项目。
+      const registry = this.ctx.get?.('workspaceRegistry')
+      if (registry) {
+        await attachSessionToWorkspace(registry, {
+          cwd,
+          title: workspaceGroupTitle({ kind: 'bot', project, bot }),
+          sessionId,
+        }, this.logger)
+      }
+      return sessionId
+    })()
+    this.sessionCreates.set(key, creating)
+    try {
+      return await creating
+    } finally {
+      this.sessionCreates.delete(key)
+    }
+  },
   async ensureBotBinding(bot, project, { run, task, modelOverride } = {} as any) {
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
     // DSHBOTS-299：查询带 project 维度（IS 比 = 多兼容 NULL——solo 域按 (bot, NULL) 命中），
@@ -442,7 +518,9 @@ export const sessionMethods = {
       if (this.ctx.sessionTitle?.rename) {
         const liveSession = agent?.agent?.session ?? agent?.session
         if (liveSession) {
-          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · 控制面`) } catch {}
+          // 会话列表显示名（DSHBOTS-315）：bot 级会话后缀取 8 位 uuid 前缀——
+          // 「控制面」在中文语境是生造词，用户看不懂（英文 controller 无妨）。
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${sessionId.slice(0, 8)}`) } catch {}
         }
       }
       this.applyFilePolicy(agent, bot, run, task)

@@ -197,7 +197,7 @@ test('d) 提示词：时效段注入剩余时间；耗尽后收尾轮口径；re
     const stalePrompt = t.promptRuntime.promptFor({
       run: { kind: 'task', task_id: taskId, trigger_type: 'task_started' } as any, ...base,
     })
-    assert.ok(stalePrompt.includes('超线，本轮是收尾轮，优先可交付小步'), '预算耗尽后施工提示词含收尾轮口径')
+    assert.ok(stalePrompt.includes('this is a wrap-up turn, prioritize a small deliverable step'), '预算耗尽后施工提示词含收尾轮口径')
     // review 豁免传导到提示词：review 分支不传 deadline，不注入 Deadline 行。
     const reviewPrompt = t.promptRuntime.promptFor({
       run: { kind: 'review', task_id: taskId, trigger_type: 'review' } as any, ...base,

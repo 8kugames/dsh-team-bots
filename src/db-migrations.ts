@@ -118,6 +118,10 @@ export function runMigrations(db) {
   // 争用口径 A（enqueue 家族 bot 忙时挂待处理队列不落 runs 行）同车后激活——存量串行化
   // （同 bot 多条 queued/running 只留最早一条，其余 canceled）+ 建 bot 级部分唯一索引。
   activateBotRunSerialization(db)
+  // DSHBOTS-308：串行域收窄为 (bot, 工作区)，见 activateBotRunSerializationDomain。
+  activateBotRunSerializationDomain(db)
+  // 任务运行豁免 bot 串行域（单 bot 多任务并行）：见 exemptTaskRunsFromBotSerialization。
+  exemptTaskRunsFromBotSerialization(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -365,6 +369,46 @@ export function activateBotRunSerialization(db) {
       ON runs(bot_id) WHERE status IN ('queued', 'running');
   `)
   recordMigration(db, 'bot_run_serialization')
+}
+
+// 串行域收窄（DSHBOTS-308，owner 拍板同一 bot 跨工作区并行）：one_active_run_per_bot 从
+// bot 全局收窄为 (bot, 工作区) 域，solo 域归一口径与 one_bot_binding 的 COALESCE 一致。
+// 同名索引列集已变，IF NOT EXISTS 不替换旧列集，须 DROP 再建；与 activateBotRunSerialization
+// 同为函数级幂等且必须排其后——前者每次开库可能重建出 bot 级旧索引，靠本函数收口到域级。
+export function activateBotRunSerializationDomain(db) {
+  // 存量按域分桶重做串行化：每 (bot, 域) 桶只留最早一条（queued_at, rowid），其余取消留痕。
+  db.prepare(
+    `UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'SERIALIZATION_DOMAIN',
+       error_message = '串行域收窄（DSHBOTS-308）：同 bot 活跃运行按 (bot, 工作区) 域串行化，本条不再单独执行'
+     WHERE status IN ('queued', 'running')
+       AND rowid <> (
+         SELECT r2.rowid FROM runs r2
+         WHERE r2.status IN ('queued', 'running')
+           AND r2.bot_id = runs.bot_id
+           AND COALESCE(r2.project_id, '~solo') = COALESCE(runs.project_id, '~solo')
+         ORDER BY r2.queued_at, r2.rowid LIMIT 1
+       )`,
+  ).run(nowIso())
+  db.exec(`
+    DROP INDEX IF EXISTS one_active_run_per_bot;
+    CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_bot
+      ON runs(bot_id, COALESCE(project_id, '~solo')) WHERE status IN ('queued', 'running');
+  `)
+  recordMigration(db, 'bot_run_serialization_domain')
+}
+
+// 任务运行豁免 bot 串行域（单 bot 多任务并行）：one_active_run_per_bot 加 kind <> 'task'
+// 谓词——施工运行不再受「同 (bot, 工作区) 至多一条活跃运行」约束，可多卡并行；任务维度的
+// 重复由 one_active_run_per_task 兜底，写安全由调度器写范围闸门兜底。review/handle（owner_task）
+// 与消息族照旧串行。不追改存量（历史串行取消行为不回滚）。
+export function exemptTaskRunsFromBotSerialization(db) {
+  db.exec(`
+    DROP INDEX IF EXISTS one_active_run_per_bot;
+    CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_bot
+      ON runs(bot_id, COALESCE(project_id, '~solo'))
+      WHERE status IN ('queued', 'running') AND kind <> 'task';
+  `)
+  recordMigration(db, 'task_runs_exempt_bot_serialization')
 }
 
 // 单聊支持：runs 与 session_bindings 的 project_id 放宽为可空（项目外会话与运行），

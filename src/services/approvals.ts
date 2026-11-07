@@ -5,6 +5,7 @@
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 db.js 的 addColumn/recordMigration 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, nowIso } from '../util.js'
+import { effectiveApprovalTimeoutMs } from '../config.js'
 import { botInActiveProject } from './questions.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
@@ -159,7 +160,7 @@ export const approvalsMethods = {
     if (!bot || (!isSolo && !project)) return next()
 
     const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY queued_at DESC LIMIT 1', sessionId)
-    const timeoutMs = this.config.approvalTimeoutMs
+    const timeoutMs = effectiveApprovalTimeoutMs(this.config, key => this.store.setting(key))
     const createdAt = nowIso()
     const approvalId = id('apr')
     const toolName = String(req.toolName ?? 'tool').slice(0, 100)
@@ -265,10 +266,17 @@ export const approvalsMethods = {
   approvalView(row) {
     const bot = this.store.get('SELECT name FROM bots WHERE id = ?', row.bot_id)
     const expiresAt = Date.parse(row.expires_at)
+    // 来源群聊标识（DSHBOTS-312）：approvalView 单行路径（decide 等）也带 project_key/name，
+    // 与列表 JOIN 口径一致——行里已带（列表查询 JOIN 产物）则不重查。
+    const source = row.project_key !== undefined ? row : (row.project_id
+      ? this.store.get('SELECT key AS project_key, name AS project_name FROM projects WHERE id = ?', row.project_id) ?? {}
+      : {})
     return {
       ...row,
       botName: bot?.name ?? 'Bot',
       tool_target_display: row.tool_target ? this.toolTargetDisplay(row.tool_target) : null,
+      projectKey: source.project_key ?? null,
+      projectName: source.project_name ?? null,
       // 会话归属（DSHBOTS-218）：单聊审批没有项目，UI 据此显示来源列并决定跳转目标。
       scope: row.project_id ? 'project' : 'solo',
       remainingMs: row.status === 'pending' ? Math.max(0, expiresAt - Date.now()) : 0,

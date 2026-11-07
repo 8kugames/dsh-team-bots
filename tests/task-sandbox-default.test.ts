@@ -89,9 +89,9 @@ test('非只读卡派发：运行档位=执行 bot 自身配置（workspace-writ
     await service.assignFromBot(sessionId, {
       assignee: 'Builder', title: '开发模块', description: '写代码。', write_scopes: ['src/module.js'],
     })
-    await service.assignFromBot(sessionId, {
-      assignee: 'Auditor', title: '审查模块', description: '读代码报告问题。', write_scopes: ['src/audit.js'],
-    })
+    // DSHBOTS-314 派单策略闸后写卡不经 assignFromBot 派只读 bot——直建卡+入队保持测试意图。
+    const auditTaskSeed = await service.createTask({ projectId: project.id, title: '审查模块', assigneeBotId: auditor.id, writeScopes: ['src/audit.js'] })
+    service.enqueueTaskRun(auditTaskSeed, 'assigned', { type: 'bot', id: dev.id })
     const devRun = await waitFor(
       () => store.get("SELECT * FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE assignee_bot_id = ?) AND kind = 'task'", dev.id),
       'dev run',

@@ -24,9 +24,15 @@ const int = (value, fallback, min, max) => {
 // 设置键沿用 settings 表的 snake_case；范围单位为分钟，与页面保存校验一致。
 export const RUN_TIMEOUT_KEY = 'run_timeout_minutes'
 export const STALL_WATCHDOG_KEY = 'stall_watchdog_minutes'
+// 审批等待/提问转接超时（DSHBOTS-309）：分钟整数 [1,60]，默认 10 分钟（原 3 分钟，
+// owner 2026-11-07 拍板上调）；空串/越界/非法回退默认，优先级与运行时效同款。
+export const APPROVAL_TIMEOUT_KEY = 'approval_timeout_minutes'
+export const QUESTION_TIMEOUT_KEY = 'question_timeout_minutes'
 export const RUN_LIMIT_RANGES = {
   [RUN_TIMEOUT_KEY]: [1, 360],
   [STALL_WATCHDOG_KEY]: [0, 360],
+  [APPROVAL_TIMEOUT_KEY]: [1, 60],
+  [QUESTION_TIMEOUT_KEY]: [1, 60],
 }
 
 // ── 验收滞留守门（DSHBOTS-194 / DSHBOTS-235）───────────────────────────────
@@ -93,6 +99,21 @@ export function effectiveRunLimits(config, getSetting: (key: string) => unknown 
     runTimeoutEnv: runEnv,
     stallTimeoutEnv: stallEnv,
   }
+}
+
+// 审批/提问等待生效值（DSHBOTS-309）：优先级与 effectiveRunLimits 同款——env 显式
+//（resolveConfig 已烘进 config.*TimeoutMs）> settings 保存分钟数 > 默认 300_000。
+// 消费点（approvals/questions 落库 expires_at 时）每次现算，改值对新条目生效。
+export function effectiveApprovalTimeoutMs(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_APPROVAL_TIMEOUT_MS')
+  const saved = savedInt(getSetting(APPROVAL_TIMEOUT_KEY), RUN_LIMIT_RANGES[APPROVAL_TIMEOUT_KEY])
+  return !env && saved !== null ? saved * 60_000 : config.approvalTimeoutMs
+}
+
+export function effectiveQuestionTimeoutMs(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_QUESTION_TIMEOUT_MS')
+  const saved = savedInt(getSetting(QUESTION_TIMEOUT_KEY), RUN_LIMIT_RANGES[QUESTION_TIMEOUT_KEY])
+  return !env && saved !== null ? saved * 60_000 : config.questionTimeoutMs
 }
 
 // ── 任务卡缺省时间预算（DSHBOTS-198）────────────────────────────────────────
@@ -235,9 +256,10 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     dmArchiveDays: int(config.dmArchiveDays ?? process.env.DSH_TEAM_DM_ARCHIVE_DAYS, 7, 0, 3650),
     dmKeepRecent: int(config.dmKeepRecent ?? process.env.DSH_TEAM_DM_KEEP_RECENT, 100, 0, 10_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。
-    approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 180_000, 5_000, 3_600_000),
-    // 提问转接超时（DSHBOTS-116）：与审批同默认 180s，最短 5s、最长 1 小时。
-    questionTimeoutMs: int(config.questionTimeoutMs ?? process.env.DSH_TEAM_QUESTION_TIMEOUT_MS, 180_000, 5_000, 3_600_000),
+    // 默认 5 分钟（DSHBOTS-313 终调：3→10（D-309）→5），settings approval_timeout_minutes 可调。
+    approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 300_000, 5_000, 3_600_000),
+    // 提问转接超时（DSHBOTS-116）：与审批同默认 5 分钟（DSHBOTS-313 同步终调），最短 5s、最长 1 小时。
+    questionTimeoutMs: int(config.questionTimeoutMs ?? process.env.DSH_TEAM_QUESTION_TIMEOUT_MS, 300_000, 5_000, 3_600_000),
     // 一次性密钥运行时文件（<dataDir>/secrets-runtime/<projectId>.env）的存活窗口：
     // 批准后生成，项目下一条 task 运行结束或窗口到期先到即焚，再次使用需重新批准。
     secretsRuntimeTtlMs: int(config.secretsRuntimeTtlMs ?? process.env.DSH_TEAM_SECRETS_TTL_MS, 30 * 60_000, 1_000, 24 * 60 * 60_000),

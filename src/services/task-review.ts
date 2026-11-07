@@ -135,8 +135,8 @@ export const taskReviewMethods = {
     // busy 闸（DSHBOTS-290）：总监忙时不落 runs 行（撞 one_active_run_per_bot），挂待
     // 处理队列空闲建回（insertHeldMessageRun 的 owner_task 分支）；返回 deferred 让
     // 手动入口与 outbox 自动入口都能感知「已挂起」而非失败。
-    if (this.botBusy(owner.id)) {
-      this.holdPendingMessage(owner.id, {
+    if (this.botBusy(owner.id, project.id)) {
+      this.holdPendingMessage(owner.id, project.id, {
         kind: 'owner_task', messageId: `owner_task:${task.id}:review_delegate`, taskId: task.id,
         projectId: project.id, runKind: 'review', triggerType: 'review_delegate', queuedAt: nowIso(),
       })

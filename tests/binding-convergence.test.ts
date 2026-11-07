@@ -275,6 +275,7 @@ class ControlPlaneRuntime {
   maybeCompactSession() {}
   taskAffinityBinding(task: any) { return sessionMethods.taskAffinityBinding.call(this, task) }
   ensureBotBinding(bot: any, project: any, opts: any) { return sessionMethods.ensureBotBinding.call(this, bot, project, opts) }
+  ensureTaskSession(bot: any, project: any, opts: any) { return sessionMethods.ensureTaskSession.call(this, bot, project, opts) }
   retireBinding(sessionId: string) { return sessionMethods.retireBinding.call(this, sessionId) }
 
   async startRun({ run, bot, project, task }: any) {
@@ -360,24 +361,24 @@ test('V1 四路合并（DSHBOTS-299 三分域）：任务/群聊/私信落 (bot,
   }
   assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').length, 0, '挂起队列应清空')
 
-  // V1 核心断言（DSHBOTS-299 会话域三分）：alias=0 绑定恰 2 行——项目域 (bot,project)
-  // 一条承接 task/chat/dm，solo 域 (bot,NULL) 一条承接 solo_chat（各 bot 专属工作区）。
+  // V1 核心断言（DSHBOTS-299 会话域三分 + 任务专属会话）：alias=0 绑定中 kind='bot'
+  // 恰 2 行——项目域 (bot,project) 承接 chat/dm，solo 域 (bot,NULL) 承接 solo_chat；
+  // task 运行另开「bot 名+任务号」专属会话（kind='task' 绑定行，单 bot 多任务并行）。
   const activeBindings = store.all("SELECT * FROM session_bindings WHERE bot_id = ? AND alias = 0", dev.id)
-  assert.equal(activeBindings.length, 2, '四路触发后 alias=0 绑定应为项目域+solo 域各 1 行')
-  assert.ok(activeBindings.every(row => row.kind === 'bot'), '绑定 kind 应均为 bot')
-  const projectBinding = activeBindings.find(row => row.project_id === project.id)
-  const soloBinding = activeBindings.find(row => row.project_id === null)
+  const botBindings = activeBindings.filter(row => row.kind === 'bot')
+  assert.equal(botBindings.length, 2, '四路触发后 kind=bot 活跃绑定应为项目域+solo 域各 1 行')
+  const projectBinding = botBindings.find(row => row.project_id === project.id)
+  const soloBinding = botBindings.find(row => row.project_id === null)
   assert.ok(projectBinding, '项目域控制面绑定应存在（project_id 命中）')
   assert.ok(soloBinding, 'solo 域绑定应存在（project_id NULL）')
-  assert.equal(
-    store.get("SELECT COUNT(*) AS n FROM session_bindings WHERE kind != 'bot'").n,
-    0,
-    '四路全程不应建出任何旧车道绑定',
-  )
+  const taskBinding = activeBindings.find(row => row.kind === 'task')
+  assert.ok(taskBinding, 'task 运行应建出 kind=task 专属会话绑定')
+  assert.ok(taskBinding.task_id, '任务会话绑定行带 task_id')
   for (const kind of ['task', 'chat', 'dm']) {
     const run = store.get("SELECT * FROM runs WHERE bot_id = ? AND kind = ?", dev.id, kind)
     assert.ok(run, `四路中缺少 ${kind} 运行`)
-    assert.equal(run.session_id, projectBinding.session_id, `${kind} 运行应落 (bot,project) 控制面会话`)
+    const expected = kind === 'task' ? taskBinding.session_id : projectBinding.session_id
+    assert.equal(run.session_id, expected, `${kind} 运行应落${kind === 'task' ? '任务专属会话' : ' (bot,project) 控制面会话'}`)
   }
   const soloRun = store.get("SELECT * FROM runs WHERE bot_id = ? AND kind = 'solo_chat'", dev.id)
   assert.ok(soloRun, '四路中缺少 solo_chat 运行')
@@ -385,7 +386,7 @@ test('V1 四路合并（DSHBOTS-299 三分域）：任务/群聊/私信落 (bot,
   // dm 回信（dm_reply）落发起方 director 自己的控制面绑定，不影响 Builder 的绑定不变量。
   assert.equal(
     store.all('SELECT DISTINCT session_id FROM runs WHERE bot_id = ? AND kind IN (\'task\',\'chat\',\'dm\',\'solo_chat\')', dev.id).length,
-    2,
-    'Builder 四路运行应只用到项目域与 solo 域两条会话',
+    3,
+    'Builder 四路运行用到项目域、任务专属与 solo 域三条会话',
   )
 })

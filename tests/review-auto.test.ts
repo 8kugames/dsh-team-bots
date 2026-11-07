@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { sessionMethods } from '../src/services/runtime/session.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
@@ -120,13 +121,26 @@ async function deliverTask(t, { actor }: { actor?: Actor } = {}) {
     projectId: t.project.id, title: '交付登录页', assigneeBotId: t.dev.id,
     status: 'in_progress', postCard: false,
   }, actor ?? { type: 'bot', id: t.director.id })
-  t.service.enqueueTaskRun(task, 'task_started', { type: 'bot', id: t.dev.id })
+  const runId = t.service.enqueueTaskRun(task, 'task_started', { type: 'bot', id: t.dev.id })
   void t.service.tick()
   return waitFor(() => t.store.get("SELECT * FROM tasks WHERE id = ? AND status = 'in_review'", task.id))
 }
 
 function runRow(t, where, ...args) {
   return t.store.get(`SELECT * FROM runs WHERE ${where}`, ...args)
+}
+
+// DSHBOTS-308 域化：挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
+// 断言跨域扫描本 bot 的全部域队列合并后读取。
+function heldItems(t, botId) {
+  const rows = t.store.all("SELECT key, value FROM settings WHERE key LIKE ?", `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    if (!row.key.startsWith(`bot_pending_msgs:${botId}:`)) continue
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
 }
 
 test('交付迁移 in_review 自动派生核验运行：同入口形态、留痕、不阻塞迁移', async () => {
@@ -517,11 +531,11 @@ test('handle 提示词超长防护：8K 截断同口径，保底字段与失败�
   } finally { await t.close() }
 })
 
-test('approvalTimeoutMs 默认 180_000，DSH_TEAM_APPROVAL_TIMEOUT_MS 可覆盖', async () => {
+test('approvalTimeoutMs 默认 300_000（DSHBOTS-313 终调：180→600→300），DSH_TEAM_APPROVAL_TIMEOUT_MS 可覆盖', async () => {
   const saved = process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS
   try {
     delete process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS
-    assert.equal(resolveConfig({}).approvalTimeoutMs, 180_000, '默认授权窗口 3 分钟')
+    assert.equal(resolveConfig({}).approvalTimeoutMs, 300_000, '默认授权窗口 5 分钟')
     process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS = '90000'
     assert.equal(resolveConfig({}).approvalTimeoutMs, 90_000, 'env 覆盖机制不变')
     assert.equal(resolveConfig({ approvalTimeoutMs: 300000 }).approvalTimeoutMs, 300_000, '配置文件优先于 env')
@@ -578,11 +592,17 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
        VALUES ('run_owner_busy', ?, ?, 'chat', 'read', 'test', 'running', 1, 'busy:owner_gate', ?)`,
       t.project.id, t.director.id, new Date().toISOString(),
     )
-    const pending = () => JSON.parse(t.store.setting(`bot_pending_msgs:${t.director.id}`) ?? '[]')
+    // DSHBOTS-308 域化：owner_task 挂起域 = 任务所属工作区，断言按域键读取。
+    const pending = () => heldItems(t, t.director.id)
     assert.equal(t.service.enqueueOwnerTaskRun(t.service.taskRow(task.id), 'review'), null, 'owner 真忙时返回 null')
     assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'review'")?.n, 0, '不落 runs 行')
     assert.equal(pending().length, 1, '挂待处理队列')
     assert.equal(pending()[0].kind, 'owner_task')
+    assert.equal(
+      JSON.parse(t.store.setting(`bot_pending_msgs:${t.director.id}:${t.project.id}`) ?? '[]').length,
+      1,
+      '挂起项记在任务所属工作区的域键下',
+    )
 
     t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_owner_busy'", new Date().toISOString())
     t.service.drainPendingMessages()
@@ -591,6 +611,37 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
     assert.equal(review.bot_id, t.director.id)
     assert.equal(review.task_id, task.id)
     assert.deepEqual(pending(), [], '挂起队列清空')
+
+    // DSHBOTS-308 域化反转：占道运行在「本工作区」域上，另一工作区的验收属他域，
+    // 不被本域占道阻塞——直接落 runs 行，且不挂起。
+    const otherProject = await t.service.createProject({
+      name: 'Other', key: 'OTH', ownerBotId: t.director.id, memberIds: [t.dev.id],
+    })
+    const otherTask = await t.service.createTask({
+      projectId: otherProject.id, title: '别的工作区的验收卡', assigneeBotId: t.dev.id,
+      status: 'in_progress', postCard: false,
+    }, t.actor)
+    const otherRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(otherTask.id), 'review')
+    assert.ok(otherRunId, '跨域验收不被本域占道阻塞，直接落 runs 行')
+    assert.equal(
+      t.store.get('SELECT project_id FROM runs WHERE id = ?', otherRunId).project_id,
+      otherProject.id,
+      '跨域验收的运行落在它自己的工作区',
+    )
+    assert.equal(
+      heldItems(t, t.director.id).filter(item => item.projectId === otherProject.id).length,
+      0,
+      '跨域验收不挂起',
+    )
+    // 调度侧同样按域并行：他域验收运行与本域验收运行同刻在跑（claimKey 域化）。
+    assert.ok(
+      await waitFor(() => t.store.get("SELECT id FROM runs WHERE id = ? AND status = 'running'", otherRunId)),
+      '跨域验收运行照常被领取开跑',
+    )
+    assert.ok(
+      t.store.get("SELECT id FROM runs WHERE id = ? AND status = 'running'", review.id),
+      '本域验收运行同时在跑，两域并行不互相阻塞',
+    )
   } finally { await t.close() }
 })
 
@@ -611,4 +662,157 @@ test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/han
   assert.match(reviewSide, /Do NOT call team_review_task/, '委派核验模板保持不代 owner 裁决')
   assert.match(reviewSide, /team_review_task with decision "accept"/, 'owner 验收模板保持裁决入口')
   assert.match(reviewSide, /「子代理核验：」/, '委派核验结论锚保持')
+})
+
+// 子代理施工硬闸解除守门（原 DSHBOTS-311 撤销）：亲做交付不再要求 subagent_spawned
+// 账目——无账目照转 in_review，治强制子代理造成的施工堵塞；子代理账本（D-294）仍照记。
+test('硬闸解除：无子代理账目亲做交付照转 in_review', async () => {
+  const t = await setup()
+  try {
+    const mk = async (title, runId) => {
+      const task = await t.service.createTask({
+        projectId: t.project.id, title, assigneeBotId: t.dev.id, postCard: false,
+      }, { type: 'bot', id: t.director.id })
+      // 清域内活跃运行（闲时压缩等后台补排会占 dev 车道，避免直插撞 UNIQUE）。
+      const now = new Date().toISOString()
+      for (const row of t.store.all(
+        "SELECT id FROM runs WHERE bot_id = ? AND COALESCE(project_id, '~solo') = ? AND status IN ('queued', 'running')",
+        t.dev.id, t.project.id,
+      )) t.store.run("UPDATE runs SET status = 'canceled', ended_at = ? WHERE id = ?", now, row.id)
+      t.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at, started_at)
+         VALUES (?, ?, ?, ?, 'task', 'write', 'task_started', ?, 'running', 1, ?, ?, ?)`,
+        runId, t.project.id, t.dev.id, task.id, task.id, `gate:${runId}`, new Date().toISOString(), new Date().toISOString(),
+      )
+      return task
+    }
+    const task1 = await mk('亲做施工', 'run_no_ledger')
+    await t.service.finishRun({ runId: 'run_no_ledger', status: 'succeeded', output: '亲做交付' })
+    assert.equal(t.store.get('SELECT status FROM runs WHERE id = ?', 'run_no_ledger').status, 'succeeded', '运行正常完结')
+    assert.equal(t.store.get('SELECT status FROM tasks WHERE id = ?', task1.id).status, 'in_review', '无账目亲做交付照转 in_review（硬闸已解除）')
+    const comment = t.store.get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task1.id)
+    assert.equal(comment.body, '亲做交付', '交付文本照落评论且无闸门提示')
+  } finally { await t.close() }
+})
+
+test('硬闸解除源码锚：交付链无闸痕迹，提示词无强制每卡子代理句', () => {
+  const source = readFileSync(fileURLToPath(new URL('../src/services/runtime/prompt.ts', import.meta.url)), 'utf8')
+  assert.doesNotMatch(source, /every card runs in a dedicated child agent/, '强制每卡子代理句已解除')
+  assert.match(source, /Execute each card yourself, or hand it to a dedicated child agent/, '亲做与派子代理均为合法路径')
+  const finishSource = readFileSync(fileURLToPath(new URL('../src/services/run-finish.ts', import.meta.url)), 'utf8')
+  assert.doesNotMatch(finishSource, /subagent_spawned|subagent_delivery_gate/, '交付链不再查子代理账目/闸门键')
+})
+
+// DSHBOTS-306 验收期亲和改判 owner：任务 in_review 后卡线程消息按 assignee 任务亲和
+// （D-286）落承接 bot 会话，而验收动作 team_review_task 仅 owner bot 可调（D-190）——
+// 指令路由与动作权限错位，每卡绕一步。守门四向：①in_review 亲和改判项目 owner bot 的
+// 控制面绑定（优先于 runs 归属/结转亲和）；②in_progress 维持 assignee 亲和（含结转后
+// alias 旧会话，D-286 不回归）；③done 无亲和不变；④退回 todo 恢复 assignee 亲和。
+test('DSHBOTS-306 验收期亲和改判 owner：in_review 落总监控制面，in_progress 维持 assignee 亲和', async () => {
+  const t = await setup()
+  try {
+    const { store, service, director, dev, project } = t
+    const affinity = (task) => sessionMethods.taskAffinityBinding.call(service, task)
+    const task = await service.createTask({ projectId: project.id, title: '亲和任务', assigneeBotId: dev.id })
+    const now = new Date().toISOString()
+    // assignee 任务会话（alias=1 模拟 D-286 结转后的旧任务绑定）+ 该任务的运行归属。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES (?, ?, ?, 'task', ?, 1, ?)",
+      'sess-task-dev', dev.id, project.id, task.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at)
+       VALUES ('run_aff_dev', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'aff:1', 'sess-task-dev', ?)`,
+      project.id, dev.id, task.id, now,
+    )
+    // 总监控制面绑定（D-299 三分：每 (owner, project) 一条 kind='bot'）。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, alias, created_at) VALUES (?, ?, ?, 'bot', 0, ?)",
+      'sess-director-proj', director.id, project.id, now,
+    )
+
+    store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id))?.session_id, 'sess-task-dev', 'in_progress 维持 assignee 任务会话亲和（含结转 alias 行）')
+
+    store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", task.id)
+    const ownerBinding = affinity(service.taskRow(task.id))
+    assert.equal(ownerBinding?.session_id, 'sess-director-proj', 'in_review 亲和改判总监控制面会话（优先于 runs 归属/结转亲和）')
+    assert.equal(ownerBinding?.bot_id, director.id, '亲和目标是项目 owner bot')
+
+    store.run("UPDATE tasks SET status = 'done' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id)), undefined, 'done 无亲和（既有口径不变）')
+
+    store.run("UPDATE tasks SET status = 'todo' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id))?.session_id, 'sess-task-dev', '退回 todo 恢复 assignee 亲和')
+  } finally { await t.close() }
+})
+
+// 总监核验运行不得劫持任务亲和：真实交付链是「assignee 施工（早）→ 交付 in_review →
+// review_delegate 核验运行落总监控制面（晚）→ 退回重做」。D-306 的 runs 归属亲和按
+// COALESCE(started_at, queued_at) DESC 取最近一条运行会话，不区分 bot/kind——核验运行
+// 一旦存在，退回后的重做 task 运行与卡线程回信全部亲和到总监会话（「成员任务卡发给
+// 总监」）。守门三向：①成员卡退回 in_progress 亲和仍是 assignee 任务会话；②owner 卡
+// （assignee=总监）退回后亲和回总监自己的任务会话而非控制面；③改派新 bot 无旧运行
+// 归属，落新建路径（undefined）。
+test('核验运行不劫持任务亲和：退回重做后 assignee 任务会话亲和不变', async () => {
+  const t = await setup()
+  try {
+    const { store, service, director, dev, project } = t
+    const affinity = (task) => sessionMethods.taskAffinityBinding.call(service, task)
+    const now = new Date().toISOString()
+    const later = new Date(Date.now() + 60_000).toISOString()
+    const task = await service.createTask({ projectId: project.id, title: '重做任务', assigneeBotId: dev.id })
+    // assignee 专属任务会话 + 施工运行（先发生）。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES (?, ?, ?, 'task', ?, 0, ?)",
+      'sess-task-dev2', dev.id, project.id, task.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_work', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'affix:1', 'sess-task-dev2', ?, ?)`,
+      project.id, dev.id, task.id, now, now,
+    )
+    // 总监控制面绑定 + 核验运行（后发生，生产中由交付自动委派落总监控制面会话）。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, alias, created_at) VALUES (?, ?, ?, 'bot', 0, ?)",
+      'sess-director-proj2', director.id, project.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_review', ?, ?, ?, 'review', 'read', 'review_delegate', 'succeeded', 1, 'affix:2', 'sess-director-proj2', ?, ?)`,
+      project.id, director.id, task.id, later, later,
+    )
+
+    store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", task.id)
+    assert.equal(affinity(service.taskRow(task.id))?.session_id, 'sess-director-proj2', 'in_review 亲和照旧改判总监控制面（D-306 不变）')
+
+    store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", task.id)
+    const after = affinity(service.taskRow(task.id))
+    assert.equal(after?.session_id, 'sess-task-dev2', '退回重做后亲和回 assignee 任务会话，核验运行不得劫持')
+    assert.equal(after?.bot_id, dev.id, '亲和绑定归属 assignee bot')
+
+    // owner 卡：assignee=总监时，核验运行同为总监所跑——亲和仍要回到总监的任务会话，
+    // 而不是「最近一条运行」的控制面会话。
+    const ownerCard = await service.createTask({ projectId: project.id, title: '总监自建卡', assigneeBotId: director.id })
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES (?, ?, ?, 'task', ?, 0, ?)",
+      'sess-task-owner', director.id, project.id, ownerCard.id, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_owner_work', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'affix:3', 'sess-task-owner', ?, ?)`,
+      project.id, director.id, ownerCard.id, now, now,
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at, started_at)
+       VALUES ('run_owner_review', ?, ?, ?, 'review', 'read', 'review_delegate', 'succeeded', 1, 'affix:4', 'sess-director-proj2', ?, ?)`,
+      project.id, director.id, ownerCard.id, later, later,
+    )
+    store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", ownerCard.id)
+    assert.equal(affinity(service.taskRow(ownerCard.id))?.session_id, 'sess-task-owner', 'owner 卡退回后亲和回总监任务会话，不落控制面')
+
+    // 改派新 bot：新负责人在卡上没有施工运行，无旧归属亲和，走新建任务会话路径。
+    store.run("UPDATE tasks SET assignee_bot_id = ? WHERE id = ?", dev.id, ownerCard.id)
+    assert.equal(affinity(service.taskRow(ownerCard.id)), undefined, '改派后无旧归属亲和，落新建路径')
+  } finally { await t.close() }
 })
