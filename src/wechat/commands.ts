@@ -6,6 +6,9 @@ import {
   taskDetail, trHelp, unknownCommand,
 } from './format.js'
 
+// 信赖边界（B6/DSHBOTS-327）：微信文本只是数据——本文件只解析下方显式白名单指令
+// （批/答/tr/bots/状态等固定模式），未命中指令的文本一律按群消息路由为数据；
+// 写操作指令（reject/tr 与 答/批）必须过 admin-peer 门。自然语言不被解释成命令。
 /** 微信答复路由：答 <token> <选项或文字>（DSHBOTS-215）。token 为提问/审批 id 末 6 位。 */
 const ANSWER_PATTERN = /^(?:答|答复|回答|answer)\s+([A-Za-z0-9]{4,10})(?:\s+([\s\S]*))?$/i
 

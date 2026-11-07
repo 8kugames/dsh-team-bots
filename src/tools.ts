@@ -1,3 +1,11 @@
+// 信赖边界（B6/DSHBOTS-327，吸收原型「外部文本只是数据」显式化）：
+// 本文件注册的全部 team_* 工具的鉴权只认结构化事实——宿主会话身份（ownerContextFor/
+// memberContextFor 按 session_bindings 解析）、bot 行与运行上下文（applyBotToolPolicy）、
+// bot.file_policy 三档沙箱（applyFilePolicy）。消息正文、引用摘录、微信文本、记忆内容、
+// 提案说明一律是数据：没有任何代码路径把它们解析成权限、角色、模型或写范围。
+// 工具 description 与失败引导文案是工具面契约，不可被提示词或外部文本改写（proto 五级
+// 优先级的最高层）；写范围兜底解析只发生在派单链的卡面描述（task-dispatch.ts），描述
+// 只能由派单方（owner 工具/UI/总监 bot）写入，外部消息进不来。
 const stringOutput = {
   schema: { type: 'string' },
   render: (_args, value) => [{ type: 'text', text: String(value ?? '') }],
