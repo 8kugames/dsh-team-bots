@@ -22,11 +22,39 @@ export const modelOverrideFor = (run) => (run?.model_provider && run?.model_mode
 
 // 运行时效上限（DSHBOTS-131）：任务派生运行（runs.task_id 非空）若任务声明了时效要求，
 // 其超时上限取 min(全局 runTimeoutMs, 时效分钟数)；无时效、非任务运行沿用全局值。
-// 只做纯计算：全局值仍在 startRun 启动瞬间定格，之后改设置不追溯进行中的运行。
-export const runTimeoutMsForTaskRun = ({ run, task, globalRunTimeoutMs }) => {
+// DSHBOTS-302 预算分档：review/handle（owner_task 运行族）在全局上限内再收紧到 review
+// 分档——director 单车道（one_active_run_per_bot）上验收长尾会堵住同 bot 的 chat 消息
+// 运行，验收类运行不需要全局跑满；chat/dm/solo 沿用全局，task 时效取 min 逻辑不变。
+export const runTimeoutMsForTaskRun = ({ run, task, globalRunTimeoutMs, reviewTimeoutMs = null }) => {
+  if ((run?.kind === 'review' || run?.kind === 'handle') && Number(reviewTimeoutMs) > 0) {
+    return Math.min(globalRunTimeoutMs, reviewTimeoutMs)
+  }
   const minutes = Number(task?.timeBudgetMinutes ?? task?.time_budget_minutes)
   if (!run?.task_id || !Number.isFinite(minutes) || minutes <= 0) return globalRunTimeoutMs
   return Math.min(globalRunTimeoutMs, minutes * 60_000)
+}
+
+// review 分档分钟（DSHBOTS-302）：env 显式 > settings 保存整数（[3,60]）> 默认 10，
+// 与 effectiveRunLimits 同款生效链；env 值同样钳到范围，防误配。消费点在 startRun
+// 启动瞬间参与定格，改值只影响之后启动的运行，进行中不追溯。
+export const REVIEW_TIMEOUT_KEY = 'review_timeout_minutes'
+export const REVIEW_TIMEOUT_MINUTES_DEFAULT = 10
+export const REVIEW_TIMEOUT_MINUTES_RANGE = [3, 60]
+
+export function effectiveReviewTimeoutMinutes(getSetting: (key: string) => unknown = () => null) {
+  const env = process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES
+  if (env !== undefined && String(env).trim() !== '') {
+    const envMinutes = Number(env)
+    if (Number.isFinite(envMinutes) && envMinutes > 0) {
+      const [min, max] = REVIEW_TIMEOUT_MINUTES_RANGE
+      return Math.min(max, Math.max(min, Math.round(envMinutes)))
+    }
+  }
+  const [min, max] = REVIEW_TIMEOUT_MINUTES_RANGE
+  const raw = String(getSetting?.(REVIEW_TIMEOUT_KEY) ?? '')
+  const saved = Number(raw)
+  if (raw !== '' && Number.isInteger(saved) && saved >= min && saved <= max) return saved
+  return REVIEW_TIMEOUT_MINUTES_DEFAULT
 }
 
 export const sessionMethods = {
@@ -495,8 +523,14 @@ export const sessionMethods = {
     this.pendingByRun.set(run.id, pending)
     // 运行时效在启动瞬间定格：之后页面改值只影响后续启动的运行，进行中不追溯。
     // 任务时效要求（DSHBOTS-131）在全局上限内再收紧：到期未完成即超时中止。
-    const globalRunTimeoutMs = effectiveRunLimits(this.config, key => this.store.setting(key)).runTimeoutMs
-    pending.runTimeoutMs = runTimeoutMsForTaskRun({ run, task, globalRunTimeoutMs })
+    // review/handle 再走分档收紧（DSHBOTS-302）：min(全局, review_timeout_minutes)。
+    const limits = effectiveRunLimits(this.config, key => this.store.setting(key))
+    pending.runTimeoutMs = runTimeoutMsForTaskRun({
+      run,
+      task,
+      globalRunTimeoutMs: limits.runTimeoutMs,
+      reviewTimeoutMs: effectiveReviewTimeoutMinutes(key => this.store.setting(key)) * 60_000,
+    })
     pending.timer = setTimeout(() => {
       void this.timeoutRun(run.id)
     }, pending.runTimeoutMs)
