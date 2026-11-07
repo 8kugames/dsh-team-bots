@@ -18,7 +18,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'save_price', 'reset_price',
   'settings', 'update_settings', 'update_prompt_segment', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
-  'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout', 'notify_receipts',
+  'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout', 'notify_receipts', 'wechat_triggers',
   'run_command', 'cancel_command', 'terminal_state',
   'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
@@ -222,6 +222,9 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'notify_receipts':
       // 外发收据流水（A3/DSHBOTS-323）：sent/gone 终态可追责，通道未启用时 available:false。
       return service.notifyReceiptsView(Number(payload.limit) || 50)
+    case 'wechat_triggers':
+      // 入站触发留痕（B4-①/DSHBOTS-328）：每条入站事件的处置与原因，回答「为什么没触发」。
+      return service.wechatTriggersView(Number(payload.limit) || 50)
     case 'wechat_login':
       return service.wechatBeginLogin()
     case 'wechat_code':

@@ -56,7 +56,11 @@ function directorReceipt(bot) {
  */
 export async function handleCommand(service, rawText, ctx = null) {
   const body = String(rawText ?? '').trim()
-  if (!body) return helpText()
+  if (!body) {
+    // Trigger 分类回填（B4-①/DSHBOTS-328）：ctx.trigger 由通道侧读取留痕，不改变返回契约。
+    if (ctx) ctx.trigger = { kind: 'chat', verb: null }
+    return helpText()
+  }
 
   // DSHBOTS-249 固定指令：/ 前缀一律不进对话链路，未知 /xxx 回简短帮助提示。
   if (body.startsWith('/')) return handleFixedCommand(service, body, ctx)
@@ -66,11 +70,13 @@ export async function handleCommand(service, rawText, ctx = null) {
   const approval = APPROVAL_PATTERN.exec(body)
   if (approval && typeof (service as any).wechatDecideApproval === 'function') {
     const decision = ['允许', 'allow'].includes(approval[2].toLowerCase()) ? 'allow' : 'reject'
+    if (ctx) ctx.trigger = { kind: 'approval', verb: decision === 'allow' ? 'approve' : 'reject', token: approval[1].toLowerCase() }
     return (service as any).wechatDecideApproval(approval[1].toLowerCase(), decision, ctx?.boundKey ?? null)
   }
   const answer = ANSWER_PATTERN.exec(body)
   if (answer && typeof (service as any).wechatAnswerQuestion === 'function') {
     const text = String(answer[2] ?? '').trim()
+    if (ctx) ctx.trigger = { kind: 'answer', verb: text ? 'answer' : 'help', token: answer[1].toLowerCase() }
     if (!text) return answerHelp()
     return (service as any).wechatAnswerQuestion(answer[1].toLowerCase(), text, ctx?.boundKey ?? null)
   }
@@ -80,6 +86,7 @@ export async function handleCommand(service, rawText, ctx = null) {
 
   // DSHBOTS-208/258 任意交互：自由文本永远直达项目外 director 专属工作区（不随
   // direct_project_key 绑定或 active 项目数变化），首触回执、之后静默直达。
+  if (ctx) ctx.trigger = { kind: 'chat', verb: 'chat' }
   const chat = await service.wechatChat(null, body)
   // 项目外 director 通道：首触回执说明去向，之后静默直达（回复由运行回程推送），
   // 不回写项目绑定（通道是项目外的）。
@@ -109,6 +116,8 @@ async function handleFixedCommand(service, body, ctx) {
   if (!slash) return unknownCommand()
   const verb = slash[1].toLowerCase()
   const rest = String(slash[2] ?? '').trim()
+  // Trigger 分类回填（B4-①/DSHBOTS-328）：固定指令带 verb，写操作门仍由 ADMIN_VERBS 把守。
+  if (ctx) ctx.trigger = { kind: 'fixed', verb }
 
   // 写操作权限门（fail-closed）：未显式 isAdmin=true 一律拒绝（只读指令不设门）。
   if (ADMIN_VERBS.has(verb) && ctx?.isAdmin !== true) return adminDenied()

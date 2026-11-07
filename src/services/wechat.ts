@@ -6,8 +6,9 @@
 import { createRequire } from 'node:module'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
-import { jsonParse } from '../util.js'
+import { jsonParse, nowIso } from '../util.js'
 import { answerFailed, answerReceipt, approvalCard, questionCard, wechatToken } from '../wechat/format.js'
+import { recordWechatTriggerRow } from './wechat-trigger-schema.js'
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
 // 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
@@ -231,6 +232,44 @@ export const wechatMethods = {
       gaveUpAt: row.gave_up_at ?? null,
     }))
     return { available: true, reason: null, items }
+  },
+
+  /**
+   * 入站 Trigger 留痕（B4-①/DSHBOTS-328）：通道每条入站事件的处置记录——handled/
+   * filtered/rejected + route + reason，回答「这条微信为什么没有触发」。稳定 id 去重
+   * （native 主键），滚动封顶在 wechat-trigger-schema。读入（Trigger）与写出（notify
+   * 收据）两侧各自留痕、互不混表。
+   */
+  recordWechatTrigger({ nativeId, peerId, text, disposition, route = null, reason = null }) {
+    if (!nativeId) return 'skipped'
+    return recordWechatTriggerRow(this.store, {
+      id: `wechat:${nativeId}`,
+      received_at: nowIso(),
+      peer_id: peerId,
+      disposition,
+      route,
+      reason,
+      preview: String(text ?? ''),
+    })
+  },
+
+  wechatTriggersView(limit = 50) {
+    const rows = this.store.all(
+      'SELECT id, received_at, peer_id, disposition, route, reason, preview FROM wechat_inbound ORDER BY received_at DESC LIMIT ?',
+      Math.max(1, Math.min(200, Number(limit) || 50)),
+    )
+    return {
+      count: rows.length,
+      items: rows.map(row => ({
+        id: row.id,
+        receivedAt: row.received_at,
+        peerId: row.peer_id,
+        disposition: row.disposition,
+        route: row.route,
+        reason: row.reason,
+        preview: row.preview,
+      })),
+    }
   },
 
   /** 按 token + 绑定项目定位 pending 条目（questions / approvals 共用）。 */

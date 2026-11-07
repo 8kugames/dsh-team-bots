@@ -292,9 +292,16 @@ export class WechatChannel {
   async handleBatch(messages, transport, signal) {
     let ok = true
     for (const message of messages) {
-      if (!message.text) continue
+      if (!message.text) {
+        // Trigger 留痕（B4-①/DSHBOTS-328）：无正文事件（图片/系统条目）也进观测面。
+        this.recordTrigger(message, 'filtered', 'no-text')
+        continue
+      }
       const key = message.messageId
-      if (key && this.processedMessages.has(key)) continue
+      if (key && this.processedMessages.has(key)) {
+        this.recordTrigger(message, 'duplicate', 'processed-in-memory')
+        continue
+      }
       try {
         await this.onInbound(message, transport, signal)
         if (key) this.rememberProcessed(key)
@@ -304,6 +311,26 @@ export class WechatChannel {
       }
     }
     return ok
+  }
+
+  /**
+   * 入站 Trigger 留痕（B4-①/DSHBOTS-328）：每条入站事件的处置（handled/filtered/rejected/
+   * duplicate + route + reason）经 service.recordWechatTrigger 落插件库，稳定 id = wechat:<nativeId>。
+   * 只观测不改变路由语义；service 不在场（测试桩）时静默跳过。
+   */
+  recordTrigger(message, disposition, route, reason = null) {
+    try {
+      this.service?.recordWechatTrigger?.({
+        nativeId: message?.messageId ?? null,
+        peerId: message?.senderId ?? null,
+        text: message?.text ?? '',
+        disposition,
+        route,
+        reason,
+      })
+    } catch (error) {
+      this.log.warn?.(`[wechat] 触发留痕失败: ${this.errorText(error)}`)
+    }
   }
 
   rememberProcessed(key) {
@@ -329,32 +356,40 @@ export class WechatChannel {
       this.store.saveAdminPeer(peerId)
       this.pendingAdmin = null
       this.log.info?.(`[wechat] 管理员已绑定（本次授权会话首条消息）: ${peerId}`)
+      this.recordTrigger(message, 'handled', 'welcome')
       await this.sendTo(peerId, welcomeAdmin(), signal)
       await this.flushOutbox(transport, signal)
       return
     }
     if (peerId !== admin) {
       this.log.info?.(`[wechat] 忽略非管理员消息来自 ${peerId}`)
+      this.recordTrigger(message, 'filtered', 'non-admin', '发送者不是已绑定管理员')
       return
     }
+    // DSHBOTS-208 直达对话上下文：管理员会话绑定的项目 key（路由成功后由命令层回写）。
+    // ctx.trigger 由命令层回填分类（B4-①），成功/失败路径据此留痕；声明在 try 外供 catch 读取。
+    const ctx: any = {
+      boundKey: this.store.getDirectProjectKey?.() ?? null,
+      bind: key => this.store.saveDirectProjectKey?.(key),
+      // 上方已校验 peerId === admin（非管理员消息整条忽略），显式带过 fail-closed 命令门
+      isAdmin: true,
+    }
     try {
-      // DSHBOTS-208 直达对话上下文：管理员会话绑定的项目 key（路由成功后由命令层回写）。
-      const reply = await handleCommand(this.service, message.text, {
-        boundKey: this.store.getDirectProjectKey?.() ?? null,
-        bind: key => this.store.saveDirectProjectKey?.(key),
-        // 上方已校验 peerId === admin（非管理员消息整条忽略），显式带过 fail-closed 命令门
-        isAdmin: true,
-      })
+      const reply = await handleCommand(this.service, message.text, ctx)
+      const trigger = ctx.trigger ?? { kind: 'chat', verb: null }
+      this.recordTrigger(message, 'handled', `${trigger.kind}${trigger.verb ? `:${trigger.verb}` : ''}`)
       await this.sendTo(peerId, reply, signal)
     } catch (error) {
       if (isBusinessError(error)) {
         // 业务性拒绝（如任务不存在、任务号非法）：给用户可读提示即可，不算处理失败
         this.log.warn?.(`[wechat] 指令被拒绝: ${this.errorText(error)}`)
+        this.recordTrigger(message, 'rejected', 'command', this.errorText(error))
         await this.sendTo(peerId, String((error as any)?.message ?? '指令无法执行'), signal)
           .catch(sendError => this.log.warn?.(`[wechat] 提示发送失败: ${this.errorText(sendError)}`))
         return
       }
       this.log.warn?.(`[wechat] 指令执行失败: ${this.errorText(error)}`)
+      this.recordTrigger(message, 'failed', `command${ctx?.trigger?.verb ? `:${ctx.trigger.verb}` : ''}`, this.errorText(error))
       await this.sendTo(peerId, failureText(), signal)
         .catch(sendError => this.log.warn?.(`[wechat] 失败提示发送失败: ${this.errorText(sendError)}`))
       // 交给上层：这条没处理成功，cursor 不推进，下一轮还会重试
