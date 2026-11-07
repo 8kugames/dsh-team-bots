@@ -35,6 +35,8 @@ export default {
   "global.stallOff": "Watchdog off",
   "global.stallMinutes": "${minutes} min watchdog",
   "global.runTimeoutLabel": "Timeout abort (minutes)",
+  "global.approvalTimeoutLabel": "Approval wait timeout (minutes)",
+  "global.questionTimeoutLabel": "Question handoff timeout (minutes)",
   "global.stallWatchdogLabel": "No-progress watchdog (minutes)",
   "global.runLimitsHint1": "Timeout abort = the maximum duration of a single run (1–360 minutes); no-progress watchdog = how long a run may produce no output before it is considered stuck (0–360 minutes, 0 disables it).",
   "global.reviewIdleLabel": "Review idle threshold (minutes)",

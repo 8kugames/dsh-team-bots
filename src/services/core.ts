@@ -3,7 +3,7 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
-import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE, REVIEW_IDLE_MINUTES_KEY, REVIEW_IDLE_MINUTES_RANGE } from '../config.js'
+import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, APPROVAL_TIMEOUT_KEY, QUESTION_TIMEOUT_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE, REVIEW_IDLE_MINUTES_KEY, REVIEW_IDLE_MINUTES_RANGE } from '../config.js'
 import { badRequest, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
@@ -167,6 +167,7 @@ export const coreMethods = {
       'retention_usage_days', 'retention_run_event_days', 'retention_message_days',
       'memory_review', 'chat_memory_review',
       RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY,
+      APPROVAL_TIMEOUT_KEY, QUESTION_TIMEOUT_KEY,
       UI_LANGUAGE_KEY,
       REVIEW_IDLE_MINUTES_KEY, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY,
     ]

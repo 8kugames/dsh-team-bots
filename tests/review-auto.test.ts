@@ -518,11 +518,11 @@ test('handle 提示词超长防护：8K 截断同口径，保底字段与失败�
   } finally { await t.close() }
 })
 
-test('approvalTimeoutMs 默认 180_000，DSH_TEAM_APPROVAL_TIMEOUT_MS 可覆盖', async () => {
+test('approvalTimeoutMs 默认 600_000（DSHBOTS-309 由 180s 上调），DSH_TEAM_APPROVAL_TIMEOUT_MS 可覆盖', async () => {
   const saved = process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS
   try {
     delete process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS
-    assert.equal(resolveConfig({}).approvalTimeoutMs, 180_000, '默认授权窗口 3 分钟')
+    assert.equal(resolveConfig({}).approvalTimeoutMs, 600_000, '默认授权窗口 10 分钟')
     process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS = '90000'
     assert.equal(resolveConfig({}).approvalTimeoutMs, 90_000, 'env 覆盖机制不变')
     assert.equal(resolveConfig({ approvalTimeoutMs: 300000 }).approvalTimeoutMs, 300_000, '配置文件优先于 env')

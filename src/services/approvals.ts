@@ -5,6 +5,7 @@
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 db.js 的 addColumn/recordMigration 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, nowIso } from '../util.js'
+import { effectiveApprovalTimeoutMs } from '../config.js'
 import { botInActiveProject } from './questions.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
@@ -159,7 +160,7 @@ export const approvalsMethods = {
     if (!bot || (!isSolo && !project)) return next()
 
     const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY queued_at DESC LIMIT 1', sessionId)
-    const timeoutMs = this.config.approvalTimeoutMs
+    const timeoutMs = effectiveApprovalTimeoutMs(this.config, key => this.store.setting(key))
     const createdAt = nowIso()
     const approvalId = id('apr')
     const toolName = String(req.toolName ?? 'tool').slice(0, 100)
