@@ -97,23 +97,25 @@ export const taskNotifyMethods = {
     return { taskId: task.id, steered: Boolean(run) }
   },
   // 任务完成微信推送（DSHBOTS-182）：锚定 →done 转换，触发点在 updateTask。
+  // 幂等收据键（A3/DSHBOTS-323）：task-done:<task.id>——同卡重复推送在通道存留期内被吸收。
   notifyTaskDone(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
     try {
-      this.wechat?.notify(taskDone(identifier, task.title))
+      this.wechat?.notify(taskDone(identifier, task.title), { receiptKey: `task-done:${task.id}` })
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 任务完成微信通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },
   // 任务创建微信推送（DSHBOTS-182 增补）：锚定创建成功（单次 INSERT），触发点在 createTask。
   // 文案含 KEY-N/标题/派给谁；无负责人时如实注明「暂未指派」。
+  // 幂等收据键（A3/DSHBOTS-323）：task-created:<task.id>。
   notifyTaskCreated(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
     const assignee = task.assignee_bot_id ? this.botRow(task.assignee_bot_id)?.name : null
     try {
-      this.wechat?.notify(taskCreated(identifier, task.title, assignee))
+      this.wechat?.notify(taskCreated(identifier, task.title, assignee), { receiptKey: `task-created:${task.id}` })
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 任务创建微信通知失败 %s: %s', identifier, error?.message ?? error)
     }

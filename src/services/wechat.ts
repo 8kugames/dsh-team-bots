@@ -184,11 +184,12 @@ export const wechatMethods = {
   // 管理员在微信的答复经 commands 的「答/批 <token> …」路由回原条目（见 wechatAnswerQuestion /
   // wechatDecideApproval）。转发失败只告警，不阻塞提问主流程。
 
-  /** 提问转发微信（只推文本；token 取问题 id 末 6 位）。 */
+  /** 提问转发微信（只推文本；token 取问题 id 末 6 位）。
+   *  幂等收据键（A3/DSHBOTS-323）：question:<row.id>——同条目重复转发在通道存留期内被吸收。 */
   wechatQuestion(project, row, items) {
     if (!this.wechat || typeof this.wechat.notify !== 'function') return false
     try {
-      this.wechat.notify(questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)))
+      this.wechat.notify(questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)), { receiptKey: `question:${row.id}` })
       return true
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 微信提问转发失败: %s', error?.message ?? error)
@@ -196,16 +197,40 @@ export const wechatMethods = {
     }
   },
 
-  /** 审批转发微信（只推文本；token 取审批 id 末 6 位）。 */
+  /** 审批转发微信（只推文本；token 取审批 id 末 6 位）。
+   *  幂等收据键（A3/DSHBOTS-323）：approval:<row.id>。 */
   wechatApproval(project, row) {
     if (!this.wechat || typeof this.wechat.notify !== 'function') return false
     try {
-      this.wechat.notify(approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)))
+      this.wechat.notify(approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)), { receiptKey: `approval:${row.id}` })
       return true
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 微信审批转发失败: %s', error?.message ?? error)
       return false
     }
+  },
+
+  /**
+   * 外发收据视图（A3/DSHBOTS-323）：近 N 条带键推送的终态流水，可追责/可回放。
+   * 真值唯一来源是通道出站库（wechat-channel.sqlite，随备份走）：sent=sent_at 在、
+   * gone=gave_up_at 在（last_error 带废弃原因）、pending=两者皆无。
+   * 通道未启用返回 available:false——「为什么没收到」在该态由通道页与 needsAttention 解释，
+   * 不在插件库建第二张收据表（反双真值）。
+   */
+  notifyReceiptsView(limit = 50) {
+    if (!this.wechat || typeof this.wechat.receipts !== 'function') {
+      return { available: false, reason: 'wechat-disabled', items: [] }
+    }
+    const items = this.wechat.receipts(limit).map(row => ({
+      receiptKey: row.receipt_key,
+      state: row.sent_at ? 'sent' : row.gave_up_at ? 'gone' : 'pending',
+      attempts: Number(row.attempts ?? 0),
+      lastError: row.last_error ?? null,
+      createdAt: row.created_at,
+      sentAt: row.sent_at ?? null,
+      gaveUpAt: row.gave_up_at ?? null,
+    }))
+    return { available: true, reason: null, items }
   },
 
   /** 按 token + 绑定项目定位 pending 条目（questions / approvals 共用）。 */

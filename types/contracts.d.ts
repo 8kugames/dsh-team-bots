@@ -43,7 +43,7 @@ type TeamActionName =
   | 'sync_skills' | 'skill_detail' | 'toggle_skill' | 'set_skill_binding' | 'rollback_skill'
   | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
   | 'dsh_update_info' | 'upgrade_dsh' | 'reboot_dsh'
-  | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout'
+  | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout' | 'notify_receipts'
   | 'run_command' | 'cancel_command' | 'terminal_state'
   | 'list_secrets' | 'upsert_secret' | 'delete_secret' | 'list_secret_requests' | 'approve_secret_request' | 'deny_secret_request'
 
