@@ -88,6 +88,37 @@ export const runsMethods = {
     return message.includes('UNIQUE')
       && (message.includes('runs.bot_id') || message.includes('one_active_run_per_bot'))
   },
+  // DSHBOTS-304 同拍双投合并辅助：按幂等键 / task_id 找既有 active 运行（双投胜利方）。
+  activeRunByIdempotencyKey(key) {
+    return this.store.get(
+      "SELECT id FROM runs WHERE idempotency_key = ? AND status IN ('queued', 'running')",
+      key,
+    )?.id ?? null
+  },
+  activeRunByTaskId(taskId) {
+    return this.store.get(
+      "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+      taskId,
+    )?.id ?? null
+  },
+  // DSHBOTS-304：挂起项是否已被既有运行覆盖或作废（true=drain 清扫时丢弃）。双投失败方的
+  // 挂起项与胜利方运行共存的两类恶果：消息族 drain 建回永撞全局 UNIQUE idempotency_key
+  // （任意状态）→返 null 永不消费→每 tick 队头 break 阻塞该 bot 全部挂起组；任务族幂等键
+  // 恒新会在原运行结束后重复建行。清扫口径：消息族=同幂等键运行已存在（胜利方已处理，
+  // 副本作废）；task/owner_task=active 运行已在（跨进程合并消算）或任务已终态/不存在（快照作废）。
+  heldItemSuperseded(botId, item) {
+    if (item?.kind === 'task' || item?.kind === 'owner_task') {
+      if (this.activeRunByTaskId(item.taskId)) return true
+      const task = this.store.get('SELECT status FROM tasks WHERE id = ?', item.taskId)
+      return !task || task.status === 'done' || task.status === 'canceled'
+    }
+    const idem = item?.kind === 'chat' ? `chat:${item.messageId}:${botId}`
+      : item?.kind === 'solo_chat' ? `solo_chat:${item.messageId}`
+        : item?.kind === 'dm' ? `dm:${item.messageId}`
+          : item?.kind === 'dm_reply' ? `dm_reply:${item.messageId}` : null
+    if (!idem) return true
+    return Boolean(this.store.get('SELECT id FROM runs WHERE idempotency_key = ?', idem))
+  },
   botBusy(botId) {
     return Boolean(this.store.get(
       "SELECT id FROM runs WHERE bot_id = ? AND status IN ('queued', 'running')",
@@ -221,8 +252,17 @@ export const runsMethods = {
     const rows = this.store.all(`SELECT key, value FROM settings WHERE key LIKE '${prefix}%'`)
     for (const row of rows) {
       const botId = row.key.slice(prefix.length)
-      const items = jsonParse(row.value, [])
+      let items = jsonParse(row.value, [])
       if (!Array.isArray(items) || !items.length) continue
+      // DSHBOTS-304 挂起项去重清扫（建回前预检）：双投失败方挂起项与胜利方运行共存时——
+      // 消息族建回永撞全局 UNIQUE idempotency_key 成永生占位，任务族按恒新幂等键重复建行；
+      // 清扫在分组前完成，被覆盖/作废项直接消账，余项自然重组（同组合并不受影响）。
+      const kept = items.filter(item => !this.heldItemSuperseded(botId, item))
+      if (kept.length !== items.length) {
+        this.store.setSetting(this.pendingMessagesKey(botId), JSON.stringify(kept))
+        if (!kept.length) continue
+        items = kept
+      }
       if (this.botBusy(botId)) continue
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', botId)
       if (!bot || bot.status !== 'active') {
@@ -286,6 +326,8 @@ export const runsMethods = {
       )
     } catch (error: any) {
       if (this.isRunBotUniqueViolation(error)) {
+        const merged = this.activeRunByIdempotencyKey(`dm:${message.id}`)
+        if (merged) return merged
         this.holdPendingMessage(target.id, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
         return null
       }
@@ -354,6 +396,8 @@ export const runsMethods = {
       )
     } catch (error: any) {
       if (this.isRunBotUniqueViolation(error)) {
+        const merged = this.activeRunByIdempotencyKey(`dm_reply:${message.id}`)
+        if (merged) return merged
         this.holdPendingMessage(caller.id, { kind: 'dm_reply', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
         return null
       }
@@ -387,6 +431,8 @@ export const runsMethods = {
       )
     } catch (error: any) {
       if (this.isRunBotUniqueViolation(error)) {
+        const merged = this.activeRunByIdempotencyKey(`solo_chat:${messageId}`)
+        if (merged) return merged
         this.holdPendingMessage(bot.id, { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
         return null
       }
@@ -426,6 +472,8 @@ export const runsMethods = {
       )
     } catch (error: any) {
       if (this.isRunBotUniqueViolation(error)) {
+        const merged = this.activeRunByIdempotencyKey(`chat:${messageId}:${bot.id}`)
+        if (merged) return merged
         this.holdPendingMessage(bot.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
         return null
       }
