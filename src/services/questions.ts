@@ -7,6 +7,7 @@
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 approvals.js 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { id, jsonParse, nowIso, text as textValue } from '../util.js'
+import { effectiveQuestionTimeoutMs } from '../config.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
 // project_id 可空：单聊会话没有项目归属（DSHBOTS-218），卡片锚点改落 solo_messages。
@@ -150,7 +151,7 @@ export const questionsMethods = {
     if (items.length === 0) return next()
 
     const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY queued_at DESC LIMIT 1', sessionId)
-    const timeoutMs = this.config.questionTimeoutMs
+    const timeoutMs = effectiveQuestionTimeoutMs(this.config, key => this.store.setting(key))
     const createdAt = nowIso()
     const questionId = id('qst')
     const callId = req.wait?.callId ? String(req.wait.callId) : null
@@ -331,7 +332,7 @@ export const questionsMethods = {
       // 会话归属（DSHBOTS-218）：单聊提问没有项目，UI 据此显示来源列并决定跳转目标。
       scope: row.project_id ? 'project' : 'solo',
       remainingMs: row.status === 'pending'
-        ? Math.max(0, (Number.isFinite(expiresAt) ? expiresAt : Date.parse(row.created_at) + this.config.questionTimeoutMs) - Date.now())
+        ? Math.max(0, (Number.isFinite(expiresAt) ? expiresAt : Date.parse(row.created_at) + effectiveQuestionTimeoutMs(this.config, key => this.store.setting(key))) - Date.now())
         : 0,
     }
   },

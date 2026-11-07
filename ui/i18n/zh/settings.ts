@@ -35,6 +35,8 @@ export default {
   "global.stallOff": "看门狗关闭",
   "global.stallMinutes": "${minutes} 分钟看门狗",
   "global.runTimeoutLabel": "超时中止（分钟）",
+  "global.approvalTimeoutLabel": "审批等待超时（分钟）",
+  "global.questionTimeoutLabel": "提问转接超时（分钟）",
   "global.stallWatchdogLabel": "无进展看门狗（分钟）",
   "global.runLimitsHint1": "超时中止 = 单次运行的最长时长（1–360 分钟）；无进展看门狗 = 运行多久没有任何输出即判定卡住（0–360 分钟，0 为关闭）。",
   "global.reviewIdleLabel": "验收滞留阈值（分钟）",

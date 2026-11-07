@@ -187,12 +187,21 @@ function renderRunLimitsCard() {
   const stallText = limits.stallTimeoutMinutes === 0
     ? t('global.stallOff')
     : t('global.stallMinutes', { minutes: limits.stallTimeoutMinutes ?? 30 })
+  // 审批/提问等待（DSHBOTS-309）：默认 10 分钟，settings 可调 [1,60]；未保存回填默认。
+  const savedApproval = settings.approval_timeout_minutes ?? ''
+  const savedQuestion = settings.question_timeout_minutes ?? ''
+  const approvalValue = savedApproval !== '' ? savedApproval : '10'
+  const questionValue = savedQuestion !== '' ? savedQuestion : '10'
   return `
     <div class="card form-card g-card">
       <div class="card-head"><h3>${t('global.cardRunLimits')}</h3><span class="meta">${t('global.runLimitsCurrent', { timeout: limits.runTimeoutMinutes ?? 120, stall: stallText })}</span></div>
       <div class="field-row">
         <div class="field"><label id="settings-run-timeout-label" for="settings-run-timeout">${t('global.runTimeoutLabel')}</label><input class="input mono" style="text-align:right" type="number" min="1" max="360" id="settings-run-timeout" name="run_timeout_minutes" value="${attr(runValue)}"></div>
         <div class="field"><label id="settings-stall-watchdog-label" for="settings-stall-watchdog">${t('global.stallWatchdogLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="360" id="settings-stall-watchdog" name="stall_watchdog_minutes" value="${attr(stallValue)}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label id="settings-approval-timeout-label" for="settings-approval-timeout">${t('global.approvalTimeoutLabel')}</label><input class="input mono" style="text-align:right" type="number" min="1" max="60" id="settings-approval-timeout" name="approval_timeout_minutes" value="${attr(approvalValue)}"></div>
+        <div class="field"><label id="settings-question-timeout-label" for="settings-question-timeout">${t('global.questionTimeoutLabel')}</label><input class="input mono" style="text-align:right" type="number" min="1" max="60" id="settings-question-timeout" name="question_timeout_minutes" value="${attr(questionValue)}"></div>
       </div>
       <div class="field-row">
         <div class="field"><label id="settings-review-idle-label" for="settings-review-idle">${t('global.reviewIdleLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="1440" id="settings-review-idle" name="review_idle_minutes" value="${attr(reviewIdleValue)}"></div>
