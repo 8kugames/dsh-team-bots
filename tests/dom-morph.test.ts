@@ -83,12 +83,24 @@ test('合并计划：同位置不同标签是「不是同一身份」，走插�
   assert.equal(removals.length, 1)
 })
 
-test('合并计划：重复键只认领第一个，多余的走插入', () => {
+test('合并计划：live 侧多出来的重复键节点交回删除', () => {
   const live = [elem('DIV', { attrs: { 'data-panel': 'p' } }), elem('DIV', { attrs: { 'data-panel': 'p' } })]
   const fresh = [elem('DIV', { attrs: { 'data-panel': 'p' } })]
   const { entries, removals } = planChildren(live.map(desc), fresh.map(desc))
   assert.ok(entries[0].live, '第一次命中认到原节点')
   assert.equal(removals.length, 1, '多出来的旧节点交回删除')
+})
+
+test('合并计划：同键多节点按序一对一配对，轮询不再克隆置换（DSHBOTS-320）', () => {
+  // 记忆卡 approve/reject/edit/delete 四个按钮共用 data-memory-id：修复前 morphKey
+  // 只认领第一个，其余按钮每拍都被「删除旧 + 克隆插入新」，焦点与动画相位全丢。
+  const actions = ['approve-memory', 'reject-memory', 'edit-memory', 'delete-memory']
+  const buttons = () => actions.map(action => elem('BUTTON', { attrs: { 'data-action': action, 'data-memory-id': 'M-27' } }))
+  const live = buttons()
+  const { entries, removals } = planChildren(live.map(desc), buttons().map(desc))
+  assert.equal(entries.length, 4)
+  assert.deepEqual(entries.map(entry => entry.live?.node), live, '四个按钮全部复用原节点（节点身份保持，非克隆置换）')
+  assert.equal(removals.length, 0)
 })
 
 test('类名合并：模板为准，运行期加上的拖拽态与临期色不被抹掉', () => {

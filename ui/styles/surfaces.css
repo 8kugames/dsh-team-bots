@@ -10,6 +10,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    /* 窄窗口下标题与按钮组放不下时换行，而不是溢出被 .list-card 的 overflow:hidden 裁掉 */
+    flex-wrap: wrap;
     margin-bottom: 12px;
 }
 .card-head h3 {

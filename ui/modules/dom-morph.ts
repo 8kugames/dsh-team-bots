@@ -49,19 +49,26 @@ function morphDescriptor(el) {
 // entries 按 fresh 顺序给出落位方案（live=null 即需要插入新节点）；removals 是没人认领的 live 节点。
 function planChildren(liveItems, freshItems) {
   const free = liveItems.map(item => ({ ...item, taken: false }))
+  // 同键可能落在多个节点上（记忆卡的 approve/reject/edit/delete 四个按钮共用
+  // data-memory-id）：按键分桶、配对时逐个认领，而不是只认第一个把其余当陌生人。
   const byKey = new Map()
   for (const item of free) {
-    if (!item.key || byKey.has(item.key)) continue
-    byKey.set(item.key, item)
+    if (!item.key) continue
+    const bucket = byKey.get(item.key)
+    if (bucket) bucket.push(item)
+    else byKey.set(item.key, [item])
   }
   const entries = freshItems.map(fresh => ({ live: null, fresh }))
-  // 第一轮：身份键配对（标签不一致即不是同一身份，交给插入 + 删除）
+  // 第一轮：身份键配对，同键按出现顺序一对一认领（标签不一致即不是同一身份，交给插入 + 删除）
   for (const entry of entries) {
     if (!entry.fresh.key) continue
-    const hit = byKey.get(entry.fresh.key)
-    if (hit && !hit.taken && hit.tag === entry.fresh.tag) {
-      hit.taken = true
-      entry.live = hit
+    const bucket = byKey.get(entry.fresh.key)
+    if (!bucket) continue
+    const index = bucket.findIndex(item => !item.taken && item.tag === entry.fresh.tag)
+    if (index >= 0) {
+      bucket[index].taken = true
+      entry.live = bucket[index]
+      bucket.splice(index, 1)
     }
   }
   // 第二轮：无键节点按同位置配对（模板结构没变即整树原位复用）
