@@ -64,7 +64,8 @@ test('任务提示词三组锚点：按任务号开子智能体 + 写范围/沙�
     assert.match(prompt, /# Child agents by task number/, '应有按任务号开子智能体段')
     assert.match(prompt, /dedicated child agent \(subagent\/subagent_fork\) labeled with its task number/, '每卡一个专属子智能体且标签=任务号')
     assert.match(prompt, /never merge cards into one agent/, '不许把多张卡合并给一个子智能体')
-    assert.match(prompt, /small single-file cards do yourself/, '小卡/单文件可亲自做')
+    assert.match(prompt, /every card runs in a dedicated child agent/, '每卡都在专属子代理执行（DSHBOTS-311 无小卡豁免）')
+    assert.doesNotMatch(prompt, /small single-file cards do yourself/, '小卡亲做豁免句已删（DSHBOTS-311 与硬闸口径一致）')
     // ② 写范围/沙箱继承：继承控制面沙箱、绕过调度闸门、卡面写范围=写入边界。
     assert.match(prompt, /Child writes inherit your session sandbox, not the task write-scope gates/, '应声明写继承沙箱且不受任务写范围调度闸门约束')
     assert.match(prompt, /pass the card's declared write scopes as the child's write boundary/, '卡面声明写范围应作为子智能体写入边界')

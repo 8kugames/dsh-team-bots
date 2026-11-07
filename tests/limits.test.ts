@@ -60,6 +60,7 @@ async function setup(overrides = {}) {
   const runtime = new ManualRuntime()
   service.attachRuntime(runtime)
   await service.initialize()
+  store.setSetting('subagent_delivery_gate', '0') // DSHBOTS-311 夹具：本文件用例非闸主题，关闸保持既有交付流
   service.started = false
   const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({

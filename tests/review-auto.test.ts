@@ -121,7 +121,12 @@ async function deliverTask(t, { actor }: { actor?: Actor } = {}) {
     projectId: t.project.id, title: '交付登录页', assigneeBotId: t.dev.id,
     status: 'in_progress', postCard: false,
   }, actor ?? { type: 'bot', id: t.director.id })
-  t.service.enqueueTaskRun(task, 'task_started', { type: 'bot', id: t.dev.id })
+  const runId = t.service.enqueueTaskRun(task, 'task_started', { type: 'bot', id: t.dev.id })
+  // DSHBOTS-311 夹具适配：施工交付过闸须有子代理账目——本助手代表「合规施工」路径。
+  t.store.run(
+    "INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, 'subagent_spawned', '夹具：已开子代理施工', ?)",
+    `evt_fixture_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, runId, new Date().toISOString(),
+  )
   void t.service.tick()
   return waitFor(() => t.store.get("SELECT * FROM tasks WHERE id = ? AND status = 'in_review'", task.id))
 }
@@ -541,6 +546,10 @@ test('交付带提问（attention）不派核验也不排总监验收：先让 o
     }, { type: 'bot', id: t.director.id })
     const runId = t.service.enqueueTaskRun(task, 'task_started', { type: 'bot', id: t.dev.id })
     t.store.run(
+      "INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, 'subagent_spawned', '夹具：已开子代理施工', ?)",
+      `evt_fixture_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, runId, new Date().toISOString(),
+    )
+    t.store.run(
       "UPDATE runs SET status = 'running', started_at = ?, last_progress_at = ? WHERE id = ?",
       new Date().toISOString(), new Date().toISOString(), runId,
     )
@@ -612,6 +621,57 @@ test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/han
   assert.match(reviewSide, /Do NOT call team_review_task/, '委派核验模板保持不代 owner 裁决')
   assert.match(reviewSide, /team_review_task with decision "accept"/, 'owner 验收模板保持裁决入口')
   assert.match(reviewSide, /「子代理核验：」/, '委派核验结论锚保持')
+})
+
+// DSHBOTS-311 子代理施工硬闸守门：task 施工运行交付须有 subagent_spawned 账目才转
+// in_review（owner 铁律不依赖模型自觉）；无账目=运行正常完结+交付评论照落+任务留原状态
+// +提示引导重做；settings subagent_delivery_gate=0 为 owner 例外通道；review/handle 与
+// 消息族不经闸（d 向由既有 review 用例覆盖）。
+test('DSHBOTS-311 硬闸：无子代理账目不转验收留原状态+提示评论；关闸放行', async () => {
+  const t = await setup()
+  try {
+    const mk = async (title, runId) => {
+      const task = await t.service.createTask({
+        projectId: t.project.id, title, assigneeBotId: t.dev.id, postCard: false,
+      }, { type: 'bot', id: t.director.id })
+      // 清域内活跃运行（闲时压缩等后台补排会占 dev 车道，避免直插撞 UNIQUE）。
+      const now = new Date().toISOString()
+      for (const row of t.store.all(
+        "SELECT id FROM runs WHERE bot_id = ? AND COALESCE(project_id, '~solo') = ? AND status IN ('queued', 'running')",
+        t.dev.id, t.project.id,
+      )) t.store.run("UPDATE runs SET status = 'canceled', ended_at = ? WHERE id = ?", now, row.id)
+      t.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at, started_at)
+         VALUES (?, ?, ?, ?, 'task', 'write', 'task_started', ?, 'running', 1, ?, ?, ?)`,
+        runId, t.project.id, t.dev.id, task.id, task.id, `gate:${runId}`, new Date().toISOString(), new Date().toISOString(),
+      )
+      return task
+    }
+    // a) 无账目：交付被闸——运行正常完结、评论照落、任务留 in_progress+提示。
+    const task1 = await mk('闸内施工', 'run_gate_on')
+    await t.service.finishRun({ runId: 'run_gate_on', status: 'succeeded', output: '亲做交付' })
+    assert.equal(t.store.get('SELECT status FROM runs WHERE id = ?', 'run_gate_on').status, 'succeeded', '运行正常完结不被硬闸打断')
+    assert.equal(t.store.get('SELECT status FROM tasks WHERE id = ?', task1.id).status, 'todo', '无账目不转 in_review（留原状态 todo）')
+    const gatedComment = t.store.get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task1.id)
+    assert.match(gatedComment.body, /DSHBOTS-311 硬闸：本运行未经子代理施工/, '提示评论落卡')
+    assert.match(gatedComment.body, /subagent_delivery_gate/, '评论指明例外通道')
+    assert.ok(gatedComment.body.includes('亲做交付'), '交付文本不丢（照落评论）')
+
+    // c) 开关 0：同款无账目交付放行转 in_review。
+    t.store.setSetting('subagent_delivery_gate', '0')
+    const task2 = await mk('关闸施工', 'run_gate_off')
+    await t.service.finishRun({ runId: 'run_gate_off', status: 'succeeded', output: '关闸交付' })
+    assert.equal(t.store.get('SELECT status FROM tasks WHERE id = ?', task2.id).status, 'in_review', '关闸后无账目交付照转 in_review（owner 例外通道）')
+  } finally { await t.close() }
+})
+
+test('DSHBOTS-311 提示词无豁免句：每卡都进专属子代理（源码锚）', () => {
+  const source = readFileSync(fileURLToPath(new URL('../src/services/runtime/prompt.ts', import.meta.url)), 'utf8')
+  assert.doesNotMatch(source, /small single-file cards do yourself/, '小卡亲做豁免句已删')
+  assert.match(source, /every card runs in a dedicated child agent/, '每卡专属子代理（与硬闸口径一致）')
+  const finishSource = readFileSync(fileURLToPath(new URL('../src/services/run-finish.ts', import.meta.url)), 'utf8')
+  assert.match(finishSource, /subagent_spawned/, '交付链闸查 subagent_spawned 账目')
+  assert.match(finishSource, /subagent_delivery_gate/, '例外开关键锚')
 })
 
 // DSHBOTS-306 验收期亲和改判 owner：任务 in_review 后卡线程消息按 assignee 任务亲和
