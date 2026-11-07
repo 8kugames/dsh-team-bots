@@ -224,6 +224,24 @@ test('跨项目/跨 kind 不合批（DSHBOTS-308 域化）：跨工作区消息�
   }
 })
 
+// DSHBOTS-308 旧键迁移守门：域化前播种的旧格式键（bot_pending_msgs:<bot>，无域段）
+// 必须在首次 drain 时并入对应域队列（按 item.projectId ?? '~solo'）后被消费，消息不丢。
+test('旧格式挂起队列键一次性迁移：旧键项并入本域队列并建回，不丢消息', async () => {
+  const t = await setup()
+  try {
+    const m = say(t.service, t.project.id, '旧键里的消息')
+    t.store.setSetting(`bot_pending_msgs:${t.dev.id}`, JSON.stringify([
+      { kind: 'chat', messageId: m, projectId: t.project.id, origin: null, queuedAt: new Date().toISOString() },
+    ]))
+    t.service.drainPendingMessages()
+    assert.equal(t.store.setting(`bot_pending_msgs:${t.dev.id}`) ?? null, null, '旧格式键应被删除')
+    assert.ok(t.store.get('SELECT id FROM runs WHERE trigger_ref = ?', m), '旧键消息建回运行（不丢）')
+    assert.equal(heldItems(t).length, 0, '域队列已清空')
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})
+
 test('合并条数上限走 settings：单组封顶，超出部分下一拍再组成新运行', async () => {
   const t = await setup()
   try {
