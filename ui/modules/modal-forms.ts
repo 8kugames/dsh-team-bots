@@ -3,7 +3,7 @@ import { icon } from './icons.js'
 import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, sandboxPill, timeAgo, toast } from './util.js'
 import { api } from './api.js'
 import { mdChatScope, richText } from './markdown.js'
-import { t } from './i18n.js'
+import { t, tMaybe } from './i18n.js'
 import { currentSkillVersion, skillVersions, taskUsageBlock } from './tasks.js'
 import { ensureComposerImageInput, ensureImageViewer } from './composer.js'
 import { app, refresh, panelAttrs, render, updateRunClocks } from '../app.js'
@@ -345,15 +345,22 @@ function runArtifacts(state, run) {
 }
 
 // ===== 思考过程：Bot 运行轨迹（run_trajectory）=====
-
-const TRAJ_LABELS = { thinking: t("思考"), text: t("回复"), tool_call: t("调用工具"), tool_result: t("工具返回"), end: t("运行结束") }
-
+// 轨迹标题是后端落库时拼好的中文原文（src/services/runtime/trajectory.ts）：剥出主体后按当前语言
+// 重组，英文界面不留中文。全角括号用 \u 转义（ui/modules 不得出现 CJK 字面量，cjk-zero 守门）。
 function trajectoryLabel(entry) {
   const kind = String(entry?.kind ?? '')
   const title = String(entry?.title ?? '').trim()
-  if (kind === 'tool_call') return title ? (title.startsWith(t("调用工具")) ? title : t("调用工具 ${title}", { title: title })) : TRAJ_LABELS.tool_call
-  if (kind === 'tool_result') return title ? (title.startsWith(t("工具")) ? title : t("工具 ${title} 返回", { title: title })) : TRAJ_LABELS.tool_result
-  return title || TRAJ_LABELS[kind] || ''
+  const tail = /[\uFF08(]([^\uFF08()\uFF09]*)[\uFF09)]$/.exec(title)
+  const head = (tail ? title.slice(0, tail.index) : title).trim()
+  const parts = head.split(/\s+/)
+  const name = tMaybe(parts[1] ?? '')
+  if (kind === 'turn') return t('第 ${n} 轮开始', { n: entry?.turn ?? parts[1] ?? '?' })
+  if (kind === 'end') return tail ? t('运行结束（${label}）', { label: tMaybe(tail[1]) }) : t('运行结束')
+  if (kind === 'thinking') return t('思考')
+  if (kind === 'text') return t('回复')
+  if (kind === 'tool_call') return t('调用工具 ${name}', { name })
+  if (kind === 'tool_result') return t('工具 ${name} 返回', { name }) + (tail ? t('（失败）') : '')
+  return title
 }
 
 function trajectoryEntry(entry, index = 0, runId = '') {
@@ -362,7 +369,7 @@ function trajectoryEntry(entry, index = 0, runId = '') {
   const detail = String(entry?.detail ?? '')
   const label = trajectoryLabel(entry)
   if (kind === 'turn') {
-    return `<div class="traj-turn"><span>${esc(title || `${t("第")} ${entry?.turn ?? ''} ${t("轮")}`)}</span></div>`
+    return `<div class="traj-turn"><span>${esc(label)}</span></div>`
   }
   if (kind === 'note') {
     return `<div class="traj-note">${esc([title, detail].filter(Boolean).join(' · '))}</div>`

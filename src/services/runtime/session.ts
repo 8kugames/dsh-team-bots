@@ -22,11 +22,39 @@ export const modelOverrideFor = (run) => (run?.model_provider && run?.model_mode
 
 // 运行时效上限（DSHBOTS-131）：任务派生运行（runs.task_id 非空）若任务声明了时效要求，
 // 其超时上限取 min(全局 runTimeoutMs, 时效分钟数)；无时效、非任务运行沿用全局值。
-// 只做纯计算：全局值仍在 startRun 启动瞬间定格，之后改设置不追溯进行中的运行。
-export const runTimeoutMsForTaskRun = ({ run, task, globalRunTimeoutMs }) => {
+// DSHBOTS-302 预算分档：review/handle（owner_task 运行族）在全局上限内再收紧到 review
+// 分档——director 单车道（one_active_run_per_bot）上验收长尾会堵住同 bot 的 chat 消息
+// 运行，验收类运行不需要全局跑满；chat/dm/solo 沿用全局，task 时效取 min 逻辑不变。
+export const runTimeoutMsForTaskRun = ({ run, task, globalRunTimeoutMs, reviewTimeoutMs = null }) => {
+  if ((run?.kind === 'review' || run?.kind === 'handle') && Number(reviewTimeoutMs) > 0) {
+    return Math.min(globalRunTimeoutMs, reviewTimeoutMs)
+  }
   const minutes = Number(task?.timeBudgetMinutes ?? task?.time_budget_minutes)
   if (!run?.task_id || !Number.isFinite(minutes) || minutes <= 0) return globalRunTimeoutMs
   return Math.min(globalRunTimeoutMs, minutes * 60_000)
+}
+
+// review 分档分钟（DSHBOTS-302）：env 显式 > settings 保存整数（[3,60]）> 默认 10，
+// 与 effectiveRunLimits 同款生效链；env 值同样钳到范围，防误配。消费点在 startRun
+// 启动瞬间参与定格，改值只影响之后启动的运行，进行中不追溯。
+export const REVIEW_TIMEOUT_KEY = 'review_timeout_minutes'
+export const REVIEW_TIMEOUT_MINUTES_DEFAULT = 10
+export const REVIEW_TIMEOUT_MINUTES_RANGE = [3, 60]
+
+export function effectiveReviewTimeoutMinutes(getSetting: (key: string) => unknown = () => null) {
+  const env = process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES
+  if (env !== undefined && String(env).trim() !== '') {
+    const envMinutes = Number(env)
+    if (Number.isFinite(envMinutes) && envMinutes > 0) {
+      const [min, max] = REVIEW_TIMEOUT_MINUTES_RANGE
+      return Math.min(max, Math.max(min, Math.round(envMinutes)))
+    }
+  }
+  const [min, max] = REVIEW_TIMEOUT_MINUTES_RANGE
+  const raw = String(getSetting?.(REVIEW_TIMEOUT_KEY) ?? '')
+  const saved = Number(raw)
+  if (raw !== '' && Number.isInteger(saved) && saved >= min && saved <= max) return saved
+  return REVIEW_TIMEOUT_MINUTES_DEFAULT
 }
 
 export const sessionMethods = {
@@ -354,21 +382,28 @@ export const sessionMethods = {
       }
       this.retireBinding(affinity.session_id)
     }
-    // ③ 控制面会话收敛（DSHBOTS-289，ADR §5.2-3）：其余运行（chat/solo_chat/dm/dm_reply/
-    // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 的 kind='bot' 单绑定
-    // 控制面会话——task/project/dm/solo 四车道建行已删除，ensureBotBinding 是唯一建行点。
+    // ③ 控制面会话收敛（DSHBOTS-289/299，ADR §5.2-3）：其余运行（chat/dm/dm_reply/
+    // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 在所属域的 kind='bot'
+    // 控制面会话——项目运行落 (bot, project) 绑定（每项目每 bot 一条，DSHBOTS-299 三分域），
+    // solo_chat/项目外流量落 (bot, NULL) 绑定即该 bot 专属工作区 solo 会话；ensureBotBinding
+    // 是唯一建行点。
     return this.ensureBotBinding(bot, project, { run, task, modelOverride })
   },
-  // 控制面会话兜底与唯一建行点（DSHBOTS-285 落机制，DSHBOTS-289 生产接线，ADR §4.1/§5.2-3）：
-  // ensureSession 收敛顺序的终点——rollover/compact 复用、任务亲和之外的运行一律解析到
-  // 该 bot 的 kind='bot' 单绑定控制面会话；已有则复用（宿主失效或结转时退役重建）。
+  // 控制面会话兜底与唯一建行点（DSHBOTS-285 落机制，289 生产接线，299 会话域三分，
+  // ADR §4.1/§5.2-3）：ensureSession 收敛顺序的终点——rollover/compact 复用、任务亲和
+  // 之外的运行一律解析到该 bot 在 (bot, project) 维度的 kind='bot' 控制面绑定；已有则复用
+  // （宿主失效或结转时退役重建）。project 为 NULL 即 solo 域：绑定行 project_id 亦为 NULL，
+  // 会话 cwd 落该 bot 专属工作区（resolveSessionCwd 的 solo 分支），与项目控制面双域分离。
   // 复用分支补齐与旧 ensureSession 同款的策略面：applyFilePolicy / applyBotToolPolicy /
   // selectModel / maybeCompactSession / rolloverPending 消费闸。
   async ensureBotBinding(bot, project, { run, task, modelOverride } = {} as any) {
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
+    // DSHBOTS-299：查询带 project 维度（IS 比 = 多兼容 NULL——solo 域按 (bot, NULL) 命中），
+    // 同一 bot 跨项目各自独立成会话，项目流量不再被单条全局绑定吸走。
     const existing = this.store.get(
-      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0 AND project_id IS ?",
       bot.id,
+      project?.id ?? null,
     )
     let rolledOver = false
     if (existing) {
@@ -390,7 +425,9 @@ export const sessionMethods = {
       // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名（DSHBOTS-256）。
       this.retireBinding(existing.session_id)
     }
-    const key = `${bot.id}:bot`
+    // DSHBOTS-299：建行去重键同样带 project 维度——同 bot 在 A 项目与 solo 域并发首建
+    // 互不挤兑，也不共用同一条 in-flight Promise（solo 会话 cwd 与项目会话不同）。
+    const key = `${bot.id}:${project?.id ?? 'solo'}:bot`
     if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
     const creating = (async () => {
       const solo = !project
@@ -486,8 +523,14 @@ export const sessionMethods = {
     this.pendingByRun.set(run.id, pending)
     // 运行时效在启动瞬间定格：之后页面改值只影响后续启动的运行，进行中不追溯。
     // 任务时效要求（DSHBOTS-131）在全局上限内再收紧：到期未完成即超时中止。
-    const globalRunTimeoutMs = effectiveRunLimits(this.config, key => this.store.setting(key)).runTimeoutMs
-    pending.runTimeoutMs = runTimeoutMsForTaskRun({ run, task, globalRunTimeoutMs })
+    // review/handle 再走分档收紧（DSHBOTS-302）：min(全局, review_timeout_minutes)。
+    const limits = effectiveRunLimits(this.config, key => this.store.setting(key))
+    pending.runTimeoutMs = runTimeoutMsForTaskRun({
+      run,
+      task,
+      globalRunTimeoutMs: limits.runTimeoutMs,
+      reviewTimeoutMs: effectiveReviewTimeoutMinutes(key => this.store.setting(key)) * 60_000,
+    })
     pending.timer = setTimeout(() => {
       void this.timeoutRun(run.id)
     }, pending.runTimeoutMs)

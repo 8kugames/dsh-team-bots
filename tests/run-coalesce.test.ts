@@ -345,3 +345,125 @@ test('跨项目同 kind 不合批（回归）：两条 chat 分属不同项目�
     await cleanup(t.root, t.store)
   }
 })
+
+// DSHBOTS-300 守门：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后
+// 各自 INSERT，后者撞 one_active_run_per_bot 直抛——outbox 会把它计为投递失败重试
+// 耗尽置 failed，消息卡死。单进程可测等价：预插一条同 bot queued 运行（对端进程的
+// 落行）后把 botBusy 桩成 false（模拟「查后插之间」的竞态窗），断言 enqueue 不抛错、
+// 消息落挂起队列、bot 空闲后 drainPendingMessages 建回运行。
+test('查后插竞态撞 one_active_run_per_bot：入队不抛错落挂起队列，空闲建回', async () => {
+  const t = await setup()
+  try {
+    const m = say(t.service, t.project.id, '竞态窗内到达的消息')
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_race_peer', ?, ?, 'chat', 'read', 'mention', 'race-peer-msg', 'queued', 1, 'race:peer', ?)`,
+      t.project.id, t.dev.id, new Date().toISOString(),
+    )
+    t.store.run(
+      `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id, origin_kind, status, created_at)
+       VALUES ('bm_race', ?, ?, ?, 'req_race', '竞态私信', 'sess-x', 'dm', 'pending', ?)`,
+      t.project.id, t.director.id, t.dev.id, new Date().toISOString(),
+    )
+    const dmMessage = t.store.get('SELECT * FROM bot_messages WHERE id = ?', 'bm_race')
+    // 模拟对端进程在「本进程 busy 过检之后、INSERT 之前」落行：busy 检查桩成 false。
+    const realBusy = t.service.botBusy.bind(t.service)
+    t.service.botBusy = () => false
+    const chatRunId = t.service.enqueueChatRun(t.project, t.dev, m)
+    const soloRunId = t.service.enqueueSoloChatRun(t.dev, 'solo_race_msg')
+    const dmRunId = t.service.enqueueDmRun(dmMessage, t.dev)
+    t.service.botBusy = realBusy
+    assert.equal(chatRunId, null, 'chat 撞 UNIQUE 返 null 不抛错')
+    assert.equal(soloRunId, null, 'solo_chat 同款兜底')
+    assert.equal(dmRunId, null, 'dm 同款兜底')
+    assert.deepEqual(heldItems(t).map(item => item.kind), ['chat', 'solo_chat', 'dm'], '三族消息全部落挂起队列')
+
+    // 对端运行结束，bot 空闲：挂起消息建回运行（chat 先建回，余量留队列下一拍）。
+    t.store.run("UPDATE runs SET status = 'canceled', ended_at = ? WHERE id = 'run_race_peer'", new Date().toISOString())
+    t.service.drainPendingMessages()
+    assert.ok(t.store.get("SELECT id FROM runs WHERE trigger_ref = ? AND status = 'queued'", m), '空闲后挂起消息建回运行')
+    assert.deepEqual(heldItems(t).map(item => item.kind), ['solo_chat', 'dm'], '建回消化 chat，余量留队列')
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})
+
+// DSHBOTS-304 守门（同拍双投边界）：dispatchOutbox 无原子 claim，两进程双投同一行时失败方
+// 走 D-300 兜底落挂起，其挂起项与胜利方运行共存——不修则消息族 drain 建回永撞全局
+// UNIQUE idempotency_key（任意状态）成永生占位、每 tick 队头 break 阻塞该 bot 全部挂起组；
+// 任务族在胜利方运行结束后按恒新幂等键重复建行。修法=入队 catch 合并（命中即返胜利方
+// id 不落挂起）+ drain 建回前去重清扫（含存量卡死项自愈）。
+test('DSHBOTS-304 双投（消息族）：胜利方运行共存时挂起项清扫消账，不永生不重建不阻塞后续组', async () => {
+  const t = await setup()
+  try {
+    const m1 = say(t.service, t.project.id, '双投失败方的消息')
+    const m2 = say(t.service, t.project.id, '无关的后到消息')
+    const now = new Date().toISOString()
+    // 胜利方：另一进程已为 m1 建起运行（同幂等键），占用 dev 车道。
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at, started_at, last_progress_at)
+       VALUES ('run_winner', ?, ?, 'chat', 'read', 'mention', ?, 'running', 1, ?, ?, ?, ?)`,
+      t.project.id, t.dev.id, m1, `chat:${m1}:${t.dev.id}`, now, now, now,
+    )
+    // 失败方：m1 已落挂起（双投兜底产物），m2 因忙正常挂起。
+    t.service.holdPendingMessage(t.dev.id, { kind: 'chat', messageId: m1, projectId: t.project.id, origin: null, queuedAt: now })
+    t.service.holdPendingMessage(t.dev.id, { kind: 'chat', messageId: m2, projectId: t.project.id, origin: null, queuedAt: now })
+    // 胜利方运行期间 drain：bot 忙整体跳过建回，但去重清扫在忙检查之前——m1（幂等键
+    // 已被胜利方占用）当拍即消账，m2 原地保留。
+    t.service.drainPendingMessages()
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [m2], 'm1 双投副本当拍清扫，m2 保留')
+    // 胜利方结束 → drain：m2 正常建回——无永生占位、无重复 m1 运行、后续组不被队头卡死。
+    t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_winner'", new Date().toISOString())
+    t.service.drainPendingMessages()
+    assert.deepEqual(heldItems(t), [], 'm1 清扫+m2 建回后队列清空（不永生）')
+    assert.equal(Number(t.store.get('SELECT COUNT(*) AS n FROM runs WHERE trigger_ref = ?', m1)?.n ?? 0), 1, 'm1 不重复建行')
+    assert.ok(t.store.get("SELECT id FROM runs WHERE trigger_ref = ? AND status = 'queued'", m2), 'm2 正常建回不被队头阻塞')
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})
+
+test('DSHBOTS-304 双投（任务族）：任务终态后挂起快照作废不重复建行；catch 合并返胜利方 id 不落挂起', async () => {
+  const t = await setup()
+  try {
+    const task = await t.service.createTask({ projectId: t.project.id, title: '双投任务', assigneeBotId: t.dev.id })
+    const now = new Date().toISOString()
+    // 场景一：胜利方运行已结束且任务已 done，失败方挂起快照仍在 → 清扫作废，不重复建行。
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at, ended_at)
+       VALUES ('run_wtask', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'wtask:1', ?, ?)`,
+      t.project.id, t.dev.id, task.id, now, now,
+    )
+    t.store.run("UPDATE tasks SET status = 'done' WHERE id = ?", task.id)
+    t.service.holdPendingMessage(t.dev.id, {
+      kind: 'task', messageId: `task:${task.id}`, taskId: task.id,
+      projectId: t.project.id, triggerType: 'assigned',
+      actorType: 'system', actorId: 'system', writeScopes: '[]',
+      routing: { mode: 'primary', ref: null, resetAt: null, provider: null, model: null, effort: null },
+      queuedAt: now,
+    })
+    t.service.drainPendingMessages()
+    assert.deepEqual(heldItems(t), [], '终态任务的挂起快照清扫消账')
+    assert.equal(Number(t.store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', task.id)?.n ?? 0), 1, '不重复建 task 运行')
+
+    // 场景二（catch 合并分支布线）：占道者是别项运行（INSERT 撞 bot_id 唯一）但同任务
+    // active 运行已在（双投时序）→ 返回胜利方 id 消算，不落挂起。
+    const task2 = await t.service.createTask({ projectId: t.project.id, title: '双投任务二', assigneeBotId: t.dev.id })
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_peer2', ?, ?, 'chat', 'read', 'mention', 'peer2', 'queued', 1, 'race:peer2', ?)`,
+      t.project.id, t.dev.id, now,
+    )
+    const realByTask = t.service.activeRunByTaskId.bind(t.service)
+    t.service.activeRunByTaskId = () => 'run_winner_task2'
+    const realBusy = t.service.botBusy.bind(t.service)
+    t.service.botBusy = () => false
+    const mergedRunId = t.service.enqueueTaskRun(t.service.taskRow(task2.id), 'assigned', { type: 'system', id: 'system' })
+    t.service.botBusy = realBusy
+    t.service.activeRunByTaskId = realByTask
+    assert.equal(mergedRunId, 'run_winner_task2', 'catch 命中同任务 active → 返胜利方 id')
+    assert.deepEqual(heldItems(t), [], '合并成功不落挂起（无永生项）')
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})

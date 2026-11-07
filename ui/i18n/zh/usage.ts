@@ -1,10 +1,6 @@
 // ui/i18n/zh/usage.ts —— 中文文案字典：usage 域（DSHBOTS-233）
 export default {
   // 用量页（DSHBOTS-204）：源码断言测试锁定部分中文文案字面量，这些条目以「原文即键」入典， 展示统一走 t()，切换语言后文案跟随，源码字面量保持不变。
-  "今日": "今日",
-  "7 日": "7 日",
-  "30 日": "30 日",
-  "至今": "至今",
   "汇总窗口": "汇总窗口",
   "总 tokens（${scope}）": "总 tokens（${scope}）",
   "调用次数（${scope}）": "调用次数（${scope}）",
@@ -23,9 +19,6 @@ export default {
   "本群分模型": "本群分模型",
   "本群各 Bot": "本群各 Bot",
   "该 Bot 分模型": "该 Bot 分模型",
-  "全局用量总览": "全局用量总览",
-  "本群用量总览": "本群用量总览",
-  "该 Bot 用量总览": "该 Bot 用量总览",
   "未配置价格的调用不计入成本合计；价格按每百万 token 配置。": "未配置价格的调用不计入成本合计；价格按每百万 token 配置。",
   "日历图只画最近 14 天，更早的调用计入上方汇总。": "日历图只画最近 14 天，更早的调用计入上方汇总。",
   "下方分组明细暂不可用，上方汇总仍按本群统计。": "下方分组明细暂不可用，上方汇总仍按本群统计。",
@@ -59,6 +52,10 @@ export default {
   "usage.dayTitleToday": "今日",
   "usage.dayTitle7d": "近 7 天",
   "usage.dayTitle30d": "近 30 天",
+  "usage.window.today": "今日",
+  "usage.window.7d": "7 天",
+  "usage.window.30d": "30 天",
+  "usage.window.all": "至今",
   "usage.windowTextFallback": "近 ${days} 天",
   "usage.windowTextToday": "今日（产品时区当日 0 点起）",
   "usage.windowText7d": "近 7 天（滚动窗口）",

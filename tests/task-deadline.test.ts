@@ -9,6 +9,8 @@
 //    review 提示词不注入 Deadline 行；
 // e) 重派即新窗口（DSHBOTS-281）：存量老卡重派不改预算不升级（正例）+ 新窗口内预算×2
 //    耗尽仍照常拦截（负例）。
+// f) review 运行预算分档（DSHBOTS-302）：review/handle 取 min(全局, 分档)（默认 10，
+//    settings review_timeout_minutes [3,60]，env 显式最高）；chat/dm/solo 沿用全局。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -22,6 +24,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import { TASK_BUDGET_ROUNDS, taskDeadlineMs } from '../src/services/tasks.js'
+import { runTimeoutMsForTaskRun, effectiveReviewTimeoutMinutes } from '../src/services/runtime/session.js'
 
 const T0 = '2026-11-06T02:00:00.000Z'
 
@@ -244,4 +247,42 @@ test('源码锚：死线闸在 kind=\'task\' 领取分支内，升级路径与�
   const deadlineGate = SCHEDULER_SRC.indexOf('escalateTaskPastDeadline(taskRow, run.id)')
   assert.ok(gate >= 0 && deadlineGate > gate, '死线闸位于施工运行领取分支（依赖闸之后）')
   assert.ok(SCHEDULER_SRC.includes('TASK_DEADLINE'), '拒绝原因码 TASK_DEADLINE 被钉')
+})
+
+// f) review 运行预算分档（DSHBOTS-302）：director 单车道上 review/handle（owner_task 运行族）
+// 长尾会堵住同 bot 的 chat 消息运行——上限取 min(全局, review 分档)；分档生效链与
+// effectiveRunLimits 同款（env 显式 > settings review_timeout_minutes [3,60] > 默认 10）；
+// chat/dm/solo 沿用全局不受影响；task 时效取 min 逻辑不变。
+test('f) review 预算分档：默认 10 / settings 覆盖 8 / 全局更小取全局 / chat 不受影响', () => {
+  const min = (m) => m * 60_000
+  const reviewRun = { kind: 'review', task_id: 't1' }
+  const handleRun = { kind: 'handle', task_id: 't1' }
+  // 生效链：默认 10；settings 整数 [3,60] 可覆盖；非法/越界值回退默认。
+  assert.equal(effectiveReviewTimeoutMinutes(() => null), 10, '默认 10 分钟')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '8' : null)), 8, 'settings 覆盖 8')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '2' : null)), 10, '低于 3 回退默认')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '61' : null)), 10, '高于 60 回退默认')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? 'abc' : null)), 10, '非整数回退默认')
+  // 分档计算：默认 10（全局 30 → 10）；handle 同款。
+  assert.equal(runTimeoutMsForTaskRun({ run: reviewRun, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(effectiveReviewTimeoutMinutes(() => null)) }), min(10), 'review 默认分档 10 分钟')
+  assert.equal(runTimeoutMsForTaskRun({ run: handleRun, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(8) }), min(8), 'handle 同款分档')
+  // 全局更小取全局：分档 10、全局 5 → 5。
+  assert.equal(runTimeoutMsForTaskRun({ run: reviewRun, task: null, globalRunTimeoutMs: min(5), reviewTimeoutMs: min(10) }), min(5), '全局更小时取全局')
+  // chat/dm/solo 不受分档影响（负例）：传了 reviewTimeoutMs 也沿用全局。
+  for (const kind of ['chat', 'dm', 'dm_reply', 'solo_chat']) {
+    assert.equal(runTimeoutMsForTaskRun({ run: { kind }, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(10) }), min(30), `${kind} 沿用全局`)
+  }
+  // task 时效取 min 逻辑不变（DSHBOTS-131 原口径）。
+  assert.equal(runTimeoutMsForTaskRun({ run: { kind: 'task', task_id: 't2' }, task: { time_budget_minutes: 15 }, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(10) }), min(15), 'task 时效取 min 不变')
+  // env 显式最高优先（含钳位）：进程内改 env 后恢复，防污染同文件其他用例。
+  const savedEnv = process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES
+  try {
+    process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES = '6'
+    assert.equal(effectiveReviewTimeoutMinutes(key => '8'), 6, 'env 显式压过 settings')
+    process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES = '999'
+    assert.equal(effectiveReviewTimeoutMinutes(() => null), 60, 'env 越界钳到 60')
+  } finally {
+    if (savedEnv === undefined) delete process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES
+    else process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES = savedEnv
+  }
 })

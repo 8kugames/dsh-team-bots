@@ -6,7 +6,7 @@
 import { createRequire } from 'node:module'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
-import { jsonParse, parseMentions } from '../util.js'
+import { jsonParse } from '../util.js'
 import { answerFailed, answerReceipt, approvalCard, questionCard, wechatToken } from '../wechat/format.js'
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
@@ -127,14 +127,15 @@ export const wechatMethods = {
   },
 
   /**
-   * 微信直达对话（DSHBOTS-208 起，258 四次拍板后收敛为绝对二值路由）：
-   * /tr 显式转发（key 非空）→ 消息以工作台用户身份插入项目群聊并触发 chat 运行，
-   * 运行结束的 bot 回复由 run-finish 按 trigger_type='wechat' 推回微信管理员；
-   * 自由文本（key 为空）→ 一律投项目外 director 专属工作区单聊（不随 direct_project_key
-   * 绑定、active 项目数变化，路由层无绑定/项目数判断分支），返回
-   * { director, messageId, firstContact }；解析不到 director（通道异常）→ { error: 'no_director' }。
-   * 项目无可定向 Bot（无 mention 且总监不可用）→ { error: 'no_owner', project }；
-   * 群聊直达成功 → { project, messageId, runBots }；显式 key 未命中 → null。
+   * 微信直达对话（DSHBOTS-208 起，258 四次拍板，299 会话域三分后收敛为单一去向）：
+   * 微信通道一律落 director 专属工作区 solo 会话（A 口径：微信=用户↔director 直接通信）——
+   * 自由文本（key 为空）与 /tr <key> 显式转发（key 非空）都投 director 的 solo_messages
+   * 并触发 solo_chat 运行（trigger_type='wechat'，运行收尾按此把回复推回微信管理员，
+   * run-finish 回程链路对 chat/solo 两类同门禁，语义不回退）；
+   * /tr 的 key 命中项目后在正文携带 [项目 KEY] 上下文，director 自行把工作派进对应项目，
+   * 不再以工作台用户身份插项目群聊触发 chat 运行（原路径 trigger_type='wechat' 的
+   * chat 运行落项目控制面会话，违反三分域）；key 未命中 → null；解析不到 director
+   * （通道异常）→ { error: 'no_director' }。
    */
   async wechatChat(key, body) {
     let project = null
@@ -146,22 +147,23 @@ export const wechatMethods = {
       if (!project) return null
     } else {
       // DSHBOTS-258 绝对口径：自由文本永远走 director 专属工作区，用户不直接进群。
-      // 路由层不出现 direct_project_key 绑定判断，也不出现 active 项目数量判断——
-      // 唯一分流条件是 /tr 显式转发（key 非空）。解析不到 director 属通道异常，
-      // 独立 no_director 出口（不复用 no_target：那是「需要用户选项目」的语义链）。
       const director = this.wechatDirectorBot()
       if (director) return this.wechatDirectorChat(director, String(body ?? ''))
       return { error: 'no_director' }
     }
-    const members = this.membersOf(project.id).filter(bot => bot.status === 'active')
-    const text = String(body ?? '')
-    // 无 mention 时 sendMessage 兜底定向 owner_bot_id：总监必须可用，否则消息发出无人接。
-    if (parseMentions(text, members).length === 0
-      && !members.some(bot => bot.id === project.owner_bot_id)) {
-      return { error: 'no_owner', project }
-    }
-    const result = await this.sendMessage(project.id, text, { type: 'user', id: this.localUserId }, null, [], { origin: 'wechat' })
-    return { project, ...result }
+    // DSHBOTS-299 A 口径：/tr 显式转发同落 director 专属工作区——正文带 [项目 KEY]
+    // 上下文（与自由文本的 [微信管理员] 前缀同链路），由 director 以团队工具派单进项目。
+    const director = this.wechatDirectorBot()
+    if (!director) return { error: 'no_director', project }
+    const adminPeerId = this.wechat?.status?.()?.adminPeerId ?? null
+    const result = await this.sendSoloMessage(
+      director.id,
+      `${WECHAT_SOLO_SOURCE_MARK}[项目 ${project.key}] ${String(body ?? '')}`,
+      { type: 'user', id: adminPeerId ?? 'user:wechat' },
+      [],
+      { origin: 'wechat' },
+    )
+    return { project, director, messageId: result?.messageId ?? null }
   },
 
   /**

@@ -1,6 +1,6 @@
 import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, COLORS, COLOR_NAMES, BOT_STATUS, RUN_STATUS, RUN_KIND, CHAT_PAGE_SIZE, CHAT_ACTIVE_TASK_LIMIT, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, CREATOR_TYPE, EFFORT, FILE_POLICY, DEFAULT_FILE_POLICY, VIEW_ACTION, NAV, SOLO_NAV } from './modules/state.js'
 import { icon } from './modules/icons.js'
-import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, avatar, statusPill, runDot, memberRunDot, runDotHtml, MEMBER_STATUS_TEXT, memorySource, toast, filePolicyOptions } from './modules/util.js'
+import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, avatar, statusPill, runDot, memberRunDot, runDotHtml, memorySource, toast, filePolicyOptions } from './modules/util.js'
 import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
@@ -225,8 +225,6 @@ function renderShell() {
   const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
   // 跨项目待答提问（DSHBOTS-116）：与审批同口径，顶层全局聚合。
   const pendingQuestions = data?.pendingQuestions ?? { count: 0, items: [] }
-  // 侧栏状态行任务口径（DSHBOTS-105）：全库任务 in_progress 计数，不随群聊/单聊上下文跳变；topbar 仍按项目口径。
-  const activeTasks = Number(data?.activeTasks ?? 0)
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
   // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。四页页壳页（DSHBOTS-216）冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；无横幅时 main-head 整块不渲染，避免空粘头残影。
@@ -352,14 +350,6 @@ function renderShell() {
           <a class="global-config dsh-official-link" href="/index.html" title="${t('sidebar.switchToDsh')}">
             ${icon('external')}<span>${t('sidebar.dshNative')}</span>
           </a>
-          <div class="sidebar-meta">
-            <span class="dot ${activeTasks ? 'amber' : ''}"></span>
-            <span>${activeTasks ? t('sidebar.tasksActive', { count: activeTasks }) : t('sidebar.idle')}</span>
-            <span class="sidebar-meta-sep">·</span>
-            <span>${t('sidebar.botsCount', { count: activeBots.length })}</span>
-            <span class="sidebar-meta-sep">·</span>
-            <span>${t('sidebar.pendingReviews', { count: pendingProposals() })}</span>
-          </div>
         </div>
       </aside>
       <main class="main">
@@ -711,11 +701,11 @@ window.addEventListener('error', (event) => {
     const url = new URL(img.getAttribute('src') ?? '', location.href)
     name = url.searchParams.get('path')?.split('/').pop() ?? url.pathname.split('/').pop() ?? ''
   } catch { name = '' }
-  if (!name) name = img.alt?.trim() || '图片'
+  if (!name) name = img.alt?.trim() || t('chat.imageFallback')
   const chip = document.createElement('span')
   chip.className = 'md-img-missing'
-  chip.textContent = `${name}（图片未能加载）`
-  chip.title = '工作区里找不到该图片，或类型/大小不在白名单内'
+  chip.textContent = `${name}${t('chat.imageMissingSuffix')}`
+  chip.title = t('chat.imageMissingHint')
   img.replaceWith(chip)
 }, true)
 

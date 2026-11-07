@@ -10,8 +10,8 @@
 
 | 层 | 定义 | 唯一性 / 数量关系 |
 |---|---|---|
-| 会话 session | 宿主 DSH 会话，bot 的唯一控制面载体：收派发、收群聊/私信/单聊、开子智能体、出交付 | 每 bot 每工作区恰 1 条活跃绑定；结转别名（alias=1）另计 |
-| 绑定 binding | `session_bindings` 行，入站消息与派发解析「该找哪个会话」的唯一入口 | 收敛为单道 `kind='bot'`，`UNIQUE(bot_id) WHERE alias=0` |
+| 会话 session | 宿主 DSH 会话，bot 的唯一控制面载体：收派发、收群聊/私信/单聊、开子智能体、出交付 | 每 (bot, 域) 恰 1 条活跃绑定：项目群聊域每项目一条 + 项目外 solo 域一条（DSHBOTS-299 三分）；结转别名（alias=1）另计 |
+| 绑定 binding | `session_bindings` 行，入站消息与派发解析「该找哪个会话」的唯一入口 | 收敛为单道 `kind='bot'`，`UNIQUE(bot_id, COALESCE(project_id,'~solo')) WHERE kind='bot' AND alias=0`——每 (bot, project) 一条，solo 域（project_id NULL）经 COALESCE 归一后每 bot 一条（DSHBOTS-299） |
 | 运行 run | `runs` 行，一次控制面轮次的调度与记账单元（排队/执行/收尾、用量、run_events） | 每会话串行：同一 bot 同时至多 1 条 queued/running |
 | 子智能体 subagent | bot 会话内按任务号开辟的宿主子会话，承载具体施工 | 并发上限=宿主 subagent 槽位设定；按任务号打标签，与任务卡 N:1 |
 
@@ -28,7 +28,7 @@
 | `task`（每任务一条会话，bot 亲自执行） | 删除。任务派发落 bot 控制面会话，施工交给按任务号开辟的子智能体 |
 | `project`（项目群会话） | 删除。群聊消息落 bot 控制面会话，`bot_messages.origin_kind='project'` 保留群线程展示 |
 | `dm`（私信会话，`enqueueDmRun` 落 `dm:<bot>:<project>` 车道） | 删除。私信落 bot 控制面会话，origin 标记 `dm`；「DM 不进运行中任务」问题结构性消失 |
-| `solo`（项目外单聊会话） | 删除。单聊落 bot 控制面会话（solo bot 的控制面就是它的唯一会话），origin 标记 `solo` |
+| `solo`（项目外单聊会话） | 删除独立车道。单聊落该 bot 专属工作区 solo 会话——即 (bot, NULL) 维度的 `kind='bot'` 绑定（solo 域），与项目内控制面双域分离（DSHBOTS-299 ②） |
 
 历史绑定处理：切换迁移时把既有 task/project/dm/solo 活跃行整体置 `alias=1`（沿用结转别名机制，旧 session id 仍可解析历史 origin），再为每个 bot 建一条 `kind='bot'` 活跃绑定。结转（rollover）机制不变，只是对象变成控制面会话：重开控制面时旧行转 alias，`runs_session_idx` 继续服务历史运行归属。
 
@@ -42,10 +42,12 @@
 4. **交付**：bot 合并并亲自审查子智能体产出（现状提示词已要求 review child output），在控制面产出交付报告。run-finish 收尾机制不变：任务级幂等键合批、交付报告写 `task_comments`、同事务把卡转 `in_review`（src/services/run-finish.ts 现路径）。
 5. **验收**：总监 `team_review_task` 裁决（accept/return），验收看门狗与自动收口规则不变；验收核验委派（核验 subagent 并行）发生在总监会话，结构性不受影响。
 
-### 2.2 DM / 群聊 / 插话如何落控制面
+### 2.2 DM / 群聊 / 插话如何落控制面（DSHBOTS-299 会话域三分）
 
-- **私信（DM）**：入站私信不再建独立 dm 运行，而是落目标 bot 控制面会话（origin 标记发送方）。bot 忙时进入该会话排队队列参与合批，闲时直接开轮次。若私信内容指向某张在跑卡，bot 在同一会话内把它转交给该卡子智能体（或亲自处理）——不再需要「恰好一条运行任务才 steer」的特例修补。
-- **群聊**：项目群消息照旧逐 bot 各自响应，但响应轮次发生在各自控制面会话（origin 标记 project）；群线程 UI 按 `bot_messages.origin_kind/origin_task_id` 过滤渲染，不依赖独立会话。
+入站流量按三分域归位：**A 微信通道**=用户↔director 直接通信，一律落 director 专属工作区 solo 会话（`/tr <key>` 显式转发亦同，正文携带 [项目 KEY] 上下文，不插项目群聊、不触发项目内 `trigger_type='wechat'` 的 chat 运行）；**B 工作台与 bot 单聊**=落各 bot 自己的专属工作区 solo 会话（(bot, NULL) 绑定，与项目会话分离）；**C 项目群聊**=落群聊工作区，无@消息归 director 会话、有@消息归被@ bot 会话，每 (bot, project) 一条控制面绑定。
+
+- **私信（DM）**：入站私信不再建独立 dm 运行，而是落目标 bot 在该 (bot, project) 维度的控制面会话（origin 标记发送方）。bot 忙时进入该会话排队队列参与合批，闲时直接开轮次。若私信内容指向某张在跑卡，bot 在同一会话内把它转交给该卡子智能体（或亲自处理）——不再需要「恰好一条运行任务才 steer」的特例修补。
+- **群聊**：项目群消息照旧逐 bot 各自响应，但响应轮次发生在各自在该项目的控制面会话（origin 标记 project）；同一 bot 跨项目的流量各自独立成会话，互不串线；群线程 UI 按 `bot_messages.origin_kind/origin_task_id` 过滤渲染，不依赖独立会话。
 - **插话（steer）**：所有向运行中内容注入的既有通道——卡面变更通知（task-notify）、任务评论直通（steerRunningTaskRun）、任务提醒、提问应答（questions answer steer 回原 agent）——目标统一改为 bot 控制面会话的 `session_id`；到达后由 bot 分流：属于某在跑卡的转交对应子智能体，其余自行消化。忙时 steer、闲时排队的回信投递策略（dm_reply 语义）收敛为「回信落控制面」，`dm_reply` 独立 kind 删除。
 
 ### 2.3 串行 / 合批
@@ -71,7 +73,7 @@
 ### 4.1 session_bindings
 
 - `kind` 域收敛为 `'bot'`（活跃行）；`task_id` 列保留仅历史行使用。
-- 新增唯一索引：`UNIQUE(bot_id) WHERE kind='bot' AND alias=0`；`one_task_binding` / `one_project_binding` / `one_solo_binding` 三索引随旧道删除。
+- 新增唯一索引：`UNIQUE(bot_id, COALESCE(project_id,'~solo')) WHERE kind='bot' AND alias=0`——每 (bot, project) 一条，solo 域归一后每 bot 一条（DSHBOTS-299 三分域，先 DROP 同名旧索引再建）；`one_task_binding` / `one_project_binding` / `one_solo_binding` 三索引随旧道删除。
 - 迁移：旧四道活跃行置 `alias=1` → 为每 bot 建 `kind='bot'` 行（session 复用该 bot 现有 project 会话或新建）。
 
 ### 4.2 runs 与 run_events
@@ -175,7 +177,7 @@
   同窗口治理件：DSHBOTS-286（结转 512/压缩 64/任务亲和，ede0e91）随第 2 步落地。
 - **守门与回归**：全量 `npm test` 两轮 1563/1563 全绿（0 fail，同 HEAD 判据；较 D-295 基线 1562 +1=本卡 V1 四路合并例），`tsc -p tsconfig.json` 0 错。V1–V5 逐项终验证据见 §6 旁注；§5.1 清单 15 项↔测试文件对照表随本卡交付报告归档。
 - **V3 尾项 grep 清单留档**（dm 车道与任务绑定建行零残留）：①旧 `dm:<bot>:<project>` 车道键 src 全域零命中——现存 `dm:${message.id}`（src/services/runs.ts:156/274）为 dm 运行幂等键（messageId 维度），非车道键；②`INSERT INTO session_bindings` 全库仅 1 处（src/services/runtime/session.ts:414，ensureBotBinding，kind='bot'）——任务绑定建行零残留；③旧车道 kind 命中面均为有意保留：db-migrations 迁移期读旧 project 行（:310/:313）、questions/approvals 历史 `kind='solo'` alias 行承接（D-294 口径）、scheduler `kind='task'` 为 runs 运行类别语义非绑定车道、notify.ts 为注释。
-- **read-audit-dedup.test.ts:108 flake 归因留档（D-294 备案复核）**：根因=夹具 run_writer 播种取 `SELECT id FROM bots LIMIT 1` 无 ORDER BY——SQLite 行序未指定，查询计划器选中 director 则绿，选中已有 queued 运行的 Builder 即撞 `one_active_run_per_bot`（报 UNIQUE runs.bot_id），索引本身按设计工作。复核证据：D-294 已在改动前 HEAD 1abaa0c 一次性 worktree 复现 pair-run 四轮 fail 1,0,1,0、单文件恒绿（既有间歇 flake，非本迁移逻辑回归）；本卡 HEAD 复核单文件 3 轮+pair-run 4 轮+全量两轮全绿（间歇性本轮未再现）。修复候选一行（改查 director 或播种前腾槽），超出本卡写范围（既有测试文件仅核对引用），是否立小卡由 owner 定。
+- **read-audit-dedup.test.ts:108 flake 归因留档（D-294 备案复核）**：根因=夹具 run_writer 播种取 `SELECT id FROM bots LIMIT 1` 无 ORDER BY——SQLite 行序未指定，查询计划器选中 director 则绿，选中已有 queued 运行的 Builder 即撞 `one_active_run_per_bot`（报 UNIQUE runs.bot_id），索引本身按设计工作。复核证据：D-294 已在改动前 HEAD 1abaa0c 一次性 worktree 复现 pair-run 四轮 fail 1,0,1,0、单文件恒绿（既有间歇 flake，非本迁移逻辑回归）；本卡 HEAD 复核单文件 3 轮+pair-run 4 轮+全量两轮全绿（间歇性本轮未再现）。修复候选一行（改查 director 或播种前腾槽）→ owner 立卡 DSHBOTS-298 落地：一行改为确定性查询 `SELECT id FROM bots WHERE name = 'director'`（不用 `LIMIT 1` 无序播种），单文件 5 轮 + pair-run（read-audit-dedup+solo）5 轮零 flake、全量 1563/1563、tsc 0；另 tests/solo.test.ts 同卡 5 处同款无序播种一并收口（commit 5076717，solo 单文件 3 轮 + pair-run 4 轮零 flake、全量 1563/1563、tsc 0）。
 
 ### 5.3 回归策略（204 个测试源文件（+编译产物）/ 1534 例）
 
@@ -251,10 +253,10 @@
 
 1. 活跃 task 绑定（alias=0）；
 2. 未终态任务的 runs 归属解析（含 alias 行）；
-3. 活跃 bot 控制面绑定（kind='bot'，alias=0）；
+3. 活跃 bot 控制面绑定（kind='bot'，alias=0，按 (bot, project) 维度解析——DSHBOTS-299：项目运行落该项目绑定，项目外/solo 流量落 (bot, NULL) 绑定即该 bot 专属工作区会话）；
 4. 新建会话。
 
-与 DSHBOTS-285 单绑定模型（`kind='bot'`，每 bot 恰一条 alias=0 活跃绑定，§4.1）共存：单绑定只决定「新流量」的家；任务亲和优先级高于活跃绑定，未终态任务消息据此回到旧会话。
+与 DSHBOTS-285/299 绑定模型（`kind='bot'`，每 (bot, project) 恰一条 alias=0 活跃绑定 + solo 域一条，§4.1）共存：绑定只决定「新流量」的家；任务亲和优先级高于活跃绑定，未终态任务消息据此回到旧会话。
 
 ### 8.4 64 轮闲时总结压缩
 

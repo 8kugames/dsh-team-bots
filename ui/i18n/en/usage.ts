@@ -1,10 +1,6 @@
 // ui/i18n/en/usage.ts —— English copy dictionary: usage domain (DSHBOTS-233)
 export default {
   // Usage page (DSHBOTS-204): source-assertion tests lock some Chinese copy literals, so those entries key on the source text itself; display goes through t() so language switching follows.
-  "今日": "Today",
-  "7 日": "7 days",
-  "30 日": "30 days",
-  "至今": "All time",
   "汇总窗口": "Summary window",
   "总 tokens（${scope}）": "Total tokens (${scope})",
   "调用次数（${scope}）": "Calls (${scope})",
@@ -23,9 +19,6 @@ export default {
   "本群分模型": "Group by model",
   "本群各 Bot": "Group bots",
   "该 Bot 分模型": "Bot by model",
-  "全局用量总览": "Global usage overview",
-  "本群用量总览": "Group usage overview",
-  "该 Bot 用量总览": "Bot usage overview",
   "未配置价格的调用不计入成本合计；价格按每百万 token 配置。": "Calls without a configured price are excluded from the cost total; prices are per million tokens.",
   "日历图只画最近 14 天，更早的调用计入上方汇总。": "The calendar chart covers the last 14 days; earlier calls are included in the summary above.",
   "下方分组明细暂不可用，上方汇总仍按本群统计。": "Per-group details are unavailable; the summary above still covers this group.",
@@ -59,6 +52,10 @@ export default {
   "usage.dayTitleToday": "Today",
   "usage.dayTitle7d": "Last 7 days",
   "usage.dayTitle30d": "Last 30 days",
+  "usage.window.today": "Today",
+  "usage.window.7d": "7 days",
+  "usage.window.30d": "30 days",
+  "usage.window.all": "All time",
   "usage.windowTextFallback": "Last ${days} days",
   "usage.windowTextToday": "Today (from 00:00 in the product timezone)",
   "usage.windowText7d": "Last 7 days (rolling window)",

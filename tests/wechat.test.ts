@@ -665,7 +665,7 @@ class DispatchStubRuntime {
   async cancelRun() { return true }
 }
 
-test('wechat 直达真 service：消息以用户身份插入项目会话并触发总监 chat 运行（trigger_type=wechat），回复推回微信', async () => {
+test('wechat 直达真 service：/tr 与自由文本一律落 director 专属工作区 solo 会话（trigger_type=wechat），回复推回微信（DSHBOTS-299 A 口径）', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-wechat-direct-'))
   const workspace = join(root, 'workspace')
   await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
@@ -687,42 +687,41 @@ test('wechat 直达真 service：消息以用户身份插入项目会话并触�
     ;(service as any).wechat = { notify() {}, status: () => ({ adminPeerId: 'wx_admin_peer' }) }
 
     // 小写 key 也要命中（COLLATE NOCASE 同 resolveTaskByIdentifier 口径）；
-    // /tr 是唯一显式转发进项目的通道（DSHBOTS-258）
+    // DSHBOTS-299 A 口径：微信通道一律落 director 专属工作区 solo 会话——/tr 显式
+    // 转发不再插项目群聊触发项目内 chat 运行，正文携带 [项目 KEY] 上下文由 director 派单。
     const reply = await handleCommand(service, '/tr dispatch 上线新版官网', { isAdmin: true })
     assert.ok(reply.includes('已直达【Dispatch Demo】'))
 
-    const message = store.get("SELECT * FROM messages WHERE body = '上线新版官网'")
-    assert.ok(message, '直达消息必须落库到项目群聊')
-    assert.equal(message.project_id, store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id)
-    assert.equal(message.sender_type, 'user')
-    assert.equal(message.sender_id, service.localUserId, '以工作台用户身份插入')
+    const projectId = store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id
+    assert.equal(store.get("SELECT id FROM messages WHERE project_id = ?", projectId), undefined, '直达消息不得落库项目群聊（三分域 A）')
+    const message = store.get("SELECT * FROM solo_messages WHERE body = ?", '[微信管理员] [项目 DISPATCH] 上线新版官网')
+    assert.ok(message, '直达消息必须落 director 专属工作区 solo 会话')
+    assert.equal(message.bot_id, director.id)
+    assert.equal(message.sender_id, 'wx_admin_peer', '身份用微信 admin peer id，不冒充工作台用户')
 
-    const outbox = store.get("SELECT * FROM outbox WHERE kind = 'chat_run'")
-    assert.ok(outbox, '直达必须入 chat_run outbox 触发一轮运行')
+    const outbox = store.get("SELECT * FROM outbox WHERE kind = 'solo_chat_run'")
+    assert.ok(outbox, '直达必须入 solo_chat_run outbox 触发一轮运行')
     assert.equal(outbox.status, 'delivered')
-    assert.equal(outbox.idempotency_key, `chat:${message.id}:${director.id}`)
     assert.equal(JSON.parse(outbox.payload_json).origin, 'wechat', '载荷带微信来源标记')
 
-    const run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
-    assert.ok(run, '必须派生 chat 运行')
-    assert.equal(run.bot_id, director.id, '无 mention 时定向项目总监（owner_bot_id）')
+    const run = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ?", message.id)
+    assert.ok(run, '必须派生 solo_chat 运行')
+    assert.equal(run.bot_id, director.id, '微信直达一律定向 director（A 口径）')
+    assert.equal(run.project_id, null, '微信直达运行不落项目域')
     assert.equal(run.trigger_type, 'wechat', '微信直达运行打 wechat 标记（回程推送依据）')
 
-    // 回程：微信直达运行结束，bot 回复推回管理员；普通群聊运行不推
-    // DSHBOTS-217 回程排版：bot 名 + 分隔线（chatReply），失败加 [失败] 纯文字标头。
-    // 争用口径 A：chat 运行先收尾腾出 director 槽，自由文本的 solo_chat 运行才能
-    // 建行（同 bot 第二条活跃行会撞 one_active_run_per_bot）；群聊回复的记忆审查
-    // 会给 director 再排 memory_review 运行，本用例关掉以免占槽。
+    // 回程：微信直达运行结束，director 回复推回管理员；普通群聊运行不推。
+    // 群聊回复的记忆审查会给 director 再排 memory_review 运行，本用例关掉以免占槽。
     store.setSetting('chat_memory_review', '0')
     const pushed: string[] = []
     ;(service as any).wechat = { notify(text: string) { pushed.push(text) }, status: () => ({ adminPeerId: 'wx_admin_peer' }) }
     await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
-    assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
+    assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 director 回复要推回微信')
 
-    // 自由文本（含已绑定场景）不再进项目群聊：一律落 director 专属工作区（DSHBOTS-258）。
-    // 该管理员首条 director 单聊：回执说明去向；之后静默。
+    // 自由文本（含已绑定场景）同落 director 专属工作区（DSHBOTS-258/299 同域）；
+    // 管理员此前已通过 /tr 首触该工作区，静默直达。
     const silent = await handleCommand(service, '顺带把首页也改了', { boundKey: 'DISPATCH', bind() {} })
-    assert.ok(silent.includes('已直达【director】专属工作区'), '首触回执 director 通道')
+    assert.equal(silent, '', '首触已发生，静默直达')
     const soloMessage = store.get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer' AND body LIKE ?", '%顺带把首页也改了')
     assert.ok(soloMessage, '自由文本必须落 director 的 solo 会话')
     assert.equal(soloMessage.bot_id, director.id)

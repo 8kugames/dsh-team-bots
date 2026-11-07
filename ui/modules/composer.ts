@@ -8,10 +8,23 @@ import { app, renderShell, renderKeepingChatScroll, render } from '../app.js'
 import { flushAppRender } from './modal-layer.js'
 
 // ac-core:start —— 输入框 / 与 @ 自动补全的纯逻辑（tests/ac.test.js 抽取此块断言）
+// title/desc 走 getter 现取：模块顶层求值早于 setLanguage，顶层固化会让英文界面留中文。
 const AC_COMMANDS = [
-  { kind: 'command', label: '/task', title: t("派任务"), desc: t("创建任务并排队执行：/task @成员 标题"), insert: '/task @', then: 'mention' },
-  { kind: 'command', label: '/remember', title: t("写项目记忆"), desc: t("写入项目级记忆：/remember 内容"), insert: '/remember ' },
-  { kind: 'command', label: '/clear', title: t("清空聊天"), desc: t("清空本群全部聊天记录（任务与记忆保留）"), insert: '/clear' },
+  {
+    kind: 'command', label: '/task', insert: '/task @', then: 'mention',
+    get title() { return t("派任务") },
+    get desc() { return t("创建任务并排队执行：/task @成员 标题") },
+  },
+  {
+    kind: 'command', label: '/remember', insert: '/remember ',
+    get title() { return t("写项目记忆") },
+    get desc() { return t("写入项目级记忆：/remember 内容") },
+  },
+  {
+    kind: 'command', label: '/clear', insert: '/clear',
+    get title() { return t("清空聊天") },
+    get desc() { return t("清空本群全部聊天记录（任务与记忆保留）") },
+  },
 ]
 const acWordChar = (ch) => ch !== undefined && !/[\s@/]/.test(ch)
 

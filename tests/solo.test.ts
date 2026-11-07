@@ -312,28 +312,62 @@ test('runs 与 session_bindings 的 project_id 迁移为可空', async () => {
     assert.equal(runsInfo.find(column => column.name === 'project_id').notnull, 0)
     assert.equal(bindingsInfo.find(column => column.name === 'project_id').notnull, 0)
     const now = new Date().toISOString()
+    // 播种 bot 须确定性选取（多行表 LIMIT 1 无 ORDER BY 时行序未定义）
     store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
-       VALUES ('r-solo', NULL, (SELECT id FROM bots LIMIT 1), 'solo_chat', 'write', 'mention', 'queued', 1, 'k-solo', ?)`, now,
+       VALUES ('r-solo', NULL, (SELECT id FROM bots WHERE name = 'director'), 'solo_chat', 'write', 'mention', 'queued', 1, 'k-solo', ?)`, now,
     )
     store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo', (SELECT id FROM bots WHERE name = 'director'), NULL, 'solo', NULL, ?)",
       now,
     )
     // DSHBOTS-285：solo 车道唯一索引已退役，车道行可共存（历史/过渡态），不再被拒
     store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo2', (SELECT id FROM bots LIMIT 1), NULL, 'solo', NULL, ?)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo2', (SELECT id FROM bots WHERE name = 'director'), NULL, 'solo', NULL, ?)",
       now,
     )
     // 收敛不变量：每 bot 恰一条 kind='bot' 活跃绑定
     store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot', (SELECT id FROM bots WHERE name = 'director'), NULL, 'bot', NULL, ?, 0)",
       now,
     )
     assert.throws(() => store.run(
-      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot2', (SELECT id FROM bots LIMIT 1), NULL, 'bot', NULL, ?, 0)",
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES ('s-bot2', (SELECT id FROM bots WHERE name = 'director'), NULL, 'bot', NULL, ?, 0)",
       now,
     ))
+    assert.equal(store.all('PRAGMA foreign_key_check').length, 0)
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('one_bot_binding 每 (bot,project) 一条：同 bot 跨项目独立，同项目/同 solo 域仍唯一（DSHBOTS-299 守门）', async () => {
+  const { root, store } = await soloSetup()
+  try {
+    const now = new Date().toISOString()
+    // 播种确定性锚：director 由 initialize() 种子创建，无既有 kind='bot' 绑定
+    const director = store.get("SELECT id FROM bots WHERE name = 'director'")
+    for (const key of ['ALPHA', 'BETA']) {
+      store.run(
+        `INSERT INTO projects(id, key, name, slug, description, owner_bot_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '', ?, 'active', ?, ?)`,
+        `prj-${key}`, key, key, key.toLowerCase(), director.id, now, now,
+      )
+    }
+    const insertBinding = (sessionId, projectId) => store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+       VALUES (?, ?, ?, 'bot', NULL, ?, 0)`,
+      sessionId, director.id, projectId, now,
+    )
+    insertBinding('b-alpha', 'prj-ALPHA')
+    // ① 跨项目独立：多项目 owner bot 在各项目各有控制面会话，互不吸流
+    insertBinding('b-beta', 'prj-BETA')
+    // 同 (bot, project) 恰一条
+    assert.throws(() => insertBinding('b-alpha2', 'prj-ALPHA'))
+    // ② solo 域（project_id NULL）经 COALESCE 归一后每 bot 仍恰一条
+    insertBinding('b-solo', null)
+    assert.throws(() => insertBinding('b-solo2', null))
     assert.equal(store.all('PRAGMA foreign_key_check').length, 0)
   } finally {
     await closeQuietly(store)

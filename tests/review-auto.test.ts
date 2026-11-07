@@ -5,6 +5,8 @@
 // 任何失败都不阻塞交付迁移。owner_bot 卡串联两跳：核验→总监裁决；user 卡核验后人工裁决。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -590,4 +592,23 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
     assert.equal(review.task_id, task.id)
     assert.deepEqual(pending(), [], '挂起队列清空')
   } finally { await t.close() }
+})
+
+// 核验纪律提示词守门（DSHBOTS-302，owner 硬口径）：核验/审计/复核他人交付=director 专属，
+// 成员 bot 模板只保留自校段（验自己的活）。源码锚（D-269 手法）：核验/验收模板指令只允许
+// 出现在 prompt.ts 的 review/handle 分支之后；分支之前的成员/通用模板不得含任何核验类指令
+// 标记；委派核验模板保持「不代 owner 裁决」，owner 验收模板才持有 team_review_task 裁决入口。
+test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/handle 分支，成员模板只有自校', () => {
+  const source = readFileSync(fileURLToPath(new URL('../src/services/runtime/prompt.ts', import.meta.url)), 'utf8')
+  const branch = source.indexOf("if ((run.kind === 'review' || run.kind === 'handle') && task)")
+  assert.ok(branch > 0, '找不到 review/handle 模板分支')
+  const memberSide = source.slice(0, branch)
+  for (const marker of ['do not redo the work', 'Subagent verification', '「子代理核验：」', 'Red verification', '建议 accept or 建议 return']) {
+    assert.ok(!memberSide.includes(marker), `成员可见模板不得含核验指令标记：${marker}`)
+  }
+  assert.match(memberSide, /verify it, and report back|verify it, then return a concise result/, '成员自校段保留（验自己的活）')
+  const reviewSide = source.slice(branch)
+  assert.match(reviewSide, /Do NOT call team_review_task/, '委派核验模板保持不代 owner 裁决')
+  assert.match(reviewSide, /team_review_task with decision "accept"/, 'owner 验收模板保持裁决入口')
+  assert.match(reviewSide, /「子代理核验：」/, '委派核验结论锚保持')
 })
