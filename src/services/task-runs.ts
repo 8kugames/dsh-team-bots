@@ -149,7 +149,11 @@ export const taskRunMethods = {
     } catch (error: any) {
       // DSHBOTS-300：查后插竞态撞 one_active_run_per_bot——按忙口径挂起返 null 不抛
       //（task_id 维度撞车不在此兜，重试下一拍 active 预检自愈）。
+      // DSHBOTS-304：双投胜利方的同任务 active 运行已在→合并返回其 id 消算，不落挂起
+      //（否则胜利方运行结束后 drain 按恒新幂等键建出重复 task 运行）。
       if (this.isRunBotUniqueViolation(error)) {
+        const merged = this.activeRunByTaskId(task.id)
+        if (merged) return merged
         hold()
         return null
       }
@@ -217,7 +221,10 @@ export const taskRunMethods = {
         `${kind}:${task.id}:${Date.now()}:${runId}`, createdAt,
       )
     } catch (error: any) {
+      // DSHBOTS-304：双投胜利方同任务 active 运行已在→合并返回其 id 消算（同 enqueueTaskRun）。
       if (this.isRunBotUniqueViolation(error)) {
+        const merged = this.activeRunByTaskId(task.id)
+        if (merged) return merged
         hold()
         return null
       }

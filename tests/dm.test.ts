@@ -243,8 +243,10 @@ test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运�
 })
 
 // DSHBOTS-291 覆盖缺口补测②（messageId 去重 + 建回护栏）：同一 bot 忙时重复入队同一
-// messageId，队列不累积重复项；重复挂起即便触发建回，idempotency_key 撞 UNIQUE 返 null 留队列。
-test('messageId 去重：忙时重复挂起不累积；建回撞 idempotency_key UNIQUE 返 null 留队列', async () => {
+// messageId，队列不累积重复项。DSHBOTS-304 语义更新：挂起项之外已存在同 idempotency_key
+// 运行（终态也算，双投胜利方已处理）时，drain 去重清扫直接消账该挂起项——旧口径「撞
+// UNIQUE 返 null 留队列」即永生占位缺陷（每 tick 队头 break 阻塞该 bot 全部挂起组），已修。
+test('messageId 去重：忙时重复挂起不累积；同幂等键运行已存在时挂起项清扫消账不永生', async () => {
   const state = await setup()
   globalThis.DM_ROOT = state.root
   try {
@@ -266,8 +268,8 @@ test('messageId 去重：忙时重复挂起不累积；建回撞 idempotency_key
     assert.equal(service.enqueueDmRun(message, director), null, '重复入队同一 messageId 同样挂起')
     assert.equal(pending().length, 1, '队列不累积重复项')
 
-    // 护栏：挂起项之外已存在同 idempotency_key 的运行（终态也算），空闲建回时 INSERT 撞
-    // UNIQUE → insertHeldMessageRun 返回 null，消息留队列下一拍，不丢也不重复建行。
+    // DSHBOTS-304：挂起项之外已存在同 idempotency_key 的运行（终态也算）＝双投胜利方已
+    // 处理该消息，失败方挂起副本作废——drain 清扫消账，不留永生占位，也不重复建行。
     store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at, ended_at)
        VALUES ('run_dup_collide', ?, ?, 'dm', 'read', 'dm', 'botm_dup1', 'succeeded', 1, 'dm:botm_dup1', ?, ?)`,
@@ -275,7 +277,7 @@ test('messageId 去重：忙时重复挂起不累积；建回撞 idempotency_key
     )
     store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_dup_busy'", new Date().toISOString())
     service.drainPendingMessages()
-    assert.equal(pending().length, 1, '建回撞 UNIQUE 返 null，挂起项留队列')
+    assert.equal(pending().length, 0, '同幂等键运行已存在：挂起副本清扫消账（不永生）')
     assert.equal(
       store.get("SELECT COUNT(*) AS n FROM runs WHERE trigger_ref = 'botm_dup1' AND status IN ('queued', 'running')")?.n,
       0,
