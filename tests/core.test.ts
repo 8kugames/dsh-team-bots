@@ -261,7 +261,8 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
     assert.ok(store.all('SELECT body FROM messages WHERE project_id = ?', project.id)
       .some(message => message.body.includes('待总监验收')))
     // 总监验收通过 → done
-    const done = await service.reviewFromBot(sessionId, { task: 'OWN-1', decision: 'accept' })
+    // DSHBOTS-318 验收机械闸：无 subagent_spawned 账目的直调验收须显式兜底。
+    const done = await service.reviewFromBot(sessionId, { task: 'OWN-1', decision: 'accept', comment: '兜底验收' })
     assert.equal(done.status, 'done')
     const after = await service.state(project.id)
     assert.equal(after.project.stats.ownerReview, 0)
@@ -282,7 +283,7 @@ test('owner return sends the task back for rework and it re-enters owner review'
     await waitFor(() => store.get("SELECT status FROM tasks WHERE id = ?", task.id)?.status === 'in_review')
     await waitFor(() => store.get("SELECT status FROM runs WHERE task_id = ? AND kind = 'review'", task.id)?.status === 'succeeded')
     const returned = await service.reviewFromBot(sessionId, {
-      task: 'RET-1', decision: 'return', comment: '需要补充测试',
+      task: 'RET-1', decision: 'return', comment: '兜底验收：需要补充测试',
     })
     assert.equal(returned.status, 'in_progress')
     assert.match(
