@@ -176,8 +176,6 @@ export function memberRunDot(member) {
 export function runDotHtml(dot) {
   return `<span class="run-dot ${dot.cls}" data-status="${dot.status}" title="${esc(dot.text)}" aria-label="${esc(dot.text)}"></span>`
 }
-// 卡片底部的状态短标签（完整说明仍在 run-dot 的 title 里）。
-export const MEMBER_STATUS_TEXT = { idle: t("空闲"), running: t("运行中"), queued: t("排队中"), plan_wait: t("限流等待"), failed: t("运行失败") }
 export function memorySource(source) {
   const value = String(source ?? '')
   if (!value) return t("手动写入")

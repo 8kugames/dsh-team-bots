@@ -49,7 +49,6 @@ export default {
   "task.time7d": "Last 7 days",
   "task.time30d": "Last 30 days",
   "task.timeAll": "All time",
-  "task.sortLabel": "Task sort",
   "task.sortCreatedDesc": "Created new → old",
   "task.sortCreatedAsc": "Created old → new",
   "task.sortCompletedDesc": "Completed new → old",
