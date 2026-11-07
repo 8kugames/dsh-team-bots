@@ -17,6 +17,12 @@ import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 const CORRECTION_TITLE_RE = /修正|勘误|补充|改写/
 const RECENT_DONE_WINDOW_MS = 7 * 86_400_000
 
+// 核验纪律派单闸关键词（DSHBOTS-303，保守集合，取舍锚）：只取「核验/审计/复核」三词。
+// 「验收」单用常出现在实施卡（如「跑通验收流程」），「验证」是普遍实施动词（如「跑通验证
+// 流程」）——纳入即误伤实施卡，均不含；「红验证/子代理核验/验收核验」等复合词已被「核验」
+// 覆盖。成员卡面自校要求（交付前自跑测试）不含三词，天然不命中。
+export const VERIFICATION_TASK_KEYWORDS = ['核验', '审计', '复核']
+
 export const taskDispatchMethods = {
   // 派发门禁（DSHBOTS-262）：暂停中的 Bot 不接新卡——新建派单、改派、重派一律拒绝，
   // 先恢复（bot status → active）再派；归档/移除等其余不可用态沿用 assertMember 既有口径。
@@ -24,6 +30,19 @@ export const taskDispatchMethods = {
     const bot = this.store.get('SELECT name, status FROM bots WHERE id = ?', botId)
     if (bot?.status === 'paused') throw badRequest(`Bot ${bot.name} 已暂停，先恢复再派卡`)
     this.assertMember(projectId, botId)
+  },
+  // 核验纪律派单闸（DSHBOTS-303）：核验/审计/复核类卡不派成员 bot（owner 硬口径）——
+  // 该类工作由总监（owner bot）自有子代理执行。与 D-302 提示词边界守门（review-auto 源码锚）
+  // 构成双层防线：提示词管会话内指引，本闸管派单行为。派给 director 本身不受限。
+  // 标题/描述任一命中关键词即视为核验类；重派改卡按改后生效卡面判定。
+  assertNotVerificationDispatch(project, botId, title, description) {
+    if (botId === project.owner_bot_id) return
+    const text = `${title ?? ''}\n${description ?? ''}`
+    if (!VERIFICATION_TASK_KEYWORDS.some(word => text.includes(word))) return
+    throw badRequest(
+      '核验/审计/复核类任务由总监（owner bot）自有子代理执行，不派成员 bot；'
+      + `如确为实施类工作请改标题/描述措辞（命中关键词：${VERIFICATION_TASK_KEYWORDS.join('、')}）。`,
+    )
   },
   // 无主卡领取开工的写范围声明闸门（DSHBOTS-270）：与 assignFromBot「派单必须声明写
   // 范围」同口径的预判——卡面清单优先，空则从描述「写范围：」行兜底解析
@@ -296,9 +315,13 @@ export const taskDispatchMethods = {
     const sandboxOverride = input.sandbox === undefined
       ? undefined
       : resolveSandboxOverride(this.botRow(member.id), input.sandbox)
+    // 核验纪律派单闸（DSHBOTS-303）——新卡面；重派分支再按「改后生效卡面」补一道。
+    this.assertNotVerificationDispatch(project, member.id, input.title, input.description)
     if (input.taskId || input.task) {
       const task = this.resolveBotTask(project, input.taskId ?? input.task)
       if (['done', 'canceled'].includes(task.status)) throw conflict(`任务 ${project.key}-${task.number} 已结束，不能重派`)
+      // 核验纪律派单闸（DSHBOTS-303）：重派/改卡按生效卡面（本次传入优先，缺省回落原卡）。
+      this.assertNotVerificationDispatch(project, member.id, input.title ?? task.title, input.description ?? task.description)
       // 任务卡修正闭环（DSHBOTS-232 ①）：重派可同时改卡面（标题/描述/优先级）——先经
       // updateTask 落卡，卡面变化由其统一触发点通知负责人修正，再走原重派链路。
       // 写范围不在此口改：入队运行快照与调度闸门消费的不是同一份数据，
