@@ -127,8 +127,81 @@ function readVersion() {
   return version
 }
 
+// 发布提交信息：标题取本次发布的变更摘要（来自 docs/release-notes.md 的对应版本小节），
+// 机器可读的 dev 快照 sha 放正文 trailer——基点识别优先读该 trailer。
+function buildCommitMessage(version, devCommit, summary) {
+  return `release: v${version} ${summary}\n\ndev-snapshot: ${devCommit}`
+}
+
+// 从提交信息里取 dev 快照 sha：优先读 trailer 里的 dev-snapshot，
+// 没有 trailer 的历史提交（老格式「（dev 快照 <sha>）」）退回宽松正则。
+function snapshotHintFrom(message) {
+  const trailer = /^dev-snapshot:\s*([0-9a-f]{7,40})$/im.exec(message)
+  if (trailer) return trailer[1]
+  const legacy = /([0-9a-f]{7,40})/i.exec(message)
+  return legacy ? legacy[1] : null
+}
+
 function treeOf(ref) {
   return gitText(['rev-parse', `${ref}^{tree}`])
+}
+
+// ── 发布摘要：取 dev 树里 docs/release-notes.md 的「## v<version>」小节 ──────────
+// 发布提交的信息必须反映本版实际变更，不允许占位文案。摘要取中文段里各条目的粗体小标题，
+// 没有条目时退回中文段首句；缺失说明文件或该版本小节即拒绝发版。
+const RELEASE_NOTES_PATH = 'docs/release-notes.md'
+const SUMMARY_MAX = 60
+
+function truncate(text, max = SUMMARY_MAX) {
+  const value = String(text ?? '').trim()
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+// 取「## v<version>」到下一个「## 」之间的正文。
+function sectionOf(markdown, version) {
+  const lines = markdown.split('\n')
+  const start = lines.findIndex(line => line.trim() === `## v${version}`)
+  if (start < 0) return null
+  const rest = lines.slice(start + 1)
+  const end = rest.findIndex(line => /^##\s/.test(line))
+  return end < 0 ? rest : rest.slice(0, end)
+}
+
+// 取小节里的中文段（「### 中文」到「### English」之间）。
+function chinesePart(section) {
+  const start = section.findIndex(line => line.trim() === '### 中文')
+  if (start < 0) return []
+  const rest = section.slice(start + 1)
+  const end = rest.findIndex(line => /^###\s/.test(line))
+  return end < 0 ? rest : rest.slice(0, end)
+}
+
+function readReleaseSummary(devRef, version) {
+  const shown = git(['show', `${devRef}:${RELEASE_NOTES_PATH}`])
+  if (shown.code !== 0) {
+    throw new ReleaseError(`dev 树里没有 ${RELEASE_NOTES_PATH}，无法生成发布摘要，拒绝发版`)
+  }
+  const section = sectionOf(shown.stdout, version)
+  if (!section) {
+    throw new ReleaseError(`${RELEASE_NOTES_PATH} 里没有「## v${version}」小节，无法生成发布摘要，拒绝发版`)
+  }
+  const chinese = chinesePart(section)
+  if (chinese.length === 0) {
+    throw new ReleaseError(`${RELEASE_NOTES_PATH} 的「## v${version}」小节缺少中文段，无法生成发布摘要，拒绝发版`)
+  }
+  const titles = []
+  for (const line of chinese) {
+    const bullet = /^\s*[-*]\s+(.*)$/.exec(line)
+    if (!bullet) continue
+    const bold = /\*\*(.+?)\*\*/.exec(bullet[1])
+    if (bold) titles.push(bold[1].trim())
+  }
+  if (titles.length > 0) return truncate(titles.join('、'))
+  const paragraph = chinese.map(line => line.trim()).find(line => line && !line.startsWith('#'))
+  if (!paragraph) {
+    throw new ReleaseError(`${RELEASE_NOTES_PATH} 的「## v${version}」中文段没有可用的变更摘要，拒绝发版`)
+  }
+  return truncate(paragraph.split(/[。！？]/)[0])
 }
 
 // package.json 除 version 外是否完全一致：用于判定「同一份包的快照」。
@@ -157,11 +230,12 @@ function findSnapshotBase() {
     if (tree === mainTree) return { sha, match: 'exact' }
   }
 
-  // 提交信息里记着上次的 dev 快照（约定：release: vX（dev 快照 <sha>）），先试它再全量扫描。
+  // 提交信息里记着上次的 dev 快照（约定：正文 trailer「dev-snapshot: <sha>」，
+  // 历史发版提交是标题里的「（dev 快照 <sha>）」），先试它再全量扫描。
   const message = gitText(['log', '-1', '--format=%B', 'main'])
   const candidates = []
-  const hinted = /([0-9a-f]{7,40})/i.exec(message)
-  if (hinted) candidates.push(hinted[1])
+  const hinted = snapshotHintFrom(message)
+  if (hinted) candidates.push(hinted)
   for (const { sha } of commits) {
     if (candidates.length >= SNAPSHOT_SCAN_LIMIT) break
     if (!candidates.includes(sha)) candidates.push(sha)
@@ -228,6 +302,8 @@ function preflight() {
 
   const version = readVersion()
   const tag = `v${version}`
+  // 发布摘要在 preflight 阶段就取：取不到直接拒绝，不推进任何远端状态。
+  const summary = readReleaseSummary('dev', version)
 
   const localTag = git(['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])
   if (localTag.code === 0) {
@@ -241,6 +317,7 @@ function preflight() {
     branch,
     version,
     tag,
+    summary,
     devCommit: short(gitText(['rev-parse', 'dev'])),
     mainCommit: short(localMain),
     remoteDev: short(heads.dev),
@@ -278,7 +355,7 @@ function detectMergeMode() {
 
 // 步骤 ②：把 dev 落到 main。可快进则 fast-forward；否则要求 main 的内容确实是 dev 的历史快照，
 //         再按本仓惯例做一次树快照提交。main 有分叉/被改写时拒绝强行合并。
-function landDevOnMain(version) {
+function landDevOnMain(version, summary) {
   const before = gitText(['rev-parse', 'main'])
   const devCommit = gitText(['rev-parse', 'dev'])
   const detected = detectMergeMode()
@@ -316,7 +393,7 @@ function landDevOnMain(version) {
     return { mode: 'snapshot', from: short(before), to: short(after), commit: short(after), devSnapshot: short(devCommit), baseSnapshot: short(base.sha), unchanged: true }
   }
 
-  const message = `release: v${version}（dev 快照 ${short(devCommit)}）`
+  const message = buildCommitMessage(version, devCommit, summary)
   // DSH_SKIP_VERSION_BUMP=1：main 上的发布快照不消耗版本号，保证 tag 名与包内 version 一致。
   const commit = git(['commit', '-m', message], { env: { DSH_SKIP_VERSION_BUMP: '1' } })
   if (commit.code !== 0) {
@@ -410,6 +487,7 @@ try {
   result.version = pre.version
   result.tag = pre.tag
   result.summary.devCommit = pre.devCommit
+  result.summary.releaseSummary = pre.summary
   result.summary.mainCommitBefore = pre.mainCommit
 
   if (DRY_RUN) {
@@ -430,7 +508,7 @@ try {
     result.summary.mergeMode = detected.mode
   } else {
     runStep('push-dev', pushDev)
-    const landed = runStep('merge-main', () => landDevOnMain(pre.version))
+    const landed = runStep('merge-main', () => landDevOnMain(pre.version, pre.summary))
     result.summary.mergeMode = landed.mode
     result.summary.mainCommit = landed.commit
     runStep('push-main', pushMain)
