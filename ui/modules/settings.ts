@@ -260,6 +260,29 @@ function renderPromptSegmentsCard() {
     </div>`
 }
 
+// 设置变更历史（A4/DSHBOTS-330）：audit_log 只读视图的呈现——回答「谁在什么时候改了什么」。
+// 只回看不代恢复：历史行是增量 patch，恢复语义 = 按行内值手动重存（revision 闸兜并发）。
+function renderSettingsHistoryCard() {
+  const history = state.data.settingsHistory ?? []
+  const actionLabel = (action) => action === 'settings.update'
+    ? t('global.historyActionSettings')
+    : action === 'prompt_segment.update' ? t('global.historyActionSegment') : t('global.historyActionSegmentReset')
+  return `
+    <div class="card form-card g-card">
+      <div class="card-head"><h3>${t('global.historyTitle')}</h3><span class="meta">${t('global.historyMeta', { count: history.length })}</span></div>
+      ${history.length === 0 ? `<div class="hint">${t('global.historyEmpty')}</div>` : `
+      <div class="g-fields">
+        ${history.slice(0, 10).map(item => `
+          <div class="field">
+            <span class="field-label mono">${attr(item.at.replace('T', ' ').slice(0, 19))}</span>
+            <div class="hint">${esc(actionLabel(item.action))} · ${esc(item.actor)} · ${esc(item.keys.join(t('global.historySep')) || t('global.historyNoKeys'))}</div>
+          </div>`).join('')}
+      </div>
+      ${history.length > 10 ? `<div class="hint">${t('global.historyMore', { count: history.length - 10 })}</div>` : ''}`}
+      <div class="hint">${t('global.historyHint')}</div>
+    </div>`
+}
+
 function renderOpsCard() {
   const settings = state.data.settings ?? {}
   const currency = settings.budget_currency || 'CNY'
@@ -482,7 +505,7 @@ function renderGlobal() {
       }),
       pageSection({
         index: '02', id: 'g-runtime', title: t('global.groupRuntime'), desc: t('global.groupRuntimeDesc'),
-        body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}`,
+        body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}${slot('full', renderSettingsHistoryCard())}`,
       }),
       pageSection({
         index: '03', id: 'g-prompts', title: t('global.groupPrompts'), desc: t('global.groupPromptsDesc'),
@@ -496,4 +519,4 @@ function renderGlobal() {
   )
 }
 
-export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderPromptSegmentsCard, renderSettings, currentScale, renderGlobal }
+export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderPromptSegmentsCard, renderSettingsHistoryCard, renderSettings, currentScale, renderGlobal }

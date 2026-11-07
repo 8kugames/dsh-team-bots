@@ -18,6 +18,17 @@ export default {
   "global.groupPref": "Preferences",
   "global.groupRuntime": "Runtime & budget",
   "global.groupAbout": "About & system status",
+  // Settings change history (A4/DSHBOTS-330)
+  "global.historySep": ", ",
+  "global.historyTitle": "Settings change history",
+  "global.historyMeta": "Latest ${count} entries (includes team instruction saves)",
+  "global.historyEmpty": "No settings changes recorded yet.",
+  "global.historyNoKeys": "(no field changes)",
+  "global.historyMore": "${count} older entries are available via the API.",
+  "global.historyActionSettings": "Settings saved",
+  "global.historyActionSegment": "Team instruction saved",
+  "global.historyActionSegmentReset": "Team instruction reset to default",
+  "global.historyHint": "View-only: re-save the values in the corresponding card to restore; the save gate guards against concurrent overwrites.",
   // Team instruction segments (B1/DSHBOTS-324)
   "global.groupPrompts": "Team instructions",
   "global.groupPromptsDesc": "Four editable instruction blocks injected into bot prompts",

@@ -18,7 +18,7 @@ import { ensureRolloverSchema } from './rollover-schema.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 import { ensureWechatTriggerSchema } from './wechat-trigger-schema.js'
 import { PROMPT_SEGMENT_DEFAULTS, PROMPT_SEGMENT_MAX_CHARS, PROMPT_TRIO_BUDGET, parsePromptOverrides, promptOverridesHash, taskGuidanceTrioLength } from './runtime/prompt.js'
-import { id, nowIso } from '../util.js'
+import { id, jsonParse, nowIso } from '../util.js'
 
 
 
@@ -171,6 +171,34 @@ export const coreMethods = {
   settingsRevision() {
     return Number(this.store.setting('settings_revision', '0')) || 0
   },
+  // 设置变更历史（A4/DSHBOTS-330）：audit_log 本就是 append-only 的不可变账本（B2 起
+  // updateSettings/prompt_segment 每次保存都审计 values），本方法只做只读视图——回答
+  // 「谁在什么时候改了什么」。只记 DB/页面值（审计 data 即 patch），进程级环境变量不混入。
+  // 不做一键恢复：审计行是增量 patch 非全量快照，恢复语义 = 用户按历史行手动重存
+  // （B2 的 revision 闸会拦下并发覆盖）。
+  settingsHistoryView(limit = 30) {
+    const rows = this.store.all(
+      `SELECT actor_type, actor_id, action, target_id, data_json, created_at FROM audit_log
+       WHERE action IN ('settings.update', 'prompt_segment.update', 'prompt_segment.reset')
+       ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      Math.max(1, Math.min(100, Number(limit) || 30)),
+    )
+    return rows.map(row => {
+      const data = jsonParse(row.data_json, {})
+      // prompt_segment 行的 data 只记字符数（不重复存正文），变更键用段键（target_id）呈现。
+      const keys = row.action.startsWith('prompt_segment.')
+        ? [row.target_id]
+        : Object.keys(data ?? {})
+      return {
+        at: row.created_at,
+        actor: `${row.actor_type}:${row.actor_id}`,
+        action: row.action,
+        target: row.target_id,
+        keys,
+        data,
+      }
+    })
+  },
   settingsView() {
     const keys = [
       'budget_currency', 'global_token_budget', 'global_cost_budget',
@@ -282,7 +310,9 @@ export const coreMethods = {
       // 乐观并发令牌随保存推进（B2/DSHBOTS-325）：settings_revision 不是 settingsView 键，
       // 不可经 patch 直接写，只在这里单调递增。
       this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
-      this.audit(actor, 'settings.update', 'settings', 'global', 'global', values)
+      // A4/DSHBOTS-330 修复：此前本行是六参误用（audit 只收五参），values 被静默丢弃、
+      // 审计行只剩 data='global'——变更历史的「改了什么」从此处起才有值。
+      this.audit(actor, 'settings.update', 'settings', 'global', values)
       // 运行时效单列一条 global.run_limits 审计，便于按目标检索改值历史。
       const limitKeys = Object.keys(RUN_LIMIT_RANGES)
       if (limitKeys.some(key => values[key] !== undefined)) {
@@ -293,8 +323,7 @@ export const coreMethods = {
     return this.settingsView()
   },
 
-  // 可编辑提示词段（B1/DSHBOTS-324）：只读视图。defaultChanged = 覆盖保存时的内置默认
-  // 指纹与当前默认不一致（升级改了默认文本），UI 据此给「保留我的文本 / 恢复新默认」取舍。
+  // 可编辑提示词段（B1/DSHBOTS-324）：只读视图。defaultChanged = 覆盖保存时的内置默认  // 指纹与当前默认不一致（升级改了默认文本），UI 据此给「保留我的文本 / 恢复新默认」取舍。
   promptSegmentsView() {
     const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
     return Object.entries(PROMPT_SEGMENT_DEFAULTS).map(([key, defaultText]) => {

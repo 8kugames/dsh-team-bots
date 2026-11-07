@@ -18,6 +18,17 @@ export default {
   "global.groupPref": "偏好",
   "global.groupRuntime": "运行与预算",
   "global.groupAbout": "关于与系统状态",
+  // 设置变更历史（A4/DSHBOTS-330）
+  "global.historySep": "、",
+  "global.historyTitle": "设置变更历史",
+  "global.historyMeta": "最近 ${count} 条（含团队指令段保存）",
+  "global.historyEmpty": "还没有设置变更记录。",
+  "global.historyNoKeys": "（无字段变化）",
+  "global.historyMore": "其余 ${count} 条更早的记录可经 API 查询。",
+  "global.historyActionSettings": "设置保存",
+  "global.historyActionSegment": "团队指令保存",
+  "global.historyActionSegmentReset": "团队指令恢复默认",
+  "global.historyHint": "只回看不代恢复：按行内值在对应卡片重存即可，并发覆盖由保存闸拦截。",
   // 团队指令段（B1/DSHBOTS-324）
   "global.groupPrompts": "团队指令",
   "global.groupPromptsDesc": "注入 bot 提示词的四段可编辑指令",
