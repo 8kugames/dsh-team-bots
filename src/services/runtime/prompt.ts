@@ -660,12 +660,11 @@ Before reporting delivery, self-run the reproducible verification and put the ev
 The previous run was interrupted by a host restart. Check the workspace and git status first to verify the current state, then resume from where it stopped; do not repeat external actions already performed (commits/publishes/messages).` : ''
       // agentTeam 门控（DSHBOTS-254 收口）：单卡内并行的执行口径——teammates/子代理、
       // 部件落项目 KEY-N 卡、交付前 wait_agent 汇总。拆分判据不在此重复（见上方提速拆分段）。
-      // DSHBOTS-292：并行执行的主力改「按任务号开子智能体」——子代理写继承控制面沙箱、
-      // 不受任务写范围调度闸门约束（ADR §2.4 三层补偿之②提示词写入边界）。
+      // 子代理化解除（DSHBOTS-311 硬闸撤销）：亲做与派子代理均可，派时命名 bot 名+任务号。
       const parallel = this.config.agentTeam ? `
 
 # Child agents by task number
-Execute each card in a dedicated child agent (subagent/subagent_fork) labeled with its task number (KEY-N); never merge cards into one agent — every card runs in a dedicated child agent. Child writes inherit your session sandbox, not the task write-scope gates: pass the card's declared write scopes as the child's write boundary. Children report changed paths, verification with results, risks; merge and review their output yourself before delivering.` : ''
+Execute each card yourself, or hand it to a dedicated child agent (subagent/subagent_fork) named <your bot name>-<task number> (e.g. Builder-ORD-3); never merge cards into one agent. Child writes inherit your session sandbox, not the task write-scope gates: pass the card's declared write scopes as the child's write boundary. Children report changed paths, verification with results, risks; merge and review their output yourself before delivering.` : ''
       const parallelMerge = this.config.agentTeam ? `
 
 # Parallel work inside this task
