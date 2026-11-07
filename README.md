@@ -4,6 +4,8 @@
 
 `dsh-team-bots` is a DSH plugin that turns one workspace into a team: project group chats, a task board, write-scope parallel scheduling, shared memory and skills, approval cards, usage and cost, and a personal WeChat channel. Every run keeps its trajectory, duration, token count and cost.
 
+![The DSH Team Bots workspace: the task board of a project](docs/assets/tasks.png)
+
 ## Requirements
 
 - Node.js ≥ 22.19
@@ -38,7 +40,7 @@ The first visit exchanges the current startup token for a 30-day login cookie. A
 
 ### Group chats and dispatch
 
-Every project is a group chat. A bot can also be addressed one-to-one in a dispatch view. Session bindings run in four lanes — task, solo, dm, project — so a group chat, a task run and a direct message never block each other.
+Every project is a group chat. A bot can also be addressed one-to-one in a dispatch view. All traffic for one bot — task dispatch, group chat, direct message, one-to-one chat — lands on a single control-plane session, and that bot runs one task at a time; different bots still run in parallel.
 
 ### Task board
 
@@ -58,7 +60,15 @@ When a bot asks for a tool approval, a secret, or an answer, the workspace shows
 
 ### Usage and cost
 
-The usage page breaks the numbers down by model, bot and project, exports CSV, and reads model prices from configuration. Run limits (timeout abort, no-progress watchdog, review idle threshold) and budgets are set per workspace.
+The usage page breaks the numbers down by model, bot and project, exports CSV, and reads model prices from configuration.
+
+![Global usage: tokens, calls, cost and model price rules](docs/assets/usage.png)
+
+### Workspace settings
+
+Run limits (timeout abort, no-progress watchdog, review idle threshold), budgets and retention windows are set per workspace, together with the interface preferences and the local DSH paths.
+
+![Global configuration: preferences, runtime limits, budgets and system status](docs/assets/global-config.png)
 
 ### Terminal, channels, secrets
 
