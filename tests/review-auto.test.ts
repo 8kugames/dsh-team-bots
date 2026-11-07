@@ -130,6 +130,19 @@ function runRow(t, where, ...args) {
   return t.store.get(`SELECT * FROM runs WHERE ${where}`, ...args)
 }
 
+// DSHBOTS-308 域化：挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
+// 断言跨域扫描本 bot 的全部域队列合并后读取。
+function heldItems(t, botId) {
+  const rows = t.store.all("SELECT key, value FROM settings WHERE key LIKE ?", `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    if (!row.key.startsWith(`bot_pending_msgs:${botId}:`)) continue
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
+}
+
 test('交付迁移 in_review 自动派生核验运行：同入口形态、留痕、不阻塞迁移', async () => {
   const t = await setup({ auto: true })
   try {
@@ -579,11 +592,17 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
        VALUES ('run_owner_busy', ?, ?, 'chat', 'read', 'test', 'running', 1, 'busy:owner_gate', ?)`,
       t.project.id, t.director.id, new Date().toISOString(),
     )
-    const pending = () => JSON.parse(t.store.setting(`bot_pending_msgs:${t.director.id}`) ?? '[]')
+    // DSHBOTS-308 域化：owner_task 挂起域 = 任务所属工作区，断言按域键读取。
+    const pending = () => heldItems(t, t.director.id)
     assert.equal(t.service.enqueueOwnerTaskRun(t.service.taskRow(task.id), 'review'), null, 'owner 真忙时返回 null')
     assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'review'")?.n, 0, '不落 runs 行')
     assert.equal(pending().length, 1, '挂待处理队列')
     assert.equal(pending()[0].kind, 'owner_task')
+    assert.equal(
+      JSON.parse(t.store.setting(`bot_pending_msgs:${t.director.id}:${t.project.id}`) ?? '[]').length,
+      1,
+      '挂起项记在任务所属工作区的域键下',
+    )
 
     t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_owner_busy'", new Date().toISOString())
     t.service.drainPendingMessages()
@@ -592,6 +611,37 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
     assert.equal(review.bot_id, t.director.id)
     assert.equal(review.task_id, task.id)
     assert.deepEqual(pending(), [], '挂起队列清空')
+
+    // DSHBOTS-308 域化反转：占道运行在「本工作区」域上，另一工作区的验收属他域，
+    // 不被本域占道阻塞——直接落 runs 行，且不挂起。
+    const otherProject = await t.service.createProject({
+      name: 'Other', key: 'OTH', ownerBotId: t.director.id, memberIds: [t.dev.id],
+    })
+    const otherTask = await t.service.createTask({
+      projectId: otherProject.id, title: '别的工作区的验收卡', assigneeBotId: t.dev.id,
+      status: 'in_progress', postCard: false,
+    }, t.actor)
+    const otherRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(otherTask.id), 'review')
+    assert.ok(otherRunId, '跨域验收不被本域占道阻塞，直接落 runs 行')
+    assert.equal(
+      t.store.get('SELECT project_id FROM runs WHERE id = ?', otherRunId).project_id,
+      otherProject.id,
+      '跨域验收的运行落在它自己的工作区',
+    )
+    assert.equal(
+      heldItems(t, t.director.id).filter(item => item.projectId === otherProject.id).length,
+      0,
+      '跨域验收不挂起',
+    )
+    // 调度侧同样按域并行：他域验收运行与本域验收运行同刻在跑（claimKey 域化）。
+    assert.ok(
+      await waitFor(() => t.store.get("SELECT id FROM runs WHERE id = ? AND status = 'running'", otherRunId)),
+      '跨域验收运行照常被领取开跑',
+    )
+    assert.ok(
+      t.store.get("SELECT id FROM runs WHERE id = ? AND status = 'running'", review.id),
+      '本域验收运行同时在跑，两域并行不互相阻塞',
+    )
   } finally { await t.close() }
 })
 

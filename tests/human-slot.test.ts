@@ -44,8 +44,8 @@ async function manualSetup({ maxConcurrentRuns }: { maxConcurrentRuns?: number }
   service.started = false // 测试手动驱动 tick
   const director = store.get('SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)')
   const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
-  // one_active_run_per_bot（DSHBOTS-291）：占槽任务与借槽人消息必须分属不同 bot，
-  // 同 bot 的第二条会被 bot 级串行挂起、观测不到保底槽行为。
+  // 串行域 = (bot, 工作区)（DSHBOTS-308）：占槽任务与借槽人消息必须分属不同 bot——
+  // 同 bot 同工作区的第二条人消息会被串行挂起、观测不到保底槽行为。
   const dev2 = await service.createBot({ name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
   const project = await service.createProject({ name: 'HumanSlot', key: 'HSLOT', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
   return { root, store, service, runtime, director, dev, dev2, project }
@@ -64,6 +64,17 @@ function primeChatRun(service, project, dev, body) {
 }
 
 async function cleanup(root, store) { await store.close(); await rm(root, { recursive: true, force: true }) }
+
+// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
+const heldItems = (store, botId) => {
+  const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
+}
 
 test('满并发时人消息运行借保底槽仍能起来 1 条，并写 human_slot 事件', async () => {
   const { root, store, service, runtime, director, dev, dev2, project } = await manualSetup({ maxConcurrentRuns: 1 })
@@ -93,11 +104,11 @@ test('第二条人消息在借槽运行期间挂起（保底槽仍只放行 1 �
     assert.ok(runtime.started.includes(first), '第一条人消息借槽启动')
     // 收尾会派生 memory_review 占住 bot，关掉让「空闲建回」可观测。
     store.setSetting('chat_memory_review', '0')
-    // bot 级串行（争用口径 A）：借槽运行在跑期间，同 bot 第二条人消息不再于领取时合并，
-    // 而是挂 bot_pending_msgs 待处理队列、不落 runs 行。
+    // bot 级串行（争用口径 A）：借槽运行在跑期间，同 bot 同一工作区的第二条人消息不再于
+    // 领取时合并，而是挂 bot_pending_msgs:<bot>:<domain> 待处理队列、不落 runs 行。
     const second = primeChatRun(service, project, dev2, '@Builder2 追问二')
     assert.equal(second, null, '忙时第二条人消息挂起不落 runs 行')
-    const held = JSON.parse(store.setting(`bot_pending_msgs:${dev2.id}`) ?? '[]')
+    const held = heldItems(store, dev2.id)
     assert.equal(held.length, 1, '挂起队列留痕')
     await service.tick()
     assert.equal(runtime.started.length, 2, '保底槽期间只有占槽任务与第一条借槽运行，不再放行第二条')

@@ -89,6 +89,19 @@ async function setup() {
   return { root, store, service, runtime, project, builder, task, originSession }
 }
 
+// DSHBOTS-308 域化：挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
+// 断言需跨域扫描合并本 bot 的全部域队列（不再有单一无域键）。
+const heldItems = (store, botId) => {
+  const rows = store.all("SELECT key, value FROM settings WHERE key LIKE ?", `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    if (!row.key.startsWith(`bot_pending_msgs:${botId}:`)) continue
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
+}
+
 async function closeQuietly(store, timeout = 2000) {
   const started = Date.now()
   while (Date.now() - started < timeout) {
@@ -220,11 +233,15 @@ test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运�
       )
       return store.get('SELECT * FROM bot_messages WHERE id = ?', id)
     }
-    const pending = () => JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]')
+    const pending = () => heldItems(store, director.id)
+    // DSHBOTS-308 域化：dm 的串行域 = 私信所属工作区（message.project_id ?? '~solo'），
+    // 本例私信都带 project_id → 挂起项落在该项目的域键上。
+    const domainKey = `bot_pending_msgs:${director.id}:${project.id}`
     for (const mid of ['botm_dm1', 'botm_dm2', 'botm_dm3']) {
       assert.equal(service.enqueueDmRun(insertDm(mid), director), null, '忙时 dm 不落 runs 行，挂待处理队列')
     }
     assert.equal(pending().length, 3, '三条 dm 全部挂起')
+    assert.equal(JSON.parse(store.setting(domainKey) ?? '[]').length, 3, '挂起项记在本工作区域键下')
 
     // 总监空闲：drain 只放行一条，两条留队列。
     store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run_dm_busy'", new Date().toISOString())
@@ -237,6 +254,19 @@ test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运�
     service.drainPendingMessages()
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'dm'")?.n, 2, '下一拍再放行一条')
     assert.equal(pending().length, 1, '最后一条仍在队列')
+
+    // DSHBOTS-308 域化反转：占道运行在「本工作区」域上，另一工作区的私信属他域，
+    // 不被本域占道阻塞——直接落 runs 行，且不混入本域挂起队列。
+    const other = await service.createProject({ name: 'Beta', key: 'BETA', memberIds: [builder.id] })
+    store.run(
+      `INSERT INTO bot_messages(id, project_id, from_bot_id, to_bot_id, request_id, text, origin_session_id, origin_kind, status, created_at)
+       VALUES ('botm_dm_other', ?, ?, ?, 'req-other', '在吗', ?, 'task', 'pending', ?)`,
+      other.id, builder.id, director.id, originSession, new Date().toISOString(),
+    )
+    const otherRunId = service.enqueueDmRun(store.get('SELECT * FROM bot_messages WHERE id = ?', 'botm_dm_other'), director)
+    assert.ok(otherRunId, '跨域私信不被本域占道阻塞，直接落 runs 行')
+    assert.equal(store.get('SELECT project_id FROM runs WHERE id = ?', otherRunId).project_id, other.id)
+    assert.equal(pending().length, 1, '跨域私信不入本域挂起队列，本域挂起项原样保留')
   } finally {
     await closeQuietly(state.store)
   }
@@ -263,10 +293,16 @@ test('messageId 去重：忙时重复挂起不累积；同幂等键运行已存�
       project.id, builder.id, director.id, originSession, new Date().toISOString(),
     )
     const message = store.get('SELECT * FROM bot_messages WHERE id = ?', 'botm_dup1')
-    const pending = () => JSON.parse(store.setting(`bot_pending_msgs:${director.id}`) ?? '[]')
+    // DSHBOTS-308 域化：挂起队列按域分键，去重断言跨域扫描本 bot 的全部域队列。
+    const pending = () => heldItems(store, director.id)
     assert.equal(service.enqueueDmRun(message, director), null)
     assert.equal(service.enqueueDmRun(message, director), null, '重复入队同一 messageId 同样挂起')
     assert.equal(pending().length, 1, '队列不累积重复项')
+    assert.equal(
+      JSON.parse(store.setting(`bot_pending_msgs:${director.id}:${project.id}`) ?? '[]').length,
+      1,
+      '挂起项记在本工作区域键下',
+    )
 
     // DSHBOTS-304：挂起项之外已存在同 idempotency_key 的运行（终态也算）＝双投胜利方已
     // 处理该消息，失败方挂起副本作废——drain 清扫消账，不留永生占位，也不重复建行。
