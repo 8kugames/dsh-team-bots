@@ -12,3 +12,4 @@ src/**/*.js
 ui/**/*.js
 tests/**/*.js
 scripts/**/*.test.js
+pnpm-lock.yaml
