@@ -32,6 +32,19 @@ export const RECENT_INCREMENTAL_LIMIT = 24
 // 不再重复进尾窗（命中即整条跳过，不占窗位）。
 export const NOISE_SYSTEM_BODY = /^(已写入.+记忆。|任务 \S+ 验收通过。|密钥 \S+ 的请求被拒绝。)$/
 
+// 通信纪律（吸收 superagent 原型 prompts/team/communication.md，DSHBOTS-321 A1）：
+// 默认沉默、只在需人时外发——三个触发条件（结果就绪 / 需要决策 / 确实做不完），
+// 进度叙述与重试噪声不算里程碑；一次只问一个具体问题；发送前逐句裁剪。
+// 只注入项目会话身份段的 owner/member 变体：任务会话的交付纪律由 deliverySelfcheckBlock
+// 承担（D-276），单聊是用户主动问的直接应答面，两者都不注入本段。
+// 系统通知模板侧（任务生命周期消息/滞留提醒/防循环闸）已由 D-95 P2-1、D-267、D-280、
+// D-228 落地压缩，本卡净增量即此提示词纪律。
+export const COMMUNICATION_RULES = [
+  '- Speak only when someone must act or decide: a deliverable is ready for review, a decision is required, or the work is truly stuck. Progress narration, retry chatter and intermediate tool output are not milestones — do not post them.',
+  '- When a decision is needed, ask one concrete question at a time, with just enough context to answer it.',
+  '- Before sending, reread the draft and cut every sentence whose removal does not change what the reader does or knows.',
+]
+
 // 沙箱档位按运行类型收紧：一切非写运行（mode!=='write'，如 dm/dm_reply/chat/review 等）
 // 物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
 // 无运行上下文（run 为空）时同样保持 bot.file_policy。
@@ -173,6 +186,7 @@ export const promptMethods = {
             '- When a task can be split, use `subagent` / `subagent_fork` to spawn child agents for parallel acceleration. Child-agent file writes are not governed by tasks.write_scopes dispatch gates (they inherit the parent session sandbox); before dispatching, check for write-scope conflicts with other members, and review child-agent output yourself before delivering it.',
             '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
             '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
+            ...COMMUNICATION_RULES,
           ]
         : [
             '- You are a long-lived teammate. Your replies in the project group are visible to the user and other bots.',
@@ -184,6 +198,7 @@ export const promptMethods = {
             '- Use `team_remember` for durable facts, preferences, decisions or lessons worth keeping. Never store secrets or credentials.',
             '- Use `team_propose_evolution` to suggest a durable instruction or skill change. You cannot approve your own proposal.',
             '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
+            ...COMMUNICATION_RULES,
           ]
     // DSHBOTS-238：成员 bot 子代理并行指引（静态段，前缀缓存区）。
     // 「生成子代理/组建临时团队」能力由宿主 preset 全局注册（subagent / subagent_fork /
