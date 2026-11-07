@@ -285,15 +285,17 @@ export const runsMethods = {
   deliverBotReply(message) {
     const caller = this.store.get('SELECT * FROM bots WHERE id = ?', message.from_bot_id)
     if (!caller || caller.status !== 'active') return null
-    // 控制面收敛（DSHBOTS-289）：回信目标按收敛顺序解析——来源任务未终态时按 runs 归属
-    // 亲和回原任务会话（steer/排运行都指向它），否则落发送方的 kind='bot' 控制面单绑定。
+    // 控制面收敛（DSHBOTS-289/299）：回信目标按收敛顺序解析——来源任务未终态时按 runs 归属
+    // 亲和回原任务会话（steer/排运行都指向它），否则落发送方在 (bot, project) 维度的
+    // kind='bot' 控制面绑定（project_id IS 兼容项目外私信的 NULL）。
     const originTask = message.origin_kind === 'task' && message.origin_task_id
       ? this.store.get('SELECT * FROM tasks WHERE id = ?', message.origin_task_id)
       : null
     const binding = (originTask ? this.runtime.taskAffinityBinding(originTask) : undefined)
       ?? this.store.get(
-        "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0",
+        "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0 AND project_id IS ?",
         caller.id,
+        message.project_id ?? null,
       )
     // 无绑定（会话被轮换清理或首次私信）：走 dm_reply 运行，由 startRun 重建会话。
     let plan

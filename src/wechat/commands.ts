@@ -154,7 +154,9 @@ async function handleFixedCommand(service, body, ctx) {
     const message = match[2].trim()
     const chat = await service.wechatChat(key, message)
     if (!chat) return projectNotFound(key, service.stateView().projects ?? [])
-    if (chat.error === 'no_owner') return noOwner(chat.project)
+    // DSHBOTS-299：/tr 转发一律落 director 专属工作区（携带 [项目 KEY] 上下文），
+    // 总监不可用属通道异常，独立出口；no_owner 出口随项目群直达一并退役。
+    if (chat.error === 'no_director') return noDirector()
     ctx?.bind?.(chat.project.key)
     return connectedReceipt(chat.project, 'dispatch')
   }

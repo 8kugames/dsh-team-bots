@@ -341,3 +341,36 @@ test('runs 与 session_bindings 的 project_id 迁移为可空', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('one_bot_binding 每 (bot,project) 一条：同 bot 跨项目独立，同项目/同 solo 域仍唯一（DSHBOTS-299 守门）', async () => {
+  const { root, store } = await soloSetup()
+  try {
+    const now = new Date().toISOString()
+    // 播种确定性锚：director 由 initialize() 种子创建，无既有 kind='bot' 绑定
+    const director = store.get("SELECT id FROM bots WHERE name = 'director'")
+    for (const key of ['ALPHA', 'BETA']) {
+      store.run(
+        `INSERT INTO projects(id, key, name, slug, description, owner_bot_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '', ?, 'active', ?, ?)`,
+        `prj-${key}`, key, key, key.toLowerCase(), director.id, now, now,
+      )
+    }
+    const insertBinding = (sessionId, projectId) => store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+       VALUES (?, ?, ?, 'bot', NULL, ?, 0)`,
+      sessionId, director.id, projectId, now,
+    )
+    insertBinding('b-alpha', 'prj-ALPHA')
+    // ① 跨项目独立：多项目 owner bot 在各项目各有控制面会话，互不吸流
+    insertBinding('b-beta', 'prj-BETA')
+    // 同 (bot, project) 恰一条
+    assert.throws(() => insertBinding('b-alpha2', 'prj-ALPHA'))
+    // ② solo 域（project_id NULL）经 COALESCE 归一后每 bot 仍恰一条
+    insertBinding('b-solo', null)
+    assert.throws(() => insertBinding('b-solo2', null))
+    assert.equal(store.all('PRAGMA foreign_key_check').length, 0)
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})

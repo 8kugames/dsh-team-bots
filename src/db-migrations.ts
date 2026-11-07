@@ -65,12 +65,15 @@ export const BINDINGS_DDL = `
   alias INTEGER NOT NULL DEFAULT 0
 `
 
-// 库与绑定收敛（DSHBOTS-285，ADR §4.1）：活跃绑定收敛为每 bot 单条 kind='bot' 控制面绑定，
+// 库与绑定收敛（DSHBOTS-285，ADR §4.1）：活跃绑定收敛为 kind='bot' 控制面绑定，
 // 旧 task/project/dm/solo 四道唯一索引删除；task_id 列保留仅供历史行解析。
+// 会话域三分（DSHBOTS-299）：唯一性放宽为每 (bot, project) 一条——solo 域是
+// project_id NULL，SQLite 唯一索引对 NULL 判互异，须 COALESCE 归一后才保住
+// 「每 bot 一条 solo 绑定」；项目维度则恢复多项目 owner bot 的项目间隔离。
 // 新库建表（db.js SCHEMA）与旧库迁移重建共用同一段 DDL，避免两处定义漂移。
 const BINDING_INDEXES = `
   CREATE UNIQUE INDEX IF NOT EXISTS one_bot_binding
-    ON session_bindings(bot_id) WHERE kind = 'bot' AND alias = 0;
+    ON session_bindings(bot_id, COALESCE(project_id, '~solo')) WHERE kind = 'bot' AND alias = 0;
   CREATE INDEX IF NOT EXISTS session_bindings_task_idx ON session_bindings(task_id);
 `
 
@@ -110,6 +113,7 @@ export function runMigrations(db) {
   migrateMessages(db)
   migrateSessionBindingAlias(db)
   migrateSessionBindingBotConvergence(db)
+  migrateSessionBindingProjectScope(db)
   // one_active_run_per_bot 激活（DSHBOTS-289，ADR §5.2-2）：控制面会话收敛（上迁移）+
   // 争用口径 A（enqueue 家族 bot 忙时挂待处理队列不落 runs 行）同车后激活——存量串行化
   // （同 bot 多条 queued/running 只留最早一条，其余 canceled）+ 建 bot 级部分唯一索引。
@@ -297,7 +301,7 @@ function migrateSessionBindingBotConvergence(db) {
     DROP INDEX IF EXISTS one_task_binding;
     DROP INDEX IF EXISTS one_solo_binding;
     CREATE UNIQUE INDEX IF NOT EXISTS one_bot_binding
-      ON session_bindings(bot_id) WHERE kind = 'bot' AND alias = 0;
+      ON session_bindings(bot_id, COALESCE(project_id, '~solo')) WHERE kind = 'bot' AND alias = 0;
   `)
   const ledger = db.prepare(
     "SELECT 1 FROM schema_migrations WHERE name = 'session_binding_bot_convergence'",
@@ -318,6 +322,25 @@ function migrateSessionBindingBotConvergence(db) {
     "UPDATE session_bindings SET alias = 1 WHERE alias = 0 AND kind IN ('task', 'project', 'dm', 'solo')",
   )
   recordMigration(db, 'session_binding_bot_convergence')
+}
+
+// 会话域三分（DSHBOTS-299）：one_bot_binding 唯一索引从 UNIQUE(bot_id) 放宽为
+// UNIQUE(bot_id, COALESCE(project_id,'~solo'))——每 (bot, project) 一条控制面绑定，
+// solo 域（project_id NULL）经 COALESCE 归一后仍每 bot 唯一。SQLite 的同名
+// CREATE UNIQUE INDEX IF NOT EXISTS 在旧列集索引已存在时不会重建，必须先 DROP
+// 再建；账本守卫只重建一次，此后每次开库只空转。旧索引每 bot 全局一条，新索引
+// 在其基础上只放宽跨项目维度，存量数据不可能违反新索引，重建必成功。
+function migrateSessionBindingProjectScope(db) {
+  const ledger = db.prepare(
+    "SELECT 1 FROM schema_migrations WHERE name = 'session_binding_project_scope'",
+  ).get()
+  if (ledger) return
+  db.exec(`
+    DROP INDEX IF EXISTS one_bot_binding;
+    CREATE UNIQUE INDEX IF NOT EXISTS one_bot_binding
+      ON session_bindings(bot_id, COALESCE(project_id, '~solo')) WHERE kind = 'bot' AND alias = 0;
+  `)
+  recordMigration(db, 'session_binding_project_scope')
 }
 
 // one_active_run_per_bot（同 bot 同时至多一条 queued/running，ADR §2.3）：机制在本卡（DSHBOTS-285）
