@@ -191,18 +191,22 @@ test('state 携带 solo 段：单聊消息、运行与 bot 视图', async () => 
   }
 })
 
-test('单聊与同 Bot 群聊互相阻塞、跨 Bot 单聊并行（DSHBOTS-219 分身通道 · 争用口径 A 新语义）', async () => {
+// DSHBOTS-308 域化：串行域 = (bot, 工作区)——单聊域 '~solo' 与项目域互不阻塞（旧语义
+// 「单聊与同 bot 群聊互相阻塞」反转），同域仍互斥；挂起队列按 bot_pending_msgs:<bot>:<domain> 分键。
+test('单聊与同 Bot 群聊跨域并行、同域仍互斥（DSHBOTS-308 串行域收窄新语义）', async () => {
   const { root, store, service, runtime, director, dev } = await soloSetup()
   try {
     // 记忆审查派生运行与本卡串行语义无关，关掉保时序确定。
     store.setSetting('memory_review', '0')
     store.setSetting('chat_memory_review', '0')
     const project = await service.createProject({ name: 'Mix', key: 'MIX', ownerBotId: director.id, memberIds: [dev.id] })
-    await service.createTask({ projectId: project.id, title: '长任务', assigneeBotId: dev.id, autoStart: true })
-    // 任务运行先落行占道（outbox 立即投递），同 bot 的单聊/群聊随后到达：全部挂起不落 runs 行。
+    // 单聊（域 '~solo'）与群聊（域 project）分属不同串行域：两条消息各自直接落 runs 行。
     await service.sendSoloMessage(dev.id, '单聊插个问题')
-    await service.sendSoloMessage(dev.id, '单聊第二条')
     await service.sendMessage(project.id, '@Builder 群里也回一句')
+    // 同域再来：第二条/第三条单聊（~solo 域）与第二条群聊（项目域）分别挂起。
+    await service.sendSoloMessage(dev.id, '单聊第二条')
+    await service.sendSoloMessage(dev.id, '单聊第三条')
+    await service.sendMessage(project.id, '@Builder 群里再回一句')
     // 跨 bot 单聊：总监自己的控制面，照常建行并行。
     await service.sendSoloMessage(director.id, '和总监单独聊聊')
 
@@ -210,35 +214,40 @@ test('单聊与同 Bot 群聊互相阻塞、跨 Bot 单聊并行（DSHBOTS-219 �
     await service.tick()
     const running = store.all("SELECT * FROM runs WHERE status = 'running'")
     const kinds = running.map(row => `${row.kind}:${row.bot_id}`)
-    // 任务运行（占道）+ 总监单聊可同时跑；Builder 单聊与群聊都被占道挂起。
-    assert.ok(kinds.includes(`task:${dev.id}`), running.map(r => r.kind).join(','))
+    // 跨域并行：同 bot 的单聊（~solo 域）与群聊（项目域）同刻在跑，互不阻塞。
+    assert.ok(kinds.includes(`solo_chat:${dev.id}`), running.map(r => r.kind).join(','))
+    assert.ok(kinds.includes(`chat:${dev.id}`), '跨域并行：单聊占道不再阻塞同 bot 群聊')
     assert.ok(kinds.includes(`solo_chat:${director.id}`), '跨 bot 单聊应照常并行启动')
-    assert.ok(!kinds.includes(`solo_chat:${dev.id}`), '同 bot 单聊被任务占道挂起，不落 runs 行')
-    assert.ok(!kinds.includes(`chat:${dev.id}`), '同 bot 群聊同样被占道挂起')
-    assert.equal(store.all("SELECT * FROM runs WHERE bot_id = ? AND kind IN ('solo_chat', 'chat')", dev.id).length, 0, '挂起期间不落任何 runs 行')
-    // 留痕：第二条单聊与群聊按序挂 bot_pending_msgs:<bot>。
-    assert.deepEqual(
-      JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').map(item => item.kind),
-      ['solo_chat', 'solo_chat', 'chat'],
-      '挂起队列保序留痕',
+    // 同域互斥：同域第二条消息挂起不落 runs 行（单聊/群聊各只一条在跑）。
+    assert.equal(
+      store.all("SELECT * FROM runs WHERE bot_id = ? AND kind IN ('solo_chat', 'chat')", dev.id).length,
+      2,
+      '同域第二条消息挂起，挂起期间只落首条运行',
     )
+    // 留痕：挂起项按域分键——单聊域两条、群聊域一条，互不混队列。
+    const soloHeld = () => JSON.parse(store.setting(`bot_pending_msgs:${dev.id}:~solo`) ?? '[]')
+    const projectHeld = () => JSON.parse(store.setting(`bot_pending_msgs:${dev.id}:${project.id}`) ?? '[]')
+    assert.deepEqual(soloHeld().map(item => item.kind), ['solo_chat', 'solo_chat'], '单聊域挂起队列保序留痕')
+    assert.deepEqual(projectHeld().map(item => item.kind), ['chat'], '群聊域挂起队列保序留痕')
 
-    // 任务收尾 → 空闲 drain：两条单聊合批建回一条运行（第二条并入 merged_messages），群聊仍留队列。
-    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'task' AND status = 'running'").id, 'succeeded', 'done')
+    // 单聊收尾 → 单聊域空闲 drain：两条单聊合批建回一条运行（第二条并入 merged_messages）；
+    // 群聊域仍被首条群聊运行占着，群聊挂起项留队列。
+    await runtime.complete(store.get("SELECT id FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id).id, 'succeeded', '单聊回复')
     await service.tick()
     const devSolo = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id)
-    assert.ok(devSolo, '空闲后单聊合批建回开跑')
+    assert.ok(devSolo, '单聊域空闲后挂起项建回开跑')
     assert.equal(JSON.parse(devSolo.merged_messages).length, 1, '建回的单聊运行应携带被合并的第二条消息')
-    assert.ok(!store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ?", dev.id), '单聊建回期间群聊仍留队列')
+    assert.deepEqual(projectHeld().map(item => item.kind), ['chat'], '单聊建回期间群聊域仍占道，群聊挂起项留队列')
 
-    // 单聊收尾 → 群聊建回开跑。
-    await runtime.complete(devSolo.id, 'succeeded', '单聊回复')
+    // 群聊收尾 → 群聊域空闲 drain：群聊挂起项建回开跑（与单聊域互不影响）。
+    await runtime.complete(store.get("SELECT id FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id).id, 'succeeded', '群聊回复')
     await service.tick()
-    assert.ok(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id), '群聊最终建回开跑')
-    assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').length, 0, '建回后挂起队列清空')
+    assert.ok(store.get("SELECT id FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id), '群聊域空闲后挂起项建回开跑')
+    assert.equal(soloHeld().length, 0, '单聊域挂起队列清空')
+    assert.equal(projectHeld().length, 0, '群聊域挂起队列清空')
 
-    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'chat' AND bot_id = ? AND status = 'running'", dev.id).id, 'succeeded', '群聊回复')
-    await runtime.complete(store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", director.id).id, 'succeeded', '好')
+    await runtime.complete(store.get("SELECT id FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", dev.id).id, 'succeeded', '单聊回复')
+    await runtime.complete(store.get("SELECT id FROM runs WHERE kind = 'solo_chat' AND bot_id = ? AND status = 'running'", director.id).id, 'succeeded', '好')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

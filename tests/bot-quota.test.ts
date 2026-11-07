@@ -94,8 +94,16 @@ async function pollRun(store, service, sql, ...params) {
   return store.get(sql, ...params)
 }
 
-const heldItems = (store, botId) =>
-  JSON.parse(store.setting(`bot_pending_msgs:${botId}`) ?? '[]')
+// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
+const heldItems = (store, botId) => {
+  const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
+}
 
 test('恢复时间解析：绝对时刻 / 相对时长 / 关键词缺失 / 已过期 / 超上界', () => {
   const now = Date.parse('2026-11-05T12:00:00')
@@ -218,7 +226,7 @@ test('解析失败兜底保守等待：reset_at 为默认窗口且来源标记 d
   }
 })
 
-test('耗尽期派发走备用模型（新语义）：忙时挂起留路由快照，空闲建回仍走备用、恢复后回主模型', async () => {
+test('耗尽期派发走备用模型（新语义）：派发直落 runs 行带备用路由快照，恢复后回主模型', async () => {
   const { root, store, service } = await setup()
   try {
     const { project, bot } = await seedAssignedBot(service)
@@ -233,24 +241,18 @@ test('耗尽期派发走备用模型（新语义）：忙时挂起留路由快�
     assert.ok(derived, '撞墙时已派生备用模型运行')
 
     const next = await service.createTask({ projectId: project.id, title: '耗尽期新任务', assigneeBotId: bot.id })
-    // one_active_run_per_bot：bot 被备用运行占用，派发挂起不落 runs 行（返回 null）。
-    assert.equal(service.enqueueTaskRun(next, 'manual', { type: 'user', id: 'u' }), null, 'bot 忙时派发挂起')
-    assert.ok(
-      heldItems(store, bot.id).some(item => item.messageId === `task:${next.id}` && item.routing?.mode === 'fallback' && item.routing?.model === 'MiniMax-M3.1-Flash'),
-      '挂起项应带备用模型路由快照',
-    )
-
-    // 备用运行置终态释放 → 空闲 drain 按快照建回：直接走备用模型并留痕 quota_fallback。
-    await flushTicks(service)
-    releaseBot(store, bot.id)
-    const rebuilt = await pollRun(store, service, 'SELECT * FROM runs WHERE task_id = ? AND kind = ?', next.id, 'task')
-    assert.ok(rebuilt, '空闲后挂起任务建回运行')
-    assert.equal(rebuilt.model_provider, 'minimax-cn', '建回运行直接走备用 provider')
-    assert.equal(rebuilt.model_model, 'MiniMax-M3.1-Flash')
-    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", rebuilt.id), '留痕 quota_fallback')
+    // 任务运行豁免 bot 串行域（单 bot 多任务并行）：bot 忙时派发不再挂起，直落 runs 行——
+    // 备用模型路由快照写进运行行（model_provider/model_model），并留痕 quota_fallback。
+    const nextRunId = service.enqueueTaskRun(next, 'manual', { type: 'user', id: 'u' })
+    assert.ok(nextRunId, 'bot 忙时派发仍直接落 runs 行（不挂起）')
+    const nextRun = store.get('SELECT * FROM runs WHERE id = ?', nextRunId)
+    assert.equal(nextRun.model_provider, 'minimax-cn', '派发行的备用 provider 快照')
+    assert.equal(nextRun.model_model, 'MiniMax-M3.1-Flash', '派发行的备用模型快照')
+    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", nextRunId), '留痕 quota_fallback')
+    assert.deepEqual(heldItems(store, bot.id), [], '任务派发不进挂起队列')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM bot_quota WHERE bot_id = ? AND provider = ?', bot.id, 'minimax-cn').n, 0, '备用 provider 未被标记耗尽')
 
-    // 人工解除后，下一条新任务回主模型（先释放仍在跑的建回运行）。
+    // 人工解除后，下一条新任务回主模型（先释放仍在跑的运行）。
     await flushTicks(service)
     releaseBot(store, bot.id)
     await service.releaseBotQuota(bot.id, { type: 'user', id: 'u' })

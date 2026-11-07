@@ -131,8 +131,18 @@ async function drainUntilChatStarted(t, messageId, maxTicks = 8) {
   return t.runtime.started.find(item => item.chatMessage?.id === messageId)
 }
 
-const heldItems = (t, botId = t.dev.id) =>
-  JSON.parse(t.store.setting(`bot_pending_msgs:${botId}`) ?? '[]')
+// DSHBOTS-308 域化：挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
+// 断言跨域扫描本 bot 的全部域队列合并后读取（域内语义不变：同域仍合批保护/提问优先）。
+const heldItems = (t, botId = t.dev.id) => {
+  const rows = t.store.all("SELECT key, value FROM settings WHERE key LIKE ?", `bot_pending_msgs:${botId}:%`)
+  const out = []
+  for (const row of rows) {
+    if (!row.key.startsWith(`bot_pending_msgs:${botId}:`)) continue
+    const arr = JSON.parse(row.value ?? '[]')
+    if (Array.isArray(arr)) out.push(...arr)
+  }
+  return out
+}
 
 test('合批保护：用户提问不并入通知触发的挂起组，独立建回保住独立回复', async () => {
   const t = await setup()
@@ -145,6 +155,12 @@ test('合批保护：用户提问不并入通知触发的挂起组，独立建�
     const noticeMsg2 = noticeMessage(t.service, t.project.id, '【通知】第二条备忘', t.director.id)
     assert.equal(t.service.enqueueChatRun(t.project, t.dev, noticeMsg2), null, '后续通知同样挂起')
     assert.deepEqual(heldItems(t).map(item => item.messageId), [userMsg, noticeMsg2], '挂起队列保序')
+    // DSHBOTS-308 域化：本例消息都在同一工作区，挂起项落在该工作区的域键下。
+    assert.equal(
+      JSON.parse(t.store.setting(`bot_pending_msgs:${t.dev.id}:${t.project.id}`) ?? '[]').length,
+      2,
+      '挂起项记在本工作区域键下',
+    )
 
     t.service.started = true
     await t.service.tick()
@@ -221,6 +237,41 @@ test('建回优先：用户提问组先于更早挂起的通知组放行（不�
       '更早挂起的通知不得先于用户提问建回',
     )
     assert.deepEqual(heldItems(t).map(item => item.messageId), [noticeMsg], '通知留队列下一拍')
+  } finally {
+    await cleanup(t.root, t.store)
+  }
+})
+
+// DSHBOTS-308 域化：串行域 = (bot, 工作区)——本域占道只挂起本域消息，他域消息照常建回
+// 运行（旧语义「同 bot 忙时一律挂起」反转）；同域消息仍照旧挂起。
+test('跨域并行：他域消息不被本域占道阻塞，同域消息照旧挂起（DSHBOTS-308 域化）', async () => {
+  const t = await setup()
+  try {
+    const other = await t.service.createProject({
+      name: 'Other', key: 'OTH', ownerBotId: t.director.id, memberIds: [t.dev.id],
+    })
+    // 本域占道：dev 在本工作区有一条群聊运行。
+    const warm = userMessage(t.service, t.project.id, '占道消息')
+    t.service.enqueueChatRun(t.project, t.dev, warm)
+    // 同域再来：照旧挂起。
+    const sameDomain = userMessage(t.service, t.project.id, '同域第二条')
+    assert.equal(t.service.enqueueChatRun(t.project, t.dev, sameDomain), null, '同域占道照旧挂起')
+    // 他域消息：不被本域占道阻塞，直接落 runs 行。
+    const otherMsg = userMessage(t.service, other.id, '另一工作区的消息')
+    const otherRunId = t.service.enqueueChatRun(other, t.dev, otherMsg)
+    assert.ok(otherRunId, '跨域消息不被本域占道阻塞，直接落 runs 行')
+    assert.equal(
+      t.store.get('SELECT project_id FROM runs WHERE id = ?', otherRunId).project_id,
+      other.id,
+      '跨域消息的运行落在它自己的工作区',
+    )
+    // 挂起项只在本域键下：他域无挂起，本域挂起项原样保留。
+    assert.deepEqual(heldItems(t).map(item => item.messageId), [sameDomain], '仅本域消息挂起')
+    assert.equal(
+      JSON.parse(t.store.setting(`bot_pending_msgs:${t.dev.id}:${other.id}`) ?? '[]').length,
+      0,
+      '他域不产生挂起项',
+    )
   } finally {
     await cleanup(t.root, t.store)
   }
