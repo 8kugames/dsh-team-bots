@@ -218,7 +218,7 @@ export const systemMethods = {
           messages: soloWindow.map(message => this.soloMessageView(message)),
           archived: { count: archivedCount, hasMore: archivedCount > 0 },
           runs: this.store.all(
-            "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 30",
+            "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 10",
             soloBot.id,
           ).map(run => this.runView(run)),
           questions: soloQuestions,
