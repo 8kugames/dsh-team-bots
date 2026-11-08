@@ -285,6 +285,7 @@ export default {
   "查看输出": "View output",
   "标题": "Title",
   "模型或强度变更会在下一次运行时生效，不会中断当前运行。": "Model or effort changes take effect on the next run and do not interrupt the current one.",
+  "仅保留最近 10 个版本，更早版本已归档至文件。": "Only the latest 10 versions are kept; earlier ones are archived to a file.",
   "模型默认": "Model default",
   "此操作不可恢复。": "This action cannot be undone.",
   "没有子目录": "No subdirectories",

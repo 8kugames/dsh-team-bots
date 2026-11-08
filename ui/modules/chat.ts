@@ -491,7 +491,7 @@ function renderSoloConfig() {
         <div class="divider"></div>
         <div class="eyebrow" style="margin-bottom:9px">${t("版本历史")}</div>
         ${revisions.length === 0 ? '<div class="faint">' + (state.soloDetail ? t("暂无版本") : t("加载中…")) + '</div>' : revisions.map(revision => `<div class="revision-row"><span class="mono">v${revision.version}</span><span class="faint">${esc(timeAgo(revision.created_at))}</span>${revision.version === bot.current_revision ? '' : `<button class="btn small" data-action="rollback-bot" data-bot-id="${attr(bot.id)}" data-revision-id="${attr(revision.id)}">${t("回滚")}</button>`}</div>`).join('')}
-        <div class="usage-note">${t("模型或强度变更会在下一次运行时生效，不会中断当前运行。")}</div>
+        <div class="usage-note">${t("模型或强度变更会在下一次运行时生效，不会中断当前运行。")}${t("仅保留最近 10 个版本，更早版本已归档至文件。")}</div>
       </aside>
     </div>`
 }

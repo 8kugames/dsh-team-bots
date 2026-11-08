@@ -4,6 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { badRequest, conflict, notFound } from '../errors.js'
 import { botWorkspaceDir, botsHome, SLUG_MAX } from '../paths.js'
 import { id, nowIso, slugify, text } from '../util.js'
@@ -18,6 +19,10 @@ export const avatarSeedPattern = /^[\w-]{1,64}$/
 
 // solo_dir 唯一冲突时事务内重生成候选的 INSERT 尝试上限。
 const SOLO_DIR_INSERT_ATTEMPTS = 5
+
+// 版本历史滚动保留（DSHBOTS-336）：表内每个 bot 只留最近 REVISION_KEEP 版，
+// 超额最旧行归档进 <dataDir>/archives/bot-revisions/<botId>.jsonl 后删除。
+export const REVISION_KEEP = 10
 
 // node:sqlite 的唯一约束错误只能按 message 判列（code 恒为 ERR_SQLITE_ERROR）：
 // 'UNIQUE constraint failed: bots.solo_dir'。返回冲突列名；非唯一约束错误返回 null。
@@ -167,6 +172,41 @@ export const botsMethods = {
       }
     }
   },
+
+  // 版本历史滚动保留（DSHBOTS-336）：查出窗口外（最近 REVISION_KEEP 版以外）的最旧行，
+  // 先整行追加进 <dataDir>/archives/bot-revisions/<botId>.jsonl（每行一个 JSON 对象），
+  // 再删除并审计留痕一条。追加失败直接抛，DELETE 不会执行——先入档后删除，数据不丢。
+  // 调用方负责事务包裹：updateBot 在事务内插行后调用；启动收敛在独立事务里逐 bot 调用。
+  archiveExcessBotRevisions(botId, actor = { type: 'system', id: 'system' }) {
+    // 倒序跳过最近 REVISION_KEEP 版，剩下的就是窗口外最旧行；反转回时间序依次入档。
+    const overflow = this.store.all(
+      'SELECT * FROM bot_revisions WHERE bot_id = ? ORDER BY version DESC LIMIT -1 OFFSET ?',
+      botId, REVISION_KEEP,
+    ).reverse()
+    if (!overflow.length) return 0
+    const dir = join(this.config.dataDir, 'archives', 'bot-revisions')
+    const file = join(dir, `${botId}.jsonl`)
+    mkdirSync(dir, { recursive: true })
+    appendFileSync(file, `${overflow.map(row => JSON.stringify({
+      id: row.id,
+      bot_id: row.bot_id,
+      version: row.version,
+      role: row.role,
+      instructions: row.instructions,
+      created_by: row.created_by,
+      created_at: row.created_at,
+    })).join('\n')}\n`)
+    this.store.run(
+      `DELETE FROM bot_revisions WHERE id IN (${overflow.map(() => '?').join(', ')})`,
+      ...overflow.map(row => row.id),
+    )
+    this.audit(actor, 'bot.revision_archive', 'bot', botId, {
+      archived: overflow.length,
+      versions: `${overflow[0].version}-${overflow.at(-1).version}`,
+      file: `archives/bot-revisions/${botId}.jsonl`,
+    })
+    return overflow.length
+  },
   async updateBot(botId, patch, actor = this.actor()) {
     const bot = this.botRow(botId)
     // removed 是移除追踪的终态：档案与历史仍可读，但不再接受任何修改（含 status 复活）。
@@ -258,6 +298,8 @@ export const botsMethods = {
           `${actor.type}:${actor.id}`, nowIso(),
         )
         this.store.run('UPDATE bots SET current_revision = ? WHERE id = ?', version, botId)
+        // 滚动保留（DSHBOTS-336）：插行后立即收敛窗口，超额最旧行先入档再删。
+        this.archiveExcessBotRevisions(botId, actor)
       }
       // 同内容重复保存（含回滚到当前内容）是 no-op：不插版本行、不 bump，审计带 unchanged 标记留痕。
       this.audit(actor, 'bot.update', 'bot', botId, snapshotTouched && snapshotUnchanged ? { ...changes, unchanged: true } : changes)

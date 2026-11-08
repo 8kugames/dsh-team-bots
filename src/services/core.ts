@@ -44,6 +44,15 @@ export const coreMethods = {
       // 密钥与数据库对不上就在启动时暴露，别等到第一次写密文才炸。
       this.ensureSecretBox()
       await this.ensureSoloWorkspaces()
+      // 版本历史存量收敛（DSHBOTS-336）：每个 bot 的超额行同口径先入档再删；
+      // 已收敛的库查不出超额行，空转零写入。单个 bot 失败只告警，下次启动重试。
+      for (const bot of this.store.all('SELECT id FROM bots')) {
+        try {
+          this.store.transaction(() => this.archiveExcessBotRevisions(bot.id))
+        } catch (error: any) {
+          this.logger.warn?.(`dsh-team: Bot ${bot.id} 版本历史存量收敛失败（下次启动重试）: ${error?.message ?? error}`)
+        }
+      }
       this.store.run(
         `INSERT INTO users(id, name, role, created_at) VALUES (?, ?, 'admin', ?)
          ON CONFLICT(id) DO NOTHING`,
