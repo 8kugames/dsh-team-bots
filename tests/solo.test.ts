@@ -185,6 +185,21 @@ test('state 携带 solo 段：单聊消息、运行与 bot 视图', async () => 
     assert.equal(view.solo.runs[0].project_id, null)
     // 群聊段不受影响
     assert.equal(view.project.id, project.id)
+
+    // DSHBOTS-338：该 bot 的运行记录默认视图封顶 10 条（用量 tab 第三分区数据源）。
+    // 预插 12 条 project_id IS NULL 的 run（queued_at 递增错开）→ 恰回 10 条且排头为最新。
+    const base = Date.parse(run.queued_at)
+    for (let i = 1; i <= 12; i++) {
+      store.run(
+        `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+         VALUES (?, NULL, ?, 'solo_chat', 'write', 'mention', 'succeeded', 1, ?, ?)`,
+        `r-338-${String(i).padStart(2, '0')}`, dev.id, `k-338-${i}`, new Date(base + i * 60_000).toISOString(),
+      )
+    }
+    const capped = await service.state(project.id, dev.id)
+    assert.equal(capped.solo.runs.length, 10, '运行记录只带最近 10 条')
+    assert.equal(capped.solo.runs[0].id, 'r-338-12', '排头应为 queued_at 最新的那条')
+    assert.ok(capped.solo.runs.every(item => item.project_id === null))
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

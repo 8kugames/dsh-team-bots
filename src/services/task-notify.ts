@@ -1,8 +1,9 @@
 // 任务通知域：任务生命周期事件的对外通知锚点。
-// 微信推送收敛（DSHBOTS-182）：微信通道只在「创建成功」与「真正完成（→done 转换）」
+// 微信推送收敛（DSHBOTS-182）：通道只在「创建成功」与「真正完成（→done 转换）」
 // 各推一条（创建→完成闭环），交付（in_review/待验收）节点不推。幂等不靠通知键，
 // 靠锚定一次性事件本身：创建是单次 INSERT；done 是受 TRANSITIONS 守卫的状态转换
-// （done→done 不构成转换）。通道未启用时静默（service.wechat 为 null）；
+// （done→done 不构成转换）。通道未启用时静默（无可用通道即 no-op）；
+// DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
 // 通知失败不能把已落库的变更打挂。
 // notifyTaskStarted（DSHBOTS-100）是群内开工通知+运行入队（非微信推送），
 // 与两个微信锚点同属任务通知域，一并落在本文件。
@@ -96,26 +97,30 @@ export const taskNotifyMethods = {
     }
     return { taskId: task.id, steered: Boolean(run) }
   },
-  // 任务完成微信推送（DSHBOTS-182）：锚定 →done 转换，触发点在 updateTask。
+  // 任务完成通知（DSHBOTS-182）：锚定 →done 转换，触发点在 updateTask。
+  // 幂等收据键（A3/DSHBOTS-323）：task-done:<task.id>——同卡重复推送在通道存留期内被吸收。
+  // DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
   notifyTaskDone(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
     try {
-      this.wechat?.notify(taskDone(identifier, task.title))
+      this.channelNotify?.(taskDone(identifier, task.title), { receiptKey: `task-done:${task.id}` })
     } catch (error: any) {
-      this.logger.warn?.('dsh-team: 任务完成微信通知失败 %s: %s', identifier, error?.message ?? error)
+      this.logger.warn?.('dsh-team: 任务完成通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },
-  // 任务创建微信推送（DSHBOTS-182 增补）：锚定创建成功（单次 INSERT），触发点在 createTask。
+  // 任务创建通知（DSHBOTS-182 增补）：锚定创建成功（单次 INSERT），触发点在 createTask。
   // 文案含 KEY-N/标题/派给谁；无负责人时如实注明「暂未指派」。
+  // 幂等收据键（A3/DSHBOTS-323）：task-created:<task.id>。
+  // DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
   notifyTaskCreated(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
     const assignee = task.assignee_bot_id ? this.botRow(task.assignee_bot_id)?.name : null
     try {
-      this.wechat?.notify(taskCreated(identifier, task.title, assignee))
+      this.channelNotify?.(taskCreated(identifier, task.title, assignee), { receiptKey: `task-created:${task.id}` })
     } catch (error: any) {
-      this.logger.warn?.('dsh-team: 任务创建微信通知失败 %s: %s', identifier, error?.message ?? error)
+      this.logger.warn?.('dsh-team: 任务创建通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },
 }

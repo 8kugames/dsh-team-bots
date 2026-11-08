@@ -14,6 +14,8 @@ import type { TeamService } from '../src/service.js'
 import type { WechatChannel } from '../src/wechat/channel.js'
 import type { WechatBusinessError } from '../src/wechat/commands.js'
 import type { WechatStore } from '../src/wechat/store.js'
+import type { FeishuChannel } from '../src/feishu/channel.js'
+import type { FeishuStore } from '../src/feishu/store.js'
 
 // 业务域方法由 defineMethods 挂到 prototype 上。与其逐个手抄签名，直接把
 // defineMethods 传入的那些域方法对象的真实类型交叉合并进类接口：方法名、参数名、
@@ -40,9 +42,11 @@ import { terminalMethods } from '../src/services/terminal.js'
 import { usageMethods } from '../src/services/usage.js'
 import { systemMethods } from '../src/services/system.js'
 import { wechatMethods } from '../src/services/wechat.js'
+import { feishuMethods } from '../src/services/feishu.js'
 import { approvalsMethods } from '../src/services/approvals.js'
 import { questionsMethods } from '../src/services/questions.js'
 import { coreMethods } from '../src/services/core.js'
+import { githubSourceMethods } from '../src/services/github-source.js'
 import { promptMethods } from '../src/services/runtime/prompt.js'
 import { sessionMethods } from '../src/services/runtime/session.js'
 import { trajectoryMethods } from '../src/services/runtime/trajectory.js'
@@ -55,8 +59,9 @@ type TeamServiceMethods =
   & typeof runsMethods & typeof runFinishMethods & typeof hygieneMethods
   & typeof modelFallbackMethods & typeof botQuotaMethods & typeof schedulerMethods & typeof memoryMethods
   & typeof secretsMethods & typeof proposalsMethods & typeof terminalMethods
-  & typeof usageMethods & typeof systemMethods & typeof wechatMethods
+  & typeof usageMethods & typeof systemMethods & typeof wechatMethods & typeof feishuMethods
   & typeof approvalsMethods & typeof questionsMethods & typeof coreMethods
+  & typeof githubSourceMethods
 
 type DshRuntimeMethods =
   & typeof promptMethods & typeof sessionMethods
@@ -163,6 +168,47 @@ declare module '../src/wechat/store.js' {
 }
 
 // ---------------------------------------------------------------------------
+// FeishuStore（src/feishu/store.js）
+// ---------------------------------------------------------------------------
+declare module '../src/feishu/store.js' {
+  interface FeishuStore {
+    db: SqlDatabase | null
+    file: string
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FeishuChannel（src/feishu/channel.js）
+// ---------------------------------------------------------------------------
+declare module '../src/feishu/channel.js' {
+  interface FeishuChannel {
+    store: FeishuStore
+    config: TeamConfig
+    log: DshLogger
+    service: TeamService | null
+    /** 'conflict'=exceed_conn_limit（1000040350，别的实例占用长连接）；'reconnecting'=断线退避中。 */
+    phase: 'disabled' | 'unbound' | 'ready' | 'reconnecting' | 'conflict'
+    error: string | null
+    /** 传输层（进程内官方 SDK，测试注入桩）：botInfo/reply/startEvents/stop。 */
+    transport: import('../src/feishu/channel.js').FeishuTransport | null
+    /** 构造时注入的传输桩是测试缝：rebind 保留复用；生产自建传输按新凭据重建。 */
+    injectedTransport: boolean
+    batchWindowMs: number
+    flushTimer: TimerHandle | null
+    flushChain: Promise<unknown>
+    /** 入站去重 LRU：(appId, message_id) -> 收到时间戳；TTL 10min、上限 1000、重连不清空。 */
+    inboundSeen: Map<string, number>
+    /** 连接 generation：每次（重）连接就绪 +1，旧轮次里未完成的事件处理整体丢弃。 */
+    consumeGeneration: number
+    consumeAbort: AbortController
+    /** 群聊非 owner @bot 礼貌回应冷却表：发送者 open_id -> 上次回应时间。 */
+    politeAt: Map<string, number>
+    /** 同幂等键发送调用计数：send 层重试与 outbox 层重试共享 3 次总预算。 */
+    sendAttempts: Map<string, number>
+  }
+}
+
+// ---------------------------------------------------------------------------
 // WechatBusinessError（src/wechat/commands.js）
 // ---------------------------------------------------------------------------
 declare module '../src/wechat/commands.js' {
@@ -214,6 +260,14 @@ declare module '../src/service.js' {
     readAuditAlerted: Map<string, unknown>
     lastMaintenanceAt: number
     wechat: WechatChannel | null
+    feishu: FeishuChannel | null
+    /** 微信通道 store 复用句柄（DSHBOTS-334 启停开关）：unmount 不关库，remount 复用。 */
+    _wechatStore: import('../src/wechat/store.js').WechatStore | null
+    /** SecretBox 缓存（services/secrets.js ensureSecretBox）。 */
+    _secretBox: unknown
+    _secretEntries: { name: string; value: string; scope: string; projectId: string | null }[] | null
+    /** GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产 null=真实 gh CLI，测试注入桩。 */
+    githubRunner: ((args: string[]) => Promise<string> | string) | null
     terminalActive: Map<string, unknown>
     /** index.js 里 service.initialize().then(...).catch(...) 的启动 Promise。 */
     boot: Promise<unknown> | null

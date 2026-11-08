@@ -5,7 +5,7 @@ import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
 import { typingLingerRowsHtml, applyOptimisticTyping, pruneTypingLinger } from './modules/typing-linger.js'
-import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
+import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, sidebarUserNeedsView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
 import { renderUsage, usageMode, usageViewTitle, usageTotals } from './modules/usage.js'
 import { renderSettings, renderGlobal, renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './modules/settings.js'
 import { renderChannel, renderSecretsPage } from './modules/global-pages.js'
@@ -336,8 +336,9 @@ function renderShell() {
           </div>
         </div>
         <div class="sidebar-bottom">
+          ${sidebarUserNeedsView({ approvals: pendingApprovals.count, questions: pendingQuestions.count, proposals: pendingProposals() })}
           <button class="global-config ${state.view === 'bots-overview' ? 'active' : ''}" data-action="nav" data-view="bots-overview">
-            ${icon('bot')}<span>${t('sidebar.botsOverview')}</span>${pendingProposals() > 0 ? `<span class="red-dot" title="${t('sidebar.pendingProposals')}"></span>` : ''}
+            ${icon('bot')}<span>${t('sidebar.botsOverview')}</span>
           </button>
           <button class="global-config ${state.view === 'usage' && state.usageMode === 'global' ? 'active' : ''}" data-action="nav" data-view="usage" data-usage-mode="global">
             ${icon('chart')}<span>${t('sidebar.usage')}</span>
@@ -349,6 +350,9 @@ function renderShell() {
           </button>
           <a class="global-config dsh-official-link" href="/index.html" title="${t('sidebar.switchToDsh')}">
             ${icon('external')}<span>${t('sidebar.dshNative')}</span>
+          </a>
+          <a class="global-config github-star-link" href="https://github.com/8kugames/dsh-team-bots" target="_blank" rel="noopener noreferrer">
+            ${icon('external')}<span>${t('sidebar.githubStar')}</span>
           </a>
         </div>
       </aside>

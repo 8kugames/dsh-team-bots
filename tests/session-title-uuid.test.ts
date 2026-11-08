@@ -28,7 +28,9 @@ class SessionTitleRuntime {
     this.sessionCreates = new Map()
     this.ctx = {
       sessionController: {
-        create: async () => ({ sessionId: 'a1b2c3d4-5678-4abc-8def-0123456789ab' }),
+        // 生产形态：宿主会话 id 带 session- 前缀（裸 uuid 夹具曾让 slice(0,8) 取到
+        // 字面量 "session-" 的缺陷从守门眼皮下滑过）。
+        create: async () => ({ sessionId: 'session-a1b2c3d4-5678-4abc-8def-0123456789ab' }),
         resolveAgent: async () => ({ agent: { session: { id: 'live' } } }),
         selectModel: async () => ({}),
       },
@@ -75,7 +77,45 @@ test('bot 会话显示名后缀 = 8 位 hex uuid 前缀（非「控制面」生�
     const title = rt.renames[0].title
     assert.match(title, /^TitleBot · [0-9a-f]{8}$/, '显示名 = <bot 名> · <8 位小写 hex>')
     assert.doesNotMatch(title, /控制面/, '不得再出现「控制面」生造词')
-    assert.equal(title.split('· ')[1], 'a1b2c3d4', '后缀取 sessionId 前 8 位')
+    assert.doesNotMatch(title, /session-/, '不得截到 id 的 session- 前缀字面量')
+    assert.equal(title.split('· ')[1], 'a1b2c3d4', '后缀 = 剥离 session- 前缀后的 uuid 前 8 位')
+  } finally {
+    try { store.close() } catch {}
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('存量坏显示名自愈：复用分支遇「xx · session-」重写正确后缀；自定义名不动', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-session-title-heal-'))
+  const workspace = join(root, 'workspace')
+  await mkdir(workspace, { recursive: true })
+  const config = resolveConfig({
+    workspace, dataDir: join(root, 'data'), skillRoot: join(workspace, '.agents'),
+    modelCacheMs: 0, schedulerIntervalMs: 60_000,
+  })
+  const store = openDatabase(config.dbPath)
+  try {
+    const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
+    const rt = new SessionTitleRuntime(config, store)
+    service.attachRuntime(rt as any)
+    await service.initialize()
+    service.started = false
+    const bot = await service.createBot({ name: 'TitleBot', role: '运维', instructions: 'Op.', provider: 'fake', model: 'm' })
+    const project = await service.createProject({ name: 'Proj', key: 'PRJ' })
+    // 播种既有控制面绑定（生产 id 形态），宿主标题停在旧代码产生的坏值上。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, 'bot', NULL, ?)",
+      'session-feedbeef-1234-4abc-8def-0123456789ab', bot.id, project.id, new Date().toISOString(),
+    )
+    ;(rt.ctx.sessionTitle as any).get = () => ({ title: 'TitleBot · session-' })
+    await rt.ensureBotBinding(bot, project, {})
+    assert.equal(rt.renames.length, 1, '坏值应触发一次重写')
+    assert.equal(rt.renames[0].title, 'TitleBot · feedbeef', '重写为剥前缀后的 8 位 hex')
+
+    rt.renames.length = 0
+    ;(rt.ctx.sessionTitle as any).get = () => ({ title: '用户手工起的名字' })
+    await rt.ensureBotBinding(bot, project, {})
+    assert.equal(rt.renames.length, 0, '非已知坏值（自定义名）不得改写')
   } finally {
     try { store.close() } catch {}
     await rm(root, { recursive: true, force: true })

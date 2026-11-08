@@ -16,9 +16,10 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'question_answer', 'questions_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
-  'settings', 'update_settings', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
+  'settings', 'update_settings', 'update_prompt_segment', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
-  'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout',
+  'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout', 'set_wechat_channel_enabled', 'notify_receipts', 'wechat_triggers', 'external_triggers',
+  'feishu_status', 'save_feishu_credentials', 'clear_feishu_credentials',
   'run_command', 'cancel_command', 'terminal_state',
   'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
@@ -189,7 +190,11 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'settings':
       return service.settingsView()
     case 'update_settings':
-      return service.updateSettings(payload.patch ?? payload, actor)
+      // B2/DSHBOTS-325：UI 携带读取时的 settings_revision，不匹配即 409（乐观并发）。
+      return service.updateSettings(payload.patch ?? payload, actor, payload.revision)
+    case 'update_prompt_segment':
+      // 可编辑提示词段（B1/DSHBOTS-324）：空文本=恢复默认；保存经预算校验并审计。
+      return service.updatePromptSegment(required(payload.segment, 'segment'), String(payload.text ?? ''), actor)
     case 'export_usage_csv':
       return {
         filename: `dsh-team-usage${payload.window ? `-${payload.window}` : ''}-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -215,6 +220,28 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.rebootDsh()
     case 'wechat_status':
       return service.wechatStatus()
+    case 'set_wechat_channel_enabled':
+      // 通道页微信启停开关（DSHBOTS-334）：settings 显式值落库并即时 mount/unmount。
+      return service.setWechatChannelEnabled(Boolean(payload.enabled), actor)
+    case 'feishu_status':
+      // 飞书通道状态（DSHBOTS-327）：只读（phase/管理员 ou_id/bot 与 appId），无凭据明文。
+      // UI 主路径走 state 轮询里的 state.feishu，本动作供备用直查。
+      return service.feishuStatus()
+    case 'save_feishu_credentials':
+      // 通道页保存飞书凭据（DSHBOTS-334）：加密落库 + 触发通道重连；响应只有脱敏视图。
+      return service.saveFeishuCredentials({ appId: payload.appId, appSecret: payload.appSecret }, actor)
+    case 'clear_feishu_credentials':
+      // 通道页清除飞书凭据（DSHBOTS-334）：删除保存的凭据对并回到未绑定态。
+      return service.clearFeishuCredentials(actor)
+    case 'notify_receipts':
+      // 外发收据流水（A3/DSHBOTS-323）：sent/gone 终态可追责，通道未启用时 available:false。
+      return service.notifyReceiptsView(Number(payload.limit) || 50)
+    case 'wechat_triggers':
+      // 入站触发留痕（B4-①/DSHBOTS-328）：每条入站事件的处置与原因，回答「为什么没触发」。
+      return service.wechatTriggersView(Number(payload.limit) || 50)
+    case 'external_triggers':
+      // 外部触发留痕（B4-②/DSHBOTS-335）：GitHub 源候选/过滤/失败流水。
+      return service.externalTriggersView(Number(payload.limit) || 50)
     case 'wechat_login':
       return service.wechatBeginLogin()
     case 'wechat_code':

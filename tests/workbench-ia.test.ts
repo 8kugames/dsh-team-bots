@@ -49,13 +49,15 @@ test('② 项目 NAV 无进化；单聊 NAV 保留进化', () => {
   assert.match(SOLO_NAV, /\['evolution', 'branch'\]/, '单聊 NAV 保留进化（逐个审批）')
 })
 
-test('② 侧栏「总览bots」入口在全局配置上方，带待审红点', () => {
+test('② 侧栏「总览bots」入口在全局配置上方，需办气泡替代旧红点', () => {
   const idxOverview = source.indexOf('data-view="bots-overview"')
   const idxGlobal = source.indexOf("<span>${t('sidebar.globalConfig')}</span>")
   assert.ok(idxOverview >= 0, '侧栏应有总览bots按钮')
   assert.ok(idxGlobal >= 0 && idxOverview < idxGlobal, '总览bots在全局配置上方')
   assert.match(source, /case 'bots-overview': return renderBotsOverview\(\)/, 'render 路由 bots-overview')
-  assert.match(source, /pendingProposals\(\) > 0 \? `<span class="red-dot"/, '有待审提案时红点')
+  // DSHBOTS-339：旧待审红点由侧栏需办气泡替代（cards.ts sidebarUserNeedsView，含进化审批计数）。
+  assert.match(source, /sidebarUserNeedsView\(\{ approvals: pendingApprovals\.count/, '侧栏挂需办气泡')
+  assert.doesNotMatch(source, /sidebar\.pendingProposals/, '旧红点撤除')
   assert.match(source, /case 'batch-decide-proposals':/, '批量审批 handler 存在')
 })
 

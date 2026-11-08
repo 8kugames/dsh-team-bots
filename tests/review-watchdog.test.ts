@@ -487,7 +487,7 @@ test('H4 settings 白名单：review_idle_minutes 可保存/校验；开关与�
   assert.equal(saved.review_idle_escalate_multiple, '3')
   assert.equal(store.setting('review_idle_minutes'), '45')
   assert.throws(() => service.updateSettings({ review_idle_minutes: '9999' }), /整数分钟/)
-  assert.throws(() => service.updateSettings({ review_auto_close: '2' }), /0 或 1/)
+  assert.throws(() => service.updateSettings({ review_auto_close: '2' }), /observe 或 1/)
   assert.throws(() => service.updateSettings({ review_idle_escalate_multiple: '1' }), /整数/)
 })
 

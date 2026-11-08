@@ -122,6 +122,8 @@ export function runMigrations(db) {
   activateBotRunSerializationDomain(db)
   // 任务运行豁免 bot 串行域（单 bot 多任务并行）：见 exemptTaskRunsFromBotSerialization。
   exemptTaskRunsFromBotSerialization(db)
+  // 只读治理运行豁免（session_compact / rollover_summary）：见 exemptGovernanceRunsFromBotSerialization。
+  exemptGovernanceRunsFromBotSerialization(db)
   db.exec(BINDING_INDEXES)
   const ftsEnabled = setupFts(db)
   recordMigration(db, 'memories_source_refs_revision')
@@ -409,6 +411,24 @@ export function exemptTaskRunsFromBotSerialization(db) {
       WHERE status IN ('queued', 'running') AND kind <> 'task';
   `)
   recordMigration(db, 'task_runs_exempt_bot_serialization')
+}
+
+// 只读治理运行豁免 bot 串行域（单轮上下文治理 P3）：session_compact / rollover_summary
+// 由 ensureSession 在 bot 自己的运行进行中排入（startRun 路径，当前运行此刻必占串行域），
+// 不豁免时 INSERT OR IGNORE 被 one_active_run_per_bot 部分唯一索引静默吞掉（changes=0 被
+// 当作幂等命中，无行无事件无报错）——生产实测 session_compact 0 次执行、结转摘要 3 次
+// 全落在索引激活（DSHBOTS-288）之前。豁免后执行侧仍按 claimKey（bot 域键）串行领取，
+// 闲时语义由领取顺序保住；botBusy 查询口径不变（治理运行排队/执行中视为忙，消息族
+// 照旧挂待处理队列，不与治理运行互抢）。
+export function exemptGovernanceRunsFromBotSerialization(db) {
+  db.exec(`
+    DROP INDEX IF EXISTS one_active_run_per_bot;
+    CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_bot
+      ON runs(bot_id, COALESCE(project_id, '~solo'))
+      WHERE status IN ('queued', 'running')
+        AND kind NOT IN ('task', 'session_compact', 'rollover_summary');
+  `)
+  recordMigration(db, 'governance_runs_exempt_bot_serialization')
 }
 
 // 单聊支持：runs 与 session_bindings 的 project_id 放宽为可空（项目外会话与运行），

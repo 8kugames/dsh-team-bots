@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { AppError } from '../../errors.js'
 import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
-import { effectiveRunLimits, effectiveSessionCompactTurns, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey, sessionCompactMarkerKey } from '../../config.js'
+import { effectiveRunLimits, effectiveSessionCompactCtxTokens, effectiveSessionCompactTurns, effectiveSessionRolloverCtxTokens, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey, sessionCompactMarkerKey } from '../../config.js'
 import { imageContentPartsForMessage } from '../message-images.js'
 import { restoreDefaultModel } from './model-restore.js'
 import { applyBotToolPolicy } from '../../tools.js'
@@ -56,6 +56,12 @@ export function effectiveReviewTimeoutMinutes(getSetting: (key: string) => unkno
   if (raw !== '' && Number.isInteger(saved) && saved >= min && saved <= max) return saved
   return REVIEW_TIMEOUT_MINUTES_DEFAULT
 }
+
+// 记忆审查专属会话的有界复用上限：审查提示词自包含（用户消息+回复/任务交付切片），
+// 不需要控制面会话历史——历史整段重放，实测单次审查被顶到 65 万 token。审查流量改走
+// 独立 kind='review' 绑定会话，每张服务 N 次审查后退役换新；宿主无会话删除 API，
+// 按次开全新会话会无限累积宿主会话列表，有界绑定把宿主会话数压到 1/N。
+export const MEMORY_REVIEW_BINDING_MAX_RUNS = 8
 
 export const sessionMethods = {
   bindingOfSession(sessionId) {
@@ -227,11 +233,28 @@ export const sessionMethods = {
       return {}
     }
   },
+  // 会话当前上下文体积估计（单轮上下文治理 P2）：该会话最近一次模型调用的
+  // input+cache_read 即当前历史整体规模——usage_events 按调用记账、runs.session_id 归属。
+  // 无记录（新会话/尚未有成功调用）返回 0，两个消费点（压缩下限/结转上限）都判 >=，
+  // 0 不会误触发。
+  sessionContextTokens(sessionId) {
+    if (!sessionId) return 0
+    return this.store.get(
+      `SELECT ue.input_tokens + ue.cache_read_tokens AS ctx
+         FROM usage_events ue JOIN runs r ON r.id = ue.run_id
+        WHERE r.session_id = ?
+        ORDER BY ue.occurred_at DESC LIMIT 1`,
+      sessionId,
+    )?.ctx ?? 0
+  },
   // 结转判定（DSHBOTS-145 / DSHBOTS-286）：旧会话是否该让位。返回 true 表示旧绑定已
   // alias 化、调用方走新建路径；false 表示继续复用旧会话。
   // - 阈值 0 = 关闭（配置见 config.js 的 sessionRolloverTurns，默认 512）；
   // - 「轮次」口径 = runs 表按 session_id 的 COUNT(*)，不限 status——失败运行的提示词同样
   //   已进会话历史，count-all 才与真实增长一致；
+  // - 体积判据（单轮上下文治理 P2）：轮数未到但会话上下文已达上限（默认 150k token，
+  //   0 = 关闭）同样触发——胖会话不用等 512 轮，live 实测稳态单轮 55 万 token 的会话
+  //   按轮数口径永远追不上真实膨胀速度；
   // - 幂等（DSHBOTS-286）：alias 行永不触发结转——本判定只在活跃绑定上被调用
   //   （唯一调用点 ensureSession 以 !existing.alias 前置短路保证）；已结转的旧会话
   //   即使轮数继续增长（承接未终态任务流量），也只参与闲时压缩，不再二次结转；
@@ -239,9 +262,12 @@ export const sessionMethods = {
   // - 摘要未就绪 → 幂等补排一条摘要运行（不阻塞对话，摘要就绪后下一次复用自然结转）。
   shouldRolloverSession({ bot, project, existing }) {
     const turns = effectiveSessionRolloverTurns(this.config, key => this.store.setting(key))
-    if (turns <= 0) return false
+    const ctxLimit = effectiveSessionRolloverCtxTokens(this.config, key => this.store.setting(key))
+    // 两个判据各自独立（0 = 该判据关闭），全关即整体关闭结转。
     const count = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0
-    if (count < turns) return false
+    const countOver = turns > 0 && count >= turns
+    const ctxOver = ctxLimit > 0 && this.sessionContextTokens(existing.session_id) >= ctxLimit
+    if (!countOver && !ctxOver) return false
     if (this.store.setting(rolloverSummaryKey(bot.id, project?.id))) return true
     const active = this.store.get(
       "SELECT id FROM runs WHERE kind = 'rollover_summary' AND trigger_ref = ? AND status IN ('queued', 'running')",
@@ -344,8 +370,35 @@ export const sessionMethods = {
     )
     return runId
   },
+  // 宿主历史折叠（单轮上下文治理 P1）：session_compact 运行收尾后调用宿主
+  // CompactionEngine.compactNow，把有用历史区间折叠为总结节点——会话前缀实际缩小。
+  // 自写总结轮只追加不折叠（DSHBOTS-286 既有行为），两者互补：总结轮管连续性叙事与
+  // 记忆落库，折叠管体积。宿主未提供 compaction 服务（ctx.get 不可达/未装实现）时
+  // 降级为「仅总结轮」，返回 unavailable 标记由收尾侧留痕；忙碌/取消等预期失败按
+  // ManualCompactionError 的 code 留痕返回，不告警不重试（下一窗口自然再试）。
+  async compactHostSessionHistory(sessionId: string) {
+    if (!sessionId) return { folded: false, reason: 'no-session' }
+    const compaction = this.ctx?.get?.('compaction')
+    if (!compaction?.compactNow) return { folded: false, unavailable: true, reason: 'unavailable' }
+    const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
+    const agent = (resolved as any)?.agent
+    if (!agent) return { folded: false, reason: 'agent-unresolved' }
+    try {
+      const result = await compaction.compactNow(agent, AbortSignal.timeout(5 * 60_000))
+      return {
+        folded: true,
+        shadowedTokens: result?.shadowedTokenCount ?? null,
+        shadowedItems: result?.shadowedSeqs?.length ?? null,
+      }
+    } catch (error: any) {
+      return { folded: false, reason: error?.code ?? 'error', message: String(error?.message ?? error) }
+    }
+  },
   // 闲时压缩判定（DSHBOTS-286）：会话复用时检查轮次是否跨过新的压缩窗口。
   // - 窗口 N 轮（session_compact_turns，0 = 关闭），轮次口径与结转一致；
+  // - 体积下限（单轮上下文治理 P2，session_compact_ctx_tokens 默认 80k、0 = 关闭）：
+  //   窗口跨过且体积达下限才排——瘦会话（低频短轮）压缩是无用功，胖会话照常按窗口
+  //   节奏压缩；上限即防 flap（一个窗口至多一次），不依赖压缩是否真的缩小历史；
   // - 闲 = 该会话除当前运行外无 queued/running 运行；忙时推后（标记不动，下次复用再判，
   //   跨多个窗口合批为一次）；
   // - 对仍在承接流量的会话生效：含 alias 旧会话（未终态任务流量）与 task/dm 短生命周期会话。
@@ -357,6 +410,8 @@ export const sessionMethods = {
     const marker = Number(this.store.setting(sessionCompactMarkerKey(sessionId)) ?? 0)
     const window = Math.floor(turns / every)
     if (window <= Math.floor(marker / every)) return
+    const ctxFloor = effectiveSessionCompactCtxTokens(this.config, key => this.store.setting(key))
+    if (ctxFloor > 0 && this.sessionContextTokens(sessionId) < ctxFloor) return
     const busy = this.store.get(
       "SELECT id FROM runs WHERE session_id = ? AND status IN ('queued', 'running') AND id != ?",
       sessionId,
@@ -383,6 +438,11 @@ export const sessionMethods = {
         return run.session_id
       }
       this.retireBinding(run.session_id)
+    }
+    // 记忆审查运行：审查提示词自包含，控制面历史对它只是重放成本（实测单次 65 万
+    // token）；也不享任务亲和（审查不是施工）。改走独立有界 review 会话。
+    if (run?.kind === 'memory_review') {
+      return this.ensureReviewSession(bot, project, { run, modelOverride })
     }
     // ② 任务亲和（DSHBOTS-286/289，ADR §5.2-3）：未终态任务按 runs 归属回原会话——含
     // dm_reply 经 sessionTaskFor 解析出的任务（executeRun 已把任务行透传进来）与结转后
@@ -478,6 +538,76 @@ export const sessionMethods = {
       this.sessionCreates.delete(key)
     }
   },
+  // 记忆审查会话（有界复用）：memory_review 运行每 (bot, project) 一条 kind='review'
+  // 活跃绑定，复用至 MEMORY_REVIEW_BINDING_MAX_RUNS 次后退役换新——上下文与宿主会话
+  // 数都被钉在有界范围内。不参与结转/闲时压缩：审查轮次彼此独立，无可继承上下文，
+  // 轮次到量直接换新。创建/策略面与 ensureTaskSession 同款（cwd、preset、标题、
+  // 文件策略、工具策略、selectModel、工作区分组挂载）。
+  async ensureReviewSession(bot, project, { run, modelOverride } = {} as any) {
+    const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
+    const existing = this.store.get(
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'review' AND alias = 0 AND project_id IS ?",
+      bot.id,
+      project?.id ?? null,
+    )
+    if (existing) {
+      const served = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0
+      if (served < MEMORY_REVIEW_BINDING_MAX_RUNS) {
+        const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
+        if (!resolved?.error) {
+          this.applyFilePolicy(resolved, bot, run, null)
+          applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+          await this.selectModel(existing.session_id, bot, modelOverride)
+          return existing.session_id
+        }
+      }
+      this.retireBinding(existing.session_id)
+    }
+    // 并发首建去重键与控制面/任务会话同理，带 review 维度。
+    const key = `${bot.id}:${project?.id ?? 'solo'}:review`
+    if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
+    const creating = (async () => {
+      const cwd = await resolveSessionCwd(this.config, { solo: !project, bot, project })
+      const created = await this.ctx.sessionController.create({
+        cwd,
+        ...(await this.defaultAgentPreset('project')),
+      })
+      const sessionId = created.sessionId
+      const agent = await this.ctx.sessionController.resolveAgent(sessionId)
+      if (agent?.error) throw new AppError('SESSION_FAILED', `创建 DSH Session 失败：${agent.error.message ?? '未知'}`)
+      if (this.ctx.sessionTitle?.rename) {
+        const liveSession = agent?.agent?.session ?? agent?.session
+        if (liveSession) {
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · 记忆审查`) } catch {}
+        }
+      }
+      this.applyFilePolicy(agent, bot, run, null)
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
+      this.store.run(
+        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+         VALUES (?, ?, ?, 'review', NULL, ?, 0)
+         ON CONFLICT(session_id) DO NOTHING`,
+        sessionId, bot.id, project?.id ?? null, new Date().toISOString(),
+      )
+      await this.selectModel(sessionId, bot, modelOverride)
+      // 挂到项目工作区分组（与控制面/任务会话同组），标题已可辨识审查会话身份。
+      const registry = this.ctx.get?.('workspaceRegistry')
+      if (registry && project) {
+        await attachSessionToWorkspace(registry, {
+          cwd,
+          title: workspaceGroupTitle({ kind: 'bot', project, bot }),
+          sessionId,
+        }, this.logger)
+      }
+      return sessionId
+    })()
+    this.sessionCreates.set(key, creating)
+    try {
+      return await creating
+    } finally {
+      this.sessionCreates.delete(key)
+    }
+  },
   async ensureBotBinding(bot, project, { run, task, modelOverride } = {} as any) {
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
     // DSHBOTS-299：查询带 project 维度（IS 比 = 多兼容 NULL——solo 域按 (bot, NULL) 命中），
@@ -498,6 +628,18 @@ export const sessionMethods = {
         if (!rolledOver) {
           this.applyFilePolicy(resolved, bot, run, task)
           applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+          // 存量坏显示名自愈：旧实现 slice(0,8) 把后缀截成字面量 session-，复用分支
+          // 遇到该已知坏值时重写为正确后缀；其他值（用户手工命名等）一律不动。
+          if (this.ctx.sessionTitle?.get && this.ctx.sessionTitle?.rename) {
+            const liveSession = resolved?.agent?.session ?? resolved?.session
+            if (liveSession) {
+              try {
+                if (this.ctx.sessionTitle.get(liveSession)?.title === `${bot.name} · session-`) {
+                  this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${existing.session_id.replace(/^session-/, '').slice(0, 8)}`)
+                }
+              } catch {}
+            }
+          }
           await this.selectModel(existing.session_id, bot, modelOverride)
           // 闲时压缩（DSHBOTS-286）：复用即「仍在承接流量」，跨过窗口且闲时排队总结压缩。
           this.maybeCompactSession({ bot, project, existing, currentRunId: run?.id })
@@ -526,7 +668,9 @@ export const sessionMethods = {
         if (liveSession) {
           // 会话列表显示名（DSHBOTS-315）：bot 级会话后缀取 8 位 uuid 前缀——
           // 「控制面」在中文语境是生造词，用户看不懂（英文 controller 无妨）。
-          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${sessionId.slice(0, 8)}`) } catch {}
+          // 宿主会话 id 形如 session-<uuid>：先剥 session- 前缀再取 8 位，
+          // 否则 slice(0,8) 取到的是字面量 "session-"（显示名变成「xx · session-」）。
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${sessionId.replace(/^session-/, '').slice(0, 8)}`) } catch {}
         }
       }
       this.applyFilePolicy(agent, bot, run, task)

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createRequire } from 'node:module'
 import { TencentIlinkTransport } from '../../vendor/wechat-ilink/index.js'
 import { handleCommand, isRetryable, outboundChunks, WechatBusinessError, WechatIlinkError } from './commands.js'
@@ -25,6 +26,36 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 /** 授权响应里可能出现的用户标识字段（vendor 的 confirmed 返回 userId=ilink_user_id）。 */
 const AUTH_USER_ID_KEYS = ['userId', 'ilink_user_id', 'ilinkUserId', 'peerId', 'wxid', 'from_user_id', 'fromUserId']
+
+/**
+ * iLink 拒发观测（诊断辅助）。vendor 是上游编译产物保持原样（NOTICE 口径），
+ * 上游把所有 ret!=0 坍缩成同一句 "iLink rejected ..."，凭证失效/频控/内容审核无法区分——
+ * ret 透出在本仓桥接层完成：makeTransport 注入的 fetch 被包装，克隆 sendmessage 的
+ * 2xx JSON 响应，ret!=0 时把 {ret, errmsg} 记进当前 sendTo 的 ALS 上下文；vendor 随后
+ * 抛出的 WechatIlinkError 经 attachRejectDetail 拼上 `(ret=N errmsg=...)`，outbox 的
+ * last_error 与 warn 日志即可对症。上下文随每次 sendTo 新建，无跨调用残留。
+ */
+const ilinkRejectSlot = new AsyncLocalStorage<{ ret?: number, errmsg?: string }>()
+
+/** 只观测出站消息端点：其余端点（getupdates/getconfig/扫码授权）不在诊断范围。 */
+function observeIlinkReject(baseFetch: typeof fetch): typeof fetch {
+  return async (url, init) => {
+    const response = await baseFetch(url, init)
+    const slot = ilinkRejectSlot.getStore()
+    if (slot && response.ok && new URL(String(url)).pathname.endsWith('/sendmessage')) {
+      try {
+        const reply = await response.clone().json()
+        if (typeof reply?.ret === 'number' && reply.ret !== 0) {
+          slot.ret = reply.ret
+          const errmsg = typeof reply.errmsg === 'string' && reply.errmsg.trim() ? reply.errmsg.trim()
+            : typeof reply.err_msg === 'string' && reply.err_msg.trim() ? reply.err_msg.trim() : null
+          if (errmsg) slot.errmsg = errmsg
+        }
+      } catch { /* 观测失败不影响原错误路径：vendor 抛什么仍是什么 */ }
+    }
+    return response
+  }
+}
 
 /**
  * 个人微信（腾讯 iLink 官方协议）通道宿主：
@@ -214,14 +245,17 @@ export class WechatChannel {
     this.phase = 'unbound'
   }
 
-  makeTransport(credentials, extra = {}) {
+  makeTransport(credentials, extra: Record<string, any> = {}) {
+    // fetch 一律过拒发观测层：extra 传入的测试桩也不例外（...extra 展开会覆盖包装版，
+    // 故先解构取出，在实参处统一包装）。
+    const { fetch: extraFetch, ...rest } = extra
     return new TencentIlinkTransport({
       baseUrl: credentials?.baseUrl ?? 'https://ilinkai.weixin.qq.com',
       token: credentials?.token,
       botAgent: `DSHTeamBots/${PLUGIN_VERSION}`,
       clientVersion: PLUGIN_VERSION,
-      fetch,
-      ...extra,
+      fetch: observeIlinkReject(extraFetch ?? fetch),
+      ...rest,
     })
   }
 
@@ -292,9 +326,16 @@ export class WechatChannel {
   async handleBatch(messages, transport, signal) {
     let ok = true
     for (const message of messages) {
-      if (!message.text) continue
+      if (!message.text) {
+        // Trigger 留痕（B4-①/DSHBOTS-328）：无正文事件（图片/系统条目）也进观测面。
+        this.recordTrigger(message, 'filtered', 'no-text')
+        continue
+      }
       const key = message.messageId
-      if (key && this.processedMessages.has(key)) continue
+      if (key && this.processedMessages.has(key)) {
+        this.recordTrigger(message, 'duplicate', 'processed-in-memory')
+        continue
+      }
       try {
         await this.onInbound(message, transport, signal)
         if (key) this.rememberProcessed(key)
@@ -304,6 +345,26 @@ export class WechatChannel {
       }
     }
     return ok
+  }
+
+  /**
+   * 入站 Trigger 留痕（B4-①/DSHBOTS-328）：每条入站事件的处置（handled/filtered/rejected/
+   * duplicate + route + reason）经 service.recordWechatTrigger 落插件库，稳定 id = wechat:<nativeId>。
+   * 只观测不改变路由语义；service 不在场（测试桩）时静默跳过。
+   */
+  recordTrigger(message, disposition, route, reason = null) {
+    try {
+      this.service?.recordWechatTrigger?.({
+        nativeId: message?.messageId ?? null,
+        peerId: message?.senderId ?? null,
+        text: message?.text ?? '',
+        disposition,
+        route,
+        reason,
+      })
+    } catch (error) {
+      this.log.warn?.(`[wechat] 触发留痕失败: ${this.errorText(error)}`)
+    }
   }
 
   rememberProcessed(key) {
@@ -329,32 +390,40 @@ export class WechatChannel {
       this.store.saveAdminPeer(peerId)
       this.pendingAdmin = null
       this.log.info?.(`[wechat] 管理员已绑定（本次授权会话首条消息）: ${peerId}`)
+      this.recordTrigger(message, 'handled', 'welcome')
       await this.sendTo(peerId, welcomeAdmin(), signal)
       await this.flushOutbox(transport, signal)
       return
     }
     if (peerId !== admin) {
       this.log.info?.(`[wechat] 忽略非管理员消息来自 ${peerId}`)
+      this.recordTrigger(message, 'filtered', 'non-admin', '发送者不是已绑定管理员')
       return
     }
+    // DSHBOTS-208 直达对话上下文：管理员会话绑定的项目 key（路由成功后由命令层回写）。
+    // ctx.trigger 由命令层回填分类（B4-①），成功/失败路径据此留痕；声明在 try 外供 catch 读取。
+    const ctx: any = {
+      boundKey: this.store.getDirectProjectKey?.() ?? null,
+      bind: key => this.store.saveDirectProjectKey?.(key),
+      // 上方已校验 peerId === admin（非管理员消息整条忽略），显式带过 fail-closed 命令门
+      isAdmin: true,
+    }
     try {
-      // DSHBOTS-208 直达对话上下文：管理员会话绑定的项目 key（路由成功后由命令层回写）。
-      const reply = await handleCommand(this.service, message.text, {
-        boundKey: this.store.getDirectProjectKey?.() ?? null,
-        bind: key => this.store.saveDirectProjectKey?.(key),
-        // 上方已校验 peerId === admin（非管理员消息整条忽略），显式带过 fail-closed 命令门
-        isAdmin: true,
-      })
+      const reply = await handleCommand(this.service, message.text, ctx)
+      const trigger = ctx.trigger ?? { kind: 'chat', verb: null }
+      this.recordTrigger(message, 'handled', `${trigger.kind}${trigger.verb ? `:${trigger.verb}` : ''}`)
       await this.sendTo(peerId, reply, signal)
     } catch (error) {
       if (isBusinessError(error)) {
         // 业务性拒绝（如任务不存在、任务号非法）：给用户可读提示即可，不算处理失败
         this.log.warn?.(`[wechat] 指令被拒绝: ${this.errorText(error)}`)
+        this.recordTrigger(message, 'rejected', 'command', this.errorText(error))
         await this.sendTo(peerId, String((error as any)?.message ?? '指令无法执行'), signal)
           .catch(sendError => this.log.warn?.(`[wechat] 提示发送失败: ${this.errorText(sendError)}`))
         return
       }
       this.log.warn?.(`[wechat] 指令执行失败: ${this.errorText(error)}`)
+      this.recordTrigger(message, 'failed', `command${ctx?.trigger?.verb ? `:${ctx.trigger.verb}` : ''}`, this.errorText(error))
       await this.sendTo(peerId, failureText(), signal)
         .catch(sendError => this.log.warn?.(`[wechat] 失败提示发送失败: ${this.errorText(sendError)}`))
       // 交给上层：这条没处理成功，cursor 不推进，下一轮还会重试
@@ -388,18 +457,37 @@ export class WechatChannel {
     if (!peer?.contextToken) throw new Error('尚无该联系人的会话凭证，等待对方发来消息')
     const body = String(text ?? '').trim()
     if (!body) return
-    for (const chunk of outboundChunks(body)) {
-      await this.transport.sendMessage({
-        peerId,
-        text: chunk,
-        contextToken: peer.contextToken,
-        clientId: randomUUID(),
-      }, signal)
-    }
+    // 拒发观测上下文：桥接 fetch 记录 ret!=0，vendor 抛错后由 attachRejectDetail 拼进文案
+    await ilinkRejectSlot.run({}, async () => {
+      try {
+        for (const chunk of outboundChunks(body)) {
+          await this.transport.sendMessage({
+            peerId,
+            text: chunk,
+            contextToken: peer.contextToken,
+            clientId: randomUUID(),
+          }, signal)
+        }
+      } catch (error) {
+        throw this.attachRejectDetail(error)
+      }
+    })
   }
 
-  /** 对外事件推送入口：入队后经合批窗口合并发送；未连接时仅落盘，链接建立后由新事件触发。 */
-  notify(text) {
+  /** vendor 抛错后把桥接层观测到的上游拒发码拼进文案（只处理带观测的 WechatIlinkError）。 */
+  attachRejectDetail(error) {
+    const observed = ilinkRejectSlot.getStore()
+    if (!observed || observed.ret === undefined || !(error instanceof WechatIlinkError)) return error
+    const suffix = ` (ret=${observed.ret}${observed.errmsg ? ` errmsg=${observed.errmsg}` : ''})`
+    return new WechatIlinkError(error.code, `${error.message}${suffix}`, error.retryable, { cause: error })
+  }
+
+  /**
+   * 对外事件推送入口：入队后经合批窗口合并发送；未连接时仅落盘，链接建立后由新事件触发。
+   * A3/DSHBOTS-323：可带 receiptKey 幂等收据键——同键在存留期内重复推送被吸收（duplicate），
+   * 调用方无需自建防重；不带键的旧形态行为不变。
+   */
+  notify(text, { receiptKey = null } = {}) {
     if (!this.enabled()) return
     const body = String(text ?? '').trim()
     if (!body) {
@@ -407,12 +495,26 @@ export class WechatChannel {
       return
     }
     try {
-      this.store.enqueue(body)
+      const outcome = this.store.enqueue(body, receiptKey)
+      if (outcome === 'duplicate') {
+        this.log.warn?.(`[wechat] 重复推送已按收据键吸收（${receiptKey}）`)
+        return
+      }
     } catch (error) {
       this.log.warn?.(`[wechat] 推送入队失败: ${this.errorText(error)}`)
       return
     }
     if (this.phase === 'connected' && this.transport) this.scheduleOutboxFlush()
+  }
+
+  /** 按 receipt_key 查收据终态（A3/DSHBOTS-323）：sent/gone/pending，供插件运维视图同源读取。 */
+  receiptStates(keys) {
+    return this.store?.receiptStates?.(keys) ?? []
+  }
+
+  /** 近期带键收据流水（A3/DSHBOTS-323）。 */
+  receipts(limit = 50) {
+    return this.store?.receipts?.(limit) ?? []
   }
 
   /** 合批窗口：窗口内的多次推送合并到同一次 flush，一轮并发任务事件只占一次消息额度。 */
@@ -462,12 +564,14 @@ export class WechatChannel {
     }
   }
 
-  /** 失败记账：可重试错误计一次尝试，达到上限废弃；不可重试错误直接废弃。废弃后永不补发。 */
+  /** 失败记账：可重试错误计一次尝试，达到上限废弃；不可重试错误直接废弃。废弃后永不补发。
+   *  失败原因落 last_error（A3/DSHBOTS-323：sent/gone 终态可解释「为什么没收到」。 */
   recordOutboxFailure(item, error) {
     const retryable = isRetryable(error)
-    const attempts = retryable ? this.store.markAttempt(item.id) : null
+    const reason = this.errorText(error)
+    const attempts = retryable ? this.store.markAttempt(item.id, reason) : null
     if (!retryable || (attempts ?? 0) >= OUTBOX_MAX_ATTEMPTS) {
-      this.store.giveUp([item.id])
+      this.store.giveUp([item.id], reason)
       this.log.warn?.(
         `[wechat] 推送废弃(不再补发) id=${item.id}${retryable ? `(尝试 ${attempts}/${OUTBOX_MAX_ATTEMPTS} 次超限)` : '(不可重试)'}: ${this.errorText(error)}`,
       )

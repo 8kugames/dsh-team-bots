@@ -9,6 +9,22 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { maskSecrets } from '../secrets.js'
 import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '../util.js'
 
+// 记忆上限（DSHBOTS-339）：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶后新增被拒，
+// 须先整理到 MEMORY_COMPACT_TO 条以内才恢复放行（滞回，避免在阈值附近反复开关）。team 作用域不限。
+export const MEMORY_CAP = 64
+export const MEMORY_COMPACT_TO = 33
+// 单条记忆篇幅上限（owner 补充）：content 不得超过 256 字。
+export const MEMORY_MAX_CHARS = 256
+
+// 记忆审查专用模型（可选）：provider 与 model 都非空才启用，否则 null（沿用 Bot
+// 主模型）。手法同读图代理的 visionProxyTarget——配置对见 config.js 的
+// memoryReviewProvider/memoryReviewModel（DSH_TEAM_MEMORY_REVIEW_PROVIDER/_MODEL）。
+export function memoryReviewModelTarget(config) {
+  const provider = String(config?.memoryReviewProvider ?? '').trim()
+  const model = String(config?.memoryReviewModel ?? '').trim()
+  return provider && model ? { provider, model } : null
+}
+
 // 记忆审查输出：模型返回 JSON 数组，形如 [{scope, topic, content, confidence}]。
 export function parseMemoryReview(output) {
   const raw = String(output ?? '').trim()
@@ -90,31 +106,31 @@ export const memoryMethods = {
   },
   learnFromTask(project, bot, task, output, runId) {
     if (!output || output.trim().length < 40) return
-    const content = maskSecrets(redactSecrets(`${task.title}：${output.trim().slice(0, 900)}`), this.secretEntries())
+    // 自动沉淀按篇幅预算截断，保证落库单条 ≤ MEMORY_MAX_CHARS 字。
+    const content = maskSecrets(redactSecrets(`${task.title}：${output.trim().slice(0, 900)}`), this.secretEntries()).slice(0, MEMORY_MAX_CHARS)
     const source = `run:${runId}`
     const existing = this.store.get("SELECT id FROM memories WHERE source = ? AND scope_type = 'bot' AND scope_id = ?", source, bot.id)
     if (existing) return
-    this.createMemory({
-      scopeType: 'bot',
-      scopeId: bot.id,
-      topic: `任务 ${project.key}-${task.number}`,
-      content,
-      source,
-      confidence: 0.7,
-      createdBy: `bot:${bot.id}`,
-      actor: { type: 'bot', id: bot.id },
-    })
+    // 自动沉淀是尽力而为：触顶（或任何写入失败）只 warn 丢弃，不得炸任务交付 run。
+    const settle = (scopeType, scopeId, topic, confidence) => {
+      try {
+        this.createMemory({
+          scopeType,
+          scopeId,
+          topic,
+          content,
+          source,
+          confidence,
+          createdBy: `bot:${bot.id}`,
+          actor: { type: 'bot', id: bot.id },
+        })
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: 任务记忆沉淀被拒（%s/%s）：%s', scopeType, scopeId, error?.message ?? error)
+      }
+    }
+    settle('bot', bot.id, `任务 ${project.key}-${task.number}`, 0.7)
     if (project.owner_bot_id === bot.id) {
-      this.createMemory({
-        scopeType: 'project',
-        scopeId: project.id,
-        topic: `${project.key}-${task.number} 交付记录`,
-        content,
-        source,
-        confidence: 0.6,
-        createdBy: `bot:${bot.id}`,
-        actor: { type: 'bot', id: bot.id },
-      })
+      settle('project', project.id, `${project.key}-${task.number} 交付记录`, 0.6)
     }
   },
 
@@ -135,13 +151,17 @@ export const memoryMethods = {
       sourceRunId,
     )
     if (active) return active.id
+    // 审查模型覆盖：配置了专用模型对时随运行下发（runs.model_* 三列既有通道，
+    // startRun 的 modelOverrideFor 消费）；未配置为 NULL，沿用 Bot 主模型。
+    const target = memoryReviewModelTarget(this.config)
     const reviewRunId = id('run')
     const createdAt = nowIso()
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?)`,
-      reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`, createdAt,
+        attempt, idempotency_key, model_provider, model_model, queued_at)
+       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?)`,
+      reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`,
+      target?.provider ?? null, target?.model ?? null, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -178,7 +198,8 @@ export const memoryMethods = {
     for (const item of items) {
       const scopeType = ['bot', 'project', 'team'].includes(item.scope) ? item.scope : 'bot'
       const scopeId = scopeType === 'bot' ? bot.id : scopeType === 'project' ? project.id : 'team'
-      const content = maskSecrets(redactSecrets(text(item.content, 8000)), this.secretEntries())
+      // 审查产出同样按篇幅预算截断，避免超长条目被写入咽喉拒绝而整条丢失。
+      const content = maskSecrets(redactSecrets(text(item.content, 8000)), this.secretEntries()).slice(0, MEMORY_MAX_CHARS)
       if (!content) continue
       const dedupeKey = `${scopeType}|${scopeId}|${source}|${content}`
       if (seen.has(dedupeKey)) {
@@ -245,11 +266,55 @@ export const memoryMethods = {
     const row = this.store.get("SELECT id FROM projects WHERE owner_bot_id = ? LIMIT 1", botId)
     return Boolean(row)
   },
+
+  // ── 记忆上限治理（DSHBOTS-339）──
+  // bot/project 作用域 active 行硬顶 MEMORY_CAP；触顶后新增被拒并置滞回标志
+  // memory_full:<scope_type>:<scope_id>，整理到 MEMORY_COMPACT_TO 条以内才清标志放行。
+  // team 作用域不参与计数。计数走 memories_scope_idx(scope_type, scope_id, status)。
+  memoryActiveCount(scopeType, scopeId) {
+    return Number(this.store.get(
+      'SELECT COUNT(*) AS count FROM memories WHERE scope_type = ? AND scope_id = ? AND status = ?',
+      scopeType, scopeId, 'active',
+    )?.count ?? 0)
+  },
+  memoryCapacityMessage(scopeType, scopeId, count) {
+    const label = scopeType === 'bot' ? `Bot(${scopeId})` : `项目(${scopeId})`
+    return `${label}记忆已达 ${count}/${MEMORY_CAP} 条上限，新增被拒绝；请先去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗（同主题用 team_memory_write 覆盖写）、融合（合并相近条目），整理到 ≤${MEMORY_COMPACT_TO} 条后再新增。`
+  },
+  assertMemoryCapacity(scopeType, scopeId) {
+    if (scopeType !== 'bot' && scopeType !== 'project') return
+    const count = this.memoryActiveCount(scopeType, scopeId)
+    const flagKey = `memory_full:${scopeType}:${scopeId}`
+    if (count >= MEMORY_CAP) {
+      this.store.setSetting(flagKey, '1')
+      throw conflict(this.memoryCapacityMessage(scopeType, scopeId, count))
+    }
+    if (this.store.setting(flagKey) === null) return
+    if (count > MEMORY_COMPACT_TO) throw conflict(this.memoryCapacityMessage(scopeType, scopeId, count))
+    this.store.run('DELETE FROM settings WHERE key = ?', flagKey)
+  },
+
+  // 项目再开容量闸（DSHBOTS-342）：归档把 active+pending 一并冻为 frozen，再开统一解回 active，
+  // 冻结条数若已超 MEMORY_CAP，解回即破顶。此时整笔再开拒绝（项目保持归档），
+  // 先按 memoryCapacityMessage 指引整理（归档态可逐条 deleteMemory）再重开。
+  assertProjectReopenCapacity(scopeId, wouldBeActive) {
+    if (wouldBeActive <= MEMORY_CAP) return
+    throw conflict(this.memoryCapacityMessage('project', scopeId, wouldBeActive))
+  },
+
+  // 单条记忆篇幅上限：content 超过 MEMORY_MAX_CHARS 字即拒绝，防止单条挤占召回预算。
+  assertMemoryLength(content) {
+    if (content.length > MEMORY_MAX_CHARS) {
+      throw badRequest(`记忆内容不能超过 ${MEMORY_MAX_CHARS} 字（当前 ${content.length} 字），请精简后重试`)
+    }
+  },
+
   createMemory({ scopeType, scopeId, topic, content, source = '', confidence = 1, createdBy = 'system', actor = null, status = 'active', sourceRefs = [] }) {
     const cleanScope = ['bot', 'project', 'team'].includes(scopeType) ? scopeType : null
     if (!cleanScope) throw badRequest('记忆作用域无效')
     const cleanContent = redactSecrets(text(content, 8000))
     if (!cleanContent) throw badRequest('记忆内容不能为空')
+    this.assertMemoryLength(cleanContent)
     const writeActor = actor ?? { type: createdBy.split(':')[0] || 'system', id: createdBy.split(':').slice(1).join(':') || 'system' }
     this.assertMemoryWriteScope(cleanScope, scopeId, writeActor)
     if (cleanScope === 'bot') {
@@ -260,6 +325,7 @@ export const memoryMethods = {
       const project = this.projectRow(scopeId)
       if (project.status !== 'active') throw conflict('项目已归档，记忆已冻结')
     }
+    this.assertMemoryCapacity(cleanScope, scopeId)
     const memoryId = id('mem')
     const createdAt = nowIso()
     const cleanStatus = status === 'pending' ? 'pending' : 'active'
@@ -289,6 +355,8 @@ export const memoryMethods = {
     const memory = this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
     if (!memory) throw notFound('记忆不存在')
     if (memory.status !== 'pending') throw conflict('只有待审记忆可以批准')
+    // 审批会把 pending 提成 active，同样受上限约束：active 已满时拒绝。
+    this.assertMemoryCapacity(memory.scope_type, memory.scope_id)
     const now = nowIso()
     this.store.run(
       "UPDATE memories SET status = 'active', approved_by = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
@@ -391,7 +459,10 @@ export const memoryMethods = {
   async updateMemory(memoryId, patch) {
     const memory = this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
     if (!memory) throw notFound('记忆不存在')
-    const content = redactSecrets(text(patch.content ?? memory.content, 8000))
+    // 篇幅闸只约束本次实际变更的 content：存量超长条目仅改 topic 时不得被误拦（DSHBOTS-342）。
+    const contentChanged = patch.content != null
+    const content = contentChanged ? redactSecrets(text(patch.content, 8000)) : memory.content
+    if (contentChanged) this.assertMemoryLength(content)
     const topic = text(patch.topic ?? memory.topic, 120)
     this.store.run(
       'UPDATE memories SET topic = ?, content = ?, updated_at = ? WHERE id = ?',
@@ -488,6 +559,7 @@ export const memoryMethods = {
     }
     const content = redactSecrets(text(input.content, 8000))
     if (!content) throw badRequest('记忆内容不能为空')
+    this.assertMemoryLength(content)
     const now = nowIso()
     this.store.run(
       'UPDATE memories SET content = ?, source = ?, revision = revision + 1, updated_at = ? WHERE id = ?',
@@ -503,7 +575,9 @@ export const memoryMethods = {
   },
 
   // 批量清理：按过期口径把 active 记忆终态化（archived，检索即不再回灌）。
-  // 口径两选一（可并用）：task=已闭环卡（done/canceled）的过程记录主题，topics=点名主题。
+  // 口径：task=已闭环卡（done/canceled）的过程记录主题，topics=点名主题，
+  // before=updated_at 严格早于该 ISO 时间戳的全部 active 条目（存量收敛的批量判据）。
+  // before 与 topics/task 可组合，按 AND 交集收窄；三者全缺即拒绝（不做「全清」缺省）。
   // 逐条 memory_events 留痕 + 一笔 memory.cleanup 审计列出被清条目。
   memoryCleanupFromBot(sessionId, input) {
     const ownerCtx = this.ownerContextFor(sessionId)
@@ -522,12 +596,26 @@ export const memoryMethods = {
       taskTopics = [`任务 ${taskLabel}`, `${taskLabel} 交付记录`]
     }
     const wanted = [...new Set([...topics, ...taskTopics])]
-    if (!wanted.length) throw badRequest('cleanup 需要 topics 或 task 至少一项')
-    const placeholders = wanted.map(() => '?').join(', ')
-    const rows = this.store.all(
-      `SELECT * FROM memories WHERE scope_type = ? AND scope_id = ? AND status = 'active' AND topic IN (${placeholders})`,
-      scopeType, scopeId, ...wanted,
-    )
+    let before = null
+    if (input.before !== undefined && input.before !== null) {
+      before = String(input.before).trim()
+      if (!Number.isFinite(Date.parse(before))) {
+        throw badRequest('before 必须是有效的 ISO 时间戳（例如 2026-01-01T00:00:00.000Z）')
+      }
+    }
+    if (!wanted.length && !before) throw badRequest('cleanup 需要 topics、task 或 before 至少一项')
+    const clauses = ['scope_type = ?', 'scope_id = ?', "status = 'active'"]
+    const params: string[] = [scopeType, scopeId]
+    if (before) {
+      // julianday 归一化时间戳格式，避免字符串比较把等值瞬间误判为「早于」。
+      clauses.push('julianday(updated_at) < julianday(?)')
+      params.push(before)
+    }
+    if (wanted.length) {
+      clauses.push(`topic IN (${wanted.map(() => '?').join(', ')})`)
+      params.push(...wanted)
+    }
+    const rows = this.store.all(`SELECT * FROM memories WHERE ${clauses.join(' AND ')}`, ...params)
     const now = nowIso()
     const cleaned: Array<{ id: string, topic: string }> = []
     this.store.transaction(() => {
@@ -539,7 +627,7 @@ export const memoryMethods = {
         )
         cleaned.push({ id: row.id, topic: row.topic })
       }
-      this.audit(actor, 'memory.cleanup', 'memory', `${scopeType}:${scopeId}`, { scope: scopeType, task: taskLabel, cleaned })
+      this.audit(actor, 'memory.cleanup', 'memory', `${scopeType}:${scopeId}`, { scope: scopeType, task: taskLabel, before, cleaned })
     })
     return { cleaned, archived: cleaned.length, missed: wanted.filter(topic => !cleaned.some(item => item.topic === topic)) }
   },

@@ -1,3 +1,11 @@
+// 信赖边界（B6/DSHBOTS-327，吸收原型「外部文本只是数据」显式化）：
+// 本文件注册的全部 team_* 工具的鉴权只认结构化事实——宿主会话身份（ownerContextFor/
+// memberContextFor 按 session_bindings 解析）、bot 行与运行上下文（applyBotToolPolicy）、
+// bot.file_policy 三档沙箱（applyFilePolicy）。消息正文、引用摘录、微信文本、记忆内容、
+// 提案说明一律是数据：没有任何代码路径把它们解析成权限、角色、模型或写范围。
+// 工具 description 与失败引导文案是工具面契约，不可被提示词或外部文本改写（proto 五级
+// 优先级的最高层）；写范围兜底解析只发生在派单链的卡面描述（task-dispatch.ts），描述
+// 只能由派单方（owner 工具/UI/总监 bot）写入，外部消息进不来。
 const stringOutput = {
   schema: { type: 'string' },
   render: (_args, value) => [{ type: 'text', text: String(value ?? '') }],
@@ -80,7 +88,7 @@ export function installTeamTools(ctx, service) {
         priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority (new tasks and card amendment on re-dispatch)' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths this task will modify (new tasks only); the scheduler runs tasks with disjoint scopes in parallel. Omit to parse a `写范围：`/`write_scopes:` line from the description instead' },
         force_duplicate: { type: 'boolean', description: 'Escape hatch (new tasks only): skip the same-write-scope duplicate check when an unfinished task in this project already declares identical write scopes. Use only when a second task on the same paths is intentional; every use is audited as dispatch_force_duplicate' },
-        time_budget_minutes: { type: 'integer', description: 'Required delivery time limit in minutes (new tasks only, 1-10080): injected into the task prompt, and the run is aborted when the budget expires. The effective timeout is the smaller of this budget and the global run timeout. Omit to take the default budget (env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > stall-watchdog minutes > fallback 20 minutes)' },
+        time_budget_minutes: { type: 'integer', description: 'Required delivery time limit in minutes (new tasks only, 1-10080): injected into the task prompt, and the run is aborted when the budget expires. The effective timeout is the smaller of this budget and the global run timeout. Omit to take the priority-tier budget (urgent/high 45, medium 30, low/none 15 minutes); non-dispatch task creation falls back to env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > stall-watchdog minutes > 20 minutes' },
         parent_task_id: { type: 'string', description: 'Nest the new task as a subtask under this main task id (new tasks only): pass it when the main item cannot be finished in this run or a new closing condition emerged, so follow-up work lands as a product-grade card instead of a verbal note; also pass it to split a large task into parallel subtask cards for speed (independent parts, disjoint write_scopes, so the cards run concurrently). Must reference an existing task in the same project; self-reference is rejected. The backend validates' },
         task: { type: 'string', description: 'Existing task to re-dispatch, as KEY-N (for example DEMO-3). Omit to create a new task' },
         sandbox: { type: 'string', enum: ['inherit', 'workspace-write', 'read-only'], default: 'inherit', description: 'Sandbox tier for this task\'s runs (new tasks and re-dispatch); default inherit = follow the assignee bot\'s configured file policy, so a development task is never tightened to read-only unless the card says so. inherit also clears any stored override on re-dispatch. workspace-write/read-only must not be wider than that configuration (tighten-only; every run of the task starts under the effective tier, recorded as a sandbox_mode run event). Use read-only to run a development task in review mode' },
@@ -301,13 +309,14 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_cleanup',
-    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Two criteria, combinable: `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision. Do not archive entries recording the user\'s explicit decisions. Director-only.',
+    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Criteria (at least one required): `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision; `before` archives every active entry whose updated_at is strictly older than the given ISO timestamp — the one-shot bulk criterion for legacy backlog convergence. `before` combines with `topics`/`task` as an AND filter. Do not archive entries recording the user\'s explicit decisions. Director-only.',
     parameters: {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to clean: bot = your own, project = this project, team = whole team' },
         topics: { type: 'array', items: { type: 'string' }, description: 'Exact topic labels to archive in this scope' },
         task: { type: 'string', description: 'Closed card (KEY-N) whose process-record memories should be archived; rejected unless the task is done or canceled' },
+        before: { type: 'string', description: 'ISO timestamp cutoff (e.g. 2026-01-01T00:00:00.000Z): archive every active entry in this scope with updated_at strictly before it. Required when neither topics nor task is given; combining with topics/task intersects the criteria' },
       },
       required: ['scope'],
       additionalProperties: false,

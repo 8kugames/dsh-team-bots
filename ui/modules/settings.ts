@@ -179,7 +179,6 @@ function renderRunLimitsCard() {
   const stallValue = savedStall !== '' ? savedStall : String(limits.stallTimeoutMinutes ?? 30)
   // 验收滞留阈值（DSHBOTS-235）：未保存回填生效值；'0'（关闭守门）同样合法不短路。
   const reviewIdleValue = savedReviewIdle !== '' ? savedReviewIdle : String(limits.reviewIdleMinutes ?? 30)
-  const autoCloseOn = savedAutoClose !== '0'
   const envNames = [
     limits.runTimeoutEnv ? 'DSH_TEAM_RUN_TIMEOUT_MS' : '',
     limits.stallTimeoutEnv ? 'DSH_TEAM_STALL_TIMEOUT_MS' : '',
@@ -207,8 +206,9 @@ function renderRunLimitsCard() {
         <div class="field"><label id="settings-review-idle-label" for="settings-review-idle">${t('global.reviewIdleLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="1440" id="settings-review-idle" name="review_idle_minutes" value="${attr(reviewIdleValue)}"></div>
         <div class="field"><label id="settings-review-auto-close-label" for="settings-review-auto-close">${t('global.reviewAutoCloseLabel')}</label>
           <select class="select" id="settings-review-auto-close" name="review_auto_close">
-            <option value="1" ${autoCloseOn ? 'selected' : ''}>${t('global.on')}</option>
-            <option value="0" ${!autoCloseOn ? 'selected' : ''}>${t('global.off')}</option>
+            <option value="1" ${settings.review_auto_close === '1' ? 'selected' : ''}>${t('global.on')}</option>
+            <option value="observe" ${settings.review_auto_close === 'observe' ? 'selected' : ''}>${t('global.observe')}</option>
+            <option value="0" ${settings.review_auto_close === '0' ? 'selected' : ''}>${t('global.off')}</option>
           </select>
         </div>
       </div>
@@ -222,6 +222,46 @@ function renderRunLimitsCard() {
     </div>`
 }
 
+// 团队指令段（B1/DSHBOTS-324）：四段可编辑提示词的查看与编辑。
+// defaultChanged 徽标提示「内置默认已升级」；保存即经后端预算校验（拆卡三段 ≤1200），
+// 改动只对之后启动的会话生效（identity 段随会话冻结，进行中会话不唤醒）。
+const PROMPT_SEGMENT_LABEL_KEYS = {
+  communication: 'global.promptSegCommunication',
+  subtask: 'global.promptSegSubtask',
+  splitting: 'global.promptSegSplitting',
+  selfcheck: 'global.promptSegSelfcheck',
+}
+const PROMPT_SEGMENT_HINT_KEYS = {
+  communication: 'global.promptSegCommunicationHint',
+  subtask: 'global.promptSegSubtaskHint',
+  splitting: 'global.promptSegSplittingHint',
+  selfcheck: 'global.promptSegSelfcheckHint',
+}
+function renderPromptSegmentsCard() {
+  const segments = state.data.promptSegments ?? []
+  if (!segments.length) return ''
+  return `
+    <div class="card form-card g-card">
+      <div class="card-head"><h3>${t('global.promptSegmentsTitle')}</h3><span class="meta">${t('global.promptSegmentsMeta')}</span></div>
+      ${segments.map(segment => `
+        <div class="field" style="margin-top:12px">
+          <label for="prompt-seg-${attr(segment.key)}">${t(PROMPT_SEGMENT_LABEL_KEYS[segment.key] ?? '')}
+            ${segment.override ? `<span class="unread-badge">${t('global.promptSegCustom')}</span>` : ''}
+            ${segment.defaultChanged ? `<span class="unread-badge">${t('global.promptSegDefaultChanged')}</span>` : ''}
+          </label>
+          <textarea class="input" id="prompt-seg-${attr(segment.key)}" rows="4" style="min-height:72px;font:inherit">${esc(segment.effectiveText ?? '')}</textarea>
+          <div class="hint">${t(PROMPT_SEGMENT_HINT_KEYS[segment.key] ?? '')}</div>
+          <div class="btn-row" style="margin-top:8px">
+            <button class="btn small" type="button" data-action="save-prompt-segment" data-segment="${attr(segment.key)}">${t('global.save')}</button>
+            <button class="btn small" type="button" data-action="reset-prompt-segment" data-segment="${attr(segment.key)}"${segment.override ? '' : ' disabled'}>${t('global.promptSegReset')}</button>
+          </div>
+        </div>`).join('')}
+      <div class="hint">${t('global.promptSegmentsHint')}</div>
+    </div>`
+}
+
+// 设置变更历史（A4/DSHBOTS-330）：audit_log 只读视图的呈现——回答「谁在什么时候改了什么」。
+// 只回看不代恢复：历史行是增量 patch，恢复语义 = 按行内值手动重存（revision 闸兜并发）。
 function renderOpsCard() {
   const settings = state.data.settings ?? {}
   const currency = settings.budget_currency || 'CNY'
@@ -271,7 +311,6 @@ function dshPathsCard() {
       <div class="path-row"><span>${t('global.pathWorkspace')}</span>${pathCode(tildePath(paths.workspace))}${copyPath(paths.workspace)}</div>
       <div class="path-row"><span>${t('global.pathSkills')}</span>${pathCode(paths.skillRoot)}${copyPath(paths.skillRoot)}</div>
       <div class="path-row"><span>${t('global.pathData')}</span>${pathCode(paths.dataDir)}${copyPath(paths.dataDir)}</div>
-      <div class="hint">${t('global.dshPathsHint')}</div>
     </div>`
 }
 
@@ -284,7 +323,7 @@ function versionRow(labelKey, value) {
     : ''
 }
 
-// DSH 服务卡：版本检查 + 投递失败提示（投递失败 kv 落在本卡尾部）。
+// DSH 服务卡：版本检查。
 function dshServiceCard() {
   const data = state.data
   // @ts-ignore 「DSH 服务」卡检查结果：loadState 只换 state.data，dshUpdate 存这里不被轮询盖掉。
@@ -294,7 +333,6 @@ function dshServiceCard() {
     : available
       ? `<strong>${esc(latest)} <span class="pill amber">${t('可升级')}</span></strong>`
       : `<strong>${esc(latest)} <span class="pill green">${t('global.latest')}</span></strong>`
-  const outbox = data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
   return `
     <div class="card form-card g-card">
       <div class="card-head">
@@ -305,7 +343,6 @@ function dshServiceCard() {
       <div class="kv"><span>${t('global.dshLatestVersion')}</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
       ${versionRow('global.pluginCurrentVersion', data.pluginVersion)}
       <div class="kv"><span>${t('global.pluginLatestVersion')}</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
-      ${Number(outbox.failed ?? 0) > 0 ? `<div class="kv" style="margin-top:12px"><span>${t('global.outboxQueue')}</span><strong>${t('global.outboxFailed', { count: outbox.failed })}</strong></div>` : ''}
     </div>`
 }
 
@@ -391,6 +428,7 @@ function renderGlobal() {
     pageNav([
       { id: 'g-pref', label: t('global.groupPref') },
       { id: 'g-runtime', label: t('global.groupRuntime') },
+      { id: 'g-prompts', label: t('global.groupPrompts') },
       { id: 'g-about', label: t('global.groupAbout') },
     ], t('global.navLabel')),
     [
@@ -446,11 +484,15 @@ function renderGlobal() {
         body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}`,
       }),
       pageSection({
-        index: '03', id: 'g-about', title: t('global.groupAbout'), desc: t('global.groupAboutDesc'),
+        index: '03', id: 'g-prompts', title: t('global.groupPrompts'), desc: t('global.groupPromptsDesc'),
+        body: slot('full', renderPromptSegmentsCard()),
+      }),
+      pageSection({
+        index: '04', id: 'g-about', title: t('global.groupAbout'), desc: t('global.groupAboutDesc'),
         body: `${slot('half', dshPathsCard())}${slot('half', dshServiceCard())}`,
       }),
     ],
   )
 }
 
-export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderSettings, currentScale, renderGlobal }
+export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderPromptSegmentsCard, renderSettings, currentScale, renderGlobal }

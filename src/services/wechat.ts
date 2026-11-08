@@ -4,10 +4,12 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { createRequire } from 'node:module'
+import { effectiveWechatEnabled } from '../config.js'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
-import { jsonParse } from '../util.js'
+import { jsonParse, nowIso } from '../util.js'
 import { answerFailed, answerReceipt, approvalCard, questionCard, wechatToken } from '../wechat/format.js'
+import { recordWechatTriggerRow } from './wechat-trigger-schema.js'
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
 // 依赖按需加载：二维码库缺失只影响扫码，不应让整个插件加载失败。
@@ -47,6 +49,53 @@ function toChannelError(service, action, error) {
 }
 
 export const wechatMethods = {
+
+  /** 微信通道生效开关（DSHBOTS-334）：通道页 settings 显式值 > patch.yml/env 默认。 */
+  wechatChannelEnabled() {
+    return effectiveWechatEnabled(this.config, key => this.store.setting(key))
+  },
+
+  /**
+   * 通道页启停开关（DSHBOTS-334）：settings 落 '1'/'0' + 审计 + 即时对齐挂载态。
+   * 停用即停推（this.wechat 置 null，channelNotify 不再扇出到微信）；启用按既有
+   * 绑定凭据恢复连接（绑定持久在 wechat-channel.sqlite，stop 不清凭据）。
+   */
+  async setWechatChannelEnabled(enabled, actor = this.actor()) {
+    this.store.setSetting('wechat_channel_enabled', enabled ? '1' : '0')
+    this.audit(actor, 'settings.update', 'settings', 'wechat_channel', { enabled: Boolean(enabled) })
+    await this.applyWechatChannelEnabled()
+    return this.wechatStatus()
+  },
+
+  /** 按生效开关即时对齐通道挂载：关=断开卸载；开=挂载并按既有绑定连接。 */
+  async applyWechatChannelEnabled() {
+    if (!this.wechatChannelEnabled()) {
+      if (!this.wechat) return
+      const channel = this.wechat
+      this.wechat = null
+      try {
+        await channel.stop()
+      } catch (error: any) {
+        this.logger.warn?.(`[wechat] 通道停用清理失败: ${error?.message ?? error}`)
+      }
+      return
+    }
+    if (this.wechat) return
+    const { WechatStore } = await import('../wechat/store.js')
+    const { WechatChannel } = await import('../wechat/channel.js')
+    this._wechatStore ??= await new WechatStore(this.config.wechatDbPath).open()
+    const channel = new WechatChannel({
+      store: this._wechatStore,
+      // 挂载决策已由生效开关做出，通道内 enabled() 门禁按挂载口径放行。
+      config: { ...this.config, wechat: { ...this.config.wechat, enabled: true } },
+      log: this.logger,
+    })
+    channel.setService(this)
+    this.wechat = channel
+    await channel.start().catch(error => {
+      this.logger.warn?.(`[wechat] 通道启动失败: ${error?.message ?? error}`)
+    })
+  },
 
   // 微信状态会进 UI state：凭据类字段一律剥掉，只留 phase/是否登录/管理员等展示信息。
   wechatStatus() {
@@ -180,31 +229,92 @@ export const wechatMethods = {
   },
 
   // ===== DSHBOTS-215：微信问答回路 =====
-  // 群聊提问/审批转发微信：只推纯文本镜像，状态仍由工作台卡片与群消息承载；
+  // 群聊提问/审批转发外部通道：只推纯文本镜像，状态仍由工作台卡片与群消息承载；
   // 管理员在微信的答复经 commands 的「答/批 <token> …」路由回原条目（见 wechatAnswerQuestion /
   // wechatDecideApproval）。转发失败只告警，不阻塞提问主流程。
+  // DSHBOTS-326：转发面从「微信单通道」扩为「各已启用通道」（微信/飞书），单通道失败不阻断另一通道。
 
-  /** 提问转发微信（只推文本；token 取问题 id 末 6 位）。 */
+  /** 提问转发各已启用通道（只推文本；token 取问题 id 末 6 位）。
+   *  幂等收据键（A3/DSHBOTS-323）：question:<row.id>——同条目重复转发在各通道存留期内被吸收
+   *  （各通道 outbox 库彼此独立，同键在两套库里各自幂等，互不干扰）。
+   *  DSHBOTS-326：出站经 channelNotify 扇出到微信与飞书，单通道失败不阻断另一通道。 */
   wechatQuestion(project, row, items) {
-    if (!this.wechat || typeof this.wechat.notify !== 'function') return false
-    try {
-      this.wechat.notify(questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)))
-      return true
-    } catch (error: any) {
-      this.logger.warn?.('dsh-team: 微信提问转发失败: %s', error?.message ?? error)
-      return false
-    }
+    const results = this.channelNotify?.(
+      questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)),
+      { receiptKey: `question:${row.id}` },
+    ) ?? []
+    return results.some(result => result.ok)
   },
 
-  /** 审批转发微信（只推文本；token 取审批 id 末 6 位）。 */
+  /** 审批转发各已启用通道（只推文本；token 取审批 id 末 6 位）。
+   *  幂等收据键（A3/DSHBOTS-323）：approval:<row.id>（各通道 outbox 库内各自幂等）。
+   *  DSHBOTS-326：出站经 channelNotify 扇出，单通道失败只留痕不阻断另一通道。 */
   wechatApproval(project, row) {
-    if (!this.wechat || typeof this.wechat.notify !== 'function') return false
-    try {
-      this.wechat.notify(approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)))
-      return true
-    } catch (error: any) {
-      this.logger.warn?.('dsh-team: 微信审批转发失败: %s', error?.message ?? error)
-      return false
+    const results = this.channelNotify?.(
+      approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)),
+      { receiptKey: `approval:${row.id}` },
+    ) ?? []
+    return results.some(result => result.ok)
+  },
+
+  /**
+   * 外发收据视图（A3/DSHBOTS-323）：近 N 条带键推送的终态流水，可追责/可回放。
+   * 真值唯一来源是通道出站库（wechat-channel.sqlite，随备份走）：sent=sent_at 在、
+   * gone=gave_up_at 在（last_error 带废弃原因）、pending=两者皆无。
+   * 通道未启用返回 available:false——「为什么没收到」在该态由通道页与 needsAttention 解释，
+   * 不在插件库建第二张收据表（反双真值）。
+   */
+  notifyReceiptsView(limit = 50) {
+    if (!this.wechat || typeof this.wechat.receipts !== 'function') {
+      return { available: false, reason: 'wechat-disabled', items: [] }
+    }
+    const items = this.wechat.receipts(limit).map(row => ({
+      receiptKey: row.receipt_key,
+      state: row.sent_at ? 'sent' : row.gave_up_at ? 'gone' : 'pending',
+      attempts: Number(row.attempts ?? 0),
+      lastError: row.last_error ?? null,
+      createdAt: row.created_at,
+      sentAt: row.sent_at ?? null,
+      gaveUpAt: row.gave_up_at ?? null,
+    }))
+    return { available: true, reason: null, items }
+  },
+
+  /**
+   * 入站 Trigger 留痕（B4-①/DSHBOTS-328）：通道每条入站事件的处置记录——handled/
+   * filtered/rejected + route + reason，回答「这条微信为什么没有触发」。稳定 id 去重
+   * （native 主键），滚动封顶在 wechat-trigger-schema。读入（Trigger）与写出（notify
+   * 收据）两侧各自留痕、互不混表。
+   */
+  recordWechatTrigger({ nativeId, peerId, text, disposition, route = null, reason = null }) {
+    if (!nativeId) return 'skipped'
+    return recordWechatTriggerRow(this.store, {
+      id: `wechat:${nativeId}`,
+      received_at: nowIso(),
+      peer_id: peerId,
+      disposition,
+      route,
+      reason,
+      preview: String(text ?? ''),
+    })
+  },
+
+  wechatTriggersView(limit = 50) {
+    const rows = this.store.all(
+      'SELECT id, received_at, peer_id, disposition, route, reason, preview FROM wechat_inbound ORDER BY received_at DESC LIMIT ?',
+      Math.max(1, Math.min(200, Number(limit) || 50)),
+    )
+    return {
+      count: rows.length,
+      items: rows.map(row => ({
+        id: row.id,
+        receivedAt: row.received_at,
+        peerId: row.peer_id,
+        disposition: row.disposition,
+        route: row.route,
+        reason: row.reason,
+        preview: row.preview,
+      })),
     }
   },
 

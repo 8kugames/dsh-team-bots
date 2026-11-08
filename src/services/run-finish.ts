@@ -250,6 +250,30 @@ export const runFinishMethods = {
         status === 'succeeded' && cleanOutput ? 'session_compact_done' : 'session_compact_failed',
         status === 'succeeded' && cleanOutput ? '会话总结压缩完成，留原会话继续' : `会话总结压缩未生成：${error?.message ?? '模型未返回文本'}`,
       )
+      // 宿主历史折叠（单轮上下文治理 P1）：总结轮入史后把旧区间真正折叠掉（compactNow），
+      // 会话前缀才实际缩小；不await收尾（折叠自带幂等锁与忙碌让路），结果按事件留痕。
+      // 降级路径：宿主无 compaction 缝隙时保持仅总结轮（skipped 留痕可见，不静默）；
+      // 可选调用兼容测试 StubRuntime（无该方法时静默跳过折叠）。
+      void Promise.resolve(this.runtime?.compactHostSessionHistory?.(run.session_id))
+        .then(outcome => {
+          if (!outcome) return
+          if (outcome.unavailable) {
+            this.insertRunEvent(runId, 'session_compact_fold_skipped', '宿主未提供 compaction 服务，本窗口保持仅总结轮')
+          } else if (outcome.folded) {
+            this.insertRunEvent(
+              runId,
+              'session_compact_fold',
+              `宿主历史折叠完成：收拢 ${outcome.shadowedItems ?? '?'} 条区间、约 ${outcome.shadowedTokens ?? '?'} token`,
+            )
+          } else {
+            this.insertRunEvent(
+              runId,
+              'session_compact_fold_failed',
+              `宿主历史折叠未执行（${outcome.reason}${outcome.message ? `：${outcome.message}` : ''}）`,
+            )
+          }
+        })
+        .catch(err => this.logger?.warn?.('session_compact 折叠收尾异常: %s', err?.message ?? err))
       if (this.rate[run.project_id]) delete this.rate[run.project_id]
       return
     }
@@ -522,17 +546,17 @@ export const runFinishMethods = {
     if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
   },
 
-  // 微信直达对话回程（DSHBOTS-208/258）：trigger_type='wechat' 的运行（项目群聊直达、
-  // 项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）推回微信管理员，出站走通道既有合批/重试治理；
-  // 只推微信触发的运行，工作台群聊回复不受影响。推送失败不阻塞收尾主流程。
+  // 通道直达对话回程（DSHBOTS-208/258/329）：trigger_type='wechat'/'feishu' 的运行
+  // （项目群聊直达、项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）
+  // 推回来源通道管理员，出站走通道既有合批/重试治理；只推通道触发的运行，工作台群聊回复不受影响。
   // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply（DSHBOTS-211）。
+  // DSHBOTS-326：出站经 channelNotify 扇出到各已启用通道（微信/飞书），单通道失败只留痕不阻断另一通道。
+  // DSHBOTS-329：飞书触发运行同款回程——推回飞书管理员，目标会话由飞书通道的
+  // store.reply_message_id 锚点决定（卡②入站时落锚，见 src/feishu/channel.ts 的 saveReplyMessageId）。
   notifyWechatChat(bot, run, body, failed = false) {
-    if (run?.trigger_type !== 'wechat' || !this.wechat) return
-    try {
-      this.wechat.notify(chatReply(bot?.name ?? 'Bot', body, failed))
-    } catch (error: any) {
-      this.logger.warn?.('dsh-team: 微信直达回复推送失败: %s', error?.message ?? error)
-    }
+    const trigger = run?.trigger_type
+    if (trigger !== 'wechat' && trigger !== 'feishu') return
+    this.channelNotify?.(chatReply(bot?.name ?? 'Bot', body, failed))
   },
 
   // ── Bot 群聊回复 mention 唤醒（DSHBOTS-252）────────────────────────────

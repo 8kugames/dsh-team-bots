@@ -70,13 +70,17 @@ const NOTE_MARK = '(note: recent done card'
 // ── a) 任务模板：自校段在场 + 既有锚点前缀不变（D-274 Deadline 结构原样）──
 
 test('a1) 源码锚：自校段为固定追加段（marker 对 + 关键文案被钉），位置在 Status 与 Description 之间', () => {
+  // B1/DSHBOTS-324 起自校段正文可被团队覆盖：默认文案钉在 PROMPT_SEGMENT_DEFAULTS（同源码内），
+  // marker 块钉覆盖解析接线（promptSegmentText('selfcheck')），标题与注入点不变。
   assert.ok(PROMPT_SRC.includes('// delivery-selfcheck:start') && PROMPT_SRC.includes('// delivery-selfcheck:end'), '自校段须有 start/end marker（沿用既有静态段惯例）')
   const block = PROMPT_SRC.slice(PROMPT_SRC.indexOf('// delivery-selfcheck:start'), PROMPT_SRC.indexOf('// delivery-selfcheck:end'))
   assert.ok(block.includes('# Delivery self-check'), '自校段标题被钉')
-  assert.ok(block.includes('put the evidence in the delivery report'), '证据进交付报告口径被钉')
-  assert.ok(block.includes('exact test/build commands') && block.includes('list of files you changed'), '测试命令+结果、改动文件清单要求被钉')
-  assert.ok(block.includes('counts or links the acceptance criteria name'), '验收标准的计数/链接核对被钉')
-  assert.ok(block.includes('Self-checking is always cheaper than rework'), '先自校再报交付的经济口径被钉')
+  assert.ok(block.includes("this.promptSegmentText('selfcheck')"), '自校段正文经可编辑段解析（覆盖生效于新会话）')
+  const defaultsSrc = PROMPT_SRC.slice(PROMPT_SRC.indexOf('export const PROMPT_SEGMENT_DEFAULTS'), PROMPT_SRC.indexOf('export const PROMPT_SEGMENT_MAX_CHARS'))
+  assert.ok(defaultsSrc.includes('put the evidence in the delivery report'), '证据进交付报告口径被钉')
+  assert.ok(defaultsSrc.includes('exact test/build commands') && defaultsSrc.includes('list of files you changed'), '测试命令+结果、改动文件清单要求被钉')
+  assert.ok(defaultsSrc.includes('counts or links the acceptance criteria name'), '验收标准的计数/链接核对被钉')
+  assert.ok(defaultsSrc.includes('Self-checking is always cheaper than rework'), '先自校再报交付的经济口径被钉')
   // 只追加（D-269 手法）：自校段插在卡头 Status 行之后、Description 之前，既有锚点行原样保留。
   assert.ok(PROMPT_SRC.includes('Status: ${task.status}${deliverySelfcheckBlock}\nDescription:'), '注入点钉在 Status 与 Description 之间，Status/Description 既有行不改写')
 })

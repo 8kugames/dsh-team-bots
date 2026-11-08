@@ -66,6 +66,10 @@ export default {
   "tree.archived": "Archived",
   "tree.archivedEmpty": "No archived projects.",
   // Sidebar bottom
+  "sidebar.bubbleApprovals": "Approvals",
+  "sidebar.bubbleQuestions": "Questions",
+  "sidebar.bubbleProposals": "Proposals",
+  "sidebar.bubbleAria": "Items needing your attention",
   "sidebar.botsOverview": "Bots overview",
   "sidebar.pendingProposals": "Proposals awaiting approval",
   "sidebar.usage": "Usage stats",
@@ -74,6 +78,7 @@ export default {
   "sidebar.globalConfig": "Global settings",
   "sidebar.switchToDsh": "Switch to the native DSH web UI",
   "sidebar.dshNative": "Native DSH UI",
+  "sidebar.githubStar": "Star on GitHub",
   // Topbar stats & actions
   "topbar.taskOne": "task",
   "topbar.taskMany": "tasks",

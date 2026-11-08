@@ -183,6 +183,34 @@
     gap: 8px;
 }
 .approval-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
+/* 连续系统通知折叠行（B8/DSHBOTS-336）：Quiet by default——≥3 条连续系统通知折叠为一行，
+   展开态按组键存 state.expandedCollapses（跨轮询持久），bot/user 消息不折叠。 */
+.msg-collapse-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 12px;
+    margin: 4px 0;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-3);
+    font: 500 var(--fs-small) var(--sans);
+    cursor: pointer;
+    text-align: left;
+}
+.msg-collapse-row:hover { border-color: var(--line-2); color: var(--ink); }
+/* chevron 图标必须显式约束尺寸：icon() 产出的 svg 只有 viewBox，无 width/height 属性时
+   按 replaced element 默认尺寸（约 300×150）渲染，会把折叠行撑破群聊时间线。 */
+.msg-collapse-row > svg { flex: 0 0 auto; width: 12px; height: 12px; }
+.msg-collapse-last {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 /* 来源定位行（DSHBOTS-240）：顶部跨会话审批通知的卡片多一行「来源群聊（项目名/KEY）+ 任务 ID/任务名」，
    让 owner 不跳转即可判断该批谁。群聊卡片不带这些字段，不渲染该行。 */
 .approval-source {

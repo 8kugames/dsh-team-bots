@@ -12,6 +12,7 @@ import { projectSkillRoots } from '../project-skills.js'
 import { resolveUiLanguage } from './locale.js'
 import { effectiveUiLanguage } from '../config.js'
 import { nowIso } from '../util.js'
+import { staleCardHit } from './notify.js'
 
 // 插件自身版本：进程启动时从部署副本 package.json 定格，即当前生效版本。
 // health() 与「DSH 服务」卡展示同源（DSHBOTS-143）。
@@ -91,12 +92,15 @@ export const systemMethods = {
       skills: skillSnapshot(this.store, this.config),
       projectSkills: project ? this.projectSkillView(project) : [],
       skillBindings: this.skillBindings(project?.id ?? null),
-      outbox: this.outboxCounts(),
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
       revisions: {},
       // 用量快照默认按 30 日窗口（DSHBOTS-121）：与页面默认档一致，其余三档按需单独取。
       usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null, window: '30d', cacheTtlMs: this.config.usageSnapshotCacheMs }),
       settings: this.settingsView(),
+      // 设置页乐观并发令牌（B2/DSHBOTS-325）：UI 保存时随 patch 回传，不匹配即 409。
+      settingsRevision: this.settingsRevision(),
+      // 可编辑提示词段（B1/DSHBOTS-324）：全局配置页「团队指令」分组唯一真值。
+      promptSegments: this.promptSegmentsView(),
       runLimits: this.runLimitsView(),
       // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
       activeRuns: Number(this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')")?.count ?? 0),
@@ -140,6 +144,8 @@ export const systemMethods = {
       // 配置里的默认价格，Web 中可据此一键恢复。
       priceDefaults: this.config.modelPrices ?? [],
       wechat: this.wechatStatus(),
+      // 飞书通道状态（DSHBOTS-323 卡②）：phase 广播含 conflict（exceed_conn_limit）。
+      feishu: this.feishuStatus(),
       now: nowIso(),
     }
     if (project) {
@@ -212,7 +218,7 @@ export const systemMethods = {
           messages: soloWindow.map(message => this.soloMessageView(message)),
           archived: { count: archivedCount, hasMore: archivedCount > 0 },
           runs: this.store.all(
-            "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 30",
+            "SELECT * FROM runs WHERE bot_id = ? AND project_id IS NULL ORDER BY queued_at DESC LIMIT 10",
             soloBot.id,
           ).map(run => this.runView(run)),
           questions: soloQuestions,
@@ -438,6 +444,48 @@ export const systemMethods = {
       projects: this.store.get('SELECT COUNT(*) AS count FROM projects')?.count ?? 0,
       queued: this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status = 'queued'")?.count ?? 0,
       running: this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status = 'running'")?.count ?? 0,
+      // needs-attention 聚合（A2/DSHBOTS-322）：外部巡检与 UI 顶部收口同源。
+      needsAttention: this.needsAttentionView(),
     }
+  },
+
+  // needs-attention 聚合（A2/DSHBOTS-322，吸收 superagent 原型 overview「三问」+ B9 系统问题口径）：
+  // 把散在各域的「需要人」事项收进一个只读聚合，供 health()（外部巡检）与 state（UI 顶部收口）
+  // 同源消费。反双真值：只做 COUNT 与既有谓词的复算，不改任何状态真值——待审/待答谓词与
+  // approvalsPending/questionsPending 同式，滞留判定复用 notify.js 的 staleCardHit 纯函数
+  // （与 scheduler 扫描同一口径），投递失败取 outboxCounts 的 failed 终态。
+  // B9 升级语义落在既有终态上：outbox failed = 退避重试耗尽（defer 不计数，D-136）；
+  // 微信通道异常取 channel status 的权威 phase（connecting 是扫码过渡态不算异常）——
+  // 不另建失败计数表（报告 D5 警示：原型「记录不删」类技术债不搬）。
+  // runs.attention_json 的待答面（answer_attention）无 UI 消费者，且 question 卡已覆盖
+  // 提问入口，这里不发明不可行动的数字。
+  needsAttentionView() {
+    const staleRows = this.store.all(
+      `SELECT status, updated_at FROM tasks
+       WHERE status IN ('in_review', 'blocked', 'backlog', 'todo') AND updated_at IS NOT NULL LIMIT 500`,
+    )
+    const needsYou = {
+      approvals: Number(this.store.get("SELECT COUNT(*) AS count FROM approvals WHERE status = 'pending'")?.count ?? 0),
+      questions: Number(this.store.get("SELECT COUNT(*) AS count FROM questions WHERE status = 'pending'")?.count ?? 0),
+      reviews: Number(this.store.get("SELECT COUNT(*) AS count FROM tasks WHERE status = 'in_review'")?.count ?? 0),
+      stale: staleRows.filter(row => staleCardHit(row)).length,
+    }
+    const issues = []
+    const outboxFailed = Number(this.outboxCounts().failed ?? 0)
+    if (outboxFailed > 0) {
+      const oldest = this.store.get("SELECT created_at FROM outbox WHERE status = 'failed' ORDER BY created_at LIMIT 1")
+      issues.push({ kind: 'outbox_failed', count: outboxFailed, since: oldest?.created_at ?? null })
+    }
+    const wechat = this.wechatStatus()
+    if (wechat.enabled && wechat.phase && !['connected', 'connecting'].includes(wechat.phase)) {
+      issues.push({ kind: 'wechat_channel', phase: wechat.phase, message: wechat.error ?? null })
+    }
+    // 飞书通道异常同口径（DSHBOTS-323 卡②）：conflict（连接数冲突）/unbound/reconnecting
+    // 都是需要人看的状态，经 phase 广播进 needs-attention。
+    const feishu = this.feishuStatus()
+    if (feishu.enabled && feishu.phase && !['ready'].includes(feishu.phase)) {
+      issues.push({ kind: 'feishu_channel', phase: feishu.phase, message: feishu.error ?? null })
+    }
+    return { needsYou, issues }
   },
 }

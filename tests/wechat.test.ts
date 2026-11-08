@@ -420,7 +420,7 @@ test('wechat channel 空文本不入队、推送成功才标记已发送', async
     const channel: any = new WechatChannel({ store, config: { wechat: { enabled: true } } })
     channel.notify('   ')
     assert.equal(store.pendingOutbox().length, 0, '空文本不应进入发送队列')
-    assert.equal(store.enqueue(''), false)
+    assert.equal(store.enqueue(''), 'skipped')
 
     const sent = []
     channel.transport = { async sendMessage(request) { sent.push(request) } }

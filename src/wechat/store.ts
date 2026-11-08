@@ -40,7 +40,9 @@ export class WechatStore {
         created_at TEXT NOT NULL,
         sent_at TEXT,
         attempts INTEGER NOT NULL DEFAULT 0,
-        gave_up_at TEXT
+        gave_up_at TEXT,
+        receipt_key TEXT,
+        last_error TEXT
       );
       CREATE TABLE IF NOT EXISTS peers (
         peer_id TEXT PRIMARY KEY,
@@ -51,6 +53,9 @@ export class WechatStore {
     `)
     await this.migrateOutboxColumns()
     await this.migrateChannelStateColumns()
+    // 幂等收据键（A3/DSHBOTS-323）：同键只允许一行在库（存留期内重复推送被吸收）。
+    // 部分唯一索引：无键行（notify 未带 receiptKey 的旧调用形态）不参与约束。
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS outbox_receipt_key_idx ON outbox(receipt_key) WHERE receipt_key IS NOT NULL')
     await this.secureFiles()
     return this
   }
@@ -69,8 +74,9 @@ export class WechatStore {
   }
 
   /**
-   * 旧库补列迁移：outbox 引入重试上限（attempts）与废弃标记（gave_up_at）前的库缺这两列。
-   * 幂等：列已存在则跳过；补列带默认值，旧行语义等价于「未重试过、未废弃」。
+   * 旧库补列迁移：outbox 引入重试上限（attempts）与废弃标记（gave_up_at）前的库缺这两列；
+   * 幂等收据键（A3/DSHBOTS-323）与最近失败原因（last_error）同批补齐。
+   * 幂等：列已存在则跳过；补列带默认值，旧行语义等价于「未重试过、未废弃、无收据键」。
    */
   async migrateOutboxColumns() {
     const columns = new Set(
@@ -81,6 +87,12 @@ export class WechatStore {
     }
     if (!columns.has('gave_up_at')) {
       this.db.exec('ALTER TABLE outbox ADD COLUMN gave_up_at TEXT')
+    }
+    if (!columns.has('receipt_key')) {
+      this.db.exec('ALTER TABLE outbox ADD COLUMN receipt_key TEXT')
+    }
+    if (!columns.has('last_error')) {
+      this.db.exec('ALTER TABLE outbox ADD COLUMN last_error TEXT')
     }
   }
 
@@ -169,13 +181,46 @@ export class WechatStore {
     this.db.prepare('DELETE FROM outbox').run()
   }
 
-  enqueue(text) {
+  /**
+   * 入队推送（A3/DSHBOTS-323）：带 receiptKey 时做幂等吸收——同键在存留期内只入队一次
+   * （先查后插，单进程无并发入队者；部分唯一索引兜底路径性竞态，竞态冲突由调用方 catch）。
+   * 返回 'enqueued' | 'duplicate' | 'skipped'，调用方据此留痕；不带键的旧形态行为不变。
+   */
+  enqueue(text, receiptKey = null) {
     const body = String(text ?? '').trim()
-    if (!body) return false
+    if (!body) return 'skipped'
+    const key = receiptKey ? String(receiptKey) : null
+    if (!key) {
+      this.db.prepare(
+        'INSERT INTO outbox (text, created_at) VALUES (?, ?)',
+      ).run(body, nowIso())
+      return 'enqueued'
+    }
+    const existing = this.db.prepare('SELECT id FROM outbox WHERE receipt_key = ?').get(key)
+    if (existing) return 'duplicate'
     this.db.prepare(
-      'INSERT INTO outbox (text, created_at) VALUES (?, ?)',
-    ).run(body, nowIso())
-    return true
+      'INSERT INTO outbox (text, created_at, receipt_key) VALUES (?, ?, ?)',
+    ).run(body, nowIso(), key)
+    return 'enqueued'
+  }
+
+  /** 按 receipt_key 查收据终态（A3/DSHBOTS-323）：sent（已发送）/ gone（已废弃）/ pending（待发）。 */
+  receiptStates(keys) {
+    const list = (Array.isArray(keys) ? keys : []).map(key => String(key)).filter(Boolean)
+    if (!list.length) return []
+    const placeholders = list.map(() => '?').join(', ')
+    return this.db.prepare(
+      `SELECT receipt_key, text, sent_at, gave_up_at, attempts, last_error, created_at
+       FROM outbox WHERE receipt_key IN (${placeholders}) ORDER BY id DESC`,
+    ).all(...list)
+  }
+
+  /** 近期收据流水（A3/DSHBOTS-323）：带键条目按入队倒序，供运维视图追责/回放。 */
+  receipts(limit = 50) {
+    return this.db.prepare(
+      `SELECT receipt_key, text, sent_at, gave_up_at, attempts, last_error, created_at
+       FROM outbox WHERE receipt_key IS NOT NULL ORDER BY id DESC LIMIT ?`,
+    ).all(Math.max(1, Math.min(200, Number(limit) || 50)))
   }
 
   pendingOutbox(limit = 20) {
@@ -191,25 +236,31 @@ export class WechatStore {
     for (const id of ids) statement.run(at, id)
   }
 
-  /** 记一次发送失败，返回该条累计尝试次数（含本次；持久化，重启不重置）。 */
-  markAttempt(id) {
+  /** 记一次发送失败（可重试），返回该条累计尝试次数（含本次；持久化，重启不重置）。
+   *  last_error 存最近一次失败原因（A3/DSHBOTS-323：废弃后可解释「为什么没收到」。 */
+  markAttempt(id, error = '') {
     const result = this.db.prepare(
-      'UPDATE outbox SET attempts = attempts + 1 WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL',
-    ).run(id)
+      "UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL",
+    ).run(String(error ?? '').slice(0, 500), id)
     if (!Number(result?.changes ?? 0)) return null
     const row = this.db.prepare('SELECT attempts FROM outbox WHERE id = ?').get(id)
     return Number(row?.attempts ?? 0)
   }
 
-  /** 废弃指定待发条目：仍视为未发送，但永久不再补发（重试超限或不可重试失败）。 */
-  giveUp(ids) {
+  /** 废弃指定待发条目：仍视为未发送，但永久不再补发（重试超限或不可重试失败）。
+   *  可带失败原因落 last_error（不带时保留既有原因，如链接重建的批量作废）。 */
+  giveUp(ids, error = null) {
     if (!ids.length) return 0
-    const statement = this.db.prepare(
-      'UPDATE outbox SET gave_up_at = ? WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL',
-    )
+    const statement = error
+      ? this.db.prepare(
+        'UPDATE outbox SET gave_up_at = ?, last_error = ? WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL',
+      )
+      : this.db.prepare(
+        'UPDATE outbox SET gave_up_at = ? WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL',
+      )
     const at = nowIso()
     let changed = 0
-    for (const id of ids) changed += Number(statement.run(at, id)?.changes ?? 0)
+    for (const id of ids) changed += Number((error ? statement.run(at, String(error).slice(0, 500), id) : statement.run(at, id))?.changes ?? 0)
     return changed
   }
 

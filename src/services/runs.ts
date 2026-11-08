@@ -13,7 +13,7 @@ import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, sha256, text } from '../util.js'
 import { readWriteScopes, writeScopePathsOverlap } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
-import { effectiveSandbox } from './runtime/prompt.js'
+import { effectiveSandbox, PROMPT_SEGMENT_DEFAULTS, parsePromptOverrides } from './runtime/prompt.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 
 // 合批窗口与上限默认值（DSHBOTS-231/287，DSHBOTS-290 随语义回补从 scheduler.ts 迁来）：
@@ -21,6 +21,15 @@ import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 // （coalesce_window_ms / coalesce_max_messages）。
 const COALESCE_MAX_MESSAGES_DEFAULT = 5
 const COALESCE_WINDOW_MS_DEFAULT = 30_000
+
+/**
+ * origin→trigger_type 映射（DSHBOTS-329）：通道来源的直达运行打来源通道标记
+ * （'wechat' 微信 / 'feishu' 飞书），运行收尾据此把回复推回该通道管理员；
+ * 普通 UI 消息（origin 空）与未映射的值都落 'mention'，不推任何通道。
+ */
+export function originTriggerType(origin) {
+  return origin === 'wechat' || origin === 'feishu' ? origin : 'mention'
+}
 
 // ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
 // 指纹行形如 " M dir/file"（前两字符状态位 + 空格 + 路径）；重命名 "R  old -> new"
@@ -200,9 +209,9 @@ export const runsMethods = {
       return runId
     }
     const spec = item.kind === 'chat'
-      ? { projectId: item.projectId, mode: 'read', trigger: item.origin === 'wechat' ? 'wechat' : 'mention', idem: `chat:${item.messageId}:${bot.id}` }
+      ? { projectId: item.projectId, mode: 'read', trigger: originTriggerType(item.origin), idem: `chat:${item.messageId}:${bot.id}` }
       : item.kind === 'solo_chat'
-        ? { projectId: null, mode: 'write', trigger: item.triggerType === 'wechat' ? 'wechat' : 'mention', idem: `solo_chat:${item.messageId}` }
+        ? { projectId: null, mode: 'write', trigger: originTriggerType(item.triggerType), idem: `solo_chat:${item.messageId}` }
         : item.kind === 'dm'
           ? { projectId: item.projectId, mode: 'read', trigger: 'dm', idem: `dm:${item.messageId}` }
           : { projectId: item.projectId, mode: 'read', trigger: 'dm_reply', idem: `dm_reply:${item.messageId}` }
@@ -481,7 +490,11 @@ export const runsMethods = {
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
-      triggerType === 'wechat' ? '微信消息触发（项目外单聊直达）' : '单聊消息触发',
+      triggerType === 'wechat'
+        ? '微信消息触发（项目外单聊直达）'
+        : triggerType === 'feishu'
+          ? '飞书消息触发（项目外单聊直达）'
+          : '单聊消息触发',
       createdAt,
     )
     return runId
@@ -502,8 +515,9 @@ export const runsMethods = {
     }
     const runId = id('run')
     const createdAt = nowIso()
-    // 微信直达（DSHBOTS-208）：trigger_type 记 'wechat'，运行收尾据此把 bot 回复推回微信管理员。
-    const triggerType = origin === 'wechat' ? 'wechat' : 'mention'
+    // 通道直达（DSHBOTS-208/329）：trigger_type 记来源通道（'wechat'/'feishu'），
+    // 运行收尾据此把 bot 回复推回该通道管理员；普通群聊消息保持 'mention' 不推。
+    const triggerType = originTriggerType(origin)
     try {
       this.store.run(
         `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
@@ -522,7 +536,13 @@ export const runsMethods = {
     }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, 'queued', triggerType === 'wechat' ? '微信群聊消息触发（直达）' : '群聊消息触发', createdAt,
+      id('evt'), runId, 'queued',
+      triggerType === 'wechat'
+        ? '微信群聊消息触发（直达）'
+        : triggerType === 'feishu'
+          ? '飞书群聊消息触发（直达）'
+          : '群聊消息触发',
+      createdAt,
     )
     return runId
   },
@@ -628,6 +648,27 @@ export const runsMethods = {
     const run = this.runRow(runId)
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
     const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
+    // 配置版本快照（C2/DSHBOTS-334）：任务运行独占会话（D-308），本运行的治理配置即
+    // 派发时刻的生效值——bot 角色版本（bots.current_revision）+ 可编辑提示词段覆盖正文
+    // （缺省段记 null，默认文本随发版可追溯）+ 实际下发模型（runs 行三列，D-25）。
+    // 回答「这张卡按哪版规则跑的」；只记账不闸门（ADR §3：变更不撤销在途，恢复前复核
+    // 由派发链闸门承担）。只对 kind='task' 记：消息族运行共用控制面冻结会话（D-91），
+    // 生效文本是冻结时的旧值，快照「当时 settings」反而误导。
+    if (run.kind === 'task') {
+      const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
+      const segments = Object.fromEntries(
+        Object.keys(PROMPT_SEGMENT_DEFAULTS).map(key => [key, overrides?.[key]?.text ?? null]),
+      )
+      const model = run.model_provider
+        ? { provider: run.model_provider, model: run.model_model, effort: run.model_effort ?? null }
+        : { provider: bot.provider, model: bot.model, effort: bot.effort ?? null }
+      this.store.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), run.id, 'config_snapshot',
+        JSON.stringify({ bot_revision: Number(bot.current_revision) || 0, model, prompt_segment_overrides: segments }),
+        nowIso(),
+      )
+    }
     try {
       const task = run.task_id ? this.taskRow(run.task_id) : null
       // DSHBOTS-112：vision 派生运行按 project_id 归位原消息（群聊 messages / 单聊

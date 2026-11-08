@@ -526,6 +526,10 @@ export class Store {
     this.db.exec(sql)
   }
 
+  // 事务纪律（B7/DSHBOTS-332）：回调内只做本库写——宿主副作用（起会话/steer/微信推送/
+  // tick）一律放在事务提交之后执行，回滚不产生幽灵消息/幽灵会话；outbox 的「先落库后
+  // 同栈投递」在事务内也只发生 runs/outbox 行写入（投递的宿主动作由提交后的 tick/领取
+  // 路径执行）。tests/after-commit.test.ts 以源码扫描守门。
   transaction(fn) {
     this.db.exec('BEGIN IMMEDIATE')
     try {

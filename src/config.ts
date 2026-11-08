@@ -9,6 +9,25 @@ export function defaultWorkspace() {
   return join(homedir(), '.dsh', 'workspace', 'team-bots')
 }
 
+// DSH_TEAM_GITHUB_WATCH 解析：JSON 数组 [{projectKey, repo}]，非法一律 []（B4-②/DSHBOTS-335）。
+export function parseGithubWatchEnv(raw) {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(String(raw))
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map(item => ({ projectKey: String(item?.projectKey ?? '').trim(), repo: String(item?.repo ?? '').trim() }))
+      .filter(item => item.projectKey && item.repo)
+  } catch {
+    return []
+  }
+}
+
+export const clampGithubPollMinutes = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 ? Math.min(1440, Math.trunc(num)) : 0
+}
+
 export const bool = (value, fallback = false) => {
   if (value === undefined || value === '') return fallback
   return /^(1|true|yes|on)$/i.test(String(value))
@@ -57,6 +76,16 @@ export const SESSION_ROLLOVER_TURNS_RANGE = [0, 10_000]
 // 忙时推后、跨窗口合批。压缩 ≠ 结转（留原会话）。0 = 关闭。
 export const SESSION_COMPACT_TURNS_KEY = 'session_compact_turns'
 export const SESSION_COMPACT_TURNS_RANGE = [0, 10_000]
+
+// 单轮上下文治理 P2：上下文体积判据（token）。会话当前规模 = 该会话最近一次模型调用的
+// input+cache_read（usage_events 按调用记账、runs.session_id 归属）。压缩在「跨过 N 轮
+// 窗口」之外还要求达到下限（瘦会话不压缩，省一次只读轮）；结转在轮数阈值之外、体积达
+// 上限也触发（胖会话不用等到 512 轮）。0 = 关闭体积判据（回到纯轮次口径）。生效链与
+// 轮次键一致（env 显式 > settings 表保存值 > 默认，设置页暂未开放）。
+export const SESSION_COMPACT_CTX_TOKENS_KEY = 'session_compact_ctx_tokens'
+export const SESSION_COMPACT_CTX_TOKENS_RANGE = [0, 10_000_000]
+export const SESSION_ROLLOVER_CTX_TOKENS_KEY = 'session_rollover_ctx_tokens'
+export const SESSION_ROLLOVER_CTX_TOKENS_RANGE = [0, 10_000_000]
 
 // 保存值必须是范围内的整数；非法或越界按未保存处理（回退默认），不做钳制。
 // 空串/null（未保存）必须先于数值化判空：Number('') 是 0，会把「未保存」误判成
@@ -127,6 +156,14 @@ export function effectiveTaskTimeBudgetMinutes(config, getSetting: (key: string)
   return !env && stallMinutes > 0 ? stallMinutes : config.taskTimeBudgetMinutes
 }
 
+// 派单预算优先级分档（DSHBOTS-325）：派单路径（assignFromBot 建卡/重派）漏传
+// time_budget_minutes 时的卡级兜底档，按卡 priority 分档落库；显式值永远优先。
+// 与全局缺省链（effectiveTaskTimeBudgetMinutes）分工：本表只管派单路径，不经派单
+// 的直建卡仍走全局链。无效 priority 与 createTask 同口径回退 medium 档。
+export const PRIORITY_BUDGET_MINUTES: Record<string, number> = {
+  urgent: 45, high: 45, medium: 30, low: 15, none: 15,
+}
+
 // 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > settings 表
 // 保存值 > 默认 512（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 会话复用检查，
 // DSHBOTS-289 起为 ensureBotBinding 复用分支）每次现算，改值对下一次会话复用生效。
@@ -142,6 +179,20 @@ export function effectiveSessionCompactTurns(config, getSetting: (key: string) =
   const env = envExplicit('DSH_TEAM_SESSION_COMPACT_TURNS')
   const saved = savedInt(getSetting(SESSION_COMPACT_TURNS_KEY), SESSION_COMPACT_TURNS_RANGE)
   return !env && saved !== null ? saved : config.sessionCompactTurns
+}
+
+// 压缩体积下限生效值（单轮上下文治理 P2）：默认 80,000 token，0 = 关闭体积判据。
+export function effectiveSessionCompactCtxTokens(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_SESSION_COMPACT_CTX_TOKENS')
+  const saved = savedInt(getSetting(SESSION_COMPACT_CTX_TOKENS_KEY), SESSION_COMPACT_CTX_TOKENS_RANGE)
+  return !env && saved !== null ? saved : config.sessionCompactCtxTokens
+}
+
+// 结转体积上限生效值（单轮上下文治理 P2）：默认 150,000 token，0 = 关闭体积判据。
+export function effectiveSessionRolloverCtxTokens(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS')
+  const saved = savedInt(getSetting(SESSION_ROLLOVER_CTX_TOKENS_KEY), SESSION_ROLLOVER_CTX_TOKENS_RANGE)
+  return !env && saved !== null ? saved : config.sessionRolloverCtxTokens
 }
 
 // 验收滞留阈值生效值（DSHBOTS-194）：优先级与会话结转一致——env 显式 > 保存值 >
@@ -195,6 +246,37 @@ export function effectiveUiLanguage(config, getSetting: (key: string) => unknown
   return envValue ?? saved ?? config.uiLanguage
 }
 
+// ── 微信通道开关生效值（DSHBOTS-334）────────────────────────────────────────
+// 通道页启停开关的 settings 键：'1'/'0' 为显式覆盖；未保存（空）回退服务端
+// 注入默认（cordis.patch.yml / env，保留为初始默认）。消费点：core 挂载决策与
+// services/wechat 的即时 mount/unmount（applyWechatChannelEnabled）。
+export const WECHAT_CHANNEL_ENABLED_KEY = 'wechat_channel_enabled'
+export function effectiveWechatEnabled(config, getSetting: (key: string) => unknown = () => null) {
+  const saved = String(getSetting(WECHAT_CHANNEL_ENABLED_KEY) ?? '').trim()
+  if (saved === '1') return true
+  if (saved === '0') return false
+  return Boolean(config.wechat?.enabled)
+}
+
+// ── 飞书凭据生效值（DSHBOTS-334）────────────────────────────────────────────
+// 优先级：通道页保存（secrets 表加密的 AppID/Secret 对）> 服务端注入
+// （cordis.patch.yml / env，即 config.feishu）。凭据成对生效：保存对不完整
+// 不得与注入对混拼；两边都没有 = 不生效（通道保持 unbound 不连）。
+// savedGetter 由 services/feishu.ts 提供（读 SecretBox 解密后的两键）。
+export function effectiveFeishuCredentials(config, savedGetter: () => { appId?: unknown; appSecret?: unknown } | null = () => null) {
+  const savedAppId = String(savedGetter()?.appId ?? '').trim()
+  const savedSecret = String(savedGetter()?.appSecret ?? '').trim()
+  if (savedAppId && savedSecret) {
+    return { appId: savedAppId, appSecret: savedSecret, source: 'saved' as const }
+  }
+  const configAppId = String(config.feishu?.appId ?? '').trim()
+  const configSecret = String(config.feishu?.appSecret ?? '').trim()
+  if (configAppId && configSecret) {
+    return { appId: configAppId, appSecret: configSecret, source: 'config' as const }
+  }
+  return { appId: '', appSecret: '', source: 'none' as const }
+}
+
 export function resolveConfig(config: Partial<TeamConfig> = {}) {
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
   const workspace = resolve(config.workspace || defaultWorkspace())
@@ -209,11 +291,21 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     dataDir,
     dbPath: join(dataDir, 'team.sqlite'),
     wechatDbPath: join(dataDir, 'wechat-channel.sqlite'),
+    feishuDbPath: join(dataDir, 'feishu-channel.sqlite'),
     // 密钥主文件：备份必须连它一起带走，缺了既有密文就再也解不开。
     secretKeyPath: join(dataDir, 'secret.key'),
     // 个人微信通道（腾讯 iLink 官方协议）：默认关闭，扫码授权后生效。
     wechat: {
       enabled: bool(config.wechatEnabled ?? process.env.DSH_TEAM_WECHAT, false),
+    },
+    // 飞书机器人通道（DSHBOTS-333）：默认关闭，DSH_BOTS_FEISHU=1 开启。
+    // 传输层为进程内官方 SDK（@larksuiteoapi/node-sdk）：凭据 AppID/Secret 注入即连。
+    // 这里只是「服务端注入」兜底来源（cordis.patch.yml / env）；生效优先级见
+    // effectiveFeishuCredentials（DSHBOTS-334：通道页保存的凭据优先）。
+    feishu: {
+      enabled: bool(config.feishuEnabled ?? process.env.DSH_BOTS_FEISHU, false),
+      appId: String(config.feishuAppId ?? process.env.DSH_BOTS_FEISHU_APP_ID ?? '').trim(),
+      appSecret: String(config.feishuAppSecret ?? process.env.DSH_BOTS_FEISHU_APP_SECRET ?? '').trim(),
     },
     memoryDir: join(dataDir, 'memory'),
     messageDir: join(dataDir, 'messages'),
@@ -242,6 +334,10 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 闲时总结压缩窗口（DSHBOTS-286）：默认每 64 轮，0 = 关闭；生效值见
     // effectiveSessionCompactTurns（env 显式 > settings 表保存值 > 默认，设置页暂未开放）。
     sessionCompactTurns: int(config.sessionCompactTurns ?? process.env.DSH_TEAM_SESSION_COMPACT_TURNS, 64, 0, 10_000),
+    // 上下文体积判据（单轮上下文治理 P2）：压缩下限默认 80k、结转上限默认 150k token，
+    // 0 = 关闭体积判据；生效值见 effectiveSession{Compact,Rollover}CtxTokens。
+    sessionCompactCtxTokens: int(config.sessionCompactCtxTokens ?? process.env.DSH_TEAM_SESSION_COMPACT_CTX_TOKENS, 80_000, 0, 10_000_000),
+    sessionRolloverCtxTokens: int(config.sessionRolloverCtxTokens ?? process.env.DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS, 150_000, 0, 10_000_000),
     // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超此分钟数 = 滞留。生效值可被
     // 全局设置 review_idle_minutes 覆盖（effectiveReviewIdleMinutes），0 = 关闭。
     reviewIdleMinutes: int(config.reviewIdleMinutes ?? process.env.DSH_TEAM_REVIEW_IDLE_MINUTES, 30, 0, 1440),
@@ -272,6 +368,10 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     ),
     // 原生 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
     // 缺省开启（DSHBOTS-230）：默认部署即注入并行拆分引导；显式传 0/false 可关闭。
+    // GitHub 只读触发源（B4-②/DSHBOTS-335）：env JSON 清单 [{projectKey, repo}]，
+    // 缺省空 + 轮询 0 分钟 = 全关；非法 JSON 降级空清单（fail-closed）。
+    githubWatch: parseGithubWatchEnv(config.githubWatch ?? process.env.DSH_TEAM_GITHUB_WATCH),
+    githubPollMinutes: clampGithubPollMinutes(config.githubPollMinutes ?? process.env.DSH_TEAM_GITHUB_POLL_MINUTES),
     agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, true),
     maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 3, 1, 8),
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。
@@ -282,6 +382,11 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 此时按现状直接报「模型不支持图片」，不做任何派生。
     visionProxyProvider: String(config.visionProxyProvider ?? process.env.DSH_TEAM_VISION_PROXY_PROVIDER ?? '').trim(),
     visionProxyModel: String(config.visionProxyModel ?? process.env.DSH_TEAM_VISION_PROXY_MODEL ?? '').trim(),
+    // 记忆审查专用模型（可选）：memory_review 派生运行改用的小模型（provider/model），
+    // 两个都非空才启用；任一为空 = 沿用 Bot 主模型。审查提示词自包含且只产 JSON
+    // 数组，不挑模型能力，配便宜模型可再压审查成本。
+    memoryReviewProvider: String(config.memoryReviewProvider ?? process.env.DSH_TEAM_MEMORY_REVIEW_PROVIDER ?? '').trim(),
+    memoryReviewModel: String(config.memoryReviewModel ?? process.env.DSH_TEAM_MEMORY_REVIEW_MODEL ?? '').trim(),
     // 验收自动委派（DSHBOTS-113）：任务交付迁移 in_review 时自动派生子代理核验运行
     // （与手动「子代理核验」按钮同一入口）。总监裁决不受影响：owner_bot 卡在核验运行
     // 结束后再触发总监验收；user 卡核验结论写回评论，裁决仍归工作台 owner。

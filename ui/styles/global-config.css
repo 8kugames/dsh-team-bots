@@ -180,24 +180,49 @@
     flex: 1 1 auto;
     min-width: 0;
 }
-.wechat-status {
+/* 状态行与管理员标识：微信/飞书两卡同款（并列选择器，样式零重复） */
+.wechat-status,
+.feishu-status {
     display: flex;
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
     margin-bottom: 12px;
 }
-.wechat-admin {
+.wechat-admin,
+.feishu-admin {
     color: var(--ink-3);
     font-size: var(--fs-small);
 }
-.wechat-admin strong {
+.wechat-admin strong,
+.feishu-admin strong {
     color: var(--ink);
     font-family: var(--mono);
     font-weight: 500;
+    display: inline-block;
+    max-width: min(220px, 50vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
 }
 .wechat-card .wechat-qr {
     flex: 0 0 auto;
+}
+
+/* ---------- 飞书通道卡：元信息行 + 冲突警示（无扫码区） ---------- */
+.feishu-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+}
+.feishu-conflict {
+    color: var(--star);
+}
+.feishu-error {
+    color: var(--danger);
 }
 
 /* ---------- 界面卡内部：字段两列 + 底部条 ---------- */

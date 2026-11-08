@@ -41,9 +41,10 @@ type TeamActionName =
   | 'create_proposal' | 'decide_proposal' | 'evaluate_proposal' | 'promote_proposal'
   | 'approval_decide' | 'approvals_pending' | 'question_answer' | 'questions_pending'
   | 'sync_skills' | 'skill_detail' | 'toggle_skill' | 'set_skill_binding' | 'rollback_skill'
-  | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
+  | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'update_prompt_segment' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
   | 'dsh_update_info' | 'upgrade_dsh' | 'reboot_dsh'
-  | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout'
+  | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout' | 'set_wechat_channel_enabled' | 'notify_receipts' | 'wechat_triggers' | 'external_triggers'
+  | 'feishu_status' | 'save_feishu_credentials' | 'clear_feishu_credentials'
   | 'run_command' | 'cancel_command' | 'terminal_state'
   | 'list_secrets' | 'upsert_secret' | 'delete_secret' | 'list_secret_requests' | 'approve_secret_request' | 'deny_secret_request'
 
@@ -68,6 +69,9 @@ interface TeamActionPayload {
   window?: UsageWindow
   name?: string
   purpose?: string
+  appId?: string
+  appSecret?: string
+  enabled?: boolean
   scope?: string
   scopeType?: string
   scopeId?: string
@@ -76,6 +80,9 @@ interface TeamActionPayload {
   query?: string
   body?: string
   answer?: string
+  segment?: string
+  text?: string
+  revision?: number
   command?: string
   code?: string
   decision?: string
@@ -121,12 +128,17 @@ interface TeamConfig {
   dataDir: string
   dbPath: string
   wechatDbPath: string
+  feishuDbPath: string
   secretKeyPath: string
   memoryDir: string
   messageDir: string
   skillRoot: string
   wechat: { enabled: boolean }
   wechatEnabled: boolean
+  feishu: { enabled: boolean; appId: string; appSecret: string }
+  feishuEnabled: boolean
+  feishuAppId: string
+  feishuAppSecret: string
   maxConcurrentRuns: number
   runTimeoutMs: number
   maxRunTokens: number
@@ -134,6 +146,9 @@ interface TeamConfig {
   taskTimeBudgetMinutes: number
   sessionRolloverTurns: number
   sessionCompactTurns: number
+  // 上下文体积判据（单轮上下文治理 P2）：压缩下限/结转上限 token，0 = 关闭体积判据。
+  sessionCompactCtxTokens: number
+  sessionRolloverCtxTokens: number
   reviewIdleMinutes: number
   uiLanguage: UiLanguage
   chatReplyMaxChars: number
@@ -144,11 +159,16 @@ interface TeamConfig {
   secretsRuntimeTtlMs: number
   imagePngJpegThresholdBytes: number
   agentTeam: boolean
+  githubWatch: { projectKey: string; repo: string }[]
+  githubRunner?: ((args: string[]) => Promise<string> | string) | null
+  githubPollMinutes: number
   maxTeammates: number
   routerPreset: string
   workerPreset: string
   visionProxyProvider: string
   visionProxyModel: string
+  memoryReviewProvider: string
+  memoryReviewModel: string
   autoReviewDelegate: boolean
   codeHygieneExts: string[]
   schedulerIntervalMs: number

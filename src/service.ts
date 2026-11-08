@@ -42,6 +42,8 @@ import { terminalMethods } from './services/terminal.js'
 import { usageMethods } from './services/usage.js'
 import { systemMethods } from './services/system.js'
 import { wechatMethods } from './services/wechat.js'
+import { feishuMethods } from './services/feishu.js'
+import { githubSourceMethods } from './services/github-source.js'
 import { approvalsMethods } from './services/approvals.js'
 import { questionsMethods } from './services/questions.js'
 import { coreMethods } from './services/core.js'
@@ -68,6 +70,9 @@ export class TeamService {
     this.readAuditAlerted = new Map()
     this.lastMaintenanceAt = 0
     this.wechat = null
+    // GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产用 spawnSync('gh', ...)，
+    // 测试注入桩替换；未设置时走真实 gh CLI。
+    this.githubRunner = null
     // 运行中的终端命令：commandId → { child, buffer, startedAtMs, timedOut, cancelRequested, timer }。
     // 进程引用与实时 tail 只放内存；结束即释放，历史落 terminal_commands 表。
     this.terminalActive = new Map()
@@ -109,6 +114,8 @@ defineMethods(TeamService.prototype, [
   usageMethods,
   systemMethods,
   wechatMethods,
+  feishuMethods,
+  githubSourceMethods,
   approvalsMethods,
   questionsMethods,
   coreMethods,

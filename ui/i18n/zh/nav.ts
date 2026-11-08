@@ -66,6 +66,10 @@ export default {
   "tree.archived": "已归档",
   "tree.archivedEmpty": "没有已归档项目。",
   // 侧栏底部
+  "sidebar.bubbleApprovals": "提权审批",
+  "sidebar.bubbleQuestions": "问答",
+  "sidebar.bubbleProposals": "进化审批",
+  "sidebar.bubbleAria": "需要你处理的事项",
   "sidebar.botsOverview": "总览bots",
   "sidebar.pendingProposals": "有待审批提案",
   "sidebar.usage": "用量统计",
@@ -74,6 +78,7 @@ export default {
   "sidebar.globalConfig": "全局配置",
   "sidebar.switchToDsh": "切换到 DSH 原生 Web 界面",
   "sidebar.dshNative": "DSH 原生界面",
+  "sidebar.githubStar": "Star on GitHub",
   // 顶栏统计与操作
   "topbar.taskOne": "任务",
   "topbar.taskMany": "任务",

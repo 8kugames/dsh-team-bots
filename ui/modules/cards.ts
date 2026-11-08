@@ -558,4 +558,19 @@ function renderDirectMessagesCard() {
 }
 
 
+// 用户需办气泡（DSHBOTS-339）：侧栏「总览bots」上方，问答/提权审批/进化审批三类需用户
+// 干预事项的常驻信号；全 0 返回空串（Quiet by default）。点击复用顶部审批/提问窄条展开
+// 与进化页导航；总监处理项与运维项不在此弹（分属任务板/全局设置页/通道页）。
+export function sidebarUserNeedsView({ approvals, questions, proposals }) {
+  const items = [
+    { count: Number(approvals ?? 0), label: t('sidebar.bubbleApprovals'), markup: 'data-action="toggle-approvals"' },
+    { count: Number(questions ?? 0), label: t('sidebar.bubbleQuestions'), markup: 'data-action="toggle-questions"' },
+    { count: Number(proposals ?? 0), label: t('sidebar.bubbleProposals'), markup: 'data-action="nav" data-view="evolution"' },
+  ].filter(item => item.count > 0)
+  if (items.length === 0) return ''
+  return `<div class="sidebar-bubbles" role="status" aria-label="${t('sidebar.bubbleAria')}">
+          ${items.map(item => `<button class="sidebar-bubble" ${item.markup}><span>${esc(item.label)}</span><span class="unread-badge">${item.count > 99 ? '99+' : item.count}</span></button>`).join('')}
+        </div>`
+}
+
 export { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, formatApprovalRemaining, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio }

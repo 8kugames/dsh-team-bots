@@ -4,7 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, APPROVAL_TIMEOUT_KEY, QUESTION_TIMEOUT_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE, REVIEW_IDLE_MINUTES_KEY, REVIEW_IDLE_MINUTES_RANGE } from '../config.js'
-import { badRequest, notFound } from '../errors.js'
+import { badRequest, conflict, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
 import { syncSkills } from '../skills.js'
@@ -16,7 +16,10 @@ import { ensureTaskTimesSchema, ensureTaskTerminalTimeBackfill } from './tasks.j
 import { ensureRecoverySchema } from './recovery-schema.js'
 import { ensureRolloverSchema } from './rollover-schema.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
-import { id, nowIso } from '../util.js'
+import { ensureWechatTriggerSchema } from './wechat-trigger-schema.js'
+import { ensureExternalTriggerSchema } from './external-trigger-schema.js'
+import { PROMPT_SEGMENT_DEFAULTS, PROMPT_SEGMENT_MAX_CHARS, PROMPT_TRIO_BUDGET, parsePromptOverrides, promptOverridesHash, taskGuidanceTrioLength } from './runtime/prompt.js'
+import { id, jsonParse, nowIso } from '../util.js'
 
 
 
@@ -41,10 +44,25 @@ export const coreMethods = {
       // 密钥与数据库对不上就在启动时暴露，别等到第一次写密文才炸。
       this.ensureSecretBox()
       await this.ensureSoloWorkspaces()
+      // 版本历史存量收敛（DSHBOTS-336）：每个 bot 的超额行同口径先入档再删；
+      // 已收敛的库查不出超额行，空转零写入。单个 bot 失败只告警，下次启动重试。
+      for (const bot of this.store.all('SELECT id FROM bots')) {
+        try {
+          this.store.transaction(() => this.archiveExcessBotRevisions(bot.id))
+        } catch (error: any) {
+          this.logger.warn?.(`dsh-team: Bot ${bot.id} 版本历史存量收敛失败（下次启动重试）: ${error?.message ?? error}`)
+        }
+      }
       this.store.run(
         `INSERT INTO users(id, name, role, created_at) VALUES (?, ?, 'admin', ?)
          ON CONFLICT(id) DO NOTHING`,
-        this.localUserId, 'You', nowIso(),
+        this.localUserId, 'Owner', nowIso(),
+      )
+      // 存量收敛（DSHBOTS-341）：旧库本地用户显示名是默认哨兵 'You'，一次性改为 'Owner'；
+      // 只认哨兵值，用户自定义名不覆盖；已收敛的库匹配不到行，幂等零副作用。
+      this.store.run(
+        `UPDATE users SET name = 'Owner' WHERE id = ? AND name = 'You'`,
+        this.localUserId,
       )
       if (!this.store.get('SELECT id FROM bots LIMIT 1')) {
         let model
@@ -108,12 +126,17 @@ export const coreMethods = {
       ensureTaskTerminalTimeBackfill(this.store)
       // 派发沙箱覆盖列（DSHBOTS-156）：tasks.sandbox_override，缺省 NULL=跟随 bot 配置档。
       ensureTaskSandboxSchema(this.store)
+      // 微信入站 Trigger 留痕表（B4-①/DSHBOTS-328）：幂等迁移，通道未启用也不碍事。
+      ensureWechatTriggerSchema(this.store)
+      // 外部触发留痕表（B4-②/DSHBOTS-335）：GitHub 源的 (source, external_id) 已见集合。
+      ensureExternalTriggerSchema(this.store)
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
       this.store.run(
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,
         nowIso(),
       )
-      if (this.config.wechat?.enabled) {
+      // 挂载决策按生效开关（DSHBOTS-334）：通道页 settings 显式值 > patch.yml/env 默认。
+      if (this.wechatChannelEnabled()) {
         // 微信通道是可选集成，其 vendor 依赖按需加载：缺失或损坏时只降级该通道，
         // 不应让整个插件加载失败、工作台路由全部不可用。
         try {
@@ -127,6 +150,22 @@ export const coreMethods = {
           })
         } catch (error: any) {
           this.logger.warn?.(`[wechat] 通道加载失败，已跳过: ${error?.message ?? error}`)
+        }
+      }
+      // 飞书机器人通道（DSHBOTS-323 卡①）：与微信通道同款可选挂载——按需动态 import，
+      // 缺失/损坏只降级该通道，不让整个插件加载失败。
+      if (this.config.feishu?.enabled) {
+        try {
+          const { FeishuStore } = await import('../feishu/store.js')
+          const { FeishuChannel } = await import('../feishu/channel.js')
+          const feishuStore = await new FeishuStore(this.config.feishuDbPath).open()
+          this.feishu = new FeishuChannel({ store: feishuStore, config: this.config, log: this.logger })
+          this.feishu.setService(this)
+          await this.feishu.start().catch(error => {
+            this.logger.warn?.(`[feishu] 通道启动失败: ${error?.message ?? error}`)
+          })
+        } catch (error: any) {
+          this.logger.warn?.(`[feishu] 通道加载失败，已跳过: ${error?.message ?? error}`)
         }
       }
       // 历史会话挂工作区分组：后台一次性回填，不阻塞启动（void 不 await）。
@@ -161,6 +200,12 @@ export const coreMethods = {
   budgetCurrency() {
     return String(this.store.setting('budget_currency', 'CNY') || 'CNY').toUpperCase()
   },
+  // 设置页乐观并发令牌（B2/DSHBOTS-325）：updateSettings 每次成功保存 +1，
+  // UI 保存时携带读取时的值，不匹配即 conflict 409（多标签/多人同时改不静默互覆）。
+  // 只覆盖 settingsView 键域；prompt_overrides 是独立编辑面，不混入本令牌。
+  settingsRevision() {
+    return Number(this.store.setting('settings_revision', '0')) || 0
+  },
   settingsView() {
     const keys = [
       'budget_currency', 'global_token_budget', 'global_cost_budget',
@@ -190,7 +235,14 @@ export const coreMethods = {
       reviewIdleMinutes,
     }
   },
-  updateSettings(patch, actor = this.actor()) {
+  updateSettings(patch, actor = this.actor(), expectedRevision = undefined) {
+    // 乐观并发（B2/DSHBOTS-325）：UI 带上读取时的 revision，不一致即 409——后保存者
+    // 不静默覆盖先保存者的改动。不带 revision 的旧调用形态保持原行为（兼容脚本/旧 UI）。
+    if (expectedRevision !== undefined && expectedRevision !== null && String(expectedRevision) !== '') {
+      if (Number(expectedRevision) !== this.settingsRevision()) {
+        throw conflict('配置已被其他人或窗口修改，本次保存被拒绝；请刷新后基于最新值重新编辑')
+      }
+    }
     const values: any = {}
     for (const [key, value] of Object.entries(patch ?? {})) {
       if (!Object.keys(this.settingsView()).includes(key)) throw badRequest(`不支持的设置项：${key}`)
@@ -236,7 +288,10 @@ export const coreMethods = {
       }
     }
     if (values[REVIEW_AUTO_CLOSE_KEY] !== undefined && values[REVIEW_AUTO_CLOSE_KEY] !== '') {
-      if (!['0', '1'].includes(values[REVIEW_AUTO_CLOSE_KEY])) throw badRequest(`${REVIEW_AUTO_CLOSE_KEY} 必须是 0 或 1`)
+      // 三态（B3/DSHBOTS-326）：0 关闭 / observe 干跑（判定留痕不收口）/ 1 开启。
+      if (!['0', '1', 'observe'].includes(values[REVIEW_AUTO_CLOSE_KEY])) {
+        throw badRequest(`${REVIEW_AUTO_CLOSE_KEY} 必须是 0、observe 或 1`)
+      }
     }
     {
       const [escMin, escMax] = REVIEW_ESCALATE_RANGE
@@ -259,7 +314,12 @@ export const coreMethods = {
     }
     this.store.transaction(() => {
       for (const [key, value] of Object.entries(values)) this.store.setSetting(key, value)
-      this.audit(actor, 'settings.update', 'settings', 'global', 'global', values)
+      // 乐观并发令牌随保存推进（B2/DSHBOTS-325）：settings_revision 不是 settingsView 键，
+      // 不可经 patch 直接写，只在这里单调递增。
+      this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
+      // A4/DSHBOTS-330 修复：此前本行是六参误用（audit 只收五参），values 被静默丢弃、
+      // 审计行只剩 data='global'——变更历史的「改了什么」从此处起才有值。
+      this.audit(actor, 'settings.update', 'settings', 'global', values)
       // 运行时效单列一条 global.run_limits 审计，便于按目标检索改值历史。
       const limitKeys = Object.keys(RUN_LIMIT_RANGES)
       if (limitKeys.some(key => values[key] !== undefined)) {
@@ -269,6 +329,63 @@ export const coreMethods = {
     })
     return this.settingsView()
   },
+
+  // 可编辑提示词段（B1/DSHBOTS-324）：只读视图。defaultChanged = 覆盖保存时的内置默认
+  // 指纹与当前默认不一致（升级改了默认文本），UI 据此给「保留我的文本 / 恢复新默认」取舍。
+  promptSegmentsView() {
+    const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
+    return Object.entries(PROMPT_SEGMENT_DEFAULTS).map(([key, defaultText]) => {
+      const override = overrides?.[key] ?? null
+      return {
+        key,
+        defaultText,
+        override: override ? {
+          text: String(override.text ?? ''),
+          baseHash: String(override.base_hash ?? ''),
+          updatedAt: String(override.updated_at ?? ''),
+          updatedBy: String(override.updated_by ?? ''),
+        } : null,
+        defaultChanged: Boolean(override && override.base_hash !== promptOverridesHash(defaultText)),
+        effectiveText: override?.text ?? defaultText,
+      }
+    })
+  },
+
+  // 保存/恢复一个提示词段：空文本或与默认一致 = 恢复默认（删覆盖）；有覆盖走预算校验
+  // （拆卡三段 ≤1200 与 tests/prompt-budget 同口径）+ 2000 字上限。保存即审计。
+  // 不唤醒任何会话：identity 段随会话冻结（D-91），改动只对新会话生效。
+  updatePromptSegment(segment, text, actor = this.actor()) {
+    if (!Object.hasOwn(PROMPT_SEGMENT_DEFAULTS, segment)) throw badRequest(`未知提示词段：${segment}`)
+    const clean = String(text ?? '').replace(/\r\n/g, '\n').trim()
+    const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
+    if (!clean || clean === PROMPT_SEGMENT_DEFAULTS[segment]) {
+      if (overrides?.[segment]) {
+        delete overrides[segment]
+        this.store.setSetting('prompt_overrides', JSON.stringify(overrides))
+        this.audit(actor, 'prompt_segment.reset', 'settings', segment, {})
+      }
+      return this.promptSegmentsView()
+    }
+    if (clean.length > PROMPT_SEGMENT_MAX_CHARS) {
+      throw badRequest(`提示词段正文上限 ${PROMPT_SEGMENT_MAX_CHARS} 字符（实测 ${clean.length}）`)
+    }
+    if (segment === 'subtask' || segment === 'splitting') {
+      const trio = taskGuidanceTrioLength({ ...overrides, [segment]: { text: clean } }, this.config)
+      if (trio > PROMPT_TRIO_BUDGET) {
+        throw badRequest(`拆卡指引三段合计超预算（实测 ${trio} > ${PROMPT_TRIO_BUDGET} 字符），请缩短文本`)
+      }
+    }
+    overrides[segment] = {
+      text: clean,
+      base_hash: promptOverridesHash(PROMPT_SEGMENT_DEFAULTS[segment]),
+      updated_at: nowIso(),
+      updated_by: `${actor?.type ?? 'user'}:${actor?.id ?? 'local'}`,
+    }
+    this.store.setSetting('prompt_overrides', JSON.stringify(overrides))
+    this.audit(actor, 'prompt_segment.update', 'settings', segment, { chars: clean.length })
+    return this.promptSegmentsView()
+  },
+
   start() {
     if (this.started) return
     this.started = true
@@ -281,12 +398,40 @@ export const coreMethods = {
     this.timer = null
     this.started = false
     void this.wechat?.stop()
+    void this.feishu?.stop()
+  },
+  /**
+   * 出站通道分发助手（DSHBOTS-326）：出站事件统一从这里扇出到各已启用通道——
+   * 微信与飞书各推一份，不再出现「某事件只到微信不到飞书」。逐通道 try/catch：
+   * 单通道失败只 warn 留痕，不阻断其他通道（一路通道坏了不该让另一路收不到）。
+   * 通道在位即已启用（挂载由 config 开关决定），通道自身的连接/绑定态门禁在各自
+   * notify 内部（未连上时只落盘不外发）。同一 receiptKey 在各通道 outbox 内各自
+   * 幂等——两套 outbox 是彼此独立的库与唯一索引，键空间互不干扰。
+   * 返回逐通道结果 [{channel, ok, error}]，供调用方判断是否至少推成功一路。
+   */
+  channelNotify(text, opts = {}) {
+    const targets = [
+      { name: 'wechat', channel: this.wechat },
+      { name: 'feishu', channel: this.feishu },
+    ]
+    const results = []
+    for (const { name, channel } of targets) {
+      if (!channel || typeof channel.notify !== 'function') continue
+      try {
+        channel.notify(text, opts)
+        results.push({ channel: name, ok: true, error: null })
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: %s 通道推送失败（其他通道不受影响）: %s', name, error?.message ?? error)
+        results.push({ channel: name, ok: false, error: String(error?.message ?? error) })
+      }
+    }
+    return results
   },
   actor(actor = { type: 'user', id: this.localUserId }) {
     return actor
   },
   actorName(actor) {
-    if (actor.type === 'user') return this.store.get('SELECT name FROM users WHERE id = ?', actor.id)?.name ?? 'You'
+    if (actor.type === 'user') return this.store.get('SELECT name FROM users WHERE id = ?', actor.id)?.name ?? 'Owner'
     return this.store.get('SELECT name FROM bots WHERE id = ?', actor.id)?.name ?? actor.id
   },
   audit(actor, action, targetType, targetId, data = {}) {

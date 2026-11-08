@@ -1,7 +1,7 @@
 import { state } from './state.js'
 import { t } from './i18n.js'
 import { activeProject, applyUiScale, applyUiTheme, toast } from './util.js'
-import { api, loadState } from './api.js'
+import { api, loadState, mergeSettingsDraft } from './api.js'
 import { sendMessage } from './composer.js'
 import { closeModal, openBot, openModal, openTask, openTrajectory } from './modal-forms.js'
 import { loadOlderMessages, loadSoloDetail } from './chat.js'
@@ -9,6 +9,39 @@ import { taskChildrenKey, taskGroupKey } from './tasks.js'
 import { toggleDesktopNotify } from './cards.js'
 import { usageMode } from './usage.js'
 import { UI_SCALE_KEY, UI_THEME_KEY, syncLanguage, refresh, startWechatPoll, stopWechatPoll, bootError, render, chatContextPending, beginChatPending, endChatPending, init } from '../app.js'
+
+// 设置保存 + 409 冲突三方合并（B2/DSHBOTS-325）：key→inputId 映射驱动 patch 采集。
+// 冲突时静默接管 api 错误：重取最新设置后，对方未动字段的用户草稿贴回表单（编辑不丢），
+// 双改字段以服务端为准并点名提示复核；无用户改动即纯刷新提示。
+async function saveSettingsWithMerge(inputIds, successToast) {
+  const value = id => (document.getElementById(id) as HTMLInputElement | null)?.value ?? ''
+  const patch: Record<string, string> = {}
+  for (const [key, id] of Object.entries(inputIds)) patch[key] = value(id)
+  const baseSettings = state.data?.settings ?? {}
+  try {
+    await api('update_settings', { ...patch, revision: state.data?.settingsRevision }, { quiet: true })
+    await loadState(state.projectId)
+    toast(successToast, 'success')
+  } catch (error: any) {
+    if (error?.code !== 'CONFLICT') {
+      toast(error?.message || String(error), 'error')
+      return
+    }
+    await loadState(state.projectId)
+    const { merged, conflicts } = mergeSettingsDraft(baseSettings, patch, state.data?.settings ?? {})
+    for (const [key, value] of Object.entries(merged)) {
+      const input = document.getElementById(inputIds[key]) as HTMLInputElement | HTMLSelectElement | null
+      if (input) input.value = String(value)
+    }
+    if (conflicts.length) {
+      toast(`${t("配置已被他人修改，以下字段双方都改过、以最新保存为准，请复核：")}${conflicts.join('、')}`, 'error')
+    } else if (Object.keys(merged).length) {
+      toast(t("配置已被他人修改：你的改动未与对方冲突，已合并回表单，请重新保存"), 'error')
+    } else {
+      toast(t("配置已被他人修改，本次没有待保存的改动"), 'error')
+    }
+  }
+}
 
 export async function handleBoardAction(action, target) {
   switch (action) {
@@ -85,26 +118,28 @@ export async function handleBoardAction(action, target) {
       break
     }
     case 'save-settings': {
-      const value = id => (document.getElementById(id) as HTMLInputElement | null)?.value ?? ''
-      const patch = {
-        budget_currency: value('settings-currency'),
-        memory_review: value('settings-memory-review'),
-        global_token_budget: value('settings-global-token-budget'),
-        global_cost_budget: value('settings-global-cost-budget'),
-        retention_usage_days: value('settings-retention-usage'),
-        retention_run_event_days: value('settings-retention-run'),
-        retention_message_days: value('settings-retention-message'),
-      }
-      await api('update_settings', patch)
-      await loadState(state.projectId)
-      toast(t("系统设置已保存"), 'success')
+      await saveSettingsWithMerge(
+        {
+          budget_currency: 'settings-currency',
+          memory_review: 'settings-memory-review',
+          global_token_budget: 'settings-global-token-budget',
+          global_cost_budget: 'settings-global-cost-budget',
+          retention_usage_days: 'settings-retention-usage',
+          retention_run_event_days: 'settings-retention-run',
+          retention_message_days: 'settings-retention-message',
+        },
+        t("系统设置已保存"),
+      )
       break
     }
     // 界面语言（DSHBOTS-162）：保存后 loadState 拿回新的 state.language，
     // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
     case 'save-ui-language': {
       const value = (document.getElementById('settings-ui-language') as HTMLInputElement | null)?.value ?? 'auto'
-      await api('update_settings', { ui_language: value })
+      // revision 仅在有值时携带（无 state 数据的旧环境回退无令牌形态）。
+      const languagePatch: Record<string, unknown> = { ui_language: value }
+      if (Number.isFinite(Number(state.data?.settingsRevision))) languagePatch.revision = state.data?.settingsRevision
+      await api('update_settings', languagePatch)
       await loadState(state.projectId)
       // poll() 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
       syncLanguage()
@@ -112,15 +147,30 @@ export async function handleBoardAction(action, target) {
       break
     }
     case 'save-run-limits': {
-      const value = id => (document.getElementById(id) as HTMLInputElement | null)?.value ?? ''
-      await api('update_settings', {
-        run_timeout_minutes: value('settings-run-timeout'),
-        stall_watchdog_minutes: value('settings-stall-watchdog'),
-        review_idle_minutes: value('settings-review-idle'),
-        review_auto_close: value('settings-review-auto-close'),
-      })
+      await saveSettingsWithMerge(
+        {
+          run_timeout_minutes: 'settings-run-timeout',
+          stall_watchdog_minutes: 'settings-stall-watchdog',
+          review_idle_minutes: 'settings-review-idle',
+          review_auto_close: 'settings-review-auto-close',
+        },
+        t("运行时效已保存"),
+      )
+      break
+    }
+    // 团队指令段（B1/DSHBOTS-324）：保存/恢复默认；预算校验在后端，失败经 api 报错 toast。
+    case 'save-prompt-segment': {
+      const segment = target.dataset.segment
+      const text = (document.getElementById(`prompt-seg-${segment}`) as HTMLTextAreaElement | null)?.value ?? ''
+      await api('update_prompt_segment', { segment, text })
       await loadState(state.projectId)
-      toast(t("运行时效已保存"), 'success')
+      toast(t("团队指令已保存，新会话生效"), 'success')
+      break
+    }
+    case 'reset-prompt-segment': {
+      await api('update_prompt_segment', { segment: target.dataset.segment, text: '' })
+      await loadState(state.projectId)
+      toast(t("已恢复默认指令"), 'success')
       break
     }
     case 'reconcile-usage': {

@@ -17,7 +17,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # 与开发/DSH 宿主实况对齐（node 26）：node 22 的 test runner 会在事件循环排空时
+          # 拆掉在途测试（unref 退避定时器口径），飞书重试用例会被连坐取消。
+          node-version: 26
           registry-url: https://registry.npmjs.org
       - name: Install dependencies
         run: |
