@@ -78,6 +78,7 @@ export default {
   "sidebar.globalConfig": "全局配置",
   "sidebar.switchToDsh": "切换到 DSH 原生 Web 界面",
   "sidebar.dshNative": "DSH 原生界面",
+  "sidebar.githubStar": "GitHub 加星",
   // 顶栏统计与操作
   "topbar.taskOne": "任务",
   "topbar.taskMany": "任务",

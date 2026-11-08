@@ -351,6 +351,9 @@ function renderShell() {
           <a class="global-config dsh-official-link" href="/index.html" title="${t('sidebar.switchToDsh')}">
             ${icon('external')}<span>${t('sidebar.dshNative')}</span>
           </a>
+          <a class="global-config github-star-link" href="https://github.com/8kugames/dsh-team-bots" target="_blank" rel="noopener noreferrer">
+            ${icon('external')}<span>${t('sidebar.githubStar')}</span>
+          </a>
         </div>
       </aside>
       <main class="main">

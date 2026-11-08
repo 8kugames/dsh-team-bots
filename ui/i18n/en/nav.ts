@@ -78,6 +78,7 @@ export default {
   "sidebar.globalConfig": "Global settings",
   "sidebar.switchToDsh": "Switch to the native DSH web UI",
   "sidebar.dshNative": "Native DSH UI",
+  "sidebar.githubStar": "Star on GitHub",
   // Topbar stats & actions
   "topbar.taskOne": "task",
   "topbar.taskMany": "tasks",

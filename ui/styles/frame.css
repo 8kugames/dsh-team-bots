@@ -328,14 +328,16 @@
     color: var(--accent-text);
     opacity: 1;
 }
-/* 链接复用 global-config 按钮形态（DSH 原生界面切换入口） */
+/* 链接复用 global-config 按钮形态（DSH 原生界面切换入口、GitHub star 外链） */
 a.global-config {
     text-decoration: none;
 }
-a.global-config.dsh-official-link {
+a.global-config.dsh-official-link,
+a.global-config.github-star-link {
     color: var(--ink-3);
 }
-a.global-config.dsh-official-link:hover {
+a.global-config.dsh-official-link:hover,
+a.global-config.github-star-link:hover {
     color: var(--ink);
 }
 
