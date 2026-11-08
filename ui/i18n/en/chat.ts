@@ -6,6 +6,7 @@ export default {
   "chat.ownerUnset": "not set",
   "chat.memberOne": "${count} member",
   "chat.memberMany": "${count} members",
+  "chat.collapseLabel": "${count} system notices",
   "chat.emptyTitle": "No messages yet",
   "chat.emptyBody": "Messages go to the owner bot by default; use <strong>@Bot</strong> to mention a member, or type <strong>/task @Bot title</strong> to create a task directly.",
   "chat.typingQueued": "Queued for reply…",

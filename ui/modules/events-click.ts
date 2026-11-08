@@ -85,6 +85,17 @@ document.addEventListener('click', async (event) => {
         state.approvalPanelOpen = !state.approvalPanelOpen
         render()
         break
+      case 'toggle-collapse':
+        // 连续系统通知折叠行（B8/DSHBOTS-336）：展开态按组键进 state.expandedCollapses（跨轮询持久）。
+        {
+          const key = target.dataset.group
+          if (key) {
+            if (state.expandedCollapses.has(key)) state.expandedCollapses.delete(key)
+            else state.expandedCollapses.add(key)
+            render()
+          }
+        }
+        break
       case 'focus-approval': {
         // 点明细跳到对应项目群聊并滚动到该审批卡（复用 focusApprovalCard）。
         const item = (state.data?.pendingApprovals?.items ?? []).find(entry => entry.id === target.dataset.approvalId)

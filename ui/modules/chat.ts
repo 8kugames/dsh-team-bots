@@ -120,6 +120,47 @@ async function loadOlderMessages() {
 }
 // chat-pagination:end
 
+// ===== auto-collapse:start =====
+// 连续系统通知折叠（B8/DSHBOTS-336）：≥ COLLAPSE_MIN 条连续 sender_type='system' 消息
+// 折叠为一行（Quiet by default，与 A1 通信纪律同向——发了的也能被折叠；「N 条系统通知 +
+// 末条摘要」不丢入口）。展开态按组键（首条消息 id，跨轮询稳定）存 state.expandedCollapses，
+// 2.8s 轮询不会重开已展开的组；bot/user 消息不折叠（内容消息无折叠价值）。
+// 深链兼容：折叠行只是渲染层，消息 id 引用（m_ 引用/team_recall）不受影响。
+const COLLAPSE_MIN = 3
+
+function collapseAutoMessages(messages) {
+  const out = []
+  let group = null
+  const flush = () => {
+    if (!group) return
+    if (group.items.length >= COLLAPSE_MIN && !state.expandedCollapses.has(group.key)) {
+      out.push({ collapsed: true, key: group.key, count: group.items.length, last: group.items[group.items.length - 1] })
+    } else {
+      for (const item of group.items) out.push(item)
+    }
+    group = null
+  }
+  for (const message of messages) {
+    if (message?.sender_type === 'system') {
+      if (!group) group = { key: `collapse:${message.id}`, items: [] }
+      group.items.push(message)
+      continue
+    }
+    flush()
+    out.push(message)
+  }
+  flush()
+  return out
+}
+
+function collapseRowView(group) {
+  return `<button class="msg-collapse-row" data-action="toggle-collapse" data-group="${attr(group.key)}" aria-expanded="false">
+    ${icon('chevron')}<span>${t('chat.collapseLabel', { count: group.count })}</span>
+    <span class="msg-collapse-last">${esc(mdPlainSummary(group.last?.body ?? '', 80))}</span>
+  </button>`
+}
+// ===== auto-collapse:end =====
+
 // 群聊右栏「项目成员」概览卡（只读）：DSHBOTS-49 恢复 D-5 信息架构收敛时删掉的面板，
 // DSHBOTS-55 按 232f1c8 的双行方案修正——①位置在「项目总监」卡正下方（活跃任务之前）；
 // ②成员行剔除总监（总监独占上方自己的 panel），计数同口径；
@@ -191,7 +232,7 @@ function renderChat() {
             <div class="empty-symbol">${icon('message')}</div>
             <h3>${t('chat.emptyTitle')}</h3>
             <p>${t('chat.emptyBody')}</p>
-          </div>` : messages.map(renderMessage).join('')}
+          </div>` : collapseAutoMessages(messages).map(item => item.collapsed ? collapseRowView(item) : renderMessage(item)).join('')}
           ${typingRows(state.data.runs, 'chat')}
           ${typingLingerRowsHtml('chat', state.data.runs)}
         </div>

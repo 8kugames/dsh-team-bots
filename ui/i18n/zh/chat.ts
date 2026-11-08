@@ -6,6 +6,7 @@ export default {
   "chat.ownerUnset": "未设置",
   "chat.memberOne": "${count} 个成员",
   "chat.memberMany": "${count} 个成员",
+  "chat.collapseLabel": "${count} 条系统通知",
   "chat.emptyTitle": "还没有人说话",
   "chat.emptyBody": "直接发言会交给总监 Bot；用 <strong>@Bot</strong> 点名成员，或输入 <strong>/task @Bot 任务标题</strong> 直接创建任务。",
   "chat.typingQueued": "排队等待回复…",

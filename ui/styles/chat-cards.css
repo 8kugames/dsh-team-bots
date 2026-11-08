@@ -183,6 +183,32 @@
     gap: 8px;
 }
 .approval-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
+/* 连续系统通知折叠行（B8/DSHBOTS-336）：Quiet by default——≥3 条连续系统通知折叠为一行，
+   展开态按组键存 state.expandedCollapses（跨轮询持久），bot/user 消息不折叠。 */
+.msg-collapse-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 12px;
+    margin: 4px 0;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-3);
+    font: 500 var(--fs-small) var(--sans);
+    cursor: pointer;
+    text-align: left;
+}
+.msg-collapse-row:hover { border-color: var(--line-2); color: var(--ink); }
+.msg-collapse-row > svg { flex: 0 0 auto; }
+.msg-collapse-last {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 /* needs-attention 顶部收口（A2/DSHBOTS-322）：Quiet by default——计数全 0 且无系统问题时
    整条不渲染。与审批/提问窄条同形容器，一行 chips 直接跳转对应页面，不展开明细菜单。 */
 .attention-banner {
