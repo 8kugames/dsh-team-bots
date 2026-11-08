@@ -173,6 +173,13 @@ export async function handleBoardAction(action, target) {
       toast(t("已恢复默认指令"), 'success')
       break
     }
+    case 'retry-outbox': {
+      // 投递失败处置（DSHBOTS-338）：复活为 pending 并清零重试预算，下一拍 tick 领取。
+      const result = await api('outbox_retry', {})
+      await loadState(state.projectId)
+      toast(t('toast.outboxRetried', { count: result?.requeued ?? 0 }), 'success')
+      break
+    }
     case 'reconcile-usage': {
       const result = await api('reconcile_usage', {})
       const reconciliation = result?.reconciliation ?? {}

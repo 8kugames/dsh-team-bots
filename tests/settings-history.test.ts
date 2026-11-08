@@ -58,6 +58,27 @@ test('变更历史：settings.update 与 prompt_segment 保存/恢复都入账�
   assert.equal(Number(store.get('SELECT COUNT(*) AS count FROM audit_log')?.count ?? 0), before)
 })
 
+test('旧格式行归一：六参审计缺陷时代的字符串 data 不再拆成数字键', async (t) => {
+  const { root, store, service } = await setup()
+  t.after(async () => { await teardown(root, store) })
+  // 直插一行缺陷时代的存量审计（data_json 是字符串 '"global"'）。
+  store.run(
+    `INSERT INTO audit_log(id, actor_type, actor_id, action, target_type, target_id, data_json, created_at)
+     VALUES ('a-legacy', 'user', 'user_local', 'settings.update', 'settings', 'global', '"global"', ?)`,
+    new Date().toISOString(),
+  )
+  const row = service.settingsHistoryView(10).find(item => item.at && item.target === 'global' && item.data === null)
+  assert.ok(row, '存量字符串行应归一为 data=null')
+  assert.deepEqual(row.keys, [], '不再把 Object.keys(字符串) 拆成 0、1、2、3、4、5')
+  // 数组 data 同样归一。
+  store.run(
+    `INSERT INTO audit_log(id, actor_type, actor_id, action, target_type, target_id, data_json, created_at)
+     VALUES ('a-legacy2', 'user', 'user_local', 'settings.update', 'settings', 'global', '[1,2]', ?)`,
+    new Date().toISOString(),
+  )
+  assert.deepEqual(service.settingsHistoryView(10).find(item => item.data === null && item.target === 'global').keys, [])
+})
+
 test('state 下发 settingsHistory；limit 边界收敛', async (t) => {
   const { root, store, service } = await setup()
   t.after(async () => { await teardown(root, store) })

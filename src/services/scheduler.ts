@@ -147,6 +147,43 @@ export const schedulerMethods = {
     }
   },
 
+  // state 视图（DSHBOTS-338）：计数 + 失败明细（最多 10 条，kind/错误/次数），投递失败
+  // 的处置入口（全局页投递队列卡）唯一真值；失败为 0 时不发明细查询。
+  outboxStateView() {
+    const counts = this.outboxCounts()
+    if (counts.failed <= 0) return { ...counts, failedItems: [] }
+    const failedItems = this.store.all(
+      "SELECT id, kind, attempts, last_error, created_at FROM outbox WHERE status = 'failed' ORDER BY created_at DESC LIMIT 10",
+    ).map(row => ({
+      id: row.id,
+      kind: row.kind,
+      attempts: Number(row.attempts ?? 0),
+      lastError: row.last_error ?? null,
+      createdAt: row.created_at,
+    }))
+    return { ...counts, failedItems }
+  },
+
+  // 手动重试（DSHBOTS-338）：把全部 failed 行复活为 pending 并清零重试预算（人工判断
+  // 下的全新一轮 5 次退避），审计留痕；下一拍 tick 自然领取。不改变幂等键（消息类 kind
+  // 重投仍被收据/去重闸吸收，不会双发）。
+  outboxRetry(actor = this.actor()) {
+    const rows = this.store.all("SELECT id FROM outbox WHERE status = 'failed'")
+    if (rows.length === 0) return { requeued: 0 }
+    const now = nowIso()
+    this.store.transaction(() => {
+      for (const row of rows) {
+        this.store.run(
+          "UPDATE outbox SET status = 'pending', attempts = 0, available_at = ?, last_error = NULL WHERE id = ?",
+          now, row.id,
+        )
+      }
+      this.audit(actor, 'outbox.retry', 'settings', 'global', { requeued: rows.length })
+    })
+    void this.tick()
+    return { requeued: rows.length }
+  },
+
   // 领取并投递 outbox 记录；投递成功标记 delivered，失败按指数退避重试。
   dispatchOutbox() {
     const rows = this.store.all(

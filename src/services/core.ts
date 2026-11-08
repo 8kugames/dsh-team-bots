@@ -203,7 +203,11 @@ export const coreMethods = {
       Math.max(1, Math.min(100, Number(limit) || 30)),
     )
     return rows.map(row => {
-      const data = jsonParse(row.data_json, {})
+      // 旧格式归一（DSHBOTS-338）：settings.update 六参审计缺陷修复前的存量行 data 是
+      // 字符串/数组等非平面对象——归一为 null（UI 显「旧格式无字段明细」），不再把
+      // Object.keys('global') 拆成 0、1、2、3、4、5 这类乱码键。
+      const parsed = jsonParse(row.data_json, null)
+      const data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
       // prompt_segment 行的 data 只记字符数（不重复存正文），变更键用段键（target_id）呈现。
       const keys = row.action.startsWith('prompt_segment.')
         ? [row.target_id]
