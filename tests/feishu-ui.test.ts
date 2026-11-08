@@ -108,7 +108,8 @@ test('② 启用 + ready：相位/管理员/元信息，AppID 脱敏、settings 
   assert.doesNotMatch(html, /name="appId"/, '非未绑定态不应渲染凭据输入表单')
   assert.match(html, /凭据已配置/, '已配置来源应显示凭据态')
   assert.match(html, /data-action="feishu-clear-credentials"/, 'settings 来源已配置应显示清除按钮')
-  assert.doesNotMatch(html, /二维码|扫码绑定/, '飞书无扫码流程，卡内不应出现扫码入口')
+  const card = html.slice(html.indexOf('feishu-card'))
+  assert.doesNotMatch(card, /二维码|扫码绑定/, '飞书无扫码流程，卡内不应出现扫码入口')
 })
 
 test('②b 相位别名：connected 与 ready 同义，都渲染「已连接」绿 pill', async () => {

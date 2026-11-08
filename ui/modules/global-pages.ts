@@ -229,8 +229,8 @@ export function renderSecretsPage() {
 }
 
 // 飞书凭据交互（DSHBOTS-334）：卡模块内自注册监听（同 events-board 委托先例，不经
-// events-submit/events-click 的通用 switch）。app.js 走动态导入——本模块被单测直接
-// 加载时不必拉起整个应用模块图。
+// events-submit/events-click 的通用 switch）。app/api 走动态 import 的命名空间调用——
+// 本模块被单测直接加载时不必拉起整个应用模块图（app.js 含启动副作用）。
 document.addEventListener('submit', async (event) => {
   const form = (event.target as any).closest?.('form[data-form="feishu-credentials"]')
   if (!form) return
@@ -239,10 +239,10 @@ document.addEventListener('submit', async (event) => {
   const appSecret = String(form.querySelector?.('[name="appSecret"]')?.value ?? '').trim()
   try {
     if (!appId || !appSecret) throw new Error(t("请输入 App ID 与 App Secret"))
-    const { api } = await import('./api.js')
-    await api('save_feishu_credentials', { appId, appSecret }, { quiet: true })
-    const { refresh } = await import('../app.js')
-    await refresh({ quiet: true })
+    const apiMod = await import('./api.js')
+    await apiMod.api('save_feishu_credentials', { appId, appSecret }, { quiet: true })
+    const appMod = await import('../app.js')
+    await appMod.refresh({ quiet: true })
     toast(t("飞书凭据已保存，正在重连"), 'success')
   } catch (error) {
     toast((error as Error)?.message || String(error), 'error')
@@ -254,10 +254,10 @@ document.addEventListener('click', async (event) => {
   if (!target) return
   if (!globalThis.confirm?.(t("清除后飞书通道将断开并回到未绑定。确认清除？"))) return
   try {
-    const { api } = await import('./api.js')
-    await api('clear_feishu_credentials', {}, { quiet: true })
-    const { refresh } = await import('../app.js')
-    await refresh({ quiet: true })
+    const apiMod = await import('./api.js')
+    await apiMod.api('clear_feishu_credentials', {}, { quiet: true })
+    const appMod = await import('../app.js')
+    await appMod.refresh({ quiet: true })
     toast(t("已清除飞书凭据，通道回到未绑定"), 'success')
   } catch (error) {
     toast((error as Error)?.message || String(error), 'error')
@@ -272,10 +272,10 @@ document.addEventListener('click', async (event) => {
   const next = target.dataset?.next === '1'
   if (!next && !globalThis.confirm?.(t("停用后微信通道立即断开且不再推送。确认停用？"))) return
   try {
-    const { api } = await import('./api.js')
-    await api('set_wechat_channel_enabled', { enabled: next }, { quiet: true })
-    const { refresh } = await import('../app.js')
-    await refresh({ quiet: true })
+    const apiMod = await import('./api.js')
+    await apiMod.api('set_wechat_channel_enabled', { enabled: next }, { quiet: true })
+    const appMod = await import('../app.js')
+    await appMod.refresh({ quiet: true })
     toast(next ? t("微信通道已启用") : t("微信通道已停用"), 'success')
   } catch (error) {
     toast((error as Error)?.message || String(error), 'error')
