@@ -39,7 +39,7 @@ function wechatCard() {
 }
 
 // 飞书通道卡（只读状态，DSHBOTS-327）：绑定态、管理员 ou_id 与机器人元信息。
-// 飞书没有扫码流程：凭据在 lark-cli 侧由 operator 配置，UI 只读状态，不给绑定按钮。
+// 飞书没有扫码流程：凭据（AppID/Secret）在服务端配置注入，UI 只读状态，不给绑定按钮。
 function feishuCard() {
   const feishu = state.data?.feishu ?? { enabled: false, phase: 'disabled' }
   if (!feishu.enabled) return ''
@@ -58,7 +58,7 @@ function feishuCard() {
       </div>
       ${feishu.phase === 'conflict' ? `<div class="hint feishu-conflict">${t("检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。")}</div>` : ''}
       ${feishu.error ? `<div class="hint feishu-error">${esc(feishu.error)}</div>` : ''}
-      ${feishu.phase === 'unbound' ? `<div class="hint">${t("配置 lark-cli 后自动连接，无需扫码。")}</div>` : ''}
+      ${feishu.phase === 'unbound' ? `<div class="hint">${t("未配置飞书应用凭据（feishuAppId / feishuAppSecret），配置后自动连接。")}</div>` : ''}
       <div class="feishu-meta">
         ${feishu.botId ? `<span>${t("机器人 ID")} <span class="mono">${esc(String(feishu.botId))}</span></span>` : ''}
         ${feishu.appId ? `<span>${t("App ID")} <span class="mono">${esc(String(feishu.appId))}</span></span>` : ''}

@@ -19,11 +19,11 @@ export default {
   "请输入微信验证码": "Enter the WeChat verification code",
   "退出绑定后需要重新扫码才能恢复推送。确认退出？": "After unbinding, you must scan the QR code again to restore push. Unbind now?",
   "验证码已提交": "Verification code submitted",
-  // Feishu channel (DSHBOTS-327): read-only status card (no QR flow; credentials live on the operator side)
+  // Feishu channel (DSHBOTS-327/333): read-only status card (no QR flow; credentials injected server-side)
   "channel.sectionFeishu": "Feishu channel",
-  "channel.sectionFeishuDesc": "Connects automatically once lark-cli is configured; task updates are pushed to the admin on Feishu.",
+  "channel.sectionFeishuDesc": "Connects automatically once the app credentials are configured; task updates are pushed to the admin on Feishu.",
   "连接冲突": "Connection conflict",
-  "配置 lark-cli 后自动连接，无需扫码。": "Connects automatically once lark-cli is configured; no QR scan needed.",
+  "未配置飞书应用凭据（feishuAppId / feishuAppSecret），配置后自动连接。": "Feishu app credentials (feishuAppId / feishuAppSecret) are not configured; it connects automatically once they are set.",
   "检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。": "Connection conflict: the same App ID is signed in elsewhere (exceed_conn_limit). Sign out the other instance first.",
   "机器人 ID": "Bot ID",
   "App ID": "App ID",

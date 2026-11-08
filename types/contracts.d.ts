@@ -132,9 +132,10 @@ interface TeamConfig {
   skillRoot: string
   wechat: { enabled: boolean }
   wechatEnabled: boolean
-  feishu: { enabled: boolean; cliPath: string }
+  feishu: { enabled: boolean; appId: string; appSecret: string }
   feishuEnabled: boolean
-  feishuCliPath: string
+  feishuAppId: string
+  feishuAppSecret: string
   maxConcurrentRuns: number
   runTimeoutMs: number
   maxRunTokens: number

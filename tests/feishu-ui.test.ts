@@ -113,8 +113,9 @@ test('②b 相位别名：connected 与 ready 同义，都渲染「已连接」�
 })
 
 test('③ unbound / conflict：未绑定给配置提示，冲突相出 amber 警示', async () => {
-  const unbound = await renderChannel({ enabled: true, phase: 'unbound', error: '未配置 lark-cli 路径（DSH_BOTS_FEISHU_CLI）' })
-  assert.match(unbound, /配置 lark-cli 后自动连接，无需扫码。/, '未绑定应提示配置 lark-cli 后自动连接')
+  const unbound = await renderChannel({ enabled: true, phase: 'unbound', error: '未配置飞书应用凭据（feishuAppId / feishuAppSecret）' })
+  assert.match(unbound, /未配置飞书应用凭据（feishuAppId \/ feishuAppSecret），配置后自动连接。/, '未绑定应提示配置应用凭据后自动连接')
+  assert.doesNotMatch(unbound, /lark-cli/, '飞书卡不得再提 lark-cli')
   const card = /<div class="card form-card g-card feishu-card"[\s\S]*?<\/div>\s*<\/div>/.exec(unbound)?.[0] ?? ''
   assert.ok(card, '未绑定态应渲染飞书卡')
   assert.doesNotMatch(card, /data-action=/, '飞书卡只读，不应有任何操作按钮（凭据归 operator 侧）')
@@ -128,7 +129,7 @@ test('③ unbound / conflict：未绑定给配置提示，冲突相出 amber 警
 
 test('④ i18n：飞书词条 zh/en 齐平、调用点均已注册、无死键', () => {
   const source = readFileSync(join(root, 'ui/modules/global-pages.js'), 'utf8')
-  const keys = ['channel.sectionFeishu', 'channel.sectionFeishuDesc', '连接冲突', '配置 lark-cli 后自动连接，无需扫码。', '检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。', '机器人 ID', 'App ID']
+  const keys = ['channel.sectionFeishu', 'channel.sectionFeishuDesc', '连接冲突', '未配置飞书应用凭据（feishuAppId / feishuAppSecret），配置后自动连接。', '检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。', '机器人 ID', 'App ID']
   for (const key of keys) {
     assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `zh 缺键：${key}`)
     assert.ok(Object.prototype.hasOwnProperty.call(en, key), `en 缺键：${key}`)

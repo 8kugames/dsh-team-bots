@@ -1,6 +1,6 @@
-// DSHBOTS-323 卡①守门：飞书通道骨架（lark-cli 全 stub，无需真二进制）。
-// ①secret 不出现在 DSHBOTS 库/日志/env；②每条出站带 idempotency-key=outbox 行 id；
-// ③outbox 3 次上限后废弃不补发；④自检失败 phase='unbound' 不 crash；
+// DSHBOTS-333 守门：飞书通道骨架（传输层全 stub，走进程内官方 SDK 接口）。
+// ①secret 不出现在 DSHBOTS 库/日志/env；②每条出站带 uuid=outbox 行 id；
+// ③outbox 3 次上限后废弃不补发；④绑定失败 phase='unbound' 不 crash；
 // ⑤不监听任何公网端口（无 webhook server 源码锚）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -12,39 +12,35 @@ import { fileURLToPath } from 'node:url'
 import { resolveConfig } from '../src/config.js'
 import { openDatabase } from '../src/db.js'
 import { TeamService } from '../src/service.js'
-import { FeishuChannel, CliError, isGone, isRetryable } from '../src/feishu/channel.js'
+import { FeishuChannel, FeishuError, isGone, isRetryable } from '../src/feishu/channel.js'
 import { FeishuStore } from '../src/feishu/store.js'
 import { outboundChunks } from '../src/feishu/format.js'
 
-// 自检桩输出里的「secret 哨兵」：auth status 即使带 secret 材料，DSHBOTS 也不得落库/落日志。
+// 凭据哨兵：app secret 出现在配置里，但 DSHBOTS 不得落库/落日志。
 const SECRET = 'feishu-secret-sentinel-9f3a2b'
-const AUTH_STATUS = JSON.stringify({
-  appId: 'cli_test123',
-  brand: 'feishu',
-  app_secret: SECRET,
-  identities: { bot: { status: 'ready' } },
-})
-const STRICT_MODE = 'strict-mode: bot'
-const BOT_INFO = JSON.stringify({ bot: { open_id: 'ou_bot123', app_name: 'DSHBots' } })
+const APP_ID = 'cli_test123'
 
-/** lark-cli 桩：按子命令回 canned 输出，记录全部调用；replyFail 控制 messages-reply 失败。 */
-function larkStub({ authStatus = AUTH_STATUS, strictMode = STRICT_MODE, botInfo = BOT_INFO, replyFail = null } = {}) {
-  const calls: any[][] = []
-  const envKeysAtSpawn = []
-  const run = async args => {
-    calls.push(args)
-    envKeysAtSpawn.push({ ...process.env })
-    if (args[0] === 'auth') return authStatus
-    if (args[0] === 'config') return strictMode
-    if (args[0] === 'api') return botInfo
-    if (args[0] === 'im') {
+/** 传输层桩：记录全部调用；replyFail 控制出站失败；botFail 控制身份自检失败。 */
+function transportStub({ botFail = null, replyFail = null, botId = 'ou_bot123' } = {}) {
+  const calls = { botInfo: 0, replies: [] }
+  const transport = {
+    async botInfo() {
+      calls.botInfo += 1
+      if (botFail) throw botFail
+      return { appId: APP_ID, botId, brand: 'feishu' }
+    },
+    async reply(messageId, text, uuid) {
+      calls.replies.push({ messageId, text, uuid })
       if (replyFail) throw replyFail
-      return ''
-    }
-    return ''
+      return { messageId: 'om_sent' }
+    },
+    async startEvents({ onReady }) {
+      onReady?.()
+    },
+    stop() {},
   }
-  const replies = () => calls.filter(args => args[0] === 'im' && args[1] === '+messages-reply')
-  return { calls, replies, run }
+  const replies = () => calls.replies
+  return { calls, replies, transport }
 }
 
 function captureLog() {
@@ -64,7 +60,7 @@ async function setup() {
   const dataDir = join(root, 'data')
   await mkdir(dataDir, { recursive: true })
   const store = await new FeishuStore(join(dataDir, 'feishu-channel.sqlite')).open()
-  const config = { feishu: { enabled: true, cliPath: '/usr/local/bin/lark' }, wechat: { enabled: false } }
+  const config = { feishu: { enabled: true, appId: APP_ID, appSecret: SECRET }, wechat: { enabled: false } }
   return { root, store, config }
 }
 
@@ -84,45 +80,55 @@ async function scanFiles(paths, needle) {
   return hits
 }
 
-test('配置段：DSH_BOTS_FEISHU 开关与 feishuDbPath 默认值', () => {
+test('配置段：DSH_BOTS_FEISHU 开关与凭据注入（config > env），feishuDbPath 默认值', () => {
   const base = resolveConfig({ workspace: '/tmp/w', dataDir: '/tmp/d' })
   assert.equal(base.feishu.enabled, false)
-  assert.equal(base.feishu.cliPath, '')
+  assert.equal(base.feishu.appId, '')
+  assert.equal(base.feishu.appSecret, '')
   assert.equal(base.feishuDbPath, join('/tmp/d', 'feishu-channel.sqlite'))
-  const prev = process.env.DSH_BOTS_FEISHU
+  const prevEnabled = process.env.DSH_BOTS_FEISHU
+  const prevId = process.env.DSH_BOTS_FEISHU_APP_ID
+  const prevSecret = process.env.DSH_BOTS_FEISHU_APP_SECRET
   try {
     process.env.DSH_BOTS_FEISHU = '1'
-    process.env.DSH_BOTS_FEISHU_CLI = '/opt/lark'
+    process.env.DSH_BOTS_FEISHU_APP_ID = 'cli_env'
+    process.env.DSH_BOTS_FEISHU_APP_SECRET = 'env-secret'
     const on = resolveConfig({ workspace: '/tmp/w', dataDir: '/tmp/d' })
     assert.equal(on.feishu.enabled, true)
-    assert.equal(on.feishu.cliPath, '/opt/lark')
+    assert.equal(on.feishu.appId, 'cli_env')
+    assert.equal(on.feishu.appSecret, 'env-secret')
+    // config 注入优先于 env（cordis.patch.yml 与开关同路径）
+    const injected = resolveConfig({
+      workspace: '/tmp/w', dataDir: '/tmp/d',
+      feishuEnabled: true, feishuAppId: 'cli_injected', feishuAppSecret: 'injected-secret',
+    })
+    assert.equal(injected.feishu.enabled, true)
+    assert.equal(injected.feishu.appId, 'cli_injected')
+    assert.equal(injected.feishu.appSecret, 'injected-secret')
   } finally {
-    if (prev === undefined) {
-      delete process.env.DSH_BOTS_FEISHU
-      delete process.env.DSH_BOTS_FEISHU_CLI
-    } else {
-      process.env.DSH_BOTS_FEISHU = prev
+    const restore = (name, value) => {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
     }
+    restore('DSH_BOTS_FEISHU', prevEnabled)
+    restore('DSH_BOTS_FEISHU_APP_ID', prevId)
+    restore('DSH_BOTS_FEISHU_APP_SECRET', prevSecret)
   }
 })
 
-test('自检通过：落 bot 绑定进 ready；secret 不落库不落日志（守门①④）', async () => {
+test('绑定成功：落 bot 身份进 ready；secret 不落库不落日志（守门①④）', async () => {
   const { root, store, config } = await setup()
   const { logger, lines } = captureLog()
-  const { calls, run } = larkStub()
   const envKeysBefore = Object.keys(process.env).sort().join(',')
-  const channel = new FeishuChannel({ store, config, log: logger, runLark: run })
+  const stub = transportStub()
+  const channel = new FeishuChannel({ store, config, log: logger, transport: stub.transport })
   await channel.start()
   assert.equal(channel.phase, 'ready')
   const state = store.getState()
-  assert.equal(state.cli_path, '/usr/local/bin/lark')
   assert.equal(state.bot_id, 'ou_bot123')
-  assert.equal(state.app_id, 'cli_test123')
+  assert.equal(state.app_id, APP_ID)
   assert.equal(state.brand, 'feishu')
-  // 自检序列顺序：auth status → config strict-mode → api bot/v3/info
-  assert.deepEqual(calls.map(args => args.slice(0, 2)), [
-    ['auth', 'status'], ['config', 'strict-mode'], ['api', 'GET'],
-  ])
+  assert.equal(stub.calls.botInfo, 1)
   // 守门①：secret 哨兵不出现在库文件字节、日志行、进程 env
   store.close()
   assert.deepEqual(await scanFiles([join(root, 'data', 'feishu-channel.sqlite')], SECRET), [])
@@ -134,36 +140,36 @@ test('自检通过：落 bot 绑定进 ready；secret 不落库不落日志（�
   await rm(root, { recursive: true, force: true })
 })
 
-test('自检失败：phase=unbound 不 crash（守门④）', async () => {
+test('绑定失败：phase=unbound 不 crash（守门④）', async () => {
   const { root, store, config } = await setup()
   const { logger } = captureLog()
   const cases = [
-    { authStatus: 'no json here' },
-    { authStatus: JSON.stringify({ appId: 'cli_test123', identities: { bot: { status: 'expired' } } }) },
-    { strictMode: 'strict-mode: user' },
-    { botInfo: JSON.stringify({ bot: {} }) },
+    { botFail: new FeishuError('app not found', 99991663) },
+    { botFail: new FeishuError('bot/v3/info 未返回 open_id（feishuNoBot）') },
+    { botFail: new Error('network unreachable') },
   ]
   for (const canned of cases) {
-    const { run } = larkStub(canned)
-    const channel = new FeishuChannel({ store, config, log: logger, runLark: run })
+    const stub = transportStub(canned)
+    const channel = new FeishuChannel({ store, config, log: logger, transport: stub.transport })
     await channel.start() // 不得抛出
     assert.equal(channel.phase, 'unbound')
     assert.ok(channel.error)
-    assert.equal(store.getState()?.bot_id ?? null, null)
+    assert.equal(store.getState()?.bot_id ?? null, null, '绑定失败不得落 bot 身份')
   }
-  // cli 未配置同样进 unbound
-  const channel = new FeishuChannel({ store, config: { feishu: { enabled: true, cliPath: '' } }, log: logger })
+  // 凭据缺失同样进 unbound
+  const channel = new FeishuChannel({ store, config: { feishu: { enabled: true, appId: '', appSecret: '' } }, log: logger })
   await channel.start()
   assert.equal(channel.phase, 'unbound')
+  assert.match(String(channel.error), /未配置飞书应用凭据/)
   store.close()
   await rm(root, { recursive: true, force: true })
 })
 
-test('出站：每条带 idempotency-key=outbox 行 id，收据键去重（守门②）', async () => {
+test('出站：每条带 uuid=outbox 行 id，收据键去重（守门②）', async () => {
   const { root, store, config } = await setup()
   const { logger } = captureLog()
-  const { replies, run } = larkStub()
-  const channel = new FeishuChannel({ store, config, log: logger, runLark: run, batchWindowMs: 60_000 })
+  const stub = transportStub()
+  const channel = new FeishuChannel({ store, config, log: logger, transport: stub.transport, batchWindowMs: 60_000 })
   await channel.start()
   await store.saveReplyMessageId('om_target', 'ou_admin')
   channel.notify('第一条', { receiptKey: 'r1' })
@@ -175,14 +181,13 @@ test('出站：每条带 idempotency-key=outbox 行 id，收据键去重（守�
   const byKey = Object.fromEntries(pending.map(row => [row.receipt_key, row]))
   assert.equal(byKey.r2.text, '第二条')
   await channel.flushOutbox()
-  const sent = replies()
+  const sent = stub.replies()
   assert.equal(sent.length, 3)
   const seenKeys = new Set()
-  for (const args of sent) {
-    // args: ['im','+messages-reply','--message-id',id,'--markdown',text,'--idempotency-key',key]
-    assert.equal(args[3], 'om_target')
-    assert.match(String(args[7]), /^\d+$/)
-    seenKeys.add(args[7])
+  for (const item of sent) {
+    assert.equal(item.messageId, 'om_target')
+    assert.match(String(item.uuid), /^\d+$/)
+    seenKeys.add(item.uuid)
   }
   // 幂等键集合 = outbox 行 id 集合，一一对应
   assert.deepEqual([...seenKeys].sort(), pending.map(row => String(row.id)).sort())
@@ -192,10 +197,10 @@ test('出站：每条带 idempotency-key=outbox 行 id，收据键去重（守�
     assert.ok(done.sent_at)
   }
   // gone 判定单元：撤回/2300xx not found 算 gone，其余不算
-  assert.ok(isGone(new CliError('message withdrawn by user', 230011)))
-  assert.ok(isGone(new CliError('230099 not found', 230099)))
-  assert.ok(!isGone(new CliError('timeout', undefined)))
-  assert.ok(!isGone(new CliError('bad request', 99991663)))
+  assert.ok(isGone(new FeishuError('message withdrawn by user', 230011)))
+  assert.ok(isGone(new FeishuError('230099 not found', 230099)))
+  assert.ok(!isGone(new FeishuError('timeout', undefined)))
+  assert.ok(!isGone(new FeishuError('bad request', 99991663)))
   store.close()
   await rm(root, { recursive: true, force: true })
 })
@@ -203,14 +208,14 @@ test('出站：每条带 idempotency-key=outbox 行 id，收据键去重（守�
 test('gone：目标消息已撤回的回复立即废弃，不重试', async () => {
   const { root, store, config } = await setup()
   const { logger } = captureLog()
-  const { replies, run } = larkStub({ replyFail: new CliError('message withdrawn by user', 230011) })
-  const channel = new FeishuChannel({ store, config, log: logger, runLark: run, batchWindowMs: 60_000 })
+  const stub = transportStub({ replyFail: new FeishuError('message withdrawn by user', 230011) })
+  const channel = new FeishuChannel({ store, config, log: logger, transport: stub.transport, batchWindowMs: 60_000 })
   await channel.start()
   await store.saveReplyMessageId('om_target', 'ou_admin')
   channel.notify('要发的内容', { receiptKey: 'g1' })
   const [row] = store.pendingOutbox()
   await channel.flushOutbox()
-  assert.equal(replies().length, 1)
+  assert.equal(stub.replies().length, 1)
   const after = store.db.prepare('SELECT attempts, gave_up_at, last_error, sent_at FROM outbox WHERE id = ?').get(row.id)
   assert.equal(after.attempts, 0)
   assert.ok(after.gave_up_at)
@@ -218,7 +223,7 @@ test('gone：目标消息已撤回的回复立即废弃，不重试', async () =
   assert.equal(after.sent_at, null)
   // 废弃后不再补发
   await channel.flushOutbox()
-  assert.equal(replies().length, 1)
+  assert.equal(stub.replies().length, 1)
   store.close()
   await rm(root, { recursive: true, force: true })
 })
@@ -226,17 +231,17 @@ test('gone：目标消息已撤回的回复立即废弃，不重试', async () =
 test('重试上限：3 次可重试失败后废弃不补发；不可重试立即废弃（守门③）', async () => {
   const { root, store, config } = await setup()
   const { logger } = captureLog()
-  const { replies, run } = larkStub({ replyFail: new CliError('local spawn timeout', undefined) })
-  const channel = new FeishuChannel({ store, config, log: logger, runLark: run, batchWindowMs: 60_000 })
+  const stub = transportStub({ replyFail: new FeishuError('local timeout', undefined) })
+  const channel = new FeishuChannel({ store, config, log: logger, transport: stub.transport, batchWindowMs: 60_000 })
   await channel.start()
   await store.saveReplyMessageId('om_target', 'ou_admin')
   channel.notify('重试链路消息', { receiptKey: 'k1' })
   const [row] = store.pendingOutbox()
-  assert.ok(isRetryable(new CliError('local spawn timeout', undefined)))
-  assert.ok(!isRetryable(new CliError('bad request', 99991663)))
+  assert.ok(isRetryable(new FeishuError('local timeout', undefined)))
+  assert.ok(!isRetryable(new FeishuError('bad request', 99991663)))
   for (let round = 0; round < 5; round++) await channel.flushOutbox()
   // 3 次尝试后废弃：第 4/5 轮不再发送
-  assert.equal(replies().length, 3)
+  assert.equal(stub.replies().length, 3)
   const after = store.db.prepare('SELECT attempts, gave_up_at, sent_at FROM outbox WHERE id = ?').get(row.id)
   assert.equal(after.attempts, 3)
   assert.ok(after.gave_up_at)
@@ -246,15 +251,15 @@ test('重试上限：3 次可重试失败后废弃不补发；不可重试立即
   await rm(root, { recursive: true, force: true })
 })
 
-test('无回复目标：条目保留待发不报错（等待入站另卡绑定）', async () => {
+test('无回复目标：条目保留待发不报错（等待入站绑定锚点）', async () => {
   const { root, store, config } = await setup()
   const { logger } = captureLog()
-  const { replies, run } = larkStub()
-  const channel = new FeishuChannel({ store, config, log: logger, runLark: run, batchWindowMs: 60_000 })
+  const stub = transportStub()
+  const channel = new FeishuChannel({ store, config, log: logger, transport: stub.transport, batchWindowMs: 60_000 })
   await channel.start()
   channel.notify('管理员还没说过话', { receiptKey: 'n1' })
   await channel.flushOutbox()
-  assert.equal(replies().length, 0)
+  assert.equal(stub.replies().length, 0)
   assert.equal(store.pendingOutbox().length, 1)
   store.close()
   await rm(root, { recursive: true, force: true })
@@ -278,13 +283,10 @@ test('守门⑤：不监听任何公网端口（src/feishu 无 webhook server �
   for (const name of files) {
     const source = readFileSync(join(dir, name), 'utf8')
     assert.doesNotMatch(source, /createServer|\.listen\s*\(/, `${name} 不得出现 HTTP server 监听`)
-    // 凭据模型：keychain 目录 env（LARKSUITE_CLI_CONFIG_DIR）属 lark-cli/operator 侧，
-    // 本插件不得在代码里读取/写入该 env（注释说明不算）。
-    assert.doesNotMatch(source, /env\.LARKSUITE_CLI_CONFIG_DIR/, `${name} 不得管理 keychain env`)
   }
 })
 
-test('服务挂载：feishu.enabled 时 core 动态挂载，自检失败仅 unbound 不拖垮工作台（守门①④）', async () => {
+test('服务挂载：feishu.enabled 时 core 动态挂载，绑定失败仅 unbound 不拖垮工作台（守门①④）', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-feishu-mount-'))
   const workspace = join(root, 'workspace')
   const dataDir = join(root, 'data')
@@ -295,7 +297,7 @@ test('服务挂载：feishu.enabled 时 core 动态挂载，自检失败仅 unbo
     schedulerIntervalMs: 30_000,
     modelCacheMs: 0,
     feishuEnabled: true,
-    // 不配 cliPath：真实 spawn('') 失败路径——start 必须吞掉进 unbound
+    // 不配应用凭据：缺凭据路径——start 必须吞掉进 unbound
   })
   assert.equal(config.feishu.enabled, true)
   class HoldingRuntime {

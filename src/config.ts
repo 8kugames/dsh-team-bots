@@ -243,12 +243,13 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     wechat: {
       enabled: bool(config.wechatEnabled ?? process.env.DSH_TEAM_WECHAT, false),
     },
-    // 飞书机器人通道（DSHBOTS-323 卡①）：默认关闭，DSH_BOTS_FEISHU=1 开启。
-    // 全部出站/自检经 lark-cli 子进程；app secret 由 lark-cli 自己的 keychain 管理
-    // （LARKSUITE_CLI_CONFIG_DIR），本插件只存 cli 路径/botId/appId，secret 不进库不进 env。
+    // 飞书机器人通道（DSHBOTS-333）：默认关闭，DSH_BOTS_FEISHU=1 开启。
+    // 传输层为进程内官方 SDK（@larksuiteoapi/node-sdk）：凭据 AppID/Secret 注入即连，
+    // secret 只在内存里交给 SDK，不落库不落日志。
     feishu: {
       enabled: bool(config.feishuEnabled ?? process.env.DSH_BOTS_FEISHU, false),
-      cliPath: String(config.feishuCliPath ?? process.env.DSH_BOTS_FEISHU_CLI ?? '').trim(),
+      appId: String(config.feishuAppId ?? process.env.DSH_BOTS_FEISHU_APP_ID ?? '').trim(),
+      appSecret: String(config.feishuAppSecret ?? process.env.DSH_BOTS_FEISHU_APP_SECRET ?? '').trim(),
     },
     memoryDir: join(dataDir, 'memory'),
     messageDir: join(dataDir, 'messages'),

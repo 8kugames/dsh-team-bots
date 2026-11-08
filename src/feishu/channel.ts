@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { outboundChunks, failureText, welcomeAdmin } from './format.js'
 import { handleCommand, NON_OWNER_NOTICE } from './commands.js'
 
@@ -8,10 +7,6 @@ const OUTBOX_MAX_ATTEMPTS = 3
 const OUTBOX_BATCH_WINDOW_MS = 1500
 /** 已发送/已废弃出站记录保留 7 天。 */
 const OUTBOX_RETENTION_DAYS = 7
-/** 入站事件消费断线退避（卡②接线用）：1s 起指数退避，上限 60s（参考实现同款）。 */
-export const CONSUME_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000]
-/** 入站事件就绪信号等待上限：45s 内 stderr 未出现 `[event] ready` 即杀进程（卡②用）。 */
-export const CONSUME_READY_TIMEOUT_MS = 45_000
 /** 入站去重 LRU：TTL 10 分钟、上限 1000 条，重连不清空（对齐 cindy 口径）。 */
 export const INBOUND_DEDUP_TTL_MS = 10 * 60 * 1000
 export const INBOUND_DEDUP_LIMIT = 1000
@@ -26,23 +21,22 @@ const sleep = ms => new Promise(resolve => {
   timer.unref?.()
 })
 
-/** lark-cli 失败：code 为飞书业务错误码（非零退出且能从输出解析出码时携带），无码=本地执行失败。 */
-export class CliError extends Error {
+/** 飞书接口错误：code 为飞书业务错误码（无码=传输/本地失败，可重试）。 */
+export class FeishuError extends Error {
   declare readonly code: number | undefined
   constructor(message, code = undefined) {
     super(message)
-    this.name = 'CliError'
+    this.name = 'FeishuError'
     this.code = code
   }
 }
 
 /**
- * gone 判定（参照 dsh-superagent-prototype 同款）：飞书侧永久拒绝回复——目标消息
- * 已被撤回（230011 / withdrawn）或 2300xx not found。只有带这些码的 CliError 才算
- * gone；本地超时/崩溃不算。
+ * gone 判定：飞书侧永久拒绝回复——目标消息已被撤回（230011 / withdrawn）或
+ * 2300xx not found。只有带这些码的 FeishuError 才算 gone；本地超时/网络失败不算。
  */
 export function isGone(error) {
-  if (!(error instanceof CliError) || error.code === undefined) return false
+  if (!(error instanceof FeishuError) || error.code === undefined) return false
   return error.code === 230011
     || /withdrawn/i.test(error.message)
     || (Math.floor(error.code / 100) === 2300 && /not found/i.test(error.message))
@@ -51,95 +45,21 @@ export function isGone(error) {
 /** 传输/执行类错误可重试；带飞书错误码的业务拒绝不可重试（重试也不会变对）。 */
 export function isRetryable(error) {
   if (!error) return false
-  if (error instanceof CliError) return error.code === undefined
+  if (error instanceof FeishuError) return error.code === undefined
   if (error?.permanent === true) return false
   if (error instanceof SyntaxError || error instanceof RangeError || error instanceof ReferenceError) return false
   return true
 }
 
-/** 从 lark-cli 输出里尽力解析飞书错误码（如 "code": 230011 或裸 230011）。 */
-function parseCliCode(output) {
-  const json = /"code"\s*:\s*(\d+)/.exec(output)?.[1]
-  if (json) return Number(json)
-  const bare = /\b(23\d{4})\b/.exec(output)?.[1]
-  return bare ? Number(bare) : undefined
-}
-
-/** 从 messages-reply 输出里取回消息 id（同键幂等重试时即原消息 id）。 */
-function parseReplyMessageId(output) {
-  return /"message_id"\s*:\s*"([^"]+)"/.exec(String(output ?? ''))?.[1] ?? null
-}
-
-/** 飞书连接数冲突（对齐 cindy exceed_conn_limit）：1000040350=本应用事件已有别的消费者在长连接。 */
+/** 飞书连接数冲突：1000040350=本应用事件已有别的消费者在长连接（SDK 报错文案带此码）。 */
 export function isConnLimit(error) {
-  if (!(error instanceof CliError)) return false
-  return error.code === 1000040350 || /exceed[_\s-]?conn[_\s-]?limit/i.test(error.message)
+  if (error?.code === 1000040350) return true
+  return /exceed[_\s-]?conn[_\s-]?limit|1000040350/i.test(String(error?.message ?? ''))
 }
 
-/**
- * 默认入站事件消费原语：spawn `lark event consume im.message.receive_v1 --as bot`
- * 长连接子进程——stdout 按行回抛 JSON 事件（onEvent）、stderr 出现 `[event] ready`
- * 回调 onReady、readyTimeoutMs 内未见 ready 即杀进程判超时；进程退出/失败经返回的
- * Promise 结算（测试注入桩同形）。
- */
-function spawnConsumeViaCli(cliPath) {
-  return ({ onEvent, onReady, signal, readyTimeoutMs }) => new Promise((resolve, reject) => {
-    const child = spawn(cliPath, ['event', 'consume', 'im.message.receive_v1', '--as', 'bot'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
-        LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1',
-      },
-    })
-    let ready = false
-    let settled = false
-    let buffer = ''
-    let stderr = ''
-    const settle = finish => {
-      if (settled) return
-      settled = true
-      clearTimeout(readyTimer)
-      finish()
-    }
-    const readyTimer = setTimeout(() => {
-      child.kill()
-      settle(() => reject(new CliError(`事件消费 ${readyTimeoutMs}ms 内未见 [event] ready`, undefined)))
-    }, readyTimeoutMs)
-    readyTimer.unref?.()
-    child.stdout.on('data', chunk => {
-      buffer += chunk
-      let newline = buffer.indexOf('\n')
-      while (newline >= 0) {
-        const line = buffer.slice(0, newline).trim()
-        buffer = buffer.slice(newline + 1)
-        if (line) onEvent(line)
-        newline = buffer.indexOf('\n')
-      }
-    })
-    child.stderr.on('data', chunk => {
-      stderr = `${stderr}${chunk}`.slice(-4000)
-      if (!ready && String(chunk).includes('[event] ready')) {
-        ready = true
-        clearTimeout(readyTimer)
-        onReady?.()
-      }
-    })
-    child.once('error', error => settle(() => reject(error)))
-    child.once('close', code => {
-      if (signal?.aborted) return settle(() => resolve('aborted'))
-      settle(() => {
-        if (ready) resolve(`exit ${code}`)
-        else reject(new CliError(stderr.trim() || `lark-cli 退出码 ${code}`, parseCliCode(stderr)))
-      })
-    })
-    signal?.addEventListener('abort', () => child.kill(), { once: true })
-  })
-}
-
-/** im.message.receive_v1 事件体的入站解析（schema 2.0）：未成形事件返回 null。 */
+/** im.message.receive_v1 事件体的入站解析：SDK 回调为顶层 sender/message 字段。 */
 export function parseInboundEvent(payload) {
-  const message = payload?.event?.message
+  const message = payload?.message
   if (!message?.message_id) return null
   let text = ''
   if (message.message_type === 'text' && message.content) {
@@ -149,7 +69,7 @@ export function parseInboundEvent(payload) {
       text = ''
     }
   }
-  const senderOpenId = payload?.event?.sender?.sender_id?.open_id
+  const senderOpenId = payload?.sender?.sender_id?.open_id
   return {
     messageId: String(message.message_id),
     chatId: message.chat_id ? String(message.chat_id) : null,
@@ -174,65 +94,158 @@ export function stripMentionPlaceholders(text) {
   return String(text ?? '').replace(/@_user_\d+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-/** 默认 lark 执行原语：spawn 配置的 cli，静默更新/技能提示；非零退出抛 CliError。 */
-function spawnLark(cliPath) {
-  return args => new Promise((resolve, reject) => {
-    const child = spawn(cliPath, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
-        LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1',
-      },
-    })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', chunk => { stdout += chunk })
-    child.stderr.on('data', chunk => { stderr += chunk })
-    child.once('error', reject)
-    child.once('close', code => {
-      if (code === 0) resolve(stdout)
-      else reject(new CliError(stderr.trim() || `lark-cli 退出码 ${code}`, parseCliCode(`${stderr}\n${stdout}`)))
-    })
-  })
+/** 传输层接口：进程内官方 SDK 实现（见 createSdkTransport），测试全 stub。
+ *  - botInfo(): 取机器人身份（appId/botId）。
+ *  - reply(messageId, text, uuid): 回复一条消息，uuid 即幂等键。
+ *  - startEvents({onEvent,onReady,onError}): 起长连接收事件。
+ *  - stop(): 断开长连接。 */
+export interface FeishuTransport {
+  botInfo: () => Promise<{ appId?: string; botId: string; brand?: string }>
+  reply: (messageId: string, text: string, uuid: string) => Promise<{ messageId?: string | null }>
+  startEvents: (hooks: {
+    onEvent: (payload: any) => void
+    onReady?: () => void
+    onError?: (error: unknown) => void
+  }) => Promise<void> | void
+  stop: () => Promise<void> | void
 }
 
-/** 从 `auth status` 输出取第一个 JSON 对象（输出可能带人类可读前缀）。 */
-function parseAuthStatus(text) {
-  const start = String(text ?? '').indexOf('{')
-  if (start < 0) return null
-  try {
-    const parsed = JSON.parse(String(text).slice(start))
-    return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
-    return null
+/** SDK 日志适配：把 SDK 内部日志转发到宿主 logger，并把 app secret 从日志里抹掉。 */
+function sdkLogger(log: any, secret: string) {
+  const emit = (level: string, args: any[]) => {
+    let text = ''
+    try {
+      text = args.map(item => (typeof item === 'string' ? item : JSON.stringify(item))).join(' ')
+    } catch {
+      text = String(args?.[0] ?? '')
+    }
+    if (secret && text.includes(secret)) text = text.split(secret).join('***')
+    log?.[level]?.(text)
+  }
+  return {
+    info: (...args) => emit('info', args),
+    warn: (...args) => emit('warn', args),
+    error: (...args) => emit('error', args),
+    debug: (...args) => emit('debug', args),
+    trace: (...args) => emit('trace', args),
+  }
+}
+
+/** 出站载荷：含 markdown 记号走交互卡片（飞书卡片 markdown 元素原生渲染），纯文本走 text 消息。 */
+function outboundPayload(text) {
+  const body = String(text ?? '')
+  if (/[*#`_]|\n\s*[-*]\s|\[[^\]]+\]\(/.test(body)) {
+    const card = {
+      config: { wide_screen_mode: true },
+      elements: [{ tag: 'markdown', content: body }],
+    }
+    return { msgType: 'interactive', content: JSON.stringify(card) }
+  }
+  return { msgType: 'text', content: JSON.stringify({ text: body }) }
+}
+
+/** SDK 抛出的错误归一：尽量取出飞书业务错误码（axios 响应体 code / 错误文案里的 code），
+ *  便于 gone（230011/2300xx）与可重试判定按业务码分流。 */
+export function toFeishuError(error) {
+  if (error instanceof FeishuError) return error
+  const raw = Number(
+    error?.response?.data?.code
+    ?? error?.code
+    ?? /code[:=]\s*(\d+)/.exec(String(error?.message ?? ''))?.[1]
+    ?? NaN,
+  )
+  const message = String(error?.response?.data?.msg ?? error?.msg ?? error?.message ?? error)
+  return new FeishuError(message, Number.isFinite(raw) ? raw : undefined)
+}
+
+/**
+ * 进程内官方 SDK 传输层（@larksuiteoapi/node-sdk）：
+ *  - 入站：WSClient 长连接 + EventDispatcher 订阅 im.message.receive_v1
+ *    （autoReconnect/ping 由 SDK 内建，token 由 SDK 自管，无外部二进制依赖）；
+ *  - 出站：im.v1.message.reply，data.uuid 作幂等键（飞书侧同 uuid 至多一条）；
+ *  - 身份：GET /open-apis/bot/v3/info 取 bot open_id。
+ * SDK 缺席（依赖未安装）时抛错，由调用方降级为 unbound。
+ */
+export async function createSdkTransport({ appId, appSecret, log = console as unknown as DshLogger }): Promise<FeishuTransport> {
+  const lark: any = await import('@larksuiteoapi/node-sdk')
+  const logger = sdkLogger(log, appSecret)
+  const client = new lark.Client({ appId, appSecret, logger, loggerLevel: lark.LoggerLevel.warn })
+  let wsClient: any = null
+  return {
+    async botInfo() {
+      let res: any
+      try {
+        res = await client.request({ url: '/open-apis/bot/v3/info', method: 'GET' })
+      } catch (error) {
+        throw toFeishuError(error)
+      }
+      const code = Number(res?.code ?? 0)
+      if (code !== 0) throw new FeishuError(res?.msg || `bot/v3/info 返回错误码 ${code}`, code)
+      const botId = res?.bot?.open_id
+      if (!botId) throw new FeishuError('bot/v3/info 未返回 open_id（feishuNoBot）')
+      return { appId: String(res?.bot?.app_id ?? appId), botId: String(botId), brand: 'feishu' }
+    },
+    async reply(messageId, text, uuid) {
+      const { msgType, content } = outboundPayload(text)
+      let res: any
+      try {
+        res = await client.im.v1.message.reply({
+          path: { message_id: String(messageId) },
+          data: { content, msg_type: msgType, uuid: String(uuid) },
+        })
+      } catch (error) {
+        throw toFeishuError(error)
+      }
+      const code = Number(res?.code ?? 0)
+      if (code !== 0) throw new FeishuError(res?.msg || `飞书回复失败（错误码 ${code}）`, code)
+      return { messageId: res?.data?.message_id ?? null }
+    },
+    async startEvents({ onEvent, onReady, onError }) {
+      const dispatcher = new lark.EventDispatcher({ logger, loggerLevel: lark.LoggerLevel.warn })
+      dispatcher.register({
+        'im.message.receive_v1': async (data: any) => {
+          onEvent(data)
+        },
+      })
+      wsClient = new lark.WSClient({
+        appId,
+        appSecret,
+        logger,
+        loggerLevel: lark.LoggerLevel.warn,
+        onReady: () => onReady?.(),
+        onReconnected: () => onReady?.(),
+        onError: (error: unknown) => onError?.(error),
+      })
+      await wsClient.start({ eventDispatcher: dispatcher })
+    },
+    stop() {
+      try {
+        wsClient?.close?.()
+      } catch {
+        // 关闭失败不影响进程退出
+      }
+      wsClient = null
+    },
   }
 }
 
 /**
- * 飞书机器人通道宿主（DSHBOTS-323 卡①：骨架 + 凭据自检 + 出站发送）。
- * 架构：不直连飞书 SDK，全部经 lark-cli 子进程——
- *  - 出站：`lark im +messages-reply --message-id <id> --markdown <text>
- *    --idempotency-key <outbox 行 id>`（幂等键=件箱行 id，飞书侧同键至多一条回复）；
- *  - 自检：auth status（bot ready）→ config strict-mode（=bot）→
- *    api GET /open-apis/bot/v3/info（取 botId），任一步失败进 phase='unbound' 不 crash；
- *  - 凭据：app secret 存 lark-cli 自己的 keychain（LARKSUITE_CLI_CONFIG_DIR），
- *    本插件只持久化 cli 路径/botId/appId，secret 不进库不进 env。
- * 入站事件消费（spawn `lark event consume im.message.receive_v1 --as bot`）是卡②范围，
- * 本卡只留 consumeLoop 接口占位。
+ * 飞书机器人通道宿主（DSHBOTS-333：传输层换进程内官方 SDK）。
+ * 架构：传输层=进程内 @larksuiteoapi/node-sdk（WSClient 长连接收事件 +
+ * im.v1.message.reply 出站，uuid 幂等），入站模型（LRU 去重/TOFU 认主/群@门禁/
+ * lane 编码/generation 门禁）与传输无关，原样保留。
+ * 凭据：AppID/Secret 由配置注入（cordis.patch.yml 或 env），secret 不落库不进日志。
  */
 export class FeishuChannel {
-  constructor({ store, config, log: logger = console as unknown as DshLogger, batchWindowMs = OUTBOX_BATCH_WINDOW_MS, runLark = null, spawnConsume = null }) {
+  constructor({ store, config, log: logger = console as unknown as DshLogger, batchWindowMs = OUTBOX_BATCH_WINDOW_MS, transport = null }) {
     this.store = store
     this.config = config
     this.log = logger
     this.service = null
     this.phase = 'disabled'
     this.error = null
-    /** lark 执行原语（测试注入桩）；缺省按配置的 cli 路径 spawn。 */
-    this.runLark = runLark ?? spawnLark(String(config.feishu?.cliPath ?? ''))
-    /** 入站事件消费原语（测试注入桩）；缺省 spawn lark event consume 长连接。 */
-    this.spawnConsume = spawnConsume ?? spawnConsumeViaCli(String(config.feishu?.cliPath ?? ''))
+    /** 传输层（测试注入桩）；缺省按凭据创建进程内 SDK 传输。 */
+    this.transport = transport
     this.batchWindowMs = batchWindowMs
     this.flushTimer = null
     /** flushOutbox 串行化链：并发 flush 会重复读取同一批 pending 造成重复发送。 */
@@ -240,7 +253,6 @@ export class FeishuChannel {
     /** 入站去重 LRU（重连不清空）与连接 generation 门禁。 */
     this.inboundSeen = new Map()
     this.consumeGeneration = 0
-    this.consumeLoopActive = false
     this.consumeAbort = new AbortController()
     /** 群聊非 owner @bot 礼貌回应的冷却表（发送者 open_id → 上次回应时间）。 */
     this.politeAt = new Map()
@@ -257,61 +269,62 @@ export class FeishuChannel {
   }
 
   /**
-   * 启动自检序列（抄参考实现 resolveFeishuBot）：auth status → bot ready →
-   * strict-mode=bot → GET /open-apis/bot/v3/info 取 botId。
-   * 任一步失败：phase='unbound' + error 留痕，绝不抛出（通道坏不拖垮工作台）。
+   * 启动：凭据齐备即连（开关+凭据=开箱即用）——先用 bot/v3/info 自检身份，
+   * 再起 WSClient 长连接。任一步失败：phase='unbound' + error 留痕，绝不抛出。
    */
   async start() {
     if (!this.enabled()) return
     this.store.purgeSentOutbox?.(OUTBOX_RETENTION_DAYS)
-    const cli = String(this.config.feishu?.cliPath ?? '').trim()
-    if (!cli) {
+    const appId = String(this.config.feishu?.appId ?? '').trim()
+    const appSecret = String(this.config.feishu?.appSecret ?? '').trim()
+    if (!appId || !appSecret) {
       this.phase = 'unbound'
-      this.error = '未配置 lark-cli 路径（DSH_BOTS_FEISHU_CLI）'
+      this.error = '未配置飞书应用凭据（feishuAppId / feishuAppSecret）'
       this.log.warn?.(`[feishu] ${this.error}`)
       return
     }
     try {
-      const bot = await this.selfCheck(cli)
-      this.store.saveBot(bot)
+      const transport = this.transport ?? await createSdkTransport({ appId, appSecret, log: this.log })
+      this.transport = transport
+      const bot = await transport.botInfo()
+      this.store.saveBot({ appId: bot.appId || appId, botId: bot.botId, brand: bot.brand ?? 'feishu' })
       // 重新绑定完成：此前的待发堆积一律作废不补发（与微信通道同治理口径）
       const voided = this.store.giveUpAllPending?.() ?? 0
       if (voided > 0) this.log.info?.(`[feishu] 绑定完成，作废此前待发堆积 ${voided} 条（不补发）`)
       this.phase = 'ready'
       this.error = null
-      this.log.info?.(`[feishu] 自检通过 app=${bot.appId} brand=${bot.brand} bot=${bot.botId}`)
-      // 卡②：绑定即开始入站事件消费（后台循环，断线自退避重连；冲突信号停循环）
-      this.consumeAbort = new AbortController()
-      void this.consumeLoop(this.consumeAbort.signal).catch(error => {
-        this.log.warn?.(`[feishu] 事件消费循环退出: ${this.errorText(error)}`)
+      this.log.info?.(`[feishu] 绑定完成 app=${bot.appId ?? appId} bot=${bot.botId}`)
+      await transport.startEvents({
+        onEvent: payload => this.onEvent(payload),
+        onReady: () => {
+          // 每次（重）连接就绪即换代 generation：旧连接轮次里未完成的事件整体丢弃
+          this.consumeGeneration += 1
+          if (this.phase !== 'conflict') {
+            this.phase = 'ready'
+            this.error = null
+          }
+          this.log.info?.('[feishu] 长连接已就绪')
+        },
+        onError: error => this.onTransportError(error),
       })
     } catch (error) {
       this.phase = 'unbound'
       this.error = this.errorText(error)
-      this.log.warn?.(`[feishu] 自检失败，通道未绑定（不 crash）: ${this.error}`)
+      this.log.warn?.(`[feishu] 绑定失败，通道未绑定（不 crash）: ${this.error}`)
     }
   }
 
-  /** 自检四步；全部通过返回 bot 绑定信息（cliPath/botId/appId/brand）。 */
-  async selfCheck(cli) {
-    const authText = await this.runLark(['auth', 'status'])
-    const status = parseAuthStatus(authText)
-    if (!status?.appId) throw new Error('auth status 未返回 app 信息（feishuNoApp）')
-    if (status.identities?.bot?.status !== 'ready') {
-      throw new Error(`bot 身份未就绪（${status.identities?.bot?.status ?? 'unknown'}）`)
+  /** 长连接异常：连接数冲突（1000040350）是确定性冲突，置 conflict；其余按重连中处理。 */
+  onTransportError(error) {
+    if (isConnLimit(error)) {
+      this.phase = 'conflict'
+      this.error = 'exceed_conn_limit（1000040350）：已有其他实例在消费本应用事件'
+      this.log.warn?.(`[feishu] ${this.error}`)
+      return
     }
-    const modeText = await this.runLark(['config', 'strict-mode'])
-    const mode = /strict-mode:\s*(\w+)/.exec(String(modeText ?? ''))?.[1]
-    if (mode !== 'bot') throw new Error(`strict-mode 非 bot（${mode ?? 'unknown'}），禁止用户身份 CLI 出站`)
-    const infoText = await this.runLark(['api', 'GET', '/open-apis/bot/v3/info', '--as', 'bot', '--format', 'ndjson'])
-    let info = null
-    try {
-      info = JSON.parse(String(infoText ?? '').split('\n')[0] || '{}')
-    } catch {
-      info = null
-    }
-    if (!info?.bot?.open_id) throw new Error('bot/v3/info 未返回 open_id（feishuNoBot）')
-    return { cliPath: cli, appId: String(status.appId), brand: String(status.brand ?? 'feishu'), botId: String(info.bot.open_id) }
+    this.phase = 'reconnecting'
+    this.error = this.errorText(error)
+    this.log.warn?.(`[feishu] 长连接异常：${this.error}`)
   }
 
   async stop() {
@@ -320,6 +333,11 @@ export class FeishuChannel {
       this.flushTimer = null
     }
     this.consumeAbort?.abort()
+    try {
+      await this.transport?.stop?.()
+    } catch (error) {
+      this.log.warn?.(`[feishu] 传输层关闭失败: ${this.errorText(error)}`)
+    }
   }
 
   status() {
@@ -336,11 +354,11 @@ export class FeishuChannel {
   }
 
   /**
-   * 出站底层原语：回复目标消息所在话题。飞书同一 idempotency-key 至多产生一条回复，
-   * 键即 outbox 行 id——CLI 重试/进程重启后重复发送也不会在飞书侧重复落消息。
-   * 超时/传输类不确定失败（卡②对齐 cindy 增量）：同键有界重试（1 次），飞书侧同键
-   * 幂等命中时从响应取回原 message_id，既不双发也不丢发。多块文本第 2 块起键尾加
-   * `#序号`（同键多块会被飞书幂等吞掉，块间必须可区分）。
+   * 出站底层原语：回复目标消息所在话题。飞书同一 uuid 至多产生一条回复，
+   * uuid 即 outbox 行 id——重试/进程重启后重复发送也不会在飞书侧重复落消息。
+   * 超时/传输类不确定失败：同 uuid 有界重试（1 次），飞书侧幂等命中时从响应取回
+   * 原 message_id，既不双发也不丢发。多块文本第 2 块起 uuid 尾加 `#序号`
+   * （同 uuid 多块会被飞书幂等吞掉，块间必须可区分）。
    * gone（目标消息已撤回/不存在）返回 'gone'，其余失败抛出由调用方记账。
    */
   async sendFeishu(messageId, text, idempotencyKey) {
@@ -357,15 +375,10 @@ export class FeishuChannel {
         this.sendAttempts.set(key, used + 1)
         if (this.sendAttempts.size > INBOUND_DEDUP_LIMIT) this.sendAttempts.delete(this.sendAttempts.keys().next().value)
         try {
-          const output = await this.runLark([
-            'im', '+messages-reply',
-            '--message-id', String(messageId),
-            '--markdown', chunks[index],
-            '--idempotency-key', key,
-          ])
+          const result = await this.transport.reply(String(messageId), chunks[index], key)
           this.sendAttempts.delete(key)
           if (attempt > 1) {
-            const recovered = parseReplyMessageId(output)
+            const recovered = result?.messageId
             this.log.info?.(`[feishu] 同键重试发送成功${recovered ? `，取回原消息 ${recovered}` : ''}`)
           }
           break
@@ -470,61 +483,15 @@ export class FeishuChannel {
     )
   }
 
-  /**
-   * 入站事件消费循环（卡②）：spawn `lark event consume im.message.receive_v1 --as bot`
-   * 长连接——ready 信号=stderr `[event] ready`（45s 超时杀进程）、stdout 按行 JSON 事件、
-   * 断线按 CONSUME_RETRY_DELAYS_MS 指数退避重连。每次重连 bump generation：旧连接
-   * 轮次里尚未完成的事件处理整体丢弃（防双连接重复起 turn）。exceed_conn_limit
-   * （1000040350）是确定性冲突（别的实例占用长连接），重试无意义：置 phase='conflict'
-   * 广播并停循环。
-   */
-  async consumeLoop(signal = new AbortController().signal) {
-    if (this.consumeLoopActive) return
-    this.consumeLoopActive = true
-    let failures = 0
-    try {
-      while (!signal.aborted) {
-        const generation = (this.consumeGeneration += 1)
-        try {
-          const outcome = await this.spawnConsume({
-            onEvent: line => {
-              void this.handleEventLine(line, generation, signal).catch(error => {
-                this.log.warn?.(`[feishu] 事件处理异常: ${this.errorText(error)}`)
-              })
-            },
-            onReady: () => {
-              if (generation === this.consumeGeneration) {
-                this.phase = 'ready'
-                this.error = null
-                this.log.info?.('[feishu] 事件消费连接已就绪')
-              }
-            },
-            signal,
-            readyTimeoutMs: CONSUME_READY_TIMEOUT_MS,
-          })
-          if (signal.aborted) return
-          failures += 1
-          this.log.warn?.(`[feishu] 事件消费连接退出（${outcome}），按退避重连`)
-        } catch (error) {
-          if (signal.aborted) return
-          if (isConnLimit(error)) {
-            this.phase = 'conflict'
-            this.error = 'exceed_conn_limit（1000040350）：已有其他实例在消费本应用事件'
-            this.log.warn?.(`[feishu] ${this.error}，停消费循环`)
-            return
-          }
-          failures += 1
-          this.log.warn?.(`[feishu] 事件消费失败(${failures})，按退避重连: ${this.errorText(error)}`)
-        }
-        if (failures > 1) this.phase = 'reconnecting'
-        await sleep(CONSUME_RETRY_DELAYS_MS[Math.min(failures - 1, CONSUME_RETRY_DELAYS_MS.length - 1)])
-      }
-    } finally {
-      this.consumeLoopActive = false
-    }
+  /** 长连接收到事件：按当前 generation 打标后交给入站模型处理。 */
+  onEvent(payload) {
+    const generation = this.consumeGeneration
+    void this.handleEvent(payload, generation, this.consumeAbort.signal).catch(error => {
+      this.log.warn?.(`[feishu] 事件处理异常: ${this.errorText(error)}`)
+    })
   }
 
-  /** 单行 JSON 事件入口：解析 → (appId, message_id) LRU 去重 → 会话门禁分发。 */
+  /** JSON 行事件入口（守门与日志回放用）：解析后走 SDK 形状的入站模型。 */
   async handleEventLine(line, generation, signal = new AbortController().signal) {
     let payload = null
     try {
@@ -532,6 +499,11 @@ export class FeishuChannel {
     } catch {
       return
     }
+    await this.handleEvent(payload, generation, signal)
+  }
+
+  /** 单事件入口：解析 → (appId, message_id) LRU 去重 → 会话门禁分发。 */
+  async handleEvent(payload, generation, signal = new AbortController().signal) {
     const parsed = parseInboundEvent(payload)
     if (!parsed?.messageId || !parsed.text) {
       this.recordTrigger(parsed, 'filtered', 'no-text')
@@ -693,7 +665,7 @@ export class FeishuChannel {
   }
 
   errorText(error) {
-    if (error instanceof CliError) return error.code !== undefined ? `cli ${error.code}: ${error.message}` : `cli: ${error.message}`
+    if (error instanceof FeishuError) return error.code !== undefined ? `飞书 ${error.code}: ${error.message}` : `飞书: ${error.message}`
     return String(error?.message ?? error)
   }
 }

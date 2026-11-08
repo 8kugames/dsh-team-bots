@@ -189,18 +189,15 @@ declare module '../src/feishu/channel.js' {
     /** 'conflict'=exceed_conn_limit（1000040350，别的实例占用长连接）；'reconnecting'=断线退避中。 */
     phase: 'disabled' | 'unbound' | 'ready' | 'reconnecting' | 'conflict'
     error: string | null
-    /** lark-cli 执行原语：args -> stdout；测试注入桩，缺省 spawn 配置的 cli。 */
-    runLark: (args: string[]) => Promise<string>
-    /** 入站事件消费原语（测试注入桩）：{onEvent,onReady,signal,readyTimeoutMs} -> 进程退出结算。 */
-    spawnConsume: (options: unknown) => Promise<unknown>
+    /** 传输层（进程内官方 SDK，测试注入桩）：botInfo/reply/startEvents/stop。 */
+    transport: import('../src/feishu/channel.js').FeishuTransport | null
     batchWindowMs: number
     flushTimer: TimerHandle | null
     flushChain: Promise<unknown>
     /** 入站去重 LRU：(appId, message_id) -> 收到时间戳；TTL 10min、上限 1000、重连不清空。 */
     inboundSeen: Map<string, number>
-    /** 连接 generation：每次重连 +1，旧轮次里未完成的事件处理整体丢弃。 */
+    /** 连接 generation：每次（重）连接就绪 +1，旧轮次里未完成的事件处理整体丢弃。 */
     consumeGeneration: number
-    consumeLoopActive: boolean
     consumeAbort: AbortController
     /** 群聊非 owner @bot 礼貌回应冷却表：发送者 open_id -> 上次回应时间。 */
     politeAt: Map<string, number>

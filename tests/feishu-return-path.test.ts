@@ -93,14 +93,19 @@ test('飞书触发运行收尾：回复推到飞书管理员消息锚点（reply
   try {
     // 卡②入站时落的出站锚点：管理员最近一条消息 id（飞书回复据此定位话题）
     feishuStore.saveReplyMessageId('om_admin_msg_001', 'ou_admin_1')
-    const sent: string[][] = []
+    const sent: Array<{ messageId: string, text: string, uuid: string }> = []
     channel = new FeishuChannel({
       store: feishuStore,
-      config: { feishu: { enabled: true, cliPath: '/fake/lark-cli' } } as any,
+      config: { feishu: { enabled: true, appId: 'cli_test123', appSecret: 'secret' } } as any,
       log: { info() {}, warn() {}, error() {} },
-      runLark: async (args: string[]) => {
-        sent.push(args)
-        return '{"message_id":"om_reply_001"}'
+      transport: {
+        async botInfo() { return { appId: 'cli_test123', botId: 'ou_bot123', brand: 'feishu' } },
+        async reply(messageId: string, text: string, uuid: string) {
+          sent.push({ messageId, text, uuid })
+          return { messageId: 'om_reply_001' }
+        },
+        async startEvents() {},
+        stop() {},
       },
     })
     channel.phase = 'ready'
@@ -117,10 +122,10 @@ test('飞书触发运行收尾：回复推到飞书管理员消息锚点（reply
     await channel.flushOutbox()
 
     assert.equal(sent.length, 1, '飞书通道恰好外发一条')
-    const args = sent[0]
-    assert.deepEqual(args.slice(0, 3), ['im', '+messages-reply', '--message-id'])
-    assert.equal(args[3], 'om_admin_msg_001', '回复落在管理员消息锚点上')
-    assert.ok(args[5].includes('收到，我来安排。'), '回复正文随出站带出')
+    const call = sent[0]
+    assert.equal(call.messageId, 'om_admin_msg_001', '回复落在管理员消息锚点上')
+    assert.ok(call.text.includes('收到，我来安排。'), '回复正文随出站带出')
+    assert.match(call.uuid, /^\d+$/, '出站带 uuid（幂等键=outbox 行 id）')
     assert.equal(wechatPushed.length, 1, '扇出口径（DSHBOTS-326）：同一事件各已启用通道各收一条')
   } finally {
     channel?.stop()

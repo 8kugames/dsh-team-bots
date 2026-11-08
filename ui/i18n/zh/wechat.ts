@@ -19,11 +19,11 @@ export default {
   "请输入微信验证码": "请输入微信验证码",
   "退出绑定后需要重新扫码才能恢复推送。确认退出？": "退出绑定后需要重新扫码才能恢复推送。确认退出？",
   "验证码已提交": "验证码已提交",
-  // 飞书通道（DSHBOTS-327）：只读状态卡（无扫码流程，凭据归 operator 侧）
+  // 飞书通道（DSHBOTS-327/333）：只读状态卡（无扫码流程，凭据在服务端配置注入）
   "channel.sectionFeishu": "飞书通道",
-  "channel.sectionFeishuDesc": "配置 lark-cli 后自动连接，任务动态会推送到管理员飞书。",
+  "channel.sectionFeishuDesc": "配置应用凭据后自动连接，任务动态会推送到管理员飞书。",
   "连接冲突": "连接冲突",
-  "配置 lark-cli 后自动连接，无需扫码。": "配置 lark-cli 后自动连接，无需扫码。",
+  "未配置飞书应用凭据（feishuAppId / feishuAppSecret），配置后自动连接。": "未配置飞书应用凭据（feishuAppId / feishuAppSecret），配置后自动连接。",
   "检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。": "检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。",
   "机器人 ID": "机器人 ID",
   "App ID": "App ID",

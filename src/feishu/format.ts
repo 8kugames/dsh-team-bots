@@ -1,7 +1,7 @@
 // src/feishu/format.ts —— 飞书出站消息排版层（markdown 文本，DSHBOTS-323 卡①）
 // 角色对齐 src/wechat/format.ts：通道全部回程/回执文案在此集中格式化。
-// 飞书原生支持 markdown（发送走 lark-cli --markdown），不做微信式的 markdown 噪点过滤，
-// 只负责长文分块（飞书单条文本有长度上限）与固定文案。
+// 飞书原生支持 markdown（出站走 SDK 的 im.v1.message.reply，含 markdown 记号的走卡片），
+// 不做微信式的 markdown 噪点过滤，只负责长文分块（飞书单条文本有长度上限）与固定文案。
 
 /** markdown 分隔线：区分消息头与正文。 */
 export const RULE = '———'

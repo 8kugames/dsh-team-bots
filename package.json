@@ -1,6 +1,6 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.2.436",
+  "version": "0.2.437",
   "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
   "repository": {
     "type": "git",
@@ -31,6 +31,9 @@
     "NOTICE",
     "LICENSE"
   ],
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.76.0"
+  },
   "devDependencies": {
     "@types/node": "26.6.6",
     "typescript": "6.0.3"

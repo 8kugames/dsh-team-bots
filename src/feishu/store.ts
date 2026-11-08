@@ -9,10 +9,10 @@ const FILE_MODE = 0o600
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
- * 飞书通道的独立持久化：lark-cli 绑定信息（cli 路径/botId/appId/brand）、
- * 管理员 ou_id、轮询 cursor、待发件箱。与主库（team 工作台）分离。
- * 凭据模型（DSHBOTS-323 卡①）：app secret 由 lark-cli 自己的 keychain 管理
- * （LARKSUITE_CLI_CONFIG_DIR），本库只存 cli 路径与 bot 身份标识，secret 不进库不进 env。
+ * 飞书通道的独立持久化：bot 身份（botId/appId/brand）、管理员 ou_id、
+ * 回复锚点与待发件箱。与主库（team 工作台）分离。
+ * 凭据模型（DSHBOTS-333）：app secret 由配置注入（进程内 SDK 使用），
+ * 本库只存 bot 身份标识，secret 不进库不进日志。
  */
 export class FeishuStore {
   constructor(file) {
@@ -72,14 +72,14 @@ export class FeishuStore {
     return this.db.prepare('SELECT * FROM channel_state WHERE id = 1').get() ?? null
   }
 
-  /** 自检通过后落 bot 绑定（cli 路径/botId/appId/brand）；secret 不在此列。 */
-  saveBot({ cliPath, botId, appId, brand = 'feishu' }) {
+  /** 绑定成功后落 bot 身份（botId/appId/brand）；secret 不在此列。 */
+  saveBot({ botId, appId, brand = 'feishu' }) {
     this.db.prepare(
-      `INSERT INTO channel_state (id, cli_path, bot_id, app_id, brand, updated_at) VALUES (1, ?, ?, ?, ?, ?)
+      `INSERT INTO channel_state (id, cli_path, bot_id, app_id, brand, updated_at) VALUES (1, '', ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         cli_path = excluded.cli_path, bot_id = excluded.bot_id,
+         bot_id = excluded.bot_id,
          app_id = excluded.app_id, brand = excluded.brand, updated_at = excluded.updated_at`,
-    ).run(String(cliPath ?? ''), String(botId ?? ''), String(appId ?? ''), String(brand ?? 'feishu'), nowIso())
+    ).run(String(botId ?? ''), String(appId ?? ''), String(brand ?? 'feishu'), nowIso())
   }
 
   saveAdminOu(ouId) {
