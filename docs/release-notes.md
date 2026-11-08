@@ -4,6 +4,32 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.2.455
+
+### 中文
+
+单笔功能跟进（v0.2.454 刚定稿后合入）：记忆批量归档 cleanup 新增时间截止判据，为存量收敛提供一次性批量口径。
+
+**记忆治理**
+
+- **cleanup 支持 before 时间截止批量归档**：team_memory_cleanup 新增 before 判据（ISO 时间戳），归档该作用域内 updated_at 严格早于截止点的全部 active 条目；可与 topics/task 组合按 AND 交集收窄；三者全缺仍拒绝，不做「全清」缺省；时间比较经 julianday 归一化，避免字符串比较把等值瞬间误判为早于；memory_events 留痕与 memory.cleanup 审计照旧（审计补记 before 判据）。
+
+**升级路径与回退**
+
+无数据库结构变更、无新配置项。回退按发版级回退：回退包版本，恢复发版前库快照。
+
+### English
+
+A single follow-up feature lands right after v0.2.454 was finalized: memory bulk-archive cleanup gains a time-cutoff criterion — a one-shot bulk handle for legacy backlog convergence.
+
+**Memory governance**
+
+- **cleanup gains a `before` time-cutoff bulk criterion**: team_memory_cleanup accepts `before` (an ISO timestamp) and archives every active entry in the scope whose updated_at is strictly earlier than the cutoff; it combines with topics/task as an AND filter; with none of the three given it still refuses — no "archive everything" default; timestamps are julianday-normalized to avoid string-comparison misjudging equal instants as earlier; memory_events trails and the memory.cleanup audit are unchanged (the audit now also records the before criterion).
+
+**Upgrade path and rollback**
+
+No schema change and no new settings. Rollback is release-level: revert the package version and restore the pre-release database snapshot.
+
 ## v0.2.454
 
 ### 中文
