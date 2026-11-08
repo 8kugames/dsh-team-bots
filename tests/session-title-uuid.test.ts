@@ -28,7 +28,9 @@ class SessionTitleRuntime {
     this.sessionCreates = new Map()
     this.ctx = {
       sessionController: {
-        create: async () => ({ sessionId: 'a1b2c3d4-5678-4abc-8def-0123456789ab' }),
+        // 生产形态：宿主会话 id 带 session- 前缀（裸 uuid 夹具曾让 slice(0,8) 取到
+        // 字面量 "session-" 的缺陷从守门眼皮下滑过）。
+        create: async () => ({ sessionId: 'session-a1b2c3d4-5678-4abc-8def-0123456789ab' }),
         resolveAgent: async () => ({ agent: { session: { id: 'live' } } }),
         selectModel: async () => ({}),
       },
@@ -75,7 +77,8 @@ test('bot 会话显示名后缀 = 8 位 hex uuid 前缀（非「控制面」生�
     const title = rt.renames[0].title
     assert.match(title, /^TitleBot · [0-9a-f]{8}$/, '显示名 = <bot 名> · <8 位小写 hex>')
     assert.doesNotMatch(title, /控制面/, '不得再出现「控制面」生造词')
-    assert.equal(title.split('· ')[1], 'a1b2c3d4', '后缀取 sessionId 前 8 位')
+    assert.doesNotMatch(title, /session-/, '不得截到 id 的 session- 前缀字面量')
+    assert.equal(title.split('· ')[1], 'a1b2c3d4', '后缀 = 剥离 session- 前缀后的 uuid 前 8 位')
   } finally {
     try { store.close() } catch {}
     await rm(root, { recursive: true, force: true })

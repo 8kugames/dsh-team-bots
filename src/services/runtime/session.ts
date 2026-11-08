@@ -656,7 +656,9 @@ export const sessionMethods = {
         if (liveSession) {
           // 会话列表显示名（DSHBOTS-315）：bot 级会话后缀取 8 位 uuid 前缀——
           // 「控制面」在中文语境是生造词，用户看不懂（英文 controller 无妨）。
-          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${sessionId.slice(0, 8)}`) } catch {}
+          // 宿主会话 id 形如 session-<uuid>：先剥 session- 前缀再取 8 位，
+          // 否则 slice(0,8) 取到的是字面量 "session-"（显示名变成「xx · session-」）。
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${sessionId.replace(/^session-/, '').slice(0, 8)}`) } catch {}
         }
       }
       this.applyFilePolicy(agent, bot, run, task)
