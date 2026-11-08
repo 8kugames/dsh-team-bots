@@ -164,7 +164,7 @@ export const systemMethods = {
         `SELECT t.*, b.name AS assignee_name FROM tasks t LEFT JOIN bots b ON b.id = t.assignee_bot_id
          WHERE t.project_id = ? ORDER BY
            CASE t.status WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1 WHEN 'in_review' THEN 2 WHEN 'todo' THEN 3 WHEN 'backlog' THEN 4 ELSE 5 END,
-           t.position, t.updated_at DESC LIMIT 300`,
+           t.position, t.updated_at DESC`,
         project.id,
       ).map(task => this.taskView(task))
       view.runs = this.store.all(
