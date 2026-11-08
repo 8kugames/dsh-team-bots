@@ -402,11 +402,13 @@ export const projectsMethods = {
       }
       // 再开与归档对称：归档时冻结的项目记忆解回 active，逐条留 memory_events 审计。
       // 已知不对称（接受）：冻结前 active/pending 一并冻为 frozen，再开统一解回 active，pending 记忆直接生效。
+      // 容量闸（DSHBOTS-342）：解回后 active 不得超 MEMORY_CAP，否则整笔再开拒绝（事务回滚，项目保持归档）。
       if (updates.status === 'active' && project.status === 'archived') {
         const frozen = this.store.all(
           "SELECT id FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'frozen'",
           projectId,
         )
+        this.assertProjectReopenCapacity(projectId, frozen.length + this.memoryActiveCount('project', projectId))
         for (const memory of frozen) {
           this.store.run("UPDATE memories SET status = 'active', updated_at = ? WHERE id = ?", nowIso(), memory.id)
           this.store.run(

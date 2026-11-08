@@ -1,12 +1,8 @@
-// tests/memory-cap.test.ts —— DSHBOTS-339 守门：bot/project 作用域 64 条硬顶与滞回放行。
-// 锁定六件事：
-//  ① 播满 64 条后第 65 条被拒，文案含作用域、当前条数与整理指引；
-//  ② 滞回：整理到 40 仍拒、到 33 放行变 34，标志随放行清位；
-//  ③ 作用域独立：project 满不拦 bot，team 灌到 100 条也永不拦；
-//  ④ 64 顶下同名覆盖写与 updateMemory 编辑照常成功；
-//  ⑤ active 已 64 时 approveMemory 拒绝（conflict 同文案）；
-//  ⑥ 自动沉淀降级：learnFromTask 满顶不抛不落行、completeMemoryReview applied=0 无异常；
-//  ⑦ 单条记忆篇幅上限 256 字：超长写入被拒，自动沉淀/审查产出截断到预算内。
+// tests/memory-cap.test.ts —— DSHBOTS-339/342 守门：bot/project 作用域 64 条硬顶与滞回放行。
+// a 触顶拦截文案；b 滞回 40 拒/33 放行；c 作用域独立（team 不限）；d 64 顶下覆盖写与编辑；
+// e approve 触顶拒；f 自动沉淀降级；g 篇幅上限与自动截断；
+// h 项目再开容量闸（DSHBOTS-342）；i UTF-16 口径（星面字符算 2 码元）；j bot 触顶+滞回标志置/清；
+// k approve 滞回中间带（34–63 持续拒）；l memoryWriteFromBot 新建路径满顶拒；m 超长存量 topic-only 编辑放行。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -290,6 +286,167 @@ test('g) 单条记忆篇幅上限 256 字：超长写入被拒，自动沉淀/�
     const reviewed = t.store.get("SELECT * FROM memories WHERE source = 'run:run-long-src' AND scope_type = 'project'")
     assert.ok(reviewed)
     assert.ok(reviewed.content.length <= MEMORY_MAX_CHARS, `审查产出应截断到 ${MEMORY_MAX_CHARS} 字内，实际 ${reviewed.content.length}`)
+  } finally {
+    await t.close()
+  }
+})
+
+test('h) 项目再开容量闸：冻结超 64 条整笔拒绝，整理后放行且不破顶', async () => {
+  const t = await setup()
+  try {
+    t.seed('project', t.project.id, 60)
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '待审随冻', content: '内容', actor: t.actor, status: 'pending' })
+    t.seed('project', t.project.id, MEMORY_CAP - 60)
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_CAP)
+    t.service.archiveProject(t.project.id, t.actor)
+    assert.equal(t.store.get('SELECT status FROM projects WHERE id = ?', t.project.id).status, 'archived')
+    assert.equal(
+      t.store.get("SELECT COUNT(*) AS n FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'frozen'", t.project.id).n,
+      MEMORY_CAP + 1,
+      '归档应把 active+pending 一并冻结',
+    )
+    await assert.rejects(
+      () => t.service.reopenProject(t.project.id, t.actor),
+      (error: any) => error.status === 409 && /上限/.test(String(error.message)) && /去废弃/.test(String(error.message)),
+      '冻结 65 条时再开应拒绝',
+    )
+    assert.equal(t.store.get('SELECT status FROM projects WHERE id = ?', t.project.id).status, 'archived', '拒绝后项目保持归档')
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memory_events WHERE action = 'unfrozen'").n, 0, '拒绝不得留下解冻事件')
+    const frozenRows = t.store.all(
+      "SELECT id FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'frozen' LIMIT 2",
+      t.project.id,
+    )
+    for (const row of frozenRows) t.service.deleteMemory(row.id, t.actor)
+    const view = await t.service.reopenProject(t.project.id, t.actor)
+    assert.equal(view.status, 'active')
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_CAP - 1, '整理 2 条后重开应为 63 条 active')
+    assert.equal(
+      t.store.get("SELECT COUNT(*) AS n FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'frozen'", t.project.id).n,
+      0,
+      '重开后不应残留 frozen',
+    )
+  } finally {
+    await t.close()
+  }
+})
+
+test('i) 篇幅闸按 UTF-16 码元计：128 个星面字符恰好 256 放行、129 个拒绝', async () => {
+  const t = await setup()
+  try {
+    assert.equal('😀'.length, 2, '星面字符在 UTF-16 下占 2 个码元')
+    const exact = t.service.createMemory({
+      scopeType: 'project', scopeId: t.project.id, topic: '星面 256', content: '😀'.repeat(128), actor: t.actor,
+    })
+    assert.equal(exact.content.length, MEMORY_MAX_CHARS, '128 个星面字符 = 256 码元应放行')
+    assert.throws(
+      () => t.service.createMemory({
+        scopeType: 'project', scopeId: t.project.id, topic: '星面 258', content: '😀'.repeat(129), actor: t.actor,
+      }),
+      (error: any) => error.status === 400 && /258/.test(String(error.message)),
+      '129 个星面字符 = 258 码元应拒绝',
+    )
+  } finally {
+    await t.close()
+  }
+})
+
+test('j) bot 作用域触顶置滞回标志、整理到 ≤33 清标志放行', async () => {
+  const t = await setup()
+  try {
+    const botId = t.director.id
+    const flagKey = `memory_full:bot:${botId}`
+    t.seed('bot', botId, MEMORY_CAP)
+    assert.throws(
+      () => t.service.createMemory({ scopeType: 'bot', scopeId: botId, topic: '超限', content: '内容', actor: t.actor }),
+      /上限/,
+      'bot 灌满后第 65 条应被拒',
+    )
+    assert.equal(t.store.setting(flagKey), '1', 'bot 触顶应置滞回标志')
+    t.archive('bot', botId, MEMORY_CAP - 40)
+    assert.equal(t.service.memoryActiveCount('bot', botId), 40)
+    assert.throws(
+      () => t.service.createMemory({ scopeType: 'bot', scopeId: botId, topic: '中间带', content: '内容', actor: t.actor }),
+      /40/,
+      '标志在时 40 条仍拒',
+    )
+    assert.equal(t.store.setting(flagKey), '1', '中间带标志不得清')
+    t.archive('bot', botId, 40 - MEMORY_COMPACT_TO)
+    const created = t.service.createMemory({ scopeType: 'bot', scopeId: botId, topic: '整理后新增', content: '内容', actor: t.actor })
+    assert.ok(created.id, '整理到 33 后 bot 作用域应放行')
+    assert.equal(t.store.setting(flagKey), null, '放行后滞回标志应清')
+  } finally {
+    await t.close()
+  }
+})
+
+test('k) approveMemory 滞回中间带：标志在、34–63 条持续拒，≤33 才放行', async () => {
+  const t = await setup()
+  try {
+    const pending = t.service.createMemory({
+      scopeType: 'project', scopeId: t.project.id, topic: '待审条目', content: '待审内容', actor: t.actor, status: 'pending',
+    })
+    t.seed('project', t.project.id, MEMORY_CAP)
+    const flagKey = `memory_full:project:${t.project.id}`
+    await assert.rejects(() => t.service.approveMemory(pending.id, t.actor), /上限/)
+    assert.equal(t.store.setting(flagKey), '1', 'approve 触顶应置滞回标志')
+    t.archive('project', t.project.id, MEMORY_CAP - 40)
+    await assert.rejects(
+      () => t.service.approveMemory(pending.id, t.actor),
+      (error: any) => /40/.test(String(error.message)),
+      '中间带 40 条时 approve 仍应拒并透出当前条数',
+    )
+    assert.equal(t.store.setting(flagKey), '1', '中间带标志不得清')
+    t.archive('project', t.project.id, 40 - MEMORY_COMPACT_TO)
+    const approved = await t.service.approveMemory(pending.id, t.actor)
+    assert.equal(approved.status, 'active')
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_COMPACT_TO + 1)
+    assert.equal(t.store.setting(flagKey), null, 'approve 放行后滞回标志应清')
+  } finally {
+    await t.close()
+  }
+})
+
+test('l) memoryWriteFromBot 同名新建路径满顶被拒', async () => {
+  const t = await setup()
+  try {
+    t.seed('project', t.project.id, MEMORY_CAP)
+    const sessionId = 'sess_owner_new'
+    t.store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
+       VALUES (?, ?, ?, 'project', NULL, ?)`,
+      sessionId, t.director.id, t.project.id, new Date().toISOString(),
+    )
+    assert.throws(
+      () => t.service.memoryWriteFromBot(sessionId, { scope: 'project', topic: '全新主题', content: '内容' }),
+      (error: any) => error.status === 409 && /上限/.test(String(error.message)),
+      '无同名可覆盖时新建路径同样受容量闸约束',
+    )
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_CAP, '被拒不得叠条')
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE topic = '全新主题'").n, 0)
+  } finally {
+    await t.close()
+  }
+})
+
+test('m) 超长存量条目仅改 topic 放行，改 content 仍受篇幅闸约束', async () => {
+  const t = await setup()
+  try {
+    const long = '长'.repeat(MEMORY_MAX_CHARS + 10)
+    const now = new Date().toISOString()
+    t.store.run(
+      `INSERT INTO memories(id, scope_type, scope_id, topic, content, source, confidence, status, created_by, created_at, updated_at, revision, summary)
+       VALUES ('mem-legacy', 'project', ?, '旧主题', ?, '', 1, 'active', 'system', ?, ?, 1, '')`,
+      t.project.id, long, now, now,
+    )
+    const updated = await t.service.updateMemory('mem-legacy', { topic: '新主题' })
+    assert.equal(updated.topic, '新主题')
+    assert.equal(updated.content, long, 'topic-only 编辑不得触碰 content')
+    assert.equal(updated.content.length, MEMORY_MAX_CHARS + 10)
+    await assert.rejects(
+      () => t.service.updateMemory('mem-legacy', { content: '超'.repeat(MEMORY_MAX_CHARS + 1) }),
+      /256/,
+      '实际变更 content 时仍受篇幅闸约束',
+    )
   } finally {
     await t.close()
   }

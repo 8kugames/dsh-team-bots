@@ -294,6 +294,14 @@ export const memoryMethods = {
     this.store.run('DELETE FROM settings WHERE key = ?', flagKey)
   },
 
+  // 项目再开容量闸（DSHBOTS-342）：归档把 active+pending 一并冻为 frozen，再开统一解回 active，
+  // 冻结条数若已超 MEMORY_CAP，解回即破顶。此时整笔再开拒绝（项目保持归档），
+  // 先按 memoryCapacityMessage 指引整理（归档态可逐条 deleteMemory）再重开。
+  assertProjectReopenCapacity(scopeId, wouldBeActive) {
+    if (wouldBeActive <= MEMORY_CAP) return
+    throw conflict(this.memoryCapacityMessage('project', scopeId, wouldBeActive))
+  },
+
   // 单条记忆篇幅上限：content 超过 MEMORY_MAX_CHARS 字即拒绝，防止单条挤占召回预算。
   assertMemoryLength(content) {
     if (content.length > MEMORY_MAX_CHARS) {
@@ -451,8 +459,10 @@ export const memoryMethods = {
   async updateMemory(memoryId, patch) {
     const memory = this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
     if (!memory) throw notFound('记忆不存在')
-    const content = redactSecrets(text(patch.content ?? memory.content, 8000))
-    this.assertMemoryLength(content)
+    // 篇幅闸只约束本次实际变更的 content：存量超长条目仅改 topic 时不得被误拦（DSHBOTS-342）。
+    const contentChanged = patch.content != null
+    const content = contentChanged ? redactSecrets(text(patch.content, 8000)) : memory.content
+    if (contentChanged) this.assertMemoryLength(content)
     const topic = text(patch.topic ?? memory.topic, 120)
     this.store.run(
       'UPDATE memories SET topic = ?, content = ?, updated_at = ? WHERE id = ?',
