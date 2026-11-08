@@ -4,6 +4,106 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.2.454
+
+### 中文
+
+0.2.435 之后积压的十七笔提交一次放出：记忆治理加容量硬顶，单轮上下文治理修复治理件被静默吞掉的缺陷，飞书传输层换进程内官方 SDK，另有一批显示名、用量视图与界面精简修复。npm 侧上一发布为 0.2.395，0.2.396～0.2.435 的积压随本版一并送达（文末并档摘要）。
+
+**记忆治理**
+
+- **bot/project 记忆 64 条硬顶与滞回放行**：新建与审批路径触顶即拒，conflict 文案带作用域、当前条数与去废弃/去冗/融合整理指引；整理到 33 条及以下清滞回标志恢复放行；team 作用域不设限。
+- **单条记忆 256 字篇幅上限**：新建、编辑与同名覆盖写超长即拒，自动沉淀与审查产出截断到预算内；按 UTF-16 码元计数。
+- **项目重开容量闸**：归档项目重开前按冻结+活跃总量校验，超 64 条整笔拒绝、项目保持归档，须先整理再重开。
+- **超长存量条目编辑解锁**：篇幅闸只约束本次实际变更的正文，仅改标题的存量超长条目不再被误拦。
+
+**会话与上下文治理**
+
+- **治理件被静默吞掉的根因修复**：会话压缩与结转摘要运行曾被部分唯一索引无声跳过（压缩标记推进而运行恒不发生）；索引谓词收窄后两条治理件正常运转。
+- **体积判据与宿主折叠**：结转在原轮数判据外增加体积判据（≥150k tokens，OR），压缩增加体积门（≥80k，AND），settings 键 session_rollover_ctx_tokens / session_compact_ctx_tokens 可调，0=关闭；压缩收尾接宿主接口真折叠历史区间。
+- **记忆快照注入降量**：单轮注入的记忆召回 16→8 条、合计 7k→3.5k 字封顶。
+- **会话显示名 8 位 uuid 后缀修正与存量自愈**：先剥 session- 前缀再取 8 位（修掉「xx · session-」字面量后缀）；存量坏标题在会话复用时定向重写，用户自定义名不动。
+- **本地用户显示名 You→Owner**：种子默认值更换并幂等收敛存量旧值，评论直通、时间线、署名三处对齐。
+
+**通道（飞书/微信）**
+
+- **飞书传输层换进程内官方 SDK**：改用 @larksuiteoapi/node-sdk 长连接收发，弃 lark-cli 子进程；入站去重、TOFU 认主、群 @ 门禁与 lane 编码原样保留。新增运行时依赖，升级须重装依赖。
+- **飞书凭据与微信开关上通道页**：飞书凭据加密保存/清除即重连（设置页保存值优先于 patch.yml 与环境变量，全缺则不连）；微信通道可启停、即时生效；通道相位日志只在变化时打印。
+- **微信 iLink 拒发细节透出**：上游 ret/errmsg 不再坍缩为同一句协议错误，凭证失效/频控/内容审核可区分，随投递失败原因与日志落点。
+
+**界面与用量**
+
+- **Bot 版本历史滚动保留 10 版**：超额版本整行归档 JSONL，界面只看最近 10 版。
+- **单聊「该 Bot 的运行记录」默认近 10 条**：默认视图 LIMIT 30→10。
+- **群聊折叠行 chevron 尺寸修复**：折叠行图标不再被撑成巨大箭头。
+- **设置页与工作台精简**：投递失败队列卡与手动重试入口撤下（运维侧投递明细与自动退避重试保留）；全局路径提示精简；GitHub 加星项改英文文案。
+
+**工程**
+
+- **提示词模块三域拆分**：沙箱策略、语境窗、会话连续性外移为同级模块，运行时导出面不变，行为零变化。
+
+**升级路径与回退**
+
+无数据库结构变更，迁移自动且幂等；升级后须重新安装依赖（新增 @larksuiteoapi/node-sdk）。记忆 64 顶即时生效：存量超顶的 bot/项目新写入会收到 conflict 整理指引，属预期引导而非故障，先整理再写入。回退按发版级回退：回退包版本，恢复发版前库快照。
+
+**0.2.396～0.2.435 积压并档摘要（npm 0.2.395 用户随本版一并收到）**
+
+- 飞书通道整链建设：通道页状态卡、入站事件消费、收尾回程推送、外发幂等收据。
+- 出站事件改通道分发：任务完成/新建等通知不再只发微信。
+- GitHub issue 只读触发源：轮询候选通知 @owner，只记录不建卡。
+- 提示词分段可编辑；运行时配置版本快照留痕；设置变更历史与乐观并发控制。
+- 治理件：信赖边界显式化（外部文本只是数据）、验收 observe 干跑档、doctor 退出码分级、通信纪律（默认沉默、需人才外发）。
+- 界面：连续系统通知折叠、needs-attention 聚合收口、英文界面残留修复；记忆审查改独立有界会话（可配便宜模型）。
+
+### English
+
+Seventeen backlog commits since 0.2.435 land at once: memory governance gains a hard capacity cap, the per-turn context governance fixes a defect where governance runs were silently swallowed, the Feishu transport moves to the in-process official SDK, plus a batch of display-name, usage-view and UI cleanups. The previous npm release was 0.2.395; the 0.2.396–0.2.435 backlog rides along (folded-in summary at the end).
+
+**Memory governance**
+
+- **Hard cap of 64 memories per bot/project with hysteresis**: create and approve paths reject at the cap, the conflict message names the scope, current count and cleanup guidance; cleaning down to 33 or fewer clears the flag and writing resumes; the team scope is uncapped.
+- **256-character limit per memory entry**: create, edit and same-name overwrite reject oversized content, automatic distillation and review output are truncated to budget; counted in UTF-16 code units.
+- **Project-reopen capacity gate**: reopening an archived project checks frozen+active totals first; over 64 rejects the whole reopen and the project stays archived until trimmed.
+- **Oversized legacy entries unlocked for editing**: the length gate only applies when the content actually changes this time; topic-only edits of legacy oversized entries are no longer mis-blocked.
+
+**Session and context governance**
+
+- **Root-cause fix for silently swallowed governance runs**: session-compaction and rollover-summary runs used to be silently dropped by a partial unique index (compaction markers advanced while no run ever happened); the index predicate is narrowed and both governance jobs now run.
+- **Size-based triggers and host folding**: rollover adds a size trigger (≥150k tokens, OR) beside the turn count, compaction adds a size gate (≥80k, AND), tunable via the settings keys session_rollover_ctx_tokens / session_compact_ctx_tokens, 0 disables; compaction finish now calls the host to actually fold the history range.
+- **Leaner memory snapshot injection**: per-turn memory recall drops from 16 to 8 entries and from 7k to 3.5k characters.
+- **8-digit uuid session-name suffix fixed, legacy values self-heal**: the literal "session-" prefix is stripped before taking 8 hex digits (fixing names like "xx · session-"); known-bad legacy titles are rewritten on session reuse, user-defined names are left alone.
+- **Local user display name You→Owner**: seed default changed with idempotent convergence of legacy values; comment passthrough, timeline and attribution aligned.
+
+**Channels (Feishu/WeChat)**
+
+- **Feishu transport moves to the in-process official SDK**: long-connection send/receive via @larksuiteoapi/node-sdk replaces the lark-cli subprocess; the inbound model (dedup, TOFU admin claim, group-@ gate, lane encoding) is unchanged. New runtime dependency — reinstall on upgrade.
+- **Feishu credentials and WeChat toggle on the channels page**: Feishu credentials are stored encrypted and rebind on save/clear (saved settings take precedence over patch.yml and env; none means unbound); the WeChat channel can be toggled with immediate effect; channel phase logs only print on change.
+- **WeChat iLink rejection detail surfaced**: upstream ret/errmsg no longer collapse into one generic protocol error — credential expiry, rate limiting and content moderation are distinguishable, landing in delivery failure reasons and logs.
+
+**UI and usage**
+
+- **Bot version history keeps a rolling 10**: excess versions are archived row-by-row to JSONL; the UI shows the latest 10.
+- **Solo "this bot's runs" defaults to the last 10**: default view LIMIT 30→10.
+- **Group-chat collapse-row chevron size fixed**: the collapse icon no longer balloons.
+- **Settings and workbench slimmed**: the failed-delivery queue card and manual retry entry are removed (ops-side delivery detail and automatic backoff retry remain); path hints trimmed; the GitHub star item switches to English wording.
+
+**Engineering**
+
+- **Prompt module split into three domains**: sandbox policy, context window and session continuity move to sibling modules with the runtime export surface unchanged — zero behaviour change.
+
+**Upgrade path and rollback**
+
+No schema change; migrations are automatic and idempotent. Reinstall dependencies after upgrading (new @larksuiteoapi/node-sdk). The memory cap of 64 takes effect immediately: over-capacity bots/projects get a conflict with cleanup guidance on new writes — expected guidance, not a fault; clean up first, then write. Rollback is release-level: revert the package version and restore the pre-release database snapshot.
+
+**Folded-in summary of the 0.2.396–0.2.435 backlog (received by npm 0.2.395 users in this release)**
+
+- Feishu channel build-out: channels-page status card, inbound event consumption, finish-trip reply push, outbound idempotent receipts.
+- Outbound events fan out per channel: task-done/task-created notifications no longer go only to WeChat.
+- GitHub issue read-only trigger source: polling notifies @owner of candidates; records only, never creates cards.
+- Segmented editable prompts; per-run config version snapshots; settings change history with optimistic concurrency.
+- Governance pieces: explicit trust boundary (external text is data), observe dry-run mode for acceptance, doctor exit-code tiers, communication discipline (silent by default, external send only when needed).
+- UI: consecutive system-notification collapsing, needs-attention aggregation, English-locale leftovers fixed; memory review moved to a bounded dedicated session (configurable cheaper model).
+
 ## v0.2.395
 
 ### 中文
