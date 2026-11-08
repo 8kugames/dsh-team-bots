@@ -44,6 +44,7 @@ type TeamActionName =
   | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'update_prompt_segment' | 'outbox_retry' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
   | 'dsh_update_info' | 'upgrade_dsh' | 'reboot_dsh'
   | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout' | 'notify_receipts' | 'wechat_triggers' | 'external_triggers'
+  | 'feishu_status'
   | 'run_command' | 'cancel_command' | 'terminal_state'
   | 'list_secrets' | 'upsert_secret' | 'delete_secret' | 'list_secret_requests' | 'approve_secret_request' | 'deny_secret_request'
 

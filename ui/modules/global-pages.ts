@@ -38,6 +38,33 @@ function wechatCard() {
     </div>`
 }
 
+// 飞书通道卡（只读状态，DSHBOTS-327）：绑定态、管理员 ou_id 与机器人元信息。
+// 飞书没有扫码流程：凭据在 lark-cli 侧由 operator 配置，UI 只读状态，不给绑定按钮。
+function feishuCard() {
+  const feishu = state.data?.feishu ?? { enabled: false, phase: 'disabled' }
+  if (!feishu.enabled) return ''
+  // 相位口径与 src/feishu/channel.ts 一致：ready=已连接、unbound=未绑定、conflict=连接冲突。
+  const phaseText = {
+    disabled: t("未启用"), unbound: t("未绑定"), ready: t("已连接"),
+    reconnecting: t("重连中"), conflict: t("连接冲突"),
+  }
+  const pillClass = feishu.phase === 'ready' ? 'green' : feishu.phase === 'conflict' ? 'amber' : ''
+  return `
+    <div class="card form-card g-card feishu-card" id="feishu-card">
+      <div class="feishu-status">
+        <span class="pill ${pillClass}">${phaseText[feishu.phase] ?? feishu.phase}</span>
+        ${feishu.adminOuId ? `<span class="feishu-admin" title="${attr(feishu.adminOuId)}">${t("管理员")} <strong>${esc(String(feishu.adminOuId))}</strong></span>` : ''}
+      </div>
+      ${feishu.phase === 'conflict' ? `<div class="hint feishu-conflict">${t("检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。")}</div>` : ''}
+      ${feishu.error ? `<div class="hint feishu-error">${esc(feishu.error)}</div>` : ''}
+      ${feishu.phase === 'unbound' ? `<div class="hint">${t("配置 lark-cli 后自动连接，无需扫码。")}</div>` : ''}
+      <div class="feishu-meta">
+        ${feishu.botId ? `<span>${t("机器人 ID")} <span class="mono">${esc(String(feishu.botId))}</span></span>` : ''}
+        ${feishu.appId ? `<span>${t("App ID")} <span class="mono">${esc(String(feishu.appId))}</span></span>` : ''}
+      </div>
+    </div>`
+}
+
 // 密钥待审请求卡：Bot 发起的密钥请求，批准时填写密钥值。
 function secretRequestsCard(requests) {
   if (requests.length === 0) return `<div class="faint">${t("暂无待审请求。")}</div>`
@@ -112,13 +139,21 @@ function secretAddCard(projects) {
 // 通道页：微信等外部消息通道的绑定与状态。
 export function renderChannel() {
   const card = wechatCard()
+  const feishu = feishuCard()
   return pageShell(
     pageHead('CHANNELS', t('viewTitle.channel'), t('channel.desc'), refreshAction()),
     '',
-    [pageSection({
-      index: '01', id: 'c-wechat', title: t('channel.sectionWechat'), desc: t('channel.sectionWechatDesc'),
-      body: slot('full', card || `<div class="card"><div class="empty-state" style="border:0"><div class="empty-symbol">${icon('message')}</div><h3>${t("微信通道未启用")}</h3><p>${t("在服务端启用 wechat 通道后，这里会出现扫码绑定入口。")}</p></div></div>`),
-    })],
+    [
+      pageSection({
+        index: '01', id: 'c-wechat', title: t('channel.sectionWechat'), desc: t('channel.sectionWechatDesc'),
+        body: slot('full', card || `<div class="card"><div class="empty-state" style="border:0"><div class="empty-symbol">${icon('message')}</div><h3>${t("微信通道未启用")}</h3><p>${t("在服务端启用 wechat 通道后，这里会出现扫码绑定入口。")}</p></div></div>`),
+      }),
+      // 飞书未启用时整段不渲染（不显示死卡）：凭据与连接都在 operator 侧，UI 只读状态。
+      ...(feishu ? [pageSection({
+        index: '02', id: 'c-feishu', title: t('channel.sectionFeishu'), desc: t('channel.sectionFeishuDesc'),
+        body: slot('full', feishu),
+      })] : []),
+    ],
   )
 }
 

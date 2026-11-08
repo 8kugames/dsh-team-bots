@@ -19,6 +19,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'settings', 'update_settings', 'update_prompt_segment', 'outbox_retry', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
   'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout', 'notify_receipts', 'wechat_triggers', 'external_triggers',
+  'feishu_status',
   'run_command', 'cancel_command', 'terminal_state',
   'list_secrets', 'upsert_secret', 'delete_secret', 'list_secret_requests', 'approve_secret_request', 'deny_secret_request',
 ])
@@ -222,6 +223,10 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.rebootDsh()
     case 'wechat_status':
       return service.wechatStatus()
+    case 'feishu_status':
+      // 飞书通道状态（DSHBOTS-327）：只读（phase/管理员 ou_id/bot 与 appId），无凭据。
+      // UI 主路径走 state 轮询里的 state.feishu，本动作供备用直查。
+      return service.feishuStatus()
     case 'notify_receipts':
       // 外发收据流水（A3/DSHBOTS-323）：sent/gone 终态可追责，通道未启用时 available:false。
       return service.notifyReceiptsView(Number(payload.limit) || 50)
