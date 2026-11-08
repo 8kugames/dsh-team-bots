@@ -146,6 +146,8 @@ export const systemMethods = {
       // 配置里的默认价格，Web 中可据此一键恢复。
       priceDefaults: this.config.modelPrices ?? [],
       wechat: this.wechatStatus(),
+      // 飞书通道状态（DSHBOTS-323 卡②）：phase 广播含 conflict（exceed_conn_limit）。
+      feishu: this.feishuStatus(),
       now: nowIso(),
     }
     if (project) {
@@ -479,6 +481,12 @@ export const systemMethods = {
     const wechat = this.wechatStatus()
     if (wechat.enabled && wechat.phase && !['connected', 'connecting'].includes(wechat.phase)) {
       issues.push({ kind: 'wechat_channel', phase: wechat.phase, message: wechat.error ?? null })
+    }
+    // 飞书通道异常同口径（DSHBOTS-323 卡②）：conflict（连接数冲突）/unbound/reconnecting
+    // 都是需要人看的状态，经 phase 广播进 needs-attention。
+    const feishu = this.feishuStatus()
+    if (feishu.enabled && feishu.phase && !['ready'].includes(feishu.phase)) {
+      issues.push({ kind: 'feishu_channel', phase: feishu.phase, message: feishu.error ?? null })
     }
     return { needsYou, issues }
   },

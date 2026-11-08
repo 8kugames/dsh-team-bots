@@ -42,6 +42,7 @@ import { terminalMethods } from '../src/services/terminal.js'
 import { usageMethods } from '../src/services/usage.js'
 import { systemMethods } from '../src/services/system.js'
 import { wechatMethods } from '../src/services/wechat.js'
+import { feishuMethods } from '../src/services/feishu.js'
 import { approvalsMethods } from '../src/services/approvals.js'
 import { questionsMethods } from '../src/services/questions.js'
 import { coreMethods } from '../src/services/core.js'
@@ -58,7 +59,7 @@ type TeamServiceMethods =
   & typeof runsMethods & typeof runFinishMethods & typeof hygieneMethods
   & typeof modelFallbackMethods & typeof botQuotaMethods & typeof schedulerMethods & typeof memoryMethods
   & typeof secretsMethods & typeof proposalsMethods & typeof terminalMethods
-  & typeof usageMethods & typeof systemMethods & typeof wechatMethods
+  & typeof usageMethods & typeof systemMethods & typeof wechatMethods & typeof feishuMethods
   & typeof approvalsMethods & typeof questionsMethods & typeof coreMethods
   & typeof githubSourceMethods
 
@@ -185,13 +186,26 @@ declare module '../src/feishu/channel.js' {
     config: TeamConfig
     log: DshLogger
     service: TeamService | null
-    phase: 'disabled' | 'unbound' | 'ready'
+    /** 'conflict'=exceed_conn_limit（1000040350，别的实例占用长连接）；'reconnecting'=断线退避中。 */
+    phase: 'disabled' | 'unbound' | 'ready' | 'reconnecting' | 'conflict'
     error: string | null
     /** lark-cli 执行原语：args -> stdout；测试注入桩，缺省 spawn 配置的 cli。 */
     runLark: (args: string[]) => Promise<string>
+    /** 入站事件消费原语（测试注入桩）：{onEvent,onReady,signal,readyTimeoutMs} -> 进程退出结算。 */
+    spawnConsume: (options: unknown) => Promise<unknown>
     batchWindowMs: number
     flushTimer: TimerHandle | null
     flushChain: Promise<unknown>
+    /** 入站去重 LRU：(appId, message_id) -> 收到时间戳；TTL 10min、上限 1000、重连不清空。 */
+    inboundSeen: Map<string, number>
+    /** 连接 generation：每次重连 +1，旧轮次里未完成的事件处理整体丢弃。 */
+    consumeGeneration: number
+    consumeLoopActive: boolean
+    consumeAbort: AbortController
+    /** 群聊非 owner @bot 礼貌回应冷却表：发送者 open_id -> 上次回应时间。 */
+    politeAt: Map<string, number>
+    /** 同幂等键发送调用计数：send 层重试与 outbox 层重试共享 3 次总预算。 */
+    sendAttempts: Map<string, number>
   }
 }
 

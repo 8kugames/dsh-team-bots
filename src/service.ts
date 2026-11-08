@@ -42,6 +42,7 @@ import { terminalMethods } from './services/terminal.js'
 import { usageMethods } from './services/usage.js'
 import { systemMethods } from './services/system.js'
 import { wechatMethods } from './services/wechat.js'
+import { feishuMethods } from './services/feishu.js'
 import { githubSourceMethods } from './services/github-source.js'
 import { approvalsMethods } from './services/approvals.js'
 import { questionsMethods } from './services/questions.js'
@@ -113,6 +114,7 @@ defineMethods(TeamService.prototype, [
   usageMethods,
   systemMethods,
   wechatMethods,
+  feishuMethods,
   githubSourceMethods,
   approvalsMethods,
   questionsMethods,
