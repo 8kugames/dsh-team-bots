@@ -6,7 +6,7 @@
 
 import { badRequest, conflict, notFound } from '../errors.js'
 import { clampNumber, id, nowIso, projectKey, TASK_ID_PATTERN, text } from '../util.js'
-import { parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
+import { parseDeliverables, parseWriteScopes, parseWriteScopesFromDescription, readDeliverables, readWriteScopes } from './write-scopes.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 import { SANDBOX_OVERRIDES } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
@@ -156,6 +156,9 @@ export const tasksMethods = {
       throw badRequest(`沙箱覆盖无效，允许值：inherit / ${SANDBOX_OVERRIDES.join(' / ')}`)
     }
     const sandboxOverride = !rawSandboxOverride || rawSandboxOverride === 'inherit' ? null : rawSandboxOverride
+    // 交付物路径声明（DSHBOTS-345 复盘）：卡面声明的交付文件，核验按路径直接读文件；
+    // camelCase 与 snake_case 都收，空数组 = 未声明。
+    const deliverables = parseDeliverables(input.deliverables ?? input.deliverables_paths ?? undefined)
     const taskId = id('task')
     const createdAt = nowIso()
     // 终态时间在创建时补齐（DSHBOTS-69）：以 done/canceled 建档的任务终态列取同一 createdAt，
@@ -178,8 +181,8 @@ export const tasksMethods = {
       this.store.run(
         `INSERT INTO tasks(id, project_id, number, title, description, status, priority, assignee_bot_id,
           creator_type, creator_id, review_target, source_message_id, parent_id, parent_task_id, blocked_by, position, due_at, estimate,
-          time_budget_minutes, write_scopes, sandbox_override, version, created_at, updated_at, completed_at, canceled_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          time_budget_minutes, write_scopes, deliverables, sandbox_override, version, created_at, updated_at, completed_at, canceled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         taskId, project.id, number, title, text(input.description, 40_000), status, priority,
         assigneeId, actor.type, actor.id, actor.type === 'bot' ? 'owner_bot' : 'user',
         input.sourceMessageId ?? null, input.parentId ?? null,
@@ -187,6 +190,7 @@ export const tasksMethods = {
         Number.isFinite(Number(input.position)) ? Number(input.position) : number,
         input.dueAt ? new Date(input.dueAt).toISOString() : null,
         clampNumber(input.estimate, 0, 1000, null), timeBudgetMinutes, JSON.stringify(writeScopes),
+        JSON.stringify(deliverables),
         sandboxOverride, createdAt, createdAt,
         completedAt, canceledAt,
       )
@@ -246,7 +250,7 @@ export const tasksMethods = {
       task.id,
     )
     const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
-    const { write_scopes: rawScopes, time_budget_minutes: rawTimeBudget, ...rest } = task
+    const { write_scopes: rawScopes, deliverables: rawDeliverables, time_budget_minutes: rawTimeBudget, ...rest } = task
     // 阶段按事实推导（task-stage 块）：与 latestRun 同源；attention 取最近运行的待回答提问。
     const attention = runs[0] ? parseAttention(runs[0].attention_json) : null
     const stage = taskStage(task, runs[0] ?? null, attention)
@@ -256,6 +260,7 @@ export const tasksMethods = {
       identifier: `${project?.key ?? 'T'}-${task.number}`,
       labels,
       writeScopes: readWriteScopes(rawScopes),
+      deliverables: readDeliverables(rawDeliverables),
       // 时效要求（分钟）：null=发布方未提；供 UI 展示与提示词注入共用一个口径。
       timeBudgetMinutes: Number.isFinite(rawTimeBudget) ? rawTimeBudget : null,
       attention,
@@ -349,6 +354,9 @@ export const tasksMethods = {
     if (patch.estimate !== undefined) updates.estimate = clampNumber(patch.estimate, 0, 1000, null)
     if (patch.writeScopes !== undefined) {
       updates.write_scopes = JSON.stringify(parseWriteScopes(patch.writeScopes))
+    }
+    if (patch.deliverables !== undefined) {
+      updates.deliverables = JSON.stringify(parseDeliverables(patch.deliverables))
     }
     // 延期阀（DSHBOTS-274）：update_task 实改 time_budget_minutes 后整卡死线按新预算重算——
     // 记 budget_updated_at 标记新预算生效；派发基准统一为最新派发（DSHBOTS-281 重派即新窗口），

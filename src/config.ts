@@ -346,6 +346,9 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     uiLanguage: normalizeUiLanguage(config.uiLanguage ?? process.env.DSH_TEAM_UI_LANGUAGE ?? 'auto'),
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
+    // 交付报告体量红线（DSHBOTS-345 复盘）：任务交付报告 ≤ 此字符数，且只引用交付物路径，
+    // 禁止把已写入工作区的文件正文复述进报告/聊天——生成侧 output 与复审上下文双省。
+    deliveryReportMaxChars: int(config.deliveryReportMaxChars ?? process.env.DSH_TEAM_DELIVERY_REPORT_MAX_CHARS, 2_000, 200, 20_000),
     // 私信自动归档（DSHBOTS-171）：单聊默认视图只留「每 bot 最近 keep 条 且 days 天内」的
     // 交集，超出任一阈值即归档（默认视图隐去，数据保留，messagesPage 翻页仍可查回）。
     // 0 = 关闭该维过滤。

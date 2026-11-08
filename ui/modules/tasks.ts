@@ -774,4 +774,15 @@ export function taskUsageBlock(usage) {
     <div class="divider"></div>`
 }
 
+// 交付产物块（DSHBOTS-345 复盘）：卡面声明的交付文件路径，核验按路径直接读文件；未声明不渲染。
+export function taskDeliverablesBlock(task) {
+  const deliverables = Array.isArray(task?.deliverables) ? task.deliverables.filter(item => typeof item === 'string' && item) : []
+  if (!deliverables.length) return ''
+  return `<div class="scope-block">
+          <div class="eyebrow" style="margin-bottom:6px">${t("交付产物")}</div>
+          <div class="scope-chips">${deliverables.map(path => `<span class="approval-chip mono" title="${attr(path)}">${esc(path)}</span>`).join('')}</div>
+          <div class="hint" style="margin-top:6px">${t("核验按路径直接读文件；交付报告只引用路径，不复述正文。")}</div>
+        </div>`
+}
+
 export { renderTasks, taskGroupKey, taskChildrenKey, terminalOutputText, renderTerminal, renderBotsOverview, renderMembers, renderSkills, searchMemories, renderMemory, currentSkillVersion, skillVersions, renderEvolution }

@@ -229,4 +229,7 @@ export default {
   // DSHBOTS-246: keys added by the full t() literal audit
   "（待办不含已取消）": " (todo excludes canceled)",
   "，按": "; ",
+  // DSHBOTS-345: deliverables declaration on the task card
+  "交付产物": "Deliverables",
+  "核验按路径直接读文件；交付报告只引用路径，不复述正文。": "Verification reads the files at these paths; the delivery report references paths only, never file contents.",
 }

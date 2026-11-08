@@ -99,6 +99,44 @@ export function readWriteScopes(raw) {
   return scopes
 }
 
+// ── 交付产物（deliverables）──────────────────────────────────────────
+// 卡面声明的交付物文件路径（相对项目工作目录，路径归一化与写范围同一条 normalizeScopePath）。
+// 核验方按路径直接读文件，交付报告降级为声明清单——不复述文件正文（DSHBOTS-345 复盘）。
+export const DELIVERABLES_MAX = 20
+
+// 解析外部输入（数组或 JSON 字符串）：非法条目直接报错，不静默降级。
+// 与写范围不同：不剥 package.json（交付物可以是任何文件），上限 20 条。
+export function parseDeliverables(input) {
+  if (input === undefined || input === null) return []
+  const list = typeof input === 'string' ? jsonParse(input, null) : input
+  if (!Array.isArray(list)) throw badRequest('交付物必须是路径数组')
+  if (list.length > DELIVERABLES_MAX) throw badRequest(`交付物最多 ${DELIVERABLES_MAX} 条`)
+  const paths = []
+  for (const item of list) {
+    if (typeof item !== 'string') throw badRequest('交付物必须是路径数组')
+    const path = normalizeScopePath(item)
+    if (!path) throw badRequest(`交付物包含非法路径：${item}`)
+    if (path.length > WRITE_SCOPE_MAX_LEN) throw badRequest(`交付物路径过长（上限 ${WRITE_SCOPE_MAX_LEN} 字符）`)
+    if (!paths.includes(path)) paths.push(path)
+  }
+  return paths
+}
+
+// 库内快照容错读取：坏数据一律回退空数组（展示与提示词注入不因脏数据炸掉）。
+export function readDeliverables(raw) {
+  if (raw === undefined || raw === null || raw === '') return []
+  const list = typeof raw === 'string' ? jsonParse(raw, null) : raw
+  if (!Array.isArray(list)) return []
+  const paths = []
+  for (const item of list) {
+    if (typeof item !== 'string') return []
+    const path = normalizeScopePath(item)
+    if (!path || path.length > WRITE_SCOPE_MAX_LEN) return []
+    if (!paths.includes(path)) paths.push(path)
+  }
+  return paths
+}
+
 // 两条写范围路径是否指向同一片区域：相等，或一方是另一方的目录前缀（按路径分段比较）。
 export function writeScopePathsOverlap(left, right) {
   if (left === right) return true

@@ -355,6 +355,7 @@ export const taskDispatchMethods = {
       if (input.title !== undefined) patch.title = input.title
       if (input.description !== undefined) patch.description = input.description
       if (input.priority !== undefined) patch.priority = input.priority
+      if (input.deliverables !== undefined) patch.deliverables = input.deliverables
       if (Object.keys(patch).length) await this.updateTask(task.id, patch, actor)
       // 派单预算优先级分档兜底（DSHBOTS-325）重派路：input.priority 已被 updateTask
       // 校验（无效即抛，到不了这里），按改后生效优先级取档；COALESCE 只补存量 NULL
@@ -420,6 +421,8 @@ export const taskDispatchMethods = {
       priority: input.priority,
       // 透传原始清单（DSHBOTS-168）：清洗+审计由 createTask 统一做（审计挂真实 taskId）。
       writeScopes: parsedScopes,
+      // 交付物路径声明（DSHBOTS-345 复盘）：新卡可带；重派已有任务经改卡分支同步修正。
+      deliverables: input.deliverables,
       // 总监派单可带父子/依赖关系（snake_case 透传，createTask 内统一校验与落库）。
       parentTaskId: input.parent_task_id,
       blockedBy: input.blocked_by,

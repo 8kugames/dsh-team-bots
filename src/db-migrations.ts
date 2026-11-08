@@ -143,6 +143,7 @@ export function runMigrations(db) {
   recordMigration(db, 'bots_file_policy')
   recordMigration(db, 'tasks_runs_write_scopes')
   recordMigration(db, 'tasks_time_budget_minutes')
+  recordMigration(db, 'tasks_deliverables')
   recordMigration(db, 'runs_retry_after_ms')
   recordMigration(db, 'bots_fallback_model')
   recordMigration(db, 'runs_model_override')
@@ -212,9 +213,12 @@ function migrateRuns(db) {
 // tasks.write_scopes 存任务声明的写范围（JSON 路径数组）；空数组 = 未声明，
 // 调度器据此把同项目写运行改为「范围不重叠才并行」。
 // tasks.time_budget_minutes 存发布时的时效要求（分钟，NULL = 未声明不注入提示词）。
+// tasks.deliverables 存卡面声明的交付物文件路径（JSON 路径数组）；核验按路径直接读文件，
+// 交付报告只引用路径不复述正文（DSHBOTS-345 复盘）。
 function migrateTasks(db) {
   addColumn(db, 'tasks', 'write_scopes', "TEXT NOT NULL DEFAULT '[]'")
   addColumn(db, 'tasks', 'time_budget_minutes', 'INTEGER')
+  addColumn(db, 'tasks', 'deliverables', "TEXT NOT NULL DEFAULT '[]'")
 }
 
 // projects.disabled_skills 存项目内关闭的技能 slug JSON 数组。

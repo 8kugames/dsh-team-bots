@@ -4,7 +4,7 @@ import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePo
 import { api } from './api.js'
 import { mdChatScope, richText } from './markdown.js'
 import { t, tMaybe } from './i18n.js'
-import { currentSkillVersion, skillVersions, taskUsageBlock } from './tasks.js'
+import { currentSkillVersion, skillVersions, taskDeliverablesBlock, taskUsageBlock } from './tasks.js'
 import { ensureComposerImageInput, ensureImageViewer } from './composer.js'
 import { app, refresh, panelAttrs, render, updateRunClocks } from '../app.js'
 import { modalShell, modalLoading, renderModalLayer } from './modal-layer.js'
@@ -460,7 +460,7 @@ function modalTask(task) {
           ${editingScopes ? scopesEdit : `${scopesEditable ? `<div class="btn-row" style="margin-bottom:6px"><button class="btn small" type="button" data-action="edit-scopes" data-task-id="${attr(task.id)}">${icon('edit')}${t("编辑")}</button></div>` : ''}${scopesView}
           <div class="hint" style="margin-top:6px">${t("写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。")}</div>`}
         </div>
-        ${task.timeBudgetMinutes ? `<div class="scope-block">
+        ${taskDeliverablesBlock(task)}${task.timeBudgetMinutes ? `<div class="scope-block">
           <div class="eyebrow" style="margin-bottom:6px">${t('taskForm.timeBudgetLabel')}</div>
           <div class="note" style="color:var(--ink)">${t('task.timeBudgetValue', { minutes: Number(task.timeBudgetMinutes) })}</div>
           <div class="hint" style="margin-top:6px">${t('task.timeBudgetNote')}</div>
