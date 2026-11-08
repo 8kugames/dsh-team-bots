@@ -575,7 +575,9 @@ export const memoryMethods = {
   },
 
   // 批量清理：按过期口径把 active 记忆终态化（archived，检索即不再回灌）。
-  // 口径两选一（可并用）：task=已闭环卡（done/canceled）的过程记录主题，topics=点名主题。
+  // 口径：task=已闭环卡（done/canceled）的过程记录主题，topics=点名主题，
+  // before=updated_at 严格早于该 ISO 时间戳的全部 active 条目（存量收敛的批量判据）。
+  // before 与 topics/task 可组合，按 AND 交集收窄；三者全缺即拒绝（不做「全清」缺省）。
   // 逐条 memory_events 留痕 + 一笔 memory.cleanup 审计列出被清条目。
   memoryCleanupFromBot(sessionId, input) {
     const ownerCtx = this.ownerContextFor(sessionId)
@@ -594,12 +596,26 @@ export const memoryMethods = {
       taskTopics = [`任务 ${taskLabel}`, `${taskLabel} 交付记录`]
     }
     const wanted = [...new Set([...topics, ...taskTopics])]
-    if (!wanted.length) throw badRequest('cleanup 需要 topics 或 task 至少一项')
-    const placeholders = wanted.map(() => '?').join(', ')
-    const rows = this.store.all(
-      `SELECT * FROM memories WHERE scope_type = ? AND scope_id = ? AND status = 'active' AND topic IN (${placeholders})`,
-      scopeType, scopeId, ...wanted,
-    )
+    let before = null
+    if (input.before !== undefined && input.before !== null) {
+      before = String(input.before).trim()
+      if (!Number.isFinite(Date.parse(before))) {
+        throw badRequest('before 必须是有效的 ISO 时间戳（例如 2026-01-01T00:00:00.000Z）')
+      }
+    }
+    if (!wanted.length && !before) throw badRequest('cleanup 需要 topics、task 或 before 至少一项')
+    const clauses = ['scope_type = ?', 'scope_id = ?', "status = 'active'"]
+    const params: string[] = [scopeType, scopeId]
+    if (before) {
+      // julianday 归一化时间戳格式，避免字符串比较把等值瞬间误判为「早于」。
+      clauses.push('julianday(updated_at) < julianday(?)')
+      params.push(before)
+    }
+    if (wanted.length) {
+      clauses.push(`topic IN (${wanted.map(() => '?').join(', ')})`)
+      params.push(...wanted)
+    }
+    const rows = this.store.all(`SELECT * FROM memories WHERE ${clauses.join(' AND ')}`, ...params)
     const now = nowIso()
     const cleaned: Array<{ id: string, topic: string }> = []
     this.store.transaction(() => {
@@ -611,7 +627,7 @@ export const memoryMethods = {
         )
         cleaned.push({ id: row.id, topic: row.topic })
       }
-      this.audit(actor, 'memory.cleanup', 'memory', `${scopeType}:${scopeId}`, { scope: scopeType, task: taskLabel, cleaned })
+      this.audit(actor, 'memory.cleanup', 'memory', `${scopeType}:${scopeId}`, { scope: scopeType, task: taskLabel, before, cleaned })
     })
     return { cleaned, archived: cleaned.length, missed: wanted.filter(topic => !cleaned.some(item => item.topic === topic)) }
   },

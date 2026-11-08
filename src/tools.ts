@@ -309,13 +309,14 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_cleanup',
-    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Two criteria, combinable: `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision. Do not archive entries recording the user\'s explicit decisions. Director-only.',
+    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Criteria (at least one required): `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision; `before` archives every active entry whose updated_at is strictly older than the given ISO timestamp — the one-shot bulk criterion for legacy backlog convergence. `before` combines with `topics`/`task` as an AND filter. Do not archive entries recording the user\'s explicit decisions. Director-only.',
     parameters: {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to clean: bot = your own, project = this project, team = whole team' },
         topics: { type: 'array', items: { type: 'string' }, description: 'Exact topic labels to archive in this scope' },
         task: { type: 'string', description: 'Closed card (KEY-N) whose process-record memories should be archived; rejected unless the task is done or canceled' },
+        before: { type: 'string', description: 'ISO timestamp cutoff (e.g. 2026-01-01T00:00:00.000Z): archive every active entry in this scope with updated_at strictly before it. Required when neither topics nor task is given; combining with topics/task intersects the criteria' },
       },
       required: ['scope'],
       additionalProperties: false,
