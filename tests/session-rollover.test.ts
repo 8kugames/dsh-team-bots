@@ -97,6 +97,17 @@ const seedRuns = (store, { projectId, botId, sessionId, count, kind = 'chat', ta
 
 const rolloverRuns = (store) => store.all("SELECT * FROM runs WHERE kind = 'rollover_summary'")
 
+// 播种会话当前上下文规模（P2）：input+cache_read 之和即 sessionContextTokens 的取值。
+const seedUsage = (store, { sessionId, ctx: tokens, occurredAt }) => {
+  const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY rowid DESC LIMIT 1', sessionId)
+  if (!run) throw new Error('seedUsage 需要会话上已有运行行')
+  store.run(
+    `INSERT INTO usage_events(id, source_key, run_id, input_tokens, cache_read_tokens, output_tokens, occurred_at, created_at)
+     VALUES (?, ?, ?, ?, 0, 0, ?, ?)`,
+    `use_seed_${sessionId}_${occurredAt}`, `seedusage:${sessionId}:${occurredAt}`, run.id, tokens, occurredAt, occurredAt,
+  )
+}
+
 test('阈值未触发：轮数低于阈值时复用旧会话，且不排摘要运行', async () => {
   const ctx = await setup()
   try {
@@ -141,6 +152,55 @@ test('阈值触发且摘要未就绪：幂等补排一条摘要运行，并继�
     const again = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
     assert.equal(again, 'sess-old')
     assert.equal(rolloverRuns(ctx.store).length, 1, '摘要运行未结束不得重复排队')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('运行中触发摘要补排（生产断点回归）：bot 自己的运行进行中超阈值，摘要运行必须真实落库', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
+    // 生产形态：当前运行已被领取（running、session_id 未回填），它的 (bot, project) 占着
+    // one_active_run_per_bot 串行域。修复前摘要 INSERT OR IGNORE 被静默吞掉（live 库实测：
+    // 索引激活 DSHBOTS-288 之后摘要运行 0 条入队，结转链路整体死亡）。
+    ctx.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_current', ?, ?, 'chat', 'read', 'mention', 'running', 1, 'chat:cur:1', ?)`,
+      project.id, dev.id, new Date().toISOString(),
+    )
+
+    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat', id: 'run_current' } }), 'sess-old', '摘要未就绪继续复用旧会话')
+    const queued = rolloverRuns(ctx.store)
+    assert.equal(queued.length, 1, '当前运行占串行域时也必须能排入摘要运行（治理运行豁免串行索引）')
+    assert.equal(queued[0].status, 'queued')
+    assert.equal(queued[0].session_id, 'sess-old', '摘要运行复用旧会话')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('P2 体积上限：轮数未到但会话上下文超上限同样触发摘要补排；体积不足则纯轮次口径', async () => {
+  // 轮数阈值拉高到够不着，只有体积判据（默认 150k）能触发。
+  const ctx = await setup({ turns: 999 })
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 3 })
+
+    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    seedUsage(ctx.store, { sessionId: 'sess-old', ctx: 100_000, occurredAt: '2026-11-08T00:00:00Z' })
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old')
+    assert.equal(rolloverRuns(ctx.store).length, 0, '体积低于上限且轮数未到：不触发')
+
+    seedUsage(ctx.store, { sessionId: 'sess-old', ctx: 200_000, occurredAt: '2026-11-08T00:01:00Z' })
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old', '摘要未就绪继续复用旧会话')
+    const queued = rolloverRuns(ctx.store)
+    assert.equal(queued.length, 1, '上下文超上限即触发摘要补排，不等待轮数阈值')
+    assert.equal(queued[0].session_id, 'sess-old')
   } finally {
     await cleanup(ctx)
   }

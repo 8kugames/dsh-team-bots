@@ -77,6 +77,16 @@ export const SESSION_ROLLOVER_TURNS_RANGE = [0, 10_000]
 export const SESSION_COMPACT_TURNS_KEY = 'session_compact_turns'
 export const SESSION_COMPACT_TURNS_RANGE = [0, 10_000]
 
+// 单轮上下文治理 P2：上下文体积判据（token）。会话当前规模 = 该会话最近一次模型调用的
+// input+cache_read（usage_events 按调用记账、runs.session_id 归属）。压缩在「跨过 N 轮
+// 窗口」之外还要求达到下限（瘦会话不压缩，省一次只读轮）；结转在轮数阈值之外、体积达
+// 上限也触发（胖会话不用等到 512 轮）。0 = 关闭体积判据（回到纯轮次口径）。生效链与
+// 轮次键一致（env 显式 > settings 表保存值 > 默认，设置页暂未开放）。
+export const SESSION_COMPACT_CTX_TOKENS_KEY = 'session_compact_ctx_tokens'
+export const SESSION_COMPACT_CTX_TOKENS_RANGE = [0, 10_000_000]
+export const SESSION_ROLLOVER_CTX_TOKENS_KEY = 'session_rollover_ctx_tokens'
+export const SESSION_ROLLOVER_CTX_TOKENS_RANGE = [0, 10_000_000]
+
 // 保存值必须是范围内的整数；非法或越界按未保存处理（回退默认），不做钳制。
 // 空串/null（未保存）必须先于数值化判空：Number('') 是 0，会把「未保存」误判成
 // 合法值 0（关闭）。用 Number() 而非 parseInt：parseInt('1.5') 会吞小数当 1。
@@ -169,6 +179,20 @@ export function effectiveSessionCompactTurns(config, getSetting: (key: string) =
   const env = envExplicit('DSH_TEAM_SESSION_COMPACT_TURNS')
   const saved = savedInt(getSetting(SESSION_COMPACT_TURNS_KEY), SESSION_COMPACT_TURNS_RANGE)
   return !env && saved !== null ? saved : config.sessionCompactTurns
+}
+
+// 压缩体积下限生效值（单轮上下文治理 P2）：默认 80,000 token，0 = 关闭体积判据。
+export function effectiveSessionCompactCtxTokens(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_SESSION_COMPACT_CTX_TOKENS')
+  const saved = savedInt(getSetting(SESSION_COMPACT_CTX_TOKENS_KEY), SESSION_COMPACT_CTX_TOKENS_RANGE)
+  return !env && saved !== null ? saved : config.sessionCompactCtxTokens
+}
+
+// 结转体积上限生效值（单轮上下文治理 P2）：默认 150,000 token，0 = 关闭体积判据。
+export function effectiveSessionRolloverCtxTokens(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS')
+  const saved = savedInt(getSetting(SESSION_ROLLOVER_CTX_TOKENS_KEY), SESSION_ROLLOVER_CTX_TOKENS_RANGE)
+  return !env && saved !== null ? saved : config.sessionRolloverCtxTokens
 }
 
 // 验收滞留阈值生效值（DSHBOTS-194）：优先级与会话结转一致——env 显式 > 保存值 >
@@ -310,6 +334,10 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 闲时总结压缩窗口（DSHBOTS-286）：默认每 64 轮，0 = 关闭；生效值见
     // effectiveSessionCompactTurns（env 显式 > settings 表保存值 > 默认，设置页暂未开放）。
     sessionCompactTurns: int(config.sessionCompactTurns ?? process.env.DSH_TEAM_SESSION_COMPACT_TURNS, 64, 0, 10_000),
+    // 上下文体积判据（单轮上下文治理 P2）：压缩下限默认 80k、结转上限默认 150k token，
+    // 0 = 关闭体积判据；生效值见 effectiveSession{Compact,Rollover}CtxTokens。
+    sessionCompactCtxTokens: int(config.sessionCompactCtxTokens ?? process.env.DSH_TEAM_SESSION_COMPACT_CTX_TOKENS, 80_000, 0, 10_000_000),
+    sessionRolloverCtxTokens: int(config.sessionRolloverCtxTokens ?? process.env.DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS, 150_000, 0, 10_000_000),
     // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超此分钟数 = 滞留。生效值可被
     // 全局设置 review_idle_minutes 覆盖（effectiveReviewIdleMinutes），0 = 关闭。
     reviewIdleMinutes: int(config.reviewIdleMinutes ?? process.env.DSH_TEAM_REVIEW_IDLE_MINUTES, 30, 0, 1440),

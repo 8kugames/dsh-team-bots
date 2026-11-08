@@ -48,6 +48,11 @@ export const RUN_EVENT_TYPES = {
   code_hygiene_alert: { domain: 'ops', zh: '代码卫生告警（超行数判定线）', en: 'Code hygiene alert (file over the line limit)' },
   rollover_summary_ready: { domain: 'memory', zh: '交接摘要已就绪', en: 'Handoff summary ready' },
   rollover_summary_failed: { domain: 'memory', zh: '交接摘要未生成', en: 'Handoff summary failed' },
+  session_compact_done: { domain: 'memory', zh: '会话总结压缩完成', en: 'Session summary compaction finished' },
+  session_compact_failed: { domain: 'memory', zh: '会话总结压缩未生成', en: 'Session summary compaction failed' },
+  session_compact_fold: { domain: 'memory', zh: '宿主历史折叠完成', en: 'Host history range folded' },
+  session_compact_fold_skipped: { domain: 'memory', zh: '宿主无压缩服务，保持仅总结轮', en: 'Host compaction unavailable; summary turn only' },
+  session_compact_fold_failed: { domain: 'memory', zh: '宿主历史折叠未执行', en: 'Host history fold not performed' },
 }
 
 // 规范释义（术语表锚点）：按域给 zh/en；未知码回退原码展示（不抛错）。

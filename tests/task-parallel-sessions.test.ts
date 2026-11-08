@@ -118,6 +118,11 @@ test('源码锚：任务专属会话命名口径与串行豁免', () => {
   assert.match(schedulerSource, /if \(run\.kind === 'task' && run\.task_id\) return `task:\$\{run\.task_id\}`/, 'claimKey 任务维度串行键')
   const migrationSource = readFileSync(fileURLToPath(new URL('../src/db-migrations.ts', import.meta.url)), 'utf8')
   assert.match(migrationSource, /kind <> 'task'/, 'bot 串行索引豁免任务运行')
+  assert.match(
+    migrationSource,
+    /kind NOT IN \('task', 'session_compact', 'rollover_summary'\)/,
+    '最终串行索引还豁免只读治理运行（否则 startRun 途中排入的压缩/结转摘要被 INSERT OR IGNORE 静默吞掉）',
+  )
   const taskRunsSource = readFileSync(fileURLToPath(new URL('../src/services/task-runs.ts', import.meta.url)), 'utf8')
   assert.doesNotMatch(taskRunsSource, /holdPendingMessage\(task\.assignee_bot_id/, '任务入队不再挂待处理队列')
 })

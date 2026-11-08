@@ -250,6 +250,30 @@ export const runFinishMethods = {
         status === 'succeeded' && cleanOutput ? 'session_compact_done' : 'session_compact_failed',
         status === 'succeeded' && cleanOutput ? '会话总结压缩完成，留原会话继续' : `会话总结压缩未生成：${error?.message ?? '模型未返回文本'}`,
       )
+      // 宿主历史折叠（单轮上下文治理 P1）：总结轮入史后把旧区间真正折叠掉（compactNow），
+      // 会话前缀才实际缩小；不await收尾（折叠自带幂等锁与忙碌让路），结果按事件留痕。
+      // 降级路径：宿主无 compaction 缝隙时保持仅总结轮（skipped 留痕可见，不静默）；
+      // 可选调用兼容测试 StubRuntime（无该方法时静默跳过折叠）。
+      void Promise.resolve(this.runtime?.compactHostSessionHistory?.(run.session_id))
+        .then(outcome => {
+          if (!outcome) return
+          if (outcome.unavailable) {
+            this.insertRunEvent(runId, 'session_compact_fold_skipped', '宿主未提供 compaction 服务，本窗口保持仅总结轮')
+          } else if (outcome.folded) {
+            this.insertRunEvent(
+              runId,
+              'session_compact_fold',
+              `宿主历史折叠完成：收拢 ${outcome.shadowedItems ?? '?'} 条区间、约 ${outcome.shadowedTokens ?? '?'} token`,
+            )
+          } else {
+            this.insertRunEvent(
+              runId,
+              'session_compact_fold_failed',
+              `宿主历史折叠未执行（${outcome.reason}${outcome.message ? `：${outcome.message}` : ''}）`,
+            )
+          }
+        })
+        .catch(err => this.logger?.warn?.('session_compact 折叠收尾异常: %s', err?.message ?? err))
       if (this.rate[run.project_id]) delete this.rate[run.project_id]
       return
     }

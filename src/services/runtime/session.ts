@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { AppError } from '../../errors.js'
 import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
-import { effectiveRunLimits, effectiveSessionCompactTurns, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey, sessionCompactMarkerKey } from '../../config.js'
+import { effectiveRunLimits, effectiveSessionCompactCtxTokens, effectiveSessionCompactTurns, effectiveSessionRolloverCtxTokens, effectiveSessionRolloverTurns, rolloverPendingKey, rolloverSummaryKey, sessionCompactMarkerKey } from '../../config.js'
 import { imageContentPartsForMessage } from '../message-images.js'
 import { restoreDefaultModel } from './model-restore.js'
 import { applyBotToolPolicy } from '../../tools.js'
@@ -233,11 +233,28 @@ export const sessionMethods = {
       return {}
     }
   },
+  // 会话当前上下文体积估计（单轮上下文治理 P2）：该会话最近一次模型调用的
+  // input+cache_read 即当前历史整体规模——usage_events 按调用记账、runs.session_id 归属。
+  // 无记录（新会话/尚未有成功调用）返回 0，两个消费点（压缩下限/结转上限）都判 >=，
+  // 0 不会误触发。
+  sessionContextTokens(sessionId) {
+    if (!sessionId) return 0
+    return this.store.get(
+      `SELECT ue.input_tokens + ue.cache_read_tokens AS ctx
+         FROM usage_events ue JOIN runs r ON r.id = ue.run_id
+        WHERE r.session_id = ?
+        ORDER BY ue.occurred_at DESC LIMIT 1`,
+      sessionId,
+    )?.ctx ?? 0
+  },
   // 结转判定（DSHBOTS-145 / DSHBOTS-286）：旧会话是否该让位。返回 true 表示旧绑定已
   // alias 化、调用方走新建路径；false 表示继续复用旧会话。
   // - 阈值 0 = 关闭（配置见 config.js 的 sessionRolloverTurns，默认 512）；
   // - 「轮次」口径 = runs 表按 session_id 的 COUNT(*)，不限 status——失败运行的提示词同样
   //   已进会话历史，count-all 才与真实增长一致；
+  // - 体积判据（单轮上下文治理 P2）：轮数未到但会话上下文已达上限（默认 150k token，
+  //   0 = 关闭）同样触发——胖会话不用等 512 轮，live 实测稳态单轮 55 万 token 的会话
+  //   按轮数口径永远追不上真实膨胀速度；
   // - 幂等（DSHBOTS-286）：alias 行永不触发结转——本判定只在活跃绑定上被调用
   //   （唯一调用点 ensureSession 以 !existing.alias 前置短路保证）；已结转的旧会话
   //   即使轮数继续增长（承接未终态任务流量），也只参与闲时压缩，不再二次结转；
@@ -245,9 +262,12 @@ export const sessionMethods = {
   // - 摘要未就绪 → 幂等补排一条摘要运行（不阻塞对话，摘要就绪后下一次复用自然结转）。
   shouldRolloverSession({ bot, project, existing }) {
     const turns = effectiveSessionRolloverTurns(this.config, key => this.store.setting(key))
-    if (turns <= 0) return false
+    const ctxLimit = effectiveSessionRolloverCtxTokens(this.config, key => this.store.setting(key))
+    // 两个判据各自独立（0 = 该判据关闭），全关即整体关闭结转。
     const count = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0
-    if (count < turns) return false
+    const countOver = turns > 0 && count >= turns
+    const ctxOver = ctxLimit > 0 && this.sessionContextTokens(existing.session_id) >= ctxLimit
+    if (!countOver && !ctxOver) return false
     if (this.store.setting(rolloverSummaryKey(bot.id, project?.id))) return true
     const active = this.store.get(
       "SELECT id FROM runs WHERE kind = 'rollover_summary' AND trigger_ref = ? AND status IN ('queued', 'running')",
@@ -350,8 +370,35 @@ export const sessionMethods = {
     )
     return runId
   },
+  // 宿主历史折叠（单轮上下文治理 P1）：session_compact 运行收尾后调用宿主
+  // CompactionEngine.compactNow，把有用历史区间折叠为总结节点——会话前缀实际缩小。
+  // 自写总结轮只追加不折叠（DSHBOTS-286 既有行为），两者互补：总结轮管连续性叙事与
+  // 记忆落库，折叠管体积。宿主未提供 compaction 服务（ctx.get 不可达/未装实现）时
+  // 降级为「仅总结轮」，返回 unavailable 标记由收尾侧留痕；忙碌/取消等预期失败按
+  // ManualCompactionError 的 code 留痕返回，不告警不重试（下一窗口自然再试）。
+  async compactHostSessionHistory(sessionId: string) {
+    if (!sessionId) return { folded: false, reason: 'no-session' }
+    const compaction = this.ctx?.get?.('compaction')
+    if (!compaction?.compactNow) return { folded: false, unavailable: true, reason: 'unavailable' }
+    const resolved = await this.ctx.sessionController.resolveAgent(sessionId)
+    const agent = (resolved as any)?.agent
+    if (!agent) return { folded: false, reason: 'agent-unresolved' }
+    try {
+      const result = await compaction.compactNow(agent, AbortSignal.timeout(5 * 60_000))
+      return {
+        folded: true,
+        shadowedTokens: result?.shadowedTokenCount ?? null,
+        shadowedItems: result?.shadowedSeqs?.length ?? null,
+      }
+    } catch (error: any) {
+      return { folded: false, reason: error?.code ?? 'error', message: String(error?.message ?? error) }
+    }
+  },
   // 闲时压缩判定（DSHBOTS-286）：会话复用时检查轮次是否跨过新的压缩窗口。
   // - 窗口 N 轮（session_compact_turns，0 = 关闭），轮次口径与结转一致；
+  // - 体积下限（单轮上下文治理 P2，session_compact_ctx_tokens 默认 80k、0 = 关闭）：
+  //   窗口跨过且体积达下限才排——瘦会话（低频短轮）压缩是无用功，胖会话照常按窗口
+  //   节奏压缩；上限即防 flap（一个窗口至多一次），不依赖压缩是否真的缩小历史；
   // - 闲 = 该会话除当前运行外无 queued/running 运行；忙时推后（标记不动，下次复用再判，
   //   跨多个窗口合批为一次）；
   // - 对仍在承接流量的会话生效：含 alias 旧会话（未终态任务流量）与 task/dm 短生命周期会话。
@@ -363,6 +410,8 @@ export const sessionMethods = {
     const marker = Number(this.store.setting(sessionCompactMarkerKey(sessionId)) ?? 0)
     const window = Math.floor(turns / every)
     if (window <= Math.floor(marker / every)) return
+    const ctxFloor = effectiveSessionCompactCtxTokens(this.config, key => this.store.setting(key))
+    if (ctxFloor > 0 && this.sessionContextTokens(sessionId) < ctxFloor) return
     const busy = this.store.get(
       "SELECT id FROM runs WHERE session_id = ? AND status IN ('queued', 'running') AND id != ?",
       sessionId,
