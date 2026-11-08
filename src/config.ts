@@ -321,6 +321,11 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 此时按现状直接报「模型不支持图片」，不做任何派生。
     visionProxyProvider: String(config.visionProxyProvider ?? process.env.DSH_TEAM_VISION_PROXY_PROVIDER ?? '').trim(),
     visionProxyModel: String(config.visionProxyModel ?? process.env.DSH_TEAM_VISION_PROXY_MODEL ?? '').trim(),
+    // 记忆审查专用模型（可选）：memory_review 派生运行改用的小模型（provider/model），
+    // 两个都非空才启用；任一为空 = 沿用 Bot 主模型。审查提示词自包含且只产 JSON
+    // 数组，不挑模型能力，配便宜模型可再压审查成本。
+    memoryReviewProvider: String(config.memoryReviewProvider ?? process.env.DSH_TEAM_MEMORY_REVIEW_PROVIDER ?? '').trim(),
+    memoryReviewModel: String(config.memoryReviewModel ?? process.env.DSH_TEAM_MEMORY_REVIEW_MODEL ?? '').trim(),
     // 验收自动委派（DSHBOTS-113）：任务交付迁移 in_review 时自动派生子代理核验运行
     // （与手动「子代理核验」按钮同一入口）。总监裁决不受影响：owner_bot 卡在核验运行
     // 结束后再触发总监验收；user 卡核验结论写回评论，裁决仍归工作台 owner。

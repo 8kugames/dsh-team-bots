@@ -159,6 +159,8 @@ interface TeamConfig {
   workerPreset: string
   visionProxyProvider: string
   visionProxyModel: string
+  memoryReviewProvider: string
+  memoryReviewModel: string
   autoReviewDelegate: boolean
   codeHygieneExts: string[]
   schedulerIntervalMs: number

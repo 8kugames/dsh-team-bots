@@ -9,6 +9,15 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { maskSecrets } from '../secrets.js'
 import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '../util.js'
 
+// 记忆审查专用模型（可选）：provider 与 model 都非空才启用，否则 null（沿用 Bot
+// 主模型）。手法同读图代理的 visionProxyTarget——配置对见 config.js 的
+// memoryReviewProvider/memoryReviewModel（DSH_TEAM_MEMORY_REVIEW_PROVIDER/_MODEL）。
+export function memoryReviewModelTarget(config) {
+  const provider = String(config?.memoryReviewProvider ?? '').trim()
+  const model = String(config?.memoryReviewModel ?? '').trim()
+  return provider && model ? { provider, model } : null
+}
+
 // 记忆审查输出：模型返回 JSON 数组，形如 [{scope, topic, content, confidence}]。
 export function parseMemoryReview(output) {
   const raw = String(output ?? '').trim()
@@ -135,13 +144,17 @@ export const memoryMethods = {
       sourceRunId,
     )
     if (active) return active.id
+    // 审查模型覆盖：配置了专用模型对时随运行下发（runs.model_* 三列既有通道，
+    // startRun 的 modelOverrideFor 消费）；未配置为 NULL，沿用 Bot 主模型。
+    const target = memoryReviewModelTarget(this.config)
     const reviewRunId = id('run')
     const createdAt = nowIso()
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?)`,
-      reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`, createdAt,
+        attempt, idempotency_key, model_provider, model_model, queued_at)
+       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?)`,
+      reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`,
+      target?.provider ?? null, target?.model ?? null, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',

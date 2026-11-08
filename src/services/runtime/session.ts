@@ -57,6 +57,12 @@ export function effectiveReviewTimeoutMinutes(getSetting: (key: string) => unkno
   return REVIEW_TIMEOUT_MINUTES_DEFAULT
 }
 
+// 记忆审查专属会话的有界复用上限：审查提示词自包含（用户消息+回复/任务交付切片），
+// 不需要控制面会话历史——历史整段重放，实测单次审查被顶到 65 万 token。审查流量改走
+// 独立 kind='review' 绑定会话，每张服务 N 次审查后退役换新；宿主无会话删除 API，
+// 按次开全新会话会无限累积宿主会话列表，有界绑定把宿主会话数压到 1/N。
+export const MEMORY_REVIEW_BINDING_MAX_RUNS = 8
+
 export const sessionMethods = {
   bindingOfSession(sessionId) {
     if (!sessionId) return undefined
@@ -384,6 +390,11 @@ export const sessionMethods = {
       }
       this.retireBinding(run.session_id)
     }
+    // 记忆审查运行：审查提示词自包含，控制面历史对它只是重放成本（实测单次 65 万
+    // token）；也不享任务亲和（审查不是施工）。改走独立有界 review 会话。
+    if (run?.kind === 'memory_review') {
+      return this.ensureReviewSession(bot, project, { run, modelOverride })
+    }
     // ② 任务亲和（DSHBOTS-286/289，ADR §5.2-3）：未终态任务按 runs 归属回原会话——含
     // dm_reply 经 sessionTaskFor 解析出的任务（executeRun 已把任务行透传进来）与结转后
     // alias 行上的旧任务流量；终态任务不享亲和，落下方控制面单绑定。
@@ -463,6 +474,76 @@ export const sessionMethods = {
       // 挂到项目工作区分组（与控制面会话同组）：任务会话在宿主列表里归入所属项目。
       const registry = this.ctx.get?.('workspaceRegistry')
       if (registry) {
+        await attachSessionToWorkspace(registry, {
+          cwd,
+          title: workspaceGroupTitle({ kind: 'bot', project, bot }),
+          sessionId,
+        }, this.logger)
+      }
+      return sessionId
+    })()
+    this.sessionCreates.set(key, creating)
+    try {
+      return await creating
+    } finally {
+      this.sessionCreates.delete(key)
+    }
+  },
+  // 记忆审查会话（有界复用）：memory_review 运行每 (bot, project) 一条 kind='review'
+  // 活跃绑定，复用至 MEMORY_REVIEW_BINDING_MAX_RUNS 次后退役换新——上下文与宿主会话
+  // 数都被钉在有界范围内。不参与结转/闲时压缩：审查轮次彼此独立，无可继承上下文，
+  // 轮次到量直接换新。创建/策略面与 ensureTaskSession 同款（cwd、preset、标题、
+  // 文件策略、工具策略、selectModel、工作区分组挂载）。
+  async ensureReviewSession(bot, project, { run, modelOverride } = {} as any) {
+    const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
+    const existing = this.store.get(
+      "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'review' AND alias = 0 AND project_id IS ?",
+      bot.id,
+      project?.id ?? null,
+    )
+    if (existing) {
+      const served = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0
+      if (served < MEMORY_REVIEW_BINDING_MAX_RUNS) {
+        const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
+        if (!resolved?.error) {
+          this.applyFilePolicy(resolved, bot, run, null)
+          applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+          await this.selectModel(existing.session_id, bot, modelOverride)
+          return existing.session_id
+        }
+      }
+      this.retireBinding(existing.session_id)
+    }
+    // 并发首建去重键与控制面/任务会话同理，带 review 维度。
+    const key = `${bot.id}:${project?.id ?? 'solo'}:review`
+    if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
+    const creating = (async () => {
+      const cwd = await resolveSessionCwd(this.config, { solo: !project, bot, project })
+      const created = await this.ctx.sessionController.create({
+        cwd,
+        ...(await this.defaultAgentPreset('project')),
+      })
+      const sessionId = created.sessionId
+      const agent = await this.ctx.sessionController.resolveAgent(sessionId)
+      if (agent?.error) throw new AppError('SESSION_FAILED', `创建 DSH Session 失败：${agent.error.message ?? '未知'}`)
+      if (this.ctx.sessionTitle?.rename) {
+        const liveSession = agent?.agent?.session ?? agent?.session
+        if (liveSession) {
+          try { this.ctx.sessionTitle.rename(liveSession, `${bot.name} · 记忆审查`) } catch {}
+        }
+      }
+      this.applyFilePolicy(agent, bot, run, null)
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
+      this.store.run(
+        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
+         VALUES (?, ?, ?, 'review', NULL, ?, 0)
+         ON CONFLICT(session_id) DO NOTHING`,
+        sessionId, bot.id, project?.id ?? null, new Date().toISOString(),
+      )
+      await this.selectModel(sessionId, bot, modelOverride)
+      // 挂到项目工作区分组（与控制面/任务会话同组），标题已可辨识审查会话身份。
+      const registry = this.ctx.get?.('workspaceRegistry')
+      if (registry && project) {
         await attachSessionToWorkspace(registry, {
           cwd,
           title: workspaceGroupTitle({ kind: 'bot', project, bot }),
