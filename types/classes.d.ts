@@ -43,6 +43,7 @@ import { wechatMethods } from '../src/services/wechat.js'
 import { approvalsMethods } from '../src/services/approvals.js'
 import { questionsMethods } from '../src/services/questions.js'
 import { coreMethods } from '../src/services/core.js'
+import { githubSourceMethods } from '../src/services/github-source.js'
 import { promptMethods } from '../src/services/runtime/prompt.js'
 import { sessionMethods } from '../src/services/runtime/session.js'
 import { trajectoryMethods } from '../src/services/runtime/trajectory.js'
@@ -57,6 +58,7 @@ type TeamServiceMethods =
   & typeof secretsMethods & typeof proposalsMethods & typeof terminalMethods
   & typeof usageMethods & typeof systemMethods & typeof wechatMethods
   & typeof approvalsMethods & typeof questionsMethods & typeof coreMethods
+  & typeof githubSourceMethods
 
 type DshRuntimeMethods =
   & typeof promptMethods & typeof sessionMethods
@@ -214,6 +216,8 @@ declare module '../src/service.js' {
     readAuditAlerted: Map<string, unknown>
     lastMaintenanceAt: number
     wechat: WechatChannel | null
+    /** GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产 null=真实 gh CLI，测试注入桩。 */
+    githubRunner: ((args: string[]) => Promise<string> | string) | null
     terminalActive: Map<string, unknown>
     /** index.js 里 service.initialize().then(...).catch(...) 的启动 Promise。 */
     boot: Promise<unknown> | null

@@ -9,6 +9,25 @@ export function defaultWorkspace() {
   return join(homedir(), '.dsh', 'workspace', 'team-bots')
 }
 
+// DSH_TEAM_GITHUB_WATCH 解析：JSON 数组 [{projectKey, repo}]，非法一律 []（B4-②/DSHBOTS-335）。
+export function parseGithubWatchEnv(raw) {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(String(raw))
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map(item => ({ projectKey: String(item?.projectKey ?? '').trim(), repo: String(item?.repo ?? '').trim() }))
+      .filter(item => item.projectKey && item.repo)
+  } catch {
+    return []
+  }
+}
+
+export const clampGithubPollMinutes = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 ? Math.min(1440, Math.trunc(num)) : 0
+}
+
 export const bool = (value, fallback = false) => {
   if (value === undefined || value === '') return fallback
   return /^(1|true|yes|on)$/i.test(String(value))
@@ -272,6 +291,10 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     ),
     // 原生 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
     // 缺省开启（DSHBOTS-230）：默认部署即注入并行拆分引导；显式传 0/false 可关闭。
+    // GitHub 只读触发源（B4-②/DSHBOTS-335）：env JSON 清单 [{projectKey, repo}]，
+    // 缺省空 + 轮询 0 分钟 = 全关；非法 JSON 降级空清单（fail-closed）。
+    githubWatch: parseGithubWatchEnv(config.githubWatch ?? process.env.DSH_TEAM_GITHUB_WATCH),
+    githubPollMinutes: clampGithubPollMinutes(config.githubPollMinutes ?? process.env.DSH_TEAM_GITHUB_POLL_MINUTES),
     agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, true),
     maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 3, 1, 8),
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。

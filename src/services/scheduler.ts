@@ -12,6 +12,7 @@ import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relati
 import { TASK_BUDGET_ROUNDS, TRANSITIONS, taskDeadlineInfo } from './tasks.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
+import { pollGithubSources } from './github-source.js'
 import { staleCardHit } from './notify.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
@@ -536,6 +537,10 @@ export const schedulerMethods = {
       // 待执行（todo/backlog）超 24h/48h/72h 三档向 owner 只提醒不自动处置；
       // 内部逐卡容错（单卡异常只 warn）。
       this.scanStaleCards()
+      // GitHub 只读触发源（B4-②/DSHBOTS-335）：间隔闸 + 逐源容错，缺省全关零开销。
+      void pollGithubSources(this).catch(error => {
+        this.logger?.warn?.('github source poll failed: %s', error?.message ?? error)
+      })
       const activeRows = this.store.all(
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。

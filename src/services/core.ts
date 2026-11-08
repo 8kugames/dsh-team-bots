@@ -17,6 +17,7 @@ import { ensureRecoverySchema } from './recovery-schema.js'
 import { ensureRolloverSchema } from './rollover-schema.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 import { ensureWechatTriggerSchema } from './wechat-trigger-schema.js'
+import { ensureExternalTriggerSchema } from './external-trigger-schema.js'
 import { PROMPT_SEGMENT_DEFAULTS, PROMPT_SEGMENT_MAX_CHARS, PROMPT_TRIO_BUDGET, parsePromptOverrides, promptOverridesHash, taskGuidanceTrioLength } from './runtime/prompt.js'
 import { id, jsonParse, nowIso } from '../util.js'
 
@@ -112,6 +113,8 @@ export const coreMethods = {
       ensureTaskSandboxSchema(this.store)
       // 微信入站 Trigger 留痕表（B4-①/DSHBOTS-328）：幂等迁移，通道未启用也不碍事。
       ensureWechatTriggerSchema(this.store)
+      // 外部触发留痕表（B4-②/DSHBOTS-335）：GitHub 源的 (source, external_id) 已见集合。
+      ensureExternalTriggerSchema(this.store)
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
       this.store.run(
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,
