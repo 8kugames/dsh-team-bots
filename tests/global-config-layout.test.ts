@@ -188,12 +188,13 @@ test('密钥页承载密钥管理卡：列表 + 待审请求 + 保存表单', as
   stopTimers()
 })
 
-test('关于内容回迁配置页第四分组：DSH 路径/服务卡 + 检查更新 + 投递失败提示', async () => {
+test('关于内容回迁配置页第四分组：DSH 路径/服务卡 + 检查更新；投递失败队列已移除', async () => {
+  // state 残留 outbox 数据时也不渲染：投递失败明细属开发者信息，不出现在用户界面。
   const { html } = await renderPage('settings', 'renderGlobal', { outbox: { pending: 1, failed: 2, delivered: 10 } })
   assert.match(html, /<h3>DSH 路径<\/h3>/, 'DSH 路径卡应回迁配置页')
   assert.match(html, /<h3>DSH 服务<\/h3>/, 'DSH 服务卡应回迁配置页')
   assert.match(html, /data-action="check-dsh-update"/, '检查更新按钮随卡回迁')
-  assert.match(html, /2 条消息投递失败/, '投递失败提示随卡回迁')
+  assert.doesNotMatch(html, /投递队列|投递失败|重试全部失败投递/, '投递失败队列已从界面移除')
   assert.match(html, /data-action="copy"/, '路径复制按钮保留')
   assert.doesNotMatch(html, /data-action="sync-skills"/, '重扫技能入口去重到技能页，配置页不放')
   stopTimers()

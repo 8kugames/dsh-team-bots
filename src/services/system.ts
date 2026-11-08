@@ -92,8 +92,6 @@ export const systemMethods = {
       skills: skillSnapshot(this.store, this.config),
       projectSkills: project ? this.projectSkillView(project) : [],
       skillBindings: this.skillBindings(project?.id ?? null),
-      // 失败明细随行下发（DSHBOTS-338）：投递失败卡片可直接渲染可行动内容。
-      outbox: this.outboxStateView(),
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
       revisions: {},
       // 用量快照默认按 30 日窗口（DSHBOTS-121）：与页面默认档一致，其余三档按需单独取。

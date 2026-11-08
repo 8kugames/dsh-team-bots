@@ -16,7 +16,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'question_answer', 'questions_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
-  'settings', 'update_settings', 'update_prompt_segment', 'outbox_retry', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
+  'settings', 'update_settings', 'update_prompt_segment', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
   'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout', 'notify_receipts', 'wechat_triggers', 'external_triggers',
   'feishu_status',
@@ -208,9 +208,6 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'usage_window':
       // 用量时间窗快照（DSHBOTS-121）：按需取，不进 state 轮询。
       return service.usageWindow(payload.projectId ?? null, payload.soloBotId ?? null, payload.window ?? '30d')
-    case 'outbox_retry':
-      // 手动重试失败投递（DSHBOTS-338）：复活为 pending 并清零重试预算，审计留痕。
-      return service.outboxRetry(actor)
     case 'outbox':
       return service.outboxView()
     case 'reconcile_usage':

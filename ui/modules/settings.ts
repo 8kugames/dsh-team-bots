@@ -324,7 +324,7 @@ function versionRow(labelKey, value) {
     : ''
 }
 
-// DSH 服务卡：版本检查 + 投递失败提示（投递失败 kv 落在本卡尾部）。
+// DSH 服务卡：版本检查。
 function dshServiceCard() {
   const data = state.data
   // @ts-ignore 「DSH 服务」卡检查结果：loadState 只换 state.data，dshUpdate 存这里不被轮询盖掉。
@@ -334,7 +334,6 @@ function dshServiceCard() {
     : available
       ? `<strong>${esc(latest)} <span class="pill amber">${t('可升级')}</span></strong>`
       : `<strong>${esc(latest)} <span class="pill green">${t('global.latest')}</span></strong>`
-  const outbox = data.outbox ?? { pending: 0, failed: 0, delivered: 0 }
   return `
     <div class="card form-card g-card">
       <div class="card-head">
@@ -345,14 +344,6 @@ function dshServiceCard() {
       <div class="kv"><span>${t('global.dshLatestVersion')}</span>${latestCell(update?.latest, update?.updateAvailable)}</div>
       ${versionRow('global.pluginCurrentVersion', data.pluginVersion)}
       <div class="kv"><span>${t('global.pluginLatestVersion')}</span>${latestCell(update?.pluginLatest, update?.pluginUpdateAvailable)}</div>
-      ${Number(outbox.failed ?? 0) > 0 ? `<div style="margin-top:12px">
-        <div class="kv"><span>${t('global.outboxQueue')}</span><strong>${t('global.outboxFailed', { count: outbox.failed })}</strong></div>
-        ${(outbox.failedItems ?? []).map(item => `
-          <div class="hint mono">${esc(t(`outboxKind.${item.kind}`))} · ${t('global.outboxAttempts', { count: item.attempts })} · ${esc(String(item.lastError ?? ''))}</div>`).join('')}
-        <div class="btn-row" style="margin-top:8px">
-          <button class="btn small" type="button" data-action="retry-outbox">${t('global.outboxRetry')}</button>
-        </div>
-      </div>` : ''}
     </div>`
 }
 
