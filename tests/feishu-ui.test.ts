@@ -107,6 +107,11 @@ test('② 启用 + ready：显示相位 pill、管理员 ou_id 与 bot/appId 元
   assert.doesNotMatch(html, /data-action="feishu-/, '飞书卡是只读状态卡，不应有任何操作按钮')
 })
 
+test('②b 相位别名：connected 与 ready 同义，都渲染「已连接」绿 pill', async () => {
+  const html = await renderChannel({ enabled: true, phase: 'connected' })
+  assert.match(html, /class="pill green">已连接<\/span>/, 'connected 相位应渲染绿色「已连接」')
+})
+
 test('③ unbound / conflict：未绑定给配置提示，冲突相出 amber 警示', async () => {
   const unbound = await renderChannel({ enabled: true, phase: 'unbound', error: '未配置 lark-cli 路径（DSH_BOTS_FEISHU_CLI）' })
   assert.match(unbound, /配置 lark-cli 后自动连接，无需扫码。/, '未绑定应提示配置 lark-cli 后自动连接')

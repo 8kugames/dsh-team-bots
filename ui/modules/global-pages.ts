@@ -44,11 +44,12 @@ function feishuCard() {
   const feishu = state.data?.feishu ?? { enabled: false, phase: 'disabled' }
   if (!feishu.enabled) return ''
   // 相位口径与 src/feishu/channel.ts 一致：ready=已连接、unbound=未绑定、conflict=连接冲突。
+  // 'connected' 是同义别名（对齐 cindy 口径），两者都渲染「已连接」。
   const phaseText = {
-    disabled: t("未启用"), unbound: t("未绑定"), ready: t("已连接"),
+    disabled: t("未启用"), unbound: t("未绑定"), ready: t("已连接"), connected: t("已连接"),
     reconnecting: t("重连中"), conflict: t("连接冲突"),
   }
-  const pillClass = feishu.phase === 'ready' ? 'green' : feishu.phase === 'conflict' ? 'amber' : ''
+  const pillClass = ['ready', 'connected'].includes(feishu.phase) ? 'green' : feishu.phase === 'conflict' ? 'amber' : ''
   return `
     <div class="card form-card g-card feishu-card" id="feishu-card">
       <div class="feishu-status">
