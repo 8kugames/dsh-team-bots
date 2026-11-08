@@ -13,7 +13,7 @@ import { deliveryPlan, replyDeliveryPrompt } from '../botmsg.js'
 import { id, jsonParse, nowIso, sha256, text } from '../util.js'
 import { readWriteScopes, writeScopePathsOverlap } from './write-scopes.js'
 import { isProviderUnavailableCode } from './model-fallback.js'
-import { effectiveSandbox } from './runtime/prompt.js'
+import { effectiveSandbox, PROMPT_SEGMENT_DEFAULTS, parsePromptOverrides } from './runtime/prompt.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 
 // 合批窗口与上限默认值（DSHBOTS-231/287，DSHBOTS-290 随语义回补从 scheduler.ts 迁来）：
@@ -628,6 +628,27 @@ export const runsMethods = {
     const run = this.runRow(runId)
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
     const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
+    // 配置版本快照（C2/DSHBOTS-334）：任务运行独占会话（D-308），本运行的治理配置即
+    // 派发时刻的生效值——bot 角色版本（bots.current_revision）+ 可编辑提示词段覆盖正文
+    // （缺省段记 null，默认文本随发版可追溯）+ 实际下发模型（runs 行三列，D-25）。
+    // 回答「这张卡按哪版规则跑的」；只记账不闸门（ADR §3：变更不撤销在途，恢复前复核
+    // 由派发链闸门承担）。只对 kind='task' 记：消息族运行共用控制面冻结会话（D-91），
+    // 生效文本是冻结时的旧值，快照「当时 settings」反而误导。
+    if (run.kind === 'task') {
+      const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
+      const segments = Object.fromEntries(
+        Object.keys(PROMPT_SEGMENT_DEFAULTS).map(key => [key, overrides?.[key]?.text ?? null]),
+      )
+      const model = run.model_provider
+        ? { provider: run.model_provider, model: run.model_model, effort: run.model_effort ?? null }
+        : { provider: bot.provider, model: bot.model, effort: bot.effort ?? null }
+      this.store.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), run.id, 'config_snapshot',
+        JSON.stringify({ bot_revision: Number(bot.current_revision) || 0, model, prompt_segment_overrides: segments }),
+        nowIso(),
+      )
+    }
     try {
       const task = run.task_id ? this.taskRow(run.task_id) : null
       // DSHBOTS-112：vision 派生运行按 project_id 归位原消息（群聊 messages / 单聊
