@@ -124,12 +124,16 @@ interface TeamConfig {
   dataDir: string
   dbPath: string
   wechatDbPath: string
+  feishuDbPath: string
   secretKeyPath: string
   memoryDir: string
   messageDir: string
   skillRoot: string
   wechat: { enabled: boolean }
   wechatEnabled: boolean
+  feishu: { enabled: boolean; cliPath: string }
+  feishuEnabled: boolean
+  feishuCliPath: string
   maxConcurrentRuns: number
   runTimeoutMs: number
   maxRunTokens: number

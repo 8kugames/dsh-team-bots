@@ -136,6 +136,22 @@ export const coreMethods = {
           this.logger.warn?.(`[wechat] 通道加载失败，已跳过: ${error?.message ?? error}`)
         }
       }
+      // 飞书机器人通道（DSHBOTS-323 卡①）：与微信通道同款可选挂载——按需动态 import，
+      // 缺失/损坏只降级该通道，不让整个插件加载失败。
+      if (this.config.feishu?.enabled) {
+        try {
+          const { FeishuStore } = await import('../feishu/store.js')
+          const { FeishuChannel } = await import('../feishu/channel.js')
+          const feishuStore = await new FeishuStore(this.config.feishuDbPath).open()
+          this.feishu = new FeishuChannel({ store: feishuStore, config: this.config, log: this.logger })
+          this.feishu.setService(this)
+          await this.feishu.start().catch(error => {
+            this.logger.warn?.(`[feishu] 通道启动失败: ${error?.message ?? error}`)
+          })
+        } catch (error: any) {
+          this.logger.warn?.(`[feishu] 通道加载失败，已跳过: ${error?.message ?? error}`)
+        }
+      }
       // 历史会话挂工作区分组：后台一次性回填，不阻塞启动（void 不 await）。
       // 宿主上下文在 runtime 上（TeamService 自身无 ctx），测试桩无 ctx 时静默跳过；
       // registry 缺失时跳过且不写标记，下次启动再试。
@@ -393,6 +409,7 @@ export const coreMethods = {
     this.timer = null
     this.started = false
     void this.wechat?.stop()
+    void this.feishu?.stop()
   },
   actor(actor = { type: 'user', id: this.localUserId }) {
     return actor

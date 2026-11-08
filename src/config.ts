@@ -228,11 +228,19 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     dataDir,
     dbPath: join(dataDir, 'team.sqlite'),
     wechatDbPath: join(dataDir, 'wechat-channel.sqlite'),
+    feishuDbPath: join(dataDir, 'feishu-channel.sqlite'),
     // 密钥主文件：备份必须连它一起带走，缺了既有密文就再也解不开。
     secretKeyPath: join(dataDir, 'secret.key'),
     // 个人微信通道（腾讯 iLink 官方协议）：默认关闭，扫码授权后生效。
     wechat: {
       enabled: bool(config.wechatEnabled ?? process.env.DSH_TEAM_WECHAT, false),
+    },
+    // 飞书机器人通道（DSHBOTS-323 卡①）：默认关闭，DSH_BOTS_FEISHU=1 开启。
+    // 全部出站/自检经 lark-cli 子进程；app secret 由 lark-cli 自己的 keychain 管理
+    // （LARKSUITE_CLI_CONFIG_DIR），本插件只存 cli 路径/botId/appId，secret 不进库不进 env。
+    feishu: {
+      enabled: bool(config.feishuEnabled ?? process.env.DSH_BOTS_FEISHU, false),
+      cliPath: String(config.feishuCliPath ?? process.env.DSH_BOTS_FEISHU_CLI ?? '').trim(),
     },
     memoryDir: join(dataDir, 'memory'),
     messageDir: join(dataDir, 'messages'),

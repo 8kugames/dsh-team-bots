@@ -14,6 +14,8 @@ import type { TeamService } from '../src/service.js'
 import type { WechatChannel } from '../src/wechat/channel.js'
 import type { WechatBusinessError } from '../src/wechat/commands.js'
 import type { WechatStore } from '../src/wechat/store.js'
+import type { FeishuChannel } from '../src/feishu/channel.js'
+import type { FeishuStore } from '../src/feishu/store.js'
 
 // 业务域方法由 defineMethods 挂到 prototype 上。与其逐个手抄签名，直接把
 // defineMethods 传入的那些域方法对象的真实类型交叉合并进类接口：方法名、参数名、
@@ -165,6 +167,35 @@ declare module '../src/wechat/store.js' {
 }
 
 // ---------------------------------------------------------------------------
+// FeishuStore（src/feishu/store.js）
+// ---------------------------------------------------------------------------
+declare module '../src/feishu/store.js' {
+  interface FeishuStore {
+    db: SqlDatabase | null
+    file: string
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FeishuChannel（src/feishu/channel.js）
+// ---------------------------------------------------------------------------
+declare module '../src/feishu/channel.js' {
+  interface FeishuChannel {
+    store: FeishuStore
+    config: TeamConfig
+    log: DshLogger
+    service: TeamService | null
+    phase: 'disabled' | 'unbound' | 'ready'
+    error: string | null
+    /** lark-cli 执行原语：args -> stdout；测试注入桩，缺省 spawn 配置的 cli。 */
+    runLark: (args: string[]) => Promise<string>
+    batchWindowMs: number
+    flushTimer: TimerHandle | null
+    flushChain: Promise<unknown>
+  }
+}
+
+// ---------------------------------------------------------------------------
 // WechatBusinessError（src/wechat/commands.js）
 // ---------------------------------------------------------------------------
 declare module '../src/wechat/commands.js' {
@@ -216,6 +247,7 @@ declare module '../src/service.js' {
     readAuditAlerted: Map<string, unknown>
     lastMaintenanceAt: number
     wechat: WechatChannel | null
+    feishu: FeishuChannel | null
     /** GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产 null=真实 gh CLI，测试注入桩。 */
     githubRunner: ((args: string[]) => Promise<string> | string) | null
     terminalActive: Map<string, unknown>
