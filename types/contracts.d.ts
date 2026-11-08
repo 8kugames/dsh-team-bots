@@ -41,7 +41,7 @@ type TeamActionName =
   | 'create_proposal' | 'decide_proposal' | 'evaluate_proposal' | 'promote_proposal'
   | 'approval_decide' | 'approvals_pending' | 'question_answer' | 'questions_pending'
   | 'sync_skills' | 'skill_detail' | 'toggle_skill' | 'set_skill_binding' | 'rollback_skill'
-  | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'update_prompt_segment' | 'settings_history' | 'outbox_retry' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
+  | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'update_prompt_segment' | 'outbox_retry' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
   | 'dsh_update_info' | 'upgrade_dsh' | 'reboot_dsh'
   | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout' | 'notify_receipts' | 'wechat_triggers' | 'external_triggers'
   | 'run_command' | 'cancel_command' | 'terminal_state'

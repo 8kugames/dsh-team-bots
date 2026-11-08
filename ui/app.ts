@@ -5,7 +5,7 @@ import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
 import { typingLingerRowsHtml, applyOptimisticTyping, pruneTypingLinger } from './modules/typing-linger.js'
-import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, attentionBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
+import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, sidebarUserNeedsView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
 import { renderUsage, usageMode, usageViewTitle, usageTotals } from './modules/usage.js'
 import { renderSettings, renderGlobal, renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './modules/settings.js'
 import { renderChannel, renderSecretsPage } from './modules/global-pages.js'
@@ -225,14 +225,12 @@ function renderShell() {
   const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
   // 跨项目待答提问（DSHBOTS-116）：与审批同口径，顶层全局聚合。
   const pendingQuestions = data?.pendingQuestions ?? { count: 0, items: [] }
-  // needs-attention 聚合（A2/DSHBOTS-322）：待验收/滞留卡/系统问题，Quiet by default。
-  const needsAttention = data?.needsAttention ?? { needsYou: {}, issues: [] }
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
   // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。四页页壳页（DSHBOTS-216）冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；无横幅时 main-head 整块不渲染，避免空粘头残影。
   const isGlobal = GLOBAL_VIEWS.has(state.view) || (state.view === 'usage' && usageMode() === 'global')
   const shellGlobalPage = isGlobal && state.view !== 'bots-overview'
-  const showMainHead = !shellGlobalPage || approvalBannerView(pendingApprovals) !== '' || questionBannerView(pendingQuestions) !== '' || attentionBannerView(needsAttention) !== ''
+  const showMainHead = !shellGlobalPage || approvalBannerView(pendingApprovals) !== '' || questionBannerView(pendingQuestions) !== ''
   // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
   const isSolo = state.view === 'chat' && state.chatMode === 'solo'
   const soloBot = inSolo ? botById(state.soloBotId) : null
@@ -338,8 +336,9 @@ function renderShell() {
           </div>
         </div>
         <div class="sidebar-bottom">
+          ${sidebarUserNeedsView({ approvals: pendingApprovals.count, questions: pendingQuestions.count, proposals: pendingProposals() })}
           <button class="global-config ${state.view === 'bots-overview' ? 'active' : ''}" data-action="nav" data-view="bots-overview">
-            ${icon('bot')}<span>${t('sidebar.botsOverview')}</span>${pendingProposals() > 0 ? `<span class="red-dot" title="${t('sidebar.pendingProposals')}"></span>` : ''}
+            ${icon('bot')}<span>${t('sidebar.botsOverview')}</span>
           </button>
           <button class="global-config ${state.view === 'usage' && state.usageMode === 'global' ? 'active' : ''}" data-action="nav" data-view="usage" data-usage-mode="global">
             ${icon('chart')}<span>${t('sidebar.usage')}</span>
@@ -358,7 +357,6 @@ function renderShell() {
         ${showMainHead ? `<div class="main-head">
         ${approvalBannerView(pendingApprovals)}
         ${questionBannerView(pendingQuestions)}
-        ${attentionBannerView(needsAttention)}
         ${shellGlobalPage ? '' : `<header class="topbar">
           <div class="topbar-title">
             ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}

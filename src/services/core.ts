@@ -190,38 +190,6 @@ export const coreMethods = {
   settingsRevision() {
     return Number(this.store.setting('settings_revision', '0')) || 0
   },
-  // 设置变更历史（A4/DSHBOTS-330）：audit_log 本就是 append-only 的不可变账本（B2 起
-  // updateSettings/prompt_segment 每次保存都审计 values），本方法只做只读视图——回答
-  // 「谁在什么时候改了什么」。只记 DB/页面值（审计 data 即 patch），进程级环境变量不混入。
-  // 不做一键恢复：审计行是增量 patch 非全量快照，恢复语义 = 用户按历史行手动重存
-  // （B2 的 revision 闸会拦下并发覆盖）。
-  settingsHistoryView(limit = 30) {
-    const rows = this.store.all(
-      `SELECT actor_type, actor_id, action, target_id, data_json, created_at FROM audit_log
-       WHERE action IN ('settings.update', 'prompt_segment.update', 'prompt_segment.reset')
-       ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-      Math.max(1, Math.min(100, Number(limit) || 30)),
-    )
-    return rows.map(row => {
-      // 旧格式归一（DSHBOTS-338）：settings.update 六参审计缺陷修复前的存量行 data 是
-      // 字符串/数组等非平面对象——归一为 null（UI 显「旧格式无字段明细」），不再把
-      // Object.keys('global') 拆成 0、1、2、3、4、5 这类乱码键。
-      const parsed = jsonParse(row.data_json, null)
-      const data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
-      // prompt_segment 行的 data 只记字符数（不重复存正文），变更键用段键（target_id）呈现。
-      const keys = row.action.startsWith('prompt_segment.')
-        ? [row.target_id]
-        : Object.keys(data ?? {})
-      return {
-        at: row.created_at,
-        actor: `${row.actor_type}:${row.actor_id}`,
-        action: row.action,
-        target: row.target_id,
-        keys,
-        data,
-      }
-    })
-  },
   settingsView() {
     const keys = [
       'budget_currency', 'global_token_budget', 'global_cost_budget',
@@ -346,7 +314,8 @@ export const coreMethods = {
     return this.settingsView()
   },
 
-  // 可编辑提示词段（B1/DSHBOTS-324）：只读视图。defaultChanged = 覆盖保存时的内置默认  // 指纹与当前默认不一致（升级改了默认文本），UI 据此给「保留我的文本 / 恢复新默认」取舍。
+  // 可编辑提示词段（B1/DSHBOTS-324）：只读视图。defaultChanged = 覆盖保存时的内置默认
+  // 指纹与当前默认不一致（升级改了默认文本），UI 据此给「保留我的文本 / 恢复新默认」取舍。
   promptSegmentsView() {
     const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
     return Object.entries(PROMPT_SEGMENT_DEFAULTS).map(([key, defaultText]) => {

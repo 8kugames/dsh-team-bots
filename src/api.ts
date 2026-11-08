@@ -16,7 +16,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'question_answer', 'questions_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
-  'settings', 'update_settings', 'update_prompt_segment', 'settings_history', 'outbox_retry', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
+  'settings', 'update_settings', 'update_prompt_segment', 'outbox_retry', 'export_usage_csv', 'usage_window', 'reconcile_usage', 'outbox',
   'dsh_update_info', 'upgrade_dsh', 'reboot_dsh',
   'wechat_status', 'wechat_login', 'wechat_code', 'wechat_logout', 'notify_receipts', 'wechat_triggers', 'external_triggers',
   'run_command', 'cancel_command', 'terminal_state',
@@ -191,9 +191,6 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'update_settings':
       // B2/DSHBOTS-325：UI 携带读取时的 settings_revision，不匹配即 409（乐观并发）。
       return service.updateSettings(payload.patch ?? payload, actor, payload.revision)
-    case 'settings_history':
-      // 设置变更历史（A4/DSHBOTS-330）：audit_log 只读视图。
-      return service.settingsHistoryView(Number(payload.limit) || 30)
     case 'update_prompt_segment':
       // 可编辑提示词段（B1/DSHBOTS-324）：空文本=恢复默认；保存经预算校验并审计。
       return service.updatePromptSegment(required(payload.segment, 'segment'), String(payload.text ?? ''), actor)

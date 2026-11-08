@@ -262,61 +262,6 @@ function renderPromptSegmentsCard() {
 
 // 设置变更历史（A4/DSHBOTS-330）：audit_log 只读视图的呈现——回答「谁在什么时候改了什么」。
 // 只回看不代恢复：历史行是增量 patch，恢复语义 = 按行内值手动重存（revision 闸兜并发）。
-// 设置键中文名（DSHBOTS-338）：历史行显示「字段中文名: 值」而非英文键；未登记键回退原键。
-const SETTING_KEY_LABEL_KEYS = {
-  budget_currency: 'settingsKey.budget_currency',
-  memory_review: 'settingsKey.memory_review',
-  global_token_budget: 'settingsKey.global_token_budget',
-  global_cost_budget: 'settingsKey.global_cost_budget',
-  retention_usage_days: 'settingsKey.retention_usage_days',
-  retention_run_event_days: 'settingsKey.retention_run_event_days',
-  retention_message_days: 'settingsKey.retention_message_days',
-  run_timeout_minutes: 'settingsKey.run_timeout_minutes',
-  stall_watchdog_minutes: 'settingsKey.stall_watchdog_minutes',
-  approval_timeout_minutes: 'settingsKey.approval_timeout_minutes',
-  question_timeout_minutes: 'settingsKey.question_timeout_minutes',
-  review_idle_minutes: 'settingsKey.review_idle_minutes',
-  review_auto_close: 'settingsKey.review_auto_close',
-  review_idle_escalate_multiple: 'settingsKey.review_idle_escalate_multiple',
-  ui_language: 'settingsKey.ui_language',
-}
-function historyActorLabel(actor) {
-  // user:user_local = 工作台本地用户（你）；bot:<id> 显示 bot 名；其余原样。
-  const [type, id] = String(actor ?? '').split(':')
-  if (type === 'user') return id === 'user_local' ? t('global.historyActorYou') : `${t('global.historyActorUser')} ${id ?? ''}`.trim()
-  if (type === 'bot') return botById(id)?.name ?? actor
-  return String(actor ?? '')
-}
-function historyChangeLabel(item) {
-  // 旧格式行（六参审计缺陷修复前的存量）：不显示乱码键，如实注明无字段明细。
-  if (!item.keys.length) return t('global.historyLegacy')
-  return item.keys.map((key) => {
-    const label = t(SETTING_KEY_LABEL_KEYS[key] ?? `settingsKey.${key}`)
-    const value = item.data && item.data[key] !== undefined ? String(item.data[key]).slice(0, 40) : ''
-    return value ? `${label}: ${value}` : label
-  }).join(t('global.historySep'))
-}
-function renderSettingsHistoryCard() {
-  const history = state.data.settingsHistory ?? []
-  const actionLabel = (action) => action === 'settings.update'
-    ? t('global.historyActionSettings')
-    : action === 'prompt_segment.update' ? t('global.historyActionSegment') : t('global.historyActionSegmentReset')
-  return `
-    <div class="card form-card g-card">
-      <div class="card-head"><h3>${t('global.historyTitle')}</h3><span class="meta">${t('global.historyMeta', { count: history.length })}</span></div>
-      ${history.length === 0 ? `<div class="hint">${t('global.historyEmpty')}</div>` : `
-      <div class="g-fields">
-        ${history.slice(0, 10).map(item => `
-          <div class="field">
-            <span class="field-label mono">${attr(item.at.replace('T', ' ').slice(0, 19))}</span>
-            <div class="hint">${esc(actionLabel(item.action))} · ${esc(historyActorLabel(item.actor))} · ${esc(historyChangeLabel(item))}</div>
-          </div>`).join('')}
-      </div>
-      ${history.length > 10 ? `<div class="hint">${t('global.historyMore', { count: history.length - 10 })}</div>` : ''}`}
-      <div class="hint">${t('global.historyHint')}</div>
-    </div>`
-}
-
 function renderOpsCard() {
   const settings = state.data.settings ?? {}
   const currency = settings.budget_currency || 'CNY'
@@ -546,7 +491,7 @@ function renderGlobal() {
       }),
       pageSection({
         index: '02', id: 'g-runtime', title: t('global.groupRuntime'), desc: t('global.groupRuntimeDesc'),
-        body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}${slot('full', renderSettingsHistoryCard())}`,
+        body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}`,
       }),
       pageSection({
         index: '03', id: 'g-prompts', title: t('global.groupPrompts'), desc: t('global.groupPromptsDesc'),
@@ -560,4 +505,4 @@ function renderGlobal() {
   )
 }
 
-export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderPromptSegmentsCard, renderSettingsHistoryCard, renderSettings, currentScale, renderGlobal }
+export { renderUsageGlobal, renderUsageDomain, renderUsageSolo, renderRunLimitsCard, renderOpsCard, renderPromptSegmentsCard, renderSettings, currentScale, renderGlobal }

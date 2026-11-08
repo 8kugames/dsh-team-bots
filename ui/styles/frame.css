@@ -271,6 +271,28 @@
     flex-direction: column;
     gap: 4px;
 }
+/* 用户需办气泡（DSHBOTS-339）：侧栏「总览bots」上方，问答/提权审批/进化审批三类
+   需用户干预事项的常驻信号；全 0 不渲染。点击复用顶部窄条展开/进化页导航。 */
+.sidebar-bubbles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 4px 2px;
+}
+.sidebar-bubble {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--star-wash);
+    color: var(--ink);
+    font-size: var(--fs-small);
+    cursor: pointer;
+}
+.sidebar-bubble:hover { border-color: var(--line-2); }
+.sidebar-bubble .unread-badge { margin-left: 0; }
 .global-config {
     width: 100%;
     display: flex;

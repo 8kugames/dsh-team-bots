@@ -381,40 +381,6 @@ function approvalBannerView(pendingApprovals) {
 }
 
 
-// ===== attention-banner:start =====
-// needs-attention 顶部收口（A2/DSHBOTS-322）：与审批/提问窄条同构的第三条，Quiet by default
-// ——计数全为 0 且无系统问题时整条不渲染。只列审批/提问两条窄条之外的需要人事项：
-// 待验收/滞留卡跳任务板，投递失败跳全局设置页（outbox 队列在该页可见），通道异常跳通道页。
-// 计数唯一真值是后端 state.needsAttention 聚合（反双真值），本条不重复渲染待审/待答两类。
-function attentionBannerChips(needsAttention) {
-  const needsYou = needsAttention?.needsYou ?? {}
-  const chips = []
-  const reviews = Number(needsYou.reviews ?? 0)
-  if (reviews > 0) chips.push({ label: t('待验收'), count: reviews, view: 'tasks' })
-  const stale = Number(needsYou.stale ?? 0)
-  if (stale > 0) chips.push({ label: t('滞留卡'), count: stale, view: 'tasks' })
-  for (const issue of Array.isArray(needsAttention?.issues) ? needsAttention.issues : []) {
-    if (issue?.kind === 'outbox_failed' && Number(issue.count ?? 0) > 0) {
-      chips.push({ label: t('投递失败'), count: Number(issue.count), view: 'global' })
-    } else if (issue?.kind === 'wechat_channel') {
-      chips.push({ label: t('通道异常'), count: null, view: 'channel' })
-    }
-  }
-  return chips
-}
-function attentionBannerView(needsAttention) {
-  const chips = attentionBannerChips(needsAttention)
-  if (chips.length === 0) return ''
-  return `<div class="attention-banner">
-          <span class="attention-banner-label">${t('需要你处理')}</span>
-          ${chips.map(chip => `
-            <button class="attention-chip" data-action="nav" data-view="${chip.view}">
-              ${esc(chip.label)}${chip.count === null ? '' : `<span class="unread-badge">${approvalBadgeText(chip.count)}</span>`}
-            </button>`).join('')}
-        </div>`
-}
-// ===== attention-banner:end =====
-
 // desktop-notify:start 审批请求桌面通知（DSHBOTS-86，tests/desktop-notify.test.js 抽取此块断言）
 const NOTIFY_KEY = 'dshb:desktop-notify'
 // 会话级基线：上一轮见过的 pending 审批 id（判增量）与已弹过通知的审批 id（每条只弹一次）。
@@ -592,4 +558,19 @@ function renderDirectMessagesCard() {
 }
 
 
-export { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, attentionBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, formatApprovalRemaining, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio }
+// 用户需办气泡（DSHBOTS-339）：侧栏「总览bots」上方，问答/提权审批/进化审批三类需用户
+// 干预事项的常驻信号；全 0 返回空串（Quiet by default）。点击复用顶部审批/提问窄条展开
+// 与进化页导航；总监处理项与运维项不在此弹（分属任务板/全局设置页/通道页）。
+export function sidebarUserNeedsView({ approvals, questions, proposals }) {
+  const items = [
+    { count: Number(approvals ?? 0), label: t('sidebar.bubbleApprovals'), markup: 'data-action="toggle-approvals"' },
+    { count: Number(questions ?? 0), label: t('sidebar.bubbleQuestions'), markup: 'data-action="toggle-questions"' },
+    { count: Number(proposals ?? 0), label: t('sidebar.bubbleProposals'), markup: 'data-action="nav" data-view="evolution"' },
+  ].filter(item => item.count > 0)
+  if (items.length === 0) return ''
+  return `<div class="sidebar-bubbles" role="status" aria-label="${t('sidebar.bubbleAria')}">
+          ${items.map(item => `<button class="sidebar-bubble" ${item.markup}><span>${esc(item.label)}</span><span class="unread-badge">${item.count > 99 ? '99+' : item.count}</span></button>`).join('')}
+        </div>`
+}
+
+export { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, formatApprovalRemaining, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio }

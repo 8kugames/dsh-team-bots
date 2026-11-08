@@ -101,8 +101,6 @@ export const systemMethods = {
       settings: this.settingsView(),
       // 设置页乐观并发令牌（B2/DSHBOTS-325）：UI 保存时随 patch 回传，不匹配即 409。
       settingsRevision: this.settingsRevision(),
-      // 设置变更历史（A4/DSHBOTS-330）：audit_log 只读视图，全局配置页回看「谁改了什么」。
-      settingsHistory: this.settingsHistoryView(),
       // 可编辑提示词段（B1/DSHBOTS-324）：全局配置页「团队指令」分组唯一真值。
       promptSegments: this.promptSegmentsView(),
       runLimits: this.runLimitsView(),
@@ -114,8 +112,6 @@ export const systemMethods = {
       pendingApprovals: this.approvalsPending(),
       // 跨项目待答聚合（DSHBOTS-116）：同口径，提问卡片出现在群聊，顶部入口给全局可见性。
       pendingQuestions: this.questionsPending(),
-      // needs-attention 聚合（A2/DSHBOTS-322）：待验收/滞留卡/系统问题，UI 顶部收口唯一真值。
-      needsAttention: this.needsAttentionView(),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,

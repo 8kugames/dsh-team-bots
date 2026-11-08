@@ -66,6 +66,10 @@ export default {
   "tree.archived": "已归档",
   "tree.archivedEmpty": "没有已归档项目。",
   // 侧栏底部
+  "sidebar.bubbleApprovals": "提权审批",
+  "sidebar.bubbleQuestions": "问答",
+  "sidebar.bubbleProposals": "进化审批",
+  "sidebar.bubbleAria": "需要你处理的事项",
   "sidebar.botsOverview": "总览bots",
   "sidebar.pendingProposals": "有待审批提案",
   "sidebar.usage": "用量统计",
