@@ -195,6 +195,12 @@
     color: var(--ink);
     font-family: var(--mono);
     font-weight: 500;
+    display: inline-block;
+    max-width: min(220px, 50vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
 }
 .wechat-card .wechat-qr {
     flex: 0 0 auto;

@@ -14,7 +14,6 @@ export default {
   "微信通道未启用": "WeChat channel not enabled",
   "微信验证码": "WeChat verification code",
   "扫码后手机上的验证码": "The verification code shown on your phone after scanning",
-  "微信扫码授权 ClawBot；确认后自动绑定授权者为管理员，任务完成主动推送。": "Scan with WeChat to authorize ClawBot; the authorizer is bound as administrator and task completion is pushed proactively.",
   "扫码绑定": "Scan to bind",
   "提交验证码": "Submit code",
   "请输入微信验证码": "Enter the WeChat verification code",

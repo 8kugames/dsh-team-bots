@@ -20,7 +20,7 @@ function wechatCard() {
       <div class="wechat-card-main">
         <div class="wechat-status">
           <span class="pill ${pillClass}">${phaseText[wechat.phase] ?? wechat.phase}</span>
-          ${wechat.adminPeerId ? `<span class="wechat-admin">${t("管理员")} <strong>${esc(String(wechat.adminPeerId).slice(0, 12))}…</strong></span>` : ''}
+          ${wechat.adminPeerId ? `<span class="wechat-admin" title="${attr(wechat.adminPeerId)}">${t("管理员")} <strong>${esc(String(wechat.adminPeerId))}</strong></span>` : ''}
         </div>
         ${wechat.error ? `<div class="hint" style="color:var(--coral,#e5484d)">${esc(wechat.error)}</div>` : ''}
         ${wechat.phase === 'verification' || auth?.verification ? `
@@ -33,7 +33,6 @@ function wechatCard() {
             ? `<button class="btn small danger" type="button" data-action="wechat-logout">${t("退出绑定")}</button>`
             : `<button class="btn small" type="button" data-action="wechat-login">${t("扫码绑定")}</button>`}
         </div>
-        <div class="hint">${t("微信扫码授权 ClawBot；确认后自动绑定授权者为管理员，任务完成主动推送。")}</div>
       </div>
       ${auth?.qrSvg ? `<div class="wechat-qr">${auth.qrSvg}</div>` : ''}
     </div>`
