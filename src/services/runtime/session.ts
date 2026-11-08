@@ -628,6 +628,18 @@ export const sessionMethods = {
         if (!rolledOver) {
           this.applyFilePolicy(resolved, bot, run, task)
           applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+          // 存量坏显示名自愈：旧实现 slice(0,8) 把后缀截成字面量 session-，复用分支
+          // 遇到该已知坏值时重写为正确后缀；其他值（用户手工命名等）一律不动。
+          if (this.ctx.sessionTitle?.get && this.ctx.sessionTitle?.rename) {
+            const liveSession = resolved?.agent?.session ?? resolved?.session
+            if (liveSession) {
+              try {
+                if (this.ctx.sessionTitle.get(liveSession)?.title === `${bot.name} · session-`) {
+                  this.ctx.sessionTitle.rename(liveSession, `${bot.name} · ${existing.session_id.replace(/^session-/, '').slice(0, 8)}`)
+                }
+              } catch {}
+            }
+          }
           await this.selectModel(existing.session_id, bot, modelOverride)
           // 闲时压缩（DSHBOTS-286）：复用即「仍在承接流量」，跨过窗口且闲时排队总结压缩。
           this.maybeCompactSession({ bot, project, existing, currentRunId: run?.id })
