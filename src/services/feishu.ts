@@ -2,18 +2,102 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.ts 的 defineMethods 调用），
 // 方法体内的 this 与微信域（services/wechat.ts）完全同语义。
 
+import { effectiveFeishuCredentials } from '../config.js'
+import { badRequest } from '../errors.js'
 import { nowIso } from '../util.js'
 import { recordWechatTriggerRow } from './wechat-trigger-schema.js'
 
 /** 项目外导演通道的正文来源标记（对齐微信 WECHAT_SOLO_SOURCE_MARK）：让 director 一眼看出该消息来自飞书管理员。 */
 const FEISHU_SOLO_SOURCE_MARK = '[飞书管理员] '
 
+// 通道页保存的飞书凭据（DSHBOTS-334）：复用项目既有敏感配置存法——secrets 表 +
+// SecretBox 加密，键为 team 级 FEISHU_APP_ID / FEISHU_APP_SECRET。进 secretEntries
+// 后自动过 maskSecretValues，secret 不会漏进任何转录/日志。
+export const FEISHU_CRED_APP_ID = 'FEISHU_APP_ID'
+export const FEISHU_CRED_APP_SECRET = 'FEISHU_APP_SECRET'
+
+/** AppID 展示脱敏：前 8 位 + …（DSHBOTS-334 口径；不足 8 位原样）。 */
+export function maskFeishuAppId(appId) {
+  const raw = String(appId ?? '').trim()
+  return raw.length > 8 ? `${raw.slice(0, 8)}…` : raw
+}
+
 export const feishuMethods = {
 
-  // 飞书状态会进 UI state：channel.ts 的 status() 本就不携带任何凭据类字段。
+  // 飞书状态会进 UI state（system.ts 的 state 轮询直调本方法）：channel.ts 的
+  // status() 不携带任何凭据类字段；这里叠加 credentials 视图（DSHBOTS-334）——
+  // 只带来源与脱敏 AppID，不带 secret 明文。
   feishuStatus() {
-    return this.feishu?.status()
+    const base = this.feishu?.status()
       ?? { phase: 'disabled', enabled: false, error: null, appId: null, botId: null, brand: null, adminOuId: null }
+    return { ...base, credentials: this.feishuCredentialView() }
+  },
+
+  /** 通道页保存的凭据对（SecretBox 解密后）；任一键缺失返回 null。 */
+  feishuSavedCredentials() {
+    const entries = this.secretEntries()
+    const appId = entries.find(item => item.name === FEISHU_CRED_APP_ID)?.value
+    const appSecret = entries.find(item => item.name === FEISHU_CRED_APP_SECRET)?.value
+    return appId && appSecret ? { appId: String(appId), appSecret: String(appSecret) } : null
+  },
+
+  /** 生效凭据（DSHBOTS-334）：通道页保存 > 服务端注入（patch.yml/env）。 */
+  feishuEffectiveCredentials() {
+    return effectiveFeishuCredentials(this.config, () => this.feishuSavedCredentials())
+  },
+
+  /** 凭据视图（通道页用）：来源 + 脱敏 AppID，无 secret 明文。 */
+  feishuCredentialView() {
+    const effective = this.feishuEffectiveCredentials()
+    return {
+      source: effective.source,
+      appIdMasked: effective.appId ? maskFeishuAppId(effective.appId) : null,
+    }
+  },
+
+  /**
+   * 通道页保存飞书凭据（DSHBOTS-334）：secrets 表加密落库（复用 upsertSecret 的
+   * 校验/指纹/审计/缓存失效），保存即触发通道重连。响应只回凭据视图，不回 secret。
+   */
+  async saveFeishuCredentials({ appId, appSecret }: { appId?: string; appSecret?: string } = {}, actor = this.actor()) {
+    const id = String(appId ?? '').trim()
+    const secret = String(appSecret ?? '').trim()
+    if (!id || !secret) throw badRequest('App ID 与 App Secret 都不能为空')
+    for (const [name, value] of [[FEISHU_CRED_APP_ID, id], [FEISHU_CRED_APP_SECRET, secret]] as const) {
+      await this.upsertSecret({ scope: 'team', projectId: null, name, purpose: '飞书通道凭据（通道页配置）', value }, actor)
+    }
+    await this.rebindFeishuChannel()
+    return this.feishuStatus()
+  },
+
+  /**
+   * 通道页清除飞书凭据（DSHBOTS-334）：外科删 secrets 表两行 + 审计 + 触发重连。
+   * 不走 deleteSecret——那个会对全部活动项目执行运行时密钥即焚，与通道凭据无关。
+   */
+  async clearFeishuCredentials(actor = this.actor()) {
+    const removed = []
+    this.store.transaction(() => {
+      for (const name of [FEISHU_CRED_APP_ID, FEISHU_CRED_APP_SECRET]) {
+        const row = this.store.get("SELECT id FROM secrets WHERE scope = 'team' AND name = ?", name)
+        if (!row) continue
+        this.store.run('DELETE FROM secrets WHERE id = ?', row.id)
+        removed.push(name)
+      }
+      if (removed.length > 0) {
+        this.audit(actor, 'settings.update', 'settings', 'feishu_credentials', { cleared: removed })
+      }
+    })
+    this._secretEntries = null
+    await this.rebindFeishuChannel()
+    return this.feishuStatus()
+  },
+
+  /**
+   * 通道重连锚（DSHBOTS-334）：保存/清除凭据后调 channel.rebind()（通道内
+   * stop→按新生效凭据重建传输→start 自检），不依赖宿主 HMR 重载。
+   */
+  async rebindFeishuChannel() {
+    await this.feishu?.rebind?.()
   },
 
   /**

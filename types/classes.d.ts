@@ -191,6 +191,8 @@ declare module '../src/feishu/channel.js' {
     error: string | null
     /** 传输层（进程内官方 SDK，测试注入桩）：botInfo/reply/startEvents/stop。 */
     transport: import('../src/feishu/channel.js').FeishuTransport | null
+    /** 构造时注入的传输桩是测试缝：rebind 保留复用；生产自建传输按新凭据重建。 */
+    injectedTransport: boolean
     batchWindowMs: number
     flushTimer: TimerHandle | null
     flushChain: Promise<unknown>
@@ -259,6 +261,11 @@ declare module '../src/service.js' {
     lastMaintenanceAt: number
     wechat: WechatChannel | null
     feishu: FeishuChannel | null
+    /** 微信通道 store 复用句柄（DSHBOTS-334 启停开关）：unmount 不关库，remount 复用。 */
+    _wechatStore: import('../src/wechat/store.js').WechatStore | null
+    /** SecretBox 缓存（services/secrets.js ensureSecretBox）。 */
+    _secretBox: unknown
+    _secretEntries: { name: string; value: string; scope: string; projectId: string | null }[] | null
     /** GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产 null=真实 gh CLI，测试注入桩。 */
     githubRunner: ((args: string[]) => Promise<string> | string) | null
     terminalActive: Map<string, unknown>

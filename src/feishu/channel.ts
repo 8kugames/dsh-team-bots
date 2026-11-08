@@ -234,7 +234,8 @@ export async function createSdkTransport({ appId, appSecret, log = console as un
  * 架构：传输层=进程内 @larksuiteoapi/node-sdk（WSClient 长连接收事件 +
  * im.v1.message.reply 出站，uuid 幂等），入站模型（LRU 去重/TOFU 认主/群@门禁/
  * lane 编码/generation 门禁）与传输无关，原样保留。
- * 凭据：AppID/Secret 由配置注入（cordis.patch.yml 或 env），secret 不落库不进日志。
+ * 凭据生效优先级（DSHBOTS-334）：通道页保存（secrets 表 SecretBox 加密）> 服务端
+ * 注入（cordis.patch.yml / env）；secret 明文只在内存交给 SDK，日志/状态一律不回显。
  */
 export class FeishuChannel {
   constructor({ store, config, log: logger = console as unknown as DshLogger, batchWindowMs = OUTBOX_BATCH_WINDOW_MS, transport = null }) {
@@ -246,6 +247,8 @@ export class FeishuChannel {
     this.error = null
     /** 传输层（测试注入桩）；缺省按凭据创建进程内 SDK 传输。 */
     this.transport = transport
+    /** 构造时注入的传输桩是测试缝：rebind 不丢弃（生产自建传输才会按新凭据重建）。 */
+    this.injectedTransport = Boolean(transport)
     this.batchWindowMs = batchWindowMs
     this.flushTimer = null
     /** flushOutbox 串行化链：并发 flush 会重复读取同一批 pending 造成重复发送。 */
@@ -269,18 +272,53 @@ export class FeishuChannel {
   }
 
   /**
+   * phase 迁移（DSHBOTS-334 日志去噪）：置相位并返回是否发生变化（相位或错误文案
+   * 任一变动）。调用方只在变化时打日志——宿主 HMR 反复重载/重连轮次里同一状态
+   * 不再刷屏；重新进入（如 ready→unbound）仍会各打一次。
+   */
+  setPhase(phase, error = this.error) {
+    const changed = this.phase !== phase || this.error !== error
+    this.phase = phase
+    this.error = error
+    return changed
+  }
+
+  /**
+   * 生效凭据（DSHBOTS-334）：通道页保存（secrets 表）> 服务端注入（patch.yml/env）。
+   * 解析收敛在 service.feishuEffectiveCredentials；无 service（单测桩）时回退 config。
+   */
+  resolveCredentials() {
+    const viaService = this.service?.feishuEffectiveCredentials?.()
+    if (viaService) return viaService
+    return {
+      appId: String(this.config.feishu?.appId ?? '').trim(),
+      appSecret: String(this.config.feishu?.appSecret ?? '').trim(),
+    }
+  }
+
+  /**
+   * 重绑（凭据变更后，DSHBOTS-334）：断开旧传输，按当前生效凭据重走启动自检。
+   * 生产路径 this.transport=null 强制按新凭据重建 SDK 传输；测试注入桩保留复用。
+   */
+  async rebind() {
+    await this.stop()
+    if (!this.injectedTransport) this.transport = null
+    await this.start()
+  }
+
+  /**
    * 启动：凭据齐备即连（开关+凭据=开箱即用）——先用 bot/v3/info 自检身份，
    * 再起 WSClient 长连接。任一步失败：phase='unbound' + error 留痕，绝不抛出。
    */
   async start() {
     if (!this.enabled()) return
     this.store.purgeSentOutbox?.(OUTBOX_RETENTION_DAYS)
-    const appId = String(this.config.feishu?.appId ?? '').trim()
-    const appSecret = String(this.config.feishu?.appSecret ?? '').trim()
+    // 重连前先换新中止器：stop() 已 abort 旧信号，旧连接轮次的事件按旧信号丢弃。
+    this.consumeAbort = new AbortController()
+    const { appId, appSecret } = this.resolveCredentials()
     if (!appId || !appSecret) {
-      this.phase = 'unbound'
-      this.error = '未配置飞书应用凭据（feishuAppId / feishuAppSecret）'
-      this.log.warn?.(`[feishu] ${this.error}`)
+      const message = '未配置飞书应用凭据（feishuAppId / feishuAppSecret）'
+      if (this.setPhase('unbound', message)) this.log.warn?.(`[feishu] ${message}`)
       return
     }
     try {
@@ -291,40 +329,33 @@ export class FeishuChannel {
       // 重新绑定完成：此前的待发堆积一律作废不补发（与微信通道同治理口径）
       const voided = this.store.giveUpAllPending?.() ?? 0
       if (voided > 0) this.log.info?.(`[feishu] 绑定完成，作废此前待发堆积 ${voided} 条（不补发）`)
-      this.phase = 'ready'
-      this.error = null
-      this.log.info?.(`[feishu] 绑定完成 app=${bot.appId ?? appId} bot=${bot.botId}`)
+      if (this.setPhase('ready', null)) this.log.info?.(`[feishu] 绑定完成 app=${bot.appId ?? appId} bot=${bot.botId}`)
       await transport.startEvents({
         onEvent: payload => this.onEvent(payload),
         onReady: () => {
           // 每次（重）连接就绪即换代 generation：旧连接轮次里未完成的事件整体丢弃
           this.consumeGeneration += 1
-          if (this.phase !== 'conflict') {
-            this.phase = 'ready'
-            this.error = null
+          if (this.phase !== 'conflict' && this.setPhase('ready', null)) {
+            this.log.info?.('[feishu] 长连接已就绪')
           }
-          this.log.info?.('[feishu] 长连接已就绪')
         },
         onError: error => this.onTransportError(error),
       })
     } catch (error) {
-      this.phase = 'unbound'
-      this.error = this.errorText(error)
-      this.log.warn?.(`[feishu] 绑定失败，通道未绑定（不 crash）: ${this.error}`)
+      const message = this.errorText(error)
+      if (this.setPhase('unbound', message)) this.log.warn?.(`[feishu] 绑定失败，通道未绑定（不 crash）: ${message}`)
     }
   }
 
   /** 长连接异常：连接数冲突（1000040350）是确定性冲突，置 conflict；其余按重连中处理。 */
   onTransportError(error) {
     if (isConnLimit(error)) {
-      this.phase = 'conflict'
-      this.error = 'exceed_conn_limit（1000040350）：已有其他实例在消费本应用事件'
-      this.log.warn?.(`[feishu] ${this.error}`)
+      const message = 'exceed_conn_limit（1000040350）：已有其他实例在消费本应用事件'
+      if (this.setPhase('conflict', message)) this.log.warn?.(`[feishu] ${message}`)
       return
     }
-    this.phase = 'reconnecting'
-    this.error = this.errorText(error)
-    this.log.warn?.(`[feishu] 长连接异常：${this.error}`)
+    const message = this.errorText(error)
+    if (this.setPhase('reconnecting', message)) this.log.warn?.(`[feishu] 长连接异常：${message}`)
   }
 
   async stop() {

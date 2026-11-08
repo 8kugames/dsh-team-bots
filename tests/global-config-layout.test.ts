@@ -162,9 +162,9 @@ test('配置页核心组交互入口完整保留', async () => {
   stopTimers()
 })
 
-test('通道页承载微信通道卡：未启用空态、启用后可绑定', async () => {
+test('通道页承载微信通道卡：停用态出启停开关、启用后可绑定', async () => {
   const empty = await renderPage('global-pages', 'renderChannel')
-  assert.match(empty.html, /<h3>微信通道未启用<\/h3>/, '未启用时应显示空态引导')
+  assert.match(empty.html, /data-action="wechat-toggle" data-next="1"/, '停用态应渲染启用开关（DSHBOTS-334，不再依赖服务端注入）')
   assert.doesNotMatch(empty.html, /g-move-note/, '迁移落地后不再有迁移标注')
   stopTimers()
   const enabled = await renderPage('global-pages', 'renderChannel', { wechat: { enabled: true, phase: 'unbound' } })

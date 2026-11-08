@@ -43,8 +43,8 @@ type TeamActionName =
   | 'sync_skills' | 'skill_detail' | 'toggle_skill' | 'set_skill_binding' | 'rollback_skill'
   | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'update_prompt_segment' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
   | 'dsh_update_info' | 'upgrade_dsh' | 'reboot_dsh'
-  | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout' | 'notify_receipts' | 'wechat_triggers' | 'external_triggers'
-  | 'feishu_status'
+  | 'wechat_status' | 'wechat_login' | 'wechat_code' | 'wechat_logout' | 'set_wechat_channel_enabled' | 'notify_receipts' | 'wechat_triggers' | 'external_triggers'
+  | 'feishu_status' | 'save_feishu_credentials' | 'clear_feishu_credentials'
   | 'run_command' | 'cancel_command' | 'terminal_state'
   | 'list_secrets' | 'upsert_secret' | 'delete_secret' | 'list_secret_requests' | 'approve_secret_request' | 'deny_secret_request'
 
@@ -69,6 +69,9 @@ interface TeamActionPayload {
   window?: UsageWindow
   name?: string
   purpose?: string
+  appId?: string
+  appSecret?: string
+  enabled?: boolean
   scope?: string
   scopeType?: string
   scopeId?: string
@@ -143,6 +146,9 @@ interface TeamConfig {
   taskTimeBudgetMinutes: number
   sessionRolloverTurns: number
   sessionCompactTurns: number
+  // 上下文体积判据（单轮上下文治理 P2）：压缩下限/结转上限 token，0 = 关闭体积判据。
+  sessionCompactCtxTokens: number
+  sessionRolloverCtxTokens: number
   reviewIdleMinutes: number
   uiLanguage: UiLanguage
   chatReplyMaxChars: number

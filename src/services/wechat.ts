@@ -4,6 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { createRequire } from 'node:module'
+import { effectiveWechatEnabled } from '../config.js'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
 import { jsonParse, nowIso } from '../util.js'
@@ -48,6 +49,53 @@ function toChannelError(service, action, error) {
 }
 
 export const wechatMethods = {
+
+  /** 微信通道生效开关（DSHBOTS-334）：通道页 settings 显式值 > patch.yml/env 默认。 */
+  wechatChannelEnabled() {
+    return effectiveWechatEnabled(this.config, key => this.store.setting(key))
+  },
+
+  /**
+   * 通道页启停开关（DSHBOTS-334）：settings 落 '1'/'0' + 审计 + 即时对齐挂载态。
+   * 停用即停推（this.wechat 置 null，channelNotify 不再扇出到微信）；启用按既有
+   * 绑定凭据恢复连接（绑定持久在 wechat-channel.sqlite，stop 不清凭据）。
+   */
+  async setWechatChannelEnabled(enabled, actor = this.actor()) {
+    this.store.setSetting('wechat_channel_enabled', enabled ? '1' : '0')
+    this.audit(actor, 'settings.update', 'settings', 'wechat_channel', { enabled: Boolean(enabled) })
+    await this.applyWechatChannelEnabled()
+    return this.wechatStatus()
+  },
+
+  /** 按生效开关即时对齐通道挂载：关=断开卸载；开=挂载并按既有绑定连接。 */
+  async applyWechatChannelEnabled() {
+    if (!this.wechatChannelEnabled()) {
+      if (!this.wechat) return
+      const channel = this.wechat
+      this.wechat = null
+      try {
+        await channel.stop()
+      } catch (error: any) {
+        this.logger.warn?.(`[wechat] 通道停用清理失败: ${error?.message ?? error}`)
+      }
+      return
+    }
+    if (this.wechat) return
+    const { WechatStore } = await import('../wechat/store.js')
+    const { WechatChannel } = await import('../wechat/channel.js')
+    this._wechatStore ??= await new WechatStore(this.config.wechatDbPath).open()
+    const channel = new WechatChannel({
+      store: this._wechatStore,
+      // 挂载决策已由生效开关做出，通道内 enabled() 门禁按挂载口径放行。
+      config: { ...this.config, wechat: { ...this.config.wechat, enabled: true } },
+      log: this.logger,
+    })
+    channel.setService(this)
+    this.wechat = channel
+    await channel.start().catch(error => {
+      this.logger.warn?.(`[wechat] 通道启动失败: ${error?.message ?? error}`)
+    })
+  },
 
   // 微信状态会进 UI state：凭据类字段一律剥掉，只留 phase/是否登录/管理员等展示信息。
   wechatStatus() {

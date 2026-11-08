@@ -120,7 +120,8 @@ export const coreMethods = {
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,
         nowIso(),
       )
-      if (this.config.wechat?.enabled) {
+      // 挂载决策按生效开关（DSHBOTS-334）：通道页 settings 显式值 > patch.yml/env 默认。
+      if (this.wechatChannelEnabled()) {
         // 微信通道是可选集成，其 vendor 依赖按需加载：缺失或损坏时只降级该通道，
         // 不应让整个插件加载失败、工作台路由全部不可用。
         try {

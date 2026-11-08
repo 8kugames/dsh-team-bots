@@ -1,20 +1,33 @@
 import { state } from './state.js'
 import { icon } from './icons.js'
 import { t } from './i18n.js'
-import { attr, esc, formatTime } from './util.js'
+import { attr, esc, formatTime, toast } from './util.js'
 import { pageHead, pageNav, pageSection, pageShell, refreshAction, slot } from './page-shell.js'
 
-// 微信通道卡（自配置页迁入）：绑定状态、扫码授权、验证码与退出。
+// 微信通道卡（自配置页迁入）：绑定状态、扫码授权、验证码与退出；
+// DSHBOTS-334 加启停开关——停用态渲染开关卡（不再靠服务端注入才能启用）。
 function wechatCard() {
   const wechat = state.data.wechat ?? { enabled: false, phase: 'disabled' }
-  if (!wechat.enabled) return ''
   const phaseText = {
     disabled: t("未启用"), unbound: t("未绑定"), connecting: t("连接中"), connected: t("已连接"),
     reconnecting: t("重连中"), needs_reauth: t("凭证失效"), scanning: t("待扫码"),
     verification: t("待输验证码"),
   }
-  const auth = state.wechatAuth
+  // 停用态：只渲染开关卡（无绑定交互），恢复入口常驻。
+  if (!wechat.enabled) {
+    return `
+    <div class="card form-card g-card wechat-card" id="wechat-card">
+      <div class="wechat-status">
+        <span class="pill">${phaseText.disabled}</span>
+      </div>
+      <div class="hint">${t("通道已停用，启用后可扫码绑定管理员微信接收推送。")}</div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn small" type="button" data-action="wechat-toggle" data-next="1">${t("启用通道")}</button>
+      </div>
+    </div>`
+  }
   const pillClass = wechat.phase === 'connected' ? 'green' : ['needs_reauth'].includes(wechat.phase) ? 'amber' : ''
+  const auth = state.wechatAuth
   return `
     <div class="card form-card g-card wechat-card" id="wechat-card">
       <div class="wechat-card-main">
@@ -32,14 +45,21 @@ function wechatCard() {
           ${['connected', 'reconnecting', 'connecting'].includes(wechat.phase)
             ? `<button class="btn small danger" type="button" data-action="wechat-logout">${t("退出绑定")}</button>`
             : `<button class="btn small" type="button" data-action="wechat-login">${t("扫码绑定")}</button>`}
+          <button class="btn small danger" type="button" data-action="wechat-toggle" data-next="0">${t("停用通道")}</button>
         </div>
       </div>
       ${auth?.qrSvg ? `<div class="wechat-qr">${auth.qrSvg}</div>` : ''}
     </div>`
 }
 
-// 飞书通道卡（只读状态，DSHBOTS-327）：绑定态、管理员 ou_id 与机器人元信息。
-// 飞书没有扫码流程：凭据（AppID/Secret）在服务端配置注入，UI 只读状态，不给绑定按钮。
+// 飞书通道卡（DSHBOTS-334 改可交互）：未绑定态给 AppID/AppSecret 输入 + 保存即连；
+// 已配置态显示脱敏 AppID（前 8 位+…）与清除按钮（服务端注入来源无清除）。
+// 飞书无扫码流程：绑定只认应用凭据，生效优先级 = 通道页保存 > 服务端注入。
+const maskAppId = (value) => {
+  const raw = String(value ?? '')
+  return raw.length > 8 ? `${raw.slice(0, 8)}…` : raw
+}
+
 function feishuCard() {
   const feishu = state.data?.feishu ?? { enabled: false, phase: 'disabled' }
   if (!feishu.enabled) return ''
@@ -50,6 +70,7 @@ function feishuCard() {
     reconnecting: t("重连中"), conflict: t("连接冲突"),
   }
   const pillClass = ['ready', 'connected'].includes(feishu.phase) ? 'green' : feishu.phase === 'conflict' ? 'amber' : ''
+  const creds = feishu.credentials ?? { source: 'none', appIdMasked: null }
   return `
     <div class="card form-card g-card feishu-card" id="feishu-card">
       <div class="feishu-status">
@@ -58,10 +79,27 @@ function feishuCard() {
       </div>
       ${feishu.phase === 'conflict' ? `<div class="hint feishu-conflict">${t("检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。")}</div>` : ''}
       ${feishu.error ? `<div class="hint feishu-error">${esc(feishu.error)}</div>` : ''}
-      ${feishu.phase === 'unbound' ? `<div class="hint">${t("未配置飞书应用凭据（feishuAppId / feishuAppSecret），配置后自动连接。")}</div>` : ''}
+      ${feishu.phase === 'unbound' ? `
+        <form data-form="feishu-credentials">
+          <div class="field-row">
+            <div class="field"><label for="feishu-app-id">${t("App ID")}</label><input class="input mono" id="feishu-app-id" name="appId" autocomplete="off" placeholder="${t("飞书应用的 App ID")}"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label for="feishu-app-secret">${t("App Secret")}</label><input class="input mono" id="feishu-app-secret" name="appSecret" type="password" autocomplete="new-password" placeholder="${t("保存后不再回显")}"></div>
+          </div>
+          <div class="btn-row"><button class="btn small" type="submit">${t("保存并连接")}</button></div>
+        </form>` : ''}
+      ${feishu.phase !== 'unbound' && creds.source !== 'none' ? `
+        <div class="feishu-status feishu-cred">
+          <span class="pill">${t("凭据已配置")}</span>
+          <span class="mono">${esc(String(creds.appIdMasked ?? ''))}</span>
+          ${creds.source === 'saved'
+            ? `<button class="btn small danger" type="button" data-action="feishu-clear-credentials">${t("清除凭据")}</button>`
+            : `<span class="faint">${t("服务端注入")}</span>`}
+        </div>` : ''}
       <div class="feishu-meta">
         ${feishu.botId ? `<span>${t("机器人 ID")} <span class="mono">${esc(String(feishu.botId))}</span></span>` : ''}
-        ${feishu.appId ? `<span>${t("App ID")} <span class="mono">${esc(String(feishu.appId))}</span></span>` : ''}
+        ${feishu.appId ? `<span>${t("App ID")} <span class="mono">${esc(maskAppId(feishu.appId))}</span></span>` : ''}
       </div>
     </div>`
 }
@@ -147,9 +185,10 @@ export function renderChannel() {
     [
       pageSection({
         index: '01', id: 'c-wechat', title: t('channel.sectionWechat'), desc: t('channel.sectionWechatDesc'),
-        body: slot('full', card || `<div class="card"><div class="empty-state" style="border:0"><div class="empty-symbol">${icon('message')}</div><h3>${t("微信通道未启用")}</h3><p>${t("在服务端启用 wechat 通道后，这里会出现扫码绑定入口。")}</p></div></div>`),
+        // 停用态也渲染开关卡（DSHBOTS-334）：启停入口常驻，不再依赖服务端注入。
+        body: slot('full', card),
       }),
-      // 飞书未启用时整段不渲染（不显示死卡）：凭据与连接都在 operator 侧，UI 只读状态。
+      // 飞书未启用时整段不渲染（不显示死卡）；启用后凭据可在卡内配置（DSHBOTS-334）。
       ...(feishu ? [pageSection({
         index: '02', id: 'c-feishu', title: t('channel.sectionFeishu'), desc: t('channel.sectionFeishuDesc'),
         body: slot('full', feishu),
@@ -188,3 +227,57 @@ export function renderSecretsPage() {
     ],
   )
 }
+
+// 飞书凭据交互（DSHBOTS-334）：卡模块内自注册监听（同 events-board 委托先例，不经
+// events-submit/events-click 的通用 switch）。app.js 走动态导入——本模块被单测直接
+// 加载时不必拉起整个应用模块图。
+document.addEventListener('submit', async (event) => {
+  const form = (event.target as any).closest?.('form[data-form="feishu-credentials"]')
+  if (!form) return
+  event.preventDefault()
+  const appId = String(form.querySelector?.('[name="appId"]')?.value ?? '').trim()
+  const appSecret = String(form.querySelector?.('[name="appSecret"]')?.value ?? '').trim()
+  try {
+    if (!appId || !appSecret) throw new Error(t("请输入 App ID 与 App Secret"))
+    const { api } = await import('./api.js')
+    await api('save_feishu_credentials', { appId, appSecret }, { quiet: true })
+    const { refresh } = await import('../app.js')
+    await refresh({ quiet: true })
+    toast(t("飞书凭据已保存，正在重连"), 'success')
+  } catch (error) {
+    toast((error as Error)?.message || String(error), 'error')
+  }
+})
+
+document.addEventListener('click', async (event) => {
+  const target = (event.target as any).closest?.('[data-action="feishu-clear-credentials"]')
+  if (!target) return
+  if (!globalThis.confirm?.(t("清除后飞书通道将断开并回到未绑定。确认清除？"))) return
+  try {
+    const { api } = await import('./api.js')
+    await api('clear_feishu_credentials', {}, { quiet: true })
+    const { refresh } = await import('../app.js')
+    await refresh({ quiet: true })
+    toast(t("已清除飞书凭据，通道回到未绑定"), 'success')
+  } catch (error) {
+    toast((error as Error)?.message || String(error), 'error')
+  }
+})
+
+// 微信通道启停开关（DSHBOTS-334）：切换即调 set_wechat_channel_enabled（服务端
+// 即时 mount/unmount），停用前确认。
+document.addEventListener('click', async (event) => {
+  const target = (event.target as any).closest?.('[data-action="wechat-toggle"]')
+  if (!target) return
+  const next = target.dataset?.next === '1'
+  if (!next && !globalThis.confirm?.(t("停用后微信通道立即断开且不再推送。确认停用？"))) return
+  try {
+    const { api } = await import('./api.js')
+    await api('set_wechat_channel_enabled', { enabled: next }, { quiet: true })
+    const { refresh } = await import('../app.js')
+    await refresh({ quiet: true })
+    toast(next ? t("微信通道已启用") : t("微信通道已停用"), 'success')
+  } catch (error) {
+    toast((error as Error)?.message || String(error), 'error')
+  }
+})

@@ -91,10 +91,11 @@ test('① 禁用态：飞书未启用时整卡与整个分组都不渲染（不�
   assert.doesNotMatch(missing, /feishu-card/, 'state 里没有 feishu 字段时同样不渲染飞书卡')
 })
 
-test('② 启用 + ready：显示相位 pill、管理员 ou_id 与 bot/appId 元信息', async () => {
+test('② 启用 + ready：相位/管理员/元信息，AppID 脱敏、settings 来源出清除按钮', async () => {
   const html = await renderChannel({
     enabled: true, phase: 'ready', error: null,
-    adminOuId: 'ou_admin_1234567890', botId: 'ou_bot_9876543210', appId: 'cli_a1b2c3d4',
+    adminOuId: 'ou_admin_1234567890', botId: 'ou_bot_9876543210', appId: 'cli_a1b2c3d4e5f6',
+    credentials: { source: 'saved', appIdMasked: 'cli_a1b2…' },
   })
   assert.match(html, /id="feishu-card"/, '启用后应渲染飞书卡')
   assert.match(html, /class="pill green">已连接<\/span>/, 'ready 相位应显示绿色「已连接」pill')
@@ -102,9 +103,12 @@ test('② 启用 + ready：显示相位 pill、管理员 ou_id 与 bot/appId 元
   assert.match(html, /ou_admin_1234567890/, '管理员 ou_id 应显示')
   assert.match(html, /机器人 ID/, '应有机器人 ID 元信息')
   assert.match(html, /ou_bot_9876543210/, '机器人 ID 值应显示')
-  assert.match(html, /App ID/, '应有 App ID 元信息')
-  assert.match(html, /cli_a1b2c3d4/, 'App ID 值应显示')
-  assert.doesNotMatch(html, /data-action="feishu-/, '飞书卡是只读状态卡，不应有任何操作按钮')
+  assert.match(html, /cli_a1b2…/, 'AppID 应脱敏显示（前 8 位+…）')
+  assert.doesNotMatch(html, /cli_a1b2c3d4e5f6/, '卡内不得回显完整 AppID')
+  assert.doesNotMatch(html, /name="appId"/, '非未绑定态不应渲染凭据输入表单')
+  assert.match(html, /凭据已配置/, '已配置来源应显示凭据态')
+  assert.match(html, /data-action="feishu-clear-credentials"/, 'settings 来源已配置应显示清除按钮')
+  assert.doesNotMatch(html, /二维码|扫码绑定/, '飞书无扫码流程，卡内不应出现扫码入口')
 })
 
 test('②b 相位别名：connected 与 ready 同义，都渲染「已连接」绿 pill', async () => {
@@ -112,14 +116,24 @@ test('②b 相位别名：connected 与 ready 同义，都渲染「已连接」�
   assert.match(html, /class="pill green">已连接<\/span>/, 'connected 相位应渲染绿色「已连接」')
 })
 
-test('③ unbound / conflict：未绑定给配置提示，冲突相出 amber 警示', async () => {
-  const unbound = await renderChannel({ enabled: true, phase: 'unbound', error: '未配置飞书应用凭据（feishuAppId / feishuAppSecret）' })
-  assert.match(unbound, /未配置飞书应用凭据（feishuAppId \/ feishuAppSecret），配置后自动连接。/, '未绑定应提示配置应用凭据后自动连接')
+test('②c 服务端注入来源：显示凭据态但无清除按钮（凭据归 operator 侧）', async () => {
+  const html = await renderChannel({
+    enabled: true, phase: 'ready', credentials: { source: 'config', appIdMasked: 'cli_conf…' },
+  })
+  assert.match(html, /凭据已配置/, '注入来源同样显示已配置态')
+  assert.match(html, /cli_conf…/, '注入来源显示脱敏 AppID')
+  assert.match(html, /服务端注入/, '注入来源应标注来源')
+  assert.doesNotMatch(html, /feishu-clear-credentials/, '注入来源不提供清除按钮')
+})
+
+test('③ unbound / conflict：未绑定出凭据表单（secret 密码框），冲突相出 amber 警示', async () => {
+  const unbound = await renderChannel({ enabled: true, phase: 'unbound', error: '未配置飞书应用凭据（feishuAppId / feishuAppSecret）', credentials: { source: 'none', appIdMasked: null } })
+  assert.match(unbound, /data-form="feishu-credentials"/, '未绑定应渲染凭据表单（DSHBOTS-334）')
+  assert.match(unbound, /name="appId"/, '表单应有 AppID 输入')
+  assert.match(unbound, /name="appSecret" type="password"/, 'AppSecret 输入应为密码框（不回显）')
+  assert.match(unbound, /type="submit"/, '表单应有保存按钮')
+  assert.match(unbound, /未配置飞书应用凭据（feishuAppId \/ feishuAppSecret）/, '未绑定错误文案应显示')
   assert.doesNotMatch(unbound, /lark-cli/, '飞书卡不得再提 lark-cli')
-  const card = /<div class="card form-card g-card feishu-card"[\s\S]*?<\/div>\s*<\/div>/.exec(unbound)?.[0] ?? ''
-  assert.ok(card, '未绑定态应渲染飞书卡')
-  assert.doesNotMatch(card, /data-action=/, '飞书卡只读，不应有任何操作按钮（凭据归 operator 侧）')
-  assert.doesNotMatch(card, /二维码|扫码绑定/, '飞书无扫码流程，卡内不应出现扫码入口')
 
   const conflict = await renderChannel({ enabled: true, phase: 'conflict', error: 'exceed_conn_limit（1000040350）：已有其他实例在消费本应用事件' })
   assert.match(conflict, /class="pill amber">连接冲突<\/span>/, 'conflict 相位应显示 amber「连接冲突」pill')
@@ -129,7 +143,7 @@ test('③ unbound / conflict：未绑定给配置提示，冲突相出 amber 警
 
 test('④ i18n：飞书词条 zh/en 齐平、调用点均已注册、无死键', () => {
   const source = readFileSync(join(root, 'ui/modules/global-pages.js'), 'utf8')
-  const keys = ['channel.sectionFeishu', 'channel.sectionFeishuDesc', '连接冲突', '未配置飞书应用凭据（feishuAppId / feishuAppSecret），配置后自动连接。', '检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。', '机器人 ID', 'App ID']
+  const keys = ['channel.sectionFeishu', 'channel.sectionFeishuDesc', '连接冲突', 'App Secret', '保存并连接', '凭据已配置', '清除凭据', '服务端注入', '检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。', '机器人 ID', 'App ID']
   for (const key of keys) {
     assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `zh 缺键：${key}`)
     assert.ok(Object.prototype.hasOwnProperty.call(en, key), `en 缺键：${key}`)
@@ -140,11 +154,15 @@ test('④ i18n：飞书词条 zh/en 齐平、调用点均已注册、无死键',
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort(), 'zh/en 键集必须一致')
 })
 
-test('⑤ api：feishu_status 动作在白名单与类型契约里齐平', () => {
+test('⑤ api：feishu 动作在白名单与类型契约里齐平（含凭据保存/清除）', () => {
   const apiSource = readFileSync(join(root, 'src/api.js'), 'utf8')
   assert.match(apiSource, /'feishu_status'/, 'api 动作白名单应含 feishu_status')
   assert.match(apiSource, /case 'feishu_status':/, 'api 应有 feishu_status 分支')
   assert.match(apiSource, /service\.feishuStatus\(\)/, 'feishu_status 应回 service.feishuStatus()')
+  assert.match(apiSource, /'save_feishu_credentials'/, 'api 动作白名单应含 save_feishu_credentials')
+  assert.match(apiSource, /case 'save_feishu_credentials':/, 'api 应有 save_feishu_credentials 分支')
+  assert.match(apiSource, /'clear_feishu_credentials'/, 'api 动作白名单应含 clear_feishu_credentials')
+  assert.match(apiSource, /case 'clear_feishu_credentials':/, 'api 应有 clear_feishu_credentials 分支')
   const contracts = readFileSync(join(root, 'types/contracts.d.ts'), 'utf8')
-  assert.match(contracts, /'feishu_status'/, 'TeamActionName 联合应含 feishu_status')
+  assert.match(contracts, /'feishu_status' \| 'save_feishu_credentials' \| 'clear_feishu_credentials'/, 'TeamActionName 联合应含三个飞书动作')
 })

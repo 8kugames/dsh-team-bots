@@ -222,6 +222,37 @@ export function effectiveUiLanguage(config, getSetting: (key: string) => unknown
   return envValue ?? saved ?? config.uiLanguage
 }
 
+// ── 微信通道开关生效值（DSHBOTS-334）────────────────────────────────────────
+// 通道页启停开关的 settings 键：'1'/'0' 为显式覆盖；未保存（空）回退服务端
+// 注入默认（cordis.patch.yml / env，保留为初始默认）。消费点：core 挂载决策与
+// services/wechat 的即时 mount/unmount（applyWechatChannelEnabled）。
+export const WECHAT_CHANNEL_ENABLED_KEY = 'wechat_channel_enabled'
+export function effectiveWechatEnabled(config, getSetting: (key: string) => unknown = () => null) {
+  const saved = String(getSetting(WECHAT_CHANNEL_ENABLED_KEY) ?? '').trim()
+  if (saved === '1') return true
+  if (saved === '0') return false
+  return Boolean(config.wechat?.enabled)
+}
+
+// ── 飞书凭据生效值（DSHBOTS-334）────────────────────────────────────────────
+// 优先级：通道页保存（secrets 表加密的 AppID/Secret 对）> 服务端注入
+// （cordis.patch.yml / env，即 config.feishu）。凭据成对生效：保存对不完整
+// 不得与注入对混拼；两边都没有 = 不生效（通道保持 unbound 不连）。
+// savedGetter 由 services/feishu.ts 提供（读 SecretBox 解密后的两键）。
+export function effectiveFeishuCredentials(config, savedGetter: () => { appId?: unknown; appSecret?: unknown } | null = () => null) {
+  const savedAppId = String(savedGetter()?.appId ?? '').trim()
+  const savedSecret = String(savedGetter()?.appSecret ?? '').trim()
+  if (savedAppId && savedSecret) {
+    return { appId: savedAppId, appSecret: savedSecret, source: 'saved' as const }
+  }
+  const configAppId = String(config.feishu?.appId ?? '').trim()
+  const configSecret = String(config.feishu?.appSecret ?? '').trim()
+  if (configAppId && configSecret) {
+    return { appId: configAppId, appSecret: configSecret, source: 'config' as const }
+  }
+  return { appId: '', appSecret: '', source: 'none' as const }
+}
+
 export function resolveConfig(config: Partial<TeamConfig> = {}) {
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
   const workspace = resolve(config.workspace || defaultWorkspace())
@@ -244,8 +275,9 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
       enabled: bool(config.wechatEnabled ?? process.env.DSH_TEAM_WECHAT, false),
     },
     // 飞书机器人通道（DSHBOTS-333）：默认关闭，DSH_BOTS_FEISHU=1 开启。
-    // 传输层为进程内官方 SDK（@larksuiteoapi/node-sdk）：凭据 AppID/Secret 注入即连，
-    // secret 只在内存里交给 SDK，不落库不落日志。
+    // 传输层为进程内官方 SDK（@larksuiteoapi/node-sdk）：凭据 AppID/Secret 注入即连。
+    // 这里只是「服务端注入」兜底来源（cordis.patch.yml / env）；生效优先级见
+    // effectiveFeishuCredentials（DSHBOTS-334：通道页保存的凭据优先）。
     feishu: {
       enabled: bool(config.feishuEnabled ?? process.env.DSH_BOTS_FEISHU, false),
       appId: String(config.feishuAppId ?? process.env.DSH_BOTS_FEISHU_APP_ID ?? '').trim(),
