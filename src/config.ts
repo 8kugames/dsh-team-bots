@@ -146,6 +146,14 @@ export function effectiveTaskTimeBudgetMinutes(config, getSetting: (key: string)
   return !env && stallMinutes > 0 ? stallMinutes : config.taskTimeBudgetMinutes
 }
 
+// 派单预算优先级分档（DSHBOTS-325）：派单路径（assignFromBot 建卡/重派）漏传
+// time_budget_minutes 时的卡级兜底档，按卡 priority 分档落库；显式值永远优先。
+// 与全局缺省链（effectiveTaskTimeBudgetMinutes）分工：本表只管派单路径，不经派单
+// 的直建卡仍走全局链。无效 priority 与 createTask 同口径回退 medium 档。
+export const PRIORITY_BUDGET_MINUTES: Record<string, number> = {
+  urgent: 45, high: 45, medium: 30, low: 15, none: 15,
+}
+
 // 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > settings 表
 // 保存值 > 默认 512（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 会话复用检查，
 // DSHBOTS-289 起为 ensureBotBinding 复用分支）每次现算，改值对下一次会话复用生效。

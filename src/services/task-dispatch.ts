@@ -7,6 +7,8 @@
 
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { nowIso } from '../util.js'
+import { PRIORITY_BUDGET_MINUTES } from '../config.js'
+import { TASK_PRIORITIES } from './tasks.js'
 import { filterIgnoredWriteScopes, parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
 import { resolveSandboxOverride } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
@@ -22,6 +24,12 @@ const RECENT_DONE_WINDOW_MS = 7 * 86_400_000
 // 流程」）——纳入即误伤实施卡，均不含；「红验证/子代理核验/验收核验」等复合词已被「核验」
 // 覆盖。成员卡面自校要求（交付前自跑测试）不含三词，天然不命中。
 export const VERIFICATION_TASK_KEYWORDS = ['核验', '审计', '复核']
+
+// 派单预算优先级分档兜底（DSHBOTS-325）：漏传 time_budget_minutes 时按卡 priority
+// 分档落库（档表 config.PRIORITY_BUDGET_MINUTES）；无效 priority 与 createTask 同
+// 口径回退 medium 档。
+const dispatchBudgetTier = priority =>
+  PRIORITY_BUDGET_MINUTES[TASK_PRIORITIES.has(priority) ? priority : 'medium']
 
 export const taskDispatchMethods = {
   // 派发门禁（DSHBOTS-262）：暂停中的 Bot 不接新卡——新建派单、改派、重派一律拒绝，
@@ -77,7 +85,9 @@ export const taskDispatchMethods = {
   },
   // sandboxOverride 选项（DSHBOTS-156）：undefined=不动（重派未传 sandbox 时保留旧覆盖）；
   // null=显式清掉回落 bot 配置档（重派传 sandbox='inherit'）；字符串=收紧档（派发入口已校验）。
-  async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride } = {} as any) {
+  // timeBudgetFallback 选项（DSHBOTS-325）：派单路径传入的 priority 分档兜底，只用于
+  // 存量 NULL 预算卡补挂；非派单直派不传，沿用全局缺省链（defaultTaskTimeBudget）。
+  async assignTask(taskId, botId, actor = this.actor(), { autoStart = true, sandboxOverride, timeBudgetFallback } = {} as any) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
     this.assertDispatchTarget(project.id, botId)
@@ -105,7 +115,8 @@ export const taskDispatchMethods = {
     ensureTaskSandboxSchema(this.store)
     const sandboxTouched = sandboxOverride !== undefined
     // 存量 NULL 预算卡补挂（DSHBOTS-198）：COALESCE 只补空，显式已设的卡不覆盖。
-    const defaultTimeBudget = this.defaultTaskTimeBudget()
+    // DSHBOTS-325：派单路径传 priority 分档兜底，非派单直派沿用全局缺省链。
+    const defaultTimeBudget = timeBudgetFallback ?? this.defaultTaskTimeBudget()
     this.store.transaction(() => {
       // queued 占位清理与改派同事务（DSHBOTS-169）：SUPERSEDED 不进任务执行历史，run 事件可审计。
       // 助手是同步函数（体内无 await），抛错会让整个事务回滚，不会留下「改派已生效但占位还在」的半成品。
@@ -345,7 +356,13 @@ export const taskDispatchMethods = {
       if (input.description !== undefined) patch.description = input.description
       if (input.priority !== undefined) patch.priority = input.priority
       if (Object.keys(patch).length) await this.updateTask(task.id, patch, actor)
-      const updated = await this.assignTask(task.id, member.id, actor, { autoStart: false, sandboxOverride })
+      // 派单预算优先级分档兜底（DSHBOTS-325）重派路：input.priority 已被 updateTask
+      // 校验（无效即抛，到不了这里），按改后生效优先级取档；COALESCE 只补存量 NULL
+      // 预算卡，已有预算不重算（②）。
+      const updated = await this.assignTask(task.id, member.id, actor, {
+        autoStart: false, sandboxOverride,
+        timeBudgetFallback: dispatchBudgetTier(input.priority ?? task.priority),
+      })
       void this.tick()
       return updated
     }
@@ -391,6 +408,10 @@ export const taskDispatchMethods = {
         description = `${input.description ? `${input.description}\n` : ''}(note: recent done card ${project.key}-${overlap.number} overlaps these scopes — consider merging follow-up corrections into one card)`
       }
     }
+    // 派单预算优先级分档兜底（DSHBOTS-325）建卡路：漏传 time_budget_minutes 时按卡
+    // priority 分档落库，不再落全局缺省值；显式值永远优先（②）。
+    const explicitBudget = input.time_budget_minutes ?? input.timeBudgetMinutes
+    const budgetTier = dispatchBudgetTier(input.priority)
     const task = await this.createTask({
       projectId: project.id,
       title: input.title,
@@ -403,13 +424,28 @@ export const taskDispatchMethods = {
       parentTaskId: input.parent_task_id,
       blockedBy: input.blocked_by,
       // 时效要求（新任务 only）：重派已有任务（上面 input.taskId/input.task 分支）不更新该字段。
-      timeBudgetMinutes: input.time_budget_minutes ?? input.timeBudgetMinutes,
+      // 漏传时按 priority 分档兜底（DSHBOTS-325），档值直接落库。
+      timeBudgetMinutes: explicitBudget ?? budgetTier,
       // 紧急豁免共用车道报备（DSHBOTS-126）：urgent 放行同写范围派单时，创建消息注明与哪张在办卡共用车道。
       laneShareTask: urgentExempt && duplicate ? `${project.key}-${duplicate.number}` : null,
       sandboxOverride,
       autoStart: true,
       postCard: true,
     }, actor)
+    // 「N 分钟档」提示（DSHBOTS-325 ④）：卡面描述写了预算档但与兜底档不一致时回执
+    // 提示一行，仅提示不拦截——确需按描述档执行就显式传 time_budget_minutes。
+    const describedTier = Number(String(input.description ?? '').match(/(\d+)\s*分钟档/)?.[1] ?? 0)
+    if (explicitBudget === undefined || explicitBudget === null) {
+      if (describedTier > 0 && describedTier !== budgetTier) {
+        this.insertMessage({
+          projectId: project.id,
+          senderType: 'system',
+          senderId: 'system',
+          taskId: task.id,
+          body: `任务 ${task.identifier} budget=${budgetTier}（priority 兜底，描述写 ${describedTier} 分钟档）`,
+        })
+      }
+    }
     if (forceDuplicate) {
       this.audit(actor, 'dispatch_force_duplicate', 'task', task.id, {
         writeScopes: scopes,
