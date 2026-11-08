@@ -1,8 +1,11 @@
-// tests/feishu-prompt-context.test.ts —— DSHBOTS-330 守门：通道直达语境提示块按 trigger_type 分流。
+// tests/feishu-prompt-context.test.ts —— DSHBOTS-330/331 守门：通道直达语境提示块按 trigger_type 分流。
 // ① 飞书触发运行注入飞书版语境块（含多轮连续性/建卡派单/ask_user_question 指引，
 //    且不含微信专属的「禁 * #」条款——飞书出站走 messages-reply --markdown，原生 Markdown）；
 // ② 微信块内容逐字零改动；
-// ③ 普通 UI 触发（trigger_type='mention'）两块都不注入。
+// ③ 普通 UI 触发（trigger_type='mention'）两块都不注入；
+// ④ DSHBOTS-331：生产入站走 solo 分支（kind='solo_chat'），语境块要注入到 solo：
+//    飞书 solo 注入（含建卡指引与无 KEY 追问锚点）/ 微信 solo 注入 / mention solo 不注入
+//    且「无项目禁 team_assign_task」禁令仍在。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -27,6 +30,10 @@ This message is from the project owner on WeChat — a real multi-turn conversat
 
 // 微信专属条款（飞书块不得含；mention 块两者都不含）。
 const WECHAT_ONLY_CLAUSE = 'WeChat renders no Markdown'
+// 飞书专属条款（微信 solo 块不得含）。
+const FEISHU_ONLY_CLAUSE = 'Feishu renders Markdown natively'
+// 普通 UI 单聊的禁令（mention 保留）。
+const SOLO_NO_PROJECT_BAN = 'There is no project here: do not use team_assign_task or team_review_task.'
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-feishu-prompt-'))
@@ -102,6 +109,74 @@ test('普通 UI 触发（mention）两块都不注入', async () => {
     assert.doesNotMatch(prompt, /# Feishu direct conversation/, 'mention 不注入飞书块')
     assert.doesNotMatch(prompt, /multi-turn conversation/)
     assert.doesNotMatch(prompt, new RegExp(WECHAT_ONLY_CLAUSE))
+  } finally {
+    await teardown(root, store)
+  }
+})
+
+// DSHBOTS-331：生产入站（微信/飞书直达落 director 专属工作区 solo 会话）走 solo 分支，
+// 语境块必须落在这里——群聊分支那份对真实通道直达是死代码。
+test('飞书 solo 运行注入飞书版语境块：含建卡指引与无 KEY 追问锚点', async () => {
+  const { root, store, runtime, director } = await setup()
+  try {
+    const prompt = runtime.promptFor({
+      run: { kind: 'solo_chat', trigger_type: 'feishu' },
+      bot: director,
+      chatMessage: { id: 'sm-1', body: '帮我把这个需求派下去', sender_type: 'user', sender_id: 'ou-admin' },
+    })
+    assert.match(prompt, /# Feishu direct conversation/, '飞书 solo 语境块在场')
+    assert.match(prompt, /multi-turn conversation/, '多轮连续性指引在场')
+    assert.match(prompt, /team_assign_task/, '建卡派单指引在场')
+    assert.match(prompt, /cards carry the project KEY-N number/, '建卡口径在位（项目 KEY-N 编号）')
+    assert.match(prompt, /carries a project key such as \[项目 ORD\]/, '带 [项目 KEY] 时定向该项目的锚点在场')
+    assert.match(prompt, /carries no key, first ask the owner which project it belongs to/, '无 KEY 先追问落哪个项目的锚点在场')
+    assert.match(prompt, /ask_user_question/, '追问工具指引在场')
+    assert.match(prompt, /Feishu renders Markdown natively/, '按飞书口径写渲染差异')
+    assert.doesNotMatch(prompt, new RegExp(WECHAT_ONLY_CLAUSE), '不含微信专属 Markdown 禁用条款')
+    assert.doesNotMatch(prompt, /never \* or #/, '不含微信专属的禁 * # 条款')
+    assert.doesNotMatch(prompt, /# WeChat direct conversation/, '不注入微信块')
+    assert.doesNotMatch(prompt, new RegExp(SOLO_NO_PROJECT_BAN), '通道来源运行不再带「无项目禁派活」禁令')
+    assert.match(prompt, /arrived from the Feishu channel/, '派活放开的口径在位')
+  } finally {
+    await teardown(root, store)
+  }
+})
+
+test('微信 solo 运行注入微信版语境块', async () => {
+  const { root, store, runtime, director } = await setup()
+  try {
+    const prompt = runtime.promptFor({
+      run: { kind: 'solo_chat', trigger_type: 'wechat' },
+      bot: director,
+      chatMessage: { id: 'sm-2', body: '帮我把这个需求派下去', sender_type: 'user', sender_id: 'wx-admin' },
+    })
+    assert.match(prompt, /# WeChat direct conversation/, '微信 solo 语境块在场')
+    assert.match(prompt, /team_assign_task/, '建卡派单指引在场')
+    assert.match(prompt, /carries a project key such as \[项目 ORD\]/, '带 [项目 KEY] 时定向该项目的锚点在场')
+    assert.match(prompt, /carries no key, first ask the owner which project it belongs to/, '无 KEY 先追问落哪个项目的锚点在场')
+    assert.match(prompt, new RegExp(WECHAT_ONLY_CLAUSE), '按微信口径写渲染差异（禁 * #）')
+    assert.doesNotMatch(prompt, new RegExp(FEISHU_ONLY_CLAUSE), '不含飞书专属渲染条款')
+    assert.doesNotMatch(prompt, /# Feishu direct conversation/, '不注入飞书块')
+    assert.doesNotMatch(prompt, new RegExp(SOLO_NO_PROJECT_BAN), '通道来源运行不再带「无项目禁派活」禁令')
+    assert.match(prompt, /arrived from the WeChat channel/, '派活放开的口径在位')
+  } finally {
+    await teardown(root, store)
+  }
+})
+
+test('普通 UI 单聊（mention）solo 不注入通道块且禁令仍在', async () => {
+  const { root, store, runtime, director } = await setup()
+  try {
+    const prompt = runtime.promptFor({
+      run: { kind: 'solo_chat', trigger_type: 'mention' },
+      bot: director,
+      chatMessage: { id: 'sm-3', body: '帮我看下这个需求', sender_type: 'user', sender_id: 'u-local' },
+    })
+    assert.doesNotMatch(prompt, /# WeChat direct conversation/, 'mention solo 不注入微信块')
+    assert.doesNotMatch(prompt, /# Feishu direct conversation/, 'mention solo 不注入飞书块')
+    assert.doesNotMatch(prompt, /multi-turn conversation/, 'mention solo 无通道语境')
+    assert.doesNotMatch(prompt, /arrived from the /, 'mention solo 无通道来源口径')
+    assert.ok(prompt.includes(SOLO_NO_PROJECT_BAN), 'mention solo 保留「无项目禁派活」禁令')
   } finally {
     await teardown(root, store)
   }

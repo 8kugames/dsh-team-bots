@@ -467,8 +467,25 @@ This conversation has grown long and is now idle. Write a working summary to kee
 - If any durable fact, decision or lesson emerged that is not yet recorded, persist it now with your memory tools (team_remember); everything else stays in this reply only.
 - Do not write files. Reply with the summary text only.`
   },
+  // 通道直达语境块（solo 分支，DSHBOTS-331）：通道来源的单聊运行（微信/飞书直达落
+  // director 专属工作区 solo 会话，run.trigger_type='wechat'/'feishu'）同样需要通道语境。
+  // 与群聊分支（DSHBOTS-215/330）同款结构：多轮连续、渲染口径按通道各写、ask_user_question。
+  // 差异在派活口径：solo 没有项目上下文，群聊块里「在项目会话里建卡」的表述不成立，
+  // 故按 owner 拍板改为——通道来源运行允许 director 用 team_assign_task 跨进项目真建卡，
+  // 正文带 [项目 KEY] 时定向该项目，无 KEY 时先追问落哪个项目再建卡。
+  soloChannelBlock(triggerType) {
+    if (triggerType === 'wechat') return `
+
+# WeChat direct conversation
+This message is from the project owner on WeChat — a real multi-turn conversation, not a one-off command. This solo session is shared across turns, so keep continuity across turns instead of restarting context each time. There is no project context in this solo chat, but this run may still dispatch project work: when the owner asks you to get something done, actually create and assign the card with team_assign_task (cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it — if the message body carries a project key such as [项目 ORD], target that project; if it carries no key, first ask the owner which project it belongs to with ask_user_question (the question opens a card in the workbench and the owner's reply comes back to you), and create the card only after the project is named. Use ask_user_question whenever you need the owner to decide something. WeChat renders no Markdown: use plain text with blank lines and - lists, never * or #.`
+    if (triggerType === 'feishu') return `
+
+# Feishu direct conversation
+This message is from the project owner on Feishu — a real multi-turn conversation, not a one-off command. This solo session is shared across turns, so keep continuity across turns instead of restarting context each time. There is no project context in this solo chat, but this run may still dispatch project work: when the owner asks you to get something done, actually create and assign the card with team_assign_task (cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it — if the message body carries a project key such as [项目 ORD], target that project; if it carries no key, first ask the owner which project it belongs to with ask_user_question (the question opens a card in the workbench and the owner's reply comes back to you), and create the card only after the project is named. Use ask_user_question whenever you need the owner to decide something. Feishu renders Markdown natively: headings, bold and - lists are fine, and * or # are allowed. Your final reply is pushed back into the Feishu thread when the run finishes.`
+    return ''
+  },
   // 单聊运行提示词：没有项目上下文，只带本会话增量新消息。
-  soloRunPrompt({ bot, chatMessage, extraMessages, sessionId }) {
+  soloRunPrompt({ run, bot, chatMessage, extraMessages, sessionId }) {
     const header = [
       `You are: ${bot.name}`,
       'Mode: one-on-one conversation (outside projects)',
@@ -492,9 +509,16 @@ This conversation has grown long and is now idle. Write a working summary to kee
     const recentBlock = context
       ? `${incremental ? 'New messages since your last turn (ids are for team_recall):' : 'Recent conversation (truncated, ids are for team_recall):'}\n${context}`
       : (incremental ? 'No new messages since your last turn.' : 'No recent conversation.')
+    // DSHBOTS-331：通道来源的 solo 运行（微信/飞书直达）按 owner 拍板放开建卡派单——
+    // 单聊的「无项目禁 team_assign_task」禁令只对普通 UI 单聊（trigger_type='mention'）保留。
+    const channelName = run?.trigger_type === 'wechat' ? 'WeChat' : (run?.trigger_type === 'feishu' ? 'Feishu' : '')
+    const noProjectClause = channelName
+      ? `This run arrived from the ${channelName} channel: the usual solo limit (no project here) does not apply to this run, so you may create a project card with team_assign_task. team_review_task still does not apply here: no project card is in context.`
+      : 'There is no project here: do not use team_assign_task or team_review_task.'
+    const channelBlock = this.soloChannelBlock(run?.trigger_type)
     return `${header}
 
-Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. There is no project here: do not use team_assign_task or team_review_task. Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.
+Reply as ${bot.name} in this one-on-one chat. Keep it under ${this.config.chatReplyMaxChars} characters unless the user asked for a full write-up or files. ${noProjectClause} Use team_recall with a m_ id when you need the full text of a truncated item. When the user asks you to produce or store files, work inside the workspace above.${channelBlock}
 
 # Solo message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}${this.mergedMessagesBlock(extraMessages)}${this.rolloverSummaryBlock(bot, null, sessionId)}
