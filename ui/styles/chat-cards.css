@@ -201,7 +201,9 @@
     text-align: left;
 }
 .msg-collapse-row:hover { border-color: var(--line-2); color: var(--ink); }
-.msg-collapse-row > svg { flex: 0 0 auto; }
+/* chevron 图标必须显式约束尺寸：icon() 产出的 svg 只有 viewBox，无 width/height 属性时
+   按 replaced element 默认尺寸（约 300×150）渲染，会把折叠行撑破群聊时间线。 */
+.msg-collapse-row > svg { flex: 0 0 auto; width: 12px; height: 12px; }
 .msg-collapse-last {
     flex: 1 1 auto;
     min-width: 0;

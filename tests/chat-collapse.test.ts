@@ -3,7 +3,8 @@
 // ①纯函数行为——≥3 条连续 system 折叠、<3 原样、非 system 断组、组键按首条 id 跨轮询稳定；
 // ②展开态持久——state.expandedCollapses 命中的组整组原样展开（2.8s 轮询不重开）；
 // ③折叠行不丢信息——计数 + 末条摘要 + toggle 动作在场；
-// ④接线锚——renderChat 走折叠序列、events-click 有 toggle-collapse 分支、i18n 键入典。
+// ④接线锚——renderChat 走折叠序列、events-click 有 toggle-collapse 分支、i18n 键入典；
+// ⑤样式锚——chat-cards.css 的 .msg-collapse-row > svg 规则块内含 width 与 height（防尺寸约束再失配）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -16,6 +17,7 @@ const chatSource = readFileSync(join(here, 'ui', 'modules', 'chat.ts'), 'utf8')
 const clickSource = readFileSync(join(here, 'ui', 'modules', 'events-click.ts'), 'utf8')
 const stateSource = readFileSync(join(here, 'ui', 'modules', 'state.ts'), 'utf8')
 const utilSource = readFileSync(join(here, 'ui', 'modules', 'util.ts'), 'utf8')
+const chatCardsCss = readFileSync(join(here, 'ui', 'styles', 'chat-cards.css'), 'utf8')
 readUiSource()
 
 const markerBlock = (source, name) => {
@@ -88,4 +90,17 @@ test('接线锚：renderChat 走折叠序列、toggle 分支在场、state/i18n 
   const en = readFileSync(join(here, 'ui', 'i18n', 'en', 'chat.ts'), 'utf8')
   assert.match(zh, /"chat\.collapseLabel": "\$\{count\} 条系统通知"/)
   assert.match(en, /"chat\.collapseLabel": "\$\{count\} system notices"/)
+})
+
+test('样式锚：折叠行 chevron 有显式 width/height 尺寸约束', () => {
+  // icon() 产出的 svg 只带 viewBox、无 width/height 属性，CSS 不约束时按 replaced element
+  // 默认尺寸渲染（约 300×150），会把群聊折叠行撑破——此处锚住尺寸约束不失配。
+  const match = chatCardsCss.match(/\.msg-collapse-row\s*>\s*svg\s*\{([^}]*)\}/)
+  assert.ok(match, '.msg-collapse-row > svg 规则必须存在')
+  const body = match[1]
+  const width = body.match(/width:\s*(\d+(?:\.\d+)?)px/)
+  const height = body.match(/height:\s*(\d+(?:\.\d+)?)px/)
+  assert.ok(width, '折叠行 chevron 必须显式约束 width')
+  assert.ok(height, '折叠行 chevron 必须显式约束 height')
+  assert.ok(Number(width[1]) <= 24 && Number(height[1]) <= 24, '折叠行 chevron 尺寸应在 24px 内，不得退回默认渲染尺寸')
 })
