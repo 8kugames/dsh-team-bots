@@ -181,34 +181,32 @@ export const wechatMethods = {
   },
 
   // ===== DSHBOTS-215：微信问答回路 =====
-  // 群聊提问/审批转发微信：只推纯文本镜像，状态仍由工作台卡片与群消息承载；
+  // 群聊提问/审批转发外部通道：只推纯文本镜像，状态仍由工作台卡片与群消息承载；
   // 管理员在微信的答复经 commands 的「答/批 <token> …」路由回原条目（见 wechatAnswerQuestion /
   // wechatDecideApproval）。转发失败只告警，不阻塞提问主流程。
+  // DSHBOTS-326：转发面从「微信单通道」扩为「各已启用通道」（微信/飞书），单通道失败不阻断另一通道。
 
-  /** 提问转发微信（只推文本；token 取问题 id 末 6 位）。
-   *  幂等收据键（A3/DSHBOTS-323）：question:<row.id>——同条目重复转发在通道存留期内被吸收。 */
+  /** 提问转发各已启用通道（只推文本；token 取问题 id 末 6 位）。
+   *  幂等收据键（A3/DSHBOTS-323）：question:<row.id>——同条目重复转发在各通道存留期内被吸收
+   *  （各通道 outbox 库彼此独立，同键在两套库里各自幂等，互不干扰）。
+   *  DSHBOTS-326：出站经 channelNotify 扇出到微信与飞书，单通道失败不阻断另一通道。 */
   wechatQuestion(project, row, items) {
-    if (!this.wechat || typeof this.wechat.notify !== 'function') return false
-    try {
-      this.wechat.notify(questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)), { receiptKey: `question:${row.id}` })
-      return true
-    } catch (error: any) {
-      this.logger.warn?.('dsh-team: 微信提问转发失败: %s', error?.message ?? error)
-      return false
-    }
+    const results = this.channelNotify?.(
+      questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)),
+      { receiptKey: `question:${row.id}` },
+    ) ?? []
+    return results.some(result => result.ok)
   },
 
-  /** 审批转发微信（只推文本；token 取审批 id 末 6 位）。
-   *  幂等收据键（A3/DSHBOTS-323）：approval:<row.id>。 */
+  /** 审批转发各已启用通道（只推文本；token 取审批 id 末 6 位）。
+   *  幂等收据键（A3/DSHBOTS-323）：approval:<row.id>（各通道 outbox 库内各自幂等）。
+   *  DSHBOTS-326：出站经 channelNotify 扇出，单通道失败只留痕不阻断另一通道。 */
   wechatApproval(project, row) {
-    if (!this.wechat || typeof this.wechat.notify !== 'function') return false
-    try {
-      this.wechat.notify(approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)), { receiptKey: `approval:${row.id}` })
-      return true
-    } catch (error: any) {
-      this.logger.warn?.('dsh-team: 微信审批转发失败: %s', error?.message ?? error)
-      return false
-    }
+    const results = this.channelNotify?.(
+      approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)),
+      { receiptKey: `approval:${row.id}` },
+    ) ?? []
+    return results.some(result => result.ok)
   },
 
   /**

@@ -384,6 +384,33 @@ export const coreMethods = {
     void this.wechat?.stop()
     void this.feishu?.stop()
   },
+  /**
+   * 出站通道分发助手（DSHBOTS-326）：出站事件统一从这里扇出到各已启用通道——
+   * 微信与飞书各推一份，不再出现「某事件只到微信不到飞书」。逐通道 try/catch：
+   * 单通道失败只 warn 留痕，不阻断其他通道（一路通道坏了不该让另一路收不到）。
+   * 通道在位即已启用（挂载由 config 开关决定），通道自身的连接/绑定态门禁在各自
+   * notify 内部（未连上时只落盘不外发）。同一 receiptKey 在各通道 outbox 内各自
+   * 幂等——两套 outbox 是彼此独立的库与唯一索引，键空间互不干扰。
+   * 返回逐通道结果 [{channel, ok, error}]，供调用方判断是否至少推成功一路。
+   */
+  channelNotify(text, opts = {}) {
+    const targets = [
+      { name: 'wechat', channel: this.wechat },
+      { name: 'feishu', channel: this.feishu },
+    ]
+    const results = []
+    for (const { name, channel } of targets) {
+      if (!channel || typeof channel.notify !== 'function') continue
+      try {
+        channel.notify(text, opts)
+        results.push({ channel: name, ok: true, error: null })
+      } catch (error: any) {
+        this.logger.warn?.('dsh-team: %s 通道推送失败（其他通道不受影响）: %s', name, error?.message ?? error)
+        results.push({ channel: name, ok: false, error: String(error?.message ?? error) })
+      }
+    }
+    return results
+  },
   actor(actor = { type: 'user', id: this.localUserId }) {
     return actor
   },

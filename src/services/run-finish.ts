@@ -526,13 +526,10 @@ export const runFinishMethods = {
   // 项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）推回微信管理员，出站走通道既有合批/重试治理；
   // 只推微信触发的运行，工作台群聊回复不受影响。推送失败不阻塞收尾主流程。
   // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply（DSHBOTS-211）。
+  // DSHBOTS-326：出站经 channelNotify 扇出到各已启用通道（微信/飞书），单通道失败只留痕不阻断另一通道。
   notifyWechatChat(bot, run, body, failed = false) {
-    if (run?.trigger_type !== 'wechat' || !this.wechat) return
-    try {
-      this.wechat.notify(chatReply(bot?.name ?? 'Bot', body, failed))
-    } catch (error: any) {
-      this.logger.warn?.('dsh-team: 微信直达回复推送失败: %s', error?.message ?? error)
-    }
+    if (run?.trigger_type !== 'wechat') return
+    this.channelNotify?.(chatReply(bot?.name ?? 'Bot', body, failed))
   },
 
   // ── Bot 群聊回复 mention 唤醒（DSHBOTS-252）────────────────────────────
