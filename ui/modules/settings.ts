@@ -311,7 +311,6 @@ function dshPathsCard() {
       <div class="path-row"><span>${t('global.pathWorkspace')}</span>${pathCode(tildePath(paths.workspace))}${copyPath(paths.workspace)}</div>
       <div class="path-row"><span>${t('global.pathSkills')}</span>${pathCode(paths.skillRoot)}${copyPath(paths.skillRoot)}</div>
       <div class="path-row"><span>${t('global.pathData')}</span>${pathCode(paths.dataDir)}${copyPath(paths.dataDir)}</div>
-      <div class="hint">${t('global.dshPathsHint')}</div>
     </div>`
 }
 
