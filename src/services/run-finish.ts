@@ -522,13 +522,16 @@ export const runFinishMethods = {
     if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
   },
 
-  // 微信直达对话回程（DSHBOTS-208/258）：trigger_type='wechat' 的运行（项目群聊直达、
-  // 项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）推回微信管理员，出站走通道既有合批/重试治理；
-  // 只推微信触发的运行，工作台群聊回复不受影响。推送失败不阻塞收尾主流程。
+  // 通道直达对话回程（DSHBOTS-208/258/329）：trigger_type='wechat'/'feishu' 的运行
+  // （项目群聊直达、项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）
+  // 推回来源通道管理员，出站走通道既有合批/重试治理；只推通道触发的运行，工作台群聊回复不受影响。
   // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply（DSHBOTS-211）。
   // DSHBOTS-326：出站经 channelNotify 扇出到各已启用通道（微信/飞书），单通道失败只留痕不阻断另一通道。
+  // DSHBOTS-329：飞书触发运行同款回程——推回飞书管理员，目标会话由飞书通道的
+  // store.reply_message_id 锚点决定（卡②入站时落锚，见 src/feishu/channel.ts 的 saveReplyMessageId）。
   notifyWechatChat(bot, run, body, failed = false) {
-    if (run?.trigger_type !== 'wechat') return
+    const trigger = run?.trigger_type
+    if (trigger !== 'wechat' && trigger !== 'feishu') return
     this.channelNotify?.(chatReply(bot?.name ?? 'Bot', body, failed))
   },
 

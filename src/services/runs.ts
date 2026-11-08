@@ -22,6 +22,15 @@ import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 const COALESCE_MAX_MESSAGES_DEFAULT = 5
 const COALESCE_WINDOW_MS_DEFAULT = 30_000
 
+/**
+ * origin→trigger_type 映射（DSHBOTS-329）：通道来源的直达运行打来源通道标记
+ * （'wechat' 微信 / 'feishu' 飞书），运行收尾据此把回复推回该通道管理员；
+ * 普通 UI 消息（origin 空）与未映射的值都落 'mention'，不推任何通道。
+ */
+export function originTriggerType(origin) {
+  return origin === 'wechat' || origin === 'feishu' ? origin : 'mention'
+}
+
 // ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
 // 指纹行形如 " M dir/file"（前两字符状态位 + 空格 + 路径）；重命名 "R  old -> new"
 // 的新旧路径都算被触碰。带引号的 quoted 路径不解析（与产物清单同一口径，跳过）。
@@ -200,9 +209,9 @@ export const runsMethods = {
       return runId
     }
     const spec = item.kind === 'chat'
-      ? { projectId: item.projectId, mode: 'read', trigger: item.origin === 'wechat' ? 'wechat' : 'mention', idem: `chat:${item.messageId}:${bot.id}` }
+      ? { projectId: item.projectId, mode: 'read', trigger: originTriggerType(item.origin), idem: `chat:${item.messageId}:${bot.id}` }
       : item.kind === 'solo_chat'
-        ? { projectId: null, mode: 'write', trigger: item.triggerType === 'wechat' ? 'wechat' : 'mention', idem: `solo_chat:${item.messageId}` }
+        ? { projectId: null, mode: 'write', trigger: originTriggerType(item.triggerType), idem: `solo_chat:${item.messageId}` }
         : item.kind === 'dm'
           ? { projectId: item.projectId, mode: 'read', trigger: 'dm', idem: `dm:${item.messageId}` }
           : { projectId: item.projectId, mode: 'read', trigger: 'dm_reply', idem: `dm_reply:${item.messageId}` }
@@ -481,7 +490,11 @@ export const runsMethods = {
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
-      triggerType === 'wechat' ? '微信消息触发（项目外单聊直达）' : '单聊消息触发',
+      triggerType === 'wechat'
+        ? '微信消息触发（项目外单聊直达）'
+        : triggerType === 'feishu'
+          ? '飞书消息触发（项目外单聊直达）'
+          : '单聊消息触发',
       createdAt,
     )
     return runId
@@ -502,8 +515,9 @@ export const runsMethods = {
     }
     const runId = id('run')
     const createdAt = nowIso()
-    // 微信直达（DSHBOTS-208）：trigger_type 记 'wechat'，运行收尾据此把 bot 回复推回微信管理员。
-    const triggerType = origin === 'wechat' ? 'wechat' : 'mention'
+    // 通道直达（DSHBOTS-208/329）：trigger_type 记来源通道（'wechat'/'feishu'），
+    // 运行收尾据此把 bot 回复推回该通道管理员；普通群聊消息保持 'mention' 不推。
+    const triggerType = originTriggerType(origin)
     try {
       this.store.run(
         `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status,
@@ -522,7 +536,13 @@ export const runsMethods = {
     }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, 'queued', triggerType === 'wechat' ? '微信群聊消息触发（直达）' : '群聊消息触发', createdAt,
+      id('evt'), runId, 'queued',
+      triggerType === 'wechat'
+        ? '微信群聊消息触发（直达）'
+        : triggerType === 'feishu'
+          ? '飞书群聊消息触发（直达）'
+          : '群聊消息触发',
+      createdAt,
     )
     return runId
   },

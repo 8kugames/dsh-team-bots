@@ -14,6 +14,7 @@ import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
 import { pollGithubSources } from './github-source.js'
 import { staleCardHit } from './notify.js'
+import { originTriggerType } from './runs.js'
 
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
@@ -272,9 +273,10 @@ export const schedulerMethods = {
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
       if (!bot || bot.status !== 'active') return null
       // payload.origin='wechat'（DSHBOTS-258）：微信通道投的项目外 director 单聊，
-      // solo 运行打 wechat 标记，运行收尾的回复据此推回微信；普通 UI 单聊保持 mention。
+      // solo 运行打 wechat 标记，运行收尾的回复据此推回微信；'feishu' 同款（DSHBOTS-329：
+      // 飞书触发运行的回复推回飞书管理员）；普通 UI 单聊保持 mention。
       return this.enqueueSoloChatRun(bot, payload.messageId, {
-        triggerType: payload.origin === 'wechat' ? 'wechat' : 'mention',
+        triggerType: originTriggerType(payload.origin),
       })
     }
     if (row.kind === 'dm_run') {
