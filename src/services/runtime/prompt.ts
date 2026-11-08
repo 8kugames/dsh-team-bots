@@ -1,7 +1,9 @@
 // src/services/runtime/prompt.ts —— 提示词构造域
-// 按运行类型拼装系统提示词、单聊提示词与引用行，并套用文件权限档位。
+// 按运行类型拼装系统提示词、单聊提示词与引用行。
 // 本文件只放方法体，方法挂到 DshRuntime 原型上（见 src/runtime.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
+// 沙箱档位、语境窗与会话连续性三域外移同级模块（sandbox-policy/context-window/
+// session-continuity），本文件 re-export 保持原导出面，方法经 promptMethods 展开挂回原型。
 //
 // 段序原则：运行提示词一律「静态指令段前置、随卡/随消息变化的字段后置」。
 // 前缀缓存按最长公共前缀匹配，静态段放在变化段之后会让跨卡派发在描述处分叉、
@@ -10,35 +12,36 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
-import { id, nowIso, parseDisabledSkills } from '../../util.js'
+import { parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { taskDeadlineInfo } from '../tasks.js'
 import { readWriteScopes } from '../write-scopes.js'
 import { displayPath, sanitizeTmpBotDirName } from '../../paths.js'
+import { sandboxMethods } from './sandbox-policy.js'
+import {
+  RECENT_FALLBACK_LIMIT,
+  RECENT_INCREMENTAL_LIMIT,
+  NOISE_SYSTEM_BODY,
+  MEMORY_CONTEXT_LIMIT,
+  MEMORY_CONTEXT_MAX_CHARS,
+  contextMethods,
+} from './context-window.js'
+import { continuityMethods } from './session-continuity.js'
 
-// 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
-export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
+// 三域外移后保持原导出面：消费方（runs/core）与既有测试仍从 prompt.js 取这些符号。
+export { SANDBOX_MODES, sandboxModeForRun, effectiveSandbox } from './sandbox-policy.js'
+export {
+  RECENT_FALLBACK_LIMIT,
+  RECENT_INCREMENTAL_LIMIT,
+  NOISE_SYSTEM_BODY,
+  MEMORY_CONTEXT_LIMIT,
+  MEMORY_CONTEXT_MAX_CHARS,
+}
 
 // 系统提示词按会话 id 冻结的 LRU 上限：session_bindings 只增不改，死会话不再求值，
 // 靠上限淘汰防会话累积泄漏。
 export const PROMPT_FREEZE_LIMIT = 256
-
-// 增量尾窗（DSHBOTS-96 P1-1）：无水位（新会话或进程重启）回退尾 12 条全量窗给足上下文；
-// 有水位只注入其后的新消息；上限 24 条兜住多运行并发共用会话时的积压。
-export const RECENT_FALLBACK_LIMIT = 12
-export const RECENT_INCREMENTAL_LIMIT = 24
-
-// 无信息量的系统短状态通知（DSHBOTS-96 P3-1）：状态已由 Open tasks 与任务评论通道覆盖，
-// 不再重复进尾窗（命中即整条跳过，不占窗位）。
-export const NOISE_SYSTEM_BODY = /^(已写入.+记忆。|任务 \S+ 验收通过。|密钥 \S+ 的请求被拒绝。)$/
-
-// 记忆快照召回量（单轮上下文治理 P4）：memoryContextFor 由宿主渲染成历史尾部的用户
-// 快照，文本一变就追加一条——live 实测条均 ~400 字符，16 条恰好顶满 7k 截断，等于每次
-// 记忆写入都往活跃会话追加约 3.5k token 的近似快照。降为 8 条 + 3.5k 封顶（按更新时间
-// 取最近 8 条完整条目，不做条内截断），单次追加体积减半；历史侧增长由 P1 折叠兜底。
-export const MEMORY_CONTEXT_LIMIT = 8
-export const MEMORY_CONTEXT_MAX_CHARS = 3_500
 
 // 通信纪律（吸收 superagent 原型 prompts/team/communication.md，DSHBOTS-321 A1）：
 // 默认沉默、只在需人时外发——三个触发条件（结果就绪 / 需要决策 / 确实做不完），
@@ -110,30 +113,6 @@ export function taskGuidanceTrioLength(overrides, config) {
   ].map(text => text.replace(/\s+$/, '')).reduce((sum, text) => sum + text.length, 0)
 }
 
-// 沙箱档位按运行类型收紧：一切非写运行（mode!=='write'，如 dm/dm_reply/chat/review 等）
-// 物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
-// 无运行上下文（run 为空）时同样保持 bot.file_policy。
-export function sandboxModeForRun(run, bot) {
-  return run && run.mode !== 'write' ? 'read-only' : bot?.file_policy
-}
-
-// 生效沙箱档（DSHBOTS-156）：任务派发可选 sandbox 覆盖后的最终口径，run_events 与视图共用。
-// - 非写运行恒 read-only（来源 run_type）：覆盖只作用于写运行，dm_reply 回投任务会话等
-//   读运行不得因任务带覆盖而放宽只读；
-// - 写运行取 tasks.sandbox_override（来源 override），只在不比 bot 配置档更宽时生效
-//   （只收紧不放大：运行侧兜底，防旁路落库的旧覆盖在换负责人后放大权限）；
-// - 其余回落 bot.file_policy（来源 bot_config）。
-// 覆盖或配置档不合法（不在 SANDBOX_MODES）时不采用，落 bot_config 由 applyFilePolicy 拦截。
-export function effectiveSandbox(run, bot, task) {
-  if (run && run.mode !== 'write') return { mode: 'read-only', source: 'run_type' }
-  const override = task?.sandbox_override
-  const policyRank = SANDBOX_MODES.indexOf(bot?.file_policy)
-  if (SANDBOX_MODES.includes(override) && SANDBOX_MODES.indexOf(override) <= policyRank) {
-    return { mode: override, source: 'override' }
-  }
-  return { mode: bot?.file_policy, source: 'bot_config' }
-}
-
 const sessionIdOf = context => context?.agent?.id ?? context?.session?.id ?? context?.sessionId
 
 // 任务描述截断（DSHBOTS-113 事故 m_33bddb；DSHBOTS-254 起任务分支与 review/handle 同口径）：
@@ -147,6 +126,10 @@ function truncateTaskDescription(raw) {
 }
 
 export const promptMethods = {
+  ...sandboxMethods,
+  ...contextMethods,
+  ...continuityMethods,
+
   // 系统提示词会话级冻结（D-85 方案 B）：首次求值后按会话 id 缓存字节，同会话此后逐字节
   // 稳定，前缀缓存不被本插件作废；密钥、技能绑定、项目技能扫描等求值也随之压缩到每会话
   // 一次。空结果不冻结（会话建立早期绑定未落库时返回 ''，等首次非空结果再定格）。
@@ -367,67 +350,6 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
     ].filter(Boolean).join('\n')
   },
 
-  // 把收紧后的档位（effectiveSandbox）写成宿主会话的文件沙箱覆盖：等价直调宿主的
-  // setSandboxMode(session, mode)，即 session.append('sandbox/mode', { mode })（插件不依赖
-  // 宿主包），事件 log-only、replay 持久、下次受限调用生效。已是目标档位就不重复追加；
-  // 失败只告警不阻断会话（沙箱回落宿主默认）。
-  // DSHBOTS-156：带运行上下文时把生效档与来源落 run_events（type='sandbox_mode'）——
-  // run_events 是运行时间线，复用会话的每条运行也各自留档，与 sandbox/mode 追加的去重无关。
-  applyFilePolicy(agent, bot, run?, task?) {
-    const { mode, source } = effectiveSandbox(run, bot, task)
-    if (!SANDBOX_MODES.includes(mode)) return
-    if (run?.id) {
-      this.store.run(
-        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-        id('evt'), run.id, 'sandbox_mode', `沙箱档位 ${mode}（来源：${source}）`, nowIso(),
-      )
-    }
-    const liveSession = agent?.agent?.session ?? agent?.session
-    if (!liveSession?.append) return
-    try {
-      // 必须走 ctx.get()：宿主服务未在本插件 inject 声明时，直接读 ctx.sandboxPolicy
-      // 会被 cordis 代理抛 "cannot get property \"sandboxPolicy\" without inject"，
-      // 导致每次应用权限都失败、静默回落宿主默认档位。
-      const policy = this.ctx.get?.('sandboxPolicy')
-      const current = policy?.overrideOf?.(liveSession)
-      if (current === mode) return
-      liveSession.append('sandbox/mode', { mode })
-    } catch (error: any) {
-      this.logger.warn?.(`应用文件权限 ${mode} 失败（${bot?.name ?? bot?.id}）：${error?.message ?? error}`)
-    }
-  },
-
-  // 增量水位尾窗（DSHBOTS-96 P1-1）：每会话维护已注入的 rowid 水位，此后每轮只注入
-  // 水位之后的新消息，替代旧的「尾 12 条×240 摘录每轮重烧」。语义：
-  // - 无水位（新会话或进程重启）→ 回退尾 RECENT_FALLBACK_LIMIT 条全量窗；
-  // - 有水位 → 取 rowid > 水位的新消息（rowid 单调递增，与 created_at 排序一致）；
-  // - 水位推进到取窗时刻该表 scope 内最大 rowid，只进不退；空窗也推进（越过触发消息）；
-  // - 多运行并发共用同一会话：先取窗者带走积压并前移水位，后取窗者窗口为空——
-  //   两条提示词进同一宿主会话历史，消息不丢不重；
-  // - excludeId 排除本轮触发消息（正文已在 # Group message / # Solo message 完整呈现，不再双份）。
-  // 无会话上下文时不读不写水位，等价旧的固定尾窗。
-  watermarkWindow({ sessionId, table, columns, where, params, excludeId }) {
-    const advance = this.store.get(`SELECT MAX(rowid) AS m FROM ${table} WHERE ${where}`, ...params)?.m ?? null
-    const watermark = sessionId ? this.messageWatermarks.get(sessionId) : undefined
-    const rows = watermark === undefined
-      ? this.store.all(
-        `SELECT ${columns} FROM ${table} WHERE ${where} ORDER BY rowid DESC LIMIT ?`,
-        ...params, RECENT_FALLBACK_LIMIT,
-      ).reverse()
-      : this.store.all(
-        `SELECT ${columns} FROM ${table} WHERE ${where} AND rowid > ? ORDER BY rowid DESC LIMIT ?`,
-        ...params, watermark, RECENT_INCREMENTAL_LIMIT,
-      ).reverse()
-    if (sessionId && advance !== null) {
-      const current = this.messageWatermarks.get(sessionId)
-      if (current === undefined || advance > current) this.messageWatermarks.set(sessionId, advance)
-    }
-    return {
-      rows: excludeId ? rows.filter(row => row.id !== excludeId) : rows,
-      incremental: watermark !== undefined,
-    }
-  },
-
   // 结转摘要块（DSHBOTS-145）：新会话首轮提示词注入旧会话的交接摘要。
   // 一次性语义（同 recovery note 手法）：读到即清零，同一摘要只注入一次。
   // 消费闸（DSHBOTS-213）：仅当本轮会话就是结转新建的目标会话（pending 标记命中）才消费；
@@ -442,37 +364,6 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
 
 # Handoff summary from the previous session
 ${summary}`
-  },
-  // 结转摘要运行提示词（DSHBOTS-145）：在旧会话上下文里让 bot 自写交接摘要。
-  // 项目会话与单聊会话都支持（project 可为空）——bot 已在本会话里，历史无需重放。
-  rolloverSummaryPrompt({ bot, project }) {
-    const header = project
-      ? [`Project: ${project.name} (${project.key})`, `You are: ${bot.name}`].join('\n')
-      : [`You are: ${bot.name}`, 'Mode: one-on-one conversation (outside projects)'].join('\n')
-    return `${header}
-
-# Handoff summary request
-This conversation has reached its turn limit and will be rolled over to a fresh session. Write a handoff summary for the next session so work continues without losing context.
-- Write in Chinese, plain prose, at most 400 characters.
-- Cover: work in progress (what was being done and where it stopped), key decisions already made, and open questions or blockers.
-- Do not repeat the task description or anything already recorded in long-term memory.
-- Do not call any tool and do not write files. Reply with the summary text only.`
-  },
-  // 闲时总结压缩运行提示词（DSHBOTS-286）：在原会话上下文里让 bot 自写连续性总结。
-  // 压缩不等于结转：会话不换，总结只为收敛上下文头绪；宿主未暴露历史截断接口，
-  // 持久事实应趁此轮落记忆或任务评论（能力边界见 ADR「结转与压缩」）。
-  sessionCompactPrompt({ bot, project }) {
-    const header = project
-      ? [`Project: ${project.name} (${project.key})`, `You are: ${bot.name}`].join('\n')
-      : [`You are: ${bot.name}`, 'Mode: one-on-one conversation (outside projects)'].join('\n')
-    return `${header}
-
-# Session compaction request
-This conversation has grown long and is now idle. Write a working summary to keep future turns focused.
-- Write in Chinese, plain prose, at most 300 characters.
-- Cover: current focus, work in progress with its exact state, and the next concrete steps.
-- If any durable fact, decision or lesson emerged that is not yet recorded, persist it now with your memory tools (team_remember); everything else stays in this reply only.
-- Do not write files. Reply with the summary text only.`
   },
   // 通道直达语境块（solo 分支，DSHBOTS-331）：通道来源的单聊运行（微信/飞书直达落
   // director 专属工作区 solo 会话，run.trigger_type='wechat'/'feishu'）同样需要通道语境。
