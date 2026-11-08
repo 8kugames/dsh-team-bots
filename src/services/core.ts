@@ -56,7 +56,13 @@ export const coreMethods = {
       this.store.run(
         `INSERT INTO users(id, name, role, created_at) VALUES (?, ?, 'admin', ?)
          ON CONFLICT(id) DO NOTHING`,
-        this.localUserId, 'You', nowIso(),
+        this.localUserId, 'Owner', nowIso(),
+      )
+      // 存量收敛（DSHBOTS-341）：旧库本地用户显示名是默认哨兵 'You'，一次性改为 'Owner'；
+      // 只认哨兵值，用户自定义名不覆盖；已收敛的库匹配不到行，幂等零副作用。
+      this.store.run(
+        `UPDATE users SET name = 'Owner' WHERE id = ? AND name = 'You'`,
+        this.localUserId,
       )
       if (!this.store.get('SELECT id FROM bots LIMIT 1')) {
         let model
@@ -425,7 +431,7 @@ export const coreMethods = {
     return actor
   },
   actorName(actor) {
-    if (actor.type === 'user') return this.store.get('SELECT name FROM users WHERE id = ?', actor.id)?.name ?? 'You'
+    if (actor.type === 'user') return this.store.get('SELECT name FROM users WHERE id = ?', actor.id)?.name ?? 'Owner'
     return this.store.get('SELECT name FROM bots WHERE id = ?', actor.id)?.name ?? actor.id
   },
   audit(actor, action, targetType, targetId, data = {}) {
