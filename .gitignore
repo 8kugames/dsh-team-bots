@@ -13,4 +13,3 @@ ui/**/*.js
 tests/**/*.js
 scripts/**/*.test.js
 pnpm-lock.yaml
-/docs/patrol-prompt.md
