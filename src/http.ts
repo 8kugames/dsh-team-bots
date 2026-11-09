@@ -17,6 +17,7 @@ const MAX_BODY = 32 * 1024 * 1024
 const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
 // 聊天图片通道的单文件上限，任务口径 10MB；MIME 白名单与防穿越在 service.chatFile。
 const MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_CHAT_TEXT_BYTES = 2 * 1024 * 1024
 const ARTIFACT_TYPES = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -175,6 +176,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   route('/api/dsh-team/modules/composer.js', ['GET'], moduleScript('composer.js'))
   route('/api/dsh-team/modules/tasks.js', ['GET'], moduleScript('tasks.js'))
   route('/api/dsh-team/modules/modal-layer.js', ['GET'], moduleScript('modal-layer.js'))
+  route('/api/dsh-team/modules/file-preview.js', ['GET'], moduleScript('file-preview.js'))
   route('/api/dsh-team/modules/dom-morph.js', ['GET'], moduleScript('dom-morph.js'))
   route('/api/dsh-team/modules/modal-forms.js', ['GET'], moduleScript('modal-forms.js'))
   route('/api/dsh-team/modules/bot-quota.js', ['GET'], moduleScript('bot-quota.js'))
@@ -314,9 +316,9 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
     }
   })
 
-  // 聊天图片通道：只读项目工作区 / 单聊 Bot 工作区内的白名单图片（MIME 白名单、
-  // 10MB 上限、路径防穿越都在 service.chatFile 里做）。与 /api 同前缀注册，鉴权由
-  // 宿主路由层承担；失败走 AppError，不落含查询串的日志。
+  // 聊天文件通道：只读项目工作区 / 单聊 Bot 工作区内的白名单图片与文本（MIME 白名单、
+  // 图片 10MB / 文本 2MB 上限、路径防穿越都在 service.chatFile 与此层做）。与 /api 同前缀
+  // 注册，鉴权由宿主路由层承担；失败走 AppError，不落含查询串的日志。
   route('/api/dsh-team/file', ['GET'], async (request) => {
     try {
       const params = searchParams(request)
@@ -326,9 +328,13 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
       if (!relPath) throw new AppError('BAD_REQUEST', '缺少参数 path', 400)
       if (!projectId === !soloBotId) throw new AppError('BAD_REQUEST', 'projectId 与 soloBotId 必须二选一', 400)
       const { absolutePath, size, contentType } = service.chatFile({ projectId, soloBotId, path: relPath })
-      if (size > MAX_CHAT_IMAGE_BYTES) throw new AppError('FILE_TOO_LARGE', '图片超过 10MB 上限', 413)
+      // 图片 10MB、文本 2MB（DSHBOTS-347）：文本弹层有前端截断，上限收紧防大文件拖垮请求。
+      const textFile = !contentType.startsWith('image/')
+      const maxBytes = textFile ? MAX_CHAT_TEXT_BYTES : MAX_CHAT_IMAGE_BYTES
+      const sizeLabel = textFile ? '文本文件超过 2MB 上限' : '图片超过 10MB 上限'
+      if (size > maxBytes) throw new AppError('FILE_TOO_LARGE', sizeLabel, 413)
       const body = await readFile(absolutePath)
-      if (body.byteLength > MAX_CHAT_IMAGE_BYTES) throw new AppError('FILE_TOO_LARGE', '图片超过 10MB 上限', 413)
+      if (body.byteLength > maxBytes) throw new AppError('FILE_TOO_LARGE', sizeLabel, 413)
       return response(body, contentType)
     } catch (error) {
       return errorResponse(error)

@@ -3,6 +3,7 @@ import { icon } from './icons.js'
 import { activeProject, actorLabel, attr, avatar, botById, canaryText, duration, esc, evaluationText, formatCost, formatNumber, formatTime, inSoloContext, memberRunDot, memorySource, pageProject, proposalPreview, runDot, tildePath, timeAgo } from './util.js'
 import { api } from './api.js'
 import { t } from './i18n.js'
+import { isPreviewableText, deliverableFileUrl } from './file-preview.js'
 import { refresh, startTerminalPoll, panelAttrs, render, noProject } from '../app.js'
 
 // task-sort:start —— 任务面板排序的纯逻辑（tests/task-sort.test.js 按本标记块抽取断言）。
@@ -775,12 +776,20 @@ export function taskUsageBlock(usage) {
 }
 
 // 交付产物块（DSHBOTS-345 复盘）：卡面声明的交付文件路径，核验按路径直接读文件；未声明不渲染。
+// 文本型 chip 可点开应用内预览（DSHBOTS-347），其余保持纯文字。
 export function taskDeliverablesBlock(task) {
   const deliverables = Array.isArray(task?.deliverables) ? task.deliverables.filter(item => typeof item === 'string' && item) : []
   if (!deliverables.length) return ''
+  const projectId = String(task?.project_id ?? pageProject()?.id ?? '')
+  const chip = (path) => {
+    const url = isPreviewableText(path) ? deliverableFileUrl(projectId, path) : null
+    return url
+      ? `<button type="button" class="approval-chip mono" data-action="preview-file" data-url="${attr(url)}" data-path="${attr(path)}" title="${attr(path)}">${esc(path)}</button>`
+      : `<span class="approval-chip mono" title="${attr(path)}">${esc(path)}</span>`
+  }
   return `<div class="scope-block">
           <div class="eyebrow" style="margin-bottom:6px">${t("交付产物")}</div>
-          <div class="scope-chips">${deliverables.map(path => `<span class="approval-chip mono" title="${attr(path)}">${esc(path)}</span>`).join('')}</div>
+          <div class="scope-chips">${deliverables.map(chip).join('')}</div>
           <div class="hint" style="margin-top:6px">${t("核验按路径直接读文件；交付报告只引用路径，不复述正文。")}</div>
         </div>`
 }

@@ -9,6 +9,7 @@ import { exportUsageCsv, switchUsageWindow, usageMode } from './usage.js'
 import { focusApprovalCard, focusQuestionCard, questionDraftSelection, questionSelectOption } from './cards.js'
 import { loadSoloDetail } from './chat.js'
 import { searchMemories } from './tasks.js'
+import { openFilePreview } from './file-preview.js'
 import { handleBoardAction } from './events-board.js'
 import { refresh, renderKeepingChatScroll, render, beginChatPending, endChatPending } from '../app.js'
 
@@ -505,6 +506,10 @@ document.addEventListener('click', async (event) => {
       }
       case 'open-artifact': {
         window.open(target.dataset.url, '_blank', 'noopener')
+        break
+      }
+      case 'preview-file': {
+        await openFilePreview(target.dataset.url, target.dataset.path)
         break
       }
       case 'delete-secret': {

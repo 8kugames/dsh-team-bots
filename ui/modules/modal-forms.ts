@@ -9,6 +9,7 @@ import { ensureComposerImageInput, ensureImageViewer } from './composer.js'
 import { app, refresh, panelAttrs, render, updateRunClocks } from '../app.js'
 import { modalShell, modalLoading, renderModalLayer } from './modal-layer.js'
 import { botQuotaBlock } from './bot-quota.js'
+import { ARTIFACT_IMAGE, FILE_TEXT_EXT, artifactFileUrl, artifactExt } from './file-preview.js'
 
 function modelOptions(provider, model) {
   const models = state.data?.models ?? []
@@ -320,11 +321,8 @@ function modalSkill(detail) {
   })
 }
 
-const ARTIFACT_IMAGE = /\.(png|jpe?g|gif|webp)$/i
-const artifactFileUrl = (runId, path) =>
-  `/api/dsh-team/artifact-file?runId=${encodeURIComponent(runId)}&path=${encodeURIComponent(path)}`
-
-// 已完成写运行的交付产物：默认收起（与「查看输出」同一折叠口径），展开后图片内联预览（点击新窗口打开），其余文件列出路径与扩展名徽标。
+// 已完成写运行的交付产物：默认收起（与「查看输出」同一折叠口径），展开后图片内联预览，
+// 文本型文件应用内预览（DSHBOTS-347），其余文件列路径与扩展名徽标、新窗口打开。
 function runArtifacts(state, run) {
   const list = Array.isArray(run.artifacts) ? run.artifacts : []
   if (run.status !== 'succeeded' || list.length === 0) return ''
@@ -335,9 +333,10 @@ function runArtifacts(state, run) {
     const url = artifactFileUrl(run.id, path)
     if (ARTIFACT_IMAGE.test(path)) {
       rows.push(`<button type="button" class="artifact-thumb" data-action="open-artifact" data-url="${attr(url)}" title="${attr(path)}"><img src="${attr(url)}" alt="${attr(path)}" loading="lazy"></button>`)
+    } else if (FILE_TEXT_EXT.test(path)) {
+      rows.push(`<button type="button" class="artifact-file" data-action="preview-file" data-url="${attr(url)}" data-path="${attr(path)}" title="${attr(path)}"><span class="artifact-path">${esc(path)}</span><span class="artifact-ext mono">${esc(artifactExt(path))}</span></button>`)
     } else {
-      const ext = (path.match(/\.([a-z0-9]+)$/i)?.[1] ?? 'file').toUpperCase().slice(0, 6)
-      rows.push(`<a class="artifact-file" href="${attr(url)}" target="_blank" rel="noopener"><span class="artifact-path">${esc(path)}</span><span class="artifact-ext mono">${esc(ext)}</span></a>`)
+      rows.push(`<a class="artifact-file" href="${attr(url)}" target="_blank" rel="noopener"><span class="artifact-path">${esc(path)}</span><span class="artifact-ext mono">${esc(artifactExt(path))}</span></a>`)
     }
   }
   if (!rows.length) return ''

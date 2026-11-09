@@ -232,4 +232,9 @@ export default {
   // DSHBOTS-345: deliverables declaration on the task card
   "交付产物": "Deliverables",
   "核验按路径直接读文件；交付报告只引用路径，不复述正文。": "Verification reads the files at these paths; the delivery report references paths only, never file contents.",
+  // DSHBOTS-347: in-app preview for text-like files
+  "文件预览": "File preview",
+  "文件较大，已截断，仅显示开头部分。": "Large file; showing a truncated head only.",
+  "新窗口打开": "Open in new window",
+  "加载文件失败：": "Failed to load file: ",
 }
