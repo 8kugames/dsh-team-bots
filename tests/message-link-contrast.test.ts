@@ -73,22 +73,21 @@ function ruleBody(selector) {
 // ---- 四套主题的 token ------------------------------------------------------
 
 function themeTokens() {
-  const mediaIndexes = [...bare.matchAll(/@media \(prefers-color-scheme: dark\) \{/g)].map((m) => m.index)
-  assert.equal(mediaIndexes.length, 2, '暗色媒体查询应为两处（默认 + Catppuccin）')
-
-  const lightRoot = tokens(blockAt(bare, bare.indexOf(':root {')))
-  const darkMedia = blockAt(bare, mediaIndexes[0])
-  const darkRoot = tokens(blockAt(darkMedia, darkMedia.indexOf(':root {')))
-  const catMedia = blockAt(bare, mediaIndexes[1])
-  const catRoot = tokens(blockAt(bare, bare.indexOf(':root[data-theme="catppuccin"] {')))
-  const catDark = tokens(blockAt(catMedia, catMedia.indexOf(':root[data-theme="catppuccin"] {')))
-
-  return {
-    '默认浅色': lightRoot,
-    '默认深色': darkRoot,
-    'Catppuccin 浅色': catRoot,
-    'Catppuccin 深色': catDark,
+  // DSHBOTS-349：深色 token 块改由 :root[data-color-scheme="dark"] 承载
+  // （原 prefers-color-scheme 媒体查询包裹已删，宿主 WebView 媒体查询失真）。
+  const selectors = {
+    '默认浅色': ':root {',
+    '默认深色': ':root[data-color-scheme="dark"] {',
+    'Catppuccin 浅色': ':root[data-theme="catppuccin"] {',
+    'Catppuccin 深色': ':root[data-color-scheme="dark"][data-theme="catppuccin"] {',
   }
+  const out = {}
+  for (const [name, selector] of Object.entries(selectors)) {
+    const index = bare.indexOf(selector)
+    assert.ok(index >= 0, `CSS 里找不到规则：${selector}`)
+    out[name] = tokens(blockAt(bare, index))
+  }
+  return out
 }
 
 const THEMES = themeTokens()

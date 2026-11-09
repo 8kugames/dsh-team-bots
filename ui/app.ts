@@ -1,6 +1,6 @@
 import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, COLORS, COLOR_NAMES, BOT_STATUS, RUN_STATUS, RUN_KIND, CHAT_PAGE_SIZE, CHAT_ACTIVE_TASK_LIMIT, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, CREATOR_TYPE, EFFORT, FILE_POLICY, DEFAULT_FILE_POLICY, VIEW_ACTION, NAV, SOLO_NAV } from './modules/state.js'
 import { icon } from './modules/icons.js'
-import { applyUiScale, applyUiTheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, avatar, statusPill, runDot, memberRunDot, runDotHtml, memorySource, toast, filePolicyOptions } from './modules/util.js'
+import { applyUiScale, applyUiTheme, initColorScheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, avatar, statusPill, runDot, memberRunDot, runDotHtml, memorySource, toast, filePolicyOptions } from './modules/util.js'
 import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
@@ -35,6 +35,7 @@ const savedScale = (() => {
   try { return Number(localStorage.getItem(UI_SCALE_KEY)) || null } catch { return null }
 })()
 if (savedScale) applyUiScale(savedScale)
+initColorScheme()
 state.theme = applyUiTheme((() => {
   try { return localStorage.getItem(UI_THEME_KEY) } catch { return null }
 })())
