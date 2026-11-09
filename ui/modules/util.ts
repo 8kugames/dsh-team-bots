@@ -14,18 +14,18 @@ export function applyUiTheme(value) {
   return theme
 }
 
-// color-scheme:start —— 深/浅色判定唯一出口（DSHBOTS-349）。
+// color-scheme:start —— 深/浅色判定唯一出口（DSHBOTS-349/351）。
 // 宿主深色不走媒体查询（WebView 的 prefers-color-scheme 失真恒报 light），而是给
-// 同源父文档 body 打 data-ds-dark-theme：嵌入态以父文档为准（双向：宿主浅也压过
-// 系统深），独立态与跨源访问异常一律回落系统媒体查询。
+// 同源祖先文档 body 打 data-ds-dark-theme：嵌入态自直接父逐层上溯到 window.top，
+// 任一祖先带属性才判 dark；祖先链全程无属性、跨源访问异常与独立态一律回落系统
+// 媒体查询——单一层级信号失真不再绝对压过系统偏好。
 export function resolveColorScheme() {
-  let hostDark = null
   try {
-    if (window.parent && window.parent !== window) {
-      hostDark = window.parent.document.body.hasAttribute('data-ds-dark-theme')
+    for (let current = window.parent; current && current !== window; current = current.parent) {
+      if (current.document.body.hasAttribute('data-ds-dark-theme')) return 'dark'
+      if (current === window.top) break
     }
-  } catch { hostDark = null }
-  if (hostDark !== null) return hostDark ? 'dark' : 'light'
+  } catch { /* 跨源祖先不可读：回落系统媒体查询 */ }
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
@@ -36,16 +36,18 @@ export function applyColorScheme() {
   return scheme
 }
 
-// 宿主切换深浅时实时跟随：观察父 body 的主题属性变化 + 自身媒体查询变化。
+// 宿主切换深浅时实时跟随：观察祖先链各层 body 的主题属性变化 + 自身媒体查询变化。
 export function initColorScheme() {
   applyColorScheme()
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyColorScheme)
   try {
-    if (window.parent && window.parent !== window) {
-      new MutationObserver(applyColorScheme).observe(window.parent.document.body, {
+    const observer = new MutationObserver(applyColorScheme)
+    for (let current = window.parent; current && current !== window; current = current.parent) {
+      observer.observe(current.document.body, {
         attributes: true,
         attributeFilter: ['data-ds-dark-theme'],
       })
+      if (current === window.top) break
     }
   } catch { /* 跨源宿主：仅跟媒体查询 */ }
 }
