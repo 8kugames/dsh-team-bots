@@ -15,7 +15,6 @@ const css = await uiStylesSource()
 const bare = css.replace(/\/\*[\s\S]*?\*\//g, '')
 
 const MOTION_GATE = '@media (prefers-reduced-motion: no-preference)'
-const DARK_QUERY = '@media (prefers-color-scheme: dark)'
 
 function matchingBrace(source, open) {
   let depth = 0
@@ -49,19 +48,6 @@ function mediaBlock(condition) {
   const index = bare.indexOf(condition)
   assert.ok(index >= 0, `CSS 里找不到媒体查询：${condition}`)
   return blockAt(bare, index)
-}
-
-// 取某个 @media 条件下的全部规则体。
-function allMediaBlocks(condition) {
-  const bodies = []
-  let from = 0
-  for (;;) {
-    const index = bare.indexOf(condition, from)
-    if (index < 0) break
-    bodies.push(blockAt(bare, index))
-    from = index + condition.length
-  }
-  return bodies
 }
 
 function keyframesBody(name) {
@@ -159,14 +145,17 @@ test('零新增色值：高光色由既有 token 的 color-mix 合成', () => {
 })
 
 test('明暗两套：深色压低高光占比避免刺眼，亮色保证可见', () => {
-  const darkBodies = allMediaBlocks(DARK_QUERY).filter((b) => b.includes('--task-sheen-tint'))
-  assert.equal(darkBodies.length, 1, '暗色下的高光色应有一个独立的覆盖定义')
+  // DSHBOTS-349：暗色根块改由 :root[data-color-scheme="dark"] 承载（媒体查询包裹已删）。
+  const darkIndex = bare.indexOf(':root[data-color-scheme="dark"] {')
+  assert.ok(darkIndex >= 0, 'CSS 缺少 :root[data-color-scheme="dark"] 暗色根块')
+  const darkRoot = blockAt(bare, darkIndex)
+  assert.ok(darkRoot.includes('--task-sheen-tint'), '暗色根块应覆盖高光色定义')
   const pct = (body) => {
     const m = body.match(/--task-sheen-tint:[^;]*?var\(--accent\)\s+([\d.]+)%/)
     assert.ok(m, '高光色定义里应能读出占比')
     return Number(m[1])
   }
-  const darkPct = pct(darkBodies[0])
+  const darkPct = pct(darkRoot)
   const lightDefs = [
     ...bare.matchAll(
       /--task-sheen-tint:\s*color-mix\(in srgb,\s*var\(--accent\)\s+([\d.]+)%\s*,\s*transparent\s*\)/g,

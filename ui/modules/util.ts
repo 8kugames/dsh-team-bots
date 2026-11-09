@@ -13,6 +13,45 @@ export function applyUiTheme(value) {
   else document.documentElement.setAttribute('data-theme', theme)
   return theme
 }
+
+// color-scheme:start —— 深/浅色判定唯一出口（DSHBOTS-349/351）。
+// 宿主深色不走媒体查询（WebView 的 prefers-color-scheme 失真恒报 light），而是给
+// 同源祖先文档 body 打 data-ds-dark-theme：嵌入态自直接父逐层上溯到 window.top，
+// 任一祖先带属性才判 dark；祖先链全程无属性、跨源访问异常与独立态一律回落系统
+// 媒体查询——单一层级信号失真不再绝对压过系统偏好。
+export function resolveColorScheme() {
+  try {
+    for (let current = window.parent; current && current !== window; current = current.parent) {
+      if (current.document.body.hasAttribute('data-ds-dark-theme')) return 'dark'
+      if (current === window.top) break
+    }
+  } catch { /* 跨源祖先不可读：回落系统媒体查询 */ }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+export function applyColorScheme() {
+  const scheme = resolveColorScheme()
+  document.documentElement.setAttribute('data-color-scheme', scheme)
+  document.documentElement.style.colorScheme = scheme
+  return scheme
+}
+
+// 宿主切换深浅时实时跟随：观察祖先链各层 body 的主题属性变化 + 自身媒体查询变化。
+export function initColorScheme() {
+  applyColorScheme()
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyColorScheme)
+  try {
+    const observer = new MutationObserver(applyColorScheme)
+    for (let current = window.parent; current && current !== window; current = current.parent) {
+      observer.observe(current.document.body, {
+        attributes: true,
+        attributeFilter: ['data-ds-dark-theme'],
+      })
+      if (current === window.top) break
+    }
+  } catch { /* 跨源宿主：仅跟媒体查询 */ }
+}
+// color-scheme:end
 export const esc = (value) => String(value ?? '')
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;').replaceAll("'", '&#39;')

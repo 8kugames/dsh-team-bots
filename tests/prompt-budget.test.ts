@@ -75,8 +75,10 @@ test('静态前缀预算：三段拆卡指引合计 ≤1200，旧三标题各至
     for (const text of sections) assert.ok(text.length > 0, '三段都应在场（agentTeam 开启）')
 
     // 整段静态前缀（到 # Assigned task 之前）不超阈值：防后续段落静默回胖。
+    // 1900→2000（DSHBOTS-345 复盘）：交付报告体量红线 + 禁贴文件正文两条固定规则
+    // 显式评审入库；实际值 ~1983，余量与旧阈值同紧度。
     const prefix = prompt.slice(0, at('# Assigned task'))
-    assert.ok(prefix.length <= 1_900, `静态前缀应 ≤1900 字符（实测 ${prefix.length}）`)
+    assert.ok(prefix.length <= 2_000, `静态前缀应 ≤2000 字符（实测 ${prefix.length}）`)
   } finally { await t.close() }
 })
 

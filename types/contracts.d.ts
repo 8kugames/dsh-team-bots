@@ -152,6 +152,7 @@ interface TeamConfig {
   reviewIdleMinutes: number
   uiLanguage: UiLanguage
   chatReplyMaxChars: number
+  deliveryReportMaxChars: number
   dmArchiveDays: number
   dmKeepRecent: number
   approvalTimeoutMs: number

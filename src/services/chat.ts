@@ -395,10 +395,11 @@ export const chatMethods = {
     }))
   },
 
-  // ── 聊天图片通道（GET /api/dsh-team/file）──────────────────────────────
-  // 定位聊天消息里 markdown 图片引用的工作区文件：只认项目工作目录或单聊 Bot
-  // 工作区内的白名单图片，路径解析 + realpath 双重防穿越（与 artifactFile 同口径）。
-  // SVG 可执行脚本，永不放行；尺寸上限由 HTTP 层把关（MAX_CHAT_IMAGE_BYTES）。
+  // ── 聊天文件通道（GET /api/dsh-team/file）──────────────────────────────
+  // 定位聊天消息与交付产物引用的工作区文件：只认项目工作目录或单聊 Bot 工作区
+  // 内的白名单类型，路径解析 + realpath 双重防穿越（与 artifactFile 同口径）。
+  // SVG 可执行脚本、.env 常带密钥，永不放行；文本扩展与前端 FILE_TEXT_EXT 同口径，
+  // 统一以 text/plain 下发（前端只 textContent 渲染，新窗口兜底也只见源码）。
   chatFile({ projectId, soloBotId, path } = {} as any) {
     const CHAT_IMAGE_TYPES = {
       '.png': 'image/png',
@@ -407,6 +408,11 @@ export const chatMethods = {
       '.gif': 'image/gif',
       '.webp': 'image/webp',
     }
+    const CHAT_TEXT_TYPES = new Set([
+      '.md', '.markdown', '.txt', '.log', '.json', '.csv', '.ini', '.toml',
+      '.yaml', '.yml', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.jsx',
+      '.css', '.html', '.htm', '.sh', '.xml', '.py', '.sql',
+    ])
     const relPath = String(path ?? '').trim()
     if (!relPath) throw badRequest('缺少参数 path')
     let dir
@@ -419,8 +425,9 @@ export const chatMethods = {
     } else {
       throw badRequest('缺少参数 projectId 或 soloBotId')
     }
-    const contentType = CHAT_IMAGE_TYPES[extname(relPath).toLowerCase()]
-    if (!contentType) throw badRequest('仅支持 png / jpg / jpeg / gif / webp 图片')
+    const ext = extname(relPath).toLowerCase()
+    const contentType = CHAT_IMAGE_TYPES[ext] ?? (CHAT_TEXT_TYPES.has(ext) ? 'text/plain; charset=utf-8' : '')
+    if (!contentType) throw badRequest('仅支持白名单图片或文本文件')
     let absolutePath
     try {
       absolutePath = assertInside(dir, join(dir, relPath))

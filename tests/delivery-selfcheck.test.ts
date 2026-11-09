@@ -82,7 +82,8 @@ test('a1) 源码锚：自校段为固定追加段（marker 对 + 关键文案被
   assert.ok(defaultsSrc.includes('counts or links the acceptance criteria name'), '验收标准的计数/链接核对被钉')
   assert.ok(defaultsSrc.includes('Self-checking is always cheaper than rework'), '先自校再报交付的经济口径被钉')
   // 只追加（D-269 手法）：自校段插在卡头 Status 行之后、Description 之前，既有锚点行原样保留。
-  assert.ok(PROMPT_SRC.includes('Status: ${task.status}${deliverySelfcheckBlock}\nDescription:'), '注入点钉在 Status 与 Description 之间，Status/Description 既有行不改写')
+  // DSHBOTS-345：Status 与自校段之间追加了单行 deliverablesLine（卡面交付物路径声明，非空才注入）。
+  assert.ok(PROMPT_SRC.includes('Status: ${task.status}${deliverablesLine}${deliverySelfcheckBlock}\nDescription:'), '注入点钉在 Status 与 Description 之间，Status/Description 既有行不改写')
 })
 
 test('a2) 源码锚：D-274 时效段结构原样（Deadline 行 + 时效模板链），自校段不触碰静态前缀三段', () => {

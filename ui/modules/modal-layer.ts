@@ -2,6 +2,7 @@ import { state } from './state.js'
 import { attr, esc } from './util.js'
 import { render, updateRunClocks } from '../app.js'
 import { modalNewProject, modalRemoveTracking, modalRemoveBotTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory } from './modal-forms.js'
+import { modalFilePreview } from './file-preview.js'
 import { t } from './i18n.js'
 
 function modalShell({ title, subtitle = '', body = '', footer = '', size = '', badge = '' }) {
@@ -44,6 +45,7 @@ function renderModal() {
     case 'proposal': return modalProposal(modal.kind)
     case 'price': return modalPrice(modal.price ?? {})
     case 'trajectory': return modalTrajectory(modal.detail, modal.runId)
+    case 'file-preview': return modalFilePreview(modal)
     default: return ''
   }
 }

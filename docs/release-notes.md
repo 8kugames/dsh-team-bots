@@ -4,6 +4,60 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.2.460
+
+### 中文
+
+本版是 v0.2.455 之后的五笔合入：交付纪律收口、文件预览通道、任务面板全量下发，以及工作台深浅两套主题的承载方式改造。
+
+**交付纪律**
+
+- **交付报告体量红线 + 禁贴文件正文**：任务交付报告默认上限 2000 字符（可经 `DSH_TEAM_DELIVERY_REPORT_MAX_CHARS` 调整，区间 200–20000），且只允许引用交付物路径——已写入工作区的文件正文不再复述进报告或聊天，复审上下文与生成侧输出同时省下来。
+- **卡面交付物路径声明**：建卡、改卡、重派与工作台修改全链可声明交付文件路径（`deliverables`），任务详情弹窗渲染交付产物 chips；核验环节按路径直接读文件，不再靠报告正文转述。
+
+**文件预览**
+
+- **文本型文件链接应用内预览**：产物清单按钮、交付 chip 与文本白名单通道三处入口都可在应用内直接预览文本文件，不必先下载再打开。
+
+**任务面板**
+
+- **任务列表全量下发**：工作台任务视图去掉 300 条截断，超过 300 张卡的项目也能看到完整列表。
+
+**工作台主题**
+
+- **深色由 `data-color-scheme` 属性承载**：工作台自身的深浅判定不再依赖样式猜测，嵌入宿主时跟随宿主的 `body[data-ds-dark-theme]` 标记。
+- **深浅判定改祖先链上溯**：从 `window.parent` 逐层上溯到 `window.top`，任一祖先带宿主深色属性才判为深色；全程无属性、无跨源异常、无独立态时一律回落系统媒体查询，宿主判定为浅色时优先于系统深色。深色用户首帧仍有毫秒级浅色闪帧（主题跟随依赖脚本执行），属已知限制。
+
+**升级路径与回退**
+
+有数据库结构变更（新增交付物路径列），迁移自动执行且幂等。回退按发版级回退：回退包版本与 tag，恢复发版前库快照。
+
+### English
+
+This release bundles five changes landed after v0.2.455: delivery-discipline tightening, an in-app file preview channel, full delivery of the task list, and a rework of how the workbench carries its light/dark themes.
+
+**Delivery discipline**
+
+- **Delivery-report size limit and no pasting file bodies**: a task delivery report is capped at 2000 characters by default (adjustable via `DSH_TEAM_DELIVERY_REPORT_MAX_CHARS`, range 200–20000), and it may only reference deliverable paths — the body of a file already written to the workspace is no longer restated in the report or in chat, which trims both the generation-side output and the review context.
+- **Deliverable path declarations on cards**: the delivery file paths can be declared across the whole chain — create, edit, re-dispatch and workbench edits (`deliverables`) — and the task detail modal renders deliverable chips. Verification now reads the files by path instead of relying on the report body.
+
+**File preview**
+
+- **In-app preview for text file links**: deliverable-list buttons, delivery chips and the text allowlist channel can all preview a text file in place, with no download-then-open step.
+
+**Task panel**
+
+- **The task list is delivered in full**: the workbench task view drops its 300-row truncation, so projects with more than 300 cards show the complete list.
+
+**Workbench theme**
+
+- **Dark mode is carried by the `data-color-scheme` attribute**: the workbench no longer guesses its own light/dark state from styling; when embedded it follows the host's `body[data-ds-dark-theme]` marker.
+- **Light/dark detection walks the ancestor chain**: it climbs from `window.parent` up to `window.top`, and treats the page as dark only if any ancestor carries the host dark attribute; with no attribute anywhere, no cross-origin exception, and no standalone state it falls back to the system media query, and a light host wins over a dark system preference. Dark-mode users still see a millisecond-scale light boot flash (theme following depends on script execution) — a known limitation.
+
+**Upgrade path and rollback**
+
+This release includes a schema change (a new deliverables path column); migrations run automatically and are idempotent. Rollback is release-level: revert the package version and tag, and restore the pre-release database snapshot.
+
 ## v0.2.455
 
 ### 中文

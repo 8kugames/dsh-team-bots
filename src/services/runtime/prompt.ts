@@ -16,7 +16,7 @@ import { parseDisabledSkills } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { taskDeadlineInfo } from '../tasks.js'
-import { readWriteScopes } from '../write-scopes.js'
+import { readDeliverables, readWriteScopes } from '../write-scopes.js'
 import { displayPath, sanitizeTmpBotDirName } from '../../paths.js'
 import { sandboxMethods } from './sandbox-policy.js'
 import {
@@ -68,7 +68,7 @@ export const PROMPT_SEGMENT_DEFAULTS = {
   communication: COMMUNICATION_RULES.map(line => line.replace(/^- /, '')).join('\n'),
   subtask: 'Before closing: if this task cannot be finished in one run or new closing conditions emerge, file subtasks via team_assign_task with parent_task_id and report in the group — no verbal-only follow-ups. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.',
   splitting: 'Split only when all hold: the task has 2+ independent parts, parts have disjoint write scopes, and the joined cost of split cards stays below one-run delivery. One card per part: parent_task_id to this task, blocked_by where order matters. Not the project owner? Propose the split in your delivery report. Example: API card (src/api/) + docs card, run concurrently.',
-  selfcheck: 'Before reporting delivery, self-run the reproducible verification and put the evidence in the delivery report: the exact test/build commands you ran with their results, the list of files you changed, and the counts or links the acceptance criteria name (grep hits, test pass counts, commit hashes). Verify your own claims first — re-run the target tests and re-check the anchors yourself; do not report delivery on unverified work. Self-checking is always cheaper than rework: a delivery report without evidence will be returned.',
+  selfcheck: 'Before reporting delivery, self-run the reproducible verification and put the evidence in the delivery report: the exact test/build commands you ran with their results, the list of files you changed, and the counts or links the acceptance criteria name (grep hits, test pass counts, commit hashes). Verify your own claims first — re-run the target tests and re-check the anchors yourself; do not report delivery on unverified work. Self-checking is always cheaper than rework: a delivery report without evidence will be returned. The report lists deliverables as file paths only — never file contents.',
 }
 export const PROMPT_SEGMENT_MAX_CHARS = 2000
 export const PROMPT_TRIO_BUDGET = 1200
@@ -445,7 +445,7 @@ Transcription requirements:
 Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
 ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
   },
-  promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId }: { run: { kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; timeBudgetMinutes?: number; time_budget_minutes?: number }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; extraMessages?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }[]; sessionId?: string }) {
+  promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId }: { run: { kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; deliverables?: string; timeBudgetMinutes?: number; time_budget_minutes?: number }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; extraMessages?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }[]; sessionId?: string }) {
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, extraMessages, sessionId })
     if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
     // 结转摘要（DSHBOTS-145）：先于 header 判定——单聊摘要运行没有项目，
@@ -499,6 +499,9 @@ ${deadlineLine}`.trimEnd()
       // 任务派生分支共用 truncateTaskDescription 的同一截断点与盲区口径（任务分支见 DSHBOTS-254）。
       const writeScopes = readWriteScopes(task.write_scopes)
       const declaredScopes = writeScopes.length ? writeScopes.join(', ') : '(none declared)'
+      // 交付物声明（DSHBOTS-345 复盘）：核验按路径直接读文件，交付报告只作声明清单。
+      const declaredDeliverables = readDeliverables(task.deliverables)
+      const deliverablesScopesLine = declaredDeliverables.length ? declaredDeliverables.join(', ') : '(none declared)'
       const description = truncateTaskDescription(task.description)
       if (run.kind === 'review') {
         // 委派核验模板（DSHBOTS-107 review-verification）：核验工作由子代理并行完成，
@@ -508,6 +511,7 @@ ${deadlineLine}`.trimEnd()
 
 The owner delegated the acceptance verification of this delivered task to you. Verify the delivery report item by item; do not redo the work and do not make the final call:
 - Scope: compare what the delivery report says was changed against the declared write scopes below; flag any out-of-scope change.
+- Deliverables: every declared deliverable path below must exist; read the files directly — the report's prose about them is claims, not evidence.
 - Target tests: run only the test files this task names (for example node --test <files>), not the whole suite — full-suite numbers are the deliverer's responsibility on a clean tree. If the read-only sandbox blocks a check, say so explicitly instead of skipping it.
 - Red verification: design at least one negative check (a change that should make the target tests fail) and state the expected number of red cases; when the sandbox forbids mutating files, give the exact command and the reasoned prediction.
 - Conclusion: a recommendation of 建议 accept or 建议 return with reasons tied to the evidence below.
@@ -520,12 +524,13 @@ Your final reply is recorded as a task comment automatically. It MUST start with
 Title: ${task.title}
 Status: ${task.status}
 Declared write scopes: ${declaredScopes}
+Declared deliverables: ${deliverablesScopesLine}
 Description:
 ${description}${threads}${timeBudgetBlockFor(task)}`
         }
         return `${header}
 
-As the project owner, review the delivered result below against the task description. Check the delivery report claims when needed (files exist, tests pass). Then decide:
+As the project owner, review the delivered result below against the task description. Check the delivery report claims when needed (files exist, tests pass); when deliverables are declared below, open the files at those paths instead of trusting the report prose. Then decide:
 - If the work is acceptable, call team_review_task with decision "accept".
 - If it needs rework, call team_review_task with decision "return" and a concrete rework reason in comment.
 Do not redo the task yourself, and do not start parallel work here. Reply in the user's language with a short verdict.
@@ -534,6 +539,7 @@ Do not redo the task yourself, and do not start parallel work here. Reply in the
 Title: ${task.title}
 Status: ${task.status}
 Declared write scopes: ${declaredScopes}
+Declared deliverables: ${deliverablesScopesLine}
 Description:
 ${description}${threads}${timeBudgetBlockFor(task)}`
       }
@@ -674,14 +680,19 @@ Execute each card yourself, or hand it to a dedicated child agent (subagent/suba
 
 # Parallel work inside this task
 ${parallelMergeBody(this.config.maxTeammates)}` : ''
+      // 交付物路径声明（DSHBOTS-345 复盘）：卡面声明的交付文件，核验按路径直接读文件。
+      // 单行注入在 Status 与自检段之间：不新增段落、不动「描述后即结尾」截断口径。
+      const deliverablesLine = readDeliverables(task.deliverables).length
+        ? `\nDeliverables (file paths): ${readDeliverables(task.deliverables).join(', ')}`
+        : ''
       return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}
 
-Do the task in the project workspace. End with a concise delivery report containing what changed, verification performed, and blockers or risks — not just a plan.${parallel}${parallelMerge}
+Do the task in the project workspace. End with a delivery report (≤${this.config.deliveryReportMaxChars} chars): what changed, verification performed, blockers or risks — not just a plan. Never paste file contents into the report or chat — reference paths; reviewers open the files.${parallel}${parallelMerge}
 
 # Assigned task ${project.key}-${task.number}
 Title: ${task.title}
 Priority: ${task.priority}
-Status: ${task.status}${deliverySelfcheckBlock}
+Status: ${task.status}${deliverablesLine}${deliverySelfcheckBlock}
 Description:
 ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}`
     }
