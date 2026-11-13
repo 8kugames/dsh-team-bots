@@ -12,7 +12,12 @@ import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '..
 // 记忆上限（DSHBOTS-339）：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶后新增被拒，
 // 须先整理到 MEMORY_COMPACT_TO 条以内才恢复放行（滞回，避免在阈值附近反复开关）。team 作用域不限。
 export const MEMORY_CAP = 64
-export const MEMORY_COMPACT_TO = 33
+// 恢复线（DSHBOTS-360）：触顶后须整理到 ≤MEMORY_COMPACT_TO 条才恢复新增（滞回带宽度 10 条）。
+// 取 MEMORY_CAP−10：滞回带要宽过单轮最大突发，否则一轮自动沉淀就能把刚整理出的余量再次吃满。
+// 10 条恰好覆盖记忆审查单轮最大突发（parseMemoryReview ≤10 条）；规则沉淀（learnFromTask ≤2 条）
+// 与审查同轮发生时会略超，属已知余量收紧，必要时可再放宽。早期取 33（≈CAP/2）等于强制腰斩，过苛：
+// 61 条需清 28 条才解锁，恢复线本身成了新的阻塞源。
+export const MEMORY_COMPACT_TO = MEMORY_CAP - 10
 // 单条记忆篇幅上限（owner 补充）：content 不得超过 256 字。
 export const MEMORY_MAX_CHARS = 256
 
@@ -211,6 +216,11 @@ export const memoryMethods = {
     const source = `run:${sourceRunId}`
     let applied = 0
     let deduped = 0
+    // 拒写留痕（DSHBOTS-360）：审查写入被拒时把拒因带内化——写进 run_events，
+    // 不再只丢一条系统日志（run_events 只说「写入 0 条」而无人知道为什么，锁定期会无限期无人处理）。
+    let rejected = 0
+    let capacityRejected = 0
+    const rejectReasons: string[] = []
     // 同一次审查里重复的条目、以及同一来源重复触发的审查，写入前都按来源+内容去重。
     const seen = new Set()
     for (const item of items) {
@@ -249,14 +259,23 @@ export const memoryMethods = {
         })
         applied += 1
       } catch (writeError: any) {
-        this.logger.warn?.('dsh-team: 记忆审查写入失败：%s', writeError?.message ?? writeError)
+        rejected += 1
+        const reason = String(writeError?.message ?? writeError)
+        // 容量锁（conflict 409）与其它拒因分开计数：容量锁意味着作用域处在整理锁定期，需要人处理。
+        if (writeError?.status === 409) capacityRejected += 1
+        if (rejectReasons.length < 3) rejectReasons.push(reason)
+        // 同主题覆盖写降级属可选能力：owner 未点头，本卡不实现（不改写既有条目、不把被拒条目转 pending 堆积）。
+        this.logger.warn?.('dsh-team: 记忆审查写入失败：%s', reason)
       }
     }
+    const rejectNote = rejected
+      ? `，拒写 ${rejected} 条${capacityRejected ? `（其中 ${capacityRejected} 条因容量锁被拒）` : ''}：${rejectReasons.join('；')}`
+      : ''
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${deduped ? `，去重 ${deduped} 条` : ''}`, nowIso(),
+      id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${deduped ? `，去重 ${deduped} 条` : ''}${rejectNote}`, nowIso(),
     )
-    return { applied, deduped }
+    return { applied, deduped, rejected, capacityRejected }
   },
 
   // 记忆写入权限：用户可写任意作用域；Bot 只能写自己的记忆、是成员的项目记忆，
@@ -297,7 +316,7 @@ export const memoryMethods = {
   },
   memoryCapacityMessage(scopeType, scopeId, count, latched = false) {
     const label = scopeType === 'bot' ? `Bot(${scopeId})` : `项目(${scopeId})`
-    // 锁定带（滞回标志在、34–63 条）：如实说明此前触顶、现处整理锁定期，不得谎称「已达 N/64」。
+    // 锁定带（滞回标志在、55–63 条）：如实说明此前触顶、现处整理锁定期，不得谎称「已达 N/64」。
     if (latched) {
       return `${label}记忆此前触顶 ${MEMORY_CAP} 条上限，现处整理锁定期（当前 ${count} 条），新增被拒绝；需整理到 ≤${MEMORY_COMPACT_TO} 条恢复新增：去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗与融合（同主题 team_memory_write 覆盖写、合并相近条目）；同主题覆盖写不受影响。`
     }
