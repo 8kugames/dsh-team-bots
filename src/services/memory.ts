@@ -316,7 +316,8 @@ export const memoryMethods = {
   },
   memoryCapacityMessage(scopeType, scopeId, count, latched = false) {
     const label = scopeType === 'bot' ? `Bot(${scopeId})` : `项目(${scopeId})`
-    // 锁定带（滞回标志在、55–63 条）：如实说明此前触顶、现处整理锁定期，不得谎称「已达 N/64」。
+    // 锁定带（滞回标志在、(MEMORY_COMPACT_TO, MEMORY_CAP) 之间）：如实说明此前触顶、现处整理锁定期，
+    // 不得谎称「已达 N/64」。
     if (latched) {
       return `${label}记忆此前触顶 ${MEMORY_CAP} 条上限，现处整理锁定期（当前 ${count} 条），新增被拒绝；需整理到 ≤${MEMORY_COMPACT_TO} 条恢复新增：去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗与融合（同主题 team_memory_write 覆盖写、合并相近条目）；同主题覆盖写不受影响。`
     }
