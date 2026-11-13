@@ -177,6 +177,7 @@ export default {
   "停止运行": "Stop run",
   "先新建一个 Bot，再回来邀请它加入。": "Create a Bot first, then come back to invite it.",
   "全员响应": "Everyone responds",
+  "仅被点名": "Mentioned only",
   "全文": "Full text",
   "全部保留": "All kept",
   "共享技能": "Shared skills",

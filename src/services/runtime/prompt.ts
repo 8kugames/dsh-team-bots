@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { scanProjectSkills } from '../../project-skills.js'
-import { parseDisabledSkills } from '../../util.js'
+import { parseDisabledSkills, jsonParse } from '../../util.js'
 import { dmPrompt, replyDeliveryPrompt } from '../../botmsg.js'
 import { rolloverPendingKey, rolloverSummaryKey } from '../../config.js'
 import { taskDeadlineInfo } from '../tasks.js'
@@ -700,7 +700,7 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
       sessionId,
       // 审批卡片（kind='approval'）是给人看的 UI 锚点，不进 bot 上下文；旧行迁移后回填 'text'。
       table: 'messages',
-      columns: 'id, sender_type, sender_id, body, task_id',
+      columns: 'id, sender_type, sender_id, body, task_id, mentions_json',
       where: "project_id = ? AND kind = 'text'",
       params: [project.id],
       excludeId: chatMessage?.id,
@@ -708,9 +708,16 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
     // P3-1：无信息量 system 短状态不进尾窗；合批消息已在专门段落呈现，同样不进尾窗（不双份）。
     const mergedIds = new Set((extraMessages ?? []).map(item => item.id))
     const visible = recent.filter(item => !mergedIds.has(item.id) && !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
+    // 分级注入（吸收 dsh-agent-team 直接信号/背景折叠理念）：@本 bot 的消息与人的消息
+    // 保持 240 全文（@我的另加标记）；其他 bot 的闲聊折叠成 80 字背景摘要，降噪省 token。
+    const botId = (bot as any).id
     const context = visible.map((item) => {
-      const body = item.body.length > 240 ? `${item.body.slice(0, 240)}…` : item.body
-      return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}${item.task_id ? ' (task thread)' : ''}: ${body}`
+      const mentions = jsonParse(item.mentions_json, [])
+      const directed = Array.isArray(mentions) && mentions.includes(botId)
+      const limit = item.sender_type === 'bot' && !directed ? 80 : 240
+      const body = item.body.length > limit ? `${item.body.slice(0, limit)}…` : item.body
+      const mark = directed ? ' [→你]' : (item.sender_type === 'bot' && !directed ? ' (背景)' : '')
+      return `- [m_${item.id.slice(-6)}] ${item.sender_type}:${item.sender_id}${item.task_id ? ' (task thread)' : ''}${mark}: ${body}`
     }).join('\n')
     const recentBlock = context
       ? `${incremental ? 'New project messages since your last turn (ids are for team_recall):' : 'Recent project messages (truncated, ids are for team_recall):'}\n${context}`

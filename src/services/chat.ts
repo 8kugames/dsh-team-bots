@@ -150,11 +150,21 @@ export const chatMethods = {
       : null
     if (replyTo && !replyMessage) throw badRequest('引用的消息不存在')
     const mentions = parseMentions(body, members)
-    // 目标解析：显式 @mention 优先（引用只作上下文）；无显式 @ 时引用 bot 消息则定向该 bot（替换 owner 兜底）；最后落 owner。
-    const targets = (mentions.length > 0
+    // 群聊回复模式（吸收 dsh-agent-team 关注/取关理念，复用既有 reply_mode 字段）：
+    // owner_first = 显式目标缺省时总监兜底（原行为）；everyone = 无显式目标时全员响应；
+    // mentioned_only = 无显式 @/引用目标不唤醒任何 bot，消息留群给人看——直接信号
+    // （@mention、引用回复）在所有模式下都照旧直达。
+    const explicitTarget = mentions.length > 0
       ? mentions
-      : members.filter(bot => bot.id === (replyMessage?.sender_type === 'bot' ? replyMessage.sender_id : project.owner_bot_id))
-    ).slice(0, 3)
+      : members.filter(bot => bot.id === (replyMessage?.sender_type === 'bot' ? replyMessage.sender_id : null))
+    const group = this.groupOf(projectId)
+    const replyMode = group?.reply_mode ?? 'owner_first'
+    const fallback = replyMode === 'everyone'
+      ? members
+      : replyMode === 'mentioned_only'
+        ? []
+        : members.filter(bot => bot.id === project.owner_bot_id)
+    const targets = (explicitTarget.length > 0 ? explicitTarget : fallback).slice(0, 3)
     const messageId = this.insertMessage({
       projectId,
       senderType: actor.type,

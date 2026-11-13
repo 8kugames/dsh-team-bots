@@ -350,7 +350,7 @@ export const projectsMethods = {
       updates.status = patch.status
     }
     if (patch.replyMode !== undefined) {
-      if (!['owner_first', 'everyone'].includes(patch.replyMode)) throw badRequest('群聊回复模式无效')
+      if (!['owner_first', 'everyone', 'mentioned_only'].includes(patch.replyMode)) throw badRequest('群聊回复模式无效')
     }
     const ownerId = updates.owner_bot_id ?? project.owner_bot_id
     const memberIds = patch.memberIds === undefined
