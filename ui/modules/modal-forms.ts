@@ -1,6 +1,6 @@
 import { state, STATUS, STATUS_ORDER, PRIORITY, BOT_STATUS, SKILL_STATUS, RUN_STATUS, CREATOR_TYPE, EFFORT, COLORS, COLOR_NAMES, stageLabelText } from './state.js'
 import { icon } from './icons.js'
-import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, sandboxPill, timeAgo, toast } from './util.js'
+import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, sandboxPill, timeAgo, tildePath, toast } from './util.js'
 import { api } from './api.js'
 import { mdChatScope, richText } from './markdown.js'
 import { t, tMaybe } from './i18n.js'
@@ -147,7 +147,7 @@ async function renderDirPicker(inputId, path) {
     error = err?.message || String(err)
   }
   const current = data?.path ?? path ?? ''
-  const head = `\n    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">\n      <button class="btn small" type="button" data-action="pick-dir-up" data-picker-for="${attr(inputId)}" data-path="${attr(current)}" title="${t("上一级")}">↑</button>\n      <button class="btn small" type="button" data-action="pick-dir-home" data-picker-for="${attr(inputId)}">${t("主目录")}</button>\n      <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(current)}">${esc(current)}</span>\n      <button class="btn primary small" type="button" data-action="pick-dir-choose" data-picker-for="${attr(inputId)}" data-path="${attr(current)}">${t("选定此目录")}</button>\n      <button class="btn small" type="button" data-action="pick-dir-close" data-picker-for="${attr(inputId)}" title="${t("关闭")}">✕</button>\n    </div>`
+  const head = `\n    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">\n      <button class="btn small" type="button" data-action="pick-dir-up" data-picker-for="${attr(inputId)}" data-path="${attr(current)}" title="${t("上一级")}">↑</button>\n      <button class="btn small" type="button" data-action="pick-dir-home" data-picker-for="${attr(inputId)}">${t("主目录")}</button>\n      <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(current)}">${esc(tildePath(current))}</span>\n      <button class="btn primary small" type="button" data-action="pick-dir-choose" data-picker-for="${attr(inputId)}" data-path="${attr(current)}">${t("选定此目录")}</button>\n      <button class="btn small" type="button" data-action="pick-dir-close" data-picker-for="${attr(inputId)}" title="${t("关闭")}">✕</button>\n    </div>`
   if (error) {
     box.innerHTML = `${head}<div class="hint" style="color:#c0392b">${esc(error)}</div>`
     return
@@ -311,7 +311,7 @@ function modalSkill(detail) {
         <div><div class="eyebrow">${t("本项目")}</div><div>${off ? `<span class="pill">${t("已停用")}</span>` : `<span class="pill green">${t("可用")}</span>`}</div></div>
       </div>
       <div class="detail-block"><div class="eyebrow">${t("描述")}</div><div>${esc(detail.description || t("无描述"))}</div></div>
-      <div class="detail-block"><div class="eyebrow">${t("文件")}</div><code class="mono detail-path">${esc(detail.path || detail.sharedPath || '')}</code></div>
+      <div class="detail-block"><div class="eyebrow">${t("文件")}</div><code class="mono detail-path">${esc(tildePath(detail.path || detail.sharedPath || ''))}</code></div>
       <div class="divider"></div>
       <div class="eyebrow">SKILL.md ${t("全文")}</div>
       ${detail.readable ? `<pre class="detail-pre">${esc(detail.content)}</pre>` : `<div class="note">${t("技能文件当前不可读（可能已被移动或删除），可尝试重新扫描。")}</div>`}

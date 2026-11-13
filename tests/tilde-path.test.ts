@@ -52,10 +52,12 @@ test('前端接线锁：展示位走 tildePath，data-copy/title/copyPath 保留
 
   const settings = read('ui/modules/settings.js')
   // D-186 卡面口径的「当前生效」行仍在 settings.js；DSH 路径卡的「工作区」行随关于内容
-  // 回迁 settings.js（DSHBOTS-200），缩写与完整路径复制语义不变。
-  assert.equal(count(settings, 'pathCode(tildePath('), 2, 'settings.js 两处工作区展示位缩写（当前生效 + DSH 路径）')
+  // 回迁 settings.js（DSHBOTS-200），缩写与完整路径复制语义不变。DSHBOTS-357 补齐 DSH 路径卡
+  // 其余三行（dshHome/skillRoot/dataDir）与「管理数据」行：六个 pathCode 展示位全部缩写。
+  assert.equal(count(settings, 'pathCode(tildePath('), 6, 'settings.js 六处路径展示位缩写（当前生效 + DSH 路径卡四行 + 管理数据）')
   assert.ok(settings.includes('copyPath(project.workspace_path)'), '当前生效的复制必须保留完整路径')
   assert.ok(settings.includes('copyPath(paths.workspace)'), '全局工作区的复制必须保留完整路径')
+  assert.ok(settings.includes('copyPath(project.data_path ?? \'\')'), '管理数据的复制必须保留完整路径')
 
   const globalPages = read('ui/modules/global-pages.js')
   assert.equal(count(globalPages, 'pathCode(tildePath('), 0, '关于内容回迁后 global-pages.js 不再有工作区展示位')
@@ -64,4 +66,16 @@ test('前端接线锁：展示位走 tildePath，data-copy/title/copyPath 保留
   // 终端标题栏：显示文本缩写，title 悬浮仍给完整路径。
   assert.ok(tasks.includes('esc(tildePath(project.workspace_path ?? project.name))'), '终端标题栏显示文本应缩写')
   assert.ok(tasks.includes(`title="\${attr(project.workspace_path ?? '')}"`), '终端标题栏 title 必须保留完整路径')
+  // 技能页两处技能根目录展示位（共享根 + 项目根）：<code> 文本缩写，data-copy 仍是完整路径。
+  assert.ok(tasks.includes('esc(tildePath(state.data.paths.skillRoot))'), '共享技能根目录展示位应缩写')
+  assert.ok(tasks.includes('esc(tildePath(root.path))'), '项目技能根目录展示位应缩写')
+  assert.ok(tasks.includes(`data-copy="\${attr(state.data.paths.skillRoot + '/skills')}"`), '共享技能根复制必须保留完整路径')
+  assert.ok(tasks.includes(`data-copy="\${attr(root.path + '/skills')}"`), '项目技能根复制必须保留完整路径')
+
+  const modalForms = read('ui/modules/modal-forms.js')
+  // 技能详情弹层「文件」行展示位缩写；目录选择器头部显示文本缩写，
+  // 其 data-path、title 与回填输入框（events-click 消费）仍保留完整路径。
+  assert.ok(modalForms.includes('esc(tildePath(detail.path || detail.sharedPath || \'\'))'), '技能详情文件路径展示位应缩写')
+  assert.ok(modalForms.includes('esc(tildePath(current))'), '目录选择器头部显示文本应缩写')
+  assert.ok(modalForms.includes(`data-path="\${attr(current)}"`), '目录选择器 data-path 必须保留完整路径')
 })
