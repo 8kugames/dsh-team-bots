@@ -44,7 +44,7 @@ class PreviewRuntime {
   }
   setCompletionHandler(handler) { this.handler = handler }
   capabilityInfo() {
-    return { native: true, profile: 'team-bots', version: '0.2.1-rc.5', toolCount: 24, modelProviderCount: 2 }
+    return { native: true, profile: 'team-bots', version: '0.2.461', toolCount: 24, modelProviderCount: 2 }
   }
   async catalog() { return this.models }
   async validateBotConfig() {}

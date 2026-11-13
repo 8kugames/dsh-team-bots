@@ -7,6 +7,7 @@ import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { resolveConfig } from '../src/config.js'
 
@@ -63,11 +64,18 @@ function tableCounts(db) {
   return Object.fromEntries(tableNames(db).map(table => [table, countRows(db, table)]))
 }
 
+// 备份目录里既有主备份 `team-<stamp>.sqlite`，也有同名的附件
+// （`.wechat.sqlite` 附件库、`.secret.key`、`.json` 清单）。附件也叫 team- 开头，
+// 按宽匹配挑「最新一份」会挑到附件上，演练随即因找不到同名清单而失败。
+export function isMainBackupFile(name) {
+  return /^team-[^.]+\.sqlite$/.test(name)
+}
+
 async function latestBackup(dir) {
   if (!existsSync(dir)) return null
   const entries = await readdir(dir)
   const candidates = entries
-    .filter(name => /^team-.*\.sqlite$/.test(name))
+    .filter(isMainBackupFile)
     .sort()
   if (candidates.length === 0) return null
   return join(dir, candidates[candidates.length - 1])
@@ -179,7 +187,13 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(`恢复演练失败：${error?.stack || error}`)
-  process.exitCode = 1
-})
+// 被测试 import 时不自动开跑（与 doctor.mjs 同口径）：导出的判定函数要能单独测。
+const invokedDirectly = process.argv[1]
+  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+
+if (invokedDirectly) {
+  main().catch(error => {
+    console.error(`恢复演练失败：${error?.stack || error}`)
+    process.exitCode = 1
+  })
+}
