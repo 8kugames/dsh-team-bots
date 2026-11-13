@@ -59,14 +59,18 @@ export function subagentCapabilityEnabledFor(bot, config) {
 // 子代理生成工具由 preset 全局注册，成员 bot 默认可见，无需额外放行。
 // DSHBOTS-247：调用点形状不一——session.ts 的结转/复用路径传 resolveAgent 的
 // `{ agent }` 包装，新建会话路径传裸 agent。这里归一为句柄后取 restrict，两种形状都生效；
-// 旧实现只认包装形状时，裸形状会静默跳过（策略从未生效）或旧构建抛 "reading 'ctx'"。
+// 旧实现只认包装形状时，裸形状会静默跳过（策略从未生效）。
+// DSHBOTS-359：restrict 必须以方法调用发出——宿主 ToolsService.restrict 首行读 this.ctx，
+// 摘下函数裸调用会让 this===undefined，抛 "reading 'ctx'" 被吞成 warn，策略自 DSHBOTS-238
+// 起从未真正生效（成员 bot 一直可见总监专权工具）。
 export function applyBotToolPolicy(resolved, { isOwner, logger }: { isOwner: boolean; logger?: { warn?: (...args: unknown[]) => void } }) {
   if (isOwner) return
   const handle = resolved?.agent ?? resolved
-  const restrict = handle?.ctx?.tools?.restrict
-  if (typeof restrict !== 'function') return
+  const tools = handle?.ctx?.tools
+  if (typeof tools?.restrict !== 'function') return
   try {
-    restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })
+    // 方法调用保留接收者（this === tools），与宿主 dsh-subagent 的 childCtx.tools.restrict 同形。
+    tools.restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })
   } catch (error: any) {
     // 工具层兜底失败不阻断会话：服务层 ownerContextFor 仍是权威闸门。
     logger?.warn?.(`dsh-team: 应用成员 bot 工具策略失败：${error?.message ?? error}`)
