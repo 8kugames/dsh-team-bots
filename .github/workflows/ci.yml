@@ -1,0 +1,51 @@
+name: ci
+
+# dev 是发版流水线的工作分支（release.mjs 从 dev 起版，main 只是发版树快照），
+# 而 tag 发布只在推 tag 时才跑 typecheck+test：dev 上的类型错误会一路潜伏到发版才红。
+# 这里给 dev 的每次 push（含 PR 合并进 dev）补上同口径的 typecheck+test。
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+# 同一 ref 上的连续 push 只保留最新一次运行，被取消的旧结果没有参考价值。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 与 publish.yml 同口径（node 26）：node 22 的 test runner 会在事件循环排空时
+          # 拆掉在途测试（unref 退避定时器口径），飞书重试用例会被连坐取消。
+          node-version: 26
+      # 仓库不提交 package-lock.json（已进 .gitignore），setup-node 的 npm 缓存按
+      # lockfile 建键在此不可用，故手写 ~/.npm 缓存；依赖版本在 package.json 里全部钉死。
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-save --prefer-offline
+          fi
+      - run: npm run typecheck
+      - run: npm test
