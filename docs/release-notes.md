@@ -4,6 +4,58 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.2.465
+
+### 中文
+
+本版是 v0.2.461 之后的三笔合入：验收机械闸改按评审周期查账、恢复演练主备份判定收窄、记忆锁定期文案与日志插值修复。
+
+**运行时**
+
+- **验收闸门改按评审周期查账**：验收机械闸不再只看「当前活跃运行」，改为按本任务的评审周期查账——周期起点取最近一次交付（`run_succeeded`）或看板流转（`status → in_review`）事件的 `MAX(created_at)`，周期内存在子代理账目（`subagent_spawned`）即放行。两跳正规流程（`review_delegate` 派子代理 → 新运行只做裁决）此前必被误拦，现已正常放行；账目挂在别的任务、别的会话或早于最近交付锚点时仍然拒绝。
+- **账目认领线扩到两条**：账目运行的归属判定由「当次运行」扩到「本任务的 owner 派单运行（task_id + bot_id）」或「调用方会话的任意运行」，覆盖验收子代理挂在上一跳已结束运行上的实际形态。
+- **子代理落账回退任意 running 运行**：owner bot 的派单账优先记 `kind='task'` 的 running 运行；无施工运行时回退该 bot 任意 `kind` 的 running 运行（review/chat），总监验收链的核验子代理不再永远查不中而不落账。
+
+**工具与运维**
+
+- **恢复演练主备份判定收窄**：恢复演练挑「最新一份备份」时只认 `team-<stamp>.sqlite`，不再把同名前缀的附件（`.wechat.sqlite` 附件库、`.secret.key` 密钥、`.json` 清单）当主备份挑走——附件被挑走时演练会因找不到同名清单而失败。
+- **restore-check 导出可测、被 import 不自动开跑**：主备份判定函数改为导出，被测试 import 时不自动开跑（与 doctor 同口径），并新增 3 例守门测试钉住判定、排序与不自动开跑三条行为。
+- **dev-server capabilityInfo 版本对齐**：`capabilityInfo()` 返回的版本号由 `0.2.1-rc.5` 对齐到 `0.2.461`，预览服务对外报出的版本与实际发版一致。
+
+**记忆与日志**
+
+- **整理锁定期文案如实**：记忆条数回落但滞回标志仍在（34–63 条的整理锁定期）时，拒新增文案如实说明「此前触顶 64 条上限，现处整理锁定期（当前 N 条）」，不再谎称「已达 N/64」；触顶态文案保持原样。
+- **日志前缀并入首参格式串**：`createLogger` 的 `[dsh-team]` 前缀改为并入首参格式串后再交给 `console.*`，此前前缀独占首参导致后续参数里的 `%s`/`%d` 永不插值（owner 看到的是字面 `%s`）。
+
+**升级路径与回退**
+
+无数据库结构变更、无新增服务端配置项。回退按发版级回退：回退包版本与 tag，恢复发版前库快照。
+
+### English
+
+This release bundles three changes landed after v0.2.461: the review gate now looks up the subagent ledger per review cycle, the restore drill narrows main-backup detection, and the memory lock-period wording plus log interpolation are fixed.
+
+**Runtime**
+
+- **The review gate looks up the ledger per review cycle**: the mechanical acceptance gate no longer inspects only the currently active run. It now queries the subagent ledger within the task's review cycle, whose start is the `MAX(created_at)` of the latest delivery (`run_succeeded`) or board transition (`status → in_review`); a `subagent_spawned` entry inside that cycle passes the gate. The two-hop happy path (`review_delegate` spawns a subagent → a new run only adjudicates) was previously always rejected and now passes, while entries bound to another task, another session, or a point before the latest delivery anchor are still refused.
+- **The ledger claim now spans two lines**: the run that owns the ledger entry is matched either by the task's owner dispatch run (`task_id` + `bot_id`) or by any run of the caller's session, covering the real shape where the verification subagent is booked on the already-finished previous hop.
+- **Ledger booking falls back to any running run**: the owner bot's dispatch entry prefers the `kind='task'` running run, and falls back to any `kind` of running run (review/chat) for that bot when no construction run exists, so verification subagents in the director's acceptance chain are no longer silently unbooked.
+
+**Tooling and operations**
+
+- **Restore-drill main-backup detection is narrowed**: picking the newest backup now only accepts `team-<stamp>.sqlite`; the same-prefix attachments (`.wechat.sqlite` side database, `.secret.key` key, `.json` manifest) are no longer picked as the main backup, which previously made the drill fail with a missing manifest.
+- **restore-check exports a testable predicate and does not auto-run when imported**: the main-backup predicate is exported and the drill only starts when invoked directly (same convention as doctor), with 3 new guard tests pinning the predicate, the sort order, and the no-auto-run behaviour.
+- **dev-server capabilityInfo version is aligned**: `capabilityInfo()` now reports `0.2.461` instead of `0.2.1-rc.5`, so the preview service advertises the version that is actually released.
+
+**Memory and logging**
+
+- **The lock-period wording states the truth**: when the hysteresis flag is still set while the entry count has dropped back (the 34–63 entry lock period), the rejection message truthfully states that the 64-entry cap was hit earlier and that the scope is now in the lock period with the current count, instead of claiming "reached N/64"; the cap-state wording is unchanged.
+- **The log prefix joins the first format string**: `createLogger` merges the `[dsh-team]` prefix into the first format string before handing it to `console.*`. Previously the prefix occupied the first argument alone, so `%s`/`%d` in later arguments were never interpolated (owners saw a literal `%s`).
+
+**Upgrade path and rollback**
+
+No schema change and no new server-side setting. Rollback is release-level: revert the package version and tag, and restore the pre-release database snapshot.
+
 ## v0.2.461
 
 ### 中文

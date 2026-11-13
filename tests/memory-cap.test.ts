@@ -3,11 +3,14 @@
 // e approve 触顶拒；f 自动沉淀降级；g 篇幅上限与自动截断；
 // h 项目再开容量闸（DSHBOTS-342）；i UTF-16 口径（星面字符算 2 码元）；j bot 触顶+滞回标志置/清；
 // k approve 滞回中间带（34–63 持续拒）；l memoryWriteFromBot 新建路径满顶拒；m 超长存量 topic-only 编辑放行。
+// n 锁定带文案如实（DSHBOTS-355，61 条不得谎称已达上限）；o 触顶态文案回归；p 放行/拒绝边界矩阵；
+// q 锁定带覆盖写放行；r 现场序列回归（64→62→61 全链路）；s logger %s 插值（根 index.ts createLogger）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createLogger } from '../index.js'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
@@ -449,5 +452,184 @@ test('m) 超长存量条目仅改 topic 放行，改 content 仍受篇幅闸约�
     )
   } finally {
     await t.close()
+  }
+})
+
+test('n) 锁定带文案如实：标志在、61 条时不再谎称「已达 61/64」', async () => {
+  const t = await setup()
+  try {
+    const flagKey = `memory_full:project:${t.project.id}`
+    t.seed('project', t.project.id, MEMORY_CAP)
+    assert.throws(
+      () => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '触顶', content: '内容', actor: t.actor }),
+      /上限/,
+      '先触顶置滞回标志',
+    )
+    assert.equal(t.store.setting(flagKey), '1')
+    t.archive('project', t.project.id, 3)
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), 61)
+    assert.throws(
+      () => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '锁定期新增', content: '内容', actor: t.actor }),
+      (error: any) => {
+        const message = String(error.message)
+        assert.ok(message.includes('此前触顶'), `文案应说明此前触顶：${message}`)
+        assert.ok(message.includes('锁定期'), `文案应说明整理锁定期：${message}`)
+        assert.ok(message.includes('当前 61 条'), `文案应如实报当前条数：${message}`)
+        assert.ok(message.includes(`≤${MEMORY_COMPACT_TO}`), `文案应含整理阈值：${message}`)
+        assert.ok(message.includes('覆盖写不受影响'), `文案应说明覆盖写不受影响：${message}`)
+        assert.doesNotMatch(message, /已达 61\/64/, '61<64 不得再出现「已达 61/64」句式')
+        return true
+      },
+    )
+  } finally {
+    await t.close()
+  }
+})
+
+test('o) 触顶态文案回归：=64 拒绝时仍含 64、去废弃、去冗、融合与 ≤33', async () => {
+  const t = await setup()
+  try {
+    t.seed('project', t.project.id, MEMORY_CAP)
+    assert.throws(
+      () => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '第 65 条', content: '内容', actor: t.actor }),
+      (error: any) => {
+        const message = String(error.message)
+        assert.ok(message.includes(String(MEMORY_CAP)), `文案应含上限值：${message}`)
+        assert.match(message, /去废弃/, '文案应含去废弃指引')
+        assert.match(message, /去冗/, '文案应含去冗指引')
+        assert.match(message, /融合/, '文案应含融合指引')
+        assert.ok(message.includes(`≤${MEMORY_COMPACT_TO}`), `文案应含整理阈值：${message}`)
+        return true
+      },
+    )
+  } finally {
+    await t.close()
+  }
+})
+
+test('p) 边界矩阵：无标志 59–63 放行、64 拒并置标志；有标志 34 拒、33 放行清标志', async t => {
+  const ctx = await setup()
+  try {
+    const flagKey = `memory_full:project:${ctx.project.id}`
+    const create = (topic: string) => ctx.service.createMemory({ scopeType: 'project', scopeId: ctx.project.id, topic, content: '内容', actor: ctx.actor })
+    ctx.seed('project', ctx.project.id, 59)
+    for (const pre of [59, 60, 61, 62, 63]) {
+      await t.test(`无标志 pre=${pre} 放行`, () => {
+        assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), pre)
+        assert.ok(create(`矩阵新增 ${pre}`).id, `pre=${pre} 应放行`)
+      })
+    }
+    await t.test('无标志 pre=64 拒绝并置标志', () => {
+      assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), MEMORY_CAP)
+      assert.throws(() => create('矩阵新增 64'), (error: any) => error.status === 409 && /上限/.test(String(error.message)))
+      assert.equal(ctx.store.setting(flagKey), '1', '触顶应置标志')
+    })
+    ctx.archive('project', ctx.project.id, 30)
+    await t.test('有标志 34 拒（锁定期文案）', () => {
+      assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), 34)
+      assert.throws(() => create('矩阵新增 34'), (error: any) => /锁定期/.test(String(error.message)) && /当前 34 条/.test(String(error.message)))
+      assert.equal(ctx.store.setting(flagKey), '1', '34 条时标志不得清')
+    })
+    ctx.archive('project', ctx.project.id, 1)
+    await t.test('有标志 33 放行并清标志', () => {
+      assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), MEMORY_COMPACT_TO)
+      assert.ok(create('矩阵新增 33').id, '整理到 33 应放行')
+      assert.equal(ctx.store.setting(flagKey), null, '放行后标志应清')
+    })
+  } finally {
+    await ctx.close()
+  }
+})
+
+test('q) 锁定带覆盖写放行：标志在、61 条时同名覆盖写不经容量闸', async () => {
+  const t = await setup()
+  try {
+    t.seed('project', t.project.id, MEMORY_CAP)
+    const flagKey = `memory_full:project:${t.project.id}`
+    assert.throws(
+      () => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '触顶', content: '内容', actor: t.actor }),
+      /上限/,
+    )
+    t.archive('project', t.project.id, 3)
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), 61)
+    const sessionId = 'sess_lock_band'
+    t.store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
+       VALUES (?, ?, ?, 'project', NULL, ?)`,
+      sessionId, t.director.id, t.project.id, new Date().toISOString(),
+    )
+    const survivor = t.store.get(
+      "SELECT topic FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'active' LIMIT 1",
+      t.project.id,
+    )
+    const { memory, overwritten } = t.service.memoryWriteFromBot(sessionId, { scope: 'project', topic: survivor.topic, content: '锁定期覆盖后的内容' })
+    assert.equal(overwritten, true, '锁定带同名主题应走覆盖写而非新增')
+    assert.equal(memory.revision, 2)
+    assert.equal(memory.content, '锁定期覆盖后的内容')
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), 61, '覆盖写不得叠条')
+    assert.equal(t.store.setting(flagKey), '1', '覆盖写不经容量闸，标志保持')
+  } finally {
+    await t.close()
+  }
+})
+
+test('r) 现场序列回归：64 触顶→归档 2→覆盖写成功→新增拒→再归档 1→61 仍拒且文案如实', async () => {
+  const t = await setup()
+  try {
+    const flagKey = `memory_full:project:${t.project.id}`
+    const create = (topic: string) => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic, content: '内容', actor: t.actor })
+    t.seed('project', t.project.id, MEMORY_CAP)
+    assert.throws(() => create('新增一次'), (error: any) => error.status === 409 && /上限/.test(String(error.message)))
+    assert.equal(t.store.setting(flagKey), '1', '触顶应置滞回标志')
+    t.archive('project', t.project.id, 2)
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), 62)
+    assert.equal(t.store.setting(flagKey), '1', '归档不清标志')
+    const sessionId = 'sess_owner_scene'
+    t.store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
+       VALUES (?, ?, ?, 'project', NULL, ?)`,
+      sessionId, t.director.id, t.project.id, new Date().toISOString(),
+    )
+    const survivor = t.store.get(
+      "SELECT topic FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'active' LIMIT 1",
+      t.project.id,
+    )
+    const { overwritten } = t.service.memoryWriteFromBot(sessionId, { scope: 'project', topic: survivor.topic, content: '现场覆盖' })
+    assert.equal(overwritten, true, '锁定期内同名覆盖写应成功')
+    assert.throws(() => create('新增二次'), /锁定期/, '62 条时新增仍拒')
+    t.archive('project', t.project.id, 1)
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), 61)
+    assert.throws(
+      () => create('新增三次'),
+      (error: any) => {
+        const message = String(error.message)
+        assert.ok(message.includes('此前触顶'), `文案应说明此前触顶：${message}`)
+        assert.ok(message.includes('锁定期'), `文案应说明整理锁定期：${message}`)
+        assert.ok(message.includes('当前 61 条'), `文案应如实报当前条数：${message}`)
+        assert.doesNotMatch(message, /已达 61\/64/, '不得谎称已达 61/64 上限')
+        return true
+      },
+    )
+  } finally {
+    await t.close()
+  }
+})
+
+test('s) logger %s 插值：warn("%s", x) 完成插值并保留 [dsh-team] 前缀', () => {
+  const original = console.warn
+  let captured = ''
+  console.warn = (...parts: unknown[]) => { captured += parts.join(' ') + '\n' }
+  try {
+    const logger = createLogger()
+    logger.warn('记忆审查写入失败：%s', '项目记忆已触顶')
+    logger.warn('a %s b %s', 'x', 'y')
+    logger.warn('无占位符的普通日志')
+    assert.ok(captured.includes('[dsh-team]'), `应保留前缀：${captured}`)
+    assert.ok(captured.includes('记忆审查写入失败：项目记忆已触顶'), `%s 应完成插值：${captured}`)
+    assert.ok(!captured.includes('%s'), `不应残留字面 %s：${captured}`)
+    assert.ok(captured.includes('a x b y'), `多占位符应全部插值：${captured}`)
+    assert.ok(captured.includes('[dsh-team] 无占位符的普通日志'), `无占位符日志不受影响：${captured}`)
+  } finally {
+    console.warn = original
   }
 })

@@ -32,6 +32,10 @@ export function installSubagentLedger(ctx, store, logger) {
   // 暂存 subagent/end 载荷：childId → info，tools/result 到达时按 id 出现在结果 JSON 里配对
   const endsByChild = new Map()
 
+  // DSHBOTS-353 落账放宽：owner bot 的派单账优先记 kind='task' running（D-294 施工账语义），
+  // 无施工运行时回退该 bot 任意 kind 的 running 运行（review/chat）——总监验收链的核验
+  // 子代理（review_delegate 运行）此前永远查不中而不落账。域串行（D-308 one_active_run_per_bot）
+  // 保证该 bot 当前 running 即派单所在运行。
   const ownerRunOf = (agentSessionId) => {
     const binding = agentSessionId
       ? store.get('SELECT * FROM session_bindings WHERE session_id = ?', agentSessionId)
@@ -39,6 +43,9 @@ export function installSubagentLedger(ctx, store, logger) {
     if (!binding?.bot_id) return null
     const run = store.get(
       "SELECT id FROM runs WHERE bot_id = ? AND kind = 'task' AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+      binding.bot_id,
+    ) ?? store.get(
+      "SELECT id FROM runs WHERE bot_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
       binding.bot_id,
     )
     return run ? { botId: binding.bot_id, runId: run.id } : null

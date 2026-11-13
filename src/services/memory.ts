@@ -277,8 +277,12 @@ export const memoryMethods = {
       scopeType, scopeId, 'active',
     )?.count ?? 0)
   },
-  memoryCapacityMessage(scopeType, scopeId, count) {
+  memoryCapacityMessage(scopeType, scopeId, count, latched = false) {
     const label = scopeType === 'bot' ? `Bot(${scopeId})` : `项目(${scopeId})`
+    // 锁定带（滞回标志在、34–63 条）：如实说明此前触顶、现处整理锁定期，不得谎称「已达 N/64」。
+    if (latched) {
+      return `${label}记忆此前触顶 ${MEMORY_CAP} 条上限，现处整理锁定期（当前 ${count} 条），新增被拒绝；需整理到 ≤${MEMORY_COMPACT_TO} 条恢复新增：去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗与融合（同主题 team_memory_write 覆盖写、合并相近条目）；同主题覆盖写不受影响。`
+    }
     return `${label}记忆已达 ${count}/${MEMORY_CAP} 条上限，新增被拒绝；请先去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗（同主题用 team_memory_write 覆盖写）、融合（合并相近条目），整理到 ≤${MEMORY_COMPACT_TO} 条后再新增。`
   },
   assertMemoryCapacity(scopeType, scopeId) {
@@ -290,7 +294,7 @@ export const memoryMethods = {
       throw conflict(this.memoryCapacityMessage(scopeType, scopeId, count))
     }
     if (this.store.setting(flagKey) === null) return
-    if (count > MEMORY_COMPACT_TO) throw conflict(this.memoryCapacityMessage(scopeType, scopeId, count))
+    if (count > MEMORY_COMPACT_TO) throw conflict(this.memoryCapacityMessage(scopeType, scopeId, count, true))
     this.store.run('DELETE FROM settings WHERE key = ?', flagKey)
   },
 

@@ -109,6 +109,51 @@ test('无所属 task 运行或非 subagent 工具不落账', async () => {
   }
 })
 
+// DSHBOTS-353 落账回退：owner bot 无 kind='task' running 时，subagent 派单账回退记到
+// 该 bot 任意 kind 的 running 运行（总监验收链的核验子代理挂在 review 运行上）。
+test('DSHBOTS-353 回退：无 task 运行时账落 owner bot 的 running review 运行', async () => {
+  const { root, store, ctx, dispose } = await setup()
+  try {
+    const now = new Date().toISOString()
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'run-1'", now)
+    store.run("INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, queued_at, started_at) VALUES ('run-rev', NULL, 'b1', 'review', 'read', 'review_delegate', 'GATE-9', 'running', 1, 'idem-ledger-rev', 'ctrl-1', ?, ?)", now, now)
+    await ctx.waterfall('tools/pre-execute', {
+      name: 'subagent',
+      callId: 'call-rev',
+      arguments: { description: 'GATE-9 验收核验', prompt: 'verify the delivery' },
+      agent: { session: { id: 'ctrl-1' } },
+    }, async () => ({ allowed: true }))
+    const spawned = events(store, 'run-rev').filter(r => r.type === 'subagent_spawned')
+    assert.equal(spawned.length, 1, '核验子代理账目应回退落到 review 运行')
+    assert.ok(spawned[0].message.includes('GATE-9'), spawned[0].message)
+  } finally {
+    dispose()
+    store.close?.()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// kind='task' 优先（D-294 施工账语义）：task 与 review 运行并存时仍记 task 运行。
+test('DSHBOTS-353 优先级：task 与 review 运行并存时账仍记 kind=\'task\'', async () => {
+  const { root, store, ctx, dispose } = await setup()
+  try {
+    const now = new Date().toISOString()
+    store.run("INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, queued_at, started_at) VALUES ('run-rev2', NULL, 'b1', 'review', 'read', 'review_delegate', 'GATE-9', 'running', 1, 'idem-ledger-rev2', 'ctrl-1', ?, ?)", now, now)
+    await ctx.waterfall('tools/pre-execute', {
+      name: 'subagent',
+      callId: 'call-pri',
+      arguments: { description: 'GATE-9 并存优先级', prompt: 'check priority' },
+      agent: { session: { id: 'ctrl-1' } },
+    }, async () => ({ allowed: true }))
+    assert.equal(events(store, 'run-1').filter(r => r.type === 'subagent_spawned').length, 1, 'task 运行优先承接账目')
+    assert.equal(events(store, 'run-rev2').filter(r => r.type === 'subagent_spawned').length, 0, 'review 运行不抢 task 运行的账')
+  } finally {
+    dispose()
+    store.close?.()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('taskLabelOf 优先任务号形态，缺省回退截断描述', () => {
   assert.equal(taskLabelOf({ description: 'DSHBOTS-294 子代理账本' }), 'DSHBOTS-294')
   assert.equal(taskLabelOf({ prompt: 'implement ALPHA-12 wiring' }), 'ALPHA-12')
