@@ -174,6 +174,16 @@ export const chatMethods = {
       replyToId: replyMessage?.id ?? null,
       images,
     })
+    // mentioned_only 的环境消息（无显式 @/引用）：不立即唤醒任何 bot，但总监默认 1 秒后
+    // 自动接单——发送回传带 runBots=[总监]，UI 立刻立起总监的思考气泡（乐观排队行，
+    // typing-linger 复用），真实运行 1 秒后入列接管气泡。
+    const ambientDirectorClaim = replyMode === 'mentioned_only'
+      && explicitTarget.length === 0
+      && targets.length === 0
+      && members.some(bot => bot.id === project.owner_bot_id)
+    if (ambientDirectorClaim) {
+      setTimeout(() => { this.claimAmbientMessage(project.id, project.owner_bot_id, messageId) }, 1_000)
+    }
     for (const bot of targets) {
       this.enqueueOutbox({
         kind: 'chat_run',
@@ -189,7 +199,36 @@ export const chatMethods = {
       void considerVisionProxy(this, { bot, message: { id: messageId, project_id: project.id } })
     }
     void this.tick()
-    return { messageId, runBots: targets.map(bot => bot.id) }
+    // 环境接单的回传：runBots 带总监供 UI 立思考气泡；真实运行由 1 秒后的接单入列。
+    return {
+      messageId,
+      runBots: ambientDirectorClaim ? [project.owner_bot_id] : targets.map(bot => bot.id),
+      ...(ambientDirectorClaim ? { deferredDirector: true } : {}),
+    }
+  },
+
+  // mentioned_only 环境消息的延迟接单（1 秒）：到点复核后按标准 chat_run 幂等键入列——
+  // 幂等键 `chat:<msg>:<bot>` 保证期间任何路径已派生同一运行时这里是 no-op。复核条件
+  // （总监可用、项目未归档、消息仍在）不满足则静默放弃，接单失败只 warn。
+  claimAmbientMessage(projectId, botId, messageId) {
+    try {
+      const project = this.store.get("SELECT id FROM projects WHERE id = ? AND status = 'active'", projectId)
+      const bot = this.store.get("SELECT id FROM bots WHERE id = ? AND status = 'active'", botId)
+      const message = this.store.get("SELECT id FROM messages WHERE id = ? AND project_id = ?", messageId, projectId)
+      if (!project || !bot || !message) return false
+      this.enqueueOutbox({
+        kind: 'chat_run',
+        payload: { projectId, botId, messageId },
+        projectId,
+        sourceId: messageId,
+        idempotencyKey: `chat:${messageId}:${botId}`,
+      })
+      void this.tick()
+      return true
+    } catch (error: any) {
+      this.logger.warn?.('dsh-team: 环境消息延迟接单失败 %s: %s', messageId, error?.message ?? error)
+      return false
+    }
   },
 
   // /clear：清空本群全部聊天记录。任务、记忆等不受影响；操作进审计。

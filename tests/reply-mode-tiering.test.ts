@@ -74,18 +74,36 @@ test('投递面：everyone 无目标时全员响应', async () => {
   } finally { await t.close() }
 })
 
-test('投递面：mentioned_only 无目标时不唤醒任何 bot，@ 与引用照旧直达', async () => {
+test('投递面：mentioned_only 环境消息延迟接单——立即回传总监气泡锚点，1 秒后自动入列', async () => {
   const t = await setup()
   try {
     t.service.updateProject(t.projectRow.id, { replyMode: 'mentioned_only' }, { type: 'user', id: 'u1' })
-    const ambient = await say(t, '环境消息：不点名，谁都不该被唤醒')
-    assert.deepEqual(ambient.runBots, [])
+    const ambient = await say(t, '环境消息：总监一秒后默认接单')
+    // 立即：不产生 chat_run 投递，但回传带总监（UI 思考气泡锚点）。
     assert.equal(
       t.store.get("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'chat_run'")?.n ?? 0, 0,
-      '环境消息不产生 chat_run 投递',
+      '环境消息不立即产生 chat_run 投递',
     )
+    assert.deepEqual(ambient.runBots, [t.director.id], '回传总监供 UI 立思考气泡')
+    assert.equal(ambient.deferredDirector, true)
+    // 1 秒后：自动接单入列（outbox 即投即领，终态断言落在 runs 表上）。
+    await new Promise(resolve => setTimeout(resolve, 1_150))
+    const deadline = Date.now() + 3_000
+    let claimed = null
+    while (Date.now() < deadline) {
+      claimed = t.store.get(
+        "SELECT id FROM runs WHERE kind = 'chat' AND trigger_ref = ? AND bot_id = ?",
+        ambient.messageId, t.director.id,
+      ) ?? t.store.get(
+        "SELECT id FROM outbox WHERE kind = 'chat_run' AND json_extract(payload_json, '$.messageId') = ?",
+        ambient.messageId,
+      )
+      if (claimed) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.ok(claimed, '1 秒后总监自动接单（chat 运行入列）')
     const mentioned = await say(t, '@Builder 这条你必须看')
-    assert.deepEqual(mentioned.runBots, [t.dev.id], '直接信号（@）照旧必达')
+    assert.deepEqual(mentioned.runBots, [t.dev.id], '直接信号（@）照旧必达且不惊动总监')
   } finally { await t.close() }
 })
 
