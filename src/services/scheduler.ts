@@ -8,6 +8,7 @@ import { badRequest } from '../errors.js'
 import { applyRetention, reconcileUsage } from '../usage-reconcile.js'
 import { id, jsonParse, nowIso, text } from '../util.js'
 import { MAX_RATE_LIMIT_RETRIES, isQuotaExhausted, isRetryChainError } from './backoff.js'
+import { INTERNAL_FALLBACK_KINDS } from './model-fallback.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
 import { TASK_BUDGET_ROUNDS, TRANSITIONS, taskDeadlineInfo } from './tasks.js'
 import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
@@ -632,8 +633,11 @@ export const schedulerMethods = {
         }
         // DSHBOTS-241 额度闸门：主 provider 仍在耗尽期、且本次没走备用模型的任务运行不领取——
         // 留 queued，恢复时间过后下一拍自动回主模型（避免每拍撞同一堵墙）。
+        // DSHBOTS-358：闸门扩到内部运行种类（任务/验收/受阻处理/记忆审查），
+        // mode='wait' 的内部运行同样留 queued 等恢复，不空转撞墙。
         // 走备用的运行（model_provider 非空）不受此闸影响，主备两套额度各自独立。
-        if (run.kind === 'task' && !run.model_provider) {
+        // 聊天类运行不在此列：照发现行下发，失败文案与重试口径不动。
+        if (INTERNAL_FALLBACK_KINDS.has(run.kind) && !run.model_provider) {
           const quota = this.botQuotaState(run.bot_id, bot.provider)
           if (quota?.exhausted) {
             const alreadyNoted = this.store.get(

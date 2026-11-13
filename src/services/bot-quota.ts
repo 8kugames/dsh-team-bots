@@ -97,6 +97,17 @@ export function quotaRouteFor(bot: any, primary: any, fallback: any) {
   return { mode: 'wait' as const, provider: primary.provider, resetAt: primary.resetAt }
 }
 
+// 更严的一条额度记录（DSHBOTS-358）：耗尽状态优先，其次恢复时间更晚者。
+// Bot 换 provider 时用于合并旧键与新键的记录，避免迁移把正在生效的墙抹掉。
+function stricterQuotaRow(a: any, b: any) {
+  const aExhausted = quotaRowState(a).exhausted
+  const bExhausted = quotaRowState(b).exhausted
+  if (aExhausted !== bExhausted) return aExhausted ? a : b
+  const aAt = a?.reset_at ? Date.parse(a.reset_at) : 0
+  const bAt = b?.reset_at ? Date.parse(b.reset_at) : 0
+  return aAt >= bAt ? a : b
+}
+
 export const botQuotaMethods = {
   // 单套 provider 的额度状态视图。provider 为空（bot 未配主模型）时视为无限制。
   botQuotaState(botId: string | null | undefined, provider: string | null | undefined) {
@@ -221,6 +232,49 @@ export const botQuotaMethods = {
     const primary = this.botQuotaState(bot.id, bot.provider)
     const fallback = bot.fallback_provider ? this.botQuotaState(bot.id, bot.fallback_provider) : null
     return quotaRouteFor(bot, primary, fallback)
+  },
+
+  // 换 provider 时迁移额度记录（DSHBOTS-358）：额度墙按 (bot, provider) 存，
+  // Bot 改用别的 provider 后旧键会成孤儿（永远查不到、也永远清不掉）。
+  // 迁移口径：目标 provider 无记录 → 直接改键；目标已有记录 → 保留更严的一条（不抹掉
+  // 正在生效的墙），删掉旧键。仅 provider 真变才动，并落一条操作日志。
+  migrateBotQuotaProvider(botId: string, fromProvider: string | null | undefined, toProvider: string | null | undefined, actor: any = this.actor()) {
+    if (!botId || !fromProvider || !toProvider || fromProvider === toProvider) return null
+    const oldRow = this.store.get('SELECT * FROM bot_quota WHERE bot_id = ? AND provider = ?', botId, fromProvider)
+    const newRow = this.store.get('SELECT * FROM bot_quota WHERE bot_id = ? AND provider = ?', botId, toProvider)
+    if (!oldRow && !newRow) {
+      this.audit(actor, 'bot.quota_provider_changed', 'bot', botId, {
+        from: fromProvider, to: toProvider, migrated: false,
+      })
+      return null
+    }
+    const now = nowIso()
+    this.store.transaction(() => {
+      if (oldRow) {
+        if (!newRow) {
+          this.store.run(
+            'UPDATE bot_quota SET provider = ?, updated_at = ? WHERE bot_id = ? AND provider = ?',
+            toProvider, now, botId, fromProvider,
+          )
+        } else {
+          const keep = stricterQuotaRow(oldRow, newRow)
+          if (keep === oldRow) {
+            this.store.run(
+              `UPDATE bot_quota SET state = ?, exhausted_at = ?, reset_at = ?, reset_source = ?, released_at = NULL,
+                released_by = NULL, error_code = ?, error_message = ?, updated_at = ?
+               WHERE bot_id = ? AND provider = ?`,
+              keep.state, keep.exhausted_at, keep.reset_at, keep.reset_source,
+              keep.error_code ?? null, keep.error_message ?? null, now, botId, toProvider,
+            )
+          }
+          this.store.run('DELETE FROM bot_quota WHERE bot_id = ? AND provider = ?', botId, fromProvider)
+        }
+      }
+      this.audit(actor, 'bot.quota_provider_changed', 'bot', botId, {
+        from: fromProvider, to: toProvider, migrated: Boolean(oldRow),
+      })
+    })
+    return this.botQuotaState(botId, toProvider)
   },
 
   // 解析 bot 标识（id 或 name），供 director 工具按名字解除。

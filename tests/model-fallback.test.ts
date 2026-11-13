@@ -45,6 +45,16 @@ function insertRun(store, { id, projectId, botId, taskId = null, kind = 'task', 
   )
 }
 
+// 落一条内部只读运行（总监验收/受阻处理/记忆审查）：形态与各自入队入口一致。
+function insertInternalRun(store, { id, projectId, botId, taskId = null, kind = 'review', triggerType = 'review_requested', triggerRef = null }) {
+  store.run(
+    `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt,
+       idempotency_key, queued_at, started_at)
+     VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'running', 1, ?, ?, ?)`,
+    id, projectId, botId, taskId, kind, triggerType, triggerRef ?? taskId, `idem-${id}`, mins(-2), mins(-2),
+  )
+}
+
 // 给 bot 配上备用模型（走公开的 updateBot，顺带覆盖配置路径）。
 async function withFallback(service, botId, { provider = 'openai', model = 'gpt-4o-mini', effort = null } = {}) {
   return service.updateBot(botId, { fallbackProvider: provider, fallbackModel: model, fallbackEffort: effort }, { type: 'user', id: 'u' })
@@ -248,6 +258,101 @@ test('自动回退：下一条运行不带 override，按 Bot 主模型下发', 
       { provider: calls.at(-1).provider, model: calls.at(-1).model },
       { provider: 'anthropic', model: 'claude-opus' },
     )
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// DSHBOTS-358：备用模型切换覆盖内部运行（review / handle / memory_review），
+// 聊天类维持现状不自动重发。
+test('内部运行撞墙派生备用：review 派生 review 运行；chat 不派生', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    await service.updateBot(director.id, { provider: 'deepseek', model: 'deepseek-chat' }, { type: 'user', id: 'u' })
+    const project = await service.createProject({ name: 'MF7', key: 'MF7', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '验收撞墙', assigneeBotId: director.id, status: 'in_review' })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    // 保证任务名下没有其他活动运行（review 运行独占任务名额）
+    store.run("UPDATE runs SET status = 'canceled' WHERE task_id = ?", task.id)
+
+    // 总监验收运行撞墙 → 派生同种类的备用运行
+    insertInternalRun(store, { id: 'rv1', projectId: project.id, botId: director.id, taskId: task.id, kind: 'review' })
+    await service.finishRun({ runId: 'rv1', status: 'failed', output: '', error: { code: '1308', message: '已达到 5 小时的使用上限' } } as any)
+
+    const derived = store.get('SELECT * FROM runs WHERE parent_run_id = ?', 'rv1')
+    assert.ok(derived, 'review 撞墙应派生备用运行')
+    assert.equal(derived.kind, 'review', '派生运行保持 review 种类')
+    assert.equal(derived.mode, 'read', '派生运行保持只读形态')
+    assert.equal(derived.model_provider, 'minimax-cn')
+    assert.equal(derived.model_model, 'MiniMax-M3.1-Flash')
+    assert.equal(derived.status, 'queued')
+    assert.equal(derived.task_id, task.id)
+    const evt = store.get("SELECT * FROM run_events WHERE run_id = 'rv1' AND type = 'model_fallback'")
+    assert.ok(evt, '原运行留 model_fallback 事件')
+    assert.match(evt.message, /minimax-cn\/MiniMax-M3\.1-Flash/)
+    // 额度墙落在主 provider 上（内部运行同样记账）
+    const quota = store.get('SELECT * FROM bot_quota WHERE bot_id = ? AND provider = ?', director.id, 'deepseek')
+    assert.ok(quota, 'review 撞墙同样记额度墙')
+    assert.equal(quota.state, 'exhausted')
+    // 群聊提示切备用，不发失败文案
+    const msg = store.get("SELECT body FROM messages WHERE run_id = 'rv1' AND body LIKE '%已切换备用模型%'")
+    assert.ok(msg, '应告知已切备用模型')
+    assert.match(msg.body, /minimax-cn\/MiniMax-M3\.1-Flash/)
+
+    // 聊天类运行撞墙不派生（保持现状：失败即失败，不自动重发）
+    const chatBot = await service.createBot({
+      name: 'chat-bot', role: 'dev', provider: 'deepseek', model: 'deepseek-chat',
+      fallbackProvider: 'minimax-cn', fallbackModel: 'MiniMax-M3.1-Flash',
+    })
+    await service.addProjectMember(project.id, chatBot.id, { type: 'user', id: 'u' })
+    insertInternalRun(store, { id: 'ch1', projectId: project.id, botId: chatBot.id, kind: 'chat', triggerType: 'mention' })
+    await service.finishRun({ runId: 'ch1', status: 'failed', output: '', error: { code: '1308', message: '已达到 5 小时的使用上限' } } as any)
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = ?', 'ch1').n, 0, 'chat 不派生备用运行')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('内部运行链内只切一次：review 的备用运行再失败不再派生', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'MF8', key: 'MF8', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '验收只切一次', assigneeBotId: director.id, status: 'in_review' })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    store.run("UPDATE runs SET status = 'canceled' WHERE task_id = ?", task.id)
+
+    insertInternalRun(store, { id: 'rv2', projectId: project.id, botId: director.id, taskId: task.id, kind: 'review' })
+    await service.finishRun({ runId: 'rv2', status: 'failed', output: '', error: { code: '1308', message: '已达限额' } } as any)
+    const derived = store.get('SELECT * FROM runs WHERE parent_run_id = ?', 'rv2')
+    assert.ok(derived, '首撞派生备用运行')
+
+    store.run("UPDATE runs SET status = 'running', started_at = ? WHERE id = ?", mins(-1), derived.id)
+    await service.finishRun({ runId: derived.id, status: 'failed', output: '', error: { code: '1308', message: '备用也限额' } } as any)
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = ?', derived.id).n, 0, '链内不重复派生')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('handle 运行撞墙派生备用：派生 handle 运行（受阻处理链独立切一次）', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'MF9', key: 'MF9', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '受阻撞墙', assigneeBotId: director.id, status: 'blocked' })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    store.run("UPDATE runs SET status = 'canceled' WHERE task_id = ?", task.id)
+    insertInternalRun(store, { id: 'hd1', projectId: project.id, botId: director.id, taskId: task.id, kind: 'handle', triggerType: 'blocked_handoff' })
+    await service.finishRun({ runId: 'hd1', status: 'failed', output: '', error: { code: '1308', message: '已达限额' } } as any)
+    const derived = store.get('SELECT * FROM runs WHERE parent_run_id = ?', 'hd1')
+    assert.ok(derived, 'handle 撞墙应派生备用运行')
+    assert.equal(derived.kind, 'handle', '派生运行保持 handle 种类')
+    assert.equal(derived.model_provider, 'minimax-cn')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })

@@ -154,14 +154,32 @@ export const memoryMethods = {
     // 审查模型覆盖：配置了专用模型对时随运行下发（runs.model_* 三列既有通道，
     // startRun 的 modelOverrideFor 消费）；未配置为 NULL，沿用 Bot 主模型。
     const target = memoryReviewModelTarget(this.config)
+    // DSHBOTS-358：记忆审查属内部运行，同样接额度路由——主 provider 耗尽时走备用模型；
+    // 主备都耗尽则不带模型覆盖，留 queued 等恢复（调度器额度闸门兜底）。
+    // 专用审查模型配在别的 provider 且该 provider 未耗尽时，专用模型优先。
+    const routing = this.quotaRoutingForBot(bot)
+    let reviewProvider = target?.provider ?? null
+    let reviewModel = target?.model ?? null
+    let reviewEffort = null
+    if (routing.mode === 'fallback') {
+      reviewProvider = routing.provider
+      reviewModel = routing.model
+      reviewEffort = routing.effort ?? null
+    } else if (routing.mode === 'wait') {
+      const dedicated = target ? this.botQuotaState(bot.id, target.provider) : null
+      if (!target || dedicated?.exhausted) {
+        reviewProvider = null
+        reviewModel = null
+      }
+    }
     const reviewRunId = id('run')
     const createdAt = nowIso()
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, model_provider, model_model, queued_at)
-       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?)`,
+        attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
+       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?, ?)`,
       reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`,
-      target?.provider ?? null, target?.model ?? null, createdAt,
+      reviewProvider, reviewModel, reviewEffort, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',

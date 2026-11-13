@@ -192,20 +192,31 @@ export const runsMethods = {
     }
     // owner 任务运行挂起项（review/handle/review_delegate，DSHBOTS-290 busy 闸）：
     // 只读任务运行，按入队时快照建回，列面与 enqueueOwnerTaskRun 一致。
+    // DSHBOTS-358：额度路由快照随挂起项带回来，建回时同样落 model_* 三列。
     if (item.kind === 'owner_task') {
+      const routing = item.routing ?? {}
       try {
         this.store.run(
           `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-            attempt, idempotency_key, queued_at)
-           VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?)`,
+            attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
+           VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?, ?, ?, ?)`,
           runId, item.projectId, bot.id, item.taskId, item.runKind, item.triggerType, item.taskId,
-          `${item.triggerType}:${item.taskId}:${Date.now()}:${runId}`, createdAt,
+          `${item.triggerType}:${item.taskId}:${Date.now()}:${runId}`,
+          routing.mode === 'fallback' ? routing.provider ?? null : null,
+          routing.mode === 'fallback' ? routing.model ?? null : null,
+          routing.mode === 'fallback' ? routing.effort ?? null : null,
+          createdAt,
         )
       } catch (error: any) {
         if (String(error).includes('UNIQUE')) return null
         throw error
       }
       this.insertRunEvent(runId, 'queued', 'bot 空闲，挂起的 owner 任务运行建回（验收/接管）')
+      if (routing.mode === 'fallback') {
+        this.insertRunEvent(runId, 'quota_fallback', `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref ?? ''}`)
+      } else if (routing.mode === 'wait') {
+        this.insertRunEvent(runId, 'quota_wait', `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`)
+      }
       return runId
     }
     const spec = item.kind === 'chat'

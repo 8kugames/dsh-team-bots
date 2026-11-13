@@ -32,6 +32,21 @@ export const PROVIDER_UNAVAILABLE_CODES = new Set([
 // 额度耗尽不在此列——它没有可等的短窗口，必须换模型。
 const WAITABLE_CODES = new Set(['RATE_LIMIT', 'QUOTA'])
 
+// 可派生备用运行的内部运行种类（DSHBOTS-358）：任务运行 + 总监验收/受阻处理 + 记忆审查。
+// 这些运行都在项目工作台内部流转，重跑不会重复打扰用户，因此与任务运行同口径切备用模型。
+// 聊天类（chat / solo_chat / dm / vision 等）不在此列：自动重跑会重复发消息、打扰用户。
+export const INTERNAL_FALLBACK_KINDS = new Set(['task', 'review', 'handle', 'memory_review'])
+
+// 运行链标识：任务链按 task_id，记忆审查链按来源运行 id（memory_review 不挂任务）。
+function fallbackChainKey(run: any) {
+  if (!run) return null
+  if (run.kind === 'memory_review') {
+    return run.trigger_ref ? { scope: 'memory', sourceRunId: run.trigger_ref } : null
+  }
+  if (run.task_id) return { scope: 'task', taskId: run.task_id }
+  return null
+}
+
 export function isProviderUnavailableCode(code) {
   return Boolean(code) && PROVIDER_UNAVAILABLE_CODES.has(String(code).toUpperCase())
 }
@@ -63,12 +78,22 @@ export const modelFallbackMethods = {
   },
 
   // 这条运行链是否已经用过备用模型（每条链只切一次）。
+  // 链按运行种类分桶（DSHBOTS-358）：任务链、验收链、受阻处理链、记忆审查链各自独立——
+  // 施工轮用过备用不代表总监验收轮不能再切，反之亦然。
   fallbackUsedInChain(run) {
     if (run?.model_provider) return true
-    if (!run?.task_id) return false
+    const chain = fallbackChainKey(run)
+    if (!chain) return false
+    if (chain.scope === 'memory') {
+      const row = this.store.get(
+        `SELECT id FROM runs WHERE kind = 'memory_review' AND trigger_ref = ? AND model_provider IS NOT NULL LIMIT 1`,
+        chain.sourceRunId,
+      )
+      return Boolean(row)
+    }
     const row = this.store.get(
-      'SELECT id FROM runs WHERE task_id = ? AND model_provider IS NOT NULL LIMIT 1',
-      run.task_id,
+      'SELECT id FROM runs WHERE kind = ? AND task_id = ? AND model_provider IS NOT NULL LIMIT 1',
+      run.kind, chain.taskId,
     )
     return Boolean(row)
   },
@@ -78,28 +103,43 @@ export const modelFallbackMethods = {
     const fallback = this.botFallbackModel(bot)
     if (!fallback) return null
     if (!shouldFallbackOn(error)) return null
-    // 只对任务运行派生：私信/群聊/单聊自动重跑会重复发消息、打扰用户。
-    if (run.kind !== 'task' || !run.task_id) return null
+    // 只对内部运行派生（DSHBOTS-358）：私信/群聊/单聊自动重跑会重复发消息、打扰用户。
+    if (!INTERNAL_FALLBACK_KINDS.has(run.kind)) return null
+    const chain = fallbackChainKey(run)
+    if (!chain) return null
     if (this.fallbackUsedInChain(run)) return null
-    const task = this.store.get('SELECT * FROM tasks WHERE id = ?', run.task_id)
-    if (!task || ['done', 'canceled'].includes(task.status)) return null
-    // 任务已有排队/运行中的运行（唯一索引 one_active_run_per_task）就不再派生。
-    const active = this.store.get(
-      "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
-      run.task_id,
-    )
-    if (active) return null
+    if (chain.scope === 'task') {
+      const task = this.store.get('SELECT * FROM tasks WHERE id = ?', chain.taskId)
+      if (!task || ['done', 'canceled'].includes(task.status)) return null
+      // 任务已有排队/运行中的运行（唯一索引 one_active_run_per_task）就不再派生。
+      const active = this.store.get(
+        "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
+        chain.taskId,
+      )
+      if (active) return null
+    } else {
+      // 记忆审查链：同一条来源运行已有排队/运行中的审查运行就不再派生。
+      const active = this.store.get(
+        "SELECT id FROM runs WHERE kind = 'memory_review' AND trigger_ref = ? AND status IN ('queued', 'running')",
+        chain.sourceRunId,
+      )
+      if (active) return null
+    }
     const runId = id('run')
     const createdAt = nowIso()
     const attempt = (Number(run.attempt) || 1) + 1
+    // 派生运行沿用原运行的种类与形态（DSHBOTS-358）：验收/受阻处理/记忆审查各自保持
+    // 原有语义与提示词通道，只是换一套模型重跑同一条链。
+    const kind = run.kind
+    const mode = run.mode ?? (kind === 'task' ? 'write' : 'read')
     try {
       this.store.transaction(() => {
         this.store.run(
           `INSERT INTO runs(id, project_id, bot_id, task_id, parent_run_id, kind, mode, write_scopes, trigger_type,
             trigger_ref, status, attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
-           VALUES (?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
           runId, run.project_id, run.bot_id, run.task_id, run.id,
-          run.mode ?? 'write', run.write_scopes ?? null,
+          kind, mode, run.write_scopes ?? null,
           run.trigger_type, run.trigger_ref, attempt, `model_fallback:${run.id}`,
           fallback.provider, fallback.model, fallback.effort, createdAt,
         )

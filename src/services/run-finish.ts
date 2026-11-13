@@ -223,7 +223,22 @@ export const runFinishMethods = {
       return
     }
     if (run.kind === 'memory_review') {
-      await this.completeMemoryReview(run, status === 'succeeded' ? cleanOutput : '', error)
+      // DSHBOTS-358：记忆审查撞 provider 额度墙时切备用模型重跑同一条审查链，
+      // 规则沉淀兜底留到备用链也失败时再做，避免同一次交付落两份记忆。
+      const fallback = status === 'failed'
+        ? this.spawnModelFallback({ run: refreshed, bot, error })
+        : null
+      if (fallback) {
+        this.insertMessage({
+          projectId: run.project_id,
+          senderType: 'bot',
+          senderId: bot.id,
+          body: `已达限额（${error?.code ?? '未知错误'}），已切换备用模型 ${fallback.fallback.ref} 继续记忆审查。`,
+          runId,
+        })
+      } else {
+        await this.completeMemoryReview(run, status === 'succeeded' ? cleanOutput : '', error)
+      }
       if (this.rate[run.project_id]) delete this.rate[run.project_id]
       return
     }
@@ -281,7 +296,21 @@ export const runFinishMethods = {
     }
     if (run.kind === 'review' || run.kind === 'handle') {
       const label = run.kind === 'review' ? '验收' : '受阻处理'
-      if (run.task_id) {
+      // DSHBOTS-358：总监验收/受阻处理撞 provider 额度墙时切备用模型重跑同一条链
+      // （与任务运行同口径）；派生成功就不发失败消息、不触发退回重派链。
+      const fallback = status === 'failed'
+        ? this.spawnModelFallback({ run: refreshed, bot, error })
+        : null
+      if (fallback) {
+        this.insertMessage({
+          projectId: project.id,
+          senderType: 'bot',
+          senderId: bot.id,
+          body: `已达限额（${error?.code ?? '未知错误'}），已切换备用模型 ${fallback.fallback.ref} 继续${label}。`,
+          taskId: run.task_id,
+          runId,
+        })
+      } else if (run.task_id) {
         // 委派核验运行（DSHBOTS-107）成功时，结论以任务评论写回（复用 addComment 通道：
         // 评论+事件+审计一次落全）。不改任务状态、不代为裁决——accept/return 仍归 owner。
         if (run.trigger_type === 'review_delegate' && status === 'succeeded' && cleanOutput) {

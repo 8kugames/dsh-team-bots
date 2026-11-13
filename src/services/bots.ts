@@ -288,6 +288,14 @@ export const botsMethods = {
       fields.push('provider = ?', 'model = ?', 'effort = ?', 'updated_at = ?')
       values.push(provider, model, effort, nowIso())
       this.store.run(`UPDATE bots SET ${fields.join(', ')} WHERE id = ?`, ...values, botId)
+      // DSHBOTS-358：provider 真变时迁移该 bot 的额度记录——额度墙按 (bot, provider) 存，
+      // 改 provider 后旧键会成孤儿。迁移保留更严的一条，不抹掉正在生效的墙。
+      if (provider !== bot.provider) {
+        this.migrateBotQuotaProvider(botId, bot.provider, provider, actor)
+      }
+      if (fallbackProvider !== bot.fallback_provider) {
+        this.migrateBotQuotaProvider(botId, bot.fallback_provider, fallbackProvider, actor)
+      }
       if (!snapshotUnchanged) {
         const version = (Number(bot.current_revision) || 0) + 1
         this.store.run(
