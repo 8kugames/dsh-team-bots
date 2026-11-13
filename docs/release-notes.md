@@ -4,6 +4,61 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.9
+
+### 中文
+
+本版修复两处长期静默失效的机制，并给记忆与调度补上自管通道：成员 bot 的工具层策略自 DSHBOTS-238 起从未真正生效，记忆容量锁的恢复线过苛导致整理完仍被挡住。版本为 patch 级，无数据库结构变更，无新增服务端配置。
+
+**运行时**
+
+- **备用模型切换覆盖内部运行**：内部运行种类集合（task/review/handle/memory_review）接入额度路由与备用模型派生，调度额度扣持闸同步扩到该集合，聊天类运行行为不变。Bot 更换 provider 时迁移 bot_quota 额度记录，保留更严的一条。
+
+**工具**
+
+- **成员 bot 工具层策略恢复**：工具层兜底此前把 restrict 摘下后裸调用，宿主侧接收者丢失并被吞成一条告警，成员 bot 一直可见总监专权工具。现改为保留接收者的方法调用，工具层策略恢复生效。
+
+**调度**
+
+- **并行吞吐默认值提升**：按近 7 天生产实测（常态并发 2–3、峰值 7），并行运行上限默认 6→10、队友数默认 3→5；派单预算分档放宽为 urgent/high 90 分钟、medium 60 分钟、low/none 30 分钟，直建卡兜底 40 分钟。
+- **大卡拆分闸产品化**：新增单卡写范围上限（默认 8 条），派单建卡的写范围超限时拒绝并指引拆成 parent_task_id 子卡并行；只拦新建卡，重派存量卡不受限。
+
+**记忆**
+
+- **容量锁恢复线 33→54**：记忆硬顶仍是 64 条，触顶后需整理到的恢复线由 33 上调到 54（硬顶减 10，覆盖审查单轮最大突发），不再让恢复线本身成为新的阻塞源。
+- **审查拒写带内留痕**：记忆审查写入被拒时把拒因写进运行事件（拒写条数、因容量锁被拒的条数与拒因原文），返回体同步给出拒写计数，不再只留一条无人处理的系统日志。
+- **bot 域记忆下放自管**：任意项目群 Bot 都能列出、写入与清理自己的 bot 域记忆（点名参数只接受自己），项目域与团队域仍归总监。
+- **总监记忆工具支持 bot 点名代管**：总监的记忆工具可按 bot 的 id 或精确名代管成员 Bot 的记忆域，作为成员 Bot 触顶后无法自清的合法整理通道，权限仍走总监闸门。
+
+**界面**
+
+- **路径展示补齐 tilde 缩写**：DSH 路径卡、管理数据行、技能页与技能详情、以及目录选择器头部统一改用 ~ 缩写展示；复制、悬停提示与输入框回填仍保留完整路径。
+
+### English
+
+This release repairs two mechanisms that had been silently ineffective and opens self-service paths for memory and scheduling: the tool-layer policy for member bots never actually took effect since DSHBOTS-238, and the memory capacity lock's restore line was so tight that a cleaned-up scope stayed blocked. The bump is patch level; no database schema changes and no new server configuration.
+
+**Runtime**
+
+- **Fallback model switching now covers internal runs**: internal run kinds (task/review/handle/memory_review) join quota routing and fallback model derivation, and the scheduler's quota hold gate extends to the same set; chat runs behave as before. When a bot changes provider its bot_quota record is migrated, keeping the stricter of the two.
+- **Member-bot tool-layer policy is effective again**: the tool-layer fallback used to detach restrict and call it bare, losing the receiver on the host side and swallowing the failure as one warning, so member bots kept seeing director-only tools. The call now keeps its receiver and the tool-layer policy takes effect again.
+
+**Scheduling**
+
+- **Higher default parallelism**: based on seven days of production measurements (typical concurrency 2–3, peak 7), the default parallel run limit rises from 6 to 10 and the default teammate count from 3 to 5; dispatch budgets are relaxed to 90 minutes for urgent/high, 60 for medium and 30 for low/none, with 40 minutes as the direct-creation fallback.
+- **Large-card split gate productised**: a new per-card write-scope limit (8 by default) refuses dispatch when the declared write scopes exceed it and points to splitting the work into parent_task_id child cards; only new cards are gated, re-dispatching existing cards is unaffected.
+
+**Memory**
+
+- **Capacity lock restore line moved from 33 to 54**: the hard cap stays at 64 entries, but a latched scope now only has to be cleaned down to 54 (cap minus 10, covering the largest single-round review burst) before new writes are accepted, so the restore line stops being a blocker of its own.
+- **Rejected review writes leave a trace**: when a memory review write is refused, the reason is recorded in the run event (rejected count, how many were refused by the capacity lock and the original reasons), and the return value carries the same counts, instead of a system log nobody handles.
+- **Bot-scoped memory is self-managed**: any bot in a project group can list, write and clean up its own bot-scoped memory (the bot argument only accepts itself); project and team scopes remain the director's.
+- **Director memory tools can manage a named bot's scope**: the director's memory tools can manage a member bot's memory scope by id or exact name, giving member bots a legitimate cleanup path once they hit the cap; permissions still pass through the director gate.
+
+**Interface**
+
+- **Tilde abbreviations complete across path displays**: the DSH path card, the management data row, the skill page and skill detail view, and the directory picker header all render paths with ~ abbreviations; copying, hover tooltips and input back-fill still keep the full path.
+
 ## v0.3.0
 
 ### 中文
