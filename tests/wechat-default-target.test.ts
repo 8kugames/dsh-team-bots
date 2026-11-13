@@ -101,40 +101,43 @@ test('① 无 key 自由文本：一律落 director solo 通道，不进任何�
   }
 })
 
-test('② /tr <key>: 显式转发一律落 director 专属工作区（携带项目上下文），容忍冒号与空格两种写法（DSHBOTS-299 A 口径）', async () => {
+test('② /tr <key>: 显式直达项目群聊（管理员身份插群 + wechat 标记 chat 运行），容忍冒号与空格两种写法', async () => {
   const { root, store, service } = await boot('dsh-wechat-solo-2-')
   try {
     const director = store.get("SELECT id FROM bots WHERE name = 'director'")
     await service.createProject({ name: 'JHY', key: 'JHY', ownerBotId: director.id })
+    const projectId = store.get("SELECT id FROM projects WHERE key = 'JHY'").id
     // 冒号写法（卡面口径 /tr <key>: <消息>）
     const colon = await handleCommand(service, '/tr jhy: 上线新版官网', { boundKey: null, bind() {}, isAdmin: true })
-    assert.ok(colon.includes('已直达【JHY】'), `冒号写法回执照旧指向项目：${colon}`)
-    let message = store.get("SELECT * FROM solo_messages WHERE body = ?", '[微信管理员] [项目 JHY] 上线新版官网')
-    assert.ok(message, '/tr 消息必须落 director 专属工作区 solo 会话')
-    assert.equal(message.bot_id, director.id)
-    assert.equal(message.sender_id, 'wx_admin_peer', '身份用微信 admin peer id')
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM messages'), 0, '不得插项目群聊（三分域 A）')
-    let run = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ?", message.id)
-    assert.ok(run, 'solo_chat 运行必须建行')
-    assert.equal(run.trigger_type, 'wechat', '微信直达运行照旧打 wechat 标记')
-    assert.equal(run.project_id, null, '微信直达运行不落项目域')
-    // 争用口径 A（DSHBOTS-289）：同 bot 至多一条活跃运行——首条 /tr 的 solo 运行
-    // 对后续断言只是夹具背景，置终态腾出 director 槽，第二条 /tr 才能再建行。
+    assert.ok(colon.includes('已直达【JHY】'), `冒号写法回执指向项目：${colon}`)
+    let message = store.get("SELECT * FROM messages WHERE body = ?", '上线新版官网')
+    assert.ok(message, '/tr 消息必须落项目群聊')
+    assert.equal(message.project_id, projectId)
+    assert.equal(message.sender_type, 'user')
+    assert.equal(message.sender_id, 'wx_admin_peer', '身份用微信 admin peer id，不冒充工作台用户')
+    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM solo_messages'), 0, '不落 director solo 通道')
+    let run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
+    assert.ok(run, 'chat 运行必须建行')
+    assert.equal(run.project_id, projectId, '直达运行落项目域')
+    assert.equal(run.bot_id, director.id, '无 @ 兜底定向 owner bot')
+    assert.equal(run.trigger_type, 'wechat', '微信直达运行打 wechat 标记（回程推送依据）')
+    // 争用口径 A（DSHBOTS-289/308）：同 bot 同域至多一条活跃运行——首条置终态腾出
+    // (director, JHY) 域槽，第二条 /tr 才能再建行。
     store.run(
-      "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE bot_id = ? AND status IN ('queued', 'running')",
-      new Date().toISOString(), director.id,
+      "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?",
+      new Date().toISOString(), run.id,
     )
     // 空格写法（既有语法不变）
     const space = await handleCommand(service, '/tr jhy 顺带改个样式', { boundKey: null, bind() {}, isAdmin: true })
     assert.ok(space.includes('已直达【JHY】'), `空格写法照旧：${space}`)
-    message = store.get("SELECT * FROM solo_messages WHERE body = ?", '[微信管理员] [项目 JHY] 顺带改个样式')
+    message = store.get("SELECT * FROM messages WHERE body = ?", '顺带改个样式')
     assert.ok(message)
-    run = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ?", message.id)
-    assert.ok(run && run.trigger_type === 'wechat', '第二条直达同样落 solo 且打 wechat 标记')
-    // key 未命中：可选项目提示
+    run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
+    assert.ok(run && run.trigger_type === 'wechat', '第二条直达同样落项目群聊且打 wechat 标记')
+    // key 未命中：可选项目提示，不落任何项目
     const miss = await handleCommand(service, '/tr nope 干活', { boundKey: null, bind() {}, isAdmin: true })
     assert.ok(miss.includes('没有找到项目 NOPE'))
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM solo_messages WHERE body LIKE ?', '[微信管理员] [项目 NOPE]%'), 0)
+    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM messages'), 2, '未命中不新增项目消息')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })

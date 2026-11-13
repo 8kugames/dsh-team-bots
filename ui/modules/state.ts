@@ -57,6 +57,8 @@ export const state = {
   memoryQuery: '',
   memoryResults: null,
   theme: 'dsh',
+  // 明暗偏好三态：auto=跟随宿主/系统，light=日间，dark=夜间（与调色板 theme 正交）。
+  colorSchemePref: 'auto',
   tree: { chats: true, bots: true, archived: false },
   // 群聊已读水位：`<projectId>:<最新消息时间>`，用于避免重复上报已读。
   markedRead: null,

@@ -641,9 +641,9 @@ test('wechat commands 自由文本直达 director：绑定/单项目不再影响
   assert.ok(broken.includes('导演通道暂不可用'))
   assert.ok(!broken.includes('还没有选定直达的项目'))
 
-  // 项目无可用总监：可读提示，不入对话
+  // 项目无可用总监（/tr 直达无 @ 且 owner 不可用）：可读提示，不入对话
   const ownerless = { stateView: () => ({ projects: [] }), async wechatChat() { return { error: 'no_owner', project: { key: 'web', name: 'Web' } } } }
-  assert.ok((await handleCommand(ownerless, '在吗')).includes('没有可用的总监 Bot'))
+  assert.ok((await handleCommand(ownerless, '/tr web 在吗', { isAdmin: true })).includes('没有可用的总监 Bot'))
 })
 
 test('wechat commands 固定指令照旧：/states /reject /detail 路由不变', async () => {
@@ -665,7 +665,7 @@ class DispatchStubRuntime {
   async cancelRun() { return true }
 }
 
-test('wechat 直达真 service：/tr 与自由文本一律落 director 专属工作区 solo 会话（trigger_type=wechat），回复推回微信（DSHBOTS-299 A 口径）', async () => {
+test('wechat 直达真 service：/tr 直达项目群聊（chat 运行 trigger_type=wechat）回复推回微信；自由文本仍落 director solo', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-wechat-direct-'))
   const workspace = join(root, 'workspace')
   await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
@@ -687,41 +687,40 @@ test('wechat 直达真 service：/tr 与自由文本一律落 director 专属工
     ;(service as any).wechat = { notify() {}, status: () => ({ adminPeerId: 'wx_admin_peer' }) }
 
     // 小写 key 也要命中（COLLATE NOCASE 同 resolveTaskByIdentifier 口径）；
-    // DSHBOTS-299 A 口径：微信通道一律落 director 专属工作区 solo 会话——/tr 显式
-    // 转发不再插项目群聊触发项目内 chat 运行，正文携带 [项目 KEY] 上下文由 director 派单。
+    // /tr 显式直达：消息以管理员身份插入项目群聊并触发项目内 chat 运行
+    // （trigger_type='wechat'，运行收尾回复推回微信管理员）。
     const reply = await handleCommand(service, '/tr dispatch 上线新版官网', { isAdmin: true })
     assert.ok(reply.includes('已直达【Dispatch Demo】'))
 
     const projectId = store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id
-    assert.equal(store.get("SELECT id FROM messages WHERE project_id = ?", projectId), undefined, '直达消息不得落库项目群聊（三分域 A）')
-    const message = store.get("SELECT * FROM solo_messages WHERE body = ?", '[微信管理员] [项目 DISPATCH] 上线新版官网')
-    assert.ok(message, '直达消息必须落 director 专属工作区 solo 会话')
-    assert.equal(message.bot_id, director.id)
+    const message = store.get("SELECT * FROM messages WHERE body = ?", '上线新版官网')
+    assert.ok(message, '直达消息必须落项目群聊')
+    assert.equal(message.project_id, projectId)
     assert.equal(message.sender_id, 'wx_admin_peer', '身份用微信 admin peer id，不冒充工作台用户')
 
-    const outbox = store.get("SELECT * FROM outbox WHERE kind = 'solo_chat_run'")
-    assert.ok(outbox, '直达必须入 solo_chat_run outbox 触发一轮运行')
+    const outbox = store.get("SELECT * FROM outbox WHERE kind = 'chat_run'")
+    assert.ok(outbox, '直达必须入 chat_run outbox 触发一轮运行')
     assert.equal(outbox.status, 'delivered')
     assert.equal(JSON.parse(outbox.payload_json).origin, 'wechat', '载荷带微信来源标记')
 
-    const run = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ?", message.id)
-    assert.ok(run, '必须派生 solo_chat 运行')
-    assert.equal(run.bot_id, director.id, '微信直达一律定向 director（A 口径）')
-    assert.equal(run.project_id, null, '微信直达运行不落项目域')
+    const run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
+    assert.ok(run, '必须派生 chat 运行')
+    assert.equal(run.bot_id, director.id, '无 @ 兜底定向 owner bot')
+    assert.equal(run.project_id, projectId, '直达运行落项目域')
     assert.equal(run.trigger_type, 'wechat', '微信直达运行打 wechat 标记（回程推送依据）')
 
-    // 回程：微信直达运行结束，director 回复推回管理员；普通群聊运行不推。
+    // 回程：微信直达运行结束，bot 回复推回管理员；普通群聊运行不推。
     // 群聊回复的记忆审查会给 director 再排 memory_review 运行，本用例关掉以免占槽。
     store.setSetting('chat_memory_review', '0')
     const pushed: string[] = []
     ;(service as any).wechat = { notify(text: string) { pushed.push(text) }, status: () => ({ adminPeerId: 'wx_admin_peer' }) }
     await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
-    assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 director 回复要推回微信')
+    assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
 
-    // 自由文本（含已绑定场景）同落 director 专属工作区（DSHBOTS-258/299 同域）；
-    // 管理员此前已通过 /tr 首触该工作区，静默直达。
-    const silent = await handleCommand(service, '顺带把首页也改了', { boundKey: 'DISPATCH', bind() {} })
-    assert.equal(silent, '', '首触已发生，静默直达')
+    // 自由文本（含已绑定场景）仍落 director 专属工作区（DSHBOTS-258 口径不变）；
+    // /tr 不再首触 solo 通道，本条才是首触回执。
+    const first = await handleCommand(service, '顺带把首页也改了', { boundKey: 'DISPATCH', bind() {} })
+    assert.ok(first.includes('已直达【director】专属工作区'), `自由文本首触回执 director 通道：${first}`)
     const soloMessage = store.get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer' AND body LIKE ?", '%顺带把首页也改了')
     assert.ok(soloMessage, '自由文本必须落 director 的 solo 会话')
     assert.equal(soloMessage.bot_id, director.id)

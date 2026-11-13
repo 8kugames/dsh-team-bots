@@ -63,6 +63,21 @@ export function effectiveReviewTimeoutMinutes(getSetting: (key: string) => unkno
 // 按次开全新会话会无限累积宿主会话列表，有界绑定把宿主会话数压到 1/N。
 export const MEMORY_REVIEW_BINDING_MAX_RUNS = 8
 
+// 宿主归档闸（ArchivedSessionGate）：归档会话在宿主侧不执行任何模型步骤，turn/end 记
+// blocked 且无 assistant 文本。照常复用会把空回复当成功落库（群聊表现为「模型未返回文本」）。
+// 与宿主同口径查 workspaceRegistry.archivedSessionIds；服务缺失（旧宿主）时视为未归档。
+export function isSessionArchived(ctx, sessionId) {
+  const archived = ctx?.get?.('workspaceRegistry')?.archivedSessionIds
+  return Array.isArray(archived) && archived.includes(sessionId)
+}
+
+// 复用前的存活解析：归档与宿主查不到同等处理——返回 null，调用方 retireBinding 后走新建。
+export async function liveAgentFor(ctx, sessionId) {
+  if (!sessionId || isSessionArchived(ctx, sessionId)) return null
+  const resolved = await ctx.sessionController.resolveAgent(sessionId)
+  return resolved?.error ? null : resolved
+}
+
 export const sessionMethods = {
   bindingOfSession(sessionId) {
     if (!sessionId) return undefined
@@ -430,8 +445,8 @@ export const sessionMethods = {
     // 且不能参与阈值判定——否则这两类运行自己又会触发结转/压缩；solo 摘要运行也没有
     // 项目上下文，不查项目。
     if ((run?.kind === 'rollover_summary' || run?.kind === 'session_compact') && run.session_id) {
-      const resolved = await this.ctx.sessionController.resolveAgent(run.session_id)
-      if (!resolved?.error) {
+      const resolved = await liveAgentFor(this.ctx, run.session_id)
+      if (resolved) {
         this.applyFilePolicy(resolved, bot, run, task)
         applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
         await this.selectModel(run.session_id, bot, modelOverride)
@@ -455,8 +470,8 @@ export const sessionMethods = {
       ? undefined
       : this.taskAffinityBinding(task)
     if (affinity) {
-      const resolved = await this.ctx.sessionController.resolveAgent(affinity.session_id)
-      if (!resolved?.error) {
+      const resolved = await liveAgentFor(this.ctx, affinity.session_id)
+      if (resolved) {
         this.applyFilePolicy(resolved, bot, run, task)
         applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
         await this.selectModel(affinity.session_id, bot, modelOverride)
@@ -552,14 +567,12 @@ export const sessionMethods = {
     )
     if (existing) {
       const served = this.store.get('SELECT COUNT(*) AS n FROM runs WHERE session_id = ?', existing.session_id)?.n ?? 0
-      if (served < MEMORY_REVIEW_BINDING_MAX_RUNS) {
-        const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
-        if (!resolved?.error) {
-          this.applyFilePolicy(resolved, bot, run, null)
-          applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
-          await this.selectModel(existing.session_id, bot, modelOverride)
-          return existing.session_id
-        }
+      const resolved = served < MEMORY_REVIEW_BINDING_MAX_RUNS ? await liveAgentFor(this.ctx, existing.session_id) : null
+      if (resolved) {
+        this.applyFilePolicy(resolved, bot, run, null)
+        applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+        await this.selectModel(existing.session_id, bot, modelOverride)
+        return existing.session_id
       }
       this.retireBinding(existing.session_id)
     }
@@ -619,8 +632,8 @@ export const sessionMethods = {
     )
     let rolledOver = false
     if (existing) {
-      const resolved = await this.ctx.sessionController.resolveAgent(existing.session_id)
-      if (!resolved?.error) {
+      const resolved = await liveAgentFor(this.ctx, existing.session_id)
+      if (resolved) {
         // 结转（DSHBOTS-145）：控制面会话长期承接全量流量，照旧阈值判定——摘要就绪即
         // alias 化落到下方重建路径，摘要由新会话首轮提示词注入；未就绪补排摘要运行，
         // 本轮继续复用。alias 行不可能走到这里（查询条件 alias=0），幂等由查询保证。

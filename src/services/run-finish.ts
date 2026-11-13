@@ -37,6 +37,7 @@ const FAILURE_CATEGORY_NOTICES = {
   sandbox_denied: { label: '沙箱拒绝', summary: '文件或命令操作被沙箱策略拒绝。' },
   timeout: { label: '超时', summary: '上游响应超时。' },
   network: { label: '网络', summary: '网络瞬态失败，已按退避策略自动重试。' },
+  blocked: { label: '会话受阻', summary: '宿主拒绝执行该会话（可能已被归档），未产生任何模型输出。' },
   internal: { label: '内部错误', summary: '服务内部错误。' },
   unknown: { label: '未知', summary: '运行失败，完整原因见运行日志。' },
 }
@@ -47,6 +48,7 @@ export function classifyFailure(error) {
   if (SANDBOX_DENIED_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.sandbox_denied
   if (TIMEOUT_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.timeout
   if (isTransientNetworkError(error)) return FAILURE_CATEGORY_NOTICES.network
+  if (error?.code === 'SESSION_BLOCKED') return FAILURE_CATEGORY_NOTICES.blocked
   if (INTERNAL_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.internal
   return FAILURE_CATEGORY_NOTICES.unknown
 }

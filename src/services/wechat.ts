@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { effectiveWechatEnabled } from '../config.js'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
-import { jsonParse, nowIso } from '../util.js'
+import { jsonParse, nowIso, parseMentions } from '../util.js'
 import { answerFailed, answerReceipt, approvalCard, questionCard, wechatToken } from '../wechat/format.js'
 import { recordWechatTriggerRow } from './wechat-trigger-schema.js'
 
@@ -176,15 +176,14 @@ export const wechatMethods = {
   },
 
   /**
-   * 微信直达对话（DSHBOTS-208 起，258 四次拍板，299 会话域三分后收敛为单一去向）：
-   * 微信通道一律落 director 专属工作区 solo 会话（A 口径：微信=用户↔director 直接通信）——
-   * 自由文本（key 为空）与 /tr <key> 显式转发（key 非空）都投 director 的 solo_messages
-   * 并触发 solo_chat 运行（trigger_type='wechat'，运行收尾按此把回复推回微信管理员，
-   * run-finish 回程链路对 chat/solo 两类同门禁，语义不回退）；
-   * /tr 的 key 命中项目后在正文携带 [项目 KEY] 上下文，director 自行把工作派进对应项目，
-   * 不再以工作台用户身份插项目群聊触发 chat 运行（原路径 trigger_type='wechat' 的
-   * chat 运行落项目控制面会话，违反三分域）；key 未命中 → null；解析不到 director
-   * （通道异常）→ { error: 'no_director' }。
+   * 微信直达对话（DSHBOTS-208 起，258/299 演进后现为二值路由）：
+   * 自由文本（key 为空）一律落 director 专属工作区 solo 会话（用户↔director 直接
+   * 通信，solo_chat 运行 trigger_type='wechat'，回复经 run-finish 推回微信管理员）；
+   * /tr <key> 显式转发（key 非空）直达指定项目群聊——消息以微信管理员身份（admin
+   * peer id，不冒充工作台用户）插入项目群聊并触发 chat 运行（origin='wechat' →
+   * trigger_type='wechat'，运行收尾把 bot 回复推回微信管理员）。正文可 @成员 定向；
+   * 无 @ 时 sendMessage 兜底定向 owner_bot_id，owner 不可用则拒投（no_owner）；
+   * key 未命中 → null；自由文本解析不到 director（通道异常）→ { error: 'no_director' }。
    */
   async wechatChat(key, body) {
     let project = null
@@ -200,19 +199,24 @@ export const wechatMethods = {
       if (director) return this.wechatDirectorChat(director, String(body ?? ''))
       return { error: 'no_director' }
     }
-    // DSHBOTS-299 A 口径：/tr 显式转发同落 director 专属工作区——正文带 [项目 KEY]
-    // 上下文（与自由文本的 [微信管理员] 前缀同链路），由 director 以团队工具派单进项目。
-    const director = this.wechatDirectorBot()
-    if (!director) return { error: 'no_director', project }
+    // /tr 显式直达项目群聊：正文原样进群（保留 @mention 语义），无 @ 且总监不可用时
+    // 拒投，不让消息落库却无人接。
+    const members = this.membersOf(project.id).filter(bot => bot.status === 'active')
+    const textBody = String(body ?? '')
+    if (parseMentions(textBody, members).length === 0
+      && !members.some(bot => bot.id === project.owner_bot_id)) {
+      return { error: 'no_owner', project }
+    }
     const adminPeerId = this.wechat?.status?.()?.adminPeerId ?? null
-    const result = await this.sendSoloMessage(
-      director.id,
-      `${WECHAT_SOLO_SOURCE_MARK}[项目 ${project.key}] ${String(body ?? '')}`,
+    const result = await this.sendMessage(
+      project.id,
+      textBody,
       { type: 'user', id: adminPeerId ?? 'user:wechat' },
+      null,
       [],
       { origin: 'wechat' },
     )
-    return { project, director, messageId: result?.messageId ?? null }
+    return { project, ...result }
   },
 
   /**

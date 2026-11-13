@@ -100,7 +100,6 @@ export async function handleCommand(service, rawText, ctx = null) {
   if (!chat || chat.error === 'no_target') {
     return needPickProject(service.stateView().projects ?? [])
   }
-  if (chat.error === 'no_owner') return noOwner(chat.project)
   return ''
 }
 
@@ -166,9 +165,8 @@ async function handleFixedCommand(service, body, ctx) {
     const message = match[2].trim()
     const chat = await service.wechatChat(key, message)
     if (!chat) return projectNotFound(key, service.stateView().projects ?? [])
-    // DSHBOTS-299：/tr 转发一律落 director 专属工作区（携带 [项目 KEY] 上下文），
-    // 总监不可用属通道异常，独立出口；no_owner 出口随项目群直达一并退役。
-    if (chat.error === 'no_director') return noDirector()
+    // 直达项目群聊无可定向 Bot（无 @ 且总监不可用）：独立出口，不入对话。
+    if (chat.error === 'no_owner') return noOwner(chat.project)
     ctx?.bind?.(chat.project.key)
     return connectedReceipt(chat.project, 'dispatch')
   }

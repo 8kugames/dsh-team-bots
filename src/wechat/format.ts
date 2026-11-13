@@ -21,7 +21,7 @@ export function helpText() {
     '  /states             未验收任务清单',
     '  /detail <任务号>     任务详情',
     '  /reject <任务号> <理由>  退回重做（管理员）',
-    '  /tr <key> <消息>     跨项目直达（管理员）',
+    '  /tr <key> <消息>     直达指定项目（管理员）',
     '',
     '其余消息直接发给项目外 director 的专属工作区，回复会推送到微信。',
   ].join('\n')
@@ -106,17 +106,17 @@ export function projectList(projects) {
   return lines.join('\n')
 }
 
-/** 直达连接回执：dispatch=显式 <key>: 指定；bind=自由文本首次绑定/换项目。 */
+/** 直达连接回执：dispatch=/tr 显式直达项目群聊；bind=自由文本首次绑定/换项目。 */
 export function connectedReceipt(project, via) {
   const name = project.name || project.key
   return via === 'dispatch'
-    ? `已直达【${name}】总监，之后的回复会推送到微信；直接发消息即可继续对话。`
+    ? `已直达【${name}】项目群，Bot 回复会推送到微信；继续给该项目发消息仍用「/tr <key> <消息>」。`
     : `已连接【${name}】总监，直接发消息即可，回复会推送到这里；换项目用「<key>: <消息>」。`
 }
 
 /** 项目无可定向总监。 */
 export function noOwner(project) {
-  return `项目【${project.name || project.key}】没有可用的总监 Bot，无法直达。`
+  return `项目【${project.name || project.key}】没有可用的总监 Bot，无法直达；可在消息里 @成员名 指定接收人。`
 }
 
 /** 项目外导演通道不可达（DSHBOTS-258）：通道异常，语义与「需要用户选项目」不同。 */

@@ -1,6 +1,6 @@
 import { state } from './state.js'
 import { t } from './i18n.js'
-import { activeProject, applyUiScale, applyUiTheme, toast } from './util.js'
+import { activeProject, applyUiScale, applyUiTheme, setColorSchemePreference, toast } from './util.js'
 import { api, loadState, mergeSettingsDraft } from './api.js'
 import { sendMessage } from './composer.js'
 import { closeModal, openBot, openModal, openTask, openTrajectory } from './modal-forms.js'
@@ -8,7 +8,7 @@ import { loadOlderMessages, loadSoloDetail } from './chat.js'
 import { taskChildrenKey, taskGroupKey } from './tasks.js'
 import { toggleDesktopNotify } from './cards.js'
 import { usageMode } from './usage.js'
-import { UI_SCALE_KEY, UI_THEME_KEY, syncLanguage, refresh, startWechatPoll, stopWechatPoll, bootError, render, chatContextPending, beginChatPending, endChatPending, init } from '../app.js'
+import { UI_SCALE_KEY, UI_THEME_KEY, UI_COLOR_SCHEME_KEY, syncLanguage, refresh, startWechatPoll, stopWechatPoll, bootError, render, chatContextPending, beginChatPending, endChatPending, init } from '../app.js'
 
 // 设置保存 + 409 冲突三方合并（B2/DSHBOTS-325）：key→inputId 映射驱动 patch 采集。
 // 冲突时静默接管 api 错误：重取最新设置后，对方未动字段的用户草稿贴回表单（编辑不丢），
@@ -19,7 +19,7 @@ async function saveSettingsWithMerge(inputIds, successToast) {
   for (const [key, id] of Object.entries(inputIds)) patch[key] = value(id)
   const baseSettings = state.data?.settings ?? {}
   try {
-    await api('update_settings', { ...patch, revision: state.data?.settingsRevision }, { quiet: true })
+    await api('update_settings', { patch: { ...patch }, revision: state.data?.settingsRevision }, { quiet: true })
     await loadState(state.projectId)
     toast(successToast, 'success')
   } catch (error: any) {
@@ -113,6 +113,13 @@ export async function handleBoardAction(action, target) {
       render()
       break
     }
+    case 'set-color-scheme': {
+      // 明暗三档：跟随宿主/系统、日间、夜间；手动档压过自动判定，落盘后即时生效。
+      const pref = setColorSchemePreference(target.dataset.colorScheme)
+      try { localStorage.setItem(UI_COLOR_SCHEME_KEY, pref) } catch {}
+      render()
+      break
+    }
     case 'toggle-notify': {
       await toggleDesktopNotify()
       break
@@ -136,10 +143,10 @@ export async function handleBoardAction(action, target) {
     // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
     case 'save-ui-language': {
       const value = (document.getElementById('settings-ui-language') as HTMLInputElement | null)?.value ?? 'auto'
-      // revision 仅在有值时携带（无 state 数据的旧环境回退无令牌形态）。
-      const languagePatch: Record<string, unknown> = { ui_language: value }
-      if (Number.isFinite(Number(state.data?.settingsRevision))) languagePatch.revision = state.data?.settingsRevision
-      await api('update_settings', languagePatch)
+      // B2/DSHBOTS-325 契约：patch 与 revision 分离；revision 仅在有值时携带。
+      const languagePayload: Record<string, unknown> = { patch: { ui_language: value } }
+      if (Number.isFinite(Number(state.data?.settingsRevision))) languagePayload.revision = state.data?.settingsRevision
+      await api('update_settings', languagePayload)
       await loadState(state.projectId)
       // poll() 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
       syncLanguage()

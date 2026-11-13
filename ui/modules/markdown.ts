@@ -1,5 +1,6 @@
 import { state } from './state.js'
 import { esc, inSoloContext, botById, pageProject } from './util.js'
+import { t } from './i18n.js'
 
 // markdown-render:start —— 聊天 markdown 渲染纯逻辑（tests/markdown.test.js 抽取此块断言）。
 // 管线固定：md → mdRewriteImageSources → marked.parse → DOMPurify.sanitize → innerHTML。
@@ -7,9 +8,28 @@ import { esc, inSoloContext, botById, pageProject } from './util.js'
 // mdCreateRenderer 返回 null，调用方回退 esc 纯文本，绝不裸插 HTML。
 // 工作区图片路径改写成 GET /api/dsh-team/file（服务端再做 MIME 白名单与防穿越）。
 const MD_SCHEME = /^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/i
+// 图片语法内部：href 允许含空格（到标题或右括号前止），标题可为 "..." / '...' / (...)。
+const MD_IMAGE = /(!\[[^\]]*\]\()([^)\n]*?)(?:\s+("[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g
+// 只剥尾部标题：含空格的路径若被标题正则误切会丢文件名，故仅匹配整段结尾的引号/括号标题。
+const MD_IMAGE_TITLE = /\s+("[^"]*"|'[^']*'|\([^)]*\))$/
+function mdImageTarget(inner) {
+  const text = String(inner ?? '').trim()
+  if (!text) return ''
+  if (text.startsWith('<')) {
+    const end = text.indexOf('>')
+    if (end >= 0) return text.slice(1, end).trim()
+  }
+  const title = MD_IMAGE_TITLE.exec(text)
+  return title ? text.slice(0, title.index) : text
+}
 function mdImageFileUrl(href, scope) {
   if (!scope || !href) return null
-  const raw = String(href)
+  let raw = String(href).trim()
+  if (!raw) return null
+  // 先还原转义再判定：%20 空格、%2F 斜杠都要按真实路径处理。
+  try { raw = decodeURIComponent(raw) } catch { /* 非法转义保持原样 */ }
+  // file:// URI 与 Windows 反斜杠都归一到工作区相对/绝对路径形态。
+  raw = raw.replace(/^file:\/\//i, '').replace(/\\/g, '/')
   // 只改写本地路径形态；http(s)/data:/锚点等协议引用原样交给消毒层。
   if (MD_SCHEME.test(raw)) return null
   let rel = raw
@@ -27,8 +47,8 @@ function mdImageFileUrl(href, scope) {
   return `/api/dsh-team/file?${params.toString()}`
 }
 function mdRewriteImageSources(source, scope) {
-  return String(source ?? '').replace(/(!\[[^\]]*\]\()\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\)/g, (whole, lead, href) => {
-    const url = mdImageFileUrl(href, scope)
+  return String(source ?? '').replace(MD_IMAGE, (whole, lead, inner) => {
+    const url = mdImageFileUrl(mdImageTarget(inner), scope)
     return url ? `${lead}${url})` : whole
   })
 }
@@ -113,4 +133,23 @@ export function mdChatScope() {
   }
   const project = pageProject()
   return project ? { projectId: project.id, root: project.workspace_path } : null
+}
+
+// 图片失败 chip 的原因诊断：src 未被改写成文件端点（路径形态没接住，浏览器按页面 URL 解析）
+// 与已改写但端点拒绝分开；已改写的再探一次状态码，403/404 直接写进 chip title。
+export function mdImageChipTitle(chip, img) {
+  const src = img.getAttribute('src') ?? ''
+  let rewritten = false
+  try { rewritten = new URL(src, location.href).pathname === '/api/dsh-team/file' } catch { /* 解析失败按未改写 */ }
+  // 外链图片失败与本地路径漏改写是两回事：前者只给通用提示，后者才指路改用工作区相对路径。
+  if (!rewritten) return /^(?:https?:|data:)/i.test(src) ? t('chat.imageMissingHint') : t('chat.imageMissingUnrewritten')
+  void fetch(src)
+    .then((res) => {
+      if (res.ok) return
+      chip.title = res.status === 403 ? t('chat.imageMissingForbidden')
+        : res.status === 404 ? t('chat.imageMissingNotFound')
+          : t('chat.imageMissingHint')
+    })
+    .catch(() => {})
+  return t('chat.imageMissingHint')
 }

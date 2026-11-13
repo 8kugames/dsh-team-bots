@@ -15,6 +15,9 @@ export default {
   "chat.imageFallback": "图片",
   "chat.imageMissingSuffix": "（图片未能加载）",
   "chat.imageMissingHint": "工作区里找不到该图片，或类型/大小不在白名单内",
+  "chat.imageMissingUnrewritten": "图片路径未被改写为工作区文件端点：可能含空格、file:// 协议或反斜杠，请改用工作区相对路径",
+  "chat.imageMissingForbidden": "图片路径越界，服务端拒绝（403）",
+  "chat.imageMissingNotFound": "工作区里找不到该图片（404）",
   // 历史消息分页
   "chat.loadingOlder": "加载中…",
   "chat.loadOlder": "加载前 ${count} 条",

@@ -6,6 +6,7 @@ import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
 
 const source = readUiSource()
+const mdSource = readFileSync(fileURLToPath(new URL('../ui/modules/markdown.ts', import.meta.url)), 'utf8')
 const html = readFileSync(fileURLToPath(new URL('../ui/index.html', import.meta.url)), 'utf8')
 const css = await uiStylesSource()
 
@@ -65,6 +66,39 @@ test('mdRewriteImageSources：只改图片引用，链接与正文不动', () =>
   assert.ok(out.includes('[文档](assets/doc.md)'), '普通链接不改写')
   assert.ok(out.includes('![外链](https://cdn.example.com/x.png)'), '协议图片不改写')
   assert.ok(out.includes('# 标题'), '正文不动')
+})
+
+test('mdRewriteImageSources：含空格 / file:// / 反斜杠 / 转义路径都改写到文件端点', () => {
+  const cases: Array<[string, string]> = [
+    ['![x](bench/xxx.png)', 'bench/xxx.png'],
+    ['![x](bench/a b.png)', 'bench/a b.png'],
+    ['![x](file:///srv/ws/art/bench/xxx.png)', 'bench/xxx.png'],
+    ['![x](file:///ws/bench/xxx.png)', 'ws/bench/xxx.png'],
+    ['![x](bench\\xxx.png)', 'bench/xxx.png'],
+    ['![x](<bench/a b.png>)', 'bench/a b.png'],
+    ['![x](bench/a%20b.png)', 'bench/a b.png'],
+    ['![x](bench/a b.png "示意")', 'bench/a b.png'],
+  ]
+  for (const [md, rel] of cases) {
+    const out = mdRewriteImageSources(md, groupScope)
+    assert.ok(out.includes(`![x](${fileUrl(groupScope, rel)})`), `${md} → ${out}`)
+  }
+  // 未改写形态原样保留：协议引用与越界段都不该被改写正则接走。
+  for (const md of [
+    '![x](https://cdn.example.com/x.png)',
+    '![x](../../etc/x.png)',
+    '![x](bench/../../x.png)',
+    '![x](file://../../etc/x.png)',
+  ]) {
+    assert.equal(mdRewriteImageSources(md, groupScope), md, `${md} 应原样保留`)
+  }
+})
+
+test('mdImageFileUrl：先解码再判定，file:// 与反斜杠归一', () => {
+  assert.equal(mdImageFileUrl('bench/a%20b.png', groupScope), fileUrl(groupScope, 'bench/a b.png'))
+  assert.equal(mdImageFileUrl('file:///srv/ws/art/bench/xxx.png', groupScope), fileUrl(groupScope, 'bench/xxx.png'))
+  assert.equal(mdImageFileUrl('bench\\xxx.png', groupScope), fileUrl(groupScope, 'bench/xxx.png'))
+  assert.equal(mdImageFileUrl('file://../../etc/x.png', groupScope), null, 'file:// 剥协议后仍拒绝 ..')
 })
 
 test('mdCreateRenderer：依赖缺席或不可用一律 fail-closed 返回 null', () => {
@@ -147,6 +181,16 @@ test('图片失败占位：全局 error 捕获把失败 img 换成文件名 chip
   assert.match(source, /closest\('\.message-bubble, \.comment-body'\)/)
   assert.match(source, /md-img-missing/)
   assert.match(source, /replaceWith\(chip\)/)
+})
+
+test('图片失败占位：chip title 区分未改写与 403/404 原因', () => {
+  assert.match(source, /mdImageChipTitle\(chip, img\)/)
+  assert.match(mdSource, /new URL\(src, location\.href\)/)
+  assert.match(mdSource, /pathname === '\/api\/dsh-team\/file'/)
+  assert.match(mdSource, /t\('chat\.imageMissingUnrewritten'\)/)
+  assert.match(mdSource, /fetch\(src\)/)
+  assert.match(mdSource, /res\.status === 403[\s\S]*?t\('chat\.imageMissingForbidden'\)/)
+  assert.match(mdSource, /res\.status === 404[\s\S]*?t\('chat\.imageMissingNotFound'\)/)
 })
 
 test('样式：代码块用终端井 token，md 元素共用既有设计语言，图片缩略', () => {
