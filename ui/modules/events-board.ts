@@ -19,7 +19,7 @@ async function saveSettingsWithMerge(inputIds, successToast) {
   for (const [key, id] of Object.entries(inputIds)) patch[key] = value(id)
   const baseSettings = state.data?.settings ?? {}
   try {
-    await api('update_settings', { ...patch, revision: state.data?.settingsRevision }, { quiet: true })
+    await api('update_settings', { patch: { ...patch }, revision: state.data?.settingsRevision }, { quiet: true })
     await loadState(state.projectId)
     toast(successToast, 'success')
   } catch (error: any) {
@@ -136,10 +136,10 @@ export async function handleBoardAction(action, target) {
     // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
     case 'save-ui-language': {
       const value = (document.getElementById('settings-ui-language') as HTMLInputElement | null)?.value ?? 'auto'
-      // revision 仅在有值时携带（无 state 数据的旧环境回退无令牌形态）。
-      const languagePatch: Record<string, unknown> = { ui_language: value }
-      if (Number.isFinite(Number(state.data?.settingsRevision))) languagePatch.revision = state.data?.settingsRevision
-      await api('update_settings', languagePatch)
+      // B2/DSHBOTS-325 契约：patch 与 revision 分离；revision 仅在有值时携带。
+      const languagePayload: Record<string, unknown> = { patch: { ui_language: value } }
+      if (Number.isFinite(Number(state.data?.settingsRevision))) languagePayload.revision = state.data?.settingsRevision
+      await api('update_settings', languagePayload)
       await loadState(state.projectId)
       // poll() 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
       syncLanguage()

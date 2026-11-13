@@ -1,7 +1,7 @@
 import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, COLORS, COLOR_NAMES, BOT_STATUS, RUN_STATUS, RUN_KIND, CHAT_PAGE_SIZE, CHAT_ACTIVE_TASK_LIMIT, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, CREATOR_TYPE, EFFORT, FILE_POLICY, DEFAULT_FILE_POLICY, VIEW_ACTION, NAV, SOLO_NAV } from './modules/state.js'
 import { icon } from './modules/icons.js'
 import { applyUiScale, applyUiTheme, initColorScheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, avatar, statusPill, runDot, memberRunDot, runDotHtml, memorySource, toast, filePolicyOptions } from './modules/util.js'
-import { richText, mdPlainSummary, mdChatScope } from './modules/markdown.js'
+import { richText, mdPlainSummary, mdChatScope, mdImageChipTitle } from './modules/markdown.js'
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
 import { typingLingerRowsHtml, applyOptimisticTyping, pruneTypingLinger } from './modules/typing-linger.js'
@@ -701,16 +701,17 @@ window.addEventListener('error', (event) => {
   const img = event.target
   if (!(img instanceof HTMLImageElement)) return
   if (!img.closest('.message-bubble, .comment-body')) return
+  const src = img.getAttribute('src') ?? ''
   let name = ''
   try {
-    const url = new URL(img.getAttribute('src') ?? '', location.href)
+    const url = new URL(src, location.href)
     name = url.searchParams.get('path')?.split('/').pop() ?? url.pathname.split('/').pop() ?? ''
   } catch { name = '' }
   if (!name) name = img.alt?.trim() || t('chat.imageFallback')
   const chip = document.createElement('span')
   chip.className = 'md-img-missing'
   chip.textContent = `${name}${t('chat.imageMissingSuffix')}`
-  chip.title = t('chat.imageMissingHint')
+  chip.title = mdImageChipTitle(chip, img)
   img.replaceWith(chip)
 }, true)
 

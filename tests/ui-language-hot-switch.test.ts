@@ -56,8 +56,8 @@ test('保存界面语言后立即热切换：handleBoardAction 在 loadState 后
 
   assert.deepEqual(
     calls.find((call) => call[0] === 'api'),
-    ['api', 'update_settings', { ui_language: 'en' }],
-    '应把下拉值经 update_settings 落库',
+    ['api', 'update_settings', { patch: { ui_language: 'en' } }],
+    '应把下拉值经 update_settings 落库（patch 与 revision 分离的契约形态）',
   )
   const order = calls.map((call) => call[0])
   const loadAt = order.indexOf('loadState')

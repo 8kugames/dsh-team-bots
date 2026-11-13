@@ -115,12 +115,31 @@ async function main() {
         // DSHBOTS-233：词表按域拆分后，聚合入口相对导入 ui/i18n/<lang>/<domain>.js，
         // 预览侧与线上同构按前缀兜底；zh.js/en.js 仍走下方 STATIC_SLICES 精确表。
         const rest = url.pathname.slice('/api/dsh-team/i18n/'.length)
-        if (!/^[\w-]+\/[\w-]+\.js$/.test(rest)) return send(res, 404, 'text/plain', 'Not found')
+        if (!/^[\w-]+(?:\/[\w-]+)?\.js$/.test(rest)) return send(res, 404, 'text/plain', 'Not found')
         return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, 'ui', 'i18n', rest)))
       }
       if (req.method === 'GET') {
         const slice = STATIC_SLICES.get(url.pathname)
         if (slice) return send(res, 200, 'text/javascript; charset=utf-8', await readFile(join(ROOT, slice)))
+      }
+      if (req.method === 'GET' && url.pathname === '/api/dsh-team/file') {
+        // 与线上 src/http.ts 同口径：只读工作区白名单文件，MIME/防穿越在 service.chatFile。
+        const json = (status, code, message) => send(res, status, 'application/json; charset=utf-8', JSON.stringify({ ok: false, error: { code, message } }))
+        try {
+          const projectId = String(url.searchParams.get('projectId') ?? '').trim()
+          const soloBotId = String(url.searchParams.get('soloBotId') ?? '').trim()
+          const relPath = String(url.searchParams.get('path') ?? '')
+          if (!relPath) return json(400, 'BAD_REQUEST', '缺少参数 path')
+          if (!projectId === !soloBotId) return json(400, 'BAD_REQUEST', 'projectId 与 soloBotId 必须二选一')
+          const { absolutePath, size, contentType } = service.chatFile({ projectId, soloBotId, path: relPath })
+          const maxBytes = contentType.startsWith('image/') ? 10 * 1024 * 1024 : 2 * 1024 * 1024
+          if (size > maxBytes) return json(413, 'FILE_TOO_LARGE', '文件超过大小上限')
+          const body = await readFile(absolutePath)
+          if (body.byteLength > maxBytes) return json(413, 'FILE_TOO_LARGE', '文件超过大小上限')
+          return send(res, 200, contentType, body)
+        } catch (error     ) {
+          return json(error?.status || 500, error?.code ?? 'INTERNAL', error?.message ?? '服务端处理失败')
+        }
       }
       const fontMatch = req.method === 'GET' && url.pathname.match(/^\/api\/dsh-team\/fonts\/inter-(400|500|600)\.woff2$/)
       if (fontMatch) {

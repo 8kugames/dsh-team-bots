@@ -15,6 +15,9 @@ export default {
   "chat.imageFallback": "Image",
   "chat.imageMissingSuffix": " (image failed to load)",
   "chat.imageMissingHint": "The image was not found in the workspace, or its type/size is not on the allowlist",
+  "chat.imageMissingUnrewritten": "Image path was not rewritten to the workspace file endpoint: it may contain spaces, a file:// scheme, or backslashes; use a workspace-relative path",
+  "chat.imageMissingForbidden": "Image path escapes the workspace and was rejected (403)",
+  "chat.imageMissingNotFound": "Image not found in the workspace (404)",
   // Message history pagination
   "chat.loadingOlder": "Loading…",
   "chat.loadOlder": "Load ${count} earlier",
