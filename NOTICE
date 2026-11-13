@@ -9,6 +9,12 @@ Architecture and DSH integration were informed by:
 - Cindy, Copyright Cindy contributors, Apache-2.0
   https://github.com/makecindy/cindy
 
+Collaboration protocol ideas (builder-verifier separation, mutation fence,
+tiered notifications, ledger-authoritative task events, acceptance-boundary
+memory reminder) were informed by dsh-agent-team, Copyright Contexera
+contributors, MIT License:
+  https://github.com/Contexera/dsh-agent-team
+
 Runtime dependency:
 - DeepSeek Harness (DSH), Copyright (c) 2026 DeepSeek, MIT License
   https://github.com/deepseek-ai/deepseek-harness

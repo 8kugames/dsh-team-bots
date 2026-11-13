@@ -200,10 +200,10 @@ export const chatMethods = {
     }
     void this.tick()
     // 环境接单的回传：runBots 带总监供 UI 立思考气泡；真实运行由 1 秒后的接单入列。
+    // 保持与旧版一致的单一返回形态（条件展开会改变推断并破坏调用方类型）。
     return {
       messageId,
       runBots: ambientDirectorClaim ? [project.owner_bot_id] : targets.map(bot => bot.id),
-      ...(ambientDirectorClaim ? { deferredDirector: true } : {}),
     }
   },
 

@@ -7,6 +7,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'release_bot_quota',
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
   'mark_chat_read',
+  'task_projection_drift',
   'add_member', 'remove_member',
   'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail', 'task_review_delegate', 'task_update_scopes',
   'retry_run', 'cancel_run', 'run_trajectory', 'answer_attention',
