@@ -4,7 +4,56 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.0
+
+### 中文
+
+本版是协作协议批次：吸收 dsh-agent-team 的五项协作理念（按本仓形态落地，不搬其表现形式），覆盖验收权责、并发写入、通知分级、事件流权威与记忆沉淀五个面。次版本号翻位以标识行为面变化（回复模式新增档位、验收新增机械闸）。
+
+**运行时**
+
+- **执行者不得验收（builder≠verifier）**：bot 验收者若曾担任本卡负责人——含当前 assignee 与历史派单（`task_events` 的 created/assigned）——验收即被机械拒绝，拒绝文案给出转派与看板两条出路。工作台 owner（人）与看板/看门狗（system）不受此闸；退回重做不拦。
+- **群聊回复模式真实生效并新增「仅被点名」档**：`reply_mode` 此前存而不用，本版起三档全部生效——`owner_first`（默认，原行为）、`everyone`（无目标时全员响应）、新增 `mentioned_only`：无显式 @/引用不立即唤醒任何 bot，发送回传立刻带总监锚点（UI 即刻亮起总监思考气泡，复用 typing-linger 乐观行），总监 1 秒后复核入列 chat_run 自动接单；显式 @ 与引用回复在所有模式下照旧直达。
+- **尾窗分级注入**：bot 上下文里的群消息尾窗按信号分级——点名本 bot 的消息保持 240 全文并加 `[→你]` 标记，其他 bot 的闲聊折叠成 80 字 `(背景)` 摘要，人发的消息不折叠。降噪并节省 token。
+- **任务状态事件流补全（账本为权威的最小落地）**：新增 `setTaskStatus` 统一迁移落点，scheduler/run-finish/runs 四条直改 `tasks.status` 的路径全部改为「UPDATE + 权威 `status` 事件同事务」，事件流可完整重放任务状态机。新增 `task_projection_drift` API（仅工作台用户）从事件流重放对照投影做只读巡检，漂移即报不修复。事务包装支持同连接嵌套（内层加入外层，随外层一并回滚）。
+
+**工具与运维**
+
+- **变更栅栏（mutation fence）**：`team_assign_task` 改卡新增可选 `expected_version`（bot 最后看到的卡 version）。不匹配即拒，拒绝附最近 5 条变更事实（谁改了什么、谁交付了），可就地重新裁决后带新版本号重试；不带参数保持 last-write-wins。`updateTask` 既有 CAS 共用同一事实文案面。
+
+**记忆**
+
+- **验收边界沉淀提醒（搭车投递）**：任务验收通过只落一个 per-(bot, project) 待提醒标记（封顶 3 条），负责人在该项目的下一次运行提示词里渲染一段一次性提醒块（指引 `team_remember` 沉淀跨任务结论），渲染即清标记。零额外轮次、不注入会话日志、不依赖会话存续。
+
+**升级路径与回退**
+
+无数据库结构变更、无新增服务端配置项。`reply_mode` 新档位 `mentioned_only` 为 opt-in（默认仍 `owner_first`）。回退按发版级回退：回退包版本与 tag，恢复发版前库快照。
+
+### English
+
+This release is the collaboration-protocol batch: five ideas absorbed from dsh-agent-team, landed in this repository's own vocabulary. The minor bump marks behaviour-surface changes (a new reply mode, a new acceptance gate).
+
+**Runtime**
+
+- **Builder never verifies (builder≠verifier)**: a bot reviewer that has ever been the card's assignee — current or historical, via `task_events` created/assigned — is now mechanically refused on accept, with the refusal naming the two ways out (re-dispatch the review to a bot that never executed the card, or accept from the board as the human owner). The human owner and the system watchdog are not gated; returning a card for rework is not gated.
+- **Group reply modes take effect, with a new "Mentioned only" mode**: `reply_mode` was stored but never consumed; all three modes now work — `owner_first` (default, previous behaviour), `everyone` (all members answer an unaddressed message), and the new `mentioned_only`: an unaddressed message wakes nobody immediately, the send response carries the director anchor (the UI shows the director's thinking bubble at once, reusing the typing-linger optimistic row), and the director claims it after a 1-second re-checked delay. Explicit mentions and replies deliver in every mode.
+- **Tiered tail-window injection**: messages that mention the bot keep 240 chars of full text with a `[→you]` marker; other bots' chatter collapses into 80-char `(background)` digests; human messages are never collapsed.
+- **Authoritative task status events (minimal ledger grounding)**: a new `setTaskStatus` choke point makes the four paths that wrote `tasks.status` directly (scheduler, run-finish, runs) write an authoritative `status` task event in the same transaction, so the event stream fully replays the task state machine. A new `task_projection_drift` API (workbench user only) replays the ledger and reports drift, without repairing. The transaction wrapper now supports same-connection nesting (inner joins the outer and rolls back with it).
+
+**Tools and operations**
+
+- **Mutation fence**: `team_assign_task` amendments accept an optional `expected_version`. On mismatch the write is refused with the last 5 change facts (who changed what, who delivered), so the writer can re-decide in place and retry with the new version; omitting the parameter keeps last-write-wins. The existing `updateTask` CAS shares the same fact-bearing refusal.
+
+**Memory**
+
+- **Acceptance-boundary reminder (piggybacked)**: accepting a task only records a per-(bot, project) pending marker (capped at 3); the assignee's next run in that project renders a one-time reminder block guiding durable conclusions into `team_remember`, then clears the marker. No extra turns, no session-log injection, no dependence on session lifetime.
+
+**Upgrade and rollback**
+
+No database schema changes, no new server configuration. The new `mentioned_only` reply mode is opt-in (default remains `owner_first`). Roll back by release: revert the package version and tag, restore the pre-release database snapshot.
+
 ## v0.2.465
+
 
 ### 中文
 

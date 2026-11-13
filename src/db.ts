@@ -508,6 +508,7 @@ export class Store {
   constructor(db, options = {} as any) {
     this.db = db
     this.ftsEnabled = options.ftsEnabled === true
+    this.txDepth = 0
   }
 
   all(sql, ...params) {
@@ -532,12 +533,18 @@ export class Store {
   // 同栈投递」在事务内也只发生 runs/outbox 行写入（投递的宿主动作由提交后的 tick/领取
   // 路径执行）。tests/after-commit.test.ts 以源码扫描守门。
   transaction(fn) {
+    // 同连接嵌套事务直接加入外层（吸收账本化改造需要：setTaskStatus 等统一落点可能被
+    // 包在外层事务里调用）；仅最外层 BEGIN/COMMIT，内层失败随外层一并回滚。
+    if (this.txDepth > 0) return fn()
     this.db.exec('BEGIN IMMEDIATE')
+    this.txDepth = 1
     try {
       const result = fn()
       this.db.exec('COMMIT')
+      this.txDepth = 0
       return result
     } catch (error) {
+      this.txDepth = 0
       try { this.db.exec('ROLLBACK') } catch {}
       throw error
     }

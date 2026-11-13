@@ -10,6 +10,7 @@
 // 微信推送文案排版集中在 src/wechat/format.js（DSHBOTS-211）。
 
 import { taskCreated, taskDone } from '../wechat/format.js'
+import { jsonParse, nowIso } from '../util.js'
 
 export const taskNotifyMethods = {
   // 「任务进入进行中」的唯一落点。
@@ -122,5 +123,22 @@ export const taskNotifyMethods = {
     } catch (error: any) {
       this.logger.warn?.('dsh-team: 任务创建通知失败 %s: %s', identifier, error?.message ?? error)
     }
+  },
+  // 验收边界沉淀提醒（吸收 dsh-agent-team acceptance-boundary 理念，搭车投递形态）：
+  // 验收通过只落一个 per-(bot, project) 待提醒标记（上限 3 条），负责人在该项目的下一次
+  // 运行提示词里渲染一次性提醒块（见 prompt.ts acceptReminderBlock）并清标记——零额外
+  // 轮次、不往会话日志注入外来消息、不依赖会话存续（steer 形态的三个毛病都没有）。
+  noteTaskAccepted(task) {
+    const project = this.projectRow(task.project_id)
+    const identifier = `${project.key}-${task.number}`
+    if (!task.assignee_bot_id) return false
+    const key = `accept_remind:${task.assignee_bot_id}:${project.id}`
+    const list = jsonParse(this.store.setting(key), [])
+    const safe = Array.isArray(list) ? list : []
+    const next = [...safe.filter(item => item?.identifier !== identifier), {
+      identifier, title: task.title ?? '', at: nowIso(),
+    }].slice(-3)
+    this.store.setSetting(key, JSON.stringify(next))
+    return true
   },
 }

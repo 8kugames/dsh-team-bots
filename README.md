@@ -42,9 +42,15 @@ The first visit exchanges the current startup token for a 30-day login cookie. A
 
 Every project is a group chat. A bot can also be addressed one-to-one in a dispatch view. All traffic for one bot — task dispatch, group chat, direct message, one-to-one chat — lands on a single control-plane session, and that bot runs one task at a time; different bots still run in parallel.
 
+A group chat has three reply modes (switchable in project settings): **Director first** (default — the director answers when nobody is addressed), **Everyone responds** (all members answer when nobody is addressed), and **Mentioned only** (a message with no explicit @mention or bot reply wakes nobody immediately, but the director's thinking bubble appears at once and the director auto-claims it after 1 second; explicit mentions and replies deliver in every mode). The message tail window injected into bot context is tiered: messages that mention the bot keep their full text with a marker, while other bots' chatter collapses into short background digests.
+
 ### Task board
 
 States: backlog, todo, in progress, blocked, in review, done, canceled. A card carries assignee, priority, parent/child links, tags, write scopes, an optional time budget (a hard limit that aborts the run), comments, and its own usage. Rows are grouped by state and can be dragged onto another group to change status.
+
+Acceptance has a mechanical gate: **whoever built does not verify** — a bot reviewer that has ever been the card's assignee (including past reassignments) is refused; hand the review to a bot that never executed the card, or accept from the workbench board as the human owner. Returning a card for rework is not gated. Amending a card (`team_assign_task` re-dispatch with card edits) accepts an optional `expected_version` mutation fence: if the card changed since you last saw it (delivery, transition, another edit) the write is refused with the most recent changes listed, so you can re-decide in place.
+
+Task status transitions now write an authoritative `status` task event in the same transaction as the update, so the event stream fully replays the task state machine; the `task_projection_drift` API is a read-only check that replays the ledger and reports any drift from the projection.
 
 ### Write scopes and parallel scheduling
 
@@ -52,7 +58,7 @@ A card declares the paths it will write, relative to the project working directo
 
 ### Memory, skills, evolution proposals
 
-Memory entries are written, reviewed, frozen and archived by the owner, and are readable by every bot in the project. Skills come from a shared skill root plus per-project skills; changing them goes through a proposal, an approval and an apply, with a canary stage before promotion to full effect. The same path can change a bot's role instructions.
+Memory entries are written, reviewed, frozen and archived by the owner, and are readable by every bot in the project. After a task is accepted, the assignee's next run in that project carries a one-time reminder to persist durable conclusions into memory (`team_remember`) while they are fresh, instead of waiting for session rollover. Skills come from a shared skill root plus per-project skills; changing them goes through a proposal, an approval and an apply, with a canary stage before promotion to full effect. The same path can change a bot's role instructions.
 
 ### Approval and question cards
 

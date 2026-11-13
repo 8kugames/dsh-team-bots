@@ -238,6 +238,91 @@ export const tasksMethods = {
       id('tevt'), taskId, type, actor.type, actor.id, JSON.stringify(data), nowIso(),
     )
   },
+  // 统一状态迁移落点（吸收 dsh-agent-team「账本为权威、投影可重放」理念）：所有直接改
+  // tasks.status 的路径都经此走——同一事务内 UPDATE + 权威 'status' 事件（from/to），
+  // 事件流因此能完整重放任务状态机（见 taskProjectionDrift）。守卫防终态覆盖/非法源态；
+  // 返回是否实际迁移（未命中守卫为 no-op，调用方保持原语义）。
+  setTaskStatus(taskId, to, actor, guard: { notIn?: string[]; ifIs?: string } = {}) {
+    const task = this.taskRow(taskId)
+    if (task.status === to) return false
+    const guardSql = guard.ifIs
+      ? 'status = ?'
+      : `status NOT IN (${(guard.notIn ?? ['done', 'canceled']).map(() => '?').join(',')})`
+    const guardParams = guard.ifIs ? [guard.ifIs] : (guard.notIn ?? ['done', 'canceled'])
+    let applied = false
+    this.store.transaction(() => {
+      const result = this.store.run(
+        `UPDATE tasks SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND ${guardSql}`,
+        to, nowIso(), taskId, ...guardParams,
+      )
+      applied = Number(result?.changes ?? 0) > 0
+      if (applied) this.addTaskEvent(taskId, 'status', actor, { field: 'status', from: task.status, to })
+    })
+    return applied
+  },
+  // 投影漂移巡检：按权威事件流（created 初始态 + 'status' 事件序列）重放每个任务的状态，
+  // 与 tasks 表对照。漂移即投影与账本脱节（崩溃半事务/手工改库），报告不修复。
+  taskProjectionDrift() {
+    const drifted = []
+    for (const task of this.store.all('SELECT id, number, project_id, status FROM tasks')) {
+      const events = this.store.all(
+        `SELECT type, data_json FROM task_events WHERE task_id = ?
+           AND (type = 'created' OR (type = 'status' AND json_extract(data_json, '$.field') = 'status'))
+         ORDER BY created_at, rowid`,
+        task.id,
+      )
+      if (!events.length) continue
+      let replayed = null
+      for (const event of events) {
+        const data = JSON.parse(event.data_json ?? '{}')
+        if (event.type === 'created') replayed = data.status ?? 'backlog'
+        else if (data.to) replayed = data.to
+      }
+      if (replayed !== null && replayed !== task.status) {
+        const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
+        drifted.push({ taskId: task.id, identifier: `${project?.key ?? 'T'}-${task.number}`, recorded: task.status, replayed })
+      }
+    }
+    return drifted
+  },
+  // 变更栅栏的事实面（吸收 dsh-agent-team mutation-fence 理念）：版本冲突的拒绝不只说
+  // 「请刷新」，还附最近变更事实，让写者就地重新裁决，不必整卡重读。事件与 version
+  // 增量非一一对应（交付是一事件一增量，updateTask 是一增量多事件），故按时间取最近
+  // N 条而非按版本切割。
+  taskChangesSince(taskId, limit = 5) {
+    const rows = this.store.all(
+      'SELECT type, actor_type, actor_id, data_json, created_at FROM task_events WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      taskId, limit,
+    )
+    return rows.reverse().map(row => {
+      let data: any = {}
+      try { data = JSON.parse(row.data_json ?? '{}') } catch { /* 旧格式事件按原始类型渲染 */ }
+      const who = row.actor_type === 'bot'
+        ? (this.store.get('SELECT name FROM bots WHERE id = ?', row.actor_id)?.name ?? row.actor_id)
+        : row.actor_type
+      if (data.field !== undefined) {
+        return `${who} 改 ${data.field}：${JSON.stringify(data.from ?? null)}→${JSON.stringify(data.to ?? null)}`
+      }
+      if (row.type === 'assigned') {
+        const name = this.store.get('SELECT name FROM bots WHERE id = ?', data.botId)?.name ?? data.botId
+        return `${who} 派单给 ${name ?? '?'}`
+      }
+      if (row.type === 'run_succeeded') return `${who} 交付（${data.identifier ?? row.task_id ?? ''}）`
+      if (row.type === 'created') return `${who} 建卡`
+      return `${who} ${row.type}`
+    })
+  },
+  // 版本冲突拒绝（原因 + 错过的事实 + 正确下一步）：updateTask 的 CAS 与
+  // team_assign_task 改卡的 expected_version 共用同一文案面。
+  staleTaskConflict(task, seenVersion) {
+    const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
+    const changes = this.taskChangesSince(task.id)
+    return conflict(
+      `任务 ${project?.key ?? 'T'}-${task.number} 已被更新（你基于 version ${Number(seenVersion)}，当前 version ${task.version}）。`
+      + `自那之后的最近变更：${changes.join('；') || '（无事件记录，以卡面为准'}）。`
+      + '可基于以上事实重新裁决后带 expected_version 重试，或先 team_recall 刷新卡面再改。',
+    )
+  },
   taskView(task) {
     // attention_json 列由 attention 域自管迁移（db.js 不加行），读视图前懒迁移一次。
     // parent_task_id/blocked_by 同款：task-relations 域自管迁移 + 依赖派生字段。
@@ -320,7 +405,7 @@ export const tasksMethods = {
   async updateTask(taskId, patch, actor = this.actor(), options = {} as any) {
     const task = this.taskRow(taskId)
     if (patch.version !== undefined && Number(patch.version) !== Number(task.version)) {
-      throw conflict('任务已被其他人更新，请刷新后重试')
+      throw this.staleTaskConflict(task, patch.version)
     }
     const updates: any = {}
     if (patch.title !== undefined) {

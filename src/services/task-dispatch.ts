@@ -343,6 +343,13 @@ export const taskDispatchMethods = {
     if (input.taskId || input.task) {
       const task = this.resolveBotTask(project, input.taskId ?? input.task)
       if (['done', 'canceled'].includes(task.status)) throw conflict(`任务 ${project.key}-${task.number} 已结束，不能重派`)
+      // 变更栅栏（吸收 dsh-agent-team mutation-fence 理念）：改卡可选带 expected_version
+      // （bot 最后看到的卡 version）。不匹配即拒，拒绝附最近变更事实，写者可就地重新
+      // 裁决；不带该参数保持既有 last-write-wins 行为（看板 UI 有自己的刷新闭环）。
+      if (input.expected_version !== undefined
+        && Number(input.expected_version) !== Number(task.version)) {
+        throw this.staleTaskConflict(task, input.expected_version)
+      }
       // 核验纪律派单闸（DSHBOTS-303）：重派/改卡按生效卡面（本次传入优先，缺省回落原卡）。
       this.assertNotVerificationDispatch(project, member.id, input.title ?? task.title, input.description ?? task.description)
       // 派单策略闸（DSHBOTS-314）：重派按原卡声明写范围同闸（重派不改写范围，D-232 口径）。
@@ -352,6 +359,9 @@ export const taskDispatchMethods = {
       // 写范围不在此口改：入队运行快照与调度闸门消费的不是同一份数据，
       // 改范围走工作台 taskUpdateScopes（含排队运行快照同步），不在这里开第二入口。
       const patch: any = {}
+      // 栅栏双保险：上面的预检与 updateTask 的 CAS 之间卡仍可能被并发更新，改卡补丁
+      // 一并携带 expected_version，由 updateTask 的 CAS 兜底拦截。
+      if (input.expected_version !== undefined) patch.version = input.expected_version
       if (input.title !== undefined) patch.title = input.title
       if (input.description !== undefined) patch.description = input.description
       if (input.priority !== undefined) patch.priority = input.priority

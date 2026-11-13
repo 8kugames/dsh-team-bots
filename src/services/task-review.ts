@@ -55,6 +55,28 @@ export const taskReviewMethods = {
     )
   },
 
+  // 执行者不得验收（builder≠verifier，吸收自 dsh-agent-team 的协作理念）：
+  // bot 验收时校验该 bot 从未担任过本卡负责人——含当前 assignee 与历史派单
+  // （task_events 的 created/assigned 事件）。工作台 owner（人）与看板/看门狗
+  // （system）不受此闸：信任边界归人，机械闸只拦 bot 自审自发。
+  assertAcceptorNotExecutor(task, project, actorBotId) {
+    const identifier = `${project.key}-${task.number}`
+    const executed = task.assignee_bot_id === actorBotId || !!this.store.get(
+      `SELECT 1 FROM task_events WHERE task_id = ?
+         AND ((type = 'assigned' AND json_extract(data_json, '$.botId') = ?)
+           OR (type = 'created' AND json_extract(data_json, '$.assigneeBotId') = ?))
+       LIMIT 1`,
+      task.id, actorBotId, actorBotId,
+    )
+    if (executed) {
+      throw conflict(
+        `任务 ${identifier} 的验收者就是它的执行者，执行者不得验收：`
+        + '把该卡验收交给未执行过本卡的 bot（team_assign_task 重派验收方），'
+        + '或由工作台 owner 在看板/管理通道直接验收。',
+      )
+    }
+  },
+
   /** 验收/退回的共用流程：owner Bot 会话与微信管理员共用。 */
   async applyReview(task, project, decision, comment, actor) {
     const identifier = `${project.key}-${task.number}`
@@ -67,6 +89,9 @@ export const taskReviewMethods = {
         + '若卡面或目标有误，用 team_assign_task 重派原任务（task=原任务号，附 title/description 即改卡）修正。',
       )
     }
+    if (decision === 'accept' && actor?.type === 'bot') {
+      this.assertAcceptorNotExecutor(task, project, actor.id)
+    }
     if (decision === 'accept') {
       await this.updateTask(task.id, { status: 'done' }, actor)
       if (comment) await this.addComment(task.id, comment, actor)
@@ -77,6 +102,8 @@ export const taskReviewMethods = {
         body: `任务 ${identifier} 验收通过。`,
         taskId: task.id,
       })
+      // 验收边界沉淀提醒：落待提醒标记，负责人下次在该项目运行时搭车渲染（零额外轮次）。
+      this.noteTaskAccepted(this.taskRow(task.id))
     } else {
       const reason = text(comment, 20_000)
       if (!reason) throw badRequest('退回任务必须说明原因')

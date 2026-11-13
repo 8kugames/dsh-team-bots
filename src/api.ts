@@ -1,4 +1,4 @@
-import { AppError } from './errors.js'
+import { AppError, forbidden } from './errors.js'
 import { exportUsageCsv } from './usage-reconcile.js'
 
 const ACTIONS: Set<TeamActionName> = new Set([
@@ -75,6 +75,10 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'mark_chat_read':
       // IM 式已读：水位只推到用户看到的那条消息，之后新到的仍算未读。
       return service.markChatRead(required(payload.projectId, 'projectId'), payload.readAt ?? '')
+    case 'task_projection_drift':
+      // 账本一致性巡检（只读诊断）：从权威事件流重放任务状态对照投影，漂移即报。
+      if (actor.type !== 'user') throw forbidden('仅工作台用户可执行账本巡检')
+      return { drifted: service.taskProjectionDrift() }
     case 'browse_dirs':
       return service.browseDirectories(payload)
     case 'send_message':

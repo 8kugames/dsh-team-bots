@@ -560,10 +560,7 @@ export const runsMethods = {
       id('evt'), runId, 'canceled', '运行已取消', nowIso(),
     )
     if (updateTask && run.task_id) {
-      this.store.run(
-        "UPDATE tasks SET status = 'todo', version = version + 1, updated_at = ? WHERE id = ? AND status = 'in_progress'",
-        nowIso(), run.task_id,
-      )
+      this.setTaskStatus(run.task_id, 'todo', { type: 'system', id: 'system' }, { ifIs: 'in_progress' })
       this.addTaskEvent(run.task_id, 'run_canceled', { type: 'system', id: 'system' }, { runId })
     }
     return this.runRow(runId)

@@ -722,10 +722,7 @@ export const schedulerMethods = {
           }
         }
         if (run.task_id && run.kind === 'task') {
-          this.store.run(
-            "UPDATE tasks SET status = 'in_progress', version = version + 1, updated_at = ? WHERE id = ? AND status NOT IN ('done', 'canceled')",
-            nowIso(), run.task_id,
-          )
+          this.setTaskStatus(run.task_id, 'in_progress', { type: 'system', id: 'system' })
           this.addTaskEvent(run.task_id, 'run_started', { type: 'system', id: 'system' }, { runId: run.id })
         }
         void this.executeRun(run.id)

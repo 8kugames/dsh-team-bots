@@ -363,7 +363,7 @@ function renderSettings() {
             <div class="field"><label id="settings-description-label" for="settings-description">${t("项目描述")}</label><textarea class="textarea" id="settings-description" name="description">${esc(project.description || '')}</textarea></div>
             <div class="field-row">
               <div class="field"><label id="settings-owner-label" for="settings-owner">${t("总监")} Bot</label><select class="select" id="settings-owner" name="ownerBotId">${members.map(bot => `<option value="${attr(bot.id)}" ${bot.id === project.owner_bot_id ? 'selected' : ''}>${esc(bot.name)}</option>`).join('')}</select></div>
-              <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">${t("群聊回复模式")}</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' ? 'selected' : ''}>${t("总监优先")}</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>${t("全员响应")}</option></select></div>
+              <div class="field"><label id="settings-reply-mode-label" for="settings-reply-mode">${t("群聊回复模式")}</label><select class="select" id="settings-reply-mode" name="replyMode"><option value="owner_first" ${project.group?.reply_mode !== 'everyone' && project.group?.reply_mode !== 'mentioned_only' ? 'selected' : ''}>${t("总监优先")}</option><option value="everyone" ${project.group?.reply_mode === 'everyone' ? 'selected' : ''}>${t("全员响应")}</option><option value="mentioned_only" ${project.group?.reply_mode === 'mentioned_only' ? 'selected' : ''}>${t("仅被点名")}</option></select></div>
             </div>
           </div>
           <div class="card form-card" style="margin-top:12px">
