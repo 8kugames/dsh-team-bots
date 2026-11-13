@@ -4,6 +4,54 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.2.461
+
+### 中文
+
+本版是 v0.2.460 之后的四笔合入：归档会话不再复用、`/tr` 恢复直达项目群聊、配色支持日间/夜间切换，以及设置保存改用 patch/revision 分离契约。
+
+**运行时**
+
+- **归档会话不再复用**：复用会话前先查宿主归档名单，命中即解除绑定并新建会话，不再拿已被宿主归档的会话继续跑。控制面绑定、任务亲和、记忆审查会话、结转/压缩运行四处复用点统一走这道闸；宿主查不到该服务（旧宿主）时按未归档处理。
+- **blocked 无输出按失败上报**：宿主对归档会话拒跑模型步骤，turn/end 记 blocked 且无 assistant 文本；这种运行改按 `SESSION_BLOCKED` 失败上报，不再当成功落库（群聊里表现为「模型未返回文本」），失败分类新增「会话受阻」一类。
+
+**通道（微信/飞书）**
+
+- **`/tr <key>` 恢复直达项目群聊**：消息以通道管理员身份插入项目群聊并触发 chat 运行（origin 透传），回复经 run-finish 推回微信/飞书。自由文本仍落 director 专属会话；直达项目群聊时若无可定向 Bot（无 `@` 且 owner 不可用），走 `no_owner` 拒投出口，不入对话。
+
+**界面**
+
+- **配色支持日间/夜间切换**：设置页「偏好 → 界面」新增明暗分段开关（跟随/日间/夜间），与既有调色板选择正交；手动档压过自动判定，「跟随」档仍由观察器实时跟随宿主切深浅，偏好落盘在浏览器 localStorage 的 `dshb:ui-color-scheme`，刷新后保持。
+- **设置保存改用 patch/revision 分离契约**：`update_settings` 统一走 `{ patch, revision }` 形态（服务端兼容旧调用形态）；修订号冲突时静默三方合并，用户草稿回贴表单，不丢已填内容。
+- **markdown 图片失败给出可定位原因**：图片路径解析补空格、`file://` 协议与反斜杠归一；失败 chip 按状态分类——未改写的外部链接给通用提示，已改写再探失败按 403（路径越界）与 404（工作区里找不到）分别提示。
+
+**升级路径与回退**
+
+无数据库结构变更、无新增服务端配置项（明暗偏好是浏览器端 localStorage 键 `dshb:ui-color-scheme`）。回退按发版级回退：回退包版本与 tag，恢复发版前库快照。
+
+### English
+
+This release bundles four changes landed after v0.2.460: archived sessions are no longer reused, `/tr` reaches the project group chat directly again, the colour scheme gains a day/night switch, and settings saving moves to the patch/revision split contract.
+
+**Runtime**
+
+- **Archived sessions are no longer reused**: before reusing a session the plugin consults the host's archived-session list; on a hit the binding is retired and a new session is created instead of running on an already archived session. The check covers all four reuse points — control-plane binding, task affinity, memory-review sessions, and rollover/compaction runs; when the host does not expose the service (older hosts) the session is treated as not archived.
+- **Blocked runs without output are reported as failures**: the host refuses to run model steps for archived sessions and records a blocked turn/end with no assistant text; such runs are now reported as a `SESSION_BLOCKED` failure instead of being stored as a success (which surfaced in group chats as "the model returned no text"). The failure classification gains a "session blocked" category.
+
+**Channels (WeChat/Feishu)**
+
+- **`/tr <key>` reaches the project group chat directly again**: the message is inserted into the project group chat as the channel administrator and triggers a chat run (with `origin` passed through); the reply is pushed back to WeChat/Feishu via run-finish. Free text still lands in the director's solo session; when a direct project-group message has no addressable Bot (no `@` and the owner is unavailable) it is refused with the `no_owner` outcome and never enters the conversation.
+
+**Interface**
+
+- **The colour scheme gains a day/night switch**: settings → preferences → interface now offers a three-way segment (follow / day / night), orthogonal to the existing palette choice; a manual choice overrides the automatic detection, the follow option still tracks the host in real time, and the preference is persisted in the browser's localStorage under `dshb:ui-color-scheme`, so it survives a reload.
+- **Settings saving uses the patch/revision split contract**: `update_settings` uniformly takes the `{ patch, revision }` shape (the server still accepts the old form); on a revision conflict the change is silently three-way merged and the user's draft is pasted back into the form instead of being lost.
+- **Markdown image failures report a locatable reason**: image path resolution now tolerates spaces, `file://` URLs and backslash separators, and the failure chip distinguishes an unrewritten external link (generic hint) from a rewritten path that 403s (path out of bounds) or 404s (not found in the workspace).
+
+**Upgrade path and rollback**
+
+No schema change and no new server-side setting (the day/night preference is the browser-side localStorage key `dshb:ui-color-scheme`). Rollback is release-level: revert the package version and tag, and restore the pre-release database snapshot.
+
 ## v0.2.460
 
 ### 中文
