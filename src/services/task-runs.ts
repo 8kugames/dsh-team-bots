@@ -179,9 +179,21 @@ export const taskRunMethods = {
     // busy 闸（DSHBOTS-290）：owner 忙时 review/handle 运行同样不落 runs 行（撞
     // one_active_run_per_bot），挂待处理队列空闲建回——与 enqueueTaskRun 同口径。
     // DSHBOTS-300：挂起项提为 hold 闭包，busy 分支与查后插竞态兜底共用。
+    // DSHBOTS-358：额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，
+    // 无可用备用则留 queued 等恢复；路由快照写进运行行的 model_* 三列。
+    // 路由在 busy 闸之前算好：挂起项要带同一份快照，空闲建回时列面与直插一致。
+    const routing = this.quotaRoutingForBot(owner)
+    const routeProvider = routing.mode === 'fallback' ? routing.provider : null
+    const routeModel = routing.mode === 'fallback' ? routing.model : null
+    const routeEffort = routing.mode === 'fallback' ? routing.effort : null
     const hold = () => this.holdPendingMessage(owner.id, project.id, {
       kind: 'owner_task', messageId: `owner_task:${current.id}:${kind}`, taskId: current.id,
       projectId: project.id, runKind: kind, triggerType, queuedAt: createdAt,
+      routing: routing.mode === 'fallback'
+        ? { mode: 'fallback', provider: routing.provider, model: routing.model, effort: routing.effort, ref: routing.ref }
+        : routing.mode === 'wait'
+          ? { mode: 'wait', resetAt: routing.resetAt }
+          : { mode: 'primary' },
     })
     if (this.botBusy(owner.id, project.id)) {
       hold()
@@ -190,10 +202,11 @@ export const taskRunMethods = {
     try {
       this.store.run(
         `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-          attempt, idempotency_key, queued_at)
-         VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?)`,
+          attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
+         VALUES (?, ?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, ?, ?, ?, ?)`,
         runId, project.id, owner.id, task.id, kind, triggerType, task.id,
-        `${kind}:${task.id}:${Date.now()}:${runId}`, createdAt,
+        `${kind}:${task.id}:${Date.now()}:${runId}`,
+        routeProvider, routeModel, routeEffort, createdAt,
       )
     } catch (error: any) {
       // DSHBOTS-304：双投胜利方同任务 active 运行已在→合并返回其 id 消算（同 enqueueTaskRun）。
@@ -211,6 +224,21 @@ export const taskRunMethods = {
       kind === 'review' ? '任务交付，转总监验收' : '任务受阻，转总监处理',
       createdAt,
     )
+    // DSHBOTS-358：内部运行同样接额度路由——主 provider 耗尽时直接走备用模型；
+    // 无可用备用则留 queued 等恢复（调度器额度闸门兜底），不再照常下发撞墙。
+    if (routing.mode === 'fallback') {
+      this.insertRunEvent(
+        runId,
+        'quota_fallback',
+        `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref}（预计 ${this.botQuotaState(owner.id, owner.provider)?.resetAt ?? '未知'} 恢复）`,
+      )
+    } else if (routing.mode === 'wait') {
+      this.insertRunEvent(
+        runId,
+        'quota_wait',
+        `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`,
+      )
+    }
     void this.tick()
     return runId
   },

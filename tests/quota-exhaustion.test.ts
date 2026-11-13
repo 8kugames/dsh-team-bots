@@ -381,3 +381,95 @@ test('网关节流走真实失败路径：不派生备用运行（不回归）',
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// DSHBOTS-358：额度耗尽对内部运行（review / handle / memory_review）同样切备用模型，
+// 聊天类维持现状不自动重发。
+test('review 运行撞墙切备用：派生 review 备用运行，任务状态不受影响', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    await service.updateBot(director.id, { provider: 'deepseek', model: 'deepseek-chat' }, { type: 'user', id: 'u' })
+    const project = await service.createProject({ name: 'Q10', key: 'Q10', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '验收撞墙', assigneeBotId: director.id, status: 'in_review' })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    store.run("UPDATE runs SET status = 'canceled' WHERE task_id = ?", task.id)
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt,
+         idempotency_key, queued_at, started_at)
+       VALUES ('rv1', ?, ?, ?, 'review', 'read', 'review_requested', ?, 'running', 1, 'idem-rv1', ?, ?)`,
+      project.id, director.id, task.id, task.id, mins(-2), mins(-2),
+    )
+    await service.finishRun({
+      runId: 'rv1', status: 'failed', output: '',
+      error: { code: '1308', message: '已达到 5 小时的使用上限' },
+    })
+    const derived = store.get("SELECT * FROM runs WHERE parent_run_id = 'rv1'")
+    assert.ok(derived, 'review 撞墙应派生备用运行')
+    assert.equal(derived.kind, 'review', '派生运行保持 review 种类')
+    assert.equal(derived.model_provider, 'minimax-cn')
+    assert.equal(derived.model_model, 'MiniMax-M3.1-Flash')
+    assert.equal(derived.status, 'queued')
+    assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'in_review', '任务不因验收失败转受阻')
+    const msg = store.get("SELECT body FROM messages WHERE run_id = 'rv1' AND body LIKE '%已切换备用模型%'")
+    assert.ok(msg, '应告知已切备用模型')
+    assert.match(msg.body, /已达限额（1308）/)
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('memory_review 撞墙切备用：派生同链备用审查运行', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    await service.updateBot(director.id, { provider: 'deepseek', model: 'deepseek-chat' }, { type: 'user', id: 'u' })
+    const project = await service.createProject({ name: 'Q11', key: 'Q11', ownerBotId: director.id })
+    await withFallback(service, director.id, { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt,
+         idempotency_key, queued_at, started_at)
+       VALUES ('mr1', ?, ?, NULL, 'memory_review', 'read', 'memory_review', 'src-1', 'running', 1, 'idem-mr1', ?, ?)`,
+      project.id, director.id, mins(-2), mins(-2),
+    )
+    await service.finishRun({
+      runId: 'mr1', status: 'failed', output: '',
+      error: { code: '1308', message: '已达到 5 小时的使用上限' },
+    })
+    const derived = store.get("SELECT * FROM runs WHERE parent_run_id = 'mr1'")
+    assert.ok(derived, '记忆审查撞墙应派生备用运行')
+    assert.equal(derived.kind, 'memory_review', '派生运行保持 memory_review 种类')
+    assert.equal(derived.trigger_ref, 'src-1', '记忆审查链沿用来源运行')
+    assert.equal(derived.model_provider, 'minimax-cn')
+    assert.equal(derived.model_model, 'MiniMax-M3.1-Flash')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('记忆审查入队接额度路由：主 provider 耗尽时带备用模型快照', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    await service.updateBot(director.id, {
+      provider: 'deepseek', model: 'deepseek-chat',
+      fallbackProvider: 'minimax-cn', fallbackModel: 'MiniMax-M3.1-Flash',
+    }, { type: 'user', id: 'u' })
+    const project = await service.createProject({ name: 'Q12', key: 'Q12', ownerBotId: director.id })
+    const task = await service.createTask({ projectId: project.id, title: '记忆路由', assigneeBotId: director.id })
+    service.recordBotQuotaExhaustion({
+      botId: director.id, provider: 'deepseek', errorCode: '1308', errorMessage: 'quota', retryAfterMs: 60 * 60_000,
+    })
+    const botRow = store.get('SELECT * FROM bots WHERE id = ?', director.id)
+    const reviewRunId = service.enqueueMemoryReview(project, botRow, task, 'src-route')
+    assert.ok(reviewRunId, '记忆审查运行应入队')
+    const run = store.get('SELECT * FROM runs WHERE id = ?', reviewRunId)
+    assert.equal(run.kind, 'memory_review')
+    assert.equal(run.model_provider, 'minimax-cn', '记忆审查入队带备用 provider 快照')
+    assert.equal(run.model_model, 'MiniMax-M3.1-Flash')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

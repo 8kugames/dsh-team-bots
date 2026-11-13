@@ -196,6 +196,12 @@ export const taskReviewMethods = {
       if (active.trigger_type === 'review_delegate') return { runId: active.id, reused: true }
       throw conflict(`任务 ${identifier} 已有运行在排队或执行，请先停止再委派核验`)
     }
+    // DSHBOTS-358：额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，
+    // 无可用备用则留 queued 等恢复；路由快照写进运行行的 model_* 三列。
+    const routing = this.quotaRoutingForBot(owner)
+    const routeProvider = routing.mode === 'fallback' ? routing.provider : null
+    const routeModel = routing.mode === 'fallback' ? routing.model : null
+    const routeEffort = routing.mode === 'fallback' ? routing.effort : null
     // busy 闸（DSHBOTS-290）：总监忙时不落 runs 行（撞 one_active_run_per_bot），挂待
     // 处理队列空闲建回（insertHeldMessageRun 的 owner_task 分支）；返回 deferred 让
     // 手动入口与 outbox 自动入口都能感知「已挂起」而非失败。
@@ -203,6 +209,11 @@ export const taskReviewMethods = {
       this.holdPendingMessage(owner.id, project.id, {
         kind: 'owner_task', messageId: `owner_task:${task.id}:review_delegate`, taskId: task.id,
         projectId: project.id, runKind: 'review', triggerType: 'review_delegate', queuedAt: nowIso(),
+        routing: routing.mode === 'fallback'
+          ? { mode: 'fallback', provider: routing.provider, model: routing.model, effort: routing.effort, ref: routing.ref }
+          : routing.mode === 'wait'
+            ? { mode: 'wait', resetAt: routing.resetAt }
+            : { mode: 'primary' },
       })
       return { runId: null, deferred: true }
     }
@@ -210,15 +221,21 @@ export const taskReviewMethods = {
     const createdAt = nowIso()
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, queued_at)
-       VALUES (?, ?, ?, ?, 'review', 'read', 'review_delegate', ?, 'queued', 1, ?, ?)`,
-      runId, project.id, owner.id, task.id, task.id, `review_delegate:${task.id}:${Date.now()}:${runId}`, createdAt,
+        attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
+       VALUES (?, ?, ?, ?, 'review', 'read', 'review_delegate', ?, 'queued', 1, ?, ?, ?, ?, ?)`,
+      runId, project.id, owner.id, task.id, task.id, `review_delegate:${task.id}:${Date.now()}:${runId}`,
+      routeProvider, routeModel, routeEffort, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
       `${origin === 'auto' ? '交付后自动' : 'owner'}委派子代理核验（${actor.type}:${actor.id}）`, createdAt,
     )
+    if (routing.mode === 'fallback') {
+      this.insertRunEvent(runId, 'quota_fallback', `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref}`)
+    } else if (routing.mode === 'wait') {
+      this.insertRunEvent(runId, 'quota_wait', `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`)
+    }
     this.audit(actor, origin === 'auto' ? 'review.auto_delegate' : 'task.review_delegate', 'task', task.id, { runId })
     void this.tick()
     return { runId, reused: false }

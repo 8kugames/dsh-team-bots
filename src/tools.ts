@@ -35,8 +35,9 @@ export const SUBAGENT_GENERATION_TOOLS = [
 // team_block_task（DSHBOTS-232）与派单/验收同款总监专属：强制受阻停运行是不可逆控制面操作。
 // team_list_bots / team_add_member / team_create_bot（DSHBOTS-229）是团队编制入口：
 // 池查询含未入群 bot，加人与建 bot 会改动项目成员或全局 bot 档案。
-// team_memory_list / team_memory_write / team_memory_cleanup（DSHBOTS-239）是记忆巡检面：
-// 枚举、同名覆盖写与批量终态化清理都只归总监。
+// team_memory_list / team_memory_write / team_memory_cleanup（DSHBOTS-239）是记忆管理面：
+// bot 域记忆由 Bot 自己管理（成员触顶后的合法自救通道），项目/团队域归项目总监，
+// 总监可经 bot 点名代管任意 Bot——权限判定在服务层 resolveMemoryScopeFor。
 export const DIRECTOR_ONLY_TOOLS = [
   'team_assign_task',
   'team_review_task',
@@ -44,9 +45,6 @@ export const DIRECTOR_ONLY_TOOLS = [
   'team_list_bots',
   'team_add_member',
   'team_create_bot',
-  'team_memory_list',
-  'team_memory_write',
-  'team_memory_cleanup',
   'team_release_bot_quota',
 ] as const
 
@@ -59,14 +57,18 @@ export function subagentCapabilityEnabledFor(bot, config) {
 // 子代理生成工具由 preset 全局注册，成员 bot 默认可见，无需额外放行。
 // DSHBOTS-247：调用点形状不一——session.ts 的结转/复用路径传 resolveAgent 的
 // `{ agent }` 包装，新建会话路径传裸 agent。这里归一为句柄后取 restrict，两种形状都生效；
-// 旧实现只认包装形状时，裸形状会静默跳过（策略从未生效）或旧构建抛 "reading 'ctx'"。
+// 旧实现只认包装形状时，裸形状会静默跳过（策略从未生效）。
+// DSHBOTS-359：restrict 必须以方法调用发出——宿主 ToolsService.restrict 首行读 this.ctx，
+// 摘下函数裸调用会让 this===undefined，抛 "reading 'ctx'" 被吞成 warn，策略自 DSHBOTS-238
+// 起从未真正生效（成员 bot 一直可见总监专权工具）。
 export function applyBotToolPolicy(resolved, { isOwner, logger }: { isOwner: boolean; logger?: { warn?: (...args: unknown[]) => void } }) {
   if (isOwner) return
   const handle = resolved?.agent ?? resolved
-  const restrict = handle?.ctx?.tools?.restrict
-  if (typeof restrict !== 'function') return
+  const tools = handle?.ctx?.tools
+  if (typeof tools?.restrict !== 'function') return
   try {
-    restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })
+    // 方法调用保留接收者（this === tools），与宿主 dsh-subagent 的 childCtx.tools.restrict 同形。
+    tools.restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })
   } catch (error: any) {
     // 工具层兜底失败不阻断会话：服务层 ownerContextFor 仍是权威闸门。
     logger?.warn?.(`dsh-team: 应用成员 bot 工具策略失败：${error?.message ?? error}`)
@@ -86,10 +88,10 @@ export function installTeamTools(ctx, service) {
         title: { type: 'string', description: 'Short actionable task title (new tasks; on re-dispatch it amends the card)' },
         description: { type: 'string', description: 'Self-contained instructions, constraints and acceptance criteria (new tasks; on re-dispatch it amends the card and the assignee is notified to correct course). Name the expected deliverable file paths inside the write scopes, and never instruct the bot to paste file contents into its delivery report — the report references paths, reviewers read the files' },
         priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority (new tasks and card amendment on re-dispatch)' },
-        write_scopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths this task will modify (new tasks only); the scheduler runs tasks with disjoint scopes in parallel. Omit to parse a `写范围：`/`write_scopes:` line from the description instead' },
+        write_scopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths this task will modify (new tasks only); the scheduler runs tasks with disjoint scopes in parallel. Keep it small: a task declaring more than maxWriteScopesPerTask (default 8) paths is rejected — split into subtask cards with parent_task_id and disjoint scopes instead. Omit to parse a `写范围：`/`write_scopes:` line from the description instead' },
         deliverables: { type: 'array', items: { type: 'string' }, description: 'Expected deliverable file paths, workspace-relative and inside the write scopes (new tasks; on re-dispatch it amends the card). The assignee references these paths in its delivery report instead of pasting file contents; reviewers read the files at these paths' },
         force_duplicate: { type: 'boolean', description: 'Escape hatch (new tasks only): skip the same-write-scope duplicate check when an unfinished task in this project already declares identical write scopes. Use only when a second task on the same paths is intentional; every use is audited as dispatch_force_duplicate' },
-        time_budget_minutes: { type: 'integer', description: 'Required delivery time limit in minutes (new tasks only, 1-10080): injected into the task prompt, and the run is aborted when the budget expires. The effective timeout is the smaller of this budget and the global run timeout. Omit to take the priority-tier budget (urgent/high 45, medium 30, low/none 15 minutes); non-dispatch task creation falls back to env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > stall-watchdog minutes > 20 minutes' },
+        time_budget_minutes: { type: 'integer', description: 'Required delivery time limit in minutes (new tasks only, 1-10080): injected into the task prompt, and the run is aborted when the budget expires. The effective timeout is the smaller of this budget and the global run timeout. Omit to take the priority-tier budget (urgent/high 90, medium 60, low/none 30 minutes); non-dispatch task creation falls back to env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > stall-watchdog minutes > 40 minutes' },
         parent_task_id: { type: 'string', description: 'Nest the new task as a subtask under this main task id (new tasks only): pass it when the main item cannot be finished in this run or a new closing condition emerged, so follow-up work lands as a product-grade card instead of a verbal note; also pass it to split a large task into parallel subtask cards for speed (independent parts, disjoint write_scopes, so the cards run concurrently). Must reference an existing task in the same project; self-reference is rejected. The backend validates' },
         task: { type: 'string', description: 'Existing task to re-dispatch, as KEY-N (for example DEMO-3). Omit to create a new task' },
         expected_version: { type: 'integer', description: 'Mutation fence (re-dispatch/amend only): the task card version you last saw (the `version` field of any card view). When the card has changed since (delivery, status transition, another edit), the write is refused and the refusal lists the most recent changes so you can re-decide in place; retry with the new expected_version, or omit to keep last-write-wins behavior' },
@@ -267,11 +269,12 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_list',
-    description: 'List existing long-term memories in one scope (bot / project / team) for hygiene inspection: entries with short id, topic, updated time and a content preview, optionally filtered by topic substring. Director-only.',
+    description: 'List existing long-term memories in one scope (bot / project / team) for hygiene inspection: entries with short id, topic, updated time and a content preview, optionally filtered by topic substring. Every bot manages its own bot scope; project and team scopes are director-only.',
     parameters: {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to enumerate: bot = your own memories, project = this project, team = whole team. Default project' },
+        bot: { type: 'string', description: 'With scope=bot, target that bot (exact bot name or id) instead of yourself — use it to inspect a member bot\'s memories when its scope hits the cap' },
         topic: { type: 'string', description: 'Optional substring filter on the topic label' },
         limit: { type: 'integer', description: 'Max entries to return (1-200, default 50)' },
       },
@@ -290,11 +293,12 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_write',
-    description: 'Write a durable memory with same-name overwrite: an active memory with the same scope+topic is updated in place (revision bumps, event trail kept) instead of appending a duplicate entry; otherwise a new memory is created. Use it to refresh a wording to the latest final state instead of piling up near-duplicates. Scope rules: bot = your own, project = this project, team = whole team. Never store secrets or credentials. Director-only.',
+    description: 'Write a durable memory with same-name overwrite: an active memory with the same scope+topic is updated in place (revision bumps, event trail kept) instead of appending a duplicate entry; otherwise a new memory is created. Use it to refresh a wording to the latest final state instead of piling up near-duplicates. Scope rules: bot = your own (every bot), project = this project (director), team = whole team (director). Never store secrets or credentials.',
     parameters: {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'bot: only you remember it; project: every project bot can use it; team: shared by the whole team (owner bots only)' },
+        bot: { type: 'string', description: 'With scope=bot, write into that bot\'s memories (exact bot name or id) instead of your own — use it for same-name-overwrite dedupe in a member bot\'s scope' },
         topic: { type: 'string', description: 'Short topic label; same topic in the same scope is overwritten in place' },
         content: { type: 'string', description: 'The durable memory, with enough context to be useful later' },
       },
@@ -311,11 +315,12 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_cleanup',
-    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Criteria (at least one required): `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision; `before` archives every active entry whose updated_at is strictly older than the given ISO timestamp — the one-shot bulk criterion for legacy backlog convergence. `before` combines with `topics`/`task` as an AND filter. Do not archive entries recording the user\'s explicit decisions. Director-only.',
+    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Criteria (at least one required): `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision; `before` archives every active entry whose updated_at is strictly older than the given ISO timestamp — the one-shot bulk criterion for legacy backlog convergence. `before` combines with `topics`/`task` as an AND filter. Do not archive entries recording the user\'s explicit decisions. Every bot manages its own bot scope; project and team scopes are director-only.',
     parameters: {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to clean: bot = your own, project = this project, team = whole team' },
+        bot: { type: 'string', description: 'With scope=bot, clean that bot\'s memories (exact bot name or id) instead of your own — the sanctioned path when a member bot\'s scope hits the cap and it cannot clean itself' },
         topics: { type: 'array', items: { type: 'string' }, description: 'Exact topic labels to archive in this scope' },
         task: { type: 'string', description: 'Closed card (KEY-N) whose process-record memories should be archived; rejected unless the task is done or canceled' },
         before: { type: 'string', description: 'ISO timestamp cutoff (e.g. 2026-01-01T00:00:00.000Z): archive every active entry in this scope with updated_at strictly before it. Required when neither topics nor task is given; combining with topics/task intersects the criteria' },

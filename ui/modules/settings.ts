@@ -307,10 +307,10 @@ function dshPathsCard() {
   return `
     <div class="card form-card g-card">
       <div class="card-head"><h3>${t('global.cardDshPaths')}</h3><span class="meta">${t('global.readonly')}</span></div>
-      <div class="path-row"><span>${t('global.pathDshHome')}</span>${pathCode(paths.dshHome ?? '~/.dsh')}${copyPath(paths.dshHome ?? '')}</div>
+      <div class="path-row"><span>${t('global.pathDshHome')}</span>${pathCode(tildePath(paths.dshHome ?? '~/.dsh'))}${copyPath(paths.dshHome ?? '')}</div>
       <div class="path-row"><span>${t('global.pathWorkspace')}</span>${pathCode(tildePath(paths.workspace))}${copyPath(paths.workspace)}</div>
-      <div class="path-row"><span>${t('global.pathSkills')}</span>${pathCode(paths.skillRoot)}${copyPath(paths.skillRoot)}</div>
-      <div class="path-row"><span>${t('global.pathData')}</span>${pathCode(paths.dataDir)}${copyPath(paths.dataDir)}</div>
+      <div class="path-row"><span>${t('global.pathSkills')}</span>${pathCode(tildePath(paths.skillRoot))}${copyPath(paths.skillRoot)}</div>
+      <div class="path-row"><span>${t('global.pathData')}</span>${pathCode(tildePath(paths.dataDir))}${copyPath(paths.dataDir)}</div>
     </div>`
 }
 
@@ -393,7 +393,7 @@ function renderSettings() {
               <div class="dir-picker" id="dir-picker-settings-production" hidden></div>
             </div>
             <div class="path-row"><span>${t("当前生效")}</span>${pathCode(tildePath(project.workspace_path))}${copyPath(project.workspace_path)}</div>
-            <div class="path-row"><span>${t("管理数据")}</span>${pathCode(project.data_path ?? '')}${copyPath(project.data_path ?? '')}</div>
+            <div class="path-row"><span>${t("管理数据")}</span>${pathCode(tildePath(project.data_path ?? ''))}${copyPath(project.data_path ?? '')}</div>
           </div>
           <div class="card form-card" style="margin-top:12px">
             <div class="card-head"><h3>${t("项目状态")}</h3>${project.status === 'active' ? `<span class="pill green">${t("运行中")}</span>` : `<span class="pill amber">${t("已归档")}</span>`}</div>

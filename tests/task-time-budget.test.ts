@@ -412,8 +412,8 @@ test('budget 大于全局时按全局中止：effective timeout 取更短者', a
 
 // DSHBOTS-198：任务卡默认带时间预算（用户 2026-11-04 拍板 A：跟随看门狗）。
 // 缺省链 = 显式 time_budget_minutes > env DSH_TEAM_TASK_TIME_BUDGET_MINUTES >
-// 无进展看门狗（分钟）生效值 > 兜底 20（看门狗未配置与配 0 关闭同值；预算不得变 0/无限）。
-test('缺省预算链：未传补 20、env 覆盖、看门狗配置覆盖、看门狗 0 兜底 20、显式不覆盖', async () => {
+// 无进展看门狗（分钟）生效值 > 兜底 40（看门狗未配置与配 0 关闭同值；预算不得变 0/无限）。
+test('缺省预算链：未传补 20、env 覆盖、看门狗配置覆盖、看门狗 0 兜底 40、显式不覆盖', async () => {
   const prevEnv = process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES
   const ctx = await setup()
   try {
@@ -437,7 +437,7 @@ test('缺省预算链：未传补 20、env 覆盖、看门狗配置覆盖、看�
     assert.equal(rowOf(ctx.store, (await create('看门狗配置')).id).time_budget_minutes, 75, '看门狗生效值应成为缺省预算')
 
     ctx.store.setSetting('stall_watchdog_minutes', '0')
-    assert.equal(rowOf(ctx.store, (await create('看门狗关闭')).id).time_budget_minutes, 20, '看门狗 0（关闭）应回落兜底 20')
+    assert.equal(rowOf(ctx.store, (await create('看门狗关闭')).id).time_budget_minutes, 40, '看门狗 0（关闭）应回落兜底 40')
 
     ctx.store.setSetting('stall_watchdog_minutes', '75')
     assert.equal(

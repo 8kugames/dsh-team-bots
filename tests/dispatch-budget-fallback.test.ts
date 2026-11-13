@@ -79,16 +79,16 @@ const taskMessages = (store, taskId) =>
 const dispatch = (ctx, sessionId, input) =>
   ctx.service.assignFromBot(sessionId, { assignee: 'Builder', description: '做点事。', ...input })
 
-test('档表常量钉住分档值（urgent/high 45、medium 30、low/none 15）', () => {
-  assert.deepEqual(PRIORITY_BUDGET_MINUTES, { urgent: 45, high: 45, medium: 30, low: 15, none: 15 })
+test('档表常量钉住分档值（urgent/high 90、medium 60、low/none 30）', () => {
+  assert.deepEqual(PRIORITY_BUDGET_MINUTES, { urgent: 90, high: 90, medium: 60, low: 30, none: 30 })
 })
 
-test('a) 漏传预算 + high → 45 落库（priority 同步落卡）', async () => {
+test('a) 漏传预算 + high → 90 落库（priority 同步落卡）', async () => {
   await withSetup(async ctx => {
     const { sessionId } = await seedProject(ctx.service, ctx.store)
     const task = await dispatch(ctx, sessionId, { title: '高优卡', write_scopes: ['src/a.js'], priority: 'high' })
     const row = budgetOf(ctx.store, task.id)
-    assert.equal(row.v, 45, '漏传预算的 high 卡应落 45（回读核验，不信透传）')
+    assert.equal(row.v, 90, '漏传预算的 high 卡应落 90（回读核验，不信透传）')
     assert.equal(row.priority, 'high')
   })
 })
@@ -103,13 +103,13 @@ test('b) 显式 90 → 90 落库不被兜底覆盖（priority=low 也不压成 1
   })
 })
 
-test('c) 漏传预算 + low → 15 落库；不传 priority 同 medium 档 30', async () => {
+test('c) 漏传预算 + low → 30 落库；不传 priority 同 medium 档 60', async () => {
   await withSetup(async ctx => {
     const { sessionId } = await seedProject(ctx.service, ctx.store)
     const low = await dispatch(ctx, sessionId, { title: '低优卡', write_scopes: ['src/c.js'], priority: 'low' })
-    assert.equal(budgetOf(ctx.store, low.id).v, 15, 'low 卡应落 15')
+    assert.equal(budgetOf(ctx.store, low.id).v, 30, 'low 卡应落 30')
     const plain = await dispatch(ctx, sessionId, { title: '缺省优卡', write_scopes: ['src/d.js'] })
-    assert.equal(budgetOf(ctx.store, plain.id).v, 30, '不传 priority（createTask 回退 medium）应落 30')
+    assert.equal(budgetOf(ctx.store, plain.id).v, 60, '不传 priority（createTask 回退 medium）应落 60')
     assert.equal(budgetOf(ctx.store, plain.id).priority, 'medium')
   })
 })
@@ -128,49 +128,49 @@ test('d) 重派已有预算不重算（90 保留）；存量 NULL 预算卡重�
     const legacy = await dispatch(ctx, sessionId, { title: '老卡', write_scopes: ['src/f.js'], priority: 'medium' })
     ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', legacy.id)
     await dispatch(ctx, sessionId, { task: 'GATE-2', priority: 'high' })
-    assert.equal(budgetOf(ctx.store, legacy.id).v, 45, 'NULL 预算卡重派按生效 priority 档补挂')
+    assert.equal(budgetOf(ctx.store, legacy.id).v, 90, 'NULL 预算卡重派按生效 priority 档补挂')
   })
 })
 
-test('e) 无效 priority 回退默认档（medium 30），与 createTask 归一同口径', async () => {
+test('e) 无效 priority 回退默认档（medium 60），与 createTask 归一同口径', async () => {
   await withSetup(async ctx => {
     const { sessionId } = await seedProject(ctx.service, ctx.store)
     const task = await dispatch(ctx, sessionId, { title: '怪优先级卡', write_scopes: ['src/g.js'], priority: 'bogus' })
     const row = budgetOf(ctx.store, task.id)
     assert.equal(row.priority, 'medium', '无效 priority 与 createTask 同口径归一为 medium')
-    assert.equal(row.v, 30, '无效 priority 回退 medium 档 30，不得落 undefined/NULL')
+    assert.equal(row.v, 60, '无效 priority 回退 medium 档 60，不得落 undefined/NULL')
   })
 })
 
-test('③ 直建卡（不经派单）仍走全局缺省链：漏传预算落 20 不落分档', async () => {
+test('③ 直建卡（不经派单）仍走全局缺省链：漏传预算落看门狗缺省 20 不落分档', async () => {
   await withSetup(async ctx => {
     const { project } = await seedProject(ctx.service, ctx.store)
     const task = await ctx.service.createTask(
       { projectId: project.id, title: '直建卡', writeScopes: ['src/h.js'], priority: 'high' },
       ctx.service.actor(),
     )
-    assert.equal(budgetOf(ctx.store, task.id).v, 20, '直建卡沿用全局缺省链 20，不被派单分档接管')
+    assert.equal(budgetOf(ctx.store, task.id).v, 20, '直建卡沿用全局缺省链（看门狗缺省 20 分钟），不被派单分档接管')
   })
 })
 
 test('④ 描述「N 分钟档」与兜底档不一致：回执提示一行；一致或显式预算时不提示', async () => {
   await withSetup(async ctx => {
     const { sessionId, project } = await seedProject(ctx.service, ctx.store)
-    // medium 卡（兜底 30）描述写 45 分钟档 → 提示；不拦截建卡。
+    // medium 卡（兜底 60）描述写 45 分钟档 → 提示；不拦截建卡。
     const mismatch = await dispatch(ctx, sessionId, {
       title: '档不符卡', write_scopes: ['src/i.js'], priority: 'medium',
       description: '写范围：src/i.js。45 分钟档。',
     })
     const mismatchBodies = taskMessages(ctx.store, mismatch.id).map(message => message.body)
     assert.ok(
-      mismatchBodies.some(body => body.includes('budget=30（priority 兜底，描述写 45 分钟档）')),
+      mismatchBodies.some(body => body.includes('budget=60（priority 兜底，描述写 45 分钟档）')),
       `应有兜底档提示消息，实际消息：${JSON.stringify(mismatchBodies)}`,
     )
 
-    // high 卡（兜底 45）描述写 45 分钟档 → 一致，不提示。
+    // high 卡（兜底 90）描述写 90 分钟档 → 一致，不提示。
     const consistent = await dispatch(ctx, sessionId, {
       title: '档一致卡', write_scopes: ['src/j.js'], priority: 'high',
-      description: '写范围：src/j.js。45 分钟档。',
+      description: '写范围：src/j.js。90 分钟档。',
     })
     const consistentBodies = taskMessages(ctx.store, consistent.id).map(message => message.body)
     assert.ok(

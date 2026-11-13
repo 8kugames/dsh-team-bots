@@ -12,7 +12,12 @@ import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '..
 // 记忆上限（DSHBOTS-339）：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶后新增被拒，
 // 须先整理到 MEMORY_COMPACT_TO 条以内才恢复放行（滞回，避免在阈值附近反复开关）。team 作用域不限。
 export const MEMORY_CAP = 64
-export const MEMORY_COMPACT_TO = 33
+// 恢复线（DSHBOTS-360）：触顶后须整理到 ≤MEMORY_COMPACT_TO 条才恢复新增（滞回带宽度 10 条）。
+// 取 MEMORY_CAP−10：滞回带要宽过单轮最大突发，否则一轮自动沉淀就能把刚整理出的余量再次吃满。
+// 10 条恰好覆盖记忆审查单轮最大突发（parseMemoryReview ≤10 条）；规则沉淀（learnFromTask ≤2 条）
+// 与审查同轮发生时会略超，属已知余量收紧，必要时可再放宽。早期取 33（≈CAP/2）等于强制腰斩，过苛：
+// 61 条需清 28 条才解锁，恢复线本身成了新的阻塞源。
+export const MEMORY_COMPACT_TO = MEMORY_CAP - 10
 // 单条记忆篇幅上限（owner 补充）：content 不得超过 256 字。
 export const MEMORY_MAX_CHARS = 256
 
@@ -154,14 +159,32 @@ export const memoryMethods = {
     // 审查模型覆盖：配置了专用模型对时随运行下发（runs.model_* 三列既有通道，
     // startRun 的 modelOverrideFor 消费）；未配置为 NULL，沿用 Bot 主模型。
     const target = memoryReviewModelTarget(this.config)
+    // DSHBOTS-358：记忆审查属内部运行，同样接额度路由——主 provider 耗尽时走备用模型；
+    // 主备都耗尽则不带模型覆盖，留 queued 等恢复（调度器额度闸门兜底）。
+    // 专用审查模型配在别的 provider 且该 provider 未耗尽时，专用模型优先。
+    const routing = this.quotaRoutingForBot(bot)
+    let reviewProvider = target?.provider ?? null
+    let reviewModel = target?.model ?? null
+    let reviewEffort = null
+    if (routing.mode === 'fallback') {
+      reviewProvider = routing.provider
+      reviewModel = routing.model
+      reviewEffort = routing.effort ?? null
+    } else if (routing.mode === 'wait') {
+      const dedicated = target ? this.botQuotaState(bot.id, target.provider) : null
+      if (!target || dedicated?.exhausted) {
+        reviewProvider = null
+        reviewModel = null
+      }
+    }
     const reviewRunId = id('run')
     const createdAt = nowIso()
     this.store.run(
       `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, model_provider, model_model, queued_at)
-       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?)`,
+        attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
+       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?, ?)`,
       reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`,
-      target?.provider ?? null, target?.model ?? null, createdAt,
+      reviewProvider, reviewModel, reviewEffort, createdAt,
     )
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -193,6 +216,11 @@ export const memoryMethods = {
     const source = `run:${sourceRunId}`
     let applied = 0
     let deduped = 0
+    // 拒写留痕（DSHBOTS-360）：审查写入被拒时把拒因带内化——写进 run_events，
+    // 不再只丢一条系统日志（run_events 只说「写入 0 条」而无人知道为什么，锁定期会无限期无人处理）。
+    let rejected = 0
+    let capacityRejected = 0
+    const rejectReasons: string[] = []
     // 同一次审查里重复的条目、以及同一来源重复触发的审查，写入前都按来源+内容去重。
     const seen = new Set()
     for (const item of items) {
@@ -231,14 +259,23 @@ export const memoryMethods = {
         })
         applied += 1
       } catch (writeError: any) {
-        this.logger.warn?.('dsh-team: 记忆审查写入失败：%s', writeError?.message ?? writeError)
+        rejected += 1
+        const reason = String(writeError?.message ?? writeError)
+        // 容量锁（conflict 409）与其它拒因分开计数：容量锁意味着作用域处在整理锁定期，需要人处理。
+        if (writeError?.status === 409) capacityRejected += 1
+        if (rejectReasons.length < 3) rejectReasons.push(reason)
+        // 同主题覆盖写降级属可选能力：owner 未点头，本卡不实现（不改写既有条目、不把被拒条目转 pending 堆积）。
+        this.logger.warn?.('dsh-team: 记忆审查写入失败：%s', reason)
       }
     }
+    const rejectNote = rejected
+      ? `，拒写 ${rejected} 条${capacityRejected ? `（其中 ${capacityRejected} 条因容量锁被拒）` : ''}：${rejectReasons.join('；')}`
+      : ''
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${deduped ? `，去重 ${deduped} 条` : ''}`, nowIso(),
+      id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${deduped ? `，去重 ${deduped} 条` : ''}${rejectNote}`, nowIso(),
     )
-    return { applied, deduped }
+    return { applied, deduped, rejected, capacityRejected }
   },
 
   // 记忆写入权限：用户可写任意作用域；Bot 只能写自己的记忆、是成员的项目记忆，
@@ -279,7 +316,8 @@ export const memoryMethods = {
   },
   memoryCapacityMessage(scopeType, scopeId, count, latched = false) {
     const label = scopeType === 'bot' ? `Bot(${scopeId})` : `项目(${scopeId})`
-    // 锁定带（滞回标志在、34–63 条）：如实说明此前触顶、现处整理锁定期，不得谎称「已达 N/64」。
+    // 锁定带（滞回标志在、(MEMORY_COMPACT_TO, MEMORY_CAP) 之间）：如实说明此前触顶、现处整理锁定期，
+    // 不得谎称「已达 N/64」。
     if (latched) {
       return `${label}记忆此前触顶 ${MEMORY_CAP} 条上限，现处整理锁定期（当前 ${count} 条），新增被拒绝；需整理到 ≤${MEMORY_COMPACT_TO} 条恢复新增：去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗与融合（同主题 team_memory_write 覆盖写、合并相近条目）；同主题覆盖写不受影响。`
     }
@@ -512,17 +550,53 @@ export const memoryMethods = {
   // 三入口共用 ownerContextFor 权威鉴权（仅项目总监，单聊/成员拒绝）；
   // 不改宿主 team_remember 语义，插件层独立封装。
 
-  // 把 scope 枚举解析到总监会话所在的具体作用域：bot=总监自己，project=会话项目，team=全团队。
-  resolveOwnerMemoryScope(ownerCtx, scope) {
+  // 记忆工具上下文：任意项目群 Bot 可自管自己的 bot 域（成员 Bot 触顶后的合法自救通道，
+  // 总监可经 bot 点名代管任意 Bot）；project/team 域仍只归总监（ownerContextFor 同款判定）。
+  memoryActorFor(sessionId) {
+    const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+    if (!binding) throw forbidden('只有项目群中的 Bot 可以执行该操作')
+    const project = binding.project_id ? this.projectRow(binding.project_id) : null
+    return {
+      binding,
+      project,
+      actor: { type: 'bot', id: binding.bot_id },
+      isOwner: Boolean(project && project.owner_bot_id === binding.bot_id),
+    }
+  },
+  resolveMemoryScopeFor(sessionId, input) {
+    const ctx = this.memoryActorFor(sessionId)
+    const scopeType = ['bot', 'project', 'team'].includes(input.scope) ? input.scope : null
+    if (!scopeType) throw badRequest('记忆作用域无效')
+    if (ctx.isOwner) {
+      const resolved = this.resolveOwnerMemoryScope(ctx, input.scope, input.bot)
+      return { ...resolved, actor: ctx.actor, project: ctx.project, isOwner: true }
+    }
+    // 成员：只放行自己的 bot 域；点名参数仅接受自己（点名他人即拒绝）。
+    if (scopeType !== 'bot') {
+      throw forbidden('成员只能管理自己的 bot 域记忆；项目/团队域的整理请由项目总监执行')
+    }
+    if (input.bot != null && String(input.bot).trim() !== '') {
+      const named = this.resolveBotForQuota(input.bot)
+      if (named.id !== ctx.binding.bot_id) throw forbidden('Bot 只能点名管理自己的记忆')
+    }
+    return { scopeType, scopeId: ctx.binding.bot_id, actor: ctx.actor, project: ctx.project, isOwner: false }
+  },
+
+  // 把 scope 枚举解析到总监会话所在的具体作用域：bot=总监自己（bot_ref 点名时为该 Bot，
+  // 成员 Bot 超限整理的合法通道——resolveBotForQuota 按 id 或精确名解析，任意总监可点名），
+  // project=会话项目，team=全团队。
+  resolveOwnerMemoryScope(ownerCtx, scope, botRef = null) {
     const scopeType = ['bot', 'project', 'team'].includes(scope) ? scope : null
     if (!scopeType) throw badRequest('记忆作用域无效')
-    const scopeId = scopeType === 'bot' ? ownerCtx.binding.bot_id : scopeType === 'project' ? ownerCtx.project.id : 'team'
+    let scopeId = scopeType === 'project' ? ownerCtx.project.id : scopeType === 'team' ? 'team' : ownerCtx.binding.bot_id
+    if (scopeType === 'bot' && botRef != null && String(botRef).trim() !== '') {
+      scopeId = this.resolveBotForQuota(botRef).id
+    }
     return { scopeType, scopeId }
   },
 
-  memoryListFromBot(sessionId, input: { scope?: string, topic?: string, limit?: number } = {}) {
-    const ownerCtx = this.ownerContextFor(sessionId)
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope ?? 'project')
+  memoryListFromBot(sessionId, input: { scope?: string, bot?: string, topic?: string, limit?: number } = {}) {
+    const { scopeType, scopeId } = this.resolveMemoryScopeFor(sessionId, { scope: 'project', ...input })
     const keyword = text(input.topic, 200).trim()
     const limitN = Math.min(200, Math.max(1, Number(input.limit) || 50))
     const like = `%${keyword}%`
@@ -539,9 +613,7 @@ export const memoryMethods = {
   // 写入/同名覆盖：同 scope+topic 已有 active 记忆时原地更新（revision+1、事件留痕），
   // 不再叠新条；无同名时走 createMemory 正常创建。
   memoryWriteFromBot(sessionId, input) {
-    const ownerCtx = this.ownerContextFor(sessionId)
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope)
-    const actor = ownerCtx.actor
+    const { scopeType, scopeId, actor } = this.resolveMemoryScopeFor(sessionId, input)
     const topic = text(input.topic, 120)
     if (!topic) throw badRequest('缺少记忆主题')
     const existing = this.store.get(
@@ -584,13 +656,12 @@ export const memoryMethods = {
   // before 与 topics/task 可组合，按 AND 交集收窄；三者全缺即拒绝（不做「全清」缺省）。
   // 逐条 memory_events 留痕 + 一笔 memory.cleanup 审计列出被清条目。
   memoryCleanupFromBot(sessionId, input) {
-    const ownerCtx = this.ownerContextFor(sessionId)
-    const { project, actor } = ownerCtx
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope)
+    const { scopeType, scopeId, project, actor } = this.resolveMemoryScopeFor(sessionId, input)
     const topics = (Array.isArray(input.topics) ? input.topics : []).map(item => text(item, 120)).filter(Boolean)
     let taskLabel = null
     let taskTopics: string[] = []
     if (input.task) {
+      if (!project) throw forbidden('单聊会话不在项目中，无法按任务口径清理')
       const task = this.resolveBotTask(project, input.task)
       if (!['done', 'canceled'].includes(task.status)) {
         throw badRequest(`仅已闭环（done/canceled）任务的历史记录可清理，${project.key}-${task.number} 当前为 ${task.status}`)

@@ -149,7 +149,7 @@ export function effectiveQuestionTimeoutMs(config, getSetting: (key: string) => 
 // 产品规则：每张任务卡必有预算。缺省链 = env 显式 > 无进展看门狗（分钟）生效值 >
 // 兜底 20（看门狗未配置与配 0 关闭同值，预算不得变 0/无限）。消费点（createTask
 // 建档、assignTask 给存量 NULL 卡补挂）每次现算，改值对之后建档/派发的卡生效。
-export const TASK_TIME_BUDGET_FALLBACK_MINUTES = 20
+export const TASK_TIME_BUDGET_FALLBACK_MINUTES = 40
 export function effectiveTaskTimeBudgetMinutes(config, getSetting: (key: string) => unknown = () => null) {
   const env = envExplicit('DSH_TEAM_TASK_TIME_BUDGET_MINUTES')
   const stallMinutes = Math.round(effectiveRunLimits(config, getSetting).stallTimeoutMs / 60_000)
@@ -160,8 +160,10 @@ export function effectiveTaskTimeBudgetMinutes(config, getSetting: (key: string)
 // time_budget_minutes 时的卡级兜底档，按卡 priority 分档落库；显式值永远优先。
 // 与全局缺省链（effectiveTaskTimeBudgetMinutes）分工：本表只管派单路径，不经派单
 // 的直建卡仍走全局链。无效 priority 与 createTask 同口径回退 medium 档。
+// 2026-11-13 放宽：生产实测任务运行大量顶死在旧 medium 档 30 分钟（max 恰为 1800s），
+// 档位翻倍让大卡一轮做深，减少派生轮往返。
 export const PRIORITY_BUDGET_MINUTES: Record<string, number> = {
-  urgent: 45, high: 45, medium: 30, low: 15, none: 15,
+  urgent: 90, high: 90, medium: 60, low: 30, none: 30,
 }
 
 // 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > settings 表
@@ -312,9 +314,14 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 共享技能池固定在本机 ~/.agents，与用户其他 agent 工具共用同一目录；测试可注入临时目录。
     skillRoot: resolve(config.skillRoot?.trim() || join(homedir(), '.agents')),
     // 并行的安全边界由写范围闸门保证（同项目写运行只在双方声明且路径不相交时才并行），
-    // 这里的总数上限只防主机过载；读运行（chat/dm）与写运行共用一个池子，给到 6 才不至于让
-    // 一两条对话运行把写任务的并发位吃干。
-    maxConcurrentRuns: int(config.maxConcurrentRuns ?? process.env.DSH_TEAM_MAX_RUNS, 6, 1, 16),
+    // 这里的总数上限只防主机过载；读运行（chat/dm）与写运行共用一个池子。默认 10：
+    // 生产实测（2026-11-13 近 7 天）常态并发 2–3、峰值 7，原默认 6 偶尔成为硬约束，
+    // 且 quota_wait 7 天仅 1 次——并发位给足才可能吃满 coding plan 额度。
+    maxConcurrentRuns: int(config.maxConcurrentRuns ?? process.env.DSH_TEAM_MAX_RUNS, 10, 1, 16),
+    // 大卡拆分闸（写范围条目上限）：单卡声明写范围超过该条数即拒绝派发，要求拆成
+    // 不相交写范围的子任务卡（parent_task_id 挂主卡）并行施工——超大范围卡与同项目
+    // 一切写运行互斥，是并行闸触发率低的主因（2026-11-13 生产实测 26%）。
+    maxWriteScopesPerTask: int(config.maxWriteScopesPerTask ?? process.env.DSH_TEAM_MAX_WRITE_SCOPES, 8, 1, 64),
     runTimeoutMs: int(config.runTimeoutMs ?? process.env.DSH_TEAM_RUN_TIMEOUT_MS, 60 * 60_000, 30_000, 6 * 60 * 60_000),
     // 0 关闭：单次运行的 token 上限，超出即中止，避免一个运行吃掉整月预算。
     maxRunTokens: int(config.maxRunTokens ?? process.env.DSH_TEAM_MAX_RUN_TOKENS, 0, 0, 500_000_000),
@@ -376,7 +383,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     githubWatch: parseGithubWatchEnv(config.githubWatch ?? process.env.DSH_TEAM_GITHUB_WATCH),
     githubPollMinutes: clampGithubPollMinutes(config.githubPollMinutes ?? process.env.DSH_TEAM_GITHUB_POLL_MINUTES),
     agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, true),
-    maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 3, 1, 8),
+    maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 5, 1, 8),
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。
     routerPreset: String(config.routerPreset ?? process.env.DSH_TEAM_ROUTER_PRESET ?? '').trim(),
     workerPreset: String(config.workerPreset ?? process.env.DSH_TEAM_WORKER_PRESET ?? '').trim(),

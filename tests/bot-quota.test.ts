@@ -411,3 +411,203 @@ test('director 工具入口：经会话绑定鉴权，按名字解除', async ()
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// DSHBOTS-358：内部运行（review / handle / memory_review）同样接额度路由与额度闸门。
+test('内部运行入队也接额度路由：review 带备用模型快照', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'QR1', key: 'QR1', ownerBotId: director.id })
+    await service.updateBot(director.id, {
+      provider: 'deepseek', model: 'deepseek-chat',
+      fallbackProvider: 'minimax-cn', fallbackModel: 'MiniMax-M3.1-Flash',
+    }, { type: 'user', id: 'u' })
+    const task = await service.createTask({ projectId: project.id, title: '验收路由', assigneeBotId: director.id, status: 'in_review' })
+    service.recordBotQuotaExhaustion({
+      botId: director.id, provider: 'deepseek', errorCode: '1308', errorMessage: 'quota', retryAfterMs: 60 * 60_000,
+    })
+    const runId = service.enqueueOwnerTaskRun(service.taskRow(task.id), 'review')
+    assert.ok(runId, 'review 运行应入队')
+    const run = store.get('SELECT * FROM runs WHERE id = ?', runId)
+    assert.equal(run.kind, 'review')
+    assert.equal(run.model_provider, 'minimax-cn', 'review 入队带备用 provider 快照')
+    assert.equal(run.model_model, 'MiniMax-M3.1-Flash', 'review 入队带备用模型快照')
+    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", runId), '留痕 quota_fallback')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('主备都耗尽：review 入队留 wait，调度器额度闸门留 queued 不下发', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'QR2', key: 'QR2', ownerBotId: director.id })
+    await service.updateBot(director.id, {
+      provider: 'deepseek', model: 'deepseek-chat',
+      fallbackProvider: 'minimax-cn', fallbackModel: 'MiniMax-M3.1-Flash',
+    }, { type: 'user', id: 'u' })
+    const task = await service.createTask({ projectId: project.id, title: '验收等待', assigneeBotId: director.id, status: 'in_review' })
+    for (const provider of ['deepseek', 'minimax-cn']) {
+      service.recordBotQuotaExhaustion({
+        botId: director.id, provider, errorCode: '1308', errorMessage: 'quota', retryAfterMs: 60 * 60_000,
+      })
+    }
+    const runId = service.enqueueOwnerTaskRun(service.taskRow(task.id), 'review')
+    assert.ok(runId, 'review 运行应入队')
+    const run = store.get('SELECT * FROM runs WHERE id = ?', runId)
+    assert.equal(run.model_provider, null, '无可用备用时不带模型覆盖')
+    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId), '留痕 quota_wait')
+    await flushTicks(service)
+    assert.equal(store.get('SELECT status FROM runs WHERE id = ?', runId).status, 'queued', '调度器额度闸门：留 queued 不撞墙')
+    assert.equal(
+      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId).n, 1,
+      '同一 run 只记一条 quota_wait',
+    )
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('额度扣持闸：内部运行留 queued 等恢复；聊天类照常下发', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'QR3', key: 'QR3', ownerBotId: director.id })
+    await service.updateBot(director.id, { provider: 'deepseek', model: 'deepseek-chat' }, { type: 'user', id: 'u' })
+    service.recordBotQuotaExhaustion({
+      botId: director.id, provider: 'deepseek', errorCode: '1308', errorMessage: 'quota', retryAfterMs: 60 * 60_000,
+    })
+    const task = await service.createTask({ projectId: project.id, title: '扣持', assigneeBotId: director.id, status: 'in_review' })
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt,
+         idempotency_key, queued_at)
+       VALUES ('rvq', ?, ?, ?, 'review', 'read', 'review_requested', ?, 'queued', 1, 'idem-rvq', ?)`,
+      project.id, director.id, task.id, task.id, future(-60_000),
+    )
+    // 另一个 bot 的群聊运行（provider 未耗尽）：聊天类不受额度闸门影响
+    const chatBot = await service.createBot({ name: 'chat-bot-q', role: 'dev', provider: 'deepseek', model: 'deepseek-chat' })
+    await service.addProjectMember(project.id, chatBot.id, { type: 'user', id: 'u' })
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt,
+         idempotency_key, queued_at)
+       VALUES ('chq', ?, ?, NULL, 'chat', 'read', 'mention', NULL, 'queued', 1, 'idem-chq', ?)`,
+      project.id, chatBot.id, future(-60_000),
+    )
+    await service.tick()
+    assert.equal(store.get('SELECT status FROM runs WHERE id = ?', 'rvq').status, 'queued', '额度闸门：review 运行留 queued 等恢复')
+    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = 'rvq' AND type = 'quota_wait'"), '留痕 quota_wait')
+    assert.equal(store.get('SELECT status FROM runs WHERE id = ?', 'chq').status, 'running', '聊天类照常下发')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Bot 改 provider：额度记录随键迁移，保留更严的一条，操作日志留痕', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const { project, bot } = await seedAssignedBot(service)
+    const task = await service.createTask({ projectId: project.id, title: '撞墙', assigneeBotId: bot.id })
+    insertRunningRun(store, { id: 'mig-1', projectId: project.id, botId: bot.id, taskId: task.id })
+    await service.finishRun({
+      runId: 'mig-1', status: 'failed', output: '',
+      error: { code: '1308', message: 'quota', retryAfterMs: 2 * HOUR },
+    })
+    const oldRow = store.get('SELECT * FROM bot_quota WHERE bot_id = ? AND provider = ?', bot.id, 'deepseek')
+    assert.ok(oldRow, '主 provider 额度行已落库')
+    assert.equal(oldRow.state, 'exhausted')
+
+    // 改主 provider → 旧键迁移到新键，耗尽态随迁移保留
+    await service.updateBot(bot.id, { provider: 'anthropic', model: 'claude-sonnet' }, { type: 'user', id: 'u' })
+    const moved = store.all('SELECT * FROM bot_quota WHERE bot_id = ?', bot.id)
+    assert.equal(moved.length, 1, '旧 provider 键不留孤儿行')
+    assert.equal(moved[0].provider, 'anthropic', '额度行迁移到新 provider')
+    assert.equal(moved[0].state, 'exhausted', '耗尽态随迁移保留')
+    assert.equal(moved[0].reset_at, oldRow.reset_at, '恢复时间随迁移保留')
+    const audit = store.get("SELECT * FROM audit_log WHERE action = 'bot.quota_provider_changed' AND target_id = ?", bot.id)
+    assert.ok(audit, '换 provider 留操作日志')
+    assert.match(audit.data_json ?? '', /deepseek/)
+    assert.match(audit.data_json ?? '', /anthropic/)
+
+    // 新 provider 已有耗尽记录：迁移保留更严的那条，不抹掉正在生效的墙
+    service.recordBotQuotaExhaustion({
+      botId: bot.id, provider: 'anthropic', errorCode: '1308', errorMessage: 'quota', retryAfterMs: 4 * HOUR,
+    })
+    service.recordBotQuotaExhaustion({
+      botId: bot.id, provider: 'moonshot', errorCode: '1308', errorMessage: 'quota', retryAfterMs: 6 * HOUR,
+    })
+    await service.updateBot(bot.id, { provider: 'moonshot', model: 'moonshot-v1' }, { type: 'user', id: 'u' })
+    const merged = store.all('SELECT * FROM bot_quota WHERE bot_id = ?', bot.id)
+    assert.equal(merged.length, 1, '合并后仍只留一条额度行')
+    assert.equal(merged[0].provider, 'moonshot')
+    assert.equal(merged[0].state, 'exhausted', '正在生效的墙不被迁移抹掉')
+    assert.ok(
+      Math.abs(Date.parse(merged[0].reset_at) - (Date.now() + 6 * HOUR)) < 5_000,
+      `保留更严的一条（恢复时间更晚），实际 ${merged[0].reset_at}`,
+    )
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('provider 未变：额度记录不动（不产生迁移日志）', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const { project, bot } = await seedAssignedBot(service)
+    const task = await service.createTask({ projectId: project.id, title: '撞墙', assigneeBotId: bot.id })
+    insertRunningRun(store, { id: 'mig-2', projectId: project.id, botId: bot.id, taskId: task.id })
+    await service.finishRun({
+      runId: 'mig-2', status: 'failed', output: '',
+      error: { code: '1308', message: 'quota', retryAfterMs: 2 * HOUR },
+    })
+    await service.updateBot(bot.id, { model: 'deepseek-chat-v2' }, { type: 'user', id: 'u' })
+    const rows = store.all('SELECT * FROM bot_quota WHERE bot_id = ?', bot.id)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].provider, 'deepseek', 'provider 未变则额度行不动')
+    assert.equal(
+      store.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'bot.quota_provider_changed' AND target_id = ?", bot.id).n, 0,
+      'provider 未变不记迁移日志',
+    )
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('review 挂起后建回仍带备用模型快照（额度路由随挂起项带回）', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const project = await service.createProject({ name: 'QR4', key: 'QR4', ownerBotId: director.id })
+    await service.updateBot(director.id, {
+      provider: 'deepseek', model: 'deepseek-chat',
+      fallbackProvider: 'minimax-cn', fallbackModel: 'MiniMax-M3.1-Flash',
+    }, { type: 'user', id: 'u' })
+    const task = await service.createTask({ projectId: project.id, title: '挂起验收', assigneeBotId: director.id, status: 'in_review' })
+    service.recordBotQuotaExhaustion({
+      botId: director.id, provider: 'deepseek', errorCode: '1308', errorMessage: 'quota', retryAfterMs: 60 * 60_000,
+    })
+    // 制造 owner 忙：一条在跑的群聊运行
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status, attempt,
+         idempotency_key, queued_at, started_at)
+       VALUES ('busy1', ?, ?, NULL, 'chat', 'read', 'mention', NULL, 'running', 1, 'idem-busy1', ?, ?)`,
+      project.id, director.id, future(-60_000), future(-60_000),
+    )
+    assert.equal(service.enqueueOwnerTaskRun(service.taskRow(task.id), 'review'), null, 'owner 忙时挂起不落 runs 行')
+    // 释放 owner → 挂起项建回
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = 'busy1'", future(-30_000))
+    const row = await pollRun(store, service, 'SELECT * FROM runs WHERE kind = ? AND task_id = ?', 'review', task.id)
+    assert.ok(row, 'owner 空闲后建回 review 运行')
+    assert.equal(row.model_provider, 'minimax-cn', '建回仍带备用 provider 快照')
+    assert.equal(row.model_model, 'MiniMax-M3.1-Flash', '建回仍带备用模型快照')
+    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", row.id), '留痕 quota_fallback')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

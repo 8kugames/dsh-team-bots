@@ -524,7 +524,7 @@ function renderSkills() {
       </div>
     </div>
     <div class="card-head" style="margin-bottom:10px"><h3>${t("共享技能池")}</h3></div>
-    <div class="path-row plain" style="margin-bottom:14px"><span>${t("技能根目录")}</span><code>${esc(state.data.paths.skillRoot)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
+    <div class="path-row plain" style="margin-bottom:14px"><span>${t("技能根目录")}</span><code>${esc(tildePath(state.data.paths.skillRoot))}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(state.data.paths.skillRoot + '/skills')}">${icon('copy')}</button></div>
     <div class="card list-card">
       ${skills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>${t("技能池为空")}</h3><p>${t("在技能根目录放置技能文件，或提交一个技能提案并审批。")}</p></div>` : skills.map(skill => {
         const off = disabledSet.has(skill.slug)
@@ -546,7 +546,7 @@ function renderSkills() {
     </div>
     ${project ? `<div class="card-head" style="margin-top:24px"><h3>${t("当前项目技能")}</h3></div>
     <div class="section-head"><p>${t("从项目目录（设了生产目录以生产目录为准，见下方实际路径）的")} <code>.agents</code>${t("、")}<code>.claude</code>${t("、")}<code>.codex</code> ${t("三个根扫描发现；同名技能按")} .agents &gt; .claude &gt; .codex ${t("去重。这些技能只在当前项目可用，且优先于同名共享技能。")}</p></div>
-    ${(state.data.paths.projectSkillRoots ?? []).map(root => `<div class="path-row plain" style="margin-bottom:6px"><span style="text-transform:none">${esc(root.root)}</span><code>${esc(root.path)}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(root.path + '/skills')}">${icon('copy')}</button></div>`).join('')}
+    ${(state.data.paths.projectSkillRoots ?? []).map(root => `<div class="path-row plain" style="margin-bottom:6px"><span style="text-transform:none">${esc(root.root)}</span><code>${esc(tildePath(root.path))}/skills</code><button class="btn icon small" data-action="copy" data-copy="${attr(root.path + '/skills')}">${icon('copy')}</button></div>`).join('')}
     <div class="card list-card">
       ${projectSkills.length === 0 ? `<div class="empty-state" style="border:0"><div class="empty-symbol">${icon('spark')}</div><h3>${t("项目内没有技能")}</h3><p>${t("在项目目录的 .agents、.claude 或 .codex 下放置")} skills/&lt;${t("技能名")}&gt;/SKILL.md ${t("即可。")}</p></div>` : projectSkills.map(skill => {
         const off = disabledSet.has(skill.name)

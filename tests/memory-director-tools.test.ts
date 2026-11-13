@@ -56,15 +56,33 @@ async function setup() {
   return { store, service, runtime, director, member, project, ownerSession, memberSession, close }
 }
 
-test('非 director 调用被拒：成员会话与未绑定会话三入口一律 forbidden', async () => {
+test('权限分层：bot 域成员自管，项目/团队域仅总监；未绑定会话拒绝', async () => {
   const t = await setup()
   try {
-    for (const sessionId of [t.memberSession, 'sess_unknown']) {
-      // 成员会话命中总监闸门，未绑定会话命中项目群闸门——都必须拒绝。
-      assert.throws(() => t.service.memoryListFromBot(sessionId, {}), /总监|项目群/, `list 应拒 ${sessionId}`)
-      assert.throws(() => t.service.memoryWriteFromBot(sessionId, { scope: 'project', topic: 'x', content: 'y' }), /总监|项目群/, `write 应拒 ${sessionId}`)
-      assert.throws(() => t.service.memoryCleanupFromBot(sessionId, { scope: 'project', topics: ['x'] }), /总监|项目群/, `cleanup 应拒 ${sessionId}`)
-    }
+    // 成员先在项目域埋一条对照，证明成员动不了项目域。
+    const actor = { type: 'bot' as const, id: t.member.id }
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.member.id, topic: '成员私记', content: 'a', actor })
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '项目记忆', content: 'p', actor: { type: 'bot', id: t.director.id } })
+
+    // 成员自管 bot 域：list / write / cleanup 全放行。
+    assert.equal(t.service.memoryListFromBot(t.memberSession, { scope: 'bot' })[0].topic, '成员私记')
+    t.service.memoryWriteFromBot(t.memberSession, { scope: 'bot', topic: '成员私记', content: '自管覆盖' })
+    assert.equal(t.service.memoryCleanupFromBot(t.memberSession, { scope: 'bot', topics: ['成员私记'] }).archived, 1)
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE scope_id = ? AND status = 'active'", t.member.id).n, 0)
+
+    // 成员碰项目/团队域、点名他人：一律拒绝。
+    assert.throws(() => t.service.memoryListFromBot(t.memberSession, {}), /总监/, '成员默认项目域应拒')
+    assert.throws(() => t.service.memoryWriteFromBot(t.memberSession, { scope: 'project', topic: 'x', content: 'y' }), /总监/)
+    assert.throws(() => t.service.memoryCleanupFromBot(t.memberSession, { scope: 'team', topics: ['x'] }), /总监/)
+    assert.throws(() => t.service.memoryCleanupFromBot(t.memberSession, { scope: 'bot', bot: t.director.name, topics: ['x'] }), /点名管理自己/)
+    assert.equal(t.store.get("SELECT status FROM memories WHERE topic = '项目记忆'").status, 'active', '项目域未被成员触碰')
+
+    // 未绑定会话仍拒绝。
+    for (const fn of [
+      () => t.service.memoryListFromBot('sess_unknown', { scope: 'bot' }),
+      () => t.service.memoryWriteFromBot('sess_unknown', { scope: 'bot', topic: 'x', content: 'y' }),
+      () => t.service.memoryCleanupFromBot('sess_unknown', { scope: 'bot', topics: ['x'] }),
+    ]) assert.throws(fn, /项目群/)
   } finally {
     await t.close()
   }
@@ -150,6 +168,39 @@ test('cleanup 判定口径：task 仅收终态卡过程记录，topics 点名清
     assert.equal(t.store.get("SELECT status FROM memories WHERE topic = '用户拍板口径'").status, 'active', '未点名条目不动')
 
     assert.throws(() => t.service.memoryCleanupFromBot(t.ownerSession, { scope: 'project' }), /至少一项/)
+  } finally {
+    await t.close()
+  }
+})
+
+test('bot 点名：总监可代管成员 Bot 的记忆域，未知 Bot 拒绝', async () => {
+  const t = await setup()
+  try {
+    const actor = { type: 'bot' as const, id: t.member.id }
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.member.id, topic: '成员私记一', content: 'a', actor })
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.member.id, topic: '成员私记二', content: 'b', actor })
+
+    // list 点名成员 Bot：能枚举其 bot 域；不点名仍是总监自己。
+    const rows = t.service.memoryListFromBot(t.ownerSession, { scope: 'bot', bot: 'Builder' })
+    assert.equal(rows.map(row => row.topic).sort().join(','), '成员私记一,成员私记二')
+    assert.equal(t.service.memoryListFromBot(t.ownerSession, { scope: 'bot' }).length, 0, '不点名 bot 域=总监自己')
+
+    // write 点名成员 Bot：同名覆盖写进成员域，不落总监域。
+    const written = t.service.memoryWriteFromBot(t.ownerSession, { scope: 'bot', bot: 'Builder', topic: '成员私记一', content: '覆盖版' })
+    assert.equal(written.overwritten, true)
+    assert.equal(written.memory.scope_id, t.member.id)
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE topic = '成员私记一' AND status = 'active'").n, 1)
+
+    // cleanup 点名成员 Bot：只清成员域，总监域同名主题不越界。
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.director.id, topic: '成员私记二', content: '同名', actor: { type: 'bot', id: t.director.id } })
+    const cleaned = t.service.memoryCleanupFromBot(t.ownerSession, { scope: 'bot', bot: 'Builder', topics: ['成员私记二'] })
+    assert.equal(cleaned.archived, 1)
+    assert.equal(t.store.get("SELECT status FROM memories WHERE topic = '成员私记二' AND scope_id = ?", t.member.id).status, 'archived')
+    assert.equal(t.store.get("SELECT status FROM memories WHERE topic = '成员私记二' AND scope_id = ?", t.director.id).status, 'active', '总监域同名条目不越界')
+
+    assert.throws(() => t.service.memoryCleanupFromBot(t.ownerSession, { scope: 'bot', bot: 'nobody', topics: ['x'] }), /Bot 不存在/)
+    assert.throws(() => t.service.memoryListFromBot(t.memberSession, { scope: 'bot', bot: t.director.name }), /点名管理自己/, '成员点名他人 Bot 拒绝')
+    assert.equal(t.service.memoryListFromBot(t.memberSession, { scope: 'bot', bot: 'Builder' }).length, 1, '成员点名自己放行')
   } finally {
     await t.close()
   }

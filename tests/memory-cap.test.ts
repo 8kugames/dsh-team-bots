@@ -1,10 +1,11 @@
-// tests/memory-cap.test.ts —— DSHBOTS-339/342 守门：bot/project 作用域 64 条硬顶与滞回放行。
-// a 触顶拦截文案；b 滞回 40 拒/33 放行；c 作用域独立（team 不限）；d 64 顶下覆盖写与编辑；
+// tests/memory-cap.test.ts —— DSHBOTS-339/342/360 守门：bot/project 作用域 64 条硬顶与滞回放行。
+// a 触顶拦截文案；b 滞回 55 拒/54 放行；c 作用域独立（team 不限）；d 64 顶下覆盖写与编辑；
 // e approve 触顶拒；f 自动沉淀降级；g 篇幅上限与自动截断；
 // h 项目再开容量闸（DSHBOTS-342）；i UTF-16 口径（星面字符算 2 码元）；j bot 触顶+滞回标志置/清；
-// k approve 滞回中间带（34–63 持续拒）；l memoryWriteFromBot 新建路径满顶拒；m 超长存量 topic-only 编辑放行。
+// k approve 滞回中间带（55–63 持续拒）；l memoryWriteFromBot 新建路径满顶拒；m 超长存量 topic-only 编辑放行。
 // n 锁定带文案如实（DSHBOTS-355，61 条不得谎称已达上限）；o 触顶态文案回归；p 放行/拒绝边界矩阵；
-// q 锁定带覆盖写放行；r 现场序列回归（64→62→61 全链路）；s logger %s 插值（根 index.ts createLogger）。
+// q 锁定带覆盖写放行；r 现场序列回归（64→62→61 全链路）；s logger %s 插值（根 index.ts createLogger）；
+// t 锁定期内审查拒写 → run_events reviewed 事件带拒因（DSHBOTS-360）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -64,7 +65,7 @@ test('a) 播满 64 条后第 65 条被拒，文案含作用域、条数与整理
   const t = await setup()
   try {
     assert.equal(MEMORY_CAP, 64)
-    assert.equal(MEMORY_COMPACT_TO, 33)
+    assert.equal(MEMORY_COMPACT_TO, 54)
     t.seed('project', t.project.id, MEMORY_CAP)
     assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_CAP)
     assert.throws(
@@ -89,7 +90,7 @@ test('a) 播满 64 条后第 65 条被拒，文案含作用域、条数与整理
   }
 })
 
-test('b) 滞回：整理到 40 仍拒、到 33 放行变 34', async () => {
+test('b) 滞回：整理到 55 仍拒、到 54 放行变 55', async () => {
   const t = await setup()
   try {
     t.seed('project', t.project.id, MEMORY_CAP)
@@ -99,18 +100,18 @@ test('b) 滞回：整理到 40 仍拒、到 33 放行变 34', async () => {
     )
     const flagKey = `memory_full:project:${t.project.id}`
     assert.equal(t.store.setting(flagKey), '1', '首次拦截应置滞回标志')
-    t.archive('project', t.project.id, MEMORY_CAP - 40)
-    assert.equal(t.service.memoryActiveCount('project', t.project.id), 40)
+    t.archive('project', t.project.id, MEMORY_CAP - 55)
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), 55)
     assert.throws(
-      () => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '整理到 40', content: '内容', actor: t.actor }),
-      (error: any) => /40/.test(String(error.message)),
-      '整理到 40 仍应拒绝并透出当前条数',
+      () => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '整理到 55', content: '内容', actor: t.actor }),
+      (error: any) => /55/.test(String(error.message)),
+      '整理到 55 仍应拒绝并透出当前条数',
     )
-    assert.equal(t.store.setting(flagKey), '1', '40 条时标志不得清')
-    t.archive('project', t.project.id, 40 - MEMORY_COMPACT_TO)
+    assert.equal(t.store.setting(flagKey), '1', '55 条时标志不得清')
+    t.archive('project', t.project.id, 55 - MEMORY_COMPACT_TO)
     assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_COMPACT_TO)
     const created = t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '整理后新增', content: '内容', actor: t.actor })
-    assert.ok(created.id, '整理到 33 后应放行')
+    assert.ok(created.id, '整理到 54 后应放行')
     assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_COMPACT_TO + 1)
     assert.equal(t.store.setting(flagKey), null, '放行后滞回标志应清除')
   } finally {
@@ -353,7 +354,7 @@ test('i) 篇幅闸按 UTF-16 码元计：128 个星面字符恰好 256 放行、
   }
 })
 
-test('j) bot 作用域触顶置滞回标志、整理到 ≤33 清标志放行', async () => {
+test('j) bot 作用域触顶置滞回标志、整理到 ≤54 清标志放行', async () => {
   const t = await setup()
   try {
     const botId = t.director.id
@@ -365,24 +366,24 @@ test('j) bot 作用域触顶置滞回标志、整理到 ≤33 清标志放行', 
       'bot 灌满后第 65 条应被拒',
     )
     assert.equal(t.store.setting(flagKey), '1', 'bot 触顶应置滞回标志')
-    t.archive('bot', botId, MEMORY_CAP - 40)
-    assert.equal(t.service.memoryActiveCount('bot', botId), 40)
+    t.archive('bot', botId, MEMORY_CAP - 55)
+    assert.equal(t.service.memoryActiveCount('bot', botId), 55)
     assert.throws(
       () => t.service.createMemory({ scopeType: 'bot', scopeId: botId, topic: '中间带', content: '内容', actor: t.actor }),
-      /40/,
-      '标志在时 40 条仍拒',
+      /55/,
+      '标志在时 55 条仍拒',
     )
     assert.equal(t.store.setting(flagKey), '1', '中间带标志不得清')
-    t.archive('bot', botId, 40 - MEMORY_COMPACT_TO)
+    t.archive('bot', botId, 55 - MEMORY_COMPACT_TO)
     const created = t.service.createMemory({ scopeType: 'bot', scopeId: botId, topic: '整理后新增', content: '内容', actor: t.actor })
-    assert.ok(created.id, '整理到 33 后 bot 作用域应放行')
+    assert.ok(created.id, '整理到 54 后 bot 作用域应放行')
     assert.equal(t.store.setting(flagKey), null, '放行后滞回标志应清')
   } finally {
     await t.close()
   }
 })
 
-test('k) approveMemory 滞回中间带：标志在、34–63 条持续拒，≤33 才放行', async () => {
+test('k) approveMemory 滞回中间带：标志在、55–63 条持续拒，≤54 才放行', async () => {
   const t = await setup()
   try {
     const pending = t.service.createMemory({
@@ -392,14 +393,14 @@ test('k) approveMemory 滞回中间带：标志在、34–63 条持续拒，≤3
     const flagKey = `memory_full:project:${t.project.id}`
     await assert.rejects(() => t.service.approveMemory(pending.id, t.actor), /上限/)
     assert.equal(t.store.setting(flagKey), '1', 'approve 触顶应置滞回标志')
-    t.archive('project', t.project.id, MEMORY_CAP - 40)
+    t.archive('project', t.project.id, MEMORY_CAP - 55)
     await assert.rejects(
       () => t.service.approveMemory(pending.id, t.actor),
-      (error: any) => /40/.test(String(error.message)),
-      '中间带 40 条时 approve 仍应拒并透出当前条数',
+      (error: any) => /55/.test(String(error.message)),
+      '中间带 55 条时 approve 仍应拒并透出当前条数',
     )
     assert.equal(t.store.setting(flagKey), '1', '中间带标志不得清')
-    t.archive('project', t.project.id, 40 - MEMORY_COMPACT_TO)
+    t.archive('project', t.project.id, 55 - MEMORY_COMPACT_TO)
     const approved = await t.service.approveMemory(pending.id, t.actor)
     assert.equal(approved.status, 'active')
     assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_COMPACT_TO + 1)
@@ -486,7 +487,7 @@ test('n) 锁定带文案如实：标志在、61 条时不再谎称「已达 61/6
   }
 })
 
-test('o) 触顶态文案回归：=64 拒绝时仍含 64、去废弃、去冗、融合与 ≤33', async () => {
+test('o) 触顶态文案回归：=64 拒绝时仍含 64、去废弃、去冗、融合与 ≤54', async () => {
   const t = await setup()
   try {
     t.seed('project', t.project.id, MEMORY_CAP)
@@ -507,13 +508,13 @@ test('o) 触顶态文案回归：=64 拒绝时仍含 64、去废弃、去冗、�
   }
 })
 
-test('p) 边界矩阵：无标志 59–63 放行、64 拒并置标志；有标志 34 拒、33 放行清标志', async t => {
+test('p) 边界矩阵：无标志 53–63 放行、64 拒并置标志；有标志 55 拒、54 放行清标志', async t => {
   const ctx = await setup()
   try {
     const flagKey = `memory_full:project:${ctx.project.id}`
     const create = (topic: string) => ctx.service.createMemory({ scopeType: 'project', scopeId: ctx.project.id, topic, content: '内容', actor: ctx.actor })
-    ctx.seed('project', ctx.project.id, 59)
-    for (const pre of [59, 60, 61, 62, 63]) {
+    ctx.seed('project', ctx.project.id, 53)
+    for (const pre of [53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]) {
       await t.test(`无标志 pre=${pre} 放行`, () => {
         assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), pre)
         assert.ok(create(`矩阵新增 ${pre}`).id, `pre=${pre} 应放行`)
@@ -524,16 +525,16 @@ test('p) 边界矩阵：无标志 59–63 放行、64 拒并置标志；有标�
       assert.throws(() => create('矩阵新增 64'), (error: any) => error.status === 409 && /上限/.test(String(error.message)))
       assert.equal(ctx.store.setting(flagKey), '1', '触顶应置标志')
     })
-    ctx.archive('project', ctx.project.id, 30)
-    await t.test('有标志 34 拒（锁定期文案）', () => {
-      assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), 34)
-      assert.throws(() => create('矩阵新增 34'), (error: any) => /锁定期/.test(String(error.message)) && /当前 34 条/.test(String(error.message)))
-      assert.equal(ctx.store.setting(flagKey), '1', '34 条时标志不得清')
+    ctx.archive('project', ctx.project.id, 9)
+    await t.test('有标志 55 拒（锁定期文案）', () => {
+      assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), 55)
+      assert.throws(() => create('矩阵新增 55'), (error: any) => /锁定期/.test(String(error.message)) && /当前 55 条/.test(String(error.message)))
+      assert.equal(ctx.store.setting(flagKey), '1', '55 条时标志不得清')
     })
     ctx.archive('project', ctx.project.id, 1)
-    await t.test('有标志 33 放行并清标志', () => {
+    await t.test('有标志 54 放行并清标志', () => {
       assert.equal(ctx.service.memoryActiveCount('project', ctx.project.id), MEMORY_COMPACT_TO)
-      assert.ok(create('矩阵新增 33').id, '整理到 33 应放行')
+      assert.ok(create('矩阵新增 54').id, '整理到 54 应放行')
       assert.equal(ctx.store.setting(flagKey), null, '放行后标志应清')
     })
   } finally {
@@ -610,6 +611,38 @@ test('r) 现场序列回归：64 触顶→归档 2→覆盖写成功→新增拒
         return true
       },
     )
+  } finally {
+    await t.close()
+  }
+})
+
+test('t) 锁定期内审查拒写：run_events 的 reviewed 事件带拒因（带内可查）', async () => {
+  const t = await setup()
+  try {
+    // bot 作用域灌满 64 → 触顶置滞回标志 → 整理到 61 条仍处整理锁定期。
+    t.seed('bot', t.director.id, MEMORY_CAP)
+    const now = new Date().toISOString()
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES (?, ?, ?, 'memory_review', 'read', 'memory_review', 'run-src-lock', 'running', 1, 'memory_review:run-src-lock', ?)`,
+      'run-review-lock', t.project.id, t.director.id, now,
+    )
+    const reviewRun = t.store.get('SELECT * FROM runs WHERE id = ?', 'run-review-lock')
+    const reviewOutput = JSON.stringify([{ scope: 'bot', topic: '锁定期审查结论', content: '锁定期内审查产出的可复用事实', confidence: 0.9 }])
+    const first = await t.service.completeMemoryReview(reviewRun, reviewOutput, null)
+    assert.equal(first.applied, 0, '触顶时审查写入应被拒')
+    assert.equal(first.rejected, 1)
+    assert.equal(first.capacityRejected, 1)
+    const event = t.store.get("SELECT message FROM run_events WHERE run_id = ? AND type = 'reviewed'", 'run-review-lock')
+    assert.ok(event, '应留下 reviewed 事件')
+    const message = String(event.message)
+    assert.ok(message.includes('拒写 1 条'), `事件应写明拒写条数：${message}`)
+    assert.ok(message.includes('容量锁'), `事件应写明容量锁拒因：${message}`)
+    assert.ok(message.includes('上限'), `事件应带拒因原文：${message}`)
+    assert.ok(message.includes(`整理到 ≤${MEMORY_COMPACT_TO}`), `事件应带恢复线数字：${message}`)
+    // 锁定期语义不变：被拒条目不得转 pending 堆积，也不得静默丢弃留痕。
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE source = 'run:run-src-lock'").n, 0)
+    assert.equal(t.service.memoryActiveCount('bot', t.director.id), MEMORY_CAP)
   } finally {
     await t.close()
   }

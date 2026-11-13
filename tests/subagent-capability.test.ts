@@ -66,9 +66,10 @@ test('能力清单：子代理生成工具与总监专权工具边界清晰', ()
   for (const name of ['subagent', 'subagent_fork', 'workflow', 'spawn_teammate']) {
     assert.ok(generation.includes(name), `成员 bot 能力清单应含 ${name}`)
   }
+  // 记忆三工具已下放 bot 域自管（服务层 resolveMemoryScopeFor 分层），不再属总监专权清单。
   assert.deepEqual(
     [...DIRECTOR_ONLY_TOOLS],
-    ['team_assign_task', 'team_review_task', 'team_block_task', 'team_list_bots', 'team_add_member', 'team_create_bot', 'team_memory_list', 'team_memory_write', 'team_memory_cleanup', 'team_release_bot_quota'],
+    ['team_assign_task', 'team_review_task', 'team_block_task', 'team_list_bots', 'team_add_member', 'team_create_bot', 'team_release_bot_quota'],
   )
   // 专权工具不得出现在成员能力清单里（防止「下放」）。
   for (const name of DIRECTOR_ONLY_TOOLS) {
@@ -172,6 +173,47 @@ test('工具层兜底：包装与裸 agent 两种形状都生效（DSHBOTS-247�
   // 无 restrict / 带 error 的形状仍静默跳过，不抛错。
   assert.doesNotThrow(() => applyBotToolPolicy({ error: new Error('x') }, { isOwner: false }))
   assert.doesNotThrow(() => applyBotToolPolicy({ ctx: { tools: {} } }, { isOwner: false }))
+})
+
+test('工具层兜底：restrict 以方法调用发出、保留接收者（DSHBOTS-359）', () => {
+  // 宿主 dsh-tools 的 ToolsService.restrict 首行读 this.ctx；摘下函数裸调用时
+  // this===undefined，抛 "reading 'ctx'" 被 try/catch 吞成 warn——工具层兜底从未生效。
+  // 替身必须写成依赖 this 的方法形态，否则测不出接收者丢失。
+  const calls = []
+  const warnings = []
+  const tools = {
+    ctx: { scope: 'agent' },
+    restrict(filter) {
+      if (!this?.ctx) throw new TypeError("Cannot read properties of undefined (reading 'ctx')")
+      calls.push({ filter, receiver: this })
+    },
+  }
+  applyBotToolPolicy(
+    { agent: { ctx: { tools } } },
+    { isOwner: false, logger: { warn: (msg: unknown) => warnings.push(String(msg)) } },
+  )
+  assert.equal(calls.length, 1, '成员 bot 应调用一次 restrict')
+  assert.equal(calls[0].receiver, tools, 'restrict 应以 tools 对象为接收者调用')
+  assert.deepEqual([...calls[0].filter.deny], [...DIRECTOR_ONLY_TOOLS], 'deny 清单应为总监专权工具')
+  assert.deepEqual(warnings, [], '不应产生策略失败 warn')
+
+  // 裸 agent 形状同样保留接收者。
+  const bareCalls = []
+  const bareTools = {
+    ctx: { scope: 'agent' },
+    restrict(filter) {
+      if (!this?.ctx) throw new TypeError("Cannot read properties of undefined (reading 'ctx')")
+      bareCalls.push({ filter, receiver: this })
+    },
+  }
+  applyBotToolPolicy(
+    { ctx: { tools: bareTools } },
+    { isOwner: false, logger: { warn: (msg: unknown) => warnings.push(String(msg)) } },
+  )
+  assert.equal(bareCalls.length, 1, '裸 agent 形状也应调用一次 restrict')
+  assert.equal(bareCalls[0].receiver, bareTools, '裸形状也须保留接收者')
+  assert.deepEqual([...bareCalls[0].filter.deny], [...DIRECTOR_ONLY_TOOLS], '裸形状 deny 清单也应为总监专权工具')
+  assert.deepEqual(warnings, [], '裸形状不应产生策略失败 warn')
 })
 
 test('服务层权威闸门：成员 bot 调 team_assign_task 仍被拒（专权未下放）', async () => {

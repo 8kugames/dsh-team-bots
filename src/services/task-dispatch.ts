@@ -394,6 +394,20 @@ export const taskDispatchMethods = {
         + '未声明会让该任务的写运行与同项目其他写运行全部串行，一条任务即可堵死队列。',
       )
     }
+    // 大卡拆分闸（产品化派单纪律）：写范围条目超过 maxWriteScopesPerTask 时拒绝整卡
+    // 派发——超大范围卡与同项目一切写运行按保守串行互斥，一条卡即可吃掉整队并行能力
+    // （2026-11-13 生产实测 run_parallel 触发率仅 26%，主因即大范围声明）。拒绝文案
+    // 按 D-269 口径 = 原因 + 替代命令（parent_task_id 拆子卡，子卡范围不相交即并行）。
+    const maxScopes = Number(this.config.maxWriteScopesPerTask)
+    if (scopes.length > maxScopes) {
+      throw badRequest(
+        `写范围 ${scopes.length} 条超过单卡上限 ${maxScopes}（maxWriteScopesPerTask），大卡必须拆分：`
+        + '先建一张主卡（或复用既有卡）拿任务号，再按独立部分拆子卡——每张子卡一次 '
+        + 'team_assign_task，传 parent_task_id=主卡任务号，write_scopes 只覆盖该部分且互不相交；'
+        + `范围有依赖顺序时用 blocked_by 串联。拆完后子卡可并行施工。`
+        + '确需单卡大范围时调大 DSH_TEAM_MAX_WRITE_SCOPES / maxWriteScopesPerTask。',
+      )
+    }
     // 同写范围重复卡拦截（DSHBOTS-82）：同项目已有「写范围完全一致」的在办卡时直接拒绝，
     // 避免同一文件上叠 N 张排队卡空转。force_duplicate 是逃生口：跳过检测，但留审计痕迹。
     // 紧急豁免（DSHBOTS-126）：priority='urgent' 的新卡放行——紧急任务无视排队立即施工，
