@@ -10,6 +10,7 @@
 // 微信推送文案排版集中在 src/wechat/format.js（DSHBOTS-211）。
 
 import { taskCreated, taskDone } from '../wechat/format.js'
+import { jsonParse, nowIso } from '../util.js'
 
 export const taskNotifyMethods = {
   // 「任务进入进行中」的唯一落点。
@@ -123,29 +124,21 @@ export const taskNotifyMethods = {
       this.logger.warn?.('dsh-team: 任务创建通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },
-  // 验收边界沉淀提醒（吸收 dsh-agent-team acceptance-boundary 理念）：验收通过的当口把
-  // 「趁热沉淀」提醒注入负责人的任务会话——工作结论还新鲜，是写跨任务记忆的最佳时机，
-  // 不必等结转摘要。会话不在运行中时 steer 自动退回排队投递；失败只 warn 不回滚验收。
-  async notifyTaskAccepted(task) {
+  // 验收边界沉淀提醒（吸收 dsh-agent-team acceptance-boundary 理念，搭车投递形态）：
+  // 验收通过只落一个 per-(bot, project) 待提醒标记（上限 3 条），负责人在该项目的下一次
+  // 运行提示词里渲染一次性提醒块（见 prompt.ts acceptReminderBlock）并清标记——零额外
+  // 轮次、不往会话日志注入外来消息、不依赖会话存续（steer 形态的三个毛病都没有）。
+  noteTaskAccepted(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
-    const run = task.assignee_bot_id
-      ? this.store.get(
-        "SELECT id, session_id FROM runs WHERE task_id = ? AND bot_id = ? AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
-        task.id, task.assignee_bot_id,
-      )
-      : null
-    if (!run || !this.runtime?.steer) return { steered: false }
-    try {
-      await this.runtime.steer(
-        run.session_id,
-        `Task ${identifier} (${task.title}) has been accepted. While it is fresh, persist any durable fact, decision or lesson worth keeping across tasks with team_remember (short topic, self-contained content; one-off process detail does not belong there). If nothing qualifies, skip silently.`,
-      )
-      this.insertRunEvent(run.id, 'accept_reminder', `验收边界沉淀提醒已注入（${identifier}）`)
-      return { steered: true }
-    } catch (error: any) {
-      this.logger.warn?.('dsh-team: 验收沉淀提醒注入失败 %s: %s', identifier, error?.message ?? error)
-      return { steered: false }
-    }
+    if (!task.assignee_bot_id) return false
+    const key = `accept_remind:${task.assignee_bot_id}:${project.id}`
+    const list = jsonParse(this.store.setting(key), [])
+    const safe = Array.isArray(list) ? list : []
+    const next = [...safe.filter(item => item?.identifier !== identifier), {
+      identifier, title: task.title ?? '', at: nowIso(),
+    }].slice(-3)
+    this.store.setSetting(key, JSON.stringify(next))
+    return true
   },
 }

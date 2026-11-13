@@ -1,7 +1,7 @@
 // tests/accept-reminder.test.ts —— 验收边界沉淀提醒（吸收 dsh-agent-team
-// acceptance-boundary 理念）：验收通过的当口向负责人的任务会话注入一条趁热沉淀提醒
-// （team_remember 指引），并落 accept_reminder 运行事件；无会话/注入失败不阻塞验收。
-// 另证记忆注入预算与结转沉淀已存在（本用例只补「验收时刻」这个钩子）。
+// acceptance-boundary 理念，搭车投递形态）：验收通过只落 per-(bot, project) 待提醒标记；
+// 负责人下次在该项目的运行提示词里渲染一次性提醒块（team_remember 指引）并清标记。
+// 不 steer、不注入会话日志、不产生额外轮次（steer 形态的三宗罪）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -10,17 +10,18 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
+import { DshRuntime } from '../src/runtime.js'
 
-class SteerSpyRuntime {
-  declare started: unknown[]
+class ManualRuntime {
+  declare handler: (result: { runId: string; status: string; output: string; error: unknown }) => void
   declare steered: { sessionId: string; body: string }[]
-  constructor() { this.started = []; this.steered = [] }
-  setCompletionHandler() {}
+  constructor() { this.steered = [] }
+  setCompletionHandler(handler) { this.handler = handler }
   async catalog() { return [] }
   async validateBotConfig() {}
-  async startRun({ run }) { this.started.push({ id: run.id, kind: run.kind }); return `session-${run.id}` }
-  async cancelRun() { return true }
+  async startRun() { return 'session-x' }
   async steer(sessionId, body) { this.steered.push({ sessionId, body }); return true }
+  async cancelRun() { return true }
 }
 
 async function setup() {
@@ -28,10 +29,10 @@ async function setup() {
   const workspace = join(root, 'workspace')
   const dataDir = join(root, 'data')
   await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
+  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 60_000 })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  const runtime = new SteerSpyRuntime()
+  const runtime = new ManualRuntime()
   service.attachRuntime(runtime)
   await service.initialize()
   service.started = true
@@ -43,7 +44,11 @@ async function setup() {
     'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, created_at) VALUES (?, ?, ?, ?, ?)',
     sessionId, director.id, project.id, 'project', new Date().toISOString(),
   )
-  return { root, store, service, runtime, director, dev, project, sessionId, close: async () => {
+  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const devRow = store.get('SELECT * FROM bots WHERE id = ?', dev.id)
+  const projectRow = store.get('SELECT * FROM projects WHERE id = ?', project.id)
+  const taskRun = { kind: 'task', mode: 'write', trigger_type: 'task_created' }
+  return { root, store, service, runtime, promptRuntime, taskRun, devRow, projectRow, director, dev, project, sessionId, close: async () => {
     for (const run of store.all("SELECT id FROM runs WHERE status IN ('queued', 'running')")) {
       try { await service.cancelRunInternal(run.id, false) } catch {}
     }
@@ -52,57 +57,65 @@ async function setup() {
   } }
 }
 
-async function setupReviewable(t) {
+const reviewable = async (t) => {
   const task = await t.service.assignFromBot(t.sessionId, {
     assignee: 'Builder', title: '提醒卡', description: '正常实施。', write_scopes: ['src/r.js'],
   })
   for (const run of t.store.all("SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')", task.id)) {
     await t.service.cancelRunInternal(run.id, false)
   }
-  // 给负责人造一个带会话的历史任务运行：验收提醒的注入锚点。
-  t.store.run(
-    `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-       attempt, idempotency_key, session_id, queued_at, started_at, ended_at)
-     VALUES (?, ?, ?, ?, 'task', 'write', 'task_created', ?, 'succeeded', 1, ?, 'sess-builder-rm', ?, ?, ?)`,
-    'run-rm-1', t.project.id, t.dev.id, task.id, task.id, 'idem-run-rm-1',
-    new Date().toISOString(), new Date().toISOString(), new Date().toISOString(),
-  )
   t.store.run(
     "INSERT INTO task_events(id, task_id, type, actor_type, actor_id, data_json, created_at) VALUES (?, ?, 'run_succeeded', 'bot', ?, ?, ?)",
     `evt-deliver-${task.id}`, task.id, t.dev.id,
-    JSON.stringify({ runId: 'run-rm-1', identifier: 'RM-1' }), new Date().toISOString(),
+    JSON.stringify({ runId: `run-${task.id}`, identifier: 'RM-1' }), new Date().toISOString(),
   )
   t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", task.id)
   return t.store.get('SELECT * FROM tasks WHERE id = ?', task.id)
 }
 
-test('验收通过：向负责人任务会话注入趁热沉淀提醒并落运行事件', async () => {
+const flagKey = t => `accept_remind:${t.dev.id}:${t.project.id}`
+
+test('验收通过：落待提醒标记（不 steer、不注入会话）', async () => {
   const t = await setup()
   try {
-    const task = await setupReviewable(t)
+    const task = await reviewable(t)
     const done = await t.service.applyReview(task, t.project, 'accept', '管理员验收', { type: 'user', id: 'local' })
     assert.equal(done.status, 'done')
-    await new Promise(resolve => setImmediate(resolve))
-    assert.equal(t.runtime.steered.length, 1, '恰注入一条提醒')
-    const steer = t.runtime.steered[0]
-    assert.equal(steer.sessionId, 'sess-builder-rm', '注入负责人（执行者）的任务会话')
-    assert.match(steer.body, /RM-1/, '提醒点名任务号')
-    assert.match(steer.body, /team_remember/, '提醒指引沉淀工具')
-    assert.ok(
-      t.store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'run-rm-1' AND type = 'accept_reminder'")?.n >= 1,
-      '落 accept_reminder 运行事件',
-    )
+    assert.equal(t.runtime.steered.length, 0, '不 steer')
+    const flag = JSON.parse(t.store.get('SELECT value FROM settings WHERE key = ?', flagKey(t)).value)
+    assert.deepEqual(flag.map(item => item.identifier), ['RM-1'])
   } finally { await t.close() }
 })
 
-test('负责人无任务会话：提醒静默跳过，验收不受影响', async () => {
+test('负责人下次运行：提示词渲染一次性提醒块并清标记，再下次不重复', async () => {
   const t = await setup()
   try {
-    const task = await setupReviewable(t)
-    t.store.run("UPDATE runs SET session_id = NULL WHERE id = 'run-rm-1'")
-    const done = await t.service.applyReview(task, t.project, 'accept', '管理员验收', { type: 'user', id: 'local' })
-    assert.equal(done.status, 'done')
-    await new Promise(resolve => setImmediate(resolve))
-    assert.equal(t.runtime.steered.length, 0)
+    const task = await reviewable(t)
+    await t.service.applyReview(task, t.project, 'accept', '管理员验收', { type: 'user', id: 'local' })
+    const taskRow = t.store.get('SELECT * FROM tasks WHERE id = ?', task.id)
+    const first = t.promptRuntime.promptFor({
+      run: t.taskRun, bot: t.devRow, project: t.projectRow, task: taskRow, sessionId: 's1',
+    })
+    assert.match(first, /Accepted tasks — persist durable conclusions/, '提醒块注入下一次运行')
+    assert.match(first, /RM-1（提醒卡/, '点名任务号与标题')
+    assert.match(first, /team_remember/, '指引沉淀工具')
+    assert.equal(JSON.parse(t.store.get('SELECT value FROM settings WHERE key = ?', flagKey(t)).value).length, 0, '渲染即清标记')
+    const second = t.promptRuntime.promptFor({
+      run: t.taskRun, bot: t.devRow, project: t.projectRow, task: taskRow, sessionId: 's1',
+    })
+    assert.ok(!second.includes('Accepted tasks'), '再下一次不重复')
+  } finally { await t.close() }
+})
+
+test('标记积压封顶 3 条：第 4 条顶掉最旧一条', async () => {
+  const t = await setup()
+  try {
+    for (let i = 1; i <= 4; i++) {
+      const task = await reviewable(t)
+      await t.service.applyReview(task, t.project, 'accept', `验收 ${i}`, { type: 'user', id: 'local' })
+    }
+    const flag = JSON.parse(t.store.get('SELECT value FROM settings WHERE key = ?', flagKey(t)).value)
+    assert.equal(flag.length, 3, '封顶 3 条')
+    assert.deepEqual(flag.map(item => item.identifier), ['RM-2', 'RM-3', 'RM-4'], '最旧被顶掉')
   } finally { await t.close() }
 })

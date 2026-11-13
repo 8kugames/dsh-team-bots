@@ -329,6 +329,24 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
     ].join('\n')
   },
 
+  // 验收边界沉淀提醒块（搭车投递，吸收 dsh-agent-team acceptance-boundary 理念）：
+  // 标记由 noteTaskAccepted 落（验收通过的负责人 × 项目），在这里渲染一次性提醒并清空——
+  // 附着在本就要跑的这一轮提示词里，不产生额外轮次，不注入会话日志。上限 3 条防积压。
+  acceptReminderBlock(bot, project) {
+    const key = `accept_remind:${bot.id}:${project.id}`
+    const list = jsonParse(this.store.setting(key), [])
+    if (!Array.isArray(list) || !list.length) return ''
+    this.store.setSetting(key, '[]')
+    const lines = list.slice(0, 3)
+      .map(item => `- ${item.identifier}（${item.title ?? ''}，验收于 ${item.at ?? ''}）`)
+      .join('\n')
+    return `
+
+# Accepted tasks — persist durable conclusions
+Tasks you executed below have been accepted. If any durable fact, decision or lesson worth keeping across tasks emerged and is not yet in memory, persist it now with team_remember (short topic, self-contained content; one-off process detail does not belong there). This notice appears once; skip silently if nothing qualifies.
+${lines}`
+  },
+
   // 单聊会话的身份段：没有项目上下文，工作区是 bot 自己的 _the_bots/<dir>。
   soloPromptFor(bot) {
     const workspace = bot.solo_dir ? join(this.config.workspace, '_the_bots', bot.solo_dir) : join(this.config.workspace, '_the_bots')
@@ -685,7 +703,7 @@ ${parallelMergeBody(this.config.maxTeammates)}` : ''
       const deliverablesLine = readDeliverables(task.deliverables).length
         ? `\nDeliverables (file paths): ${readDeliverables(task.deliverables).join(', ')}`
         : ''
-      return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}
+      return `${header}${subtaskDisciplineBlock}${splittingGuidanceBlock}${this.acceptReminderBlock(bot, project)}
 
 Do the task in the project workspace. End with a delivery report (≤${this.config.deliveryReportMaxChars} chars): what changed, verification performed, blockers or risks — not just a plan. Never paste file contents into the report or chat — reference paths; reviewers open the files.${parallel}${parallelMerge}
 
@@ -760,7 +778,7 @@ Reply as ${bot.name} in the project group. Keep it under ${this.config.chatReply
 
 # Group message
 ${(chatMessage?.body ?? '(no message)').slice(0, 4_000)}
-${this.mergedMessagesBlock(extraMessages)}${quoteLine}${this.rolloverSummaryBlock(bot, project, sessionId)}
+${this.mergedMessagesBlock(extraMessages)}${quoteLine}${this.rolloverSummaryBlock(bot, project, sessionId)}${this.acceptReminderBlock(bot, project)}
 ${recentBlock}
 
 Open tasks:

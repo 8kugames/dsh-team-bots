@@ -102,8 +102,8 @@ export const taskReviewMethods = {
         body: `任务 ${identifier} 验收通过。`,
         taskId: task.id,
       })
-      // 验收边界沉淀提醒：趁热提醒负责人沉淀跨任务结论（fire-and-forget，不阻塞验收）。
-      void this.notifyTaskAccepted(this.taskRow(task.id))
+      // 验收边界沉淀提醒：落待提醒标记，负责人下次在该项目运行时搭车渲染（零额外轮次）。
+      this.noteTaskAccepted(this.taskRow(task.id))
     } else {
       const reason = text(comment, 20_000)
       if (!reason) throw badRequest('退回任务必须说明原因')

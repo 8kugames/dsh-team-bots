@@ -40,7 +40,6 @@ export const RUN_EVENT_TYPES = {
   notified: { domain: 'notify', zh: '任务提醒已注入', en: 'Task reminder injected' },
   partner_notice: { domain: 'notify', zh: '伙伴提醒记账', en: 'Partner notice recorded' },
   card_changed: { domain: 'notify', zh: '卡面变更修正提示已注入', en: 'Card amendment injected' },
-  accept_reminder: { domain: 'memory', zh: '验收边界沉淀提醒已注入', en: 'Acceptance memory reminder injected' },
   scopes_updated: { domain: 'run', zh: '写范围修改同步快照', en: 'Write-scope snapshot refreshed' },
   artifacts_skipped: { domain: 'ops', zh: '产物记录跳过', en: 'Artifact recording skipped' },
   artifacts_ignore_failed: { domain: 'ops', zh: '忽略过滤不可用', en: 'gitignore filter unavailable' },
