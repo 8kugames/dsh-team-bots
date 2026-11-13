@@ -155,6 +155,38 @@ test('cleanup 判定口径：task 仅收终态卡过程记录，topics 点名清
   }
 })
 
+test('bot 点名：总监可代管成员 Bot 的记忆域，未知 Bot 拒绝', async () => {
+  const t = await setup()
+  try {
+    const actor = { type: 'bot' as const, id: t.member.id }
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.member.id, topic: '成员私记一', content: 'a', actor })
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.member.id, topic: '成员私记二', content: 'b', actor })
+
+    // list 点名成员 Bot：能枚举其 bot 域；不点名仍是总监自己。
+    const rows = t.service.memoryListFromBot(t.ownerSession, { scope: 'bot', bot: 'Builder' })
+    assert.equal(rows.map(row => row.topic).sort().join(','), '成员私记一,成员私记二')
+    assert.equal(t.service.memoryListFromBot(t.ownerSession, { scope: 'bot' }).length, 0, '不点名 bot 域=总监自己')
+
+    // write 点名成员 Bot：同名覆盖写进成员域，不落总监域。
+    const written = t.service.memoryWriteFromBot(t.ownerSession, { scope: 'bot', bot: 'Builder', topic: '成员私记一', content: '覆盖版' })
+    assert.equal(written.overwritten, true)
+    assert.equal(written.memory.scope_id, t.member.id)
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE topic = '成员私记一' AND status = 'active'").n, 1)
+
+    // cleanup 点名成员 Bot：只清成员域，总监域同名主题不越界。
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.director.id, topic: '成员私记二', content: '同名', actor: { type: 'bot', id: t.director.id } })
+    const cleaned = t.service.memoryCleanupFromBot(t.ownerSession, { scope: 'bot', bot: 'Builder', topics: ['成员私记二'] })
+    assert.equal(cleaned.archived, 1)
+    assert.equal(t.store.get("SELECT status FROM memories WHERE topic = '成员私记二' AND scope_id = ?", t.member.id).status, 'archived')
+    assert.equal(t.store.get("SELECT status FROM memories WHERE topic = '成员私记二' AND scope_id = ?", t.director.id).status, 'active', '总监域同名条目不越界')
+
+    assert.throws(() => t.service.memoryCleanupFromBot(t.ownerSession, { scope: 'bot', bot: 'nobody', topics: ['x'] }), /Bot 不存在/)
+    assert.throws(() => t.service.memoryListFromBot(t.memberSession, { scope: 'bot', bot: 'Builder' }), /总监/, '成员点名他人 Bot 仍拒绝')
+  } finally {
+    await t.close()
+  }
+})
+
 test('巡检纪律注入总监身份提示词静态段，成员不注入', async () => {
   const t = await setup()
   try {

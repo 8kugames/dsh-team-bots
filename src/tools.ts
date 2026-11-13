@@ -276,6 +276,7 @@ export function installTeamTools(ctx, service) {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to enumerate: bot = your own memories, project = this project, team = whole team. Default project' },
+        bot: { type: 'string', description: 'With scope=bot, target that bot (exact bot name or id) instead of yourself — use it to inspect a member bot\'s memories when its scope hits the cap' },
         topic: { type: 'string', description: 'Optional substring filter on the topic label' },
         limit: { type: 'integer', description: 'Max entries to return (1-200, default 50)' },
       },
@@ -299,6 +300,7 @@ export function installTeamTools(ctx, service) {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'bot: only you remember it; project: every project bot can use it; team: shared by the whole team (owner bots only)' },
+        bot: { type: 'string', description: 'With scope=bot, write into that bot\'s memories (exact bot name or id) instead of your own — use it for same-name-overwrite dedupe in a member bot\'s scope' },
         topic: { type: 'string', description: 'Short topic label; same topic in the same scope is overwritten in place' },
         content: { type: 'string', description: 'The durable memory, with enough context to be useful later' },
       },
@@ -320,6 +322,7 @@ export function installTeamTools(ctx, service) {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['bot', 'project', 'team'], description: 'Which memory scope to clean: bot = your own, project = this project, team = whole team' },
+        bot: { type: 'string', description: 'With scope=bot, clean that bot\'s memories (exact bot name or id) instead of your own — the sanctioned path when a member bot\'s scope hits the cap and it cannot clean itself' },
         topics: { type: 'array', items: { type: 'string' }, description: 'Exact topic labels to archive in this scope' },
         task: { type: 'string', description: 'Closed card (KEY-N) whose process-record memories should be archived; rejected unless the task is done or canceled' },
         before: { type: 'string', description: 'ISO timestamp cutoff (e.g. 2026-01-01T00:00:00.000Z): archive every active entry in this scope with updated_at strictly before it. Required when neither topics nor task is given; combining with topics/task intersects the criteria' },

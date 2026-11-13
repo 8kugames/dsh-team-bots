@@ -550,17 +550,22 @@ export const memoryMethods = {
   // 三入口共用 ownerContextFor 权威鉴权（仅项目总监，单聊/成员拒绝）；
   // 不改宿主 team_remember 语义，插件层独立封装。
 
-  // 把 scope 枚举解析到总监会话所在的具体作用域：bot=总监自己，project=会话项目，team=全团队。
-  resolveOwnerMemoryScope(ownerCtx, scope) {
+  // 把 scope 枚举解析到总监会话所在的具体作用域：bot=总监自己（bot_ref 点名时为该 Bot，
+  // 成员 Bot 超限整理的合法通道——resolveBotForQuota 按 id 或精确名解析，任意总监可点名），
+  // project=会话项目，team=全团队。
+  resolveOwnerMemoryScope(ownerCtx, scope, botRef = null) {
     const scopeType = ['bot', 'project', 'team'].includes(scope) ? scope : null
     if (!scopeType) throw badRequest('记忆作用域无效')
-    const scopeId = scopeType === 'bot' ? ownerCtx.binding.bot_id : scopeType === 'project' ? ownerCtx.project.id : 'team'
+    let scopeId = scopeType === 'project' ? ownerCtx.project.id : scopeType === 'team' ? 'team' : ownerCtx.binding.bot_id
+    if (scopeType === 'bot' && botRef != null && String(botRef).trim() !== '') {
+      scopeId = this.resolveBotForQuota(botRef).id
+    }
     return { scopeType, scopeId }
   },
 
-  memoryListFromBot(sessionId, input: { scope?: string, topic?: string, limit?: number } = {}) {
+  memoryListFromBot(sessionId, input: { scope?: string, bot?: string, topic?: string, limit?: number } = {}) {
     const ownerCtx = this.ownerContextFor(sessionId)
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope ?? 'project')
+    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope ?? 'project', input.bot)
     const keyword = text(input.topic, 200).trim()
     const limitN = Math.min(200, Math.max(1, Number(input.limit) || 50))
     const like = `%${keyword}%`
@@ -578,7 +583,7 @@ export const memoryMethods = {
   // 不再叠新条；无同名时走 createMemory 正常创建。
   memoryWriteFromBot(sessionId, input) {
     const ownerCtx = this.ownerContextFor(sessionId)
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope)
+    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope, input.bot)
     const actor = ownerCtx.actor
     const topic = text(input.topic, 120)
     if (!topic) throw badRequest('缺少记忆主题')
@@ -624,7 +629,7 @@ export const memoryMethods = {
   memoryCleanupFromBot(sessionId, input) {
     const ownerCtx = this.ownerContextFor(sessionId)
     const { project, actor } = ownerCtx
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope)
+    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope, input.bot)
     const topics = (Array.isArray(input.topics) ? input.topics : []).map(item => text(item, 120)).filter(Boolean)
     let taskLabel = null
     let taskTopics: string[] = []
