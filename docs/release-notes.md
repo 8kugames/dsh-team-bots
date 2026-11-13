@@ -4,6 +4,32 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.12
+
+### 中文
+
+本版是 v0.3.9 批次的补发：该批次的 tag 推上后被 typecheck 拦下、publish 被跳过，包始终没有进入 npm registry，本版把整批改动重新发出去。除补发外，本版还把 dev 分支的 CI 两道闸接上，让同类类型错误不再潜伏到发版才红。版本为 patch 级，无数据库结构变更，无新增服务端配置。
+
+**发布**
+
+- **补发 v0.3.9 批次**：v0.3.9 的 tag 因类型错误被拦下，该批次的完整改动在本版首次进入 npm registry。
+- **类型声明修复解除发布阻断**：补上 TeamConfig.maxWriteScopesPerTask 的类型声明，并把拒绝派单用例的断言参数收窄为 unknown，typecheck 恢复全绿。
+- **新增 dev push CI 两道闸**：dev 分支的 push 与发往 dev 的 PR 新增 typecheck+test 工作流，与 tag 发布路径同口径，类型错误在开发分支即被拦下。
+
+v0.3.9 小节所列的 8 项特性（运行时 1 项、工具 1 项、调度 2 项、记忆 4 项）随本版首次上架，该小节的界面改动（路径展示补齐 tilde 缩写）一并随行。
+
+### English
+
+This release republishes the v0.3.9 batch: its tag was stopped by typecheck and publish was skipped, so the package never reached the npm registry, and this release ships the whole batch again. On top of the republication, dev pushes and pull requests targeting dev now run the same typecheck+test gate as the tag path, so the same class of type errors is caught on the development branch instead of only at release time. The bump is patch level; no database schema changes and no new server configuration.
+
+**Release**
+
+- **The v0.3.9 batch is republished**: the v0.3.9 tag was blocked by type errors, so this release puts that batch onto the npm registry for the first time.
+- **The type declaration fix unblocks publishing**: TeamConfig.maxWriteScopesPerTask now carries its type declaration and the rejected-dispatch assertion narrows its parameter to unknown, which turns typecheck green again.
+- **Two new CI gates on dev pushes**: pushes to dev and pull requests targeting dev now run a typecheck+test workflow with the same coverage as the tag path, so type errors are caught on the development branch.
+
+The eight features listed in the v0.3.9 section (one runtime, one tool, two scheduling and four memory items) ship with this release for the first time, together with the interface change from that section (tilde abbreviations across path displays).
+
 ## v0.3.9
 
 ### 中文

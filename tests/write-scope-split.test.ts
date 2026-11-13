@@ -78,7 +78,8 @@ test('a) 写范围超过上限（9 > 8）拒绝派单，拒绝文案带拆分指
     const { sessionId, project } = await seedProject(ctx.service, ctx.store)
     await assert.rejects(
       () => dispatch(ctx, sessionId, { description: '做点事。', write_scopes: many(9) }),
-      error => {
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
         assert.match(error.message, /单卡上限 8/)
         assert.match(error.message, /parent_task_id/)
         return true

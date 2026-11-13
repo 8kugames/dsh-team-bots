@@ -141,6 +141,8 @@ interface TeamConfig {
   feishuAppId: string
   feishuAppSecret: string
   maxConcurrentRuns: number
+  // 大卡拆分闸：单卡写范围条目上限，超限拒绝派发并指引拆 parent_task_id 子卡。
+  maxWriteScopesPerTask: number
   runTimeoutMs: number
   maxRunTokens: number
   stallTimeoutMs: number
