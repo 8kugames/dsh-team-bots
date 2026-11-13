@@ -25,20 +25,24 @@ const GLOBAL_VIEWS = new Set(['global', 'bots-overview', 'channel', 'secrets'])
 const app = document.getElementById('app') as unknown as Document & { className: string; innerHTML: string }
 const UI_SCALE_KEY = 'dshb:ui-scale'
 const UI_THEME_KEY = 'dshb:ui-theme'
+const UI_COLOR_SCHEME_KEY = 'dshb:ui-color-scheme'
 
 // 任务分组默认全展开（DSHBOTS-58）：把各分组的展开态 key 预置进 state.openPanels，
 // 与 <details data-panel> 同一套通道（key 形如 task-group:<status>），折叠即从集合里删掉。
 for (const status of STATUS_ORDER) state.openPanels.add(taskGroupKey(status))
 
 if (window.matchMedia?.('(max-width: 980px)').matches) state.tree = { chats: false, bots: false } as typeof state.tree
-const savedScale = (() => {
-  try { return Number(localStorage.getItem(UI_SCALE_KEY)) || null } catch { return null }
-})()
+// 偏好读取的唯一出口：本地存储不可用（隐私模式/无权限）一律回落默认值。
+const readPref = (key: string) => {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+const savedScale = Number(readPref(UI_SCALE_KEY)) || null
 if (savedScale) applyUiScale(savedScale)
+// 明暗偏好先于 initColorScheme 落地：手动档（日间/夜间）压过宿主/系统自动判定，
+// auto 档仍由 initColorScheme 的观察器在宿主切深浅时实时跟随。
+state.colorSchemePref = readPref(UI_COLOR_SCHEME_KEY)
 initColorScheme()
-state.theme = applyUiTheme((() => {
-  try { return localStorage.getItem(UI_THEME_KEY) } catch { return null }
-})())
+state.theme = applyUiTheme(readPref(UI_THEME_KEY))
 
 // UI 语言跟随 DSH 宿主 Language 设定（DSHBOTS-120）：服务端把解析结果（zh/en/auto）
 // 注入 <html data-dsh-language>，模块加载即设定语言并替换静态 boot 文案（CSP 禁内联
@@ -789,6 +793,6 @@ void init()
 
 // DSHBOTS-15 批次3：IIFE 包裹已拆除（模块作用域等价于原 IIFE 私有作用域，模块天然 strict）。
 // 以下导出仅供后续批次外迁的 ui/modules/*.js 反向依赖（调用期解析）；随各域搬出逐步收缩。
-export { app, UI_SCALE_KEY, UI_THEME_KEY, savedScale, refresh, startWechatPoll, stopWechatPoll, startTerminalPoll, stopTerminalPoll, syncTerminalPoll, updateTerminalDom, bootError, isTyping, pendingProposals, tabDot, renderShell, syncChromeHeight, renderKeepingChatScroll, panelKey, isPanelOpen, panelOpenAttr }
+export { app, UI_SCALE_KEY, UI_THEME_KEY, UI_COLOR_SCHEME_KEY, savedScale, refresh, startWechatPoll, stopWechatPoll, startTerminalPoll, stopTerminalPoll, syncTerminalPoll, updateTerminalDom, bootError, isTyping, pendingProposals, tabDot, renderShell, syncChromeHeight, renderKeepingChatScroll, panelKey, isPanelOpen, panelOpenAttr }
 export { applyPanelToggle, panelAttrs, lastRenderedView, captureViewScroll, restoreViewScroll, CHAT_BOTTOM_THRESHOLD, nextChatAtBottom, render, renderView, noProject, runStatusLabel, sideRowStatusHtml, runKindLabel, chatContextPending, beginChatPending, endChatPending }
 export { observer, updateRunClocks, init, syncLanguage, formPayload }

@@ -103,7 +103,8 @@ test('冲突路径真实可达：CONFLICT 后三方合并回贴表单并提示�
     toast: (message) => calls.push(['toast', message]),
     api: async (action, payload) => {
       calls.push(['api', action, payload])
-      const error = new Error('配置已被其他人或窗口修改，本次保存被拒绝；请刷新后基于最新值重新编辑')
+      // 服务端冲突异常带 code/status，UI 靠 error.code === 'CONFLICT' 分流合并路径。
+      const error = new Error('配置已被其他人或窗口修改，本次保存被拒绝；请刷新后基于最新值重新编辑') as Error & { code: string; status: number }
       error.code = 'CONFLICT'
       error.status = 409
       throw error

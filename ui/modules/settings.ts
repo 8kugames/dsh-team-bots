@@ -423,6 +423,8 @@ function renderGlobal() {
   // 用 || 而非 ??：settingsView() 对未保存键返回 ''（见 core.js），空串必须回落 auto，否则三选项都不选中。
   const uiLanguage = data.settings?.ui_language || 'auto'
   const notify = notifyToggleView()
+  // 明暗偏好读内存态（非服务端设置）：三档跟随/日间/夜间，与调色板正交。
+  const colorSchemePref = state.colorSchemePref || 'auto'
   return pageShell(
     pageHead('GLOBAL CONFIGURATION', t('global.title'), t('global.desc'), refreshAction()),
     pageNav([
@@ -447,6 +449,15 @@ function renderGlobal() {
                     <span class="faint">${t('global.uiScaleSmall')}</span>
                     <span class="faint" style="margin-left:auto">${t('global.uiScaleLarge')}</span>
                   </div>
+                </div>
+                <div class="field">
+                  <span class="field-label" id="ui-color-scheme-label">${t('global.colorScheme')}</span>
+                  <div class="seg" role="group" aria-labelledby="ui-color-scheme-label">
+                    <button data-action="set-color-scheme" data-color-scheme="auto" aria-pressed="${colorSchemePref === 'auto'}">${t('global.colorSchemeAuto')}</button>
+                    <button data-action="set-color-scheme" data-color-scheme="light" aria-pressed="${colorSchemePref === 'light'}">${t('global.colorSchemeLight')}</button>
+                    <button data-action="set-color-scheme" data-color-scheme="dark" aria-pressed="${colorSchemePref === 'dark'}">${t('global.colorSchemeDark')}</button>
+                  </div>
+                  <div class="hint">${esc(t('global.colorSchemeHint'))}</div>
                 </div>
                 <div class="field">
                   <span class="field-label" id="ui-theme-label">${t('global.theme')}</span>

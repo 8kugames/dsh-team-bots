@@ -29,8 +29,25 @@ export function resolveColorScheme() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
+// 明暗偏好三态：auto=跟随宿主/系统，light=日间，dark=夜间。手动档压过自动判定，
+// auto 档仍走 resolveColorScheme 的宿主/系统回落链。
+export function normalizeColorSchemePref(value) {
+  return value === 'light' || value === 'dark' ? value : 'auto'
+}
+
+// 应用明暗偏好：写状态 + 立即生效。返回偏好档本身（不是生效明暗）——落盘要的是档位，
+// 否则「跟随」会被存成当时的生效值，刷新后变成手动固定。
+export function setColorSchemePreference(value) {
+  const pref = normalizeColorSchemePref(value)
+  state.colorSchemePref = pref
+  applyColorScheme()
+  return pref
+}
+
+// 当前生效明暗：手动档直接定；auto 档实时跟随宿主/系统。
 export function applyColorScheme() {
-  const scheme = resolveColorScheme()
+  const pref = normalizeColorSchemePref(state.colorSchemePref)
+  const scheme = pref === 'auto' ? resolveColorScheme() : pref
   document.documentElement.setAttribute('data-color-scheme', scheme)
   document.documentElement.style.colorScheme = scheme
   return scheme

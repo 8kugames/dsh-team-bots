@@ -1,6 +1,6 @@
 import { state } from './state.js'
 import { t } from './i18n.js'
-import { activeProject, applyUiScale, applyUiTheme, toast } from './util.js'
+import { activeProject, applyUiScale, applyUiTheme, setColorSchemePreference, toast } from './util.js'
 import { api, loadState, mergeSettingsDraft } from './api.js'
 import { sendMessage } from './composer.js'
 import { closeModal, openBot, openModal, openTask, openTrajectory } from './modal-forms.js'
@@ -8,7 +8,7 @@ import { loadOlderMessages, loadSoloDetail } from './chat.js'
 import { taskChildrenKey, taskGroupKey } from './tasks.js'
 import { toggleDesktopNotify } from './cards.js'
 import { usageMode } from './usage.js'
-import { UI_SCALE_KEY, UI_THEME_KEY, syncLanguage, refresh, startWechatPoll, stopWechatPoll, bootError, render, chatContextPending, beginChatPending, endChatPending, init } from '../app.js'
+import { UI_SCALE_KEY, UI_THEME_KEY, UI_COLOR_SCHEME_KEY, syncLanguage, refresh, startWechatPoll, stopWechatPoll, bootError, render, chatContextPending, beginChatPending, endChatPending, init } from '../app.js'
 
 // 设置保存 + 409 冲突三方合并（B2/DSHBOTS-325）：key→inputId 映射驱动 patch 采集。
 // 冲突时静默接管 api 错误：重取最新设置后，对方未动字段的用户草稿贴回表单（编辑不丢），
@@ -110,6 +110,13 @@ export async function handleBoardAction(action, target) {
     case 'set-theme': {
       state.theme = applyUiTheme(target.dataset.theme)
       try { localStorage.setItem(UI_THEME_KEY, state.theme) } catch {}
+      render()
+      break
+    }
+    case 'set-color-scheme': {
+      // 明暗三档：跟随宿主/系统、日间、夜间；手动档压过自动判定，落盘后即时生效。
+      const pref = setColorSchemePreference(target.dataset.colorScheme)
+      try { localStorage.setItem(UI_COLOR_SCHEME_KEY, pref) } catch {}
       render()
       break
     }

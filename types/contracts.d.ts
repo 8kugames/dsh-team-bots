@@ -111,7 +111,8 @@ interface TeamActionPayload {
   write_scopes?: unknown
   writeScopes?: unknown
   evaluation?: unknown
-  patch?: TeamActionPayload
+  /** update_settings 的设置键补丁：键集由服务端 settingsView 白名单校验，不受 action 入参白名单约束。 */
+  patch?: Record<string, unknown>
 }
 
 /** 任务树卡片的渲染选项，与 action 入参无关。 */
