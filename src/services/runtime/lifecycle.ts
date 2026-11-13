@@ -261,18 +261,23 @@ export const lifecycleMethods = {
     this.pending.delete(sessionId)
     this.pendingByRun.delete(root.runId)
     const reason = reasonOf(event)
-    const failed = reason.kind === 'error' || reason.kind === 'aborted'
     const output = selectDeliverableText(root.texts)
-    const error = failed
-      ? {
-          code: reason.kind === 'aborted' ? 'ABORTED' : (reason.error?.code ?? 'MODEL_ERROR'),
-          message: reason.error?.message ?? (reason.kind === 'aborted' ? '运行被中止' : '模型调用失败'),
-          // 限流退避只有 provider 真发 Retry-After 才有值（宿主 failureSnapshot 已校验正有限数），拿不到就是 null，不伪造。
-          retryAfterMs: reason.kind === 'error' && Number.isFinite(reason.error?.providerRetryAfterMs) && reason.error.providerRetryAfterMs > 0
-            ? reason.error.providerRetryAfterMs
-            : null,
-        }
-      : null
+    // 宿主侧拒绝（归档闸等 pre-step reject）不产生任何模型调用与文本：按成功收尾会把空回复
+    // 落库成「模型未返回文本」。无输出时按失败上报，走既有失败链路（可见错误/重试）。
+    const blocked = reason.kind === 'blocked' && !output
+    const failed = blocked || reason.kind === 'error' || reason.kind === 'aborted'
+    const error = blocked
+      ? { code: 'SESSION_BLOCKED', message: '宿主拒绝执行该会话（可能已被归档），未产生任何模型输出。', retryAfterMs: null }
+      : failed
+        ? {
+            code: reason.kind === 'aborted' ? 'ABORTED' : (reason.error?.code ?? 'MODEL_ERROR'),
+            message: reason.error?.message ?? (reason.kind === 'aborted' ? '运行被中止' : '模型调用失败'),
+            // 限流退避只有 provider 真发 Retry-After 才有值（宿主 failureSnapshot 已校验正有限数），拿不到就是 null，不伪造。
+            retryAfterMs: reason.kind === 'error' && Number.isFinite(reason.error?.providerRetryAfterMs) && reason.error.providerRetryAfterMs > 0
+              ? reason.error.providerRetryAfterMs
+              : null,
+          }
+        : null
     this.releaseAttribution(root.runId)
     await this.completionHandler?.({
       runId: root.runId,
