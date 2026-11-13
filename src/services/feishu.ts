@@ -4,7 +4,7 @@
 
 import { effectiveFeishuCredentials } from '../config.js'
 import { badRequest } from '../errors.js'
-import { nowIso } from '../util.js'
+import { nowIso, parseMentions } from '../util.js'
 import { recordWechatTriggerRow } from './wechat-trigger-schema.js'
 
 /** 项目外导演通道的正文来源标记（对齐微信 WECHAT_SOLO_SOURCE_MARK）：让 director 一眼看出该消息来自飞书管理员。 */
@@ -152,9 +152,12 @@ export const feishuMethods = {
   },
 
   /**
-   * 飞书直达对话（与微信 wechatChat 同口径）：自由文本与 /tr <key> 显式转发都落
-   * director 专属工作区（origin='feishu'，正文带 [飞书管理员] 来源标记）；key 未命中
-   * 返回 null；解析不到 director 返回 { error: 'no_director' }。
+   * 飞书直达对话（与微信 wechatChat 同口径）：自由文本落 director 专属工作区
+   * （origin='feishu'，正文带 [飞书管理员] 来源标记）；/tr <key> 显式转发直达指定
+   * 项目群聊——消息以飞书管理员身份插入项目群聊并触发 chat 运行（origin='feishu'，
+   * 运行收尾把 bot 回复推回飞书管理员）。正文可 @成员 定向；无 @ 且 owner 不可用
+   * 返回 { error: 'no_owner', project }；key 未命中返回 null；自由文本解析不到
+   * director 返回 { error: 'no_director' }。
    */
   async feishuChat(key, body) {
     let project = null
@@ -164,18 +167,25 @@ export const feishuMethods = {
         String(key ?? '').trim(),
       )
       if (!project) return null
+      const members = this.membersOf(project.id).filter(bot => bot.status === 'active')
+      const textBody = String(body ?? '')
+      if (parseMentions(textBody, members).length === 0
+        && !members.some(bot => bot.id === project.owner_bot_id)) {
+        return { error: 'no_owner', project }
+      }
+      const adminOuId = this.feishu?.status?.()?.adminOuId ?? null
+      const result = await this.sendMessage(
+        project.id,
+        textBody,
+        { type: 'user', id: adminOuId ?? 'user:feishu' },
+        null,
+        [],
+        { origin: 'feishu' },
+      )
+      return { project, ...result }
     }
     const director = this.feishuDirectorBot()
-    if (!director) return { error: 'no_director', ...(project ? { project } : {}) }
-    if (!project) return this.feishuDirectorChat(director, String(body ?? ''))
-    const adminOuId = this.feishu?.status?.()?.adminOuId ?? null
-    const result = await this.sendSoloMessage(
-      director.id,
-      `${FEISHU_SOLO_SOURCE_MARK}[项目 ${project.key}] ${String(body ?? '')}`,
-      { type: 'user', id: adminOuId ?? 'user:feishu' },
-      [],
-      { origin: 'feishu' },
-    )
-    return { project, director, messageId: result?.messageId ?? null }
+    if (!director) return { error: 'no_director' }
+    return this.feishuDirectorChat(director, String(body ?? ''))
   },
 }

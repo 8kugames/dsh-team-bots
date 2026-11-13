@@ -79,6 +79,20 @@ test('origin=feishu：solo 直达与群聊直达的运行 trigger_type 都落 fe
     const chatRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", sent.messageId)
     assert.ok(chatRun, '必须派生 chat 运行')
     assert.equal(chatRun.trigger_type, 'feishu', '飞书来源群聊运行打 feishu 标记')
+
+    // /tr <key> 显式直达（feishuChat 带非空 key）：同落项目群聊，管理员身份插群；
+    // 先给首条 chat 运行置终态腾出 (director, FSR) 域槽（同域串行，DSHBOTS-308）。
+    store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), chatRun.id)
+    ;(service as any).feishu = { status: () => ({ adminOuId: 'ou_admin_1' }) }
+    const tr = await service.feishuChat('FSR', '@director /tr 直达的项目消息')
+    assert.ok(tr?.project, '/tr 命中项目返回 project 形态')
+    const trMessage = store.get("SELECT * FROM messages WHERE body = ?", '@director /tr 直达的项目消息')
+    assert.ok(trMessage, '/tr 消息必须落项目群聊')
+    assert.equal(trMessage.project_id, project.id)
+    assert.equal(trMessage.sender_id, 'ou_admin_1', '身份用飞书管理员 ou id，不冒充工作台用户')
+    const trRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", trMessage.id)
+    assert.ok(trRun, '/tr 直达必须派生 chat 运行')
+    assert.equal(trRun.trigger_type, 'feishu', '/tr 直达运行打 feishu 标记（回程推送依据）')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
