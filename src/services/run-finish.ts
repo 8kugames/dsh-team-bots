@@ -343,11 +343,7 @@ export const runFinishMethods = {
         // 子代理施工硬闸已解除（原 DSHBOTS-311）：交付不再要求子代理施工账目，
         // 施工方式由 bot 自选（亲做或派「bot 名+任务号」子代理），账本（D-294）仍照记。
         this.store.transaction(() => {
-          this.store.run(
-            `UPDATE tasks SET status = 'in_review', version = version + 1, updated_at = ?
-             WHERE id = ? AND status NOT IN ('done', 'canceled')`,
-            endedAt, task.id,
-          )
+          this.setTaskStatus(task.id, 'in_review', { type: 'bot', id: bot.id })
           this.store.run(
             'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
             id('cmt'), task.id, 'bot', bot.id,
@@ -479,10 +475,7 @@ export const runFinishMethods = {
           runId,
         })
       } else if (run.task_id) {
-        this.store.run(
-          "UPDATE tasks SET status = 'blocked', version = version + 1, updated_at = ? WHERE id = ? AND status NOT IN ('done', 'canceled')",
-          endedAt, run.task_id,
-        )
+        this.setTaskStatus(run.task_id, 'blocked', { type: 'bot', id: bot.id })
         this.addTaskEvent(run.task_id, 'run_failed', { type: 'bot', id: bot.id }, { runId, error })
         // 额度耗尽没有「退避后自动重试」这回事：主备都限额就是终点，任务转受阻。
         const quotaNote = quotaExhausted

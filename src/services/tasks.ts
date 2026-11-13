@@ -238,6 +238,53 @@ export const tasksMethods = {
       id('tevt'), taskId, type, actor.type, actor.id, JSON.stringify(data), nowIso(),
     )
   },
+  // 统一状态迁移落点（吸收 dsh-agent-team「账本为权威、投影可重放」理念）：所有直接改
+  // tasks.status 的路径都经此走——同一事务内 UPDATE + 权威 'status' 事件（from/to），
+  // 事件流因此能完整重放任务状态机（见 taskProjectionDrift）。守卫防终态覆盖/非法源态；
+  // 返回是否实际迁移（未命中守卫为 no-op，调用方保持原语义）。
+  setTaskStatus(taskId, to, actor, guard: { notIn?: string[]; ifIs?: string } = {}) {
+    const task = this.taskRow(taskId)
+    if (task.status === to) return false
+    const guardSql = guard.ifIs
+      ? 'status = ?'
+      : `status NOT IN (${(guard.notIn ?? ['done', 'canceled']).map(() => '?').join(',')})`
+    const guardParams = guard.ifIs ? [guard.ifIs] : (guard.notIn ?? ['done', 'canceled'])
+    let applied = false
+    this.store.transaction(() => {
+      const result = this.store.run(
+        `UPDATE tasks SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND ${guardSql}`,
+        to, nowIso(), taskId, ...guardParams,
+      )
+      applied = Number(result?.changes ?? 0) > 0
+      if (applied) this.addTaskEvent(taskId, 'status', actor, { field: 'status', from: task.status, to })
+    })
+    return applied
+  },
+  // 投影漂移巡检：按权威事件流（created 初始态 + 'status' 事件序列）重放每个任务的状态，
+  // 与 tasks 表对照。漂移即投影与账本脱节（崩溃半事务/手工改库），报告不修复。
+  taskProjectionDrift() {
+    const drifted = []
+    for (const task of this.store.all('SELECT id, number, project_id, status FROM tasks')) {
+      const events = this.store.all(
+        `SELECT type, data_json FROM task_events WHERE task_id = ?
+           AND (type = 'created' OR (type = 'status' AND json_extract(data_json, '$.field') = 'status'))
+         ORDER BY created_at, rowid`,
+        task.id,
+      )
+      if (!events.length) continue
+      let replayed = null
+      for (const event of events) {
+        const data = JSON.parse(event.data_json ?? '{}')
+        if (event.type === 'created') replayed = data.status ?? 'backlog'
+        else if (data.to) replayed = data.to
+      }
+      if (replayed !== null && replayed !== task.status) {
+        const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
+        drifted.push({ taskId: task.id, identifier: `${project?.key ?? 'T'}-${task.number}`, recorded: task.status, replayed })
+      }
+    }
+    return drifted
+  },
   // 变更栅栏的事实面（吸收 dsh-agent-team mutation-fence 理念）：版本冲突的拒绝不只说
   // 「请刷新」，还附最近变更事实，让写者就地重新裁决，不必整卡重读。事件与 version
   // 增量非一一对应（交付是一事件一增量，updateTask 是一增量多事件），故按时间取最近
