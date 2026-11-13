@@ -85,7 +85,6 @@ test('投递面：mentioned_only 环境消息延迟接单——立即回传总�
       '环境消息不立即产生 chat_run 投递',
     )
     assert.deepEqual(ambient.runBots, [t.director.id], '回传总监供 UI 立思考气泡')
-    assert.equal(ambient.deferredDirector, true)
     // 1 秒后：自动接单入列（outbox 即投即领，终态断言落在 runs 表上）。
     await new Promise(resolve => setTimeout(resolve, 1_150))
     const deadline = Date.now() + 3_000

@@ -505,6 +505,8 @@ export function openDatabase(path) {
 }
 
 export class Store {
+  // 同连接事务深度（transaction 嵌套时内层加入外层，见 transaction 实现）。
+  declare txDepth: number
   constructor(db, options = {} as any) {
     this.db = db
     this.ftsEnabled = options.ftsEnabled === true
