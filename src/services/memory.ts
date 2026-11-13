@@ -550,6 +550,38 @@ export const memoryMethods = {
   // 三入口共用 ownerContextFor 权威鉴权（仅项目总监，单聊/成员拒绝）；
   // 不改宿主 team_remember 语义，插件层独立封装。
 
+  // 记忆工具上下文：任意项目群 Bot 可自管自己的 bot 域（成员 Bot 触顶后的合法自救通道，
+  // 总监可经 bot 点名代管任意 Bot）；project/team 域仍只归总监（ownerContextFor 同款判定）。
+  memoryActorFor(sessionId) {
+    const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+    if (!binding) throw forbidden('只有项目群中的 Bot 可以执行该操作')
+    const project = binding.project_id ? this.projectRow(binding.project_id) : null
+    return {
+      binding,
+      project,
+      actor: { type: 'bot', id: binding.bot_id },
+      isOwner: Boolean(project && project.owner_bot_id === binding.bot_id),
+    }
+  },
+  resolveMemoryScopeFor(sessionId, input) {
+    const ctx = this.memoryActorFor(sessionId)
+    const scopeType = ['bot', 'project', 'team'].includes(input.scope) ? input.scope : null
+    if (!scopeType) throw badRequest('记忆作用域无效')
+    if (ctx.isOwner) {
+      const resolved = this.resolveOwnerMemoryScope(ctx, input.scope, input.bot)
+      return { ...resolved, actor: ctx.actor, project: ctx.project, isOwner: true }
+    }
+    // 成员：只放行自己的 bot 域；点名参数仅接受自己（点名他人即拒绝）。
+    if (scopeType !== 'bot') {
+      throw forbidden('成员只能管理自己的 bot 域记忆；项目/团队域的整理请由项目总监执行')
+    }
+    if (input.bot != null && String(input.bot).trim() !== '') {
+      const named = this.resolveBotForQuota(input.bot)
+      if (named.id !== ctx.binding.bot_id) throw forbidden('Bot 只能点名管理自己的记忆')
+    }
+    return { scopeType, scopeId: ctx.binding.bot_id, actor: ctx.actor, project: ctx.project, isOwner: false }
+  },
+
   // 把 scope 枚举解析到总监会话所在的具体作用域：bot=总监自己（bot_ref 点名时为该 Bot，
   // 成员 Bot 超限整理的合法通道——resolveBotForQuota 按 id 或精确名解析，任意总监可点名），
   // project=会话项目，team=全团队。
@@ -564,8 +596,7 @@ export const memoryMethods = {
   },
 
   memoryListFromBot(sessionId, input: { scope?: string, bot?: string, topic?: string, limit?: number } = {}) {
-    const ownerCtx = this.ownerContextFor(sessionId)
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope ?? 'project', input.bot)
+    const { scopeType, scopeId } = this.resolveMemoryScopeFor(sessionId, { scope: 'project', ...input })
     const keyword = text(input.topic, 200).trim()
     const limitN = Math.min(200, Math.max(1, Number(input.limit) || 50))
     const like = `%${keyword}%`
@@ -582,9 +613,7 @@ export const memoryMethods = {
   // 写入/同名覆盖：同 scope+topic 已有 active 记忆时原地更新（revision+1、事件留痕），
   // 不再叠新条；无同名时走 createMemory 正常创建。
   memoryWriteFromBot(sessionId, input) {
-    const ownerCtx = this.ownerContextFor(sessionId)
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope, input.bot)
-    const actor = ownerCtx.actor
+    const { scopeType, scopeId, actor } = this.resolveMemoryScopeFor(sessionId, input)
     const topic = text(input.topic, 120)
     if (!topic) throw badRequest('缺少记忆主题')
     const existing = this.store.get(
@@ -627,13 +656,12 @@ export const memoryMethods = {
   // before 与 topics/task 可组合，按 AND 交集收窄；三者全缺即拒绝（不做「全清」缺省）。
   // 逐条 memory_events 留痕 + 一笔 memory.cleanup 审计列出被清条目。
   memoryCleanupFromBot(sessionId, input) {
-    const ownerCtx = this.ownerContextFor(sessionId)
-    const { project, actor } = ownerCtx
-    const { scopeType, scopeId } = this.resolveOwnerMemoryScope(ownerCtx, input.scope, input.bot)
+    const { scopeType, scopeId, project, actor } = this.resolveMemoryScopeFor(sessionId, input)
     const topics = (Array.isArray(input.topics) ? input.topics : []).map(item => text(item, 120)).filter(Boolean)
     let taskLabel = null
     let taskTopics: string[] = []
     if (input.task) {
+      if (!project) throw forbidden('单聊会话不在项目中，无法按任务口径清理')
       const task = this.resolveBotTask(project, input.task)
       if (!['done', 'canceled'].includes(task.status)) {
         throw badRequest(`仅已闭环（done/canceled）任务的历史记录可清理，${project.key}-${task.number} 当前为 ${task.status}`)

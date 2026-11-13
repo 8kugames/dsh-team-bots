@@ -35,8 +35,9 @@ export const SUBAGENT_GENERATION_TOOLS = [
 // team_block_task（DSHBOTS-232）与派单/验收同款总监专属：强制受阻停运行是不可逆控制面操作。
 // team_list_bots / team_add_member / team_create_bot（DSHBOTS-229）是团队编制入口：
 // 池查询含未入群 bot，加人与建 bot 会改动项目成员或全局 bot 档案。
-// team_memory_list / team_memory_write / team_memory_cleanup（DSHBOTS-239）是记忆巡检面：
-// 枚举、同名覆盖写与批量终态化清理都只归总监。
+// team_memory_list / team_memory_write / team_memory_cleanup（DSHBOTS-239）是记忆管理面：
+// bot 域记忆由 Bot 自己管理（成员触顶后的合法自救通道），项目/团队域归项目总监，
+// 总监可经 bot 点名代管任意 Bot——权限判定在服务层 resolveMemoryScopeFor。
 export const DIRECTOR_ONLY_TOOLS = [
   'team_assign_task',
   'team_review_task',
@@ -44,9 +45,6 @@ export const DIRECTOR_ONLY_TOOLS = [
   'team_list_bots',
   'team_add_member',
   'team_create_bot',
-  'team_memory_list',
-  'team_memory_write',
-  'team_memory_cleanup',
   'team_release_bot_quota',
 ] as const
 
@@ -271,7 +269,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_list',
-    description: 'List existing long-term memories in one scope (bot / project / team) for hygiene inspection: entries with short id, topic, updated time and a content preview, optionally filtered by topic substring. Director-only.',
+    description: 'List existing long-term memories in one scope (bot / project / team) for hygiene inspection: entries with short id, topic, updated time and a content preview, optionally filtered by topic substring. Every bot manages its own bot scope; project and team scopes are director-only.',
     parameters: {
       type: 'object',
       properties: {
@@ -295,7 +293,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_write',
-    description: 'Write a durable memory with same-name overwrite: an active memory with the same scope+topic is updated in place (revision bumps, event trail kept) instead of appending a duplicate entry; otherwise a new memory is created. Use it to refresh a wording to the latest final state instead of piling up near-duplicates. Scope rules: bot = your own, project = this project, team = whole team. Never store secrets or credentials. Director-only.',
+    description: 'Write a durable memory with same-name overwrite: an active memory with the same scope+topic is updated in place (revision bumps, event trail kept) instead of appending a duplicate entry; otherwise a new memory is created. Use it to refresh a wording to the latest final state instead of piling up near-duplicates. Scope rules: bot = your own (every bot), project = this project (director), team = whole team (director). Never store secrets or credentials.',
     parameters: {
       type: 'object',
       properties: {
@@ -317,7 +315,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_cleanup',
-    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Criteria (at least one required): `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision; `before` archives every active entry whose updated_at is strictly older than the given ISO timestamp — the one-shot bulk criterion for legacy backlog convergence. `before` combines with `topics`/`task` as an AND filter. Do not archive entries recording the user\'s explicit decisions. Director-only.',
+    description: 'Batch-deprecate stale memories in one scope: matched entries are archived (terminal — excluded from recall), each keeps its memory_events trail, and the batch is audited as memory.cleanup with the cleaned entries listed. Criteria (at least one required): `task` archives a closed card\'s process records (its 任务 KEY-N / KEY-N 交付记录 topics; the task must already be done or canceled); `topics` archives the explicitly listed topics — use it for older wordings that conflict with a newer final decision; `before` archives every active entry whose updated_at is strictly older than the given ISO timestamp — the one-shot bulk criterion for legacy backlog convergence. `before` combines with `topics`/`task` as an AND filter. Do not archive entries recording the user\'s explicit decisions. Every bot manages its own bot scope; project and team scopes are director-only.',
     parameters: {
       type: 'object',
       properties: {
