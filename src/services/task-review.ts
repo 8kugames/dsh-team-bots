@@ -17,29 +17,39 @@ export const taskReviewMethods = {
     const task = this.resolveBotTask(project, input.task)
     // 验收机械闸（DSHBOTS-318）只拦真验收动作（in_review 卡）：非待验收状态保持既有
     // 校验顺序，仍由 applyReview 抛 in_review conflict，闸不抢跑。
-    if (task.status === 'in_review') this.assertReviewSubagentVerified(sessionId, input.comment)
+    if (task.status === 'in_review') this.assertReviewSubagentVerified(sessionId, project, task, input.comment)
     return this.applyReview(task, project, input.decision, input.comment, actor)
   },
 
-  // 验收机械闸（DSHBOTS-318）：把「验收必须经由子代理」从提示约束升级为机械约束——
-  // owner bot 的 team_review_task 前置校验调用方当前活跃运行的子代理账目
-  // （run_events 的 subagent_spawned），无账目即拒绝；comment 显式注明「兜底验收」
-  // 放行（对应 router 硬流程第 4 条：子代理失败重试一次仍失败时 director 兜底）。
+  // 验收机械闸（DSHBOTS-318/353）：把「验收必须经由子代理」从提示约束升级为机械约束——
+  // owner bot 的 team_review_task 前置校验本评审周期内的子代理账目（run_events 的
+  // subagent_spawned）。周期起点 T=最近一次交付（run_succeeded）或看板流转
+  // （status→in_review）事件的 created_at 取 MAX；账目归属两条认领线：
+  // 本任务的 owner 运行（task_id+bot_id）或调用方会话的任意运行——两跳正规流程
+  // （review_delegate 派子代理 → 新运行只裁决）的账目挂在上一跳已结束运行上，
+  // 按「当运行有账」查必漏，故按周期查。comment 显式注明「兜底验收」放行
+  // （对应 router 硬流程第 4 条：子代理失败重试一次仍失败时 director 兜底）。
   // 仅机器人路径：微信管理员/看板 owner 走 applyReview，不经过本闸。
-  assertReviewSubagentVerified(sessionId, comment) {
+  assertReviewSubagentVerified(sessionId, project, task, comment) {
     if (comment?.includes('兜底验收')) return
-    const run = this.store.get(
-      "SELECT id FROM runs WHERE session_id = ? AND status IN ('running', 'queued') ORDER BY queued_at DESC LIMIT 1",
-      sessionId,
-    )
-    const ledger = run && this.store.get(
-      "SELECT id FROM run_events WHERE run_id = ? AND type = 'subagent_spawned' LIMIT 1",
-      run.id,
+    // run_events 无 run_id 索引：先筛 runs 再 EXISTS，量级与旧「当运行」查询相同。
+    const windowStart = this.store.get(
+      `SELECT MAX(created_at) AS t FROM task_events WHERE task_id = ?
+        AND (type = 'run_succeeded' OR (type = 'status' AND json_extract(data_json, '$.to') = 'in_review'))`,
+      task.id,
+    )?.t ?? ''
+    const ledger = this.store.get(
+      `SELECT 1 AS hit FROM runs r
+        WHERE ((r.task_id = ? AND r.bot_id = ?) OR r.session_id = ?)
+          AND EXISTS (SELECT 1 FROM run_events e
+            WHERE e.run_id = r.id AND e.type = 'subagent_spawned' AND e.created_at >= ?)
+        LIMIT 1`,
+      task.id, project.owner_bot_id, sessionId, windowStart,
     )
     if (ledger) return
     // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 正确下一步。
     throw badRequest(
-      '当前运行没有子代理账目（subagent_spawned），验收必须先经子代理核验：'
+      '本次评审没有子代理账目（subagent_spawned），验收必须先经子代理核验：'
       + '先派验收子代理（subagent/subagent_fork）做范围比对/目标测试/红线预测，把结论作为 comment；'
       + '如需 director 兜底，在 comment 里注明「兜底验收」。',
     )
