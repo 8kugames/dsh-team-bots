@@ -1,0 +1,283 @@
+import { state } from './state.js'
+import { icon } from './icons.js'
+import { t } from './i18n.js'
+import { attr, esc, formatTime, toast } from './util.js'
+import { pageHead, pageNav, pageSection, pageShell, refreshAction, slot } from './page-shell.js'
+
+// 微信通道卡（自配置页迁入）：绑定状态、扫码授权、验证码与退出；
+// DSHBOTS-334 加启停开关——停用态渲染开关卡（不再靠服务端注入才能启用）。
+function wechatCard() {
+  const wechat = state.data.wechat ?? { enabled: false, phase: 'disabled' }
+  const phaseText = {
+    disabled: t("未启用"), unbound: t("未绑定"), connecting: t("连接中"), connected: t("已连接"),
+    reconnecting: t("重连中"), needs_reauth: t("凭证失效"), scanning: t("待扫码"),
+    verification: t("待输验证码"),
+  }
+  // 停用态：只渲染开关卡（无绑定交互），恢复入口常驻。
+  if (!wechat.enabled) {
+    return `
+    <div class="card form-card g-card wechat-card" id="wechat-card">
+      <div class="wechat-status">
+        <span class="pill">${phaseText.disabled}</span>
+      </div>
+      <div class="hint">${t("通道已停用，启用后可扫码绑定管理员微信接收推送。")}</div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn small" type="button" data-action="wechat-toggle" data-next="1">${t("启用通道")}</button>
+      </div>
+    </div>`
+  }
+  const pillClass = wechat.phase === 'connected' ? 'green' : ['needs_reauth'].includes(wechat.phase) ? 'amber' : ''
+  const auth = state.wechatAuth
+  return `
+    <div class="card form-card g-card wechat-card" id="wechat-card">
+      <div class="wechat-card-main">
+        <div class="wechat-status">
+          <span class="pill ${pillClass}">${phaseText[wechat.phase] ?? wechat.phase}</span>
+          ${wechat.adminPeerId ? `<span class="wechat-admin" title="${attr(wechat.adminPeerId)}">${t("管理员")} <strong>${esc(String(wechat.adminPeerId))}</strong></span>` : ''}
+        </div>
+        ${wechat.error ? `<div class="hint" style="color:var(--coral,#e5484d)">${esc(wechat.error)}</div>` : ''}
+        ${wechat.phase === 'verification' || auth?.verification ? `
+          <div class="field-row" style="margin-top:8px">
+            <div class="field"><label for="wechat-code">${t("微信验证码")}</label><input class="input mono" id="wechat-code" inputmode="numeric" placeholder="${t("扫码后手机上的验证码")}"></div>
+            <div class="field"><label>&nbsp;</label><button class="btn small" type="button" data-action="wechat-code">${t("提交验证码")}</button></div>
+          </div>` : ''}
+        <div class="btn-row" style="margin-top:12px">
+          ${['connected', 'reconnecting', 'connecting'].includes(wechat.phase)
+            ? `<button class="btn small danger" type="button" data-action="wechat-logout">${t("退出绑定")}</button>`
+            : `<button class="btn small" type="button" data-action="wechat-login">${t("扫码绑定")}</button>`}
+          <button class="btn small danger" type="button" data-action="wechat-toggle" data-next="0">${t("停用通道")}</button>
+        </div>
+      </div>
+      ${auth?.qrSvg ? `<div class="wechat-qr">${auth.qrSvg}</div>` : ''}
+    </div>`
+}
+
+// 飞书通道卡（DSHBOTS-334 改可交互）：未绑定态给 AppID/AppSecret 输入 + 保存即连；
+// 已配置态显示脱敏 AppID（前 8 位+…）与清除按钮（服务端注入来源无清除）。
+// 飞书无扫码流程：绑定只认应用凭据，生效优先级 = 通道页保存 > 服务端注入。
+const maskAppId = (value) => {
+  const raw = String(value ?? '')
+  return raw.length > 8 ? `${raw.slice(0, 8)}…` : raw
+}
+
+function feishuCard() {
+  const feishu = state.data?.feishu ?? { enabled: false, phase: 'disabled' }
+  if (!feishu.enabled) return ''
+  // 相位口径与 src/feishu/channel.ts 一致：ready=已连接、unbound=未绑定、conflict=连接冲突。
+  // 'connected' 是同义别名（对齐 cindy 口径），两者都渲染「已连接」。
+  const phaseText = {
+    disabled: t("未启用"), unbound: t("未绑定"), ready: t("已连接"), connected: t("已连接"),
+    reconnecting: t("重连中"), conflict: t("连接冲突"),
+  }
+  const pillClass = ['ready', 'connected'].includes(feishu.phase) ? 'green' : feishu.phase === 'conflict' ? 'amber' : ''
+  const creds = feishu.credentials ?? { source: 'none', appIdMasked: null }
+  return `
+    <div class="card form-card g-card feishu-card" id="feishu-card">
+      <div class="feishu-status">
+        <span class="pill ${pillClass}">${phaseText[feishu.phase] ?? feishu.phase}</span>
+        ${feishu.adminOuId ? `<span class="feishu-admin" title="${attr(feishu.adminOuId)}">${t("管理员")} <strong>${esc(String(feishu.adminOuId))}</strong></span>` : ''}
+      </div>
+      ${feishu.phase === 'conflict' ? `<div class="hint feishu-conflict">${t("检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。")}</div>` : ''}
+      ${feishu.error ? `<div class="hint feishu-error">${esc(feishu.error)}</div>` : ''}
+      ${feishu.phase === 'unbound' ? `
+        <form data-form="feishu-credentials">
+          <div class="field-row">
+            <div class="field"><label for="feishu-app-id">${t("App ID")}</label><input class="input mono" id="feishu-app-id" name="appId" autocomplete="off" placeholder="${t("飞书应用的 App ID")}"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label for="feishu-app-secret">${t("App Secret")}</label><input class="input mono" id="feishu-app-secret" name="appSecret" type="password" autocomplete="new-password" placeholder="${t("保存后不再回显")}"></div>
+          </div>
+          <div class="btn-row"><button class="btn small" type="submit">${t("保存并连接")}</button></div>
+        </form>` : ''}
+      ${feishu.phase !== 'unbound' && creds.source !== 'none' ? `
+        <div class="feishu-status feishu-cred">
+          <span class="pill">${t("凭据已配置")}</span>
+          <span class="mono">${esc(String(creds.appIdMasked ?? ''))}</span>
+          ${creds.source === 'saved'
+            ? `<button class="btn small danger" type="button" data-action="feishu-clear-credentials">${t("清除凭据")}</button>`
+            : `<span class="faint">${t("服务端注入")}</span>`}
+        </div>` : ''}
+      <div class="feishu-meta">
+        ${feishu.botId ? `<span>${t("机器人 ID")} <span class="mono">${esc(String(feishu.botId))}</span></span>` : ''}
+        ${feishu.appId ? `<span>${t("App ID")} <span class="mono">${esc(maskAppId(feishu.appId))}</span></span>` : ''}
+      </div>
+    </div>`
+}
+
+// 密钥待审请求卡：Bot 发起的密钥请求，批准时填写密钥值。
+function secretRequestsCard(requests) {
+  if (requests.length === 0) return `<div class="faint">${t("暂无待审请求。")}</div>`
+  return `<div class="secret-block">
+    ${requests.map(request => `
+      <form class="secret-request" data-form="approve-secret">
+        <input type="hidden" name="requestId" value="${attr(request.id)}">
+        <div class="secret-request-info">
+          <strong>${esc(request.botName)}</strong>
+          <span>${t("请求")} <code>${esc(request.name)}</code></span>
+          ${request.projectName ? `<span class="faint">${esc(request.projectName)}</span>` : ''}
+          <span class="faint">${esc(formatTime(request.createdAt))}</span>
+        </div>
+        ${request.reason ? `<div class="secret-request-reason">${esc(request.reason)}</div>` : ''}
+        <div class="secret-request-actions">
+          <input class="input mono" type="password" name="value" minlength="8" autocomplete="new-password" placeholder="${t("填写密钥值（至少 8 个字符）后批准")}">
+          <button class="btn primary small" type="submit">${t("批准")}</button>
+          <button class="btn small" type="button" data-action="deny-secret-request" data-request-id="${attr(request.id)}">${t("拒绝")}</button>
+        </div>
+      </form>`).join('')}
+  </div>`
+}
+
+// 密钥列表卡：团队/项目两级密钥，值只显示指纹。
+function secretListCard(secrets) {
+  if (secrets.length === 0) return `<div class="faint">${t("还没有密钥。")}</div>`
+  return `<div class="secret-list">
+    ${secrets.map(secret => `
+      <div class="secret-row">
+        <span class="pill ${secret.scope === 'team' ? 'violet' : ''}">${secret.scope === 'team' ? t("团队") : t("项目")}</span>
+        <strong class="mono">${esc(secret.name)}</strong>
+        ${secret.scope === 'project' && secret.projectName ? `<span class="faint">${esc(secret.projectName)}</span>` : ''}
+        <span class="secret-purpose">${esc(secret.purpose || '')}</span>
+        <span class="subpanel-tag" title="${t("值指纹（sha256 前 8 位）")}">${esc(secret.fingerprint)}</span>
+        <span class="faint">${esc(formatTime(secret.updatedAt))}</span>
+        <span class="faint">${esc(secret.updatedBy ?? '')}</span>
+        <button class="btn icon small" type="button" data-action="delete-secret" data-secret-id="${attr(secret.id)}" data-secret-name="${attr(secret.name)}" title="${t("删除密钥")}" aria-label="${t("删除密钥")} ${attr(secret.name)}">${icon('trash')}</button>
+      </div>`).join('')}
+  </div>`
+}
+
+// 新增密钥卡：作用域/项目/名称/用途/值，保存后不再回显。
+function secretAddCard(projects) {
+  return `
+    <form class="card form-card g-card" data-form="upsert-secret">
+      <div class="field-row">
+        <div class="field"><label for="secret-scope">${t("作用域")}</label>
+          <select class="select" id="secret-scope" name="scope">
+            <option value="team">${t("团队（全部活动项目）")}</option>
+            <option value="project">${t("单个项目")}</option>
+          </select>
+        </div>
+        <div class="field"><label for="secret-project">${t("所属项目")}</label>
+          <select class="select" id="secret-project" name="projectId">
+            <option value="">${t("团队级无需选择")}</option>
+            ${projects.map(project => `<option value="${attr(project.id)}">${esc(project.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="secret-name">${t("名称")}</label><input class="input mono" id="secret-name" name="name" maxlength="64" placeholder="${t("如")} DEPLOY_TOKEN" required></div>
+        <div class="field"><label for="secret-purpose">${t("用途说明")}</label><input class="input" id="secret-purpose" name="purpose" maxlength="200" placeholder="${t("选填")}"></div>
+      </div>
+      <div class="field"><label for="secret-value">${t("密钥值")}</label>
+        <input class="input mono" id="secret-value" name="value" type="password" minlength="8" autocomplete="new-password" placeholder="${t("至少 8 个字符，保存后不再回显")}">
+        <div class="hint">${t("同作用域同名会覆盖旧值。")}</div>
+      </div>
+      <div class="btn-row"><button class="btn small" type="submit">${icon('check')}${t("保存密钥")}</button></div>
+    </form>`
+}
+
+// 通道页：微信等外部消息通道的绑定与状态。
+export function renderChannel() {
+  const card = wechatCard()
+  const feishu = feishuCard()
+  return pageShell(
+    pageHead('CHANNELS', t('viewTitle.channel'), t('channel.desc'), refreshAction()),
+    '',
+    [
+      pageSection({
+        index: '01', id: 'c-wechat', title: t('channel.sectionWechat'), desc: t('channel.sectionWechatDesc'),
+        // 停用态也渲染开关卡（DSHBOTS-334）：启停入口常驻，不再依赖服务端注入。
+        body: slot('full', card),
+      }),
+      // 飞书未启用时整段不渲染（不显示死卡）；启用后凭据可在卡内配置（DSHBOTS-334）。
+      ...(feishu ? [pageSection({
+        index: '02', id: 'c-feishu', title: t('channel.sectionFeishu'), desc: t('channel.sectionFeishuDesc'),
+        body: slot('full', feishu),
+      })] : []),
+    ],
+  )
+}
+
+// 密钥页：团队与项目两级密钥 + Bot 密钥请求审批。
+export function renderSecretsPage() {
+  const secrets = state.data?.secrets ?? []
+  const requests = state.data?.secretRequests ?? []
+  const projects = (state.data?.projects ?? []).filter(project => project.status === 'active')
+  return pageShell(
+    pageHead('SECRETS', t('viewTitle.secrets'), t('secrets.desc'), refreshAction()),
+    pageNav([
+      { id: 's-requests', label: t('secrets.sectionRequests') },
+      { id: 's-list', label: t('secrets.sectionList') },
+      { id: 's-add', label: t('secrets.sectionAdd') },
+    ], t('secrets.navLabel')),
+    [
+      pageSection({
+        index: '01', id: 's-requests', title: t('secrets.sectionRequests'), desc: t('secrets.sectionRequestsDesc'),
+        body: slot('full', secretRequestsCard(requests)),
+        headExtra: `<span class="meta">${requests.length} ${t("待审")}</span>`,
+      }),
+      pageSection({
+        index: '02', id: 's-list', title: t('secrets.sectionList'), desc: t('secrets.sectionListDesc'),
+        body: slot('full', `<div class="card form-card g-card">${secretListCard(secrets)}</div>`),
+        headExtra: `<span class="meta">${secrets.length} ${t("条")}</span>`,
+      }),
+      pageSection({
+        index: '03', id: 's-add', title: t('secrets.sectionAdd'), desc: t('secrets.sectionAddDesc'),
+        body: slot('full', secretAddCard(projects)),
+      }),
+    ],
+  )
+}
+
+// 飞书凭据交互（DSHBOTS-334）：卡模块内自注册监听（同 events-board 委托先例，不经
+// events-submit/events-click 的通用 switch）。app/api 走动态 import 的命名空间调用——
+// 本模块被单测直接加载时不必拉起整个应用模块图（app.js 含启动副作用）。
+document.addEventListener('submit', async (event) => {
+  const form = (event.target as any).closest?.('form[data-form="feishu-credentials"]')
+  if (!form) return
+  event.preventDefault()
+  const appId = String(form.querySelector?.('[name="appId"]')?.value ?? '').trim()
+  const appSecret = String(form.querySelector?.('[name="appSecret"]')?.value ?? '').trim()
+  try {
+    if (!appId || !appSecret) throw new Error(t("请输入 App ID 与 App Secret"))
+    const apiMod = await import('./api.js')
+    await apiMod.api('save_feishu_credentials', { appId, appSecret }, { quiet: true })
+    const appMod = await import('../app.js')
+    await appMod.refresh({ quiet: true })
+    toast(t("飞书凭据已保存，正在重连"), 'success')
+  } catch (error) {
+    toast((error as Error)?.message || String(error), 'error')
+  }
+})
+
+document.addEventListener('click', async (event) => {
+  const target = (event.target as any).closest?.('[data-action="feishu-clear-credentials"]')
+  if (!target) return
+  if (!globalThis.confirm?.(t("清除后飞书通道将断开并回到未绑定。确认清除？"))) return
+  try {
+    const apiMod = await import('./api.js')
+    await apiMod.api('clear_feishu_credentials', {}, { quiet: true })
+    const appMod = await import('../app.js')
+    await appMod.refresh({ quiet: true })
+    toast(t("已清除飞书凭据，通道回到未绑定"), 'success')
+  } catch (error) {
+    toast((error as Error)?.message || String(error), 'error')
+  }
+})
+
+// 微信通道启停开关（DSHBOTS-334）：切换即调 set_wechat_channel_enabled（服务端
+// 即时 mount/unmount），停用前确认。
+document.addEventListener('click', async (event) => {
+  const target = (event.target as any).closest?.('[data-action="wechat-toggle"]')
+  if (!target) return
+  const next = target.dataset?.next === '1'
+  if (!next && !globalThis.confirm?.(t("停用后微信通道立即断开且不再推送。确认停用？"))) return
+  try {
+    const apiMod = await import('./api.js')
+    await apiMod.api('set_wechat_channel_enabled', { enabled: next }, { quiet: true })
+    const appMod = await import('../app.js')
+    await appMod.refresh({ quiet: true })
+    toast(next ? t("微信通道已启用") : t("微信通道已停用"), 'success')
+  } catch (error) {
+    toast((error as Error)?.message || String(error), 'error')
+  }
+})

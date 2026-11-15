@@ -1,0 +1,234 @@
+/* ---------------------------------------------------------------- Buttons
+   Four roles, one shape. The rule that matters: a pressable thing must never
+   read as a label. Every button therefore carries a hairline frame on a
+   raised surface; every label stays bare text (eyebrow / note / kv / side-row
+   without data-action).
+   action   — hairline frame on surface-2, the default
+   emphasis — accent fill, at most one per screen
+   danger   — red text on a faint red frame, destructive actions only
+   icon     — the glyph is the affordance, so it stays frameless */
+.btn {
+    border: 1px solid var(--line-2);
+    background: var(--surface-2);
+    color: var(--ink-2);
+    border-radius: 8px;
+    padding: 0 10px;
+    font-size: var(--fs-small);
+    font-weight: 500;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background-color var(--motion-fast) var(--ease-out),
+        border-color var(--motion-fast) var(--ease-out),
+        color var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out),
+        transform var(--motion-instant) var(--ease-out);
+}
+.btn:hover {
+    background: var(--surface-3);
+    border-color: var(--line);
+    color: var(--ink);
+}
+/* 按下要有触觉级回应：80ms 内轻微下沉，松开即回弹。只动 transform，不引发重排。 */
+.btn:active {
+    transform: scale(0.97);
+}
+.btn:disabled:active {
+    transform: none;
+}
+/* 进行中：spinner 走伪元素，不改任何模板；aria-busy 同时是选择器与无障碍口径，
+   读屏据此播报「忙」，动效关掉后状态信息不丢。 */
+.btn[data-state="loading"],
+.btn.is-loading,
+.btn[aria-busy="true"] {
+    pointer-events: none;
+}
+.btn[data-state="loading"]::before,
+.btn.is-loading::before,
+.btn[aria-busy="true"]::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    animation: btn-spin 0.8s linear infinite;
+}
+@keyframes btn-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+/* 忙态不是禁用态：disabled 只用来挡重复提交，按钮此刻仍在工作，不能被
+   .btn:disabled 的 opacity .4 压暗成「不可用」。 */
+.btn[aria-busy="true"]:disabled,
+.btn[aria-busy="true"]:disabled:hover {
+    opacity: 1;
+    transform: none;
+}
+.btn svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+}
+.btn.primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--accent-ink);
+    font-weight: 600;
+}
+.btn.primary:hover {
+    background: color-mix(in srgb, var(--accent) 88%, var(--ink));
+    border-color: transparent;
+    color: var(--accent-ink);
+}
+.btn.danger {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 22%, var(--line-2));
+}
+.btn.danger:hover {
+    background: var(--danger-wash);
+    border-color: color-mix(in srgb, var(--danger) 48%, transparent);
+    color: var(--danger);
+}
+.btn.small {
+    padding: 0 8px;
+    font-size: var(--fs-caption);
+    min-height: 26px;
+    border-radius: 7px;
+}
+.btn.small svg {
+    width: 12px;
+    height: 12px;
+}
+.btn.icon {
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    color: var(--ink-3);
+    border-color: transparent;
+    background: transparent;
+}
+.btn.icon:hover {
+    background: var(--line);
+    border-color: transparent;
+    color: var(--ink);
+}
+.btn.icon svg {
+    width: 15px;
+    height: 15px;
+}
+.btn.icon.small {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+}
+.btn.icon.small svg {
+    width: 13px;
+    height: 13px;
+}
+.aa-mark {
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    font-size: var(--fs-small);
+}
+.btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.btn:disabled:hover {
+    background: var(--surface-2);
+    border-color: var(--line-2);
+    color: var(--ink-2);
+}
+.btn.primary:disabled:hover {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--accent-ink);
+}
+.btn-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Segmented control — mutually exclusive options, one of which is active. */
+.seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 9px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+}
+.seg button {
+    border: 0;
+    background: transparent;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 7px;
+    transition:
+        background-color var(--motion-fast) var(--ease-out),
+        color var(--motion-fast) var(--ease-out);
+}
+.seg button:hover {
+    color: var(--ink-2);
+}
+.seg button[aria-pressed="true"] {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow-1);
+}
+.seg button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+/* An action that follows a data list gets its own ground, so it never reads as one more row. */
+.form-card .kv + .btn-row {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+/* A row that carries a destructive action gets its own ground. */
+.btn-row.split {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+
+.send-btn {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    display: inline-grid;
+    place-items: center;
+    background: var(--accent);
+    color: var(--accent-ink);
+    transition: opacity var(--motion-fast) var(--ease-out);
+}
+.send-btn:hover {
+    opacity: 0.88;
+}
+.send-btn svg {
+    width: 14px;
+    height: 14px;
+}
+.send-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+

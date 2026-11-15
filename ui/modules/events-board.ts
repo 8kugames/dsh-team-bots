@@ -1,0 +1,372 @@
+import { state } from './state.js'
+import { t } from './i18n.js'
+import { activeProject, applyUiScale, applyUiTheme, setColorSchemePreference, toast } from './util.js'
+import { api, loadState, mergeSettingsDraft } from './api.js'
+import { sendMessage } from './composer.js'
+import { closeModal, openBot, openModal, openTask, openTrajectory } from './modal-forms.js'
+import { loadOlderMessages, loadSoloDetail } from './chat.js'
+import { taskChildrenKey, taskGroupKey } from './tasks.js'
+import { toggleDesktopNotify } from './cards.js'
+import { usageMode } from './usage.js'
+import { UI_SCALE_KEY, UI_THEME_KEY, UI_COLOR_SCHEME_KEY, syncLanguage, refresh, startWechatPoll, stopWechatPoll, bootError, render, chatContextPending, beginChatPending, endChatPending, init } from '../app.js'
+
+// 设置保存 + 409 冲突三方合并（B2/DSHBOTS-325）：key→inputId 映射驱动 patch 采集。
+// 冲突时静默接管 api 错误：重取最新设置后，对方未动字段的用户草稿贴回表单（编辑不丢），
+// 双改字段以服务端为准并点名提示复核；无用户改动即纯刷新提示。
+async function saveSettingsWithMerge(inputIds, successToast) {
+  const value = id => (document.getElementById(id) as HTMLInputElement | null)?.value ?? ''
+  const patch: Record<string, string> = {}
+  for (const [key, id] of Object.entries(inputIds)) patch[key] = value(id)
+  const baseSettings = state.data?.settings ?? {}
+  try {
+    await api('update_settings', { patch: { ...patch }, revision: state.data?.settingsRevision }, { quiet: true })
+    await loadState(state.projectId)
+    toast(successToast, 'success')
+  } catch (error: any) {
+    if (error?.code !== 'CONFLICT') {
+      toast(error?.message || String(error), 'error')
+      return
+    }
+    await loadState(state.projectId)
+    const { merged, conflicts } = mergeSettingsDraft(baseSettings, patch, state.data?.settings ?? {})
+    for (const [key, value] of Object.entries(merged)) {
+      const input = document.getElementById(inputIds[key]) as HTMLInputElement | HTMLSelectElement | null
+      if (input) input.value = String(value)
+    }
+    if (conflicts.length) {
+      toast(`${t("配置已被他人修改，以下字段双方都改过、以最新保存为准，请复核：")}${conflicts.join('、')}`, 'error')
+    } else if (Object.keys(merged).length) {
+      toast(t("配置已被他人修改：你的改动未与对方冲突，已合并回表单，请重新保存"), 'error')
+    } else {
+      toast(t("配置已被他人修改，本次没有待保存的改动"), 'error')
+    }
+  }
+}
+
+export async function handleBoardAction(action, target) {
+  switch (action) {
+    case 'retry-boot':
+      state.bootError = null
+      await init()
+      break
+    case 'nav': {
+      // 带 data-project-id 的导航：从调度页的任务行跳到该项目的任务页（顺带切回群聊上下文）。
+      const navProjectId = target.dataset.projectId
+      state.view = target.dataset.view || 'chat'
+      // 用量页三态（DSHBOTS-56）：侧栏入口=全局视图（与上下文零耦合）；群聊 tab=本群；单聊 tab=本 bot。
+      // 口径由入口决定，不再按当前上下文收敛。
+      if (state.view === 'usage') {
+        state.usageMode = target.dataset.usageMode === 'solo' || target.dataset.usageMode === 'domain'
+          ? target.dataset.usageMode
+          : 'global'
+        state.usageScope = 'global'
+        state.usageBot = null
+      }
+      if (navProjectId) {
+        state.projectId = navProjectId
+        state.chatMode = 'group'
+        state.replyTo = null
+        await refresh()
+        break
+      }
+      if (state.view === 'solo-config') void loadSoloDetail()
+      render()
+      break
+    }
+    case 'toggle-tree': {
+      const key = target.dataset.tree
+      if (key && key in state.tree) {
+        state.tree[key] = !state.tree[key]
+        render()
+      }
+      break
+    }
+    case 'toggle-task-group': {
+      // 分组折叠（DSHBOTS-58）：展开态记在 state.openPanels（key: task-group:<status>），默认全展开。
+      const status = target.dataset.status
+      if (!status) break
+      const key = taskGroupKey(status)
+      if (state.openPanels.has(key)) state.openPanels.delete(key)
+      else state.openPanels.add(key)
+      render()
+      break
+    }
+    case 'toggle-task-children': {
+      // 子任务折叠（DSHBOTS-58）：展开态记在 state.openPanels（key: task-children:<taskId>），默认收起。
+      const taskId = target.dataset.taskId
+      if (!taskId) break
+      const key = taskChildrenKey(taskId)
+      if (state.openPanels.has(key)) state.openPanels.delete(key)
+      else state.openPanels.add(key)
+      render()
+      break
+    }
+    case 'reset-scale': {
+      const scale = applyUiScale(1)
+      try { localStorage.setItem(UI_SCALE_KEY, String(scale)) } catch {}
+      render()
+      break
+    }
+    case 'set-theme': {
+      state.theme = applyUiTheme(target.dataset.theme)
+      try { localStorage.setItem(UI_THEME_KEY, state.theme) } catch {}
+      render()
+      break
+    }
+    case 'set-color-scheme': {
+      // 明暗三档：跟随宿主/系统、日间、夜间；手动档压过自动判定，落盘后即时生效。
+      const pref = setColorSchemePreference(target.dataset.colorScheme)
+      try { localStorage.setItem(UI_COLOR_SCHEME_KEY, pref) } catch {}
+      render()
+      break
+    }
+    case 'toggle-notify': {
+      await toggleDesktopNotify()
+      break
+    }
+    case 'save-settings': {
+      await saveSettingsWithMerge(
+        {
+          budget_currency: 'settings-currency',
+          memory_review: 'settings-memory-review',
+          global_token_budget: 'settings-global-token-budget',
+          global_cost_budget: 'settings-global-cost-budget',
+          retention_usage_days: 'settings-retention-usage',
+          retention_run_event_days: 'settings-retention-run',
+          retention_message_days: 'settings-retention-message',
+        },
+        t("系统设置已保存"),
+      )
+      break
+    }
+    // 界面语言（DSHBOTS-162）：保存后 loadState 拿回新的 state.language，
+    // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
+    case 'save-ui-language': {
+      const value = (document.getElementById('settings-ui-language') as HTMLInputElement | null)?.value ?? 'auto'
+      // B2/DSHBOTS-325 契约：patch 与 revision 分离；revision 仅在有值时携带。
+      const languagePayload: Record<string, unknown> = { patch: { ui_language: value } }
+      if (Number.isFinite(Number(state.data?.settingsRevision))) languagePayload.revision = state.data?.settingsRevision
+      await api('update_settings', languagePayload)
+      await loadState(state.projectId)
+      // poll() 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
+      syncLanguage()
+      toast(t('toast.uiLanguageSaved'), 'success')
+      break
+    }
+    // 运行参数（全局设置「运行参数」卡）：整卡收集 data-runtime-setting 元素按 key 提交。
+    // 空值语义由后端定义：空串 = 清除保存值回默认（bool 下拉有显式「跟随默认」空项）。
+    case 'save-runtime-settings': {
+      const patch: Record<string, string> = {}
+      for (const el of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-runtime-setting]')) {
+        const key = el.dataset.runtimeSetting
+        if (key) patch[key] = el.value
+      }
+      const payload: Record<string, unknown> = { patch }
+      if (Number.isFinite(Number(state.data?.settingsRevision))) payload.revision = state.data?.settingsRevision
+      await api('update_settings', payload)
+      await loadState(state.projectId)
+      toast(t('运行参数已保存，即时生效（env 显式设置仍优先）'), 'success')
+      break
+    }
+    case 'save-run-limits': {
+      await saveSettingsWithMerge(
+        {
+          run_timeout_minutes: 'settings-run-timeout',
+          stall_watchdog_minutes: 'settings-stall-watchdog',
+          review_idle_minutes: 'settings-review-idle',
+          review_auto_close: 'settings-review-auto-close',
+        },
+        t("运行时效已保存"),
+      )
+      break
+    }
+    // 团队指令段（B1/DSHBOTS-324）：保存/恢复默认；预算校验在后端，失败经 api 报错 toast。
+    case 'save-prompt-segment': {
+      const segment = target.dataset.segment
+      const text = (document.getElementById(`prompt-seg-${segment}`) as HTMLTextAreaElement | null)?.value ?? ''
+      await api('update_prompt_segment', { segment, text })
+      await loadState(state.projectId)
+      toast(t("团队指令已保存，新会话生效"), 'success')
+      break
+    }
+    case 'reset-prompt-segment': {
+      await api('update_prompt_segment', { segment: target.dataset.segment, text: '' })
+      await loadState(state.projectId)
+      toast(t("已恢复默认指令"), 'success')
+      break
+    }
+    // 审批免审规则（DSHBOTS-365）：服务端权威整表替换——保存 = 存量行 + 新增行全量收集；
+    // 删除 = 去掉该行后整表提交。校验在后端（主维度必填一项等），失败经 api 报错 toast。
+    case 'save-approval-rules':
+    case 'approval-rule-delete': {
+      const removeId = action === 'approval-rule-delete' ? target.dataset.ruleId : null
+      const readRow = (row: Element | null) => {
+        if (!row) return null
+        const value = (name: string) => (row.querySelector(`[data-field="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)?.value ?? ''
+        const item = {
+          path_prefix: value('path_prefix'), command: value('command'), bot_id: value('bot_id'),
+          tool_name: value('tool_name'), sandbox: value('sandbox'), note: value('note'),
+        }
+        return item.path_prefix.trim() || item.command.trim() ? item : null
+      }
+      const rules: Record<string, string>[] = []
+      for (const row of document.querySelectorAll<HTMLElement>('[data-approval-rule-id]')) {
+        if (removeId && row.dataset.approvalRuleId === removeId) continue
+        const item = readRow(row)
+        if (item) rules.push({ ...item, id: row.dataset.approvalRuleId })
+      }
+      const fresh = readRow(document.getElementById('approval-rule-new'))
+      if (fresh) rules.push(fresh)
+      await api('update_approval_rules', { rules })
+      await loadState(state.projectId)
+      toast(action === 'approval-rule-delete' ? t("规则已删除") : t("审批免审规则已保存"), 'success')
+      break
+    }
+    case 'reconcile-usage': {
+      const result = await api('reconcile_usage', {})
+      const reconciliation = result?.reconciliation ?? {}
+      toast(`${t("对账完成：检查")} ${reconciliation.runsChecked ?? 0} ${t("个运行，差异")} ${reconciliation.mismatched ?? 0} ${t("个")}`, 'success')
+      await loadState(state.projectId)
+      break
+    }
+    case 'check-dsh-update': { // @ts-ignore
+      state.dshUpdate = await api('dsh_update_info', {})
+      render()
+      break
+    }
+    case 'wechat-login': {
+      const result = await api('wechat_login', {})
+      state.wechatAuth = { qrSvg: result.qrSvg, qrCodeUrl: result.qrCodeUrl }
+      toast(t("二维码已生成，请用微信扫码"), 'success')
+      startWechatPoll()
+      render()
+      break
+    }
+    case 'wechat-code': {
+      const code = (document.getElementById('wechat-code') as HTMLInputElement | null)?.value?.trim()
+      if (!code) {
+        toast(t("请输入微信验证码"), 'error')
+        break
+      }
+      await api('wechat_code', { code })
+      state.wechatAuth = null
+      toast(t("验证码已提交"), 'success')
+      startWechatPoll()
+      break
+    }
+    case 'wechat-logout': {
+      if (!window.confirm(t("退出绑定后需要重新扫码才能恢复推送。确认退出？"))) break
+      await api('wechat_logout', {})
+      state.wechatAuth = null
+      stopWechatPoll()
+      await refresh({ quiet: true })
+      toast(t("已退出微信绑定"), 'success')
+      break
+    }
+    case 'select-project':
+      state.projectId = target.dataset.projectId
+      state.replyTo = null // 切项目即切群聊，引用不能跨项目
+      state.chatMode = 'group'
+      state.view = 'chat'
+      // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
+      const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: 'group', soloBotId: null })
+      render()
+      try {
+        await refresh()
+      } finally {
+        // refresh 成功时内部已 render；只有它没落真实内容（取数失败或项目回退到别的项目）
+        // 时才补一次，否则骨架会一直停在那里。
+        const stuckOnSkeleton = chatContextPending()
+        endChatPending(pendingSeq)
+        if (stuckOnSkeleton) render()
+      }
+      break
+    case 'refresh':
+      await refresh()
+      break
+    case 'close-modal':
+      closeModal()
+      break
+    case 'new-project':
+      openModal({ type: 'new-project' })
+      break
+    case 'new-bot':
+      openModal({ type: 'new-bot' })
+      break
+    case 'new-task': {
+      if (!activeProject()) {
+        toast(t("请先创建项目"), 'error')
+        break
+      }
+      openModal({ type: 'new-task' })
+      break
+    }
+    // 派生子任务（D-63）：从任务详情 footer 进入，复用新建任务表单并预填 parentTaskId；
+    // 任何任务都可派生（子任务同样可以作为父任务），不加额外限制。
+    case 'derive-subtask': {
+      if (!activeProject()) {
+        toast(t("请先创建项目"), 'error')
+        break
+      }
+      const parentId = target.dataset.taskId || ''
+      if (!parentId || !(state.data?.tasks ?? []).some(task => task.id === parentId)) {
+        toast(t("父任务不存在或已刷新，请重试"), 'error')
+        break
+      }
+      openModal({ type: 'new-task', parentTaskId: parentId })
+      break
+    }
+    case 'new-memory':
+      if (!activeProject()) {
+        toast(t("请先创建项目"), 'error')
+        break
+      }
+      openModal({ type: 'memory', memory: null })
+      break
+    case 'new-proposal':
+      if (!activeProject()) {
+        toast(t("请先创建项目"), 'error')
+        break
+      }
+      openModal({ type: 'proposal', kind: target.dataset.kind || 'bot_update' })
+      break
+    case 'new-price':
+      openModal({ type: 'price' })
+      break
+    case 'edit-price': {
+      const model = target.dataset.model
+      const provider = target.dataset.provider ?? ''
+      const price = (state.data?.prices ?? []).find(item => item.model === model && (item.provider ?? '') === provider)
+      openModal({ type: 'price', price: price ?? { model, provider } })
+      break
+    }
+    case 'reset-price': {
+      const model = target.dataset.model
+      if (!window.confirm(t("把 ${model} 的价格恢复为配置默认值？", { model: model }))) break
+      await api('reset_price', { provider: target.dataset.provider ?? '', model })
+      closeModal()
+      await loadState(state.projectId, { quiet: true })
+      render()
+      toast(t("${model} 已恢复默认价格", { model: model }), 'success')
+      break
+    }
+    case 'open-task':
+      await openTask(target.dataset.taskId)
+      break
+    case 'open-trajectory':
+      await openTrajectory(target.dataset.runId)
+      break
+    case 'edit-bot':
+      await openBot(target.dataset.botId)
+      break
+    case 'send-message':
+      await sendMessage()
+      break
+    case 'load-older':
+      await loadOlderMessages()
+      break
+    default:
+      return false
+  }
+  return true
+}

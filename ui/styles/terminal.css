@@ -1,0 +1,398 @@
+/* ---------------------------------------------------------------- Project terminal tab
+   One machine in three states: idle (empty well), running (accent pulse), history (log rows).
+   Hierarchy is carried by value, not by decoration: the chrome strip is the only ornament,
+   the output area is the only recessed (darker) surface on the page. */
+.terminal-page {
+    display: grid;
+    /* 主列自适应，右列固定可读宽度；窄屏整块落到下方（见下方媒体查询）。 */
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+    gap: 16px;
+    align-items: start;
+    max-width: 1280px;
+}
+.terminal-main {
+    min-width: 0;
+}
+.terminal-side {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+.terminal-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--ink-2);
+    /* 提示是旁注不是警报：左端一条 --star 竖线 + 淡洗底，不再用整圈描边抢主卡的视觉重量（DSHBOTS-74）。 */
+    border: 0;
+    border-left: 2px solid var(--star);
+    background: var(--star-wash);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: var(--fs-small);
+    line-height: 1.6;
+}
+/* 图标必须显式定尺寸：SVG 无 width/height 属性时在弹性行里会撑成整屏宽（DSHBOTS-66）。 */
+.terminal-warn-icon {
+    width: 16px;
+    height: 16px;
+}
+.terminal-warn svg {
+    color: var(--star);
+    flex: 0 0 auto;
+}
+.terminal-warn-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.terminal-card {
+    padding: 0;
+    overflow: hidden;
+    border-radius: 14px;
+    box-shadow: var(--shadow-card);
+}
+
+/* chrome strip: a quiet title bar, so the card reads as a machine not a form */
+.terminal-chrome {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 38px;
+    padding: 0 16px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+}
+.terminal-chrome-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+}
+.terminal-chrome-dots i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    opacity: 0.32;
+}
+.terminal-chrome-label {
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--ink-3);
+}
+.terminal-chrome-path {
+    margin-left: auto;
+    font: 500 var(--fs-caption) var(--mono);
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 46ch;
+}
+.terminal-card.is-running .terminal-chrome-dots i:last-child {
+    background: var(--accent);
+    opacity: 1;
+    animation: terminal-pulse 1.5s ease-in-out infinite;
+}
+@keyframes terminal-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+        transform: scale(0.85);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .terminal-card.is-running .terminal-chrome-dots i:last-child {
+        animation: none;
+        opacity: 1;
+    }
+}
+
+/* command bar: the prompt is the anchor, the field stays flat until focused */
+.terminal-input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    /* 机身条与标题栏同色：深色井被两条浅带夹住，井才读成凹陷的屏幕而不是一块浮板（DSHBOTS-74）。 */
+    background: var(--surface-2);
+    border-top: 1px solid var(--line);
+}
+.terminal-prompt {
+    font: 600 0.9375rem var(--mono);
+    color: var(--accent-text);
+    flex: 0 0 auto;
+}
+.terminal-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: var(--fs-small);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line-2);
+    border-radius: 0;
+    padding: 5px 2px;
+}
+.terminal-input:focus {
+    outline: none;
+    background: transparent;
+    border-bottom-color: var(--accent);
+    box-shadow: 0 1px 0 0 var(--accent);
+}
+.terminal-input::placeholder {
+    color: var(--ink-3);
+    font-family: var(--sans);
+}
+.terminal-input:disabled {
+    opacity: 0.5;
+}
+.terminal-kbd {
+    font: 500 var(--fs-caption) var(--mono);
+    color: var(--ink-3);
+    /* 机身条已是 --surface-2，键位提示改用 --surface-3 才浮得出来（DSHBOTS-74）。 */
+    background: var(--surface-3);
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 1px 5px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+/* running state: an accent edge on the left, so the eye finds the live row instantly */
+.terminal-active-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--accent-wash);
+    box-shadow: inset 2px 0 0 0 var(--accent);
+    font-size: var(--fs-small);
+}
+.terminal-active-cmd {
+    font-family: var(--mono);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.terminal-active-row .run-clock {
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+}
+.terminal-stop {
+    flex: 0 0 auto;
+}
+
+/* the well: the only dark surface in the app, in both themes */
+.terminal-output-wrap {
+    position: relative;
+}
+.terminal-output {
+    margin: 0;
+    padding: 14px 16px;
+    min-height: 220px;
+    max-height: 52vh;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: var(--fs-small);
+    line-height: 1.7;
+    color: var(--console-ink);
+    background: var(--console-bg);
+    /* 井沿：1px 内描边把深色井从机身里切出来；暗色主题下机身条更浅，井才真正读成凹陷面（DSHBOTS-74）。 */
+    box-shadow:
+        inset 0 0 0 1px var(--console-line),
+        inset 0 1px 3px rgba(0, 0, 0, 0.28);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+    /* 细滚动条：井内滚动不喧宾夺主，hover 才显形（DSHBOTS-74）。 */
+    scrollbar-width: thin;
+    scrollbar-color: var(--console-line) transparent;
+}
+.terminal-output::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+.terminal-output::-webkit-scrollbar-track {
+    background: transparent;
+}
+.terminal-output::-webkit-scrollbar-thumb {
+    background: var(--console-line);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+}
+.terminal-output::-webkit-scrollbar-thumb:hover {
+    background: var(--console-ink-2);
+    background-clip: padding-box;
+}
+/* 空态：独立于 pre 的说明层，图标显式定尺寸，避免 SVG 在弹性容器里被撑开（DSHBOTS-66）。 */
+.terminal-output-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px;
+    text-align: center;
+    font-family: var(--sans);
+    font-size: var(--fs-small);
+    line-height: 1.7;
+    color: var(--console-ink-2);
+    pointer-events: none;
+}
+.terminal-empty-icon {
+    width: 34px;
+    height: 34px;
+    opacity: 0.5;
+}
+.terminal-output-empty[hidden] {
+    display: none;
+}
+
+/* history: a log list, one row per command, separated by hairlines */
+/* 历史卡是终端卡的附属仪表：投影更浅、标题条沿用机身的 --surface-2（DSHBOTS-74）。 */
+.terminal-history-card {
+    padding: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    box-shadow: var(--shadow-1);
+}
+.terminal-history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+}
+/* 计数标签压在 --surface-2 标题条上，要用 --surface-3 才看得见（DSHBOTS-74）。 */
+.terminal-history-head .tag {
+    background: var(--surface-3);
+}
+.terminal-history {
+    display: flex;
+    flex-direction: column;
+    max-height: 420px;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-2) transparent;
+}
+.terminal-history::-webkit-scrollbar {
+    width: 10px;
+}
+.terminal-history::-webkit-scrollbar-track {
+    background: transparent;
+}
+.terminal-history::-webkit-scrollbar-thumb {
+    background: var(--line-2);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+}
+.terminal-history::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-3);
+    background-clip: padding-box;
+}
+/* 空列表：与普通卡片空态同一口径，不再靠行内样式撑开（DSHBOTS-74）。 */
+.terminal-history-empty {
+    padding: 16px 14px;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+}
+.terminal-history-item {
+    /* 窄列里命令是主角：状态徽标占左列，命令与元信息上下两行（DSHBOTS-66）。 */
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 2px;
+    width: 100%;
+    padding: 8px 14px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-left: 2px solid var(--line-2);
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--ink);
+    font: inherit;
+    transition:
+        background-color 0.13s ease,
+        border-left-color 0.13s ease;
+}
+.terminal-history-item:last-child {
+    border-bottom: 0;
+}
+.terminal-history-item:hover {
+    background: var(--surface-2);
+    border-left-color: var(--accent);
+}
+.terminal-history-item[data-status="succeeded"] {
+    border-left-color: var(--green);
+}
+.terminal-history-item[data-status="failed"],
+.terminal-history-item[data-status="timeout"],
+.terminal-history-item[data-status="interrupted"] {
+    border-left-color: var(--danger);
+}
+.terminal-history-item[data-status="running"] {
+    border-left-color: var(--star);
+}
+.terminal-history-item .pill {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-self: start;
+    font-size: var(--fs-caption);
+}
+/* 层级：命令是行内主角（--ink），元信息退到 --ink-3（DSHBOTS-74）。 */
+.terminal-history-cmd {
+    grid-column: 2;
+    grid-row: 1;
+    font-family: var(--mono);
+    font-size: var(--fs-small);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.terminal-history-meta {
+    grid-column: 2;
+    grid-row: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    font-variant-numeric: tabular-nums;
+    min-width: 0;
+    white-space: normal;
+    flex-wrap: wrap;
+}
+
+/* 窄屏：右列整块落到终端卡下方，避免被挤成竖排一字一行（DSHBOTS-66）。 */
+@media (max-width: 980px) {
+    .terminal-page {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .terminal-history {
+        max-height: 320px;
+    }
+}

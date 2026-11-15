@@ -1,0 +1,19 @@
+DSH Team Bots
+Copyright 2026 DSH Team Bots contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Architecture and DSH integration were informed by:
+- DS Bot, Copyright 2026 Fei2411 and the DS Bot contributors, Apache-2.0
+  https://github.com/Fei2411/DS-Bot
+- Cindy, Copyright Cindy contributors, Apache-2.0
+  https://github.com/makecindy/cindy
+
+Collaboration protocol ideas (mutation fence, tiered notifications,
+ledger-authoritative task events, acceptance-boundary memory reminder) were
+informed by dsh-agent-team, Copyright Contexera contributors, MIT License:
+  https://github.com/Contexera/dsh-agent-team
+
+Runtime dependency:
+- DeepSeek Harness (DSH), Copyright (c) 2026 DeepSeek, MIT License
+  https://github.com/deepseek-ai/deepseek-harness

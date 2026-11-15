@@ -1,0 +1,409 @@
+// DSHBOTS-286：512 轮结转 + 每 64 轮闲时总结压缩（忙时推后/合批）。
+// 覆盖：默认值（512/64）与生效链、64 轮边界闲时触发、幂等不重排、忙时推后跨窗口合批、
+// 压缩≠结转（不 alias 化/不新建/不排 rollover）、compact=0 关闭、压缩运行路由回原会话
+// 与提示词/收尾留痕、结转后任务亲和路由（未终态任务落旧会话/新任务落活跃控制面绑定）、
+// alias 会话不重复结转、旧会话（承接任务流量）仍被压缩触发。
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { openDatabase } from '../src/db.js'
+import {
+  SESSION_COMPACT_CTX_TOKENS_KEY,
+  SESSION_COMPACT_TURNS_KEY,
+  resolveConfig,
+  effectiveSessionCompactTurns,
+  rolloverSummaryKey,
+  sessionCompactMarkerKey,
+} from '../src/config.js'
+import { TeamService } from '../src/service.js'
+import { DshRuntime } from '../src/runtime.js'
+
+const logger = { info() {}, warn() {}, error() {} }
+
+class StubRuntime {
+  setCompletionHandler() {}
+  async catalog() { return [] }
+  async validateBotConfig() {}
+}
+
+async function setup({ rolloverTurns = 999, compactTurns = 4, compactCtxTokens = 0, rolloverCtxTokens = 0 } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-session-compact-'))
+  const workspace = join(root, 'workspace')
+  const dataDir = join(root, 'data')
+  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
+  const config = resolveConfig({
+    workspace, dataDir, skillRoot: join(workspace, '.agents'),
+    modelCacheMs: 0, schedulerIntervalMs: 30_000,
+    sessionRolloverTurns: rolloverTurns, sessionCompactTurns: compactTurns,
+    // P2 体积判据默认关闭：既有用例守窗口语义（不播种 usage_events），体积门由专门用例覆盖。
+    sessionCompactCtxTokens: compactCtxTokens, sessionRolloverCtxTokens: rolloverCtxTokens,
+  })
+  const store = openDatabase(config.dbPath)
+  const service = new TeamService({ store, config, logger })
+  service.attachRuntime(new StubRuntime())
+  await service.initialize()
+  service.started = true
+  return { root, store, service, config }
+}
+
+const cleanup = async ({ root, store, service }) => {
+  try { service.started = false } catch {}
+  try { store.close() } catch {}
+  await rm(root, { recursive: true, force: true })
+}
+
+const captureHost = (sink = []) => ({
+  created: [] as string[],
+  sessionController: {
+    resolveAgent: async () => ({}),
+    selectModel: async () => ({}),
+    create: async () => {
+      const sessionId = `sess-new-${captureCounter()}`
+      return { sessionId }
+    },
+    prompt: async (request: any) => { sink.push(request.content.map((part: any) => part.text ?? '').join('\n')) },
+    cancel: async () => {},
+  },
+})
+
+let createdSeq = 0
+const captureCounter = () => { createdSeq += 1; return createdSeq }
+
+const newRuntime = (ctx: any, config: any, store: any) => new DshRuntime({ ctx, config, store, logger } as any)
+
+async function primeProject(service: any, store: any) {
+  const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+  const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
+  const project = await service.createProject({ name: 'Compact', key: 'CMP', ownerBotId: director.id, memberIds: [dev.id] })
+  return { director, dev, project }
+}
+
+// 种子绑定默认即 bot 的 kind='bot' 控制面绑定（DSHBOTS-289 收敛后唯一活跃车道）。
+const bindSession = (store: any, { botId, projectId, sessionId, kind = 'bot', taskId = null }) => {
+  store.run(
+    'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    sessionId, botId, projectId, kind, taskId, new Date().toISOString(),
+  )
+}
+
+// 轮次口径 = runs 表按 session_id 的 COUNT(*)（不限 status），直接落库模拟历史运行。
+const seedRuns = (store: any, { projectId, botId, sessionId, count, kind = 'chat', status = 'succeeded', idPrefix, taskId = null }: { projectId: string | null; botId: string; sessionId: string; count: number; kind?: string; status?: string; idPrefix?: string; taskId?: string | null }) => {
+  const at = new Date().toISOString()
+  for (let i = 0; i < count; i += 1) {
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at)
+       VALUES (?, ?, ?, ?, ?, 'read', 'test', ?, 1, ?, ?, ?)`,
+      `${idPrefix ?? `run_seed_${sessionId}`}__${i}`, projectId, botId, taskId, kind, status, `seed:${idPrefix ?? sessionId}:${status}:${i}`, sessionId, at,
+    )
+  }
+}
+
+const compactRuns = (store: any) => store.all("SELECT * FROM runs WHERE kind = 'session_compact'")
+const rolloverRuns = (store: any) => store.all("SELECT * FROM runs WHERE kind = 'rollover_summary'")
+
+// 播种会话当前上下文规模（P2）：给该会话最近一条运行挂一次模型调用记账，
+// input+cache_read 之和即 sessionContextTokens 取到的「当前上下文」。
+const seedUsage = (store: any, { sessionId, ctx: tokens, occurredAt }: { sessionId: string; ctx: number; occurredAt: string }) => {
+  const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY rowid DESC LIMIT 1', sessionId)
+  if (!run) throw new Error('seedUsage 需要会话上已有运行行')
+  store.run(
+    `INSERT INTO usage_events(id, source_key, run_id, input_tokens, cache_read_tokens, output_tokens, occurred_at, created_at)
+     VALUES (?, ?, ?, ?, 0, 0, ?, ?)`,
+    `use_seed_${sessionId}_${occurredAt}`, `seedusage:${sessionId}:${occurredAt}`, run.id, tokens, occurredAt, occurredAt,
+  )
+}
+
+test('默认值与生效链：rollover 默认 512、compact 默认 64，设置页 0 可关闭压缩', () => {
+  const config = resolveConfig({ workspace: '/tmp/x', dataDir: '/tmp/x' })
+  assert.equal(config.sessionRolloverTurns, 512, '结转阈值默认应为 512')
+  assert.equal(config.sessionCompactTurns, 64, '压缩窗口默认应为 64')
+  assert.equal(effectiveSessionCompactTurns(config, () => 0), 0, '设置页保存 0 应关闭压缩')
+  assert.equal(effectiveSessionCompactTurns(config, () => '96'), 96, '设置页保存值应覆盖默认')
+})
+
+test('64 轮边界闲时触发：跨窗口且闲时排一条压缩运行，复用不重排', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 4 })
+
+    const host = captureHost()
+    const runtime = newRuntime(host, ctx.config, ctx.store)
+    const sessionId = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    assert.equal(sessionId, 'sess-old', '压缩不换会话')
+
+    const queued = compactRuns(ctx.store)
+    assert.equal(queued.length, 1, '跨过窗口边界应恰好排一条压缩运行')
+    assert.equal(queued[0].status, 'queued')
+    assert.equal(queued[0].mode, 'read', '压缩运行只读')
+    assert.equal(queued[0].session_id, 'sess-old', '压缩运行必须复用原会话')
+    assert.equal(queued[0].trigger_ref, 'sess-old')
+    assert.equal(queued[0].idempotency_key, 'session_compact:sess-old:1', '幂等键带窗口号')
+    assert.equal(ctx.store.setting(sessionCompactMarkerKey('sess-old')), '4', '窗口标记应推进到窗口下界')
+
+    // 压缩运行自身入队后轮数 +1（仍在窗口 1 内）：再次复用不得重排。
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    assert.equal(compactRuns(ctx.store).length, 1, '同窗口不得重复排队')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('忙时推后并合批：会话有其他在跑运行时不排，空闲后跨窗口一次性补排', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 4 })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 1, status: 'running', idPrefix: 'run_busy' })
+
+    const runtime = newRuntime(captureHost(), ctx.config, ctx.store)
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    assert.equal(compactRuns(ctx.store).length, 0, '忙时不得排压缩运行')
+
+    ctx.store.run("UPDATE runs SET status = 'succeeded' WHERE id = 'run_busy__0'")
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    const queued = compactRuns(ctx.store)
+    assert.equal(queued.length, 1, '空闲后应补排')
+    assert.equal(queued[0].idempotency_key, 'session_compact:sess-old:1', '推后触发仍归原窗口（合批不重不漏）')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('运行中触发（生产断点回归）：bot 自己的运行进行中跨窗口，压缩运行必须真实落库', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 4 })
+    // 生产形态：调度器已领取当前运行（running、session_id 尚未写回——startRun 在 ensureSession
+    // 之后才回填），maybeCompactSession 按会话查忙看不见它，但它的 (bot, project) 占着串行域。
+    // 修复前：INSERT OR IGNORE 撞 one_active_run_per_bot 被静默吞掉，标记照常推进、运行永不落库
+    // （live 库实测 4 个会话标记推进到 64/128/320，session_compact 运行 0 条）。
+    ctx.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_current', ?, ?, 'chat', 'read', 'mention', 'running', 1, 'chat:cur:1', ?)`,
+      project.id, dev.id, new Date().toISOString(),
+    )
+
+    const runtime = newRuntime(captureHost(), ctx.config, ctx.store)
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat', id: 'run_current' } })
+    const queued = compactRuns(ctx.store)
+    assert.equal(queued.length, 1, '当前运行占串行域时也必须能排入压缩运行（治理运行豁免串行索引）')
+    assert.equal(queued[0].status, 'queued')
+    assert.equal(queued[0].session_id, 'sess-old', '压缩运行复用原会话')
+    assert.equal(ctx.store.setting(sessionCompactMarkerKey('sess-old')), '4', '标记推进到窗口下界')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('P2 体积下限：窗口跨过但体积不足不排也不耗标记，达下限才排；设置页保存 0 关闭体积门', async () => {
+  const ctx = await setup({ compactTurns: 4, compactCtxTokens: 100_000 })
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 4 })
+    const t0 = new Date('2026-11-08T00:00:00Z').toISOString()
+    const t1 = new Date('2026-11-08T00:01:00Z').toISOString()
+    seedUsage(ctx.store, { sessionId: 'sess-old', ctx: 60_000, occurredAt: t0 })
+
+    const runtime = newRuntime(captureHost(), ctx.config, ctx.store)
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    assert.equal(compactRuns(ctx.store).length, 0, '窗口跨过但体积低于下限：瘦会话不压缩')
+    assert.equal(ctx.store.setting(sessionCompactMarkerKey('sess-old')), null, '体积不足不得消耗窗口标记')
+
+    seedUsage(ctx.store, { sessionId: 'sess-old', ctx: 120_000, occurredAt: t1 })
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    const queued = compactRuns(ctx.store)
+    assert.equal(queued.length, 1, '体积达下限后同窗口补排压缩运行')
+    assert.equal(queued[0].idempotency_key, 'session_compact:sess-old:1')
+
+    // 设置页保存 0 = 关闭体积门（回到纯窗口口径），不播种用量也能排。
+    const ctx2 = await setup({ compactTurns: 4, compactCtxTokens: 100_000 })
+    try {
+      const p2 = await primeProject(ctx2.service, ctx2.store)
+      bindSession(ctx2.store, { botId: p2.dev.id, projectId: p2.project.id, sessionId: 'sess-plain' })
+      seedRuns(ctx2.store, { projectId: p2.project.id, botId: p2.dev.id, sessionId: 'sess-plain', count: 4 })
+      ctx2.store.setSetting(SESSION_COMPACT_CTX_TOKENS_KEY, '0')
+      const runtime2 = newRuntime(captureHost(), ctx2.config, ctx2.store)
+      await runtime2.ensureSession(p2.dev, p2.project, { run: { kind: 'chat' } })
+      assert.equal(compactRuns(ctx2.store).length, 1, '保存 0 关闭体积门后纯窗口口径照排')
+    } finally {
+      await cleanup(ctx2)
+    }
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('压缩≠结转：不 alias 化绑定、不新建会话、不排 rollover；压缩运行回原会话并留痕', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 4 })
+
+    const host = captureHost()
+    const runtime = newRuntime(host, ctx.config, ctx.store)
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    assert.equal(rolloverRuns(ctx.store).length, 0, '压缩不得触发结转摘要')
+    assert.equal(host.created.length, 0, '压缩不得新建会话')
+    assert.equal(ctx.store.get('SELECT alias FROM session_bindings WHERE session_id = ?', 'sess-old').alias, 0, '压缩后绑定仍是活跃绑定')
+
+    const compact = compactRuns(ctx.store)[0]
+    assert.equal(await runtime.ensureSession(dev, project, { run: compact }), 'sess-old', '压缩运行应回原会话')
+    const prompt = runtime.promptFor({ run: compact, bot: dev, project, sessionId: 'sess-old' })
+    assert.ok(prompt.includes('# Session compaction request'), '应下发压缩总结提示词')
+    assert.ok(!prompt.includes('# Handoff summary'), '压缩提示词不得混入结转摘要块')
+
+    await ctx.service.finishRun({ runId: compact.id, status: 'succeeded', output: '当前聚焦 X，进行中 Y，下一步 Z。' })
+    assert.equal(
+      ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_done'", compact.id).length,
+      1,
+      '成功应留 session_compact_done 事件',
+    )
+    assert.equal(ctx.store.setting(rolloverSummaryKey(dev.id, project.id)), null, '压缩产出不得写入结转摘要槽')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('P1 宿主折叠：session_compact 收尾调用 compactNow 并留痕；宿主无缝隙降级 skipped', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 4 })
+
+    const foldCalls: any[] = []
+    const foldHost = {
+      sessionController: {
+        resolveAgent: async () => ({ agent: { id: 'agent-live' } }),
+        selectModel: async () => ({}),
+        create: async () => ({ sessionId: 'sess-new-x' }),
+        prompt: async () => {},
+        cancel: async () => {},
+      },
+      get: (name: string) => name === 'compaction'
+        ? { compactNow: async (agent: any, signal: AbortSignal) => { foldCalls.push({ agent, signal }); return { shadowedSeqs: [1, 2, 3], shadowedTokenCount: 4242, summarySeq: 9 } } }
+        : undefined,
+    }
+    const runtime = new DshRuntime({ ctx: foldHost as any, config: ctx.config, store: ctx.store, logger } as any)
+    ctx.service.attachRuntime(runtime)
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    const compact = compactRuns(ctx.store)[0]
+    await ctx.service.finishRun({ runId: compact.id, status: 'succeeded', output: '当前聚焦 X，进行中 Y，下一步 Z。' })
+    await new Promise(resolve => setImmediate(resolve))
+
+    assert.equal(foldCalls.length, 1, '收尾应恰好触发一次宿主折叠')
+    assert.equal(foldCalls[0].agent.id, 'agent-live', '折叠作用于压缩运行的原会话 agent')
+    assert.ok(foldCalls[0].signal instanceof AbortSignal, '折叠请求带取消信号（有界超时）')
+    assert.equal(
+      ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_fold'", compact.id).length,
+      1,
+      '折叠完成应留 session_compact_fold 事件（含收拢规模）',
+    )
+    const foldMsg = ctx.store.get("SELECT message FROM run_events WHERE run_id = ? AND type = 'session_compact_fold'", compact.id)?.message
+    assert.ok(foldMsg.includes('4242'), '留痕带折叠 token 数')
+
+    // 降级：宿主未提供 compaction 服务 → skipped 留痕可见，不静默。
+    const ctx2 = await setup()
+    try {
+      const p2 = await primeProject(ctx2.service, ctx2.store)
+      bindSession(ctx2.store, { botId: p2.dev.id, projectId: p2.project.id, sessionId: 'sess-bare' })
+      seedRuns(ctx2.store, { projectId: p2.project.id, botId: p2.dev.id, sessionId: 'sess-bare', count: 4 })
+      const runtime2 = newRuntime(captureHost(), ctx2.config, ctx2.store)
+      ctx2.service.attachRuntime(runtime2)
+      await runtime2.ensureSession(p2.dev, p2.project, { run: { kind: 'chat' } })
+      const compact2 = compactRuns(ctx2.store)[0]
+      await ctx2.service.finishRun({ runId: compact2.id, status: 'succeeded', output: '总结。' })
+      await new Promise(resolve => setImmediate(resolve))
+      assert.equal(
+        ctx2.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_fold_skipped'", compact2.id).length,
+        1,
+        '宿主无缝隙应留 skipped 事件（降级可见）',
+      )
+    } finally {
+      await cleanup(ctx2)
+    }
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('compact=0 关闭：跨任意轮数都不排压缩运行', async () => {
+  const ctx = await setup({ compactTurns: 0 })
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 300 })
+
+    const runtime = newRuntime(captureHost(), ctx.config, ctx.store)
+    await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
+    assert.equal(compactRuns(ctx.store).length, 0, '关闭时不得排压缩运行')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('结转后任务亲和：未终态任务消息落旧会话，新任务落活跃控制面绑定，alias 不重复结转，旧会话仍可被压缩触发', async () => {
+  const ctx = await setup({ rolloverTurns: 3, compactTurns: 0 })
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    // 任务 T1：未终态，历史运行都落在旧控制面会话 sess-old（单绑定模型：任务流量与控制面同会话）。
+    const t1 = await ctx.service.createTask({ projectId: project.id, title: '旧任务', assigneeBotId: dev.id }, ctx.service.actor())
+    ctx.store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", t1.id)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 3 })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 2, kind: 'task', idPrefix: 'run_t1', taskId: t1.id })
+
+    const host = captureHost()
+    const runtime = newRuntime(host, ctx.config, ctx.store)
+    // 项目会话超阈值且摘要就绪 → 结转：sess-old alias 化，新会话成为活跃绑定。
+    ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '交接摘要。')
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-new-1', '超阈值应结转开新会话')
+    assert.equal(ctx.store.get('SELECT alias FROM session_bindings WHERE session_id = ?', 'sess-old').alias, 1, '旧会话应 alias 化')
+    const createdAfterRollover = host.created.length
+
+    // ① 任务亲和：未终态 T1 的消息按 runs 归属落旧会话（活跃绑定已换新会话）。
+    const task = ctx.store.get('SELECT * FROM tasks WHERE id = ?', t1.id)
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task }), 'sess-old', '未终态任务消息应落旧会话')
+    // ② 幂等：旧会话轮数远超阈值且摘要仍在，亲和复用也不得二次结转。
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 5, idPrefix: 'run_more' })
+    ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '再次交接摘要。')
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task }), 'sess-old', 'alias 会话不得重复结转')
+    assert.equal(host.created.length, createdAfterRollover, '亲和复用不得再新建会话')
+    assert.equal(rolloverRuns(ctx.store).length, 0, 'alias 会话不得重排结转摘要')
+
+    // ③ 新任务（无 runs 归属）：不享亲和，也不进控制面绑定——开「bot 名+任务号」专属
+    //    任务会话（单 bot 多任务并行），落 kind='task' 绑定行。
+    const t2 = await ctx.service.createTask({ projectId: project.id, title: '新任务', assigneeBotId: dev.id }, ctx.service.actor())
+    const task2 = ctx.store.get('SELECT * FROM tasks WHERE id = ?', t2.id)
+    const fresh = await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task: task2 })
+    assert.equal(fresh, 'sess-new-2', '新任务开专属任务会话（结转已用 sess-new-1）')
+    const taskBinding = ctx.store.get("SELECT * FROM session_bindings WHERE session_id = ?", fresh)
+    assert.equal(taskBinding.kind, 'task', '任务会话绑定行 kind=task')
+    assert.equal(taskBinding.task_id, t2.id, '任务会话绑定行带 task_id')
+    assert.equal(taskBinding.alias, 0)
+    assert.equal(
+      ctx.store.get("SELECT COUNT(*) AS n FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0", dev.id)?.n,
+      1,
+      '活跃控制面绑定仍只有一条（任务会话不占控制面绑定）',
+    )
+
+    // ④ 旧会话（alias、承接未终态任务流量）跨压缩窗口：仍应被压缩触发（设置页开压缩）。
+    ctx.store.setSetting(SESSION_COMPACT_TURNS_KEY, '8')
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task }), 'sess-old')
+    const queued = compactRuns(ctx.store)
+    assert.equal(queued.length, 1, '旧会话承接流量仍应被压缩触发')
+    assert.equal(queued[0].session_id, 'sess-old')
+    assert.equal(queued[0].idempotency_key, 'session_compact:sess-old:1', '10 轮跨入第 2 个窗口（窗口号 1）')
+  } finally {
+    await cleanup(ctx)
+  }
+})

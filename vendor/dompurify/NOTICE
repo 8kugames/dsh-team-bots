@@ -1,0 +1,6 @@
+DOMPurify 3.2.6, Copyright 2025 Dr.-Ing. Mario Heiderich, Cure53 and DOMPurify
+contributors (Apache-2.0 OR MPL-2.0 dual license, see LICENSE, upstream
+https://github.com/cure53/DOMPurify). Copied from npm tarball
+dompurify-3.2.6.tgz (registry.npmjs.org). Only dist/purify.min.js is kept
+(UMD minified build the plugin UI loads as a plain script tag); package.json
+and LICENSE are recorded verbatim. No source edits.

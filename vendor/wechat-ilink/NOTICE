@@ -1,0 +1,12 @@
+# vendor/wechat-ilink 来源与许可
+
+本目录是从 cindy 项目（https://github.com/makecindy/cindy，Apache-2.0）的
+`packages/wechat-ilink` 包编译打包得到的单文件 ESM 产物，未做源码修改。
+
+- 上游包：@cindy/wechat-ilink（cindy monorepo，main 分支，2026-11-01 拉取）
+- 打包方式：esbuild --bundle --format=esm --platform=node --target=node22
+- 协议出处：腾讯官方 https://github.com/Tencent/openclaw-weixin （MIT，
+  见 LICENSE.tencent-openclaw-weixin，随包保留）
+- 该包为 host 无关的 iLink 协议客户端（线编码、扫码授权、长轮询、发文本、
+  媒体加密原语）；凭证持久化、轮询生命周期、目录路径、重试队列均由
+  本仓 src/wechat/ 宿主层负责（与上游包 README 声明的边界一致）。

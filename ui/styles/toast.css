@@ -1,0 +1,47 @@
+/* ---------------------------------------------------------------- Toast */
+#toast-root {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 120;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+.toast {
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: var(--fs-small);
+    box-shadow: var(--shadow-2);
+    max-width: 380px;
+    pointer-events: auto;
+    /* 入场与退场都归 CSS，时长统一走 220ms 档；JS 只决定何时收起，不再写行内样式。
+       @starting-style 负责插入即淡入，[data-closing] 负责淡出——节点移除由 JS 等
+       动画跑完再做，退场不会被 remove() 直接切掉。 */
+    transition:
+        opacity var(--motion-base) var(--ease-out),
+        translate var(--motion-base) var(--ease-out);
+}
+@starting-style {
+    .toast {
+        opacity: 0;
+        translate: 0 7px;
+    }
+}
+/* 正在收起的提示不再接收点击，避免点到一条马上要消失的通知。 */
+.toast[data-closing] {
+    opacity: 0;
+    translate: 0 5px;
+    pointer-events: none;
+}
+.toast.error {
+    color: var(--danger);
+}
+.toast.success {
+    color: var(--green);
+}
+

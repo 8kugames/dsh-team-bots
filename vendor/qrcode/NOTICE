@@ -1,0 +1,5 @@
+qrcode-generator 1.4.4 by Kazuhiko Arase, MIT license (declared in package.json,
+upstream https://github.com/kazuhikoarase/qrcode-generator). Copied from npm
+tarball qrcode-generator-1.4.4.tgz (registry.npmjs.org). Single local change:
+appended one line at the end exposing the UMD factory as a browser global
+(window.qrcode) for the plugin UI's WeChat login QR rendering. No other edits.
