@@ -329,3 +329,93 @@
     margin-top: 10px;
 }
 
+/* 免审权限卡（总览 bots 页「全部 Bots」下方）：每条规则压成一行 chip 摘要，
+   展开后只露路径/命令两条主规则，其余条件收进「更多条件」。 */
+.perm-section {
+    margin-top: 26px;
+}
+.perm-card {
+    padding: 4px 16px 14px;
+}
+.perm-empty {
+    padding: 14px 0;
+}
+.perm-rule {
+    border-bottom: 1px solid var(--line);
+}
+.perm-rule > summary.perm-rule-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 10px 0;
+    cursor: pointer;
+    list-style: none;
+}
+.perm-rule > summary.perm-rule-head::-webkit-details-marker {
+    display: none;
+}
+.perm-rule-head .approval-chip {
+    max-width: 320px;
+}
+.perm-chev {
+    margin-left: auto;
+    width: 14px;
+    height: 14px;
+    color: var(--ink-3);
+    flex: 0 0 auto;
+}
+.perm-rule[open] > summary .perm-chev {
+    transform: rotate(90deg);
+}
+.perm-rule-body {
+    padding-bottom: 12px;
+}
+.perm-rule-body .field-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.perm-rule-body .field {
+    margin-bottom: 10px;
+}
+.perm-rule-body .btn-row {
+    justify-content: flex-end;
+}
+/* 更多条件：默认收起，展开后四列排条件位 */
+.perm-more {
+    margin-top: 4px;
+}
+.perm-more > summary.perm-more-head {
+    cursor: pointer;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+    list-style: none;
+}
+.perm-more > summary.perm-more-head::-webkit-details-marker {
+    display: none;
+}
+.perm-more > summary.perm-more-head::before {
+    content: "▸ ";
+    color: var(--ink-3);
+}
+.perm-more[open] > summary.perm-more-head::before {
+    content: "▾ ";
+}
+.perm-more .field-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 10px;
+}
+.perm-note {
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+}
+.perm-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-2);
+}
+.perm-add svg {
+    width: 14px;
+    height: 14px;
+}
+

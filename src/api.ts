@@ -14,6 +14,8 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
   'approval_decide', 'approvals_pending',
+  // 免审规则编辑面（DSHBOTS-365）：读走 state.approvalRules，此处备用直查；写仅 type=user。
+  'approval_rules', 'update_approval_rules',
   'question_answer', 'questions_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
@@ -31,7 +33,8 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'health':
       return service.health()
     case 'state':
-      return service.state(payload.projectId, payload.soloBotId ?? null)
+      // since：版本短路（system.state）——客户端带上上次响应的 version，相等即回 unchanged。
+      return service.state(payload.projectId, payload.soloBotId ?? null, { since: payload.since ?? null })
     case 'messages_page':
       // 聊天历史游标分页：更早的消息按最旧一条 created_at+id 向前翻页。
       return service.messagesPage(payload)
@@ -159,6 +162,12 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.decideApproval(required(payload.approvalId, 'approvalId'), required(payload.decision, 'decision'), actor)
     case 'approvals_pending':
       return service.approvalsPending()
+    // 免审规则（DSHBOTS-365）：bot 写免审规则由服务层守卫拒绝（actor.type!=='user' forbidden），
+    // 与 task_update_scopes 同口径。
+    case 'approval_rules':
+      return service.approvalRulesView()
+    case 'update_approval_rules':
+      return service.updateApprovalRules(payload.rules, actor)
     case 'question_answer':
       return service.answerQuestion(required(payload.questionId, 'questionId'), payload, actor)
     case 'questions_pending':

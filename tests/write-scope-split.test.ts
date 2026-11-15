@@ -4,12 +4,9 @@
 // 不受此闸（闸只拦新建，存量卡改卡/重派口径不变）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+import { rm } from 'node:fs/promises'
+
+import { setupTeam } from './helpers/harness.js'
 
 class HoldingRuntime {
   setCompletionHandler() {}
@@ -20,17 +17,7 @@ class HoldingRuntime {
 }
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-scope-split-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new HoldingRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-scope-split-', schedulerIntervalMs: 30_000, runtime: new HoldingRuntime() })
 }
 
 async function seedProject(service, store) {

@@ -47,11 +47,16 @@ export const STALL_WATCHDOG_KEY = 'stall_watchdog_minutes'
 // owner 2026-11-07 拍板上调）；空串/越界/非法回退默认，优先级与运行时效同款。
 export const APPROVAL_TIMEOUT_KEY = 'approval_timeout_minutes'
 export const QUESTION_TIMEOUT_KEY = 'question_timeout_minutes'
+// 验收/受阻处理分档时效（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：键放这里进
+// RUN_LIMIT_RANGES，updateSettings 的范围校验即自动覆盖；生效值函数在
+// runtime/session.js 的 effectiveReviewTimeoutMinutes（消费点在 startRun）。
+export const REVIEW_TIMEOUT_KEY = 'review_timeout_minutes'
 export const RUN_LIMIT_RANGES = {
   [RUN_TIMEOUT_KEY]: [1, 360],
   [STALL_WATCHDOG_KEY]: [0, 360],
   [APPROVAL_TIMEOUT_KEY]: [1, 60],
   [QUESTION_TIMEOUT_KEY]: [1, 60],
+  [REVIEW_TIMEOUT_KEY]: [0, 60],
 }
 
 // ── 验收滞留守门（DSHBOTS-194 / DSHBOTS-235）───────────────────────────────
@@ -87,6 +92,15 @@ export const SESSION_COMPACT_CTX_TOKENS_RANGE = [0, 10_000_000]
 export const SESSION_ROLLOVER_CTX_TOKENS_KEY = 'session_rollover_ctx_tokens'
 export const SESSION_ROLLOVER_CTX_TOKENS_RANGE = [0, 10_000_000]
 
+// 会话子代理消费判据：DSH 宿主对单个会话可派生的子代理数量有上限，长期复用的会话
+// （尤其总监控制面）派满后 subagent 派生开始失败且无自动恢复。口径 = 该会话名下运行
+// 的 run_events 中 type='subagent_spawned' 计数（DSHBOTS-294 子代理账本）。轮数/体积
+// 之外累计消费达到阈值同样触发结转。默认 128：结转在会话复用时判定、摘要就绪后下一次
+// 复用才换会话，阈值须低于宿主上限（口径 200）留出摘要往返期间继续消费的余量。
+// 0 = 关闭该判据；生效链与轮次键一致。
+export const SESSION_ROLLOVER_SUBAGENTS_KEY = 'session_rollover_subagents'
+export const SESSION_ROLLOVER_SUBAGENTS_RANGE = [0, 10_000]
+
 // 保存值必须是范围内的整数；非法或越界按未保存处理（回退默认），不做钳制。
 // 空串/null（未保存）必须先于数值化判空：Number('') 是 0，会把「未保存」误判成
 // 合法值 0（关闭）。用 Number() 而非 parseInt：parseInt('1.5') 会吞小数当 1。
@@ -98,7 +112,7 @@ const savedInt = (value, range) => {
   return Number.isInteger(num) && num >= min && num <= max ? num : null
 }
 
-const envExplicit = (name) => {
+export const envExplicit = (name) => {
   const raw = process.env[name]
   return raw !== undefined && String(raw).trim() !== ''
 }
@@ -195,6 +209,13 @@ export function effectiveSessionRolloverCtxTokens(config, getSetting: (key: stri
   const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS')
   const saved = savedInt(getSetting(SESSION_ROLLOVER_CTX_TOKENS_KEY), SESSION_ROLLOVER_CTX_TOKENS_RANGE)
   return !env && saved !== null ? saved : config.sessionRolloverCtxTokens
+}
+
+// 结转子代理消费上限生效值：默认 128 个（宿主上限 200 留余量），0 = 关闭该判据。
+export function effectiveSessionRolloverSubagents(config, getSetting: (key: string) => unknown = () => null) {
+  const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_SUBAGENTS')
+  const saved = savedInt(getSetting(SESSION_ROLLOVER_SUBAGENTS_KEY), SESSION_ROLLOVER_SUBAGENTS_RANGE)
+  return !env && saved !== null ? saved : config.sessionRolloverSubagents
 }
 
 // 验收滞留阈值生效值（DSHBOTS-194）：优先级与会话结转一致——env 显式 > 保存值 >
@@ -345,6 +366,9 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 0 = 关闭体积判据；生效值见 effectiveSession{Compact,Rollover}CtxTokens。
     sessionCompactCtxTokens: int(config.sessionCompactCtxTokens ?? process.env.DSH_TEAM_SESSION_COMPACT_CTX_TOKENS, 80_000, 0, 10_000_000),
     sessionRolloverCtxTokens: int(config.sessionRolloverCtxTokens ?? process.env.DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS, 150_000, 0, 10_000_000),
+    // 会话子代理消费上限：默认 128 个（低于宿主上限 200 留摘要往返余量），0 = 关闭；
+    // 生效值见 effectiveSessionRolloverSubagents。
+    sessionRolloverSubagents: int(config.sessionRolloverSubagents ?? process.env.DSH_TEAM_SESSION_ROLLOVER_SUBAGENTS, 128, 0, 10_000),
     // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超此分钟数 = 滞留。生效值可被
     // 全局设置 review_idle_minutes 覆盖（effectiveReviewIdleMinutes），0 = 关闭。
     reviewIdleMinutes: int(config.reviewIdleMinutes ?? process.env.DSH_TEAM_REVIEW_IDLE_MINUTES, 30, 0, 1440),
@@ -401,9 +425,16 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // （与手动「子代理核验」按钮同一入口）。总监裁决不受影响：owner_bot 卡在核验运行
     // 结束后再触发总监验收；user 卡核验结论写回评论，裁决仍归工作台 owner。
     autoReviewDelegate: bool(config.autoReviewDelegate ?? process.env.DSH_TEAM_AUTO_REVIEW_DELEGATE, true),
+    // 验收核验分档：生效沙箱为只读档（run_type 收紧或任务覆盖/负责人配置 read-only）的交付
+    // 免自动核验委派，验收闸门同口径放宽；写档交付维持强制子代理核验。
+    // DSH_TEAM_REVIEW_READ_ONLY_SKIP=0 关闭回到全量强制。
+    reviewReadOnlySkip: bool(config.reviewReadOnlySkip ?? process.env.DSH_TEAM_REVIEW_READ_ONLY_SKIP, true),
     // 代码卫生（DSHBOTS-172）：扫描扩展名白名单覆盖（默认白名单见 services/hygiene.js）。
     codeHygieneExts: parseExtList(config.codeHygieneExts ?? process.env.DSH_TEAM_CODE_HYGIENE_EXTS),
     schedulerIntervalMs: int(config.schedulerIntervalMs, 1_500, 250, 30_000),
+    // 空载降频：周期定时器在无 queued/running 运行、无可领 outbox 且距上次全量拍不足该间隔时，
+    // 只做一次索引计数探测即返回。事件唤醒的 tick() 不受影响，永远全量。
+    schedulerIdleIntervalMs: int(config.schedulerIdleIntervalMs, 15_000, 1_500, 60_000),
     modelCacheMs: int(config.modelCacheMs, 8_000, 0, 120_000),
     // 用量快照缓存：state() 每轮轮询都跑 30d 全口径聚合（生产库实测约 500ms），
     // 这里做 TTL 缓存把 state() 拉回几十毫秒。0 = 关闭缓存（每次重算）。

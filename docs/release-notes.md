@@ -4,6 +4,84 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.55
+
+### 中文
+
+本版是 v0.3.12 之后 dev 分支的大批次合发：覆盖运行/调度、通道、任务板、记忆、审批与工作台界面等 600 余个提交。含多处数据库结构变更（会话单活跃绑定、串行域、任务亲和、账本与审计表等，开库自动迁移）；无新增必须配置，运行时效、结转等新配置均有默认值。
+
+**运行与调度**
+
+- **会话生命周期重构**：每 bot 单活跃绑定收敛为唯一建行点；512 轮会话结转 + 64 轮闲时总结压缩；任务亲和路由使运行优先落绑定任务会话；入队即合并同车道排队运行，用户提问单独成组优先放行。
+- **bot 串行域收窄为 (bot, 工作区)**：单 bot 可在多项目并行；派单级单 bot 多任务并行；owner 任务与总监核验运行忙时挂起队列，空闲自动建回，宿主重启不再杀活跃运行。
+- **任务级时效**：time_budget 约束整卡耗时，优先级分档兜底；review/handle 运行分档预算治总监单车道长尾；审批/提问等待超时默认 3→10 分钟并可配；待执行滞留阈值分档梯度提醒。
+
+**任务板与验收**
+
+- **reviewer 产品默认角色**：新群自动带入种子 reviewer，验收核验运行优先落 reviewer 名下；验收机械闸扩展到委派核验运行的子代理账目。
+- **变更栅栏**：team_assign_task 改卡可选 expected_version，版本冲突拒绝并回附最近变更事实；重派即新死线窗口。
+- **派单质量闸**：核验类卡不得派成员 bot；派单校验 assignee 沙箱策略；无主卡领取/编辑须补写范围声明；交付报告体量红线与交付物路径声明。
+
+**通道与通知**
+
+- **飞书通道落地**：进程内官方 SDK WSClient 传输、凭据模型、出站发送与回程闭环、触发语境提示与状态卡。
+- **微信通道强化**：外发幂等收据与 sent/gone 终态、入站 Trigger 留痕、GitHub issue 只读触发源；出站事件按通道分发，不再硬编码微信。
+- **分级通知**：reply_mode 新增 mentioned_only 档真实生效；环境消息延迟接单；系统连续通知默认折叠（Quiet by default）。
+
+**记忆**
+
+- **bot 域记忆下放为各 Bot 自管**，总监可点名代管；bot/project 记忆 64 条硬顶与滞回放行；版本历史滚动保留最近 10 版；cleanup 支持 before 批量归档；记忆审查改走独立有界会话可配便宜模型。
+- **全文检索修复**：旧库非 trigram 分词的 memories_fts 开库检测并重建回填；短于 3 字符关键词走 LIKE 子串兜底。
+
+**审批与配置**
+
+- **免审规则白名单**：glob 匹配、命中即时放行并留痕，配置迁到总览页紧凑权限卡。
+- **设置乐观并发**：revision 令牌 + 409 + 草稿三方合并；设置变更历史只读视图；分段可编辑提示词。
+
+**界面与可访问性**
+
+- **工作台界面大改版**：动效层 token 阶梯、日间/夜间配色三档、文本文件应用内预览、路径 tilde 缩写、全局用量页与配置页布局修复。
+- **可访问性**：表单集中内联校验、任务卡/侧栏键盘可达与上下文菜单、遮罩打开背景 inert、可点目标尺寸提升。
+- **性能**：state 轮询版本短路 + 视图作用域签名 + 视图载荷缓存与切换 SWR 回放（群聊/单聊切换秒开）；prepared statement 缓存；空闲周期 tick 收敛为单索引探针。
+
+### English
+
+This release ships the large batch accumulated on dev since v0.3.12: more than 600 commits across runs/scheduling, channels, the task board, memory, approvals and the workbench UI. It contains several database schema changes (single active bot binding, serialization domains, task affinity, ledger and audit tables — all applied automatically on startup); no mandatory configuration is added and every new setting ships with a default.
+
+**Runs and scheduling**
+
+- **Session lifecycle rebuild**: per-bot single active binding becomes the only row-creation point; 512-turn rollover plus 64-turn idle compaction; task-affinity routing; same-lane queued runs coalesce at enqueue time and user questions get their own priority group.
+- **Bot serialization narrowed to (bot, workspace)**: one bot can work across projects in parallel, including task-level parallelism; owner-task and director review runs queue while busy and resume when idle, surviving host restarts.
+- **Task-level timing**: time_budget caps whole-card effort with priority-tier fallbacks; tiered review-run budgets; approval/question wait timeouts default to 10 minutes and are configurable; stale-card thresholds become a four-state gradient.
+
+**Task board and review**
+
+- **A default reviewer role**: new groups seed a reviewer bot and verification runs land there first; the mechanical review gate covers delegated verification runs' subagent accounting.
+- **Mutation fence**: team_assign_task accepts expected_version and rejects conflicting edits with the latest card facts; re-dispatch resets the deadline window.
+- **Dispatch quality gates**: verification cards cannot be dispatched to member bots; assignee file-policy checks; claimed cards must declare write scopes; delivery reports have size and path-declaration limits.
+
+**Channels and notifications**
+
+- **Feishu channel ships**: in-process official SDK WSClient transport, credential model, outbound delivery and round-trip closing, trigger context and status cards.
+- **WeChat channel hardened**: idempotent outbound receipts with sent/gone terminal states, inbound trigger trail, a GitHub issue read-only trigger source; outbound events fan out per channel instead of hardcoding WeChat.
+- **Tiered notifications**: a real mentioned_only reply mode; ambient messages defer pickup; consecutive system notices collapse by default (quiet by default).
+
+**Memory**
+
+- **Bot-scope memories become bot-managed** with director proxy management; 64-entry hard caps with hysteresis; version history keeps the last 10 revisions; cleanup supports before-cutoff batch archiving; memory review moves to a bounded session with a cheaper configurable model.
+- **Full-text search fixes**: legacy non-trigram memories_fts tables are detected, rebuilt and backfilled on startup; keywords shorter than 3 characters fall back to LIKE substring matching.
+
+**Approvals and configuration**
+
+- **Approval bypass whitelist**: glob-matched rules pass privileged requests instantly with an audit trail; the card moves to the overview page.
+- **Optimistic concurrency for settings**: revision tokens with 409 responses and three-way draft merges; a read-only settings history view; segmented editable prompts.
+
+**UI and accessibility**
+
+- **Workbench redesign**: a motion token ladder, three-mode light/dark theming, in-app text file preview, tilde-abbreviated paths, and layout fixes on the global usage and settings pages.
+- **Accessibility**: centralized form inline validation, keyboard-reachable task cards with a context menu, inert backgrounds under modals, and larger touch targets.
+- **Performance**: version short-circuit state polling with view-scoped signatures, view payload caching with stale-while-revalidate switching, prepared-statement caching, and an idle-gated periodic tick.
+
 ## v0.3.12
 
 ### 中文

@@ -6,6 +6,7 @@ import { COMPOSER_AUTO_MAX_PX, addPendingImages, applyAutocomplete, applyCompose
 import { questionDraftOf } from './cards.js'
 import { searchMemories } from './tasks.js'
 import { closeModal, trapModalFocus, updateEffortOptions, updateFallbackEffortOptions } from './modal-forms.js'
+import { openTaskMenuForElement } from './task-menu.js'
 import { UI_SCALE_KEY, renderShell, renderKeepingChatScroll, panelKey, applyPanelToggle, nextChatAtBottom, render, refresh } from '../app.js'
 import { t } from './i18n.js'
 
@@ -67,10 +68,52 @@ document.addEventListener('change', (event) => {
   }
 })
 
+// ===== keyboard-activation:start —— 纯逻辑标记块（tests/task-a11y.test.js 抽取断言）=====
+// 原生自带键盘激活的标签：这些元素上的 Enter/Space 交给浏览器，不重复派发。
+const NATIVE_ACTIVATION_TAGS = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY']
+// 纯判定：给定按键、载体标签、以及事件目标到载体之间的标签链，
+// 判断这次 keydown 是否该由「非 button 载体」（任务卡 article、侧栏行 div）自行激活。
+// repeat：长按不放时 keydown 会连发，卡片会被反复打开——按住时只认第一次。
+function activationDecision({ key, carrierTag, chainTags, repeat }) {
+  if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return false
+  if (repeat) return false
+  if (!carrierTag) return false
+  if (NATIVE_ACTIVATION_TAGS.includes(carrierTag)) return false
+  return !(chainTags ?? []).some(tag => NATIVE_ACTIVATION_TAGS.includes(tag))
+}
+// ===== keyboard-activation:end =====
+
+// 定位本次 keydown 的动作载体：最近的 [data-action]，以及目标到载体之间的标签链。
+function activationCarrier(target) {
+  const el = target as HTMLElement
+  const carrier = el?.closest?.('[data-action]') as HTMLElement | null
+  // 遮罩本身也是 [data-action]（点击遮罩关弹窗），但它不是键盘动作载体：
+  // 弹窗内无可聚焦元素时焦点会落在 .modal 上，此时 Space 不该顺手关掉弹窗。
+  if (!carrier || carrier.classList?.contains('modal-backdrop')) return { carrier: null, chain: [] as string[] }
+  const chain: string[] = []
+  for (let node = el; node && node !== carrier; node = node.parentElement) chain.push(node.tagName)
+  return { carrier, chain }
+}
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Tab' && state.modal) {
     trapModalFocus(event)
     return
+  }
+  // 通用键盘激活（DSHBOTS-367）：任务卡（article）与侧栏行（div）不是原生可激活元素，
+  // Enter/Space 由这里代为派发 click；原生按钮/链接不在此重复触发。
+  const { carrier, chain } = activationCarrier(event.target)
+  if (activationDecision({ key: event.key, carrierTag: carrier?.tagName, chainTags: chain, repeat: event.repeat })) {
+    event.preventDefault()
+    carrier?.click()
+    return
+  }
+  // 菜单键 / Shift+F10：开任务卡上下文菜单——键盘跨列移动的入口。
+  if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+    if (openTaskMenuForElement(event.target as HTMLElement)) {
+      event.preventDefault()
+      return
+    }
   }
   const tab = (event.target as HTMLElement).closest?.('[role="tab"]') as HTMLElement | null
   if (tab && ['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) {

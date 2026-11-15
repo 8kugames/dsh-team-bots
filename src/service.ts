@@ -69,6 +69,10 @@ export class TeamService {
     // 同一指纹跨运行只点名一次，重复只记 run_event，不重复插群消息。
     this.readAuditAlerted = new Map()
     this.lastMaintenanceAt = 0
+    // 最近一次全量调度拍的时间戳（空载门 tickIdleGate 的基准；0 = 首拍必全量）。
+    this.lastFullTickAt = 0
+    // state 轮询版本短路缓存（system.state）：单槽存最近一次组装的 key/版本/时间。
+    this.stateCache = null
     this.wechat = null
     // GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产用 spawnSync('gh', ...)，
     // 测试注入桩替换；未设置时走真实 gh CLI。

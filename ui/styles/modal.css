@@ -2,6 +2,11 @@
 .modal-backdrop {
     position: fixed;
     inset: 0;
+    /* 背景滚动锁定（DSHBOTS-367）：遮罩自身成为不可滚动的滚动容器并 contain 滚动链——
+       滚轮停在遮罩上时不再把底页滚下去。不改 html/body 的 overflow：那会顶掉页面滚动条，
+       造成横向布局抖动并可能跳变滚动位置。 */
+    overflow: hidden;
+    overscroll-behavior: contain;
     background: color-mix(in srgb, var(--ink) 24%, transparent);
     backdrop-filter: blur(2px);
     display: flex;
@@ -297,5 +302,28 @@ body:has(#modal-root .modal-backdrop) #app *::after {
 }
 .revision-row .faint {
     margin-left: auto;
+}
+
+/* 入场：遮罩淡入、面板从上方 8px 落到位置。@starting-style 只在节点首次插入时触发
+   一次——modal-layer 的原位补丁复用 .modal 容器与 .modal-body，同一弹窗刷新内容
+   （loading→详情、保存后重载）不会重播入场。
+   只动 opacity/translate：不新增 filter，也不给遮罩加 will-change（D-166 口径，
+   提升 filter 元素自身会让 Paint 面积暴涨）。 */
+.modal-backdrop {
+    transition: opacity var(--motion-base) var(--ease-out);
+}
+.modal {
+    transition:
+        opacity var(--motion-base) var(--ease-out),
+        translate var(--motion-base) var(--ease-out);
+}
+@starting-style {
+    .modal-backdrop {
+        opacity: 0;
+    }
+    .modal {
+        opacity: 0;
+        translate: 0 -8px;
+    }
 }
 

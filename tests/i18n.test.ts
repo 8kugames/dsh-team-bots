@@ -161,7 +161,7 @@ test('注入接线：index.html data-dsh-language 与 system.js state.language �
   const html = read('ui/index.html')
   assert.match(html, /data-dsh-language="\{\{language\}\}"/, 'html 标签应带 language 占位')
   const sys = read('src/services/system.js')
-  assert.match(sys, /language: await resolveUiLanguage\(/, 'state() 顶层应透传 language')
+  assert.match(sys, /const language = await resolveUiLanguage\(/, 'state() 顶层应透传 language')
   assert.match(sys, /effectiveUiLanguage\(this\.config/, '页面保存值经 effectiveUiLanguage 读取')
 })
 

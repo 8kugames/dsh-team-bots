@@ -1,6 +1,6 @@
 import { state } from './state.js'
 import { icon } from './icons.js'
-import { activeProject, attr, avatar, botById, esc, toast } from './util.js'
+import { activeProject, attr, avatar, botById, esc, overlayInertState, setAppInert, toast } from './util.js'
 import { api, loadState } from './api.js'
 import { applyOptimisticTyping } from './typing-linger.js'
 import { t } from './i18n.js'
@@ -479,6 +479,8 @@ async function openMessageImage(imageId) {
   const nameEl = document.getElementById('image-viewer-name')
   const sizeEl = document.getElementById('image-viewer-size')
   viewer.hidden = false
+  // 查看器也是遮罩：背景 #app 置 inert（DSHBOTS-367）。
+  setAppInert(overlayInertState())
   body.textContent = t("图片加载中…")
   if (nameEl) nameEl.textContent = ''
   if (sizeEl) sizeEl.textContent = ''
@@ -506,6 +508,8 @@ function closeImageViewer() {
     img.removeAttribute('src')
   }
   viewer.hidden = true
+  // 查看器关闭：背景解锁（弹窗仍开着时保持 inert）。
+  setAppInert(overlayInertState())
   // 遮罩关闭：补上查看器开着期间被跳过的 #app 渲染（DSHBOTS-98）。
   flushAppRender()
 }
@@ -529,6 +533,7 @@ function openInlineImage(img) {
   document.getElementById('image-viewer-name').textContent = name
   document.getElementById('image-viewer-size').textContent = ''
   viewer.hidden = false
+  setAppInert(overlayInertState())
   body.textContent = ''
   const view = document.createElement('img')
   view.className = 'image-viewer-img'

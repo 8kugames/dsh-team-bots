@@ -4,34 +4,15 @@
 // ③手动解除限 owner/总监，审计留痕；非总监成员解除被拒。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
-import { parseQuotaResetMs, QUOTA_DEFAULT_RESET_MS, quotaRouteFor } from '../src/services/bot-quota.js'
+import { rm } from 'node:fs/promises'
 
-class StubRuntime {
-  setCompletionHandler() {}
-  async catalog() { return [] }
-  async validateBotConfig() {}
-  async startRun({ run }) { return `session-${run.id}` }
-  async cancelRun() { return true }
-}
+import { join } from 'node:path'
+
+import { parseQuotaResetMs, QUOTA_DEFAULT_RESET_MS, quotaRouteFor } from '../src/services/bot-quota.js'
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-bot-quota-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-bot-quota-', schedulerIntervalMs: 20 })
 }
 
 const HOUR = 60 * 60_000

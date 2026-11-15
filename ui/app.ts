@@ -1,4 +1,4 @@
-import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, COLORS, COLOR_NAMES, BOT_STATUS, RUN_STATUS, RUN_KIND, CHAT_PAGE_SIZE, CHAT_ACTIVE_TASK_LIMIT, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, CREATOR_TYPE, EFFORT, FILE_POLICY, DEFAULT_FILE_POLICY, VIEW_ACTION, NAV, SOLO_NAV } from './modules/state.js'
+import { state, STATUS, STATUS_ORDER, PRIORITY, PROPOSAL_STATUS, COLORS, COLOR_NAMES, BOT_STATUS, RUN_STATUS, RUN_KIND, CHAT_PAGE_SIZE, CHAT_ACTIVE_TASK_LIMIT, SKILL_STATUS, MEMORY_STATUS, PROPOSAL_KIND, TERMINAL_STATUS, CREATOR_TYPE, EFFORT, FILE_POLICY, DEFAULT_FILE_POLICY, VIEW_ACTION, NAV, SOLO_NAV, runStatusLabel, runKindLabel } from './modules/state.js'
 import { icon } from './modules/icons.js'
 import { applyUiScale, applyUiTheme, initColorScheme, esc, attr, pathCode, costValue, clamp, botById, shortRefId, actorLabel, taskById, activeProject, inSoloContext, pageProject, activeBots, formatNumber, CURRENCY_SYMBOL, formatCost, timeAgo, formatTime, duration, avatar, statusPill, runDot, memberRunDot, runDotHtml, memorySource, toast, filePolicyOptions } from './modules/util.js'
 import { richText, mdPlainSummary, mdChatScope, mdImageChipTitle } from './modules/markdown.js'
@@ -199,7 +199,8 @@ function tabDot(view) {
   return false
 }
 
-// STATUS/RUN_STATUS/RUN_KIND 的渲染标签：表内有键走 t()，表外原样回落（保持旧 ?? 兜底语义）。
+// STATUS 的渲染标签：表内有键走 t()，表外原样回落（保持旧 ?? 兜底语义；
+// runStatus/runKind 同口径的 runStatusLabel/runKindLabel 已下沉 modules/state.js）。
 function statusLabel(status) {
   return STATUS[status] ? t('status.' + status) : status
 }
@@ -211,14 +212,6 @@ function statusLabel(status) {
 function sideRowStatusHtml(status) {
   const live = status === 'in_progress' ? ' task-status-live' : ''
   return `<span class="side-row-status${live}">${esc(statusLabel(status))}</span>`
-}
-
-function runStatusLabel(status) {
-  return RUN_STATUS[status] ? t('runStatus.' + status) : status
-}
-
-function runKindLabel(kind) {
-  return RUN_KIND[kind] ? t('runKind.' + kind) : kind
 }
 
 function renderShell() {
@@ -642,7 +635,11 @@ async function poll() {
       notifyNewApprovals(data?.approvals ?? [])
       return
     }
+    // 版本短路：loadState 在服务端版本未变时原引用返回，数据零变化——跳过整页重渲染
+    // 与通知重算（2.8s 空闲轮询从「全量取数+渲染」降为一次版本比对）。
+    const previousData = state.data
     await loadState(state.projectId, { quiet: true })
+    if (state.data === previousData) return
     // 渲染闸门（DSHBOTS-123）：composer 静默窗内有输入或 IME 组词中才挡整页重建，
     // 其余输入控件维持原「焦点即挡」；被挡周期的取数已生效，下一周期自动补渲染。
     if (!pollRenderBlockedByFocus(document.activeElement, { composing: state.composerComposing, composerInputAt: state.composerInputAt })) render()

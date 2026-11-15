@@ -2,8 +2,14 @@
 // 认领 session_bindings 命中的 bot 会话：绑定到项目的走群聊卡片；绑定为单聊（kind='solo'、
 // project_id 为空）的走单聊卡片（DSHBOTS-218）；其余 next() 透传（人类会话审批继续走 Web UI）。
 // 决策权仅用户（type=user）持有，bot 一律 forbidden 不能自批；pending 之外拒绝重复应答，动作写审计。
+// DSHBOTS-365 免审白名单：命中规则的提权请求不落待办卡，插件在认领入口即时替 owner 应答
+// allowed-once；approvals 行照落（status='allowed'、decided_by='auto:rule:<id>'）+ 审计事件
+// approval.auto_allow，免审不免留痕。规则存 settings 'approval_auto_rules'（JSON 数组，仿
+// prompt_overrides 独立编辑面先例，不进 settingsView 单值键域），仅 type=user 可写。
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 db.js 的 addColumn/recordMigration 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { id, nowIso } from '../util.js'
 import { effectiveApprovalTimeoutMs } from '../config.js'
 import { botInActiveProject } from './questions.js'
@@ -70,6 +76,15 @@ export function ensureApprovalSchema(store) {
   store.run(
     "UPDATE approvals SET status = 'timeout' WHERE status = 'pending'",
   )
+  // 出厂预置默认免审规则（DSHBOTS-365 增量）：仅键未初始化（null）时播种一次；非-null
+  // 一律不动——'[]' 是 owner 显式清空，永不回播；重复执行幂等，不做回填迁移。
+  if (store.setting(APPROVAL_RULES_SETTING) === null) {
+    store.setSetting(APPROVAL_RULES_SETTING, JSON.stringify(DEFAULT_APPROVAL_AUTO_RULES))
+  }
+  // 存量预置行迁移（口径改 glob）：仍是出厂原样的预置行替换为三条关键词 glob；owner 自建或
+  // 改过的行不动，显式清空（[]）不回播。迁移后预置行都带通配符，重复执行不再命中。
+  const migrated = migrateApprovalPresetRules(store.setting(APPROVAL_RULES_SETTING))
+  if (migrated) store.setSetting(APPROVAL_RULES_SETTING, migrated)
 }
 
 // 目标提取（纯函数）：按参数形状判别，不按工具名——宿主工具族会扩展，形状更稳。
@@ -89,6 +104,168 @@ export function toolTargetOf(arguments_) {
 
 // pre-execute 目标缓存上限：只记最近若干次调用的目标，防长会话里无界增长。
 const APPROVAL_TARGET_CACHE_LIMIT = 200
+
+// ── 免审规则（DSHBOTS-365）──────────────────────────────────────────────────
+// 结构化规则列表：主维度 path_prefix（工作区外目录前缀）/ command（命令首行前缀），
+// 辅维度 bot_id / tool_name / sandbox（目标沙箱档；danger-full-access 可配、默认规则集为空
+// 自然不含）。存储仿 prompt_overrides：settings 键 'approval_auto_rules' 存 JSON 数组，
+// 独立编辑面（approvalRulesView / updateApprovalRules），不进 settingsView 单值键域。
+export const APPROVAL_RULES_SETTING = 'approval_auto_rules'
+export const APPROVAL_RULES_LIMIT = 50
+// 规则可配的沙箱档：宿主 bash 族提权重试时的 sandbox_permissions 取值；空串 = 任意档。
+export const APPROVAL_RULE_SANDBOXES = ['workspace-write', 'danger-full-access']
+
+// 系统临时目录（$TMPDIR）：macOS 是 /var/folders/<user>/<hash>/T，名字不含 temp/tmp，
+// 关键词 glob 覆盖不到——单独一行兜底；Linux 的 tmpdir() 就是 /tmp，已被覆盖就不重复一行。
+const OS_TMPDIR = tmpdir().replace(/[/\\]+$/, '')
+
+// 出厂预置默认规则（DSHBOTS-365 增量改口径）：关键词 glob 三条——
+// **/temp/**、**/.tmp/**、**/tmp/** 命中即免审（路径与命令同一套 glob 方言），
+// 再加系统临时目录一行（未被关键词覆盖时）。预置行仍是普通规则行，owner 可自行删改。
+const KEYWORD_APPROVAL_AUTO_RULES = [
+  { glob: '**/temp/**', key: 'temp' },
+  { glob: '**/.tmp/**', key: 'dot_tmp' },
+  { glob: '**/tmp/**', key: 'tmp' },
+]
+const TMPDIR_COVERED = KEYWORD_APPROVAL_AUTO_RULES.some(item => approvalGlobMatch(item.glob, OS_TMPDIR))
+export const DEFAULT_APPROVAL_AUTO_RULES = [
+  ...KEYWORD_APPROVAL_AUTO_RULES,
+  ...(TMPDIR_COVERED ? [] : [{ glob: `${OS_TMPDIR}/**`, key: 'tmpdir' }]),
+].map(item => ({
+  id: `arul_default_${item.key}`,
+  path_prefix: item.glob,
+  command: '',
+  bot_id: '',
+  tool_name: '',
+  sandbox: '',
+  note: '',
+  updated_at: nowIso(),
+  updated_by: 'system:preset',
+}))
+
+// 系统预置行的「出厂原样」形态：id → 可接受的路径形态（口径迭代换过形态的都列进来）。
+// 迁移时按这张表认出仍是出厂样的预置行换成当前默认集合；owner 改过路径的预置行不在表内，
+// 视为 owner 自有行保留。owner 自建行（id 不在这张表）同样保留。
+const SYSTEM_PRESET_PATTERNS = new Map<string, string[]>([
+  ['arul_default_tmp', ['/tmp', '**/tmp/**']],
+  ['arul_default_private_tmp', ['/private/tmp']],
+  ['arul_default_var_tmp', ['/var/tmp']],
+  ['arul_default_tmpdir', [OS_TMPDIR, `${OS_TMPDIR}/**`]],
+  ['arul_default_home_dot_tmp', [join(homedir(), '.tmp').replace(/[/\\]+$/, '')]],
+  ['arul_default_home_tmp', [join(homedir(), 'tmp').replace(/[/\\]+$/, '')]],
+  ['arul_default_temp', ['**/temp/**']],
+  ['arul_default_dot_tmp', ['**/.tmp/**']],
+])
+
+// settings 'approval_auto_rules' 解析：坏数据一律降级为空规则（不抛错，原卡流程兜底）。
+export function parseApprovalRules(raw) {
+  let parsed
+  try {
+    parsed = JSON.parse(String(raw ?? ''))
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed.filter(item => item && typeof item === 'object')
+}
+
+// glob 方言（路径与命令共用）：** 跨任意层级（含 '/'）、* 跨任意字符但不跨 '/'、
+// ? 单字符（不跨 '/'）、其余按字面量；整串命中才算匹配。尾部 '/**' 额外允许匹配目录自身
+// （'/tmp/**' 命中 '/tmp' 与 '/tmp/a/b'，但不命中 '/tmpfoo'）。
+export function approvalGlobToRegExp(pattern) {
+  let text = String(pattern ?? '')
+  let tail = ''
+  if (text.endsWith('/**')) {
+    text = text.slice(0, -3)
+    tail = '(?:/.*)?'
+  }
+  let out = '^'
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (char === '*') {
+      const doubled = text[index + 1] === '*'
+      if (!doubled) {
+        out += '[^/]*'
+        index += 1
+        continue
+      }
+      index += 2
+      if (text[index] === '/') {
+        index += 1
+        out += '(?:.*/)?'
+      } else {
+        out += '.*'
+      }
+      continue
+    }
+    if (char === '?') {
+      out += '[^/]'
+      index += 1
+      continue
+    }
+    out += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    index += 1
+  }
+  return new RegExp(`${out}${tail}$`)
+}
+
+export function approvalGlobMatch(pattern, value) {
+  const text = String(value ?? '')
+  if (!String(pattern ?? '') || !text) return false
+  return approvalGlobToRegExp(pattern).test(text)
+}
+
+// 单条规则匹配（纯函数）：目标为空不命中；主维度二选一命中即中——
+// 路径规则与命令规则都用 glob 整串匹配；不含通配符的存量规则保留旧前缀语义
+// （路径按目录边界、命令按词边界），口径切换不静默废掉已配规则。
+// 辅维度留空 = 通配，填了必须精确相等。
+export function approvalRuleMatches(rule, { botId, toolName, target, sandbox }) {
+  const value = String(target ?? '')
+  if (!value) return false
+  if (rule.bot_id && rule.bot_id !== botId) return false
+  if (rule.tool_name && rule.tool_name !== toolName) return false
+  if (rule.sandbox && rule.sandbox !== sandbox) return false
+  const pathPattern = String(rule.path_prefix ?? '').trim()
+  if (pathPattern && matchesRulePattern(pathPattern, value, 'path')) return true
+  const commandPattern = String(rule.command ?? '').trim()
+  if (commandPattern && matchesRulePattern(commandPattern, value, 'command')) return true
+  return false
+}
+
+// 含通配符 → glob；不含通配符 → 存量前缀语义（路径按目录边界、命令按词边界）。
+function matchesRulePattern(pattern, value, dimension) {
+  if (/[*?]/.test(pattern)) return approvalGlobMatch(pattern, value)
+  if (dimension === 'path') return value === pattern || value.startsWith(`${pattern}/`)
+  return value === pattern || value.startsWith(`${pattern} `)
+}
+
+// 存量预置行迁移：仍是出厂原样的预置行换成当前默认集合（口径迭代换过形态的都算「原样」），
+// owner 自建行与改过路径的预置行不动，显式清空 '[]' 依然永不回播。
+// 返回迁移后的 JSON 字符串，无需迁移时返回 null。
+export function migrateApprovalPresetRules(raw) {
+  let parsed
+  try {
+    parsed = JSON.parse(String(raw ?? ''))
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  const rows = parsed.filter(item => item && typeof item === 'object')
+  const isSystemPreset = row => {
+    const id = typeof row.id === 'string' ? row.id : ''
+    const patterns = SYSTEM_PRESET_PATTERNS.get(id)
+    if (!patterns || String(row.command ?? '').trim()) return false
+    const path = String(row.path_prefix ?? '').replace(/[/\\]+$/, '')
+    return patterns.some(pattern => pattern.replace(/[/\\]+$/, '') === path)
+  }
+  if (!rows.some(isSystemPreset)) return null
+  const firstIndex = rows.findIndex(isSystemPreset)
+  const kept = rows.filter(row => !isSystemPreset(row))
+  const before = rows.slice(0, firstIndex).filter(row => !isSystemPreset(row)).length
+  const presets = DEFAULT_APPROVAL_AUTO_RULES.map(rule => ({ ...rule }))
+  return JSON.stringify([...kept.slice(0, before), ...presets, ...kept.slice(before)])
+}
 
 // 来源定位字段（DSHBOTS-240）：审批行 → 来源群聊（项目名/KEY）+ 任务 ID/标识/标题。
 // 列表查询用 JOIN 一次取齐（approvalsPending / approvalsForProject / approvalsForBot 共用），
@@ -120,12 +297,14 @@ export const approvalsMethods = {
     const off = runtime.ctx.on('approval/request', (req, next) => this.handleApprovalRequest(req, next), { prepend: true })
     // approval/request 事件不带工具参数，目标取数只能从 tools/pre-execute 透传监听来：
     // 宿主先过 pre-execute 网关、gate 返回 ask 才发起审批，此刻 exec 里带着 callId/name/arguments。
-    // 按 callId 记已提取目标（先提短串再掩码，只存小字符串），审批发起时一次性取走；超量 FIFO 驱逐。
+    // 按 callId 记已提取目标与目标沙箱档（DSHBOTS-365 辅维度；先提短串再掩码，只存小字符串），
+    // 审批发起时一次性取走；超量 FIFO 驱逐。
     const offPreExecute = runtime.ctx.on('tools/pre-execute', (exec, next) => {
       const callId = exec?.callId ? String(exec.callId) : ''
       const target = callId ? toolTargetOf(exec.arguments) : null
       if (callId && target) {
-        this.approvalTargets.set(callId, this.maskSecretValues(target))
+        const sandbox = typeof exec.arguments?.sandbox_permissions === 'string' ? exec.arguments.sandbox_permissions : ''
+        this.approvalTargets.set(callId, { target: this.maskSecretValues(target), sandbox })
         if (this.approvalTargets.size > APPROVAL_TARGET_CACHE_LIMIT) {
           this.approvalTargets.delete(this.approvalTargets.keys().next().value)
         }
@@ -168,9 +347,11 @@ export const approvalsMethods = {
     const displayReason = req.displayReason?.zh ? this.maskSecretValues(String(req.displayReason.zh).slice(0, 2_000)) : null
     const reason = this.maskSecretValues(String(req.reason ?? '').slice(0, 2_000))
     // 本次调用的操作目标：pre-execute 阶段按 callId 记下，这里一次性取走（不留残页）；没有则为 NULL，
-    // UI 回退到从摘要正则猜测的旧口径。
+    // UI 回退到从摘要正则猜测的旧口径。sandbox 是目标沙箱档（免审规则辅维度，DSHBOTS-365）。
     const callId = req.callId ? String(req.callId) : null
-    const toolTarget = callId ? (this.approvalTargets.get(callId) ?? null) : null
+    const cachedTarget = callId ? (this.approvalTargets.get(callId) ?? null) : null
+    const toolTarget = cachedTarget?.target ?? null
+    const targetSandbox = cachedTarget?.sandbox ?? ''
     if (callId) this.approvalTargets.delete(callId)
 
     store.run(
@@ -180,6 +361,21 @@ export const approvalsMethods = {
       toolName, callId, reason, displayReason, toolTarget,
       createdAt, new Date(Date.parse(createdAt) + timeoutMs).toISOString(),
     )
+
+    // DSHBOTS-365 免审白名单：命中规则的提权请求不落待办卡、不发群聊锚点/微信转发/通知，
+    // 插件即时替 owner 应答 allowed-once。留痕两件套缺一不可：approvals 行 status='allowed'
+    // + decided_by='auto:rule:<id>'（复用 settleApproval，decided_at 同步落库），审计事件
+    // approval.auto_allow。每次调用一放行一结：规则每次现读，改规则即时生效，无持久授权。
+    // 不进 approvalPending、不挂超时 timer、不挂 abort 监听——超时与轮次中止对已决条目天然不触。
+    const autoRule = this.matchApprovalAutoRule({ botId: bot.id, toolName, target: toolTarget, sandbox: targetSandbox })
+    if (autoRule) {
+      this.settleApproval(approvalId, 'allowed', 'allowed-once', `auto:rule:${autoRule.id}`)
+      this.audit(
+        { type: 'system', id: 'system' }, 'approval.auto_allow', 'approval', approvalId,
+        { ruleId: autoRule.id, toolName, botId: bot.id, target: toolTarget },
+      )
+      return 'allowed-once'
+    }
 
     // 卡片锚点：群聊落 messages（kind=approval），单聊落 solo_messages（DSHBOTS-218）。
     // 状态渲染时查 approvals 表，消息体只是纯文本兜底，不承载状态。
@@ -225,16 +421,22 @@ export const approvalsMethods = {
   },
 
   // 统一结算：清定时器、出 pending 表、写终态。hostAnswer 非空才向宿主应答（abort 分支不答）。
+  // 写库容错：结算可能由轮次取消的 abort 监听或超时定时器在插件重载（store.close()）之后
+  // 迟到触发——曾在 abort 分发里裸抛 statement has been finalized，把整个 dsh 宿主打成 fatal 退出。
   settleApproval(approvalId, status, hostAnswer, decidedBy) {
     const pending = this.approvalPending?.get(approvalId)
     if (pending) {
       clearTimeout(pending.timer)
       this.approvalPending.delete(approvalId)
     }
-    this.store.run(
-      'UPDATE approvals SET status = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = ?',
-      status, decidedBy, nowIso(), approvalId, 'pending',
-    )
+    try {
+      this.store.run(
+        'UPDATE approvals SET status = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = ?',
+        status, decidedBy, nowIso(), approvalId, 'pending',
+      )
+    } catch (error: any) {
+      this.logger?.warn?.('dsh-team: 审批结算写库失败（插件可能已重载）: %s', error?.message ?? error)
+    }
     if (pending && hostAnswer) pending.resolve(hostAnswer)
   },
 
@@ -250,6 +452,72 @@ export const approvalsMethods = {
     this.settleApproval(approvalId, decision === 'allow' ? 'allowed' : 'rejected', decision === 'allow' ? 'allowed-once' : 'rejected', decidedBy)
     this.audit(actor, `approval.${decision}`, 'approval', approvalId, { toolName: approval.tool_name, botId: approval.bot_id })
     return this.approvalView(this.store.get('SELECT * FROM approvals WHERE id = ?', approvalId))
+  },
+
+  // 免审规则取数（DSHBOTS-365）：每次现读现解析——无缓存，改规则对下一次提权请求即时生效。
+  approvalRulesView() {
+    return parseApprovalRules(this.store.setting(APPROVAL_RULES_SETTING, ''))
+  },
+
+  // 免审规则匹配入口：按规则表顺序首中即返（表序即优先级）。目标为空（无 callId 缓存）
+  // 一律不命中，保守回落原卡流程。
+  matchApprovalAutoRule(input) {
+    const target = String(input.target ?? '')
+    if (!target) return null
+    for (const rule of this.approvalRulesView()) {
+      if (approvalRuleMatches(rule, input)) return rule
+    }
+    return null
+  },
+
+  // 免审规则保存（DSHBOTS-365）：独立编辑面（仿 updatePromptSegment 先例），仅 type=user
+  // 可写——bot 写免审规则必须被拒，维持「bot 不能自批」边界。整表替换（UI 全量收集后提交），
+  // 逐条校验：主维度至少一项、路径前缀必须是绝对路径、sandbox 档枚举收口、bot 必须存在。
+  // 保存即审计；id 复用已有（编辑保 id），新条目发 arul_*。
+  async updateApprovalRules(rulesInput, actor = this.actor()) {
+    if (actor?.type !== 'user') throw forbidden('仅工作台 owner 可配置审批免审规则，bot 不能自批')
+    if (!Array.isArray(rulesInput)) throw badRequest('免审规则必须是数组')
+    if (rulesInput.length > APPROVAL_RULES_LIMIT) throw badRequest(`免审规则最多 ${APPROVAL_RULES_LIMIT} 条`)
+    const knownIds = new Set(this.approvalRulesView().map(rule => rule.id))
+    const usedIds = new Set<string>()
+    const rules = rulesInput.map((raw, index) => {
+      const item = raw && typeof raw === 'object' ? raw : {}
+      const label = `第 ${index + 1} 条规则`
+      const pathPrefix = String(item.path_prefix ?? '').trim().replace(/\/+$/, '')
+      const command = String(item.command ?? '').trim().split('\n')[0].trim().slice(0, 200)
+      if (!pathPrefix && !command) throw badRequest(`${label}缺少路径规则或命令规则（至少填一项）`)
+      // 路径规则：绝对路径，或含通配符的 glob（关键词规则如 **/tmp/** 不必是绝对路径）。
+      if (pathPrefix && !pathPrefix.startsWith('/') && !/[*?]/.test(pathPrefix)) {
+        throw badRequest(`${label}路径规则必须是以 / 开头的绝对路径或含通配符的 glob`)
+      }
+      if (pathPrefix.length > 500) throw badRequest(`${label}路径规则超长（上限 500 字符）`)
+      const botId = String(item.bot_id ?? '').trim()
+      if (botId && !this.store.get('SELECT id FROM bots WHERE id = ?', botId)) throw badRequest(`${label}限定的 Bot 不存在`)
+      const sandbox = String(item.sandbox ?? '').trim()
+      if (sandbox && !APPROVAL_RULE_SANDBOXES.includes(sandbox)) {
+        throw badRequest(`${label}沙箱档必须是 ${APPROVAL_RULE_SANDBOXES.join('/')} 或留空`)
+      }
+      // id 复用已有（编辑保 id）；新条目或输入撞 id（重复行）一律发新 id，保证表内 id 唯一。
+      let ruleId = item.id && knownIds.has(String(item.id)) && !usedIds.has(String(item.id)) ? String(item.id) : id('arul')
+      usedIds.add(ruleId)
+      return {
+        id: ruleId,
+        path_prefix: pathPrefix,
+        command,
+        bot_id: botId,
+        tool_name: String(item.tool_name ?? '').trim().slice(0, 100),
+        sandbox,
+        note: String(item.note ?? '').trim().slice(0, 200),
+        updated_at: nowIso(),
+        updated_by: `${actor.type}:${actor.id}`,
+      }
+    })
+    this.store.setSetting(APPROVAL_RULES_SETTING, JSON.stringify(rules))
+    this.audit(actor, 'approval_rules.update', 'settings', APPROVAL_RULES_SETTING, {
+      count: rules.length,
+      rules: rules.map(rule => ({ id: rule.id, path_prefix: rule.path_prefix, command: rule.command, sandbox: rule.sandbox })),
+    })
+    return this.approvalRulesView()
   },
 
   // 目标展示形：绝对路径落在项目工作区内且剩余段非空、不含空白时收成相对路径（chip 少占宽）；

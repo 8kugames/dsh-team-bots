@@ -36,6 +36,10 @@ const FAILURE_CATEGORY_NOTICES = {
   rate_limited: { label: '限流', summary: '上游限流，已按退避策略自动处理。' },
   sandbox_denied: { label: '沙箱拒绝', summary: '文件或命令操作被沙箱策略拒绝。' },
   timeout: { label: '超时', summary: '上游响应超时。' },
+  // DSHBOTS-364：本机时效中止/停滞收割与上游超时分开报——此前一律归「上游响应超时」，
+  // 把自家看门狗/分档时效的动作误报成 provider 故障，误导排查方向。
+  run_timeout: { label: '时效', summary: '运行超过时效上限被中止（非上游故障）。' },
+  stalled: { label: '停滞', summary: '运行长时间无进展，已被看门狗中止。' },
   network: { label: '网络', summary: '网络瞬态失败，已按退避策略自动重试。' },
   blocked: { label: '会话受阻', summary: '宿主拒绝执行该会话（可能已被归档），未产生任何模型输出。' },
   internal: { label: '内部错误', summary: '服务内部错误。' },
@@ -46,6 +50,8 @@ export function classifyFailure(error) {
   if (isQuotaExhausted(error)) return FAILURE_CATEGORY_NOTICES.quota
   if (isRateLimitError(error)) return FAILURE_CATEGORY_NOTICES.rate_limited
   if (SANDBOX_DENIED_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.sandbox_denied
+  if (error?.code === 'RUN_TIMEOUT') return FAILURE_CATEGORY_NOTICES.run_timeout
+  if (error?.code === 'RUN_STALLED') return FAILURE_CATEGORY_NOTICES.stalled
   if (TIMEOUT_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.timeout
   if (isTransientNetworkError(error)) return FAILURE_CATEGORY_NOTICES.network
   if (error?.code === 'SESSION_BLOCKED') return FAILURE_CATEGORY_NOTICES.blocked
@@ -67,6 +73,11 @@ export const runFinishMethods = {
     if (attentionPending) return false
     const current = this.taskRow(task.id)
     if (current.status !== 'in_review') return false
+    // 核验分档：只读档交付免自动核验（与验收闸门豁免同口径）；审计留痕便于核对漏审。
+    if (this.readOnlyDelivery(run, current)) {
+      this.audit({ type: 'system', id: 'system' }, 'review.auto_delegate', 'task', task.id, { skipped: 'read_only' })
+      return false
+    }
     const owner = project.owner_bot_id
       ? this.store.get("SELECT id FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
       : null

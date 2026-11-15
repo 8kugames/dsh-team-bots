@@ -39,6 +39,8 @@
     /* 卡内纵向 flex：图例与说明贴到卡片底部，等高时不再悬空。 */
     display: flex;
     flex-direction: column;
+    /* narrow 窗口下列表/表格最小宽度超过半宽槽位时卡内横向滚动，不顶破卡片与页面（1000px 实测溢出 53–69px） */
+    overflow-x: auto;
 }
 .usage-panel > .usage-legend,
 .usage-panel > .usage-note {

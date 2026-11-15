@@ -1,41 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
-import { handleAction } from '../src/api.js'
 
-// 归档/再开/移除追踪本身不启动 run，runtime 只需存在。
-class StubRuntime { declare models: any[];
-  constructor() {
-    this.models = [{
-      ref: 'fake/model-a', provider: 'fake', providerName: 'Fake', model: 'model-a', name: 'Model A',
-      efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high',
-    }]
-  }
-  setCompletionHandler() {}
-  async catalog() { return this.models }
-  async validateBotConfig() {}
-  async startRun({ run }) { return `session-${run.id}` }
-  async cancelRun() { return true }
-}
+import { handleAction } from '../src/api.js'
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-archive-test-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-archive-test-', schedulerIntervalMs: 20 })
 }
 
 function insertRun(store, { id: runId, projectId, botId, status = 'succeeded' }) {

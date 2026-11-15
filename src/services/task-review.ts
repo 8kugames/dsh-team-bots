@@ -7,8 +7,10 @@
 
 import { badRequest, conflict, forbidden } from '../errors.js'
 import { bool } from '../config.js'
+import { REVIEWER_BOT_NAME } from '../seed-bots.js'
 import { id, nowIso, text } from '../util.js'
 import { parseWriteScopes, readWriteScopes } from './write-scopes.js'
+import { effectiveSandbox } from './runtime/sandbox-policy.js'
 
 export const taskReviewMethods = {
   async reviewFromBot(sessionId, input) {
@@ -21,14 +23,34 @@ export const taskReviewMethods = {
     return this.applyReview(task, project, input.decision, input.comment, actor)
   },
 
+  // 验收核验分档开关：默认开，DSH_TEAM_REVIEW_READ_ONLY_SKIP=0 关闭回到全量强制核验。
+  reviewReadOnlySkipEnabled() {
+    return bool(this.config.reviewReadOnlySkip, true)
+  },
+
+  // 只读档交付判定（核验分档的单一口径）：交付运行的生效沙箱为 read-only（非写运行被
+  // run_type 收紧，或任务覆盖/负责人配置档为只读）即视为只读交付——物理上写不了工作区，
+  // 核验子代理重读一遍的边际价值最低。queueAutoReviewDelegate 跳过、验收闸门放宽、
+  // taskReviewStatus 标记 skipped 三处共用本判定。
+  readOnlyDelivery(run, taskRow) {
+    if (!run || !this.reviewReadOnlySkipEnabled()) return false
+    // 保守卫：mode 缺失的坏数据不豁免（DB 列 NOT NULL DEFAULT 'write'，正常不会缺），
+    // 只有显式 read 运行或写运行被覆盖/配置收紧到只读才豁免。
+    if (run.mode !== 'write' && run.mode !== 'read') return false
+    const bot = this.store.get('SELECT id, file_policy FROM bots WHERE id = ?', run.bot_id)
+    const task = taskRow ?? (run.task_id ? this.store.get('SELECT id, sandbox_override FROM tasks WHERE id = ?', run.task_id) : null)
+    return effectiveSandbox(run, bot, task).mode === 'read-only'
+  },
+
   // 验收机械闸（DSHBOTS-318/353）：把「验收必须经由子代理」从提示约束升级为机械约束——
   // owner bot 的 team_review_task 前置校验本评审周期内的子代理账目（run_events 的
   // subagent_spawned）。周期起点 T=最近一次交付（run_succeeded）或看板流转
-  // （status→in_review）事件的 created_at 取 MAX；账目归属两条认领线：
-  // 本任务的 owner 运行（task_id+bot_id）或调用方会话的任意运行——两跳正规流程
-  // （review_delegate 派子代理 → 新运行只裁决）的账目挂在上一跳已结束运行上，
-  // 按「当运行有账」查必漏，故按周期查。comment 显式注明「兜底验收」放行
-  // （对应 router 硬流程第 4 条：子代理失败重试一次仍失败时 director 兜底）。
+  // （status→in_review）事件的 created_at 取 MAX；账目归属三条认领线：
+  // 本任务的 owner 运行（task_id+bot_id）、调用方会话的任意运行、或本任务上的委派核验
+  // 运行（task_id+trigger_type，DSHBOTS-365：核验承接人可能是成员 reviewer 而非总监，
+  // 其子代理账目挂在自己名下）。两跳正规流程（review_delegate 派子代理 → 新运行只裁决）
+  // 的账目挂在上一跳已结束运行上，按当运行有账查必漏，故按周期查。comment 显式注明
+  // 「兜底验收」放行（对应 router 硬流程第 4 条：子代理失败重试一次仍失败时 director 兜底）。
   // 仅机器人路径：微信管理员/看板 owner 走 applyReview，不经过本闸。
   assertReviewSubagentVerified(sessionId, project, task, comment) {
     if (comment?.includes('兜底验收')) return
@@ -38,13 +60,23 @@ export const taskReviewMethods = {
         AND (type = 'run_succeeded' OR (type = 'status' AND json_extract(data_json, '$.to') = 'in_review'))`,
       task.id,
     )?.t ?? ''
+    // 核验分档：本评审周期的交付运行为只读档（事件载荷 runId 指回交付运行）时免子代理
+    // 账目——与自动委派豁免同口径；无交付运行锚（如纯看板流转）时保持强制，不放宽。
+    const delivered = this.store.get(
+      `SELECT r.* FROM task_events e JOIN runs r ON r.id = json_extract(e.data_json, '$.runId')
+        WHERE e.task_id = ? AND e.type = 'run_succeeded' AND e.created_at >= ?
+        ORDER BY e.created_at DESC LIMIT 1`,
+      task.id, windowStart,
+    )
+    if (delivered && this.readOnlyDelivery(delivered, task)) return
     const ledger = this.store.get(
       `SELECT 1 AS hit FROM runs r
-        WHERE ((r.task_id = ? AND r.bot_id = ?) OR r.session_id = ?)
+        WHERE ((r.task_id = ? AND r.bot_id = ?) OR r.session_id = ?
+          OR (r.task_id = ? AND r.trigger_type = 'review_delegate'))
           AND EXISTS (SELECT 1 FROM run_events e
             WHERE e.run_id = r.id AND e.type = 'subagent_spawned' AND e.created_at >= ?)
         LIMIT 1`,
-      task.id, project.owner_bot_id, sessionId, windowStart,
+      task.id, project.owner_bot_id, sessionId, task.id, windowStart,
     )
     if (ledger) return
     // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 正确下一步。
@@ -53,28 +85,6 @@ export const taskReviewMethods = {
       + '先派验收子代理（subagent/subagent_fork）做范围比对/目标测试/红线预测，把结论作为 comment；'
       + '如需 director 兜底，在 comment 里注明「兜底验收」。',
     )
-  },
-
-  // 执行者不得验收（builder≠verifier，吸收自 dsh-agent-team 的协作理念）：
-  // bot 验收时校验该 bot 从未担任过本卡负责人——含当前 assignee 与历史派单
-  // （task_events 的 created/assigned 事件）。工作台 owner（人）与看板/看门狗
-  // （system）不受此闸：信任边界归人，机械闸只拦 bot 自审自发。
-  assertAcceptorNotExecutor(task, project, actorBotId) {
-    const identifier = `${project.key}-${task.number}`
-    const executed = task.assignee_bot_id === actorBotId || !!this.store.get(
-      `SELECT 1 FROM task_events WHERE task_id = ?
-         AND ((type = 'assigned' AND json_extract(data_json, '$.botId') = ?)
-           OR (type = 'created' AND json_extract(data_json, '$.assigneeBotId') = ?))
-       LIMIT 1`,
-      task.id, actorBotId, actorBotId,
-    )
-    if (executed) {
-      throw conflict(
-        `任务 ${identifier} 的验收者就是它的执行者，执行者不得验收：`
-        + '把该卡验收交给未执行过本卡的 bot（team_assign_task 重派验收方），'
-        + '或由工作台 owner 在看板/管理通道直接验收。',
-      )
-    }
   },
 
   /** 验收/退回的共用流程：owner Bot 会话与微信管理员共用。 */
@@ -88,9 +98,6 @@ export const taskReviewMethods = {
         + 'team_review_task 只验收已交付（in_review）的卡，请先等负责人交付；'
         + '若卡面或目标有误，用 team_assign_task 重派原任务（task=原任务号，附 title/description 即改卡）修正。',
       )
-    }
-    if (decision === 'accept' && actor?.type === 'bot') {
-      this.assertAcceptorNotExecutor(task, project, actor.id)
     }
     if (decision === 'accept') {
       await this.updateTask(task.id, { status: 'done' }, actor)
@@ -125,10 +132,12 @@ export const taskReviewMethods = {
     return this.taskView(this.taskRow(task.id))
   },
 
-  // 验收核验委派（DSHBOTS-107）：待验收任务上，owner 一键把核验工作派给总监 Bot，
-  // 由其会话内的 subagent/subagent_fork 并行完成（提示词见 runtime/prompt.js 的
-  // review-verification 模板）。核验结论以任务评论写回（finishRun 复用 addComment 通道），
-  // 裁决权不变：accept/return 仍由 owner 经 team_review_task 或看板执行，本方法不碰任务状态。
+  // 验收核验委派（DSHBOTS-107；DSHBOTS-365 承接人默认 reviewer）：待验收任务上，owner
+  // 一键委派子代理核验——承接人优先项目内种子 reviewer（reviewDelegateBotFor），无则
+  // 总监 Bot 兜底，由其会话内的 subagent/subagent_fork 并行完成（提示词见
+  // runtime/prompt.js 的 review-verification 模板）。核验结论以任务评论写回（finishRun
+  // 复用 addComment 通道），不改任务状态、不代负责人裁决：accept/return 仍由 owner 经
+  // team_review_task 或看板执行，本方法不碰任务状态。
   async taskReviewDelegate(taskId, actor = this.actor()) {
     if (actor.type !== 'user') throw forbidden('只有工作台 owner 可以委派子代理核验')
     const task = this.taskRow(taskId)
@@ -174,6 +183,19 @@ export const taskReviewMethods = {
     return this.taskView(this.taskRow(taskId))
   },
 
+  // 核验承接人（DSHBOTS-365 产品默认）：项目成员里的种子 reviewer 优先（固定名识别，
+  // 改名/移除/不可用即失效），回落总监自行核验（兜底）。裁决权不变：仍归 owner。
+  reviewDelegateBotFor(project) {
+    if (!project.owner_bot_id) return null
+    return this.store.get(
+      `SELECT b.* FROM bots b
+        JOIN project_members m ON m.member_type = 'bot' AND m.member_id = b.id
+        WHERE m.project_id = ? AND b.name = ? AND b.status = 'active' AND b.id <> ?
+        LIMIT 1`,
+      project.id, REVIEWER_BOT_NAME, project.owner_bot_id,
+    )
+  },
+
   // 核验委派共享入口（DSHBOTS-113）：手动按钮（taskReviewDelegate）与交付后自动委派
   // （review_delegate_auto outbox）走同一实现，守卫（待验收状态 / 可用总监 / one_active
   // 幂等复看）与运行形态（kind='review', mode='read', trigger='review_delegate'）完全一致。
@@ -186,6 +208,8 @@ export const taskReviewMethods = {
       ? this.store.get("SELECT * FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
       : null
     if (!owner) throw conflict(`项目 ${project.name} 没有可用的总监 Bot，无法委派核验`)
+    // 核验承接人：优先成员 reviewer（DSHBOTS-365），无则总监兜底。
+    const verifier = this.reviewDelegateBotFor(project) ?? owner
     const active = this.store.get(
       "SELECT id, trigger_type FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
       task.id,
@@ -198,34 +222,45 @@ export const taskReviewMethods = {
     }
     // DSHBOTS-358：额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，
     // 无可用备用则留 queued 等恢复；路由快照写进运行行的 model_* 三列。
-    const routing = this.quotaRoutingForBot(owner)
+    const routing = this.quotaRoutingForBot(verifier)
     const routeProvider = routing.mode === 'fallback' ? routing.provider : null
     const routeModel = routing.mode === 'fallback' ? routing.model : null
     const routeEffort = routing.mode === 'fallback' ? routing.effort : null
-    // busy 闸（DSHBOTS-290）：总监忙时不落 runs 行（撞 one_active_run_per_bot），挂待
+    // busy 闸（DSHBOTS-290）：承接人忙时不落 runs 行（撞 one_active_run_per_bot），挂待
     // 处理队列空闲建回（insertHeldMessageRun 的 owner_task 分支）；返回 deferred 让
     // 手动入口与 outbox 自动入口都能感知「已挂起」而非失败。
-    if (this.botBusy(owner.id, project.id)) {
-      this.holdPendingMessage(owner.id, project.id, {
-        kind: 'owner_task', messageId: `owner_task:${task.id}:review_delegate`, taskId: task.id,
-        projectId: project.id, runKind: 'review', triggerType: 'review_delegate', queuedAt: nowIso(),
-        routing: routing.mode === 'fallback'
-          ? { mode: 'fallback', provider: routing.provider, model: routing.model, effort: routing.effort, ref: routing.ref }
-          : routing.mode === 'wait'
-            ? { mode: 'wait', resetAt: routing.resetAt }
-            : { mode: 'primary' },
-      })
+    const hold = () => this.holdPendingMessage(verifier.id, project.id, {
+      kind: 'owner_task', messageId: `owner_task:${task.id}:review_delegate`, taskId: task.id,
+      projectId: project.id, runKind: 'review', triggerType: 'review_delegate', queuedAt: nowIso(),
+      routing: routing.mode === 'fallback'
+        ? { mode: 'fallback', provider: routing.provider, model: routing.model, effort: routing.effort, ref: routing.ref }
+        : routing.mode === 'wait'
+          ? { mode: 'wait', resetAt: routing.resetAt }
+          : { mode: 'primary' },
+    })
+    if (this.botBusy(verifier.id, project.id)) {
+      hold()
       return { runId: null, deferred: true }
     }
     const runId = id('run')
     const createdAt = nowIso()
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
-       VALUES (?, ?, ?, ?, 'review', 'read', 'review_delegate', ?, 'queued', 1, ?, ?, ?, ?, ?)`,
-      runId, project.id, owner.id, task.id, task.id, `review_delegate:${task.id}:${Date.now()}:${runId}`,
-      routeProvider, routeModel, routeEffort, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
+         VALUES (?, ?, ?, ?, 'review', 'read', 'review_delegate', ?, 'queued', 1, ?, ?, ?, ?, ?)`,
+        runId, project.id, verifier.id, task.id, task.id, `review_delegate:${task.id}:${Date.now()}:${runId}`,
+        routeProvider, routeModel, routeEffort, createdAt,
+      )
+    } catch (error) {
+      // 查后插竞态（DSHBOTS-300 同款）：busy 检查与 INSERT 之间承接人被占用，撞
+      // one_active_run_per_bot——挂待处理队列空闲建回，同 busy 闸返回 deferred，不向上抛。
+      if (this.isRunBotUniqueViolation(error)) {
+        hold()
+        return { runId: null, deferred: true }
+      }
+      throw error
+    }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',

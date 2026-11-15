@@ -68,6 +68,12 @@ const addRun = (store, { id, botId, projectId = null, status = 'queued', queuedA
   id, projectId, botId, status, `ik:${id}`, queuedAt ?? new Date().toISOString(),
 )
 
+const addTaskRun = (store, { id, botId, projectId = null, taskId, status = 'queued', queuedAt }: { id: string; botId: string; projectId?: string; taskId: string; status?: string; queuedAt?: string }) => store.run(
+  `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+   VALUES (?, ?, ?, ?, 'task', 'write', 'task_created', ?, 1, ?, ?)`,
+  id, projectId, botId, taskId, status, `ik:${id}`, queuedAt ?? new Date().toISOString(),
+)
+
 // 把已迁移的新库回退成「四车道旧库」形状：清掉收敛账本、重建旧三索引、恢复旧道活跃行。
 const revertToLegacyLanes = (store, rows) => {
   store.run('DELETE FROM schema_migrations WHERE name = ?', MIGRATION_NAME)
@@ -176,9 +182,11 @@ test('存量运行串行化：同 bot 多条 queued 只留最早一条，其余 
   t.after(() => cleanup(ctx))
   const { store } = ctx
   addBot(store, 'bot-a')
-  // 新库开库即带 one_active_run_per_bot（runMigrations 已接线激活）：先撤索引才能种出
-  // 存量老库「同 bot 多条 queued 并存」的形状，再走激活迁移验证串行化收口。
+  // 新库开库即带 one_active_run_per_bot 且已记账本（runMigrations 已接线激活）：先撤索引、
+  // 清账本才能种出存量老库「同 bot 多条 queued 并存且未迁移」的形状，再走激活迁移验证
+  // 串行化收口。
   store.run('DROP INDEX IF EXISTS one_active_run_per_bot')
+  store.run("DELETE FROM schema_migrations WHERE name = 'bot_run_serialization'")
   const at = (ms) => new Date(Date.parse('2026-11-06T00:00:00Z') + ms).toISOString()
   addRun(store, { id: 'run-early', botId: 'bot-a', queuedAt: at(0) })
   addRun(store, { id: 'run-late', botId: 'bot-a', queuedAt: at(1_000) })
@@ -189,6 +197,38 @@ test('存量运行串行化：同 bot 多条 queued 只留最早一条，其余 
   assert.equal(canceled.status, 'canceled')
   assert.equal(canceled.error_code, 'BOT_SERIALIZATION')
   assert.ok(indexNames(store).includes('one_active_run_per_bot'), '串行化后索引应建成')
+})
+
+// ZONGM-140 三会话事故复盘①：串行化收口是一次性存量迁移，账本已记录时重开库（宿主
+// 重启即触发）不得再收口——修复前生产表现是每次重启把同 bot 较新的 queued/running 运行
+// （含已被最终索引豁免的 task/治理运行）误杀成 BOT_SERIALIZATION canceled（ZONGM-140
+// 首发运行入队 15 秒被杀、DSHBOTS-368 两次被杀、11-13 两条治理运行被杀）。
+test('串行化收口账本闸：已记录后重开库不再取消活跃运行（重启安全）', async (t) => {
+  const ctx = await setup()
+  t.after(() => cleanup(ctx))
+  const { store } = ctx
+  addBot(store, 'bot-a')
+  addProject(store, 'proj-ser', 'bot-a')
+  const addSeedTask = (id, number) => store.run(
+    `INSERT INTO tasks(id, project_id, number, title, status, priority, creator_type, creator_id, created_at, updated_at)
+     VALUES (?, 'proj-ser', ?, ?, 'in_progress', 'medium', 'bot', 'bot-a', ?, ?)`,
+    id, number, id, new Date().toISOString(), new Date().toISOString(),
+  )
+  addSeedTask('task-old', 1)
+  addSeedTask('task-new', 2)
+  const at = (ms) => new Date(Date.parse('2026-11-06T00:00:00Z') + ms).toISOString()
+  // setup 开库已走完迁移链（账本已记录）。种出「同 bot 多条活跃 task 运行并存」形状
+  // （ZONGM-139 running + ZONGM-140 queued 同 bot 的生产事故形状）：task 运行被最终
+  // 索引豁免可合法并存，但 chat 类会撞索引，故种 task 类并各带互异 task_id。
+  store.run('DROP INDEX IF EXISTS one_active_run_per_bot')
+  addTaskRun(store, { id: 'run-old', botId: 'bot-a', projectId: 'proj-ser', taskId: 'task-old', queuedAt: at(0) })
+  addTaskRun(store, { id: 'run-new', botId: 'bot-a', projectId: 'proj-ser', taskId: 'task-new', queuedAt: at(1_000) })
+  // 宿主重启 = 重开库：账本在场，收口 UPDATE 不得再执行，两条活跃运行原样保留。
+  runMigrations(store.db)
+  assert.equal(store.get("SELECT status FROM runs WHERE id = 'run-old'").status, 'queued', '重开库不得收口 run-old')
+  assert.equal(store.get("SELECT status FROM runs WHERE id = 'run-new'").status, 'queued', '重开库不得收口 run-new（修复前会被置 BOT_SERIALIZATION canceled）')
+  assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE error_code = 'BOT_SERIALIZATION'").n, 0, '不得产生任何 BOT_SERIALIZATION 痕迹')
+  assert.ok(indexNames(store).includes('one_active_run_per_bot'), '最终索引面不受账本闸影响（exempt 系列每次开库兜底重建）')
 })
 
 test('ensureBotBinding：无绑定 bot 运行期新建控制面会话，重复调用复用不重建', async (t) => {

@@ -1,36 +1,14 @@
 // DSHBOTS-25：Bot 备用模型——主 provider 不可用时临时切备用模型继续执行任务，运行结束自动回退。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+import { rm } from 'node:fs/promises'
+
 import { DshRuntime } from '../src/runtime.js'
 import { modelOverrideFor } from '../src/services/runtime/session.js'
-
-// 不真正启动会话：finishRun / 派生逻辑全部用直接落库的 run 行驱动。
-class StubRuntime {
-  setCompletionHandler() {}
-  async catalog() { return [] }
-  async validateBotConfig() {}
-  async startRun({ run }) { return `session-${run.id}` }
-  async cancelRun() { return true }
-}
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-model-fallback-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service, config }
+  return setupTeam({ prefix: 'dsh-model-fallback-', schedulerIntervalMs: 20 })
 }
 
 const mins = n => new Date(Date.now() + n * 60_000).toISOString()

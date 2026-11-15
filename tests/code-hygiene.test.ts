@@ -4,12 +4,10 @@
 // 告警去重（同文件不重复报、回落后再超标重报）、run-finish 钩子触发与 run_event 留痕。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+
 import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+
 import {
   CODE_HYGIENE_DEFAULT_LIMIT,
   countTextLines,
@@ -18,6 +16,7 @@ import {
   scanCodeHygieneFiles,
 } from '../src/services/hygiene.js'
 import { messageLocale, systemAlertLabel } from '../src/services/locale.js'
+import { setupTeam } from './helpers/harness.js'
 
 // startRun 只记账不回调完成：run 停在 running，finishRun 由测试显式调用。
 class HoldingRuntime { declare started: unknown[];
@@ -30,17 +29,7 @@ class HoldingRuntime { declare started: unknown[];
 }
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-hygiene-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new HoldingRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-hygiene-', schedulerIntervalMs: 30_000, runtime: new HoldingRuntime() })
 }
 
 async function seedProject(service, key = 'HYG') {

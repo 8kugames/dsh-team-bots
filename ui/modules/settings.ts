@@ -182,6 +182,7 @@ function renderRunLimitsCard() {
   const envNames = [
     limits.runTimeoutEnv ? 'DSH_TEAM_RUN_TIMEOUT_MS' : '',
     limits.stallTimeoutEnv ? 'DSH_TEAM_STALL_TIMEOUT_MS' : '',
+    limits.reviewTimeoutEnv ? 'DSH_TEAM_REVIEW_TIMEOUT_MINUTES' : '',
   ].filter(Boolean).join(' / ')
   const stallText = limits.stallTimeoutMinutes === 0
     ? t('global.stallOff')
@@ -191,6 +192,9 @@ function renderRunLimitsCard() {
   const savedQuestion = settings.question_timeout_minutes ?? ''
   const approvalValue = savedApproval !== '' ? savedApproval : '10'
   const questionValue = savedQuestion !== '' ? savedQuestion : '10'
+  // 验收分档时效（DSHBOTS-364）：'0'（关闭分档、跟随全局）合法，不能 || 短路。
+  const savedReviewTimeout = settings.review_timeout_minutes ?? ''
+  const reviewTimeoutValue = savedReviewTimeout !== '' ? savedReviewTimeout : String(limits.reviewTimeoutMinutes ?? 0)
   return `
     <div class="card form-card g-card">
       <div class="card-head"><h3>${t('global.cardRunLimits')}</h3><span class="meta">${t('global.runLimitsCurrent', { timeout: limits.runTimeoutMinutes ?? 120, stall: stallText })}</span></div>
@@ -204,6 +208,8 @@ function renderRunLimitsCard() {
       </div>
       <div class="field-row">
         <div class="field"><label id="settings-review-idle-label" for="settings-review-idle">${t('global.reviewIdleLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="1440" id="settings-review-idle" name="review_idle_minutes" value="${attr(reviewIdleValue)}"></div>
+        <div class="field"><label id="settings-review-timeout-label" for="settings-review-timeout">${t('global.reviewTimeoutLabel')}</label><input class="input mono" style="text-align:right" type="number" min="0" max="60" id="settings-review-timeout" name="review_timeout_minutes" value="${attr(reviewTimeoutValue)}"></div>
+      </div>
         <div class="field"><label id="settings-review-auto-close-label" for="settings-review-auto-close">${t('global.reviewAutoCloseLabel')}</label>
           <select class="select" id="settings-review-auto-close" name="review_auto_close">
             <option value="1" ${settings.review_auto_close === '1' ? 'selected' : ''}>${t('global.on')}</option>
@@ -211,9 +217,9 @@ function renderRunLimitsCard() {
             <option value="0" ${settings.review_auto_close === '0' ? 'selected' : ''}>${t('global.off')}</option>
           </select>
         </div>
-      </div>
       <div class="hint">${t('global.runLimitsHint1')}</div>
       <div class="hint">${t('global.reviewIdleHint')}</div>
+      <div class="hint">${t('global.reviewTimeoutHint')}</div>
       <div class="hint">${t('新值只对之后启动的运行生效，进行中的运行不追溯。')}</div>
       ${envNames ? `<div class="hint">${t('global.runLimitsEnv', { names: envNames })}</div>` : ''}
       <div class="btn-row" style="margin-top:12px">

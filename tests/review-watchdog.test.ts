@@ -7,15 +7,16 @@
 // H5 逐卡容错与索引、自动收口开关关闭行为不变。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { openDatabase } from '../src/db.js'
+
 import { resolveConfig, effectiveReviewIdleMinutes } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+
 import { REVIEW_IDLE_ALERTED_KEY, latestAnchorMs, runReviewWatchdog } from '../src/services/review-watchdog.js'
+import { setupTeam } from './helpers/harness.js'
 
 class HoldingRuntime {
   declare started: string[]
@@ -28,17 +29,7 @@ class HoldingRuntime {
 }
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-rvw-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new HoldingRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-rvw-', schedulerIntervalMs: 30_000, runtime: new HoldingRuntime() })
 }
 
 async function seedProject(service, key = 'RVW') {

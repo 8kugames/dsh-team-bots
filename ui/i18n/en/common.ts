@@ -172,4 +172,14 @@ export default {
   "主模型": "Primary model",
   "：": ": ",
   "）": ")",
+  // Form inline validation (DSHBOTS-367)
+  "form.thisField": "This field",
+  "form.errorRequired": "${label} is required",
+  "form.errorTypeMismatch": "${label} has an invalid format",
+  "form.errorPatternMismatch": "${label} does not match the expected format",
+  "form.errorTooShort": "${label} must be at least ${min} characters",
+  "form.errorTooLong": "${label} must be at most ${max} characters",
+  "form.errorRangeUnderflow": "${label} must be at least ${min}",
+  "form.errorRangeOverflow": "${label} must be at most ${max}",
+  "form.errorStepMismatch": "${label} must be a multiple of ${step}",
 }

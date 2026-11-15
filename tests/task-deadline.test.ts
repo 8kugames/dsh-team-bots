@@ -9,8 +9,9 @@
 //    review 提示词不注入 Deadline 行；
 // e) 重派即新窗口（DSHBOTS-281）：存量老卡重派不改预算不升级（正例）+ 新窗口内预算×2
 //    耗尽仍照常拦截（负例）。
-// f) review 运行预算分档（DSHBOTS-302）：review/handle 取 min(全局, 分档)（默认 10，
-//    settings review_timeout_minutes [3,60]，env 显式最高）；chat/dm/solo 沿用全局。
+// f) review 运行预算分档（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：review/handle 配了
+//    分档取 min(全局, 分档)（默认 0 = 关闭走全局，settings review_timeout_minutes
+//    [0,60]，env 显式最高）；chat/dm/solo 沿用全局。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -249,22 +250,25 @@ test('源码锚：死线闸在 kind=\'task\' 领取分支内，升级路径与�
   assert.ok(SCHEDULER_SRC.includes('TASK_DEADLINE'), '拒绝原因码 TASK_DEADLINE 被钉')
 })
 
-// f) review 运行预算分档（DSHBOTS-302）：director 单车道上 review/handle（owner_task 运行族）
-// 长尾会堵住同 bot 的 chat 消息运行——上限取 min(全局, review 分档)；分档生效链与
-// effectiveRunLimits 同款（env 显式 > settings review_timeout_minutes [3,60] > 默认 10）；
-// chat/dm/solo 沿用全局不受影响；task 时效取 min 逻辑不变。
-test('f) review 预算分档：默认 10 / settings 覆盖 8 / 全局更小取全局 / chat 不受影响', () => {
+// f) review 运行预算分档（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：review/handle
+// （owner_task 运行族）可配单独特效上限——生效时上限取 min(全局, review 分档)；分档
+// 生效链与 effectiveRunLimits 同款（env 显式 > settings review_timeout_minutes
+// [0,60]，0 = 关闭 > 默认 0 关闭）；默认关闭后验收沿用全局时效，真挂死由无进展看门狗
+// 兜底（子代理活动计入根运行进展，不误杀在跑验收）；chat/dm/solo 沿用全局不受影响；
+// task 时效取 min 逻辑不变。
+test('f) review 预算分档：默认关闭走全局 / settings 覆盖 8 与关闭 0 / 全局更小取全局 / chat 不受影响', () => {
   const min = (m) => m * 60_000
   const reviewRun = { kind: 'review', task_id: 't1' }
   const handleRun = { kind: 'handle', task_id: 't1' }
-  // 生效链：默认 10；settings 整数 [3,60] 可覆盖；非法/越界值回退默认。
-  assert.equal(effectiveReviewTimeoutMinutes(() => null), 10, '默认 10 分钟')
+  // 生效链：默认 0（关闭）；settings 整数 [0,60] 可覆盖；非法/越界值回退默认。
+  assert.equal(effectiveReviewTimeoutMinutes(() => null), 0, '默认 0（关闭分档）')
   assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '8' : null)), 8, 'settings 覆盖 8')
-  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '2' : null)), 10, '低于 3 回退默认')
-  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '61' : null)), 10, '高于 60 回退默认')
-  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? 'abc' : null)), 10, '非整数回退默认')
-  // 分档计算：默认 10（全局 30 → 10）；handle 同款。
-  assert.equal(runTimeoutMsForTaskRun({ run: reviewRun, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(effectiveReviewTimeoutMinutes(() => null)) }), min(10), 'review 默认分档 10 分钟')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '0' : null)), 0, 'settings 0 = 显式关闭')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '-1' : null)), 0, '负数回退默认')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '61' : null)), 0, '高于 60 回退默认')
+  assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? 'abc' : null)), 0, '非整数回退默认')
+  // 分档计算：默认关闭（全局 30 → 30，不再砍到 10）；配了分档 8 时 handle 同款收紧。
+  assert.equal(runTimeoutMsForTaskRun({ run: reviewRun, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(effectiveReviewTimeoutMinutes(() => null)) }), min(30), '默认关闭分档，review 沿用全局')
   assert.equal(runTimeoutMsForTaskRun({ run: handleRun, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(8) }), min(8), 'handle 同款分档')
   // 全局更小取全局：分档 10、全局 5 → 5。
   assert.equal(runTimeoutMsForTaskRun({ run: reviewRun, task: null, globalRunTimeoutMs: min(5), reviewTimeoutMs: min(10) }), min(5), '全局更小时取全局')

@@ -4,6 +4,8 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { createRequire } from 'node:module'
+import { appendFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { AppError, badRequest, conflict, hotUpgradeUnsupported } from '../errors.js'
 import { usageSnapshot } from '../usage.js'
 import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion, detectDshRuntimeVersion, detectHostDshVersionFromPlugin, displayDshVersion } from '../updater.js'
@@ -58,9 +60,80 @@ function soloVisibleMessages(store, botId, { days = 0, keep = 0, beforeCreatedAt
 
 
 
-export const systemMethods = {
+const systemMethodsBase = {
+  // state 版本（效率优化）：DB 变更计数（total_changes，O(1)）+ 两通道内存相位 + 模型目录
+  // 刷新时间戳。state 的全部数据源变更都会推进版本；轮询带 since 且版本相等时服务端直接
+  // 回 unchanged，跳过整套组装（几十次查询 + 序列化 + 传输）。usage 快照/设置/技能等均由
+  // DB 派生，被变更计数覆盖；微信/飞书连接相位与模型目录是不落库的易变成分，单独入版本。
+  stateVersion() {
+    // 视图作用域版本（perf 实测修复）：旧口径用全库 total_changes，任何后台写入
+    // （usage_events/run_trajectory/普通 outbox 投递等高频表）都会打穿 since 短路，
+    // 活跃运行期间每拍 2.8s 轮询都全量组装并回传 1~2MB。这里改为只对 state() 实读
+    // 的表取「行数 + 最新变更时刻」签名：与本视图无关的写入不再失效短路。
+    // 漏表的最坏后果由既有 60s 兜底上限覆盖（到期强制重组装一次）。
+    // 任一表/列不存在（老库、懒建表未建）时整体回退旧口径，宁可多传不可 500。
+    try {
+      const sig = (sql: string) => {
+        const row = this.store.get(sql) as { n?: number | string, m?: string } | undefined
+        return `${row?.n ?? 0}:${row?.m ?? ''}`
+      }
+      const count = (table: string) => sig(`SELECT COUNT(*) AS n, '' AS m FROM ${table}`)
+      const stamp = (table: string, column: string) =>
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(${column}), '') AS m FROM ${table}`)
+      const parts = [
+        stamp('projects', 'updated_at'),
+        stamp('bots', 'updated_at'),
+        stamp('tasks', 'updated_at'),
+        stamp('task_labels', 'rowid'),
+        stamp('task_comments', 'rowid'),
+        // runs 不含 updated_at：新运行看行数、启动/结束看 started_at/ended_at；
+        // last_progress_at 的巡检心跳不进签名——它不改变视图载荷，计入会重新引入高频失效。
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(queued_at), '') || COALESCE(MAX(started_at), '') || COALESCE(MAX(ended_at), '') AS m FROM runs`),
+        stamp('messages', 'rowid'),
+        stamp('solo_messages', 'rowid'),
+        // bot_messages 的 status/reply 变更不推 rowid，靠 replied_at 捕捉。
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(replied_at, created_at)), '') AS m FROM bot_messages`),
+        stamp('memories', 'updated_at'),
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(decided_at, created_at)), '') AS m FROM proposals`),
+        stamp('skills', 'updated_at'),
+        stamp('skill_versions', 'rowid'),
+        stamp('skill_bindings', 'updated_at'),
+        // approvals/questions 是懒建表，未建时此处抛错走兜底回退，语义安全。
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(decided_at, created_at)), '') AS m FROM approvals`),
+        // questions 表没有 answered_at 列（answer/answered_by/ended_at）——答问不改行数也
+        // 多数不改 MAX(status)，用答案总长度与 ended_at 一并作签名，漏检由 60s 兜底覆盖。
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(ended_at), '') || ' #' || SUM(LENGTH(COALESCE(answer, ''))) AS m FROM questions`),
+        stamp('chat_reads', 'read_at'),
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(ended_at, created_at)), '') AS m FROM terminal_commands`),
+        stamp('secrets', 'updated_at'),
+        sig(`SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(handled_at, created_at)), '') AS m FROM secret_requests`),
+        count('model_prices'),
+        // 只签 review 类 outbox 行（taskReviewStatus 实读口径）：计数与最新变更都按
+        // kind 过滤——普通投递行的高频 pending→done 翻转不再打穿短路。
+        sig(`SELECT SUM(CASE WHEN kind = 'review_delegate_auto' THEN 1 ELSE 0 END) AS n, COALESCE(MAX(CASE WHEN kind = 'review_delegate_auto' THEN status || created_at ELSE NULL END), '') AS m FROM outbox`),
+        this.settingsRevision(),
+      ]
+      return [...parts, this.wechat?.status?.()?.phase ?? 'off', this.feishu?.status?.()?.phase ?? 'off', this.runtime?.modelsCache?.at ?? 0].join(':')
+    } catch {
+      return [
+        this.store.changes(),
+        this.wechat?.status?.()?.phase ?? 'off',
+        this.feishu?.status?.()?.phase ?? 'off',
+        this.runtime?.modelsCache?.at ?? 0,
+      ].join(':')
+    }
+  },
+
   async state(projectId, soloBotId = null) {
+    // perf-diag（临时）：分解组装耗时，>300ms 时在返回前落 breakdown 行；定位后整块移除。
+    const perf = { init: 0, db: 0, catalog: 0, lang: 0 }
+    const stateT0 = performance.now()
+    const initT0 = performance.now()
     await this.initialize()
+    perf.init = performance.now() - initT0
+    const version = this.stateVersion()
+    const cacheKey = `${projectId ?? ''}|${soloBotId ?? ''}`
+    const dbT0 = performance.now()
     const projects = this.store.all(`
       SELECT p.*, (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status NOT IN ('done','canceled')) AS open_tasks,
         (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'in_review' AND t.review_target = 'user') AS review_tasks,
@@ -73,9 +146,20 @@ export const systemMethods = {
     let project = projectId ? this.store.get('SELECT * FROM projects WHERE id = ?', projectId) : undefined
     if (!project) project = this.store.get("SELECT * FROM projects WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1")
     const capabilityInfo = this.runtime?.capabilityInfo?.() ?? {}
+    const catalogT0 = performance.now()
+    const models = await this.runtime?.catalog() ?? []
+    perf.catalog = performance.now() - catalogT0
+    const langT0 = performance.now()
+    const language = await resolveUiLanguage({
+      loader: this.runtime?.ctx?.get?.('loader'),
+      dshHome: this.config.dshHome,
+      profile: process.env.DSH_PROFILE || 'team-bots',
+      uiLanguage: effectiveUiLanguage(this.config, key => this.store.setting(key)),
+    })
+    perf.lang = performance.now() - langT0
     const view: any = {
       me: this.store.get('SELECT id, name FROM users WHERE id = ?', this.localUserId),
-      models: await this.runtime?.catalog() ?? [],
+      models,
       bots: bots.map(bot => this.botView(bot)),
       projects: projects.map(item => ({
         ...item,
@@ -101,6 +185,8 @@ export const systemMethods = {
       settingsRevision: this.settingsRevision(),
       // 可编辑提示词段（B1/DSHBOTS-324）：全局配置页「团队指令」分组唯一真值。
       promptSegments: this.promptSegmentsView(),
+      // 审批免审规则（DSHBOTS-365）：总览 bots 页「免审权限」卡唯一真值，规则量小随行下发。
+      approvalRules: this.approvalRulesView(),
       runLimits: this.runLimitsView(),
       // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
       activeRuns: Number(this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')")?.count ?? 0),
@@ -131,14 +217,9 @@ export const systemMethods = {
       // 本插件（dsh-team-bots）部署生效版：与 health().version 同源。
       pluginVersion: PLUGIN_VERSION,
       // UI 语言（DSHBOTS-120）：与 http.js page() 的 {{language}} 注入同源
-      // （页面保存值 zh/en > loader 直读 → patch 文件 → 'auto' 交浏览器），
+      // （页面保存值 zh/en > loader 直读 → patch 文件 → 'auto' 交浏览器）；
       // state 轮询据此热切换字典包。
-      language: await resolveUiLanguage({
-        loader: this.runtime?.ctx?.get?.('loader'),
-        dshHome: this.config.dshHome,
-        profile: process.env.DSH_PROFILE || 'team-bots',
-        uiLanguage: effectiveUiLanguage(this.config, key => this.store.setting(key)),
-      }),
+      language,
       // 每个 provider+model 只保留最新一条生效价格；历史版本不在这里展开。
       prices: this.latestPrices(),
       // 配置里的默认价格，Web 中可据此一键恢复。
@@ -249,7 +330,19 @@ export const systemMethods = {
         view.dispatch = this.botDispatchView(soloBot.id)
       }
     }
-    return view
+    // 版本在组装前取：组装中途发生的写入会让下一拍版本失配而走全量，方向安全。
+    this.stateCache = { key: cacheKey, version, at: Date.now() }
+    // perf-diag（临时）：慢组装落一行分相耗时 + 各字段体积，与 http.ts 打点同日志文件，定位后一并移除。
+    const stateMs = performance.now() - stateT0
+    if (stateMs > 300) {
+      try {
+        const fields = ['messages', 'solo', 'memories', 'pendingMemories', 'proposals', 'tasks', 'runs', 'dispatch', 'directMessages', 'usage', 'skills', 'projectSkills']
+        const sizes = fields.filter(key => view[key] !== undefined).map(key => `${key}:${JSON.stringify(view[key]).length}`).join(' ')
+        appendFileSync(join(this.config.dataDir, 'perf-actions.log'),
+          `${new Date().toISOString()} state-breakdown total=${stateMs.toFixed(0)}ms init=${perf.init.toFixed(0)} db=${perf.db.toFixed(0)} catalog=${perf.catalog.toFixed(0)} lang=${perf.lang.toFixed(0)} rest=${(stateMs - perf.init - perf.db - perf.catalog - perf.lang).toFixed(0)} ${sizes}\n`)
+      } catch { /* 诊断写失败不影响业务 */ }
+    }
+    return { ...view, version }
   },
 
   /**
@@ -489,3 +582,60 @@ export const systemMethods = {
     return { needsYou, issues }
   },
 }
+
+// 版本短路外壳（1030854）：api.ts 与测试的对外 state 入口（第 3 参 since = 上次响应
+// 的 version）。全量组装器保持上面 systemMethodsBase.state 的两参签名（DSHBOTS-105 的
+// workbench-ia 源锚点），不改写其形参。外壳提供两级省流：
+// ① unchanged 短路——同视图、版本相等、60s 内，只回 { unchanged, version }（轮询路径）；
+// ② 视图载荷缓存——切换场景（客户端持别的视图 version 或不带 since）在目标视图
+//    版本未变时直接回放缓存载荷，不再整段重组（实测组装在共享事件循环下 1.2~2s，
+//    是切换「加载中…」的主导成本）。60s 兜底与 ① 同口径，防未入签名的易变字段
+//    （now 等）被永久冻结；缓存按 LRU 留最近 8 个视图。
+const assembleState = systemMethodsBase.state
+systemMethodsBase.state = async function (this: any, projectId: any, soloBotId: any = null, { since }: { since?: number | string | null } = {} as any) {
+  await this.initialize()
+  const cacheKey = `${projectId ?? ''}|${soloBotId ?? ''}`
+  // 版本串编入视图键：since 只在「客户端持有的正是本视图数据」时才允许判 unchanged——
+  // 底层签名是全局的，两个视图的 version 会相等，切换回环（A→B→A）里 B 的 since 恰与
+  // 当前版本相同，不编键就会让客户端拿着 B 的数据当 A 用、骨架永不清除。
+  const version = `${cacheKey}@${this.stateVersion()}`
+  this.stateViewCache ??= new Map()
+  const cached = this.stateViewCache.get(cacheKey)
+  if (cached && cached.version === version) {
+    if (since === version && Date.now() - cached.at < 60_000) return { unchanged: true, version }
+    if (Date.now() - cached.at < 60_000) return { ...cached.view, version }
+  }
+  // 切换 SWR（与模型目录的 stale-while-revalidate 同哲学）：只服务「显式切换」——调用方
+  // 携带的是别的视图键的 version（A→B→A 回环/会话内换视图）；本视图轮询（since 以
+  // `${cacheKey}@` 开头）必须拿新数据，否则新消息可见性被推迟一轮。不带 since 的请求
+  // （首次加载/脚本直调/测试）一律现组装：无法与「切换」区分，回放旧载荷会让直调方
+  // 拿到 ≤5s 陈数据（实测打断 9 条服务层行为测试），切换收益只认显式持他视图版本的场景。
+  const isSwitch = since != null && !String(since).startsWith(`${cacheKey}@`)
+  if (cached && isSwitch && Date.now() - cached.at < 5_000) {
+    void assembleState.call(this, projectId, soloBotId).then(result => {
+      if (result && typeof result === 'object' && 'version' in result) {
+        const { version: _dropped, ...view } = result as Record<string, unknown>
+        this.stateViewCache.delete(cacheKey)
+        this.stateViewCache.set(cacheKey, { version, view, at: Date.now() })
+      }
+    }).catch(() => {})
+    // 版本号必须描述回传的数据本身：SWR 回放的是旧视图，必须配它自己的旧版本号。
+    // 若配当前版本号，客户端下一拍轮询会因缓存同版本而收到 unchanged，新消息被
+    // 卡到再下一次版本变化才可见（实测「新消息进来页面不及时刷新」即此）。
+    return { ...cached.view, version: cached.version }
+  }
+  const result = await assembleState.call(this, projectId, soloBotId)
+  if (result && typeof result === 'object' && 'version' in result) {
+    const { version: _dropped, ...view } = result as Record<string, unknown>
+    this.stateViewCache.delete(cacheKey)
+    this.stateViewCache.set(cacheKey, { version, view, at: Date.now() })
+    while (this.stateViewCache.size > 8) this.stateViewCache.delete(this.stateViewCache.keys().next().value)
+    return { ...result, version }
+  }
+  return result
+}
+
+// 对外静态类型按外壳签名收窄（base 字面量里的 state 是两参组装器签名，
+// 直接 typeof 会让三参调用在 tsc 下报错）。
+export type StateEntry = (projectId: string | null | undefined, soloBotId?: string | null, opts?: { since?: number | string | null }) => Promise<any>
+export const systemMethods: Omit<typeof systemMethodsBase, 'state'> & { state: StateEntry } = systemMethodsBase

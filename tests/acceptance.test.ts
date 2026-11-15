@@ -181,6 +181,10 @@ test('记忆检索按项目隔离并命中全文索引', async () => {
     assert.equal(hits[0].scope_id, alpha.id)
     const otherHits = service.searchMemories({ projectId: beta.id, query: '发布前' })
     assert.equal(otherHits.length, 0)
+    // trigram 分词器匹配不了不足 3 字符的关键词，短词（如「发版」两字）须走 LIKE 子串兜底。
+    const shortHits = service.searchMemories({ projectId: alpha.id, query: '发布' })
+    assert.equal(shortHits.length, 1)
+    assert.equal(shortHits[0].topic, '发布流程')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })

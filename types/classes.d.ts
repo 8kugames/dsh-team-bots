@@ -259,6 +259,10 @@ declare module '../src/service.js' {
     fingerprints: Map<string, unknown>
     readAuditAlerted: Map<string, unknown>
     lastMaintenanceAt: number
+    /** 最近一次全量调度拍的时间戳（tickIdleGate 空载门基准；0 = 首拍必全量）。 */
+    lastFullTickAt: number
+    /** state 轮询版本短路缓存：{ key, version, at }，见 system.state 的版本短路。 */
+    stateCache: { key: string; version: string; at: number } | null
     wechat: WechatChannel | null
     feishu: FeishuChannel | null
     /** 微信通道 store 复用句柄（DSHBOTS-334 启停开关）：unmount 不关库，remount 复用。 */

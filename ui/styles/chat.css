@@ -114,6 +114,12 @@
 .message-meta strong {
     color: var(--ink-2);
     font-weight: 600;
+    /* 长名字截断而不是把整行撑宽（DSHBOTS-367：操作按钮 22→24px 后 meta 行余量更紧，
+       窄屏 360px 下长 bot 名会把两个操作按钮顶出气泡）。 */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .message-bubble {
     color: var(--ink);
@@ -328,8 +334,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    /* 消息操作按钮 22 → 24px（DSHBOTS-367）：键盘可达后按钮成为可点目标，尺寸跟着抬到 24px。 */
+    width: 24px;
+    height: 24px;
     margin-left: 2px;
     padding: 0;
     border: 0;
@@ -367,4 +374,18 @@
     text-align: center;
     color: var(--ink-3);
     font-size: var(--fs-caption);
+}
+
+/* 新消息入场。@starting-style 只在节点首次插入时触发一次：dom-morph 按
+   data-bubble-key 复用既有气泡，2.8s 轮询的原位补丁不会让整屏历史反复重播。 */
+.message-row {
+    transition:
+        opacity var(--motion-base) var(--ease-out),
+        translate var(--motion-base) var(--ease-out);
+}
+@starting-style {
+    .message-row {
+        opacity: 0;
+        translate: 0 6px;
+    }
 }

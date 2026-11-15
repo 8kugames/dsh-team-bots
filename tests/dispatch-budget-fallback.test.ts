@@ -5,12 +5,11 @@
 // 建卡回执提示一行、一致或显式预算时不提示（④，仅提示不拦截）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig, PRIORITY_BUDGET_MINUTES } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+import { rm } from 'node:fs/promises'
+
+import { PRIORITY_BUDGET_MINUTES } from '../src/config.js'
+
+import { setupTeam } from './helpers/harness.js'
 
 // startRun 只记账不回调完成：任务 run 停在 running，不影响本测试只读 tasks 表的断言。
 class HoldingRuntime {
@@ -22,17 +21,7 @@ class HoldingRuntime {
 }
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-budget-tier-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new HoldingRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-budget-tier-', schedulerIntervalMs: 30_000, runtime: new HoldingRuntime() })
 }
 
 async function seedProject(service, store) {

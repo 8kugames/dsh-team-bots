@@ -179,13 +179,28 @@ export const memoryMethods = {
     }
     const reviewRunId = id('run')
     const createdAt = nowIso()
-    this.store.run(
-      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
-        attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
-       VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?, ?)`,
-      reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`,
-      reviewProvider, reviewModel, reviewEffort, createdAt,
-    )
+    try {
+      this.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
+          attempt, idempotency_key, model_provider, model_model, model_effort, queued_at)
+         VALUES (?, ?, ?, NULL, 'memory_review', 'read', 'memory_review', ?, 'queued', 1, ?, ?, ?, ?, ?)`,
+        reviewRunId, project.id, bot.id, sourceRunId, `memory_review:${sourceRunId}`,
+        reviewProvider, reviewModel, reviewEffort, createdAt,
+      )
+    } catch (error) {
+      // memory_review 占 bot 串行域但入队点无 busy 闸（来源运行收尾/交付路径）：同 (bot,
+      // 工作区) 已有活跃运行（如任务交付后新 chat 已排队）时 INSERT 撞 one_active_run_per_bot。
+      // 审查是尽力而为的治理动作，撞车降级为跳过（调用方按 null 走沉淀兜底/忽略），不把
+      // 收尾路径打成异常（生产实测：finishRun 尾部抛 UNIQUE 导致运行收尾报「异常」）。
+      if (this.isRunBotUniqueViolation(error)) {
+        this.logger?.warn?.(
+          'dsh-team: 记忆审查入队撞 bot 串行域（bot=%s run=%s source=%s），本次跳过',
+          bot?.id, reviewRunId, sourceRunId,
+        )
+        return null
+      }
+      throw error
+    }
     this.store.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), reviewRunId, 'queued', '任务交付完成，触发记忆审查', createdAt,
@@ -447,7 +462,8 @@ export const memoryMethods = {
     const keyword = text(query, 200).trim()
     const limitN = Math.min(100, Math.max(1, Number(limit) || 20))
     let rows
-    if (keyword && this.store.ftsEnabled) {
+    // trigram 分词器无法匹配不足 3 字符的关键词（如中文「发版」两字），短词走 LIKE 子串兜底。
+    if (keyword && this.store.ftsEnabled && keyword.length >= 3) {
       const match = `"${keyword.replace(/"/g, '""')}"`
       rows = this.store.all(
         `SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.memory_id

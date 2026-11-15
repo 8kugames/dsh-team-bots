@@ -67,6 +67,7 @@ export default {
   "task.reviewOwner": "总监验收中",
   "task.reviewYou": "待您验收",
   "task.reviewPending": "核验中",
+  "task.reviewSkipped": "只读免核验",
   "task.reviewUnverified": "未核验",
   "task.childrenSuffix": "个子任务",
   "task.unassigned": "未指派",
@@ -237,4 +238,6 @@ export default {
   "文件较大，已截断，仅显示开头部分。": "文件较大，已截断，仅显示开头部分。",
   "新窗口打开": "新窗口打开",
   "加载文件失败：": "加载文件失败：",
+  // 任务卡上下文菜单（DSHBOTS-367）：键盘跨列移动
+  "task.moveMenuLabel": "移动到",
 }

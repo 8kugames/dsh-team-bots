@@ -67,6 +67,7 @@ export default {
   "task.reviewOwner": "Director reviewing",
   "task.reviewYou": "Waiting for your review",
   "task.reviewPending": "Verifying",
+  "task.reviewSkipped": "Read-only skip",
   "task.reviewUnverified": "Unverified",
   "task.childrenSuffix": "subtasks",
   "task.unassigned": "Unassigned",
@@ -237,4 +238,6 @@ export default {
   "文件较大，已截断，仅显示开头部分。": "Large file; showing a truncated head only.",
   "新窗口打开": "Open in new window",
   "加载文件失败：": "Failed to load file: ",
+  // Task card context menu (DSHBOTS-367): keyboard cross-column move
+  "task.moveMenuLabel": "Move to",
 }

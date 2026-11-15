@@ -153,6 +153,7 @@ test('总监侧 review/handle 运行不进成员任务会话，落总监控制�
       shouldRolloverSession: () => false,
       maybeCompactSession() {},
       taskAffinityBinding: sessionMethods.taskAffinityBinding,
+    sessionPolicyBot: sessionMethods.sessionPolicyBot,
       ensureTaskSession: sessionMethods.ensureTaskSession,
       ensureBotBinding: sessionMethods.ensureBotBinding,
       retireBinding: sessionMethods.retireBinding,
@@ -196,5 +197,88 @@ test('总监侧 review/handle 运行不进成员任务会话，落总监控制�
       'sess-task-x',
       '成员自己的施工运行照旧亲和回任务会话（不回归）',
     )
+  } finally { await t.close() }
+})
+
+// ZONGM-140 三会话事故复盘②：宿主重启把 running 运行重排队时置空 runs.session_id，
+// runs 归属亲和（taskAffinityBinding）随之断链——直落 ensureTaskSession 首建会开出一张
+// 新任务会话，旧会话（绑定行 kind='task' 仍在、宿主仍活）被孤儿化：同一张卡每重启一次
+// 多一个会话。守门：ensureTaskSession 先按 (bot, task) 找活跃绑定复用，死了才退役重建；
+// 多活跃行（历史孤儿）只保留最新、其余 alias 化收敛。
+test('任务会话复用：runs 亲和断链（重启置空 session_id）时按绑定行回到原会话，不孤儿化', async () => {
+  const t = await setup()
+  try {
+    const { store, service, director, dev, project } = t
+    const actor = { type: 'bot', id: director.id }
+    const card = await service.createTask({ projectId: project.id, title: '重启卡', assigneeBotId: dev.id, writeScopes: ['src/r/'], postCard: false }, actor)
+    const task = service.taskRow(card.id)
+    const at = (ms) => new Date(Date.parse('2026-11-15T11:40:00Z') + ms).toISOString()
+    // 事故形状：首发运行曾开进 sess-task-1（绑定行在场），宿主重启把它重排队并置空
+    // runs.session_id——runs 亲和查不到任何归属。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES ('sess-task-1', ?, ?, 'task', ?, 0, ?)",
+      dev.id, project.id, task.id, at(0),
+    )
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, attempt, idempotency_key, session_id, queued_at)
+       VALUES ('run_orphan', ?, ?, ?, 'task', 'write', 'task_created', 'canceled', 1, 'own:orphan', NULL, ?)`,
+      project.id, dev.id, task.id, at(1_000),
+    )
+
+    let created = 0
+    const rt = {
+      store, config: service.config, logger: { info() {}, warn() {}, error() {} },
+      sessionCreates: new Map(),
+      ctx: {
+        sessionController: {
+          resolveAgent: async () => ({}),
+          selectModel: async () => ({}),
+          create: async () => ({ sessionId: `sess-task-new-${++created}` }),
+        },
+      },
+      selectModel: async () => {},
+      defaultAgentPreset: async () => ({}),
+      applyFilePolicy() {},
+      shouldRolloverSession: () => false,
+      maybeCompactSession() {},
+      retireBinding: sessionMethods.retireBinding,
+    } as any
+
+    // ① 绑定行仍活：回到 sess-task-1，不新建（修复前会开出第二张会话）。
+    assert.equal(
+      await sessionMethods.ensureTaskSession.call(rt, dev, project, { run: { id: 'run_recover', kind: 'task' }, task }),
+      'sess-task-1',
+      '重启恢复运行应回原任务会话',
+    )
+    assert.equal(created, 0, '绑定存活时不得新建会话')
+
+    // ② 换负责人（改派）：不同 bot 无绑定归属，新建各自任务会话（既有口径不回归）。
+    const dev2View = await service.createBot({ name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
+    const dev2 = store.get('SELECT * FROM bots WHERE id = ?', dev2View.id)
+    const second = await sessionMethods.ensureTaskSession.call(rt, dev2, project, { run: { id: 'run_dev2', kind: 'task' }, task })
+    assert.match(second, /sess-task-new-/, '改派新负责人落新建任务会话')
+    assert.equal(created, 1)
+
+    // ③ 孤儿收敛：同 (bot, task) 两条活跃绑定（历史重启孤儿形状）——复用最新一条，
+    // 旧的 alias 化，不再叠第三张。
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES ('sess-task-0', ?, ?, 'task', ?, 0, ?)",
+      dev.id, project.id, task.id, at(-1_000),
+    )
+    assert.equal(
+      await sessionMethods.ensureTaskSession.call(rt, dev, project, { run: { id: 'run_again', kind: 'task' }, task }),
+      'sess-task-1',
+      '多活跃绑定取最新复用',
+    )
+    assert.equal(created, 1, '复用路径不新建')
+    assert.equal(store.get("SELECT alias FROM session_bindings WHERE session_id = 'sess-task-0'").alias, 1, '旧孤儿收敛为别名')
+
+    // ④ 绑定死了（宿主查无此会话）：退役重建（新会话照常解析存活）。
+    rt.ctx.sessionController.resolveAgent = async (sessionId) => (
+      sessionId === 'sess-task-1' ? { error: { message: 'gone' } } : ({})
+    )
+    const fresh = await sessionMethods.ensureTaskSession.call(rt, dev, project, { run: { id: 'run_fresh', kind: 'task' }, task })
+    assert.match(fresh, /sess-task-new-/, '死绑定退役后新建')
+    assert.equal(store.get("SELECT alias FROM session_bindings WHERE session_id = 'sess-task-1'").alias, 1, '死绑定已 alias 化')
   } finally { await t.close() }
 })

@@ -229,7 +229,10 @@
     min-width: 0;
     overflow: hidden;
     cursor: pointer;
-    transition: background-color 0.12s ease;
+    transition:
+        background-color var(--motion-fast) var(--ease-out),
+        opacity var(--motion-base) var(--ease-out),
+        translate var(--motion-base) var(--ease-out);
 }
 .task-card:hover {
     background: var(--surface-2);
@@ -578,3 +581,50 @@
     --av: var(--c-gray);
 }
 
+/* 新任务行入场（新建、以及拖到别的分组后在新组里重新插入）。dom-morph 按
+   data-task-id 复用行节点，轮询原位补丁不会让整块看板反复重播。 */
+@starting-style {
+    .task-card {
+        opacity: 0;
+        translate: 0 -4px;
+    }
+}
+
+
+/* 任务卡上下文菜单（DSHBOTS-367）：键盘跨列移动的载体，与遮罩同层但不吃遮罩点击。 */
+#task-menu-root {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    pointer-events: none;
+}
+.task-menu {
+    position: absolute;
+    min-width: 168px;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    box-shadow: var(--shadow-3);
+    pointer-events: auto;
+}
+.task-menu-title {
+    padding: 4px 8px 6px;
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+}
+.task-menu-item {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    font-size: var(--fs-small);
+    text-align: left;
+    cursor: pointer;
+}
+.task-menu-item:hover {
+    background: var(--surface-2);
+}

@@ -278,7 +278,7 @@ function renderChat() {
           ${open.length === 0 ? `<div class="faint">${t('card.noActiveTasks')}</div>` : `<div class="side-list">
             ${open.map(task => {
               const bot = botById(task.assignee_bot_id)
-              return `<div class="side-row" data-action="open-task" data-task-id="${attr(task.id)}" style="cursor:pointer">
+              return `<div class="side-row" role="button" tabindex="0" data-action="open-task" data-task-id="${attr(task.id)}" style="cursor:pointer">
                 ${sideRowStatusHtml(task.status)}
                 <strong>${esc(task.identifier)}</strong>
                 <span class="side-row-title">${esc(task.title)}</span>

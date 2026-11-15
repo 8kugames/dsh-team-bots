@@ -6,32 +6,13 @@
 // 计价公式（cacheRead/cacheWrite 计价）沿用 costForTokens 既有口径，不在此重测（卡面明确勿重做）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
-import { recordUsage, taskSubtreeIds, taskTreeUsageTotals, taskUsageTotals } from '../src/usage.js'
+import { rm } from 'node:fs/promises'
 
-class StubRuntime {
-  setCompletionHandler() {}
-  async catalog() { return [] }
-  async validateBotConfig() {}
-}
+import { recordUsage, taskSubtreeIds, taskTreeUsageTotals, taskUsageTotals } from '../src/usage.js'
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-task-usage-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service, config }
+  return setupTeam({ prefix: 'dsh-task-usage-', schedulerIntervalMs: 30_000 })
 }
 
 async function seedProject(service) {

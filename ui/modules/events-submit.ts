@@ -3,6 +3,7 @@ import { activeProject, toast } from './util.js'
 import { api, loadState } from './api.js'
 import { closeModal, normalizeTimeBudgetMinutes, openTask, parseFallbackFields, reloadTaskModal } from './modal-forms.js'
 import { saveTaskFromForm } from './composer.js'
+import { validateForm } from './form-validation.js'
 import { loadSoloDetail } from './chat.js'
 import { refresh, startTerminalPoll, render, formPayload } from '../app.js'
 import { t } from './i18n.js'
@@ -11,8 +12,20 @@ document.addEventListener('submit', async (event) => {
   const form = (event.target as any).closest('form[data-form]')
   if (!form) return
   event.preventDefault()
+  // 表单内联校验（DSHBOTS-367）：非法字段就地报错并把焦点交给第一个非法字段，
+  // 校验不过就不进后端。原生约束校验的即时错误由 form-validation 模块接管。
+  if (!validateForm(form)) return
   const type = form.dataset.form
   const payload = formPayload(form)
+  // 提交在途时按钮出 spinner 并播报 aria-busy。只接这一处中央路径，全部表单类型自动
+  // 生效。弹窗的提交按钮靠 form= 挂在 .modal-foot 里、并不在 form 子树内，只有
+  // SubmitEvent.submitter 能拿到真正触发提交的那一个。
+  const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null
+  const wasDisabled = submitter?.disabled ?? false
+  if (submitter) {
+    submitter.setAttribute('aria-busy', 'true')
+    submitter.disabled = true
+  }
   try {
     if (type === 'create-project') {
       const result = await api('create_project', {
@@ -251,6 +264,13 @@ document.addEventListener('submit', async (event) => {
     }
   } catch (error: any) {
     toast(error.message || String(error), 'error')
+  } finally {
+    // 成功路径常已 closeModal()/refresh() 把按钮换成新节点，这里恢复的是旧引用，
+    // 对已脱离文档的节点写属性无副作用；失败路径按钮还在，必须收回忙态让用户能重试。
+    if (submitter) {
+      submitter.removeAttribute('aria-busy')
+      submitter.disabled = wasDisabled
+    }
   }
 })
 

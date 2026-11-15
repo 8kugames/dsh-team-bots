@@ -11,14 +11,13 @@ import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
+
 import { TeamService } from '../src/service.js'
 import { handleAction } from '../src/api.js'
 import './helpers/eval-shim.js'
+import { setupTeam } from './helpers/harness.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
@@ -336,37 +335,8 @@ test('源级接线锁：chat.js 入口 archived-only + case 块直调 renderModa
   assert.match(serverApiSource, /case 'remove_bot_tracking':/, 'src/api.js 有对应分发 case')
 })
 
-// ---------- 服务层契约（真实 TeamService + handleAction，镜像 tests/archive.test.js 的装配） ----------
-class StubRuntime {
-  declare models: {
-    ref: string; provider: string; providerName: string; model: string; name: string
-    efforts: { id: string; name: string }[]; defaultEffort: string
-  }[]
-  constructor() {
-    this.models = [{
-      ref: 'fake/model-a', provider: 'fake', providerName: 'Fake', model: 'model-a', name: 'Model A',
-      efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high',
-    }]
-  }
-  setCompletionHandler() {}
-  async catalog() { return this.models }
-  async validateBotConfig() {}
-  async startRun({ run }) { return `session-${run.id}` }
-  async cancelRun() { return true }
-}
-
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-bot-untrack-test-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-bot-untrack-test-', schedulerIntervalMs: 20 })
 }
 
 function insertSoloRun(store, { id: runId, botId, status = 'succeeded' }) {

@@ -4,16 +4,16 @@
 // UI 三例：死按钮与 case 全删；检查更新接线保留 + 卡内渲染四项；API 层保留 upgrade_dsh/reboot_dsh。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
+
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
+
 import { readUiSource } from './helpers/ui-sources.js'
-import { TeamService } from '../src/service.js'
+
+import { setupTeam } from './helpers/harness.js'
 
 const require = createRequire(import.meta.url)
 const PACKAGE_VERSION = String(require('../package.json').version)
@@ -32,17 +32,7 @@ class HoldingRuntime {
 }
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-service-card-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new HoldingRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-service-card-', schedulerIntervalMs: 30_000, runtime: new HoldingRuntime() })
 }
 
 const cleanup = async ({ root, store }) => {

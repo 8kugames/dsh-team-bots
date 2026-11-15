@@ -6,15 +6,13 @@
 //   ④UI 侧：卡片与详情 footer 都出「驳回」按钮，click 委托走 transition_task，文案走 i18n。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
+
 import { readUiSource } from './helpers/ui-sources.js'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+
 import zh from '../ui/i18n/zh.js'
 import en from '../ui/i18n/en.js'
+import { setupTeam } from './helpers/harness.js'
 
 // startRun 只记账不回调完成：任务 run 停在 running（本卡用例不依赖运行生命周期，仅作运行时替身）。
 class HoldingRuntime {
@@ -32,17 +30,7 @@ class HoldingRuntime {
 
 // schedulerIntervalMs 拉满 30s：定时 tick 不掺和，时序只由显式调用驱动。
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-task-reject-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new HoldingRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-task-reject-', schedulerIntervalMs: 30_000, runtime: new HoldingRuntime() })
 }
 
 const rowOf = (store, id) => store.get('SELECT * FROM tasks WHERE id = ?', id)

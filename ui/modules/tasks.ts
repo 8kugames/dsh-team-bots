@@ -4,6 +4,7 @@ import { activeProject, actorLabel, attr, avatar, botById, canaryText, duration,
 import { api } from './api.js'
 import { t } from './i18n.js'
 import { isPreviewableText, deliverableFileUrl } from './file-preview.js'
+import { renderApprovalPermissionsCard } from './permissions.js'
 import { refresh, startTerminalPoll, panelAttrs, render, noProject } from '../app.js'
 
 // task-sort:start —— 任务面板排序的纯逻辑（tests/task-sort.test.js 按本标记块抽取断言）。
@@ -230,6 +231,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
     tags.push(task.review_target === 'owner_bot' ? t('task.reviewOwner') : t('task.reviewYou'))
     // 核验可见性（DSHBOTS-113）：自动/手动核验的状态标记——未核验/失败亮出，防止静默漏审。
     if (task.reviewStatus === 'pending') tags.push(t('task.reviewPending'))
+    else if (task.reviewStatus === 'skipped') tags.push(t('task.reviewSkipped'))
     else if (task.reviewStatus !== 'done') tags.push(t('task.reviewUnverified'))
   }
   for (const label of task.labels ?? []) tags.push(label)
@@ -240,7 +242,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
   const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
   const depsBlocked = task.depsSatisfied === false && blockedNames.length > 0
   const depsTitle = `${t("被")} ${blockedNames.length} ${t("个任务阻塞：")}${blockedNames.join(t("、"))}`
-  return `<article class="task-card${isRunning ? ' running' : ''}${depth > 0 ? ' task-child' : ''}" draggable="true" data-task-id="${attr(task.id)}" data-action="open-task">
+  return `<article class="task-card${isRunning ? ' running' : ''}${depth > 0 ? ' task-child' : ''}" draggable="true" tabindex="0" data-task-id="${attr(task.id)}" data-action="open-task">
     ${taskStatusIcon(task)}
     ${taskPriorityIcon(task)}
     <div class="task-card-top">
@@ -263,11 +265,10 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
 }
 // task-card:end
 
-// 任务父子层级（DSHBOTS-58 第二笔，依赖后端 D-59 落库的 parent_task_id）：
-// 分组内按 parent_task_id 组树——子任务挂到父行下方、容器左缩进一级，父行可折叠子行；
-// 展开态记在 state.openPanels，key 形如 task-children:<taskId>（与 <details data-panel> 同一套 key 口径）。
-// 只有父任务也在本组可见时才挂成子级：父被搜索/筛选掉、或父在别的状态分组时，
-// 子任务回到本组顶层，避免任务因为层级关系在看板上凭空消失。
+// 任务父子层级（DSHBOTS-58 第二笔，依赖后端 D-59 落库的 parent_task_id）：分组内按 parent_task_id 组树——
+// 子任务挂到父行下方、容器左缩进一级，父行可折叠子行；展开态记在 state.openPanels，key 形如
+// task-children:<taskId>（与 <details data-panel> 同一套 key 口径）。父任务被搜索/筛选掉或不在本组时，
+// 子任务回到本组顶层，避免任务因层级关系在看板上凭空消失。
 function taskChildrenKey(taskId) {
   return `task-children:${taskId}`
 }
@@ -378,8 +379,7 @@ function renderBots() {
   return `
     ${bots.length === 0 ? `<div class="empty-state">
       <div class="empty-symbol">${icon('bot')}</div><h3>${t("还没有")} Bot</h3><p>${t("至少创建一个 Bot 才能运行项目群聊和任务。")}</p>
-      <button class="btn" data-action="new-bot">${icon('plus')}${t("新建")} Bot</button>
-    </div>` : `<div class="grid bots">
+      <button class="btn" data-action="new-bot">${icon('plus')}${t("新建")} Bot</button></div>` : `<div class="grid bots">
       ${bots.map(bot => `<article class="card bot-card">
         <div class="bot-card-head">
           ${avatar(bot, 'lg')}
@@ -453,6 +453,7 @@ function renderBotsOverview() {
     ${proposalsSection}
     <div class="section-head"><h3>${t("全部")} Bots</h3><button class="btn" data-action="new-bot">${icon('plus')}${t("新建")} Bot</button></div>
     ${renderBots()}
+    ${renderApprovalPermissionsCard()}
   `
 }
 

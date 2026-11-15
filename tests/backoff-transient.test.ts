@@ -1,40 +1,18 @@
 // DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等过性错误）分类接入既有重试链。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+import { rm } from 'node:fs/promises'
+
 import {
   TRANSIENT_PATTERN,
   isTransientNetworkError,
   needsTransientBackoff,
   transientBackoffMs,
 } from '../src/services/backoff.js'
-
-// 不真正启动会话：finishRun / 派生逻辑全部用直接落库的 run 行驱动。
-class StubRuntime {
-  setCompletionHandler() {}
-  async catalog() { return [] }
-  async validateBotConfig() {}
-  async startRun({ run }) { return `session-${run.id}` }
-  async cancelRun() { return true }
-}
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-transient-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-transient-', schedulerIntervalMs: 20 })
 }
 
 const mins = n => new Date(Date.now() + n * 60_000).toISOString()

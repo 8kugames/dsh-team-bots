@@ -1,40 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
-import { handleAction } from '../src/api.js'
+import { rm } from 'node:fs/promises'
 
-// 只需要 runtime 存在即可：成员管理本身不启动 run，usage 用直接落库的 run 行验证聚合。
-class StubRuntime { declare models: any[];
-  constructor() {
-    this.models = [{
-      ref: 'fake/model-a', provider: 'fake', providerName: 'Fake', model: 'model-a', name: 'Model A',
-      efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high',
-    }]
-  }
-  setCompletionHandler() {}
-  async catalog() { return this.models }
-  async validateBotConfig() {}
-  async startRun({ run }) { return `session-${run.id}` }
-  async cancelRun() { return true }
-}
+import { handleAction } from '../src/api.js'
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-members-test-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-members-test-', schedulerIntervalMs: 20 })
 }
 
 function insertRun(store, { id: runId, projectId, botId, status = 'succeeded', usage = {} }: { id: any; projectId: any; botId: any; status?: any; usage?: any }) {
@@ -281,20 +253,20 @@ test('update_project 不带 memberIds 时不动成员表；换总监自动补齐
     // 设置页已不再全量提交 memberIds：纯信息更新（如改描述）不得触碰成员表
     await handleAction(service, 'update_project', { projectId: project.id, patch: { description: 'changed' } }, actor)
     let roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
-    assert.equal(roles.length, 2, '纯信息更新后成员数不变')
+    assert.equal(roles.length, 3, '纯信息更新后成员数不变（director+默认 reviewer+builder）')
     assert.equal(roles.find(row => row.member_id === builder.id)?.member_role, 'member')
 
     // 换总监（不带 memberIds）：新总监须自动进成员表且角色为 owner，原总监降为普通成员
     await handleAction(service, 'update_project', { projectId: project.id, patch: { ownerBotId: builder.id } }, actor)
     roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
-    assert.equal(roles.length, 2, '换总监不增不减成员')
+    assert.equal(roles.length, 3, '换总监不增不减成员')
     assert.equal(roles.find(row => row.member_id === builder.id)?.member_role, 'owner', '新总监角色为 owner')
     assert.equal(roles.find(row => row.member_id === director.id)?.member_role, 'member', '原总监降为普通成员')
 
     // 幂等：同一总监再保存一次仍是 owner，成员数不变
     await handleAction(service, 'update_project', { projectId: project.id, patch: { ownerBotId: builder.id } }, actor)
     roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
-    assert.equal(roles.length, 2)
+    assert.equal(roles.length, 3)
     assert.equal(roles.find(row => row.member_id === builder.id)?.member_role, 'owner')
   } finally {
     store.close()

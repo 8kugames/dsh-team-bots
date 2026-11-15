@@ -62,10 +62,13 @@ const makeModalTree = ({ panelClass = 'modal task', label = '任务详情', body
 // root 与 createElement 出来的解析台共用 doc._trees 注册表（同一 html 字符串 → 同一预建树）
 const makeDoc = (root, trees) => ({ _trees: trees, getElementById: id => (id === 'modal-root' ? root : null), body: { appendChild() {} }, activeElement: null })
 const load = (doc, renderModal) =>
-  new Function('document', 'renderModal', 'HTMLElement', `${fnSrc}\nreturn { ensureModalRoot, renderModalLayer }`)(
+  new Function('document', 'renderModal', 'HTMLElement', 'setAppInert', 'overlayInertState', `${fnSrc}\nreturn { ensureModalRoot, renderModalLayer }`)(
     { ...doc, createElement: () => { const n = makeNode(); n.parse = h => { if (doc._trees[h]) n.children = [doc._trees[h]] }; return n } },
     renderModal,
     FakeHTMLElement,
+    // DSHBOTS-367：遮罩开合切 #app inert——桩只记录调用，不做真实 DOM 操作。
+    () => {},
+    () => false,
   )
 // root 的 innerHTML 记写入次数（首建走 innerHTML，原位刷新与清空都不应再走）
 const withWriteCounter = root => {
@@ -220,7 +223,7 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
   const scope = new Function(
     'document', 'renderModal', 'HTMLElement', 'state', 'app', 'renderShell', 'hydrateMessageImageThumbs',
     'captureViewScroll', 'restoreViewScroll', 'syncChromeHeight', 'syncComposerBox', 'syncTerminalPoll',
-    'requestAnimationFrame', 'lastRenderedView', 'morph',
+    'requestAnimationFrame', 'lastRenderedView', 'morph', 'setAppInert', 'overlayInertState',
     `${fnSrc}\n${renderSrc}\nreturn { render, overlayOpen, flushAppRender, get pending() { return appRenderPending } }`,
   )(
     doc,
@@ -240,6 +243,8 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
     // 原位补丁在此迷你 DOM 上不做解析：记录「这一拍渲染过一次」并直接整页写，
     // 于是 writes() 计整页重建次数、morphCalls 计渲染次数，两个口径都能盯。
     (root, html) => { morphCalls.push(html); root.innerHTML = html },
+    () => {},
+    () => false,
   )
   // 注意：不能用展开（{...scope}）——展开会把 pending getter 求值成静态快照。
   return {
@@ -293,7 +298,7 @@ test('接线④：轮询/刷新不因弹窗早退，遮罩关闭路径都补渲�
   assert.doesNotMatch(pollSrc, /state\.modal/, '轮询不再因弹窗早退：遮罩期间照常取数，数据不丢')
   // DSHBOTS-123：poll 的 render 改为经焦点渲染闸门放行（composer 正在输入时让路，其余照常），
   // 取数仍无条件先行；断言随行为同步迁移。
-  assert.match(pollSrc, /await loadState\(state\.projectId, \{ quiet: true \}\)\n\s*\/\/ 渲染闸门[\s\S]*?if \(!pollRenderBlockedByFocus\(document\.activeElement[\s\S]*?\)\) render\(\)/, '取数后仍走 render()（焦点渲染闸门与遮罩闸门各自决定是否重建）')
+  assert.match(pollSrc, /\/\/ 版本短路[\s\S]*?await loadState\(state\.projectId, \{ quiet: true \}\)[\s\S]*?\/\/ 渲染闸门[\s\S]*?if \(!pollRenderBlockedByFocus\(document\.activeElement[\s\S]*?\)\) render\(\)/, '取数后仍走 render()（版本短路零变化提前 return；焦点渲染闸门与遮罩闸门各自决定是否重建）')
   const refreshSrc = /async function refresh\([^)]*\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(refreshSrc, 'ui/app.js 缺少 refresh()')
   assert.doesNotMatch(refreshSrc, /state\.modal/, '刷新不再因弹窗跳过渲染')

@@ -2,6 +2,10 @@ import { state, STATUS, RUN_STATUS, FILE_POLICY, DEFAULT_FILE_POLICY } from './s
 import { t } from './i18n.js'
 
 const toastRoot = document.getElementById('toast-root')
+// 驻留时长与退场兜底。退场动画本身由 CSS 的 --motion-base 决定，兜底必须比它长，
+// 否则动画没跑完节点就被删掉。
+const TOAST_TTL_MS = 3600
+const TOAST_EXIT_TIMEOUT_MS = 400
 export function applyUiScale(value) {
   const scale = Math.min(1.4, Math.max(1, Number(value) || 1))
   document.documentElement.style.setProperty('--ui-scale', String(scale))
@@ -246,17 +250,29 @@ export function filePolicyOptions(current) {
   return Object.entries(FILE_POLICY).map(([id, label]) => `<option value="${attr(id)}" ${value === id ? 'selected' : ''}>${esc(label)}</option>`).join('')
 }
 
+async function dismissToast(el) {
+  el.setAttribute('data-closing', '')
+  // 减弱动效下全局把时长压到 0.001ms，过渡可能压根不产生；精简 DOM 桩也没有这个 API。
+  // 两种情况都直接删——不能等一个永远不来的 transitionend 把节点留在 DOM 里。
+  const animations = el.getAnimations?.() ?? []
+  if (animations.length > 0) {
+    await Promise.race([
+      Promise.allSettled(animations.map((a) => a.finished)),
+      new Promise((resolve) => setTimeout(resolve, TOAST_EXIT_TIMEOUT_MS)),
+    ])
+  }
+  el.remove()
+}
+
 export function toast(message, type = '') {
   const el = document.createElement('div')
   el.className = `toast ${type}`
   el.textContent = message
+  // 错误要打断播报：role=alert 自带 assertive + atomic，也是动态插入节点唯一可靠的
+  // 播报方式——插入之后再设 aria-live，读屏普遍不认。其余仍走容器的 polite。
+  if (type === 'error') el.setAttribute('role', 'alert')
   toastRoot.appendChild(el)
-  setTimeout(() => {
-    el.style.opacity = '0'
-    el.style.transform = 'translateY(5px)'
-    el.style.transition = 'opacity .2s, transform .2s'
-    setTimeout(() => el.remove(), 220)
-  }, 3600)
+  setTimeout(() => dismissToast(el), TOAST_TTL_MS)
 }
 
 // 提案展示辅助（DSHBOTS-223 自 tasks.ts 迁入，tasks.ts 触及 800 行铁律）：
@@ -293,3 +309,24 @@ export function proposalPreview(proposal) {
   return JSON.stringify(payload, null, 2)
 }
 
+
+// ===== overlay-inert:start —— 纯逻辑标记块（tests/task-a11y.test.js 抽取断言）=====
+// 遮罩期间背景是否应置 inert：弹窗或图片查看器任一开着就锁背景。
+function backgroundInert(modalOpen, viewerOpen) {
+  return Boolean(modalOpen || viewerOpen)
+}
+// ===== overlay-inert:end =====
+
+// #app 置 inert：遮罩打开期间背景不可聚焦、不可点击、读屏也读不到。
+// 背景滚动不靠改 html/body 的 overflow（会顶掉页面滚动条、造成横向抖动），
+// 而是让遮罩自身成为不可滚动的滚动容器并 contain 滚动链（见 modal.css）。
+export function setAppInert(inert) {
+  const app = document.getElementById('app')
+  if (app) (app as unknown as { inert: boolean }).inert = Boolean(inert)
+}
+
+// 当前是否该锁背景：弹窗开着或图片查看器开着。
+export function overlayInertState() {
+  const viewer = document.getElementById('image-viewer')
+  return backgroundInert(Boolean(state?.modal), Boolean(viewer && !viewer.hidden))
+}

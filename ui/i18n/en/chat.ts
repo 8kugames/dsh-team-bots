@@ -77,6 +77,8 @@ export default {
   // DSHBOTS-220: ui/modules copy
   "等待审批": "Waiting for approval",
   "已允许一次": "Allowed once",
+  // DSHBOTS-365: distinct pill text for rule-based auto-allow (decided_by=auto:rule:*)
+  "规则自动放行": "Auto-allowed by rule",
   "已拒绝": "Rejected",
   "已超时": "Timed out",
   "已取消": "Canceled",

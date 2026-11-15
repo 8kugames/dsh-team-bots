@@ -180,6 +180,33 @@ export async function handleBoardAction(action, target) {
       toast(t("已恢复默认指令"), 'success')
       break
     }
+    // 审批免审规则（DSHBOTS-365）：服务端权威整表替换——保存 = 存量行 + 新增行全量收集；
+    // 删除 = 去掉该行后整表提交。校验在后端（主维度必填一项等），失败经 api 报错 toast。
+    case 'save-approval-rules':
+    case 'approval-rule-delete': {
+      const removeId = action === 'approval-rule-delete' ? target.dataset.ruleId : null
+      const readRow = (row: Element | null) => {
+        if (!row) return null
+        const value = (name: string) => (row.querySelector(`[data-field="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)?.value ?? ''
+        const item = {
+          path_prefix: value('path_prefix'), command: value('command'), bot_id: value('bot_id'),
+          tool_name: value('tool_name'), sandbox: value('sandbox'), note: value('note'),
+        }
+        return item.path_prefix.trim() || item.command.trim() ? item : null
+      }
+      const rules: Record<string, string>[] = []
+      for (const row of document.querySelectorAll<HTMLElement>('[data-approval-rule-id]')) {
+        if (removeId && row.dataset.approvalRuleId === removeId) continue
+        const item = readRow(row)
+        if (item) rules.push({ ...item, id: row.dataset.approvalRuleId })
+      }
+      const fresh = readRow(document.getElementById('approval-rule-new'))
+      if (fresh) rules.push(fresh)
+      await api('update_approval_rules', { rules })
+      await loadState(state.projectId)
+      toast(action === 'approval-rule-delete' ? t("规则已删除") : t("审批免审规则已保存"), 'success')
+      break
+    }
     case 'reconcile-usage': {
       const result = await api('reconcile_usage', {})
       const reconciliation = result?.reconciliation ?? {}

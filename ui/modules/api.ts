@@ -127,7 +127,15 @@ export function preserveAnsweredQuestions(previous, next) {
 
 export async function loadState(projectId = state.projectId, { quiet = false } = {}) {
   // 仅单聊场景携带 soloBotId，避免把单聊口径的 runs/memories 泄漏进群聊视图。
-  const data = preserveAnsweredQuestions(state.data, preserveDecidedApprovals(state.data, await api('state', { projectId: projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet })))
+  // since 版本短路：带上上次响应的 version，服务端版本未变时只回十几字节的 unchanged，
+  // 此处沿用既有 state.data（同引用返回），调用方据此可跳过重渲染。
+  const response = await api('state', {
+    projectId: projectId || undefined,
+    soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined,
+    since: state.data?.version ?? undefined,
+  }, { quiet })
+  if (response?.unchanged) return state.data
+  const data = preserveAnsweredQuestions(state.data, preserveDecidedApprovals(state.data, response))
   state.data = data
   // 已读上报不挡渲染（DSHBOTS-167）：本地水位与徽标在调用瞬间即生效（函数体首段同步执行），
   // 服务端上报即发即走；失败由 markVisibleChatRead 内部回退 markedRead，下一轮轮询自动重报。

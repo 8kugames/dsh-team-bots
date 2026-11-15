@@ -516,9 +516,29 @@ export const schedulerMethods = {
     return true
   },
 
+  // 空载门（效率优化）：只挂在周期定时器上（core.start 的 setInterval）。距上次全量拍不足
+  // schedulerIdleIntervalMs 时，先用一次索引计数探测是否有可做的工作——无 queued/running
+  // 运行且无可领 outbox 即本拍直接返回，把空载 tick 从十来次查询压到一次计数。
+  // 有工作或窗口到期则照常全量。提醒类扫描（滞留卡/验收守门）与到期重试派生在慢拍粒度
+  // （默认 15s）下运行，阈值均为分钟级，无感；入队路径的事件唤醒 tick() 与测试直调不经此门。
+  tickIdleGate() {
+    const idleMs = Number(this.config.schedulerIdleIntervalMs ?? 15_000)
+    if (Date.now() - this.lastFullTickAt < idleMs) {
+      const probe = this.store.get(
+        `SELECT
+           (SELECT COUNT(*) FROM runs WHERE status IN ('queued', 'running')) AS active_runs,
+           (SELECT COUNT(*) FROM outbox WHERE status = 'pending' AND available_at <= ?) AS ready_outbox`,
+        nowIso(),
+      )
+      if (!Number(probe?.active_runs) && !Number(probe?.ready_outbox)) return null
+    }
+    return this.tick()
+  },
+
   async tick() {
     if (this.ticking || !this.started) return
     this.ticking = true
+    this.lastFullTickAt = Date.now()
     try {
       // tasks 的依赖列由 task-relations 域自管迁移（db.js 不加行），闸门读列前懒迁移一次。
       ensureTaskRelationsSchema(this.store)

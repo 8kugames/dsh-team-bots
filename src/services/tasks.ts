@@ -365,15 +365,18 @@ export const tasksMethods = {
   },
 
   // 核验状态（DSHBOTS-113）：none=未核验 / pending=核验中（委派运行在跑或自动委派待投递）/
-  // done=本次交付已有核验结论 / failed=核验失败（运行失败或自动委派重试耗尽）。
+  // done=本次交付已有核验结论 / failed=核验失败（运行失败或自动委派重试耗尽）/
+  // skipped=只读档交付按策略跳过核验（readOnlyDelivery 豁免）。
   // 以「最近一次成功的执行运行」（本次交付）为基准，只认其后发起的核验，避免上一轮
   // 交付的旧结论被误读为本轮已核验。自动流程失败必须在 UI 可见（防静默漏审）。
   taskReviewStatus(task) {
     const delivery = this.store.get(
-      "SELECT queued_at FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'succeeded' AND COALESCE(error_code, '') <> 'SUPERSEDED' ORDER BY ended_at DESC LIMIT 1",
+      "SELECT queued_at, bot_id, task_id, mode FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'succeeded' AND COALESCE(error_code, '') <> 'SUPERSEDED' ORDER BY ended_at DESC LIMIT 1",
       task.id,
     )
     if (!delivery) return 'none'
+    // 核验分档：只读档交付按策略跳过核验，标 skipped（UI 呈现「只读免核验」而非误报未核验）。
+    if (this.readOnlyDelivery(delivery, task)) return 'skipped'
     const activeRun = this.store.get(
       "SELECT id FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND status IN ('queued', 'running') AND queued_at >= ?",
       task.id, delivery.queued_at,

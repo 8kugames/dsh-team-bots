@@ -172,4 +172,14 @@ export default {
   "主模型": "主模型",
   "：": "：",
   "）": "）",
+  // 表单内联校验（DSHBOTS-367）
+  "form.thisField": "该字段",
+  "form.errorRequired": "${label}不能为空",
+  "form.errorTypeMismatch": "${label}格式不正确",
+  "form.errorPatternMismatch": "${label}格式不符合要求",
+  "form.errorTooShort": "${label}至少需要 ${min} 个字符",
+  "form.errorTooLong": "${label}最多 ${max} 个字符",
+  "form.errorRangeUnderflow": "${label}不能小于 ${min}",
+  "form.errorRangeOverflow": "${label}不能大于 ${max}",
+  "form.errorStepMismatch": "${label}必须是 ${step} 的整数倍",
 }

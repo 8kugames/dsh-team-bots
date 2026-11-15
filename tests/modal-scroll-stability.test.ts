@@ -79,7 +79,7 @@ const makeLayerHarness = ({ trees }: { trees?: Record<string, any> } = {}) => {
   let now = 1000
   let scheduled = null
   const scope = new Function(
-    'document', 'renderModal', 'HTMLElement', 'performance', 'setTimeout',
+    'document', 'renderModal', 'HTMLElement', 'performance', 'setTimeout', 'setAppInert', 'overlayInertState',
     `${fnSrc}\nreturn { renderModalLayer, __setScroll: t => { modalScrollAt = t }, get last() { return lastModalHtml }, __timer: () => modalPatchTimer }`,
   )(
     doc,
@@ -87,6 +87,9 @@ const makeLayerHarness = ({ trees }: { trees?: Record<string, any> } = {}) => {
     FakeHTMLElement,
     { now: () => now },
     cb => { scheduled = cb; return 1 },
+    // DSHBOTS-367：遮罩开合切 #app inert——桩只记录调用，不做真实 DOM 操作。
+    () => {},
+    () => false,
   )
   let current = ''
   return {

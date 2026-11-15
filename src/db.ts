@@ -507,27 +507,52 @@ export function openDatabase(path) {
 export class Store {
   // 同连接事务深度（transaction 嵌套时内层加入外层，见 transaction 实现）。
   declare txDepth: number
+  // 预编译语句缓存：热路径（调度 tick、UI 轮询、消息尾窗）反复执行同一批语句，
+  // 按语句文本缓存 StatementSync，免去每次调用的 SQL 解析；语句系于本连接，随 Store 一起丢弃。
+  // 值类型保持 any：精确标注 StatementSync 会让 all/get 摆脱 any 推断，
+  // 连锁暴露全项目 400+ 存量宽松类型错误，属独立任务，不在本次范围。
+  declare stmtCache: Map<string, any>
   constructor(db, options = {} as any) {
     this.db = db
     this.ftsEnabled = options.ftsEnabled === true
     this.txDepth = 0
+    this.stmtCache = new Map()
+  }
+
+  // 语句文本在本项目是有限形状集（占位符列表按长度、固定前缀 LIKE、固定表名拼接），
+  // 上限只作病态增长的保险：超限整体清空，代价是下一次重新 prepare。
+  statement(sql) {
+    let stmt = this.stmtCache.get(sql)
+    if (!stmt) {
+      if (this.stmtCache.size >= 1000) this.stmtCache.clear()
+      stmt = this.db.prepare(sql)
+      this.stmtCache.set(sql, stmt)
+    }
+    return stmt
   }
 
   all(sql, ...params) {
-    return this.db.prepare(sql).all(...params).map(row => ({ ...row }))
+    return this.statement(sql).all(...params).map(row => ({ ...row }))
   }
 
   get(sql, ...params) {
-    const row = this.db.prepare(sql).get(...params)
+    const row = this.statement(sql).get(...params)
     return row === undefined ? undefined : { ...row }
   }
 
   run(sql, ...params) {
-    return this.db.prepare(sql).run(...params)
+    return this.statement(sql).run(...params)
   }
 
   exec(sql) {
     this.db.exec(sql)
+  }
+
+  // 数据变更计数：本连接自打开以来的累计行变更数（total_changes()，O(1) 读取）。
+  // 用作 state 轮询的版本基底——任何 INSERT/UPDATE/DELETE 都会推进它，读操作不影响。
+  // 注意用函数形式：node:sqlite 的 prepare('PRAGMA …').get() 不返回行。
+  changes() {
+    return Number(this.db.prepare('SELECT total_changes() AS n').get()?.n ?? 0)
   }
 
   // 事务纪律（B7/DSHBOTS-332）：回调内只做本库写——宿主副作用（起会话/steer/微信推送/

@@ -39,7 +39,7 @@ type TeamActionName =
   | 'retry_run' | 'cancel_run' | 'run_trajectory' | 'answer_attention'
   | 'create_memory' | 'update_memory' | 'delete_memory' | 'search_memories' | 'approve_memory' | 'reject_memory'
   | 'create_proposal' | 'decide_proposal' | 'evaluate_proposal' | 'promote_proposal'
-  | 'approval_decide' | 'approvals_pending' | 'question_answer' | 'questions_pending'
+  | 'approval_decide' | 'approvals_pending' | 'approval_rules' | 'update_approval_rules' | 'question_answer' | 'questions_pending'
   | 'sync_skills' | 'skill_detail' | 'toggle_skill' | 'set_skill_binding' | 'rollback_skill'
   | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'update_prompt_segment' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
   | 'dsh_update_info' | 'upgrade_dsh' | 'reboot_dsh'
@@ -52,6 +52,8 @@ type TeamActionName =
 interface TeamActionPayload {
   projectId?: string
   soloBotId?: string | null
+  /** state 轮询版本短路：上次响应的 version，相等即回 unchanged。 */
+  since?: string | null
   botId?: string
   taskId?: string
   runId?: string
@@ -111,6 +113,8 @@ interface TeamActionPayload {
   write_scopes?: unknown
   writeScopes?: unknown
   evaluation?: unknown
+  /** update_approval_rules 的规则数组（DSHBOTS-365）：字段由服务端逐条校验。 */
+  rules?: unknown[]
   /** update_settings 的设置键补丁：键集由服务端 settingsView 白名单校验，不受 action 入参白名单约束。 */
   patch?: Record<string, unknown>
 }
@@ -152,6 +156,8 @@ interface TeamConfig {
   // 上下文体积判据（单轮上下文治理 P2）：压缩下限/结转上限 token，0 = 关闭体积判据。
   sessionCompactCtxTokens: number
   sessionRolloverCtxTokens: number
+  // 会话子代理消费判据：结转累计消费上限（个数），0 = 关闭该判据。
+  sessionRolloverSubagents: number
   reviewIdleMinutes: number
   uiLanguage: UiLanguage
   chatReplyMaxChars: number
@@ -174,8 +180,12 @@ interface TeamConfig {
   memoryReviewProvider: string
   memoryReviewModel: string
   autoReviewDelegate: boolean
+  /** 只读档交付免自动核验并放宽验收闸门（写档交付不受影响）。 */
+  reviewReadOnlySkip: boolean
   codeHygieneExts: string[]
   schedulerIntervalMs: number
+  /** 空载降频窗口：周期拍无工作且距上次全量拍不足该值时只做一次索引计数探测。 */
+  schedulerIdleIntervalMs: number
   modelCacheMs: number
   usageSnapshotCacheMs: number
   catalogStaleMs: number

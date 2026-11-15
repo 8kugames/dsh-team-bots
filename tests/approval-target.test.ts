@@ -160,6 +160,9 @@ test('edit/write 提权：file_path 绝对路径落库，展示形收成工作�
     const project = await primeProject(store, service, 'Target Edit')
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     bindSession(store, { sessionId: 'sess-target-edit', botId: director.id, projectId: project.id })
+    // 测试夹具的 workspace 建在 os.tmpdir() 下，会命中出厂预置的 temp 目录免审规则（DSHBOTS-365
+    // 增量）被自动放行；本用例验证的是 pending 卡片流程，显式清空规则保持原语义。
+    store.setSetting('approval_auto_rules', '[]')
     const filePath = join(config.workspace, 'src/services/approvals.js')
     await ctx.waterfall({}, 'tools/pre-execute', { name: 'edit', callId: 'call-edit-1', arguments: { file_path: filePath } }, () => Promise.resolve('ok'))
     const outcome = service.handleApprovalRequest(makeReq({ sessionId: 'sess-target-edit', toolName: 'edit', callId: 'call-edit-1', zh: '需要修改审批服务' }), () => {})

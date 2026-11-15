@@ -23,14 +23,54 @@
     white-space: nowrap;
     cursor: pointer;
     transition:
-        background-color 0.13s ease,
-        border-color 0.13s ease,
-        color 0.13s ease;
+        background-color var(--motion-fast) var(--ease-out),
+        border-color var(--motion-fast) var(--ease-out),
+        color var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out),
+        transform var(--motion-instant) var(--ease-out);
 }
 .btn:hover {
     background: var(--surface-3);
     border-color: var(--line);
     color: var(--ink);
+}
+/* 按下要有触觉级回应：80ms 内轻微下沉，松开即回弹。只动 transform，不引发重排。 */
+.btn:active {
+    transform: scale(0.97);
+}
+.btn:disabled:active {
+    transform: none;
+}
+/* 进行中：spinner 走伪元素，不改任何模板；aria-busy 同时是选择器与无障碍口径，
+   读屏据此播报「忙」，动效关掉后状态信息不丢。 */
+.btn[data-state="loading"],
+.btn.is-loading,
+.btn[aria-busy="true"] {
+    pointer-events: none;
+}
+.btn[data-state="loading"]::before,
+.btn.is-loading::before,
+.btn[aria-busy="true"]::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    animation: btn-spin 0.8s linear infinite;
+}
+@keyframes btn-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+/* 忙态不是禁用态：disabled 只用来挡重复提交，按钮此刻仍在工作，不能被
+   .btn:disabled 的 opacity .4 压暗成「不可用」。 */
+.btn[aria-busy="true"]:disabled,
+.btn[aria-busy="true"]:disabled:hover {
+    opacity: 1;
+    transform: none;
 }
 .btn svg {
     width: 14px;
@@ -139,8 +179,8 @@
     padding: 0 10px;
     border-radius: 7px;
     transition:
-        background-color 0.13s ease,
-        color 0.13s ease;
+        background-color var(--motion-fast) var(--ease-out),
+        color var(--motion-fast) var(--ease-out);
 }
 .seg button:hover {
     color: var(--ink-2);
@@ -178,7 +218,7 @@
     place-items: center;
     background: var(--accent);
     color: var(--accent-ink);
-    transition: opacity 0.13s ease;
+    transition: opacity var(--motion-fast) var(--ease-out);
 }
 .send-btn:hover {
     opacity: 0.88;

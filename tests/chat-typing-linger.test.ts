@@ -225,10 +225,11 @@ test('接线：画气泡行时对齐台账、1s 定时器到期摘除气泡，�
   assert.ok(htmlBody, '未找到 typingLingerRowsHtml')
   assert.ok(htmlBody.indexOf('syncTypingBubbles(') > 0, '画气泡行前需对齐气泡台账')
   assert.ok(htmlBody.indexOf('syncTypingBubbles(') < htmlBody.indexOf('typingLingerRows('), '对齐必须早于取行')
-  // 轮询仍走取数 → 焦点渲染闸门 → render（DSHBOTS-72/D-123 的闸门结构不动）
+  // 轮询仍走取数 → 焦点渲染闸门 → render（DSHBOTS-72/D-123 的闸门结构不动；
+  // 版本短路插在取数与闸门之间：数据零变化时提前 return，闸门结构不变）
   const pollBody = /async function poll\(\)[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(pollBody, '未找到 poll')
-  assert.match(pollBody, /await loadState\(state\.projectId, \{ quiet: true \}\)\n\s*\/\/ 渲染闸门/)
+  assert.match(pollBody, /\/\/ 版本短路[\s\S]*?await loadState\(state\.projectId, \{ quiet: true \}\)[\s\S]*?\/\/ 渲染闸门/)
   assert.match(pollBody, /if \(!pollRenderBlockedByFocus\(document\.activeElement[\s\S]*?\)\) render\(\)/)
   assert.match(source, /pruneTypingLinger\(\)/)
   // 气泡块自身不碰滚动（滚动闸门 D-72 不回归）

@@ -1,46 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
+
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+
 import { handleAction } from '../src/api.js'
 import { uiStylesSource } from './ui-styles-source.js'
-
-class StubRuntime {
-  declare models: Array<{
-    ref: string; provider: string; providerName: string; model: string; name: string;
-    efforts: Array<{ id: string; name: string }>; defaultEffort: string;
-  }>
-  constructor() {
-    this.models = [{
-      ref: 'fake/model-a', provider: 'fake', providerName: 'Fake', model: 'model-a', name: 'Model A',
-      efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high',
-    }]
-  }
-  setCompletionHandler() {}
-  async catalog() { return this.models }
-  async validateBotConfig() {}
-  async startRun({ run }) { return `session-${run.id}` }
-  async cancelRun() { return true }
-}
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-unread-test-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 20 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service }
+  return setupTeam({ prefix: 'dsh-unread-test-', schedulerIntervalMs: 20 })
 }
 
 // 在项目创建时间之后落消息，保证越过「无水位时以项目创建时间为基线」的判定。

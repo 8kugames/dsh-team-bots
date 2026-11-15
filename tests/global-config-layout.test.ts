@@ -103,7 +103,7 @@ async function renderPage(module, fn, data?) {
     project: null, settings: { ui_language: 'zh' },
     ...data,
   }
-  state.view = { renderGlobal: 'global', renderChannel: 'channel', renderSecretsPage: 'secrets', renderUsageGlobal: 'usage', renderSkills: 'skills' }[fn]
+  state.view = { renderGlobal: 'global', renderChannel: 'channel', renderSecretsPage: 'secrets', renderUsageGlobal: 'usage', renderSkills: 'skills', renderBotsOverview: 'bots-overview' }[fn]
   return { html: mod[fn](), state }
 }
 
@@ -159,6 +159,32 @@ test('配置页核心组交互入口完整保留', async () => {
     assert.ok(html.includes(`data-action="${action}"`), `缺交互入口 ${action}`)
   }
   assert.match(html, /class="g-slot g-slot--/, '卡片应由槽位包裹以控制跨列')
+  stopTimers()
+})
+
+test('免审规则编辑面在总览 bots 页「全部 Bots」下方：配置页不渲染，卡片是紧凑权限卡（DSHBOTS-365）', async () => {
+  const rules = [
+    { id: 'arul_default_tmp', path_prefix: '**/tmp/**', command: '', bot_id: '', tool_name: '', sandbox: '', note: '' },
+    { id: 'arul_2', path_prefix: '', command: 'git push*', bot_id: 'b1', tool_name: '', sandbox: 'workspace-write', note: '' },
+  ]
+  const global = await renderPage('settings', 'renderGlobal', { approvalRules: rules })
+  assert.doesNotMatch(global.html, /data-action="save-approval-rules"/, '配置页不再承载免审规则编辑面')
+  assert.doesNotMatch(global.html, /id="approval-rule-new"/, '配置页不再有新增规则行')
+  const overview = await renderPage('tasks', 'renderBotsOverview', {
+    approvalRules: rules,
+    bots: [{ id: 'b1', name: 'Bot', role: '成员', status: 'active', openTasks: 0, memoryCount: 0, stats: { succeeded: 0 } }],
+  })
+  assert.match(overview.html, /class="card perm-card"/, '总览页落免审权限卡')
+  assert.match(overview.html, /<details class="perm-rule" data-approval-rule-id="arul_default_tmp"/, '每条规则压成一行可展开的 chip 摘要')
+  assert.match(overview.html, /class="approval-chip mono">路径 \*\*\/tmp\/\*\*</, '摘要行显示 glob 路径 chip')
+  assert.match(overview.html, /class="approval-chip mono">命令 git push\*</, '命令型规则同样只在摘要行占一行')
+  assert.match(overview.html, /data-action="save-approval-rules"/, '保存入口随卡迁入')
+  assert.match(overview.html, /id="approval-rule-new"/, '新增规则行随卡迁入')
+  assert.match(overview.html, /class="perm-more"/, 'Bot / 工具 / 沙箱 / 备注收进「更多条件」')
+  // 位置：权限卡在「全部 Bots」之后，不抢 bots 列表的位置。
+  const botsAt = overview.html.indexOf('全部')
+  const permAt = overview.html.indexOf('perm-section')
+  assert.ok(botsAt >= 0 && permAt > botsAt, '免审权限卡应排在「全部 Bots」之后')
   stopTimers()
 })
 

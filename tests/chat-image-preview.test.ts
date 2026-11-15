@@ -81,7 +81,7 @@ test('正文内嵌图点击放大：委托先于 data-action，openInlineImage �
   const seen = {}
   const viewer = { hidden: true }
   const openInlineImage = new Function(
-    'document', 'ensureImageViewer', 'location',
+    'document', 'ensureImageViewer', 'location', 'setAppInert', 'overlayInertState',
     `${inlineFn}\nreturn openInlineImage`,
   )(
     {
@@ -90,6 +90,9 @@ test('正文内嵌图点击放大：委托先于 data-action，openInlineImage �
     },
     () => viewer,
     { href: 'http://localhost/' },
+    // DSHBOTS-367：查看器打开时背景 #app 置 inert——桩只记录调用，不做真实 DOM 操作。
+    () => {},
+    () => false,
   )
   openInlineImage({
     currentSrc: '',

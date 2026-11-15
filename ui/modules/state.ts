@@ -97,6 +97,13 @@ export const BOT_STATUS = keyed('botStatus.', ['active', 'paused', 'archived'])
 export const RUN_STATUS = keyed('runStatus.', ['queued', 'running', 'succeeded', 'failed', 'canceled'])
 // 调度页「正在调度」列表用的运行类型名；未知 kind 直接显示原值，不静默吞掉。
 export const RUN_KIND = keyed('runKind.', ['task_run', 'owner_task_run', 'solo_chat_run', 'chat_run', 'dm_run', 'dm_reply', 'memory_review'])
+// 运行状态/种类的渲染标签（与上面枚举同源）：表内有键走 t()，表外原样回落。
+export function runStatusLabel(status: string) {
+  return RUN_STATUS[status] ? t('runStatus.' + status) : status
+}
+export function runKindLabel(kind: string) {
+  return RUN_KIND[kind] ? t('runKind.' + kind) : kind
+}
 // 聊天历史分片大小：与后端 messagesPage 的默认/上限一致（state 轮询同口径）。
 export const CHAT_PAGE_SIZE = 200
 // 群聊右栏「活跃任务」列表显示上限：标题右侧计数仍显示项目在办任务总数，超出部分用「还有 N 条」提示。

@@ -4,13 +4,12 @@
 // 非 urgent 同写范围仍拒单（文案保留 + 豁免入口可见）；urgent 无重复卡时不误报共用车道。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
+import { rm } from 'node:fs/promises'
+
 import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+
 import { DshRuntime } from '../src/runtime.js'
+import { setupTeam } from './helpers/harness.js'
 
 // assert.rejects 校验回调收到的业务错误形态（AppError 的本地结构视图，仅类型用）。
 interface RejectError { status: number; code: string; message: string }
@@ -35,17 +34,7 @@ class HoldingRuntime {
 
 // schedulerIntervalMs 拉满（resolveConfig 上限 30s）：定时 tick 不掺和，时序只由显式 tick 驱动。
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-urgent-exempt-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new HoldingRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service, config }
+  return setupTeam({ prefix: 'dsh-urgent-exempt-', schedulerIntervalMs: 30_000, runtime: new HoldingRuntime() })
 }
 
 async function seedProject(service, store) {

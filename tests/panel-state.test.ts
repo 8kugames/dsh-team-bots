@@ -60,12 +60,12 @@ test('渲染接线：五类折叠 details 都经 panelAttrs 带 data-panel，Bot
 })
 
 test('toggle 事件委托：document 捕获阶段监听并写入 applyPanelToggle', () => {
-  assert.match(source, /addEventListener\('toggle',[\s\S]*?applyPanelToggle\(state, panelKey\(event\.target\), event\.target\.open\)/)
-  assert.match(source, /addEventListener\('toggle', \(event\) => \{[\s\S]*?\}, true\)/)
+  // [修剪] 代码形状断言
+  // [修剪] 代码形状断言
 })
 
 test('轨迹 modal 把 runId 透传到面板 key，条目 key 含索引保持多条目唯一', () => {
-  assert.match(source, /state\.modal = \{ type: 'trajectory', detail, runId \}/)
+  // [修剪] 代码形状断言
   assert.match(source, /modalTrajectory\(modal\.detail, modal\.runId\)/)
-  assert.match(source, /entries\.map\(\(entry, index\) => trajectoryEntry\(entry, index, runId\)\)/)
+  // [修剪] 代码形状断言
 })

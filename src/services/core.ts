@@ -3,7 +3,7 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
 
-import { effectiveReviewIdleMinutes, effectiveRunLimits, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, APPROVAL_TIMEOUT_KEY, QUESTION_TIMEOUT_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE, REVIEW_IDLE_MINUTES_KEY, REVIEW_IDLE_MINUTES_RANGE } from '../config.js'
+import { effectiveReviewIdleMinutes, effectiveRunLimits, envExplicit, RUN_LIMIT_RANGES, RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY, APPROVAL_TIMEOUT_KEY, QUESTION_TIMEOUT_KEY, REVIEW_TIMEOUT_KEY, UI_LANGUAGE_KEY, UI_LANGUAGE_VALUES, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY, REVIEW_ESCALATE_RANGE, REVIEW_IDLE_MINUTES_KEY, REVIEW_IDLE_MINUTES_RANGE } from '../config.js'
 import { badRequest, conflict, notFound } from '../errors.js'
 import { ensureDirResilient, ensureSkillRoot } from '../paths.js'
 import { seedModelPrices } from '../pricing.js'
@@ -19,6 +19,7 @@ import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 import { ensureWechatTriggerSchema } from './wechat-trigger-schema.js'
 import { ensureExternalTriggerSchema } from './external-trigger-schema.js'
 import { PROMPT_SEGMENT_DEFAULTS, PROMPT_SEGMENT_MAX_CHARS, PROMPT_TRIO_BUDGET, parsePromptOverrides, promptOverridesHash, taskGuidanceTrioLength } from './runtime/prompt.js'
+import { effectiveReviewTimeoutMinutes } from './runtime/session.js'
 import { id, jsonParse, nowIso } from '../util.js'
 
 
@@ -213,6 +214,7 @@ export const coreMethods = {
       'memory_review', 'chat_memory_review',
       RUN_TIMEOUT_KEY, STALL_WATCHDOG_KEY,
       APPROVAL_TIMEOUT_KEY, QUESTION_TIMEOUT_KEY,
+      REVIEW_TIMEOUT_KEY,
       UI_LANGUAGE_KEY,
       REVIEW_IDLE_MINUTES_KEY, REVIEW_AUTO_CLOSE_KEY, REVIEW_ESCALATE_KEY,
     ]
@@ -233,6 +235,9 @@ export const coreMethods = {
       runTimeoutEnv: limits.runTimeoutEnv,
       stallTimeoutEnv: limits.stallTimeoutEnv,
       reviewIdleMinutes,
+      // 验收分档时效（DSHBOTS-364）：默认 0 = 关闭分档、跟随全局；设置页随行回显。
+      reviewTimeoutMinutes: effectiveReviewTimeoutMinutes(key => this.store.setting(key)),
+      reviewTimeoutEnv: envExplicit('DSH_TEAM_REVIEW_TIMEOUT_MINUTES'),
     }
   },
   updateSettings(patch, actor = this.actor(), expectedRevision = undefined) {
@@ -389,7 +394,9 @@ export const coreMethods = {
   start() {
     if (this.started) return
     this.started = true
-    this.timer = setInterval(() => void this.tick(), this.config.schedulerIntervalMs)
+    // 周期拍走空载门：空闲时降频为一次索引计数，有工作立即恢复全量拍；
+    // 事件唤醒（各入队路径的 void this.tick()）不经此门。
+    this.timer = setInterval(() => void this.tickIdleGate(), this.config.schedulerIntervalMs)
     this.timer.unref?.()
     setTimeout(() => void this.tick(), 300).unref?.()
   },
@@ -397,6 +404,10 @@ export const coreMethods = {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.started = false
+    // 在途审批定时器一并清空：abort 监听由宿主信号持有无法摘除（迟到结算已由
+    // settleApproval 容错），但停机后不得再由自身定时器主动触发写库。
+    for (const pending of this.approvalPending?.values() ?? []) clearTimeout(pending.timer)
+    this.approvalPending?.clear()
     void this.wechat?.stop()
     void this.feishu?.stop()
   },

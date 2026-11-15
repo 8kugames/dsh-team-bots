@@ -7,6 +7,7 @@ import { readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
+import { REVIEWER_BOT_NAME } from '../seed-bots.js'
 import { ensureBotTmpDirs, ensureExternalDir, ensureProjectWorkspace } from '../paths.js'
 import { clampNumber, id, nowIso, parseDisabledSkills, projectKey, slugify, text } from '../util.js'
 
@@ -277,7 +278,17 @@ export const projectsMethods = {
     const projectId = id('prj')
     const groupId = id('grp')
     const createdAt = nowIso()
-    const memberIds = [...new Set([owner.id, ...(Array.isArray(input.memberIds) ? input.memberIds : [])])]
+    // 成员默认（DSHBOTS-365）：不显式指定成员的新群自动带入种子 reviewer——验收核验
+    // 优先落到质量评审角色上，总监只裁决。显式 memberIds 是用户裁剪过的名单，不擅自加人；
+    // 用户事后移除 reviewer 即回落总监自行核验（spawnReviewDelegate 兜底）。
+    const explicitMembers = Array.isArray(input.memberIds)
+    const memberIds = [...new Set([owner.id, ...(explicitMembers ? input.memberIds : [])])]
+    if (!explicitMembers) {
+      const reviewer = this.store.get(
+        "SELECT id FROM bots WHERE name = ? AND status = 'active'", REVIEWER_BOT_NAME,
+      )
+      if (reviewer && reviewer.id !== owner.id) memberIds.push(reviewer.id)
+    }
     for (const botId of memberIds) this.botRow(botId)
     await ensureProjectWorkspace(this.config.workspace, slug)
     const productionDir = await this.resolveProductionDir(input.productionDir)

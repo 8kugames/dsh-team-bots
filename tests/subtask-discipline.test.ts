@@ -4,33 +4,14 @@
 // parent_task_id 空串/不存在/跨项目 → 400（沿用 task-relations 校验，锁不回归）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { openDatabase } from '../src/db.js'
-import { resolveConfig } from '../src/config.js'
-import { TeamService } from '../src/service.js'
+import { rm } from 'node:fs/promises'
+
 import { DshRuntime } from '../src/runtime.js'
 import { installTeamTools } from '../src/tools.js'
-
-class StubRuntime {
-  setCompletionHandler() {}
-  async catalog() { return [] }
-  async validateBotConfig() {}
-}
+import { setupTeam } from './helpers/harness.js'
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-subtask-discipline-'))
-  const workspace = join(root, 'workspace')
-  const dataDir = join(root, 'data')
-  await mkdir(join(workspace, '.agents', 'skills'), { recursive: true })
-  const config = resolveConfig({ workspace, dataDir, skillRoot: join(workspace, '.agents'), modelCacheMs: 0, schedulerIntervalMs: 30_000 })
-  const store = openDatabase(config.dbPath)
-  const service = new TeamService({ store, config, logger: { info() {}, warn() {}, error() {} } })
-  service.attachRuntime(new StubRuntime())
-  await service.initialize()
-  service.started = true
-  return { root, store, service, config }
+  return setupTeam({ prefix: 'dsh-subtask-discipline-', schedulerIntervalMs: 30_000 })
 }
 
 async function seedProject(service, store) {

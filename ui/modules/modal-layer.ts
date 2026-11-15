@@ -1,5 +1,5 @@
 import { state } from './state.js'
-import { attr, esc } from './util.js'
+import { attr, esc, overlayInertState, setAppInert } from './util.js'
 import { render, updateRunClocks } from '../app.js'
 import { modalNewProject, modalRemoveTracking, modalRemoveBotTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory } from './modal-forms.js'
 import { modalFilePreview } from './file-preview.js'
@@ -109,6 +109,9 @@ function ensureModalRoot(doc = document) {
 function renderModalLayer() {
   const root = ensureModalRoot()
   const html = renderModal()
+  // 遮罩开合即背景可达性的开关（DSHBOTS-367）：#app 置 inert，关闭时还原。
+  // typeof 守卫同 updateRunClocks：本块会被测试整段抽出求值，符号不在场时跳过。
+  if (typeof setAppInert === 'function') setAppInert(overlayInertState())
   if (html === lastModalHtml) return
   // 滚动守卫闸门（DSHBOTS-154）：同一弹窗的刷新在 modal-body 滚动进行中延后——延后期间
   // lastModalHtml 不更新，滚动停止后 scheduleModalPatch 重入时仍能识别「内容变了」并补拍。

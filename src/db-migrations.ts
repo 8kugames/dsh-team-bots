@@ -258,6 +258,14 @@ function migrateUsageEvents(db) {
 // FTS5 全文索引：可用则建立并回填，不可用则回退到 LIKE 扫描。
 function setupFts(db) {
   try {
+    // 旧库可能带着非 trigram（unicode61 默认分词）的 memories_fts：中文整段被切成单 token，
+    // 子串检索永远 0 命中。IF NOT EXISTS 不会重建，须显式检测分词器并丢弃重建后回填。
+    const existing = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name = 'memories_fts'",
+    ).get()
+    if (existing && !/tokenize\s*=\s*'trigram'/.test(String(existing.sql))) {
+      db.exec('DROP TABLE memories_fts')
+    }
     db.exec(FTS_SCHEMA)
   } catch {
     return false
@@ -357,8 +365,15 @@ function migrateSessionBindingProjectScope(db) {
 // 完整落地，但激活必须与 §5.2-2 入站路由收敛同车——现行运行时仍是「同 bot 多条 queued 领取时
 // 合批」（scheduler.coalesceQueuedRuns）与四车道并行，先建索引会让 enqueue 家族直接撞唯一约束
 // （实测全量 1540 例红 68，全部为 UNIQUE constraint failed: runs.bot_id）。步骤 2 把合批改为
-// 入队合并后，在 runMigrations 里调用本函数激活；本函数自身幂等，可重复执行。
+// 入队合并后，在 runMigrations 里调用本函数激活。
+// 账本闸（ZONGM-140 三会话事故复盘）：串行化收口是一次性存量迁移，不是每次开库的常驻
+// 逻辑——无闸时每次宿主重启都会把同 bot「较新的活跃运行」再收一遍，且下方 UPDATE 的
+// 收口口径（全 bot、不限 kind）与最终豁免口径（task/治理运行免串行，见 exempt 系列
+// 索引谓词）并不一致，生产表现是每次重启杀掉新排队的任务卡/治理运行（ZONGM-140 首发
+// 运行 10:40:25 入队 15 秒后被杀、DSHBOTS-368 两次被杀、11-13 两条治理运行被杀）。
+// 已记录账本即跳过：索引重建由 exempt 系列每次开库兜底，收口 UPDATE 只跑一次。
 export function activateBotRunSerialization(db) {
+  if (db.prepare("SELECT 1 FROM schema_migrations WHERE name = 'bot_run_serialization'").get()) return
   // 存量运行串行化（ADR §2.3）：同 bot 多条 queued/running 只保留最早一条，其余置 canceled。
   // 被收掉的均为未启动的排队运行，消息与运行留痕不丢（同 scheduler 合批的 MERGED 口径）。
   db.prepare(
@@ -379,9 +394,11 @@ export function activateBotRunSerialization(db) {
 
 // 串行域收窄（DSHBOTS-308，owner 拍板同一 bot 跨工作区并行）：one_active_run_per_bot 从
 // bot 全局收窄为 (bot, 工作区) 域，solo 域归一口径与 one_bot_binding 的 COALESCE 一致。
-// 同名索引列集已变，IF NOT EXISTS 不替换旧列集，须 DROP 再建；与 activateBotRunSerialization
-// 同为函数级幂等且必须排其后——前者每次开库可能重建出 bot 级旧索引，靠本函数收口到域级。
+// 同名索引列集已变，IF NOT EXISTS 不替换旧列集，须 DROP 再建；必须排 activateBotRunSerialization
+// 之后——前者未记账本时可能重建出 bot 级旧索引，靠本函数收口到域级。账本闸同前者（一次性
+// 存量迁移，重复执行的取消 UPDATE 会在每次重启时误杀活跃运行，见前者注释）。
 export function activateBotRunSerializationDomain(db) {
+  if (db.prepare("SELECT 1 FROM schema_migrations WHERE name = 'bot_run_serialization_domain'").get()) return
   // 存量按域分桶重做串行化：每 (bot, 域) 桶只留最早一条（queued_at, rowid），其余取消留痕。
   db.prepare(
     `UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'SERIALIZATION_DOMAIN',
@@ -408,13 +425,43 @@ export function activateBotRunSerializationDomain(db) {
 // 重复由 one_active_run_per_task 兜底，写安全由调度器写范围闸门兜底。review/handle（owner_task）
 // 与消息族照旧串行。不追改存量（历史串行取消行为不回滚）。
 export function exemptTaskRunsFromBotSerialization(db) {
+  // 本函数与 exemptGovernanceRunsFromBotSerialization 一样无账本闸（每次开库 DROP+重建，
+  // 兜住中间版本/损坏库的索引漂移）。但中间谓词（只豁免 task）比最终谓词（再豁免治理
+  // 运行）窄：库内存在最终态合法共存（如 review:running + rollover_summary:queued）时，
+  // 本步 CREATE UNIQUE INDEX 直接撞约束，宿主启动崩溃且 DROP 已执行、索引缺失→每次
+  // 启动都崩（生产实测 0.3.51：exemptTaskRunsFromBotSerialization UNIQUE constraint
+  // failed: one_active_run_per_bot）。修复：重建谓词直接收敛到最终口径（两步语义上
+  // 原本就是同车演进的收窄链，中间索引只活到下一行执行，不承担运行期约束），
+  // 并在 CREATE 前按最终谓词收口重复活跃运行自愈脏数据。
+  convergeActiveRunsForDomainIndex(db, ['task', 'session_compact', 'rollover_summary'])
   db.exec(`
     DROP INDEX IF EXISTS one_active_run_per_bot;
     CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_bot
       ON runs(bot_id, COALESCE(project_id, '~solo'))
-      WHERE status IN ('queued', 'running') AND kind <> 'task';
+      WHERE status IN ('queued', 'running') AND kind NOT IN ('task', 'session_compact', 'rollover_summary');
   `)
   recordMigration(db, 'task_runs_exempt_bot_serialization')
+}
+
+// 按最终索引谓词收口同 (bot, 工作区) 域内重复的非豁免活跃运行：每桶只留最早一条
+// （queued_at, rowid），其余取消留痕。稳态下索引本身保证无重复，本收口只在脏数据
+// （崩溃残留/中间版本共存）上各执行一次，不会重复误杀。
+function convergeActiveRunsForDomainIndex(db, exemptKinds) {
+  const placeholders = exemptKinds.map(() => '?').join(', ')
+  db.prepare(
+    `UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'INDEX_CONVERGE',
+       error_message = '开库重建 one_active_run_per_bot 前收口：同 (bot, 工作区) 域重复活跃运行，仅保留最早一条'
+     WHERE status IN ('queued', 'running')
+       AND kind NOT IN (${placeholders})
+       AND rowid <> (
+         SELECT r2.rowid FROM runs r2
+         WHERE r2.status IN ('queued', 'running')
+           AND r2.kind NOT IN (${placeholders})
+           AND r2.bot_id = runs.bot_id
+           AND COALESCE(r2.project_id, '~solo') = COALESCE(runs.project_id, '~solo')
+         ORDER BY r2.queued_at, r2.rowid LIMIT 1
+       )`,
+  ).run(nowIso(), ...exemptKinds, ...exemptKinds)
 }
 
 // 只读治理运行豁免 bot 串行域（单轮上下文治理 P3）：session_compact / rollover_summary
@@ -425,6 +472,8 @@ export function exemptTaskRunsFromBotSerialization(db) {
 // 闲时语义由领取顺序保住；botBusy 查询口径不变（治理运行排队/执行中视为忙，消息族
 // 照旧挂待处理队列，不与治理运行互抢）。
 export function exemptGovernanceRunsFromBotSerialization(db) {
+  // 同上：CREATE 前收口脏数据（崩溃残留的重复活跃行），避免开库重建撞约束。
+  convergeActiveRunsForDomainIndex(db, ['task', 'session_compact', 'rollover_summary'])
   db.exec(`
     DROP INDEX IF EXISTS one_active_run_per_bot;
     CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_bot

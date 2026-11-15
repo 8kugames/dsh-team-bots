@@ -116,9 +116,12 @@ function approvalCardMarkup(approval, deciding = false, showSource = false) {
   const percent = pending ? Math.round(approvalProgressRatio(approval.remainingMs, windowMs) * 100) : 0
   const urgent = approvalUrgent(approval.remainingMs)
   const target = approvalTargetChip(approval, summary)
+  const decidedBy = String(approval.decided_by ?? '')
+  // 免审回显（DSHBOTS-365）：auto:rule:* 前缀区分自动/人工放行，decided_by 进 pill title 可溯源。
+  const autoAllowed = status === 'allowed' && decidedBy.startsWith('auto:')
   const pillTone = status === 'allowed' ? 'is-allowed' : status === 'rejected' ? 'is-rejected' : 'is-muted'
   const pillText = status === 'allowed' && approval.decided_at
-    ? `${APPROVAL_STATUS.allowed} ${formatTime(approval.decided_at)}`
+    ? `${autoAllowed ? t("规则自动放行") : APPROVAL_STATUS.allowed} ${formatTime(approval.decided_at)}`
     : (APPROVAL_STATUS[status] ?? status)
   return `<div class="message-row">
     <div class="message-body-wrap approval-card" data-approval-status="${attr(approval.status)}" data-approval-id="${attr(approval.id)}">
@@ -138,7 +141,7 @@ function approvalCardMarkup(approval, deciding = false, showSource = false) {
         <button class="btn small primary" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="allow"${deciding ? ' disabled' : ''}>${t("允许一次")}</button>
         <button class="btn small danger" data-action="approval-decide" data-approval-id="${attr(approval.id)}" data-decision="reject"${deciding ? ' disabled' : ''}>${t("拒绝")}</button>
       </div>`
-        : `<div class="approval-foot"><span class="approval-pill ${pillTone}"${approval.decided_at ? ` title="${attr(formatTime(approval.decided_at))}"` : ''}>${esc(pillText)}</span></div>`}
+        : `<div class="approval-foot"><span class="approval-pill ${pillTone}"${approval.decided_at ? ` title="${attr(decidedBy ? `${formatTime(approval.decided_at)} · ${decidedBy}` : formatTime(approval.decided_at))}"` : ''}>${esc(pillText)}</span></div>`}
     </div>
   </div>`
 }
@@ -520,7 +523,7 @@ function renderMessage(message) {
   return `<div class="message-row ${isUser ? 'user' : ''}">
     ${isUser ? '' : avatar(bot ?? { name: message.senderName, color: 'gray' })}
     <div class="message-body-wrap">
-      <div class="message-meta"><strong>${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}${copyBtn}</div>
+      <div class="message-meta"><strong title="${attr(message.senderName)}">${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}${copyBtn}</div>
       ${bubbleHtml}
       ${renderMessageImages(message.images)}
       ${chipsLine}

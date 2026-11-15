@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { appendFileSync, renameSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -175,6 +176,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   route('/api/dsh-team/modules/page-shell.js', ['GET'], moduleScript('page-shell.js'))
   route('/api/dsh-team/modules/composer.js', ['GET'], moduleScript('composer.js'))
   route('/api/dsh-team/modules/tasks.js', ['GET'], moduleScript('tasks.js'))
+  route('/api/dsh-team/modules/permissions.js', ['GET'], moduleScript('permissions.js'))
   route('/api/dsh-team/modules/modal-layer.js', ['GET'], moduleScript('modal-layer.js'))
   route('/api/dsh-team/modules/file-preview.js', ['GET'], moduleScript('file-preview.js'))
   route('/api/dsh-team/modules/dom-morph.js', ['GET'], moduleScript('dom-morph.js'))
@@ -186,6 +188,8 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   route('/api/dsh-team/modules/events-click.js', ['GET'], moduleScript('events-click.js'))
   route('/api/dsh-team/modules/events-submit.js', ['GET'], moduleScript('events-submit.js'))
   route('/api/dsh-team/modules/events-misc.js', ['GET'], moduleScript('events-misc.js'))
+  route('/api/dsh-team/modules/form-validation.js', ['GET'], moduleScript('form-validation.js'))
+  route('/api/dsh-team/modules/task-menu.js', ['GET'], moduleScript('task-menu.js'))
   route('/api/dsh-team/i18n/zh.js', ['GET'], i18nDict('zh.js'))
   route('/api/dsh-team/i18n/en.js', ['GET'], i18nDict('en.js'))
   // DSHBOTS-233：词表按域拆分后，聚合入口（zh.js/en.js）相对导入域切片，
@@ -259,6 +263,17 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
     return response(JSON.stringify({ ok: false, error: { code, message } }), 'application/json; charset=utf-8', status)
   }
 
+  // 临时诊断（用户报「群聊/bots 切换加载中过久」）：超过 120ms 的动作落 dataDir/perf-actions.log
+  // 一行（动作、耗时、响应字节数；state 额外记 unchanged），定位真热点后本块整体移除。
+  const perfLog = (action: string, ms: number, bytes: number, data: unknown) => {
+    try {
+      const file = join(service.config.dataDir, 'perf-actions.log')
+      try { if (statSync(file).size > 1_000_000) renameSync(file, `${file}.old`) } catch {}
+      const unchanged = action === 'state' && data && typeof data === 'object' ? ` unchanged=${String((data as { unchanged?: boolean }).unchanged)}` : ''
+      appendFileSync(file, `${new Date().toISOString()} ${action} ${ms.toFixed(0)}ms ${bytes}B${unchanged}\n`)
+    } catch { /* 诊断写失败不影响业务 */ }
+  }
+
   route('/api/dsh-team/api', ['POST'], async (request) => {
     try {
       const length = Number(request.headers.get('content-length') ?? 0)
@@ -274,8 +289,12 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
       const action = String(body?.action ?? '')
       const payload = body?.payload && typeof body.payload === 'object' ? body.payload : {}
       const actor = { type: 'user', id: service.localUserId }
+      const startedAt = performance.now()
       const data = await handleAction(service, action as TeamActionName, payload, actor)
-      return response(JSON.stringify({ ok: true, data }), 'application/json; charset=utf-8')
+      const bodyJson = JSON.stringify({ ok: true, data })
+      const elapsed = performance.now() - startedAt
+      if (elapsed > 120) perfLog(action, elapsed, bodyJson.length, data)
+      return response(bodyJson, 'application/json; charset=utf-8')
     } catch (error) {
       return errorResponse(error)
     }

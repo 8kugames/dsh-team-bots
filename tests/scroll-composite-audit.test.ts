@@ -52,6 +52,7 @@ const SCROLL_CONTAINERS = [
   { file: 'chat-cards.css', sel: '.approval-menu', verdict: 'promoted', note: 'D-187：经 .approval-banner 渲染在 .main-head（backdrop-filter）子树' },
   { file: 'chat-cards.css', sel: '.question-menu', verdict: 'promoted', note: 'D-187：经 .question-banner 渲染在 .main-head（backdrop-filter）子树' },
   { file: 'main.css', sel: '.tabbar', verdict: 'promoted', note: 'D-187：.main-head（backdrop-filter）子树内的横向滚动' },
+  { file: 'usage.css', sel: '.usage-panel', verdict: 'no-filter-ancestor', note: '用量页卡内横向滚动兜底（d0aea80），页面内容槽位祖先链无 filter' },
 ]
 
 const STICKY_FIXED = [
@@ -62,6 +63,7 @@ const STICKY_FIXED = [
   { file: 'frame.css', sel: '.sidebar', note: 'sticky 无 filter' },
   { file: 'main.css', sel: '.main-head', note: 'sticky + backdrop-filter（filter 轴已登记）' },
   { file: 'global-config.css', sel: '.global-nav', note: 'sticky + backdrop-filter（filter 轴已登记）' },
+  { file: 'tasks.css', sel: '#task-menu-root', note: 'fixed 容器（任务卡上下文菜单，无 filter 无滚动后代）' },
 ]
 
 // —— 从服务集 CSS 提取规则（与线上完全同源：UI_STYLE_PARTS + 注释先剥）——

@@ -191,6 +191,8 @@ return { modalShell, modalRemoveTracking }`)(state, escStub, escStub)
     beginChatPending: () => 1, endChatPending: noop, reloadTaskModal: async () => {},
     saveTaskFromForm: async () => null,
     questionDraftSelection: noop, questionSelectOption: noop,
+    // DSHBOTS-367：中央 submit 路径先过表单内联校验（真实实现见 ui/modules/form-validation.js）。
+    validateForm: () => true,
   }
 
   const loadListener = (source, type, extraStubs = {}) => {

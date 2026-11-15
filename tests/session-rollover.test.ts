@@ -24,7 +24,7 @@ class StubRuntime {
   async validateBotConfig() {}
 }
 
-async function setup({ turns = TURNS } = {}) {
+async function setup({ turns = TURNS, subagents }: { turns?: number, subagents?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-session-rollover-'))
   const workspace = join(root, 'workspace')
   const dataDir = join(root, 'data')
@@ -32,6 +32,7 @@ async function setup({ turns = TURNS } = {}) {
   const config = resolveConfig({
     workspace, dataDir, skillRoot: join(workspace, '.agents'),
     modelCacheMs: 0, schedulerIntervalMs: 30_000, sessionRolloverTurns: turns,
+    sessionRolloverSubagents: subagents,
   })
   const store = openDatabase(config.dbPath)
   const service = new TeamService({ store, config, logger })
@@ -200,6 +201,41 @@ test('P2 体积上限：轮数未到但会话上下文超上限同样触发摘�
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old', '摘要未就绪继续复用旧会话')
     const queued = rolloverRuns(ctx.store)
     assert.equal(queued.length, 1, '上下文超上限即触发摘要补排，不等待轮数阈值')
+    assert.equal(queued[0].session_id, 'sess-old')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+// 播种会话累计消费的子代理数：账本口径 = 会话名下运行的 subagent_spawned run_events。
+const seedSubagents = (store, { sessionId, count, offset = 0 }) => {
+  const at = new Date().toISOString()
+  const runs = store.all('SELECT id FROM runs WHERE session_id = ?', sessionId)
+  for (let i = 0; i < count; i += 1) {
+    store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      `evt_seed_${sessionId}_${offset + i}`, runs[(offset + i) % runs.length].id, 'subagent_spawned', 'seed', at,
+    )
+  }
+}
+
+test('子代理消费上限：轮数未到但会话派满子代理同样触发摘要补排；消费不足则不触发', async () => {
+  // 轮数阈值拉高到够不着，只有子代理判据（阈值 2）能触发。
+  const ctx = await setup({ turns: 999, subagents: 2 })
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 3 })
+
+    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    seedSubagents(ctx.store, { sessionId: 'sess-old', count: 1 })
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old')
+    assert.equal(rolloverRuns(ctx.store).length, 0, '子代理消费低于上限且轮数未到：不触发')
+
+    seedSubagents(ctx.store, { sessionId: 'sess-old', count: 1, offset: 1 })
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old', '摘要未就绪继续复用旧会话')
+    const queued = rolloverRuns(ctx.store)
+    assert.equal(queued.length, 1, '子代理消费达上限即触发摘要补排，不等待轮数阈值')
     assert.equal(queued[0].session_id, 'sess-old')
   } finally {
     await cleanup(ctx)
