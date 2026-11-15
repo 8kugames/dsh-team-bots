@@ -4,6 +4,32 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.64
+
+### 中文
+
+**全局设置**
+
+- **运行参数卡**：全部运行期 `DSH_TEAM_*` 环境变量（29 项）可在全局设置页「关于与系统状态」分组配置，生效优先级 env 显式 > 设置保存值 > 启动默认，界面实时回显当前生效值与默认值。
+- **分组改 tab 分页**：用量统计、密钥管理、全局配置三页的分组导航从页内锚点改为 tab 分页容器，一次只渲染激活分组，长页单屏化；任务看板保持原样。tab 支持 `?tab=` 深链。
+
+**文档与工程**
+
+- README 配图按语言分套重拍（英文配主 README、中文配 README.zh），统一 1280×800 单屏；清除无引用的旧设计稿截图。
+- 推送前预检：pre-push 钩子做净树检查 + 与 CI 同源的 typecheck/test。
+
+### English
+
+**Global settings**
+
+- **Runtime settings card**: all runtime `DSH_TEAM_*` environment variables (29 entries) are now configurable on the Global settings page, with precedence explicit env > saved setting > startup default; the UI shows the effective and default values inline.
+- **Groups become tabs**: the grouped pages (usage stats, secrets, global configuration) switch from in-page anchors to a tabbed container that renders only the active group, keeping each page single-screen; the task board is unchanged. Tabs support `?tab=` deep links.
+
+**Docs and tooling**
+
+- README screenshots retaken per language (English for the main README, Chinese for README.zh) at a uniform 1280×800 single screen; unreferenced design-draft screenshots removed.
+- Pre-push preflight: clean-tree check plus typecheck/test identical to CI.
+
 ## v0.3.55
 
 ### 中文
