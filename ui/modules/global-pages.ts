@@ -202,13 +202,15 @@ export function renderSecretsPage() {
   const secrets = state.data?.secrets ?? []
   const requests = state.data?.secretRequests ?? []
   const projects = (state.data?.projects ?? []).filter(project => project.status === 'active')
+  const navItems = [
+    { id: 's-requests', label: t('secrets.sectionRequests') },
+    { id: 's-list', label: t('secrets.sectionList') },
+    { id: 's-add', label: t('secrets.sectionAdd') },
+  ]
+  const active = navItems.some(item => item.id === state.pageTab) ? state.pageTab : navItems[0].id
   return pageShell(
     pageHead('SECRETS', t('viewTitle.secrets'), t('secrets.desc'), refreshAction()),
-    pageNav([
-      { id: 's-requests', label: t('secrets.sectionRequests') },
-      { id: 's-list', label: t('secrets.sectionList') },
-      { id: 's-add', label: t('secrets.sectionAdd') },
-    ], t('secrets.navLabel')),
+    pageNav(navItems, t('secrets.navLabel')),
     [
       pageSection({
         index: '01', id: 's-requests', title: t('secrets.sectionRequests'), desc: t('secrets.sectionRequestsDesc'),
@@ -225,6 +227,7 @@ export function renderSecretsPage() {
         body: slot('full', secretAddCard(projects)),
       }),
     ],
+    active,
   )
 }
 

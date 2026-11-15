@@ -17,8 +17,14 @@ function usagePanelSlots(panels, order) {
 }
 
 // 分组导航：只列当前视图真实存在的分组，避免死锚点。
+// tab 分页：state.pageTab 失效（切视图/分组动态消失）时回落第一项。
+function activeTab(items) {
+  const ids = items.map(item => item.id)
+  return ids.includes(state.pageTab) ? state.pageTab : ids[0]
+}
+
 function usageNav(items) {
-  return pageNav(items, t('usage.navLabel'))
+  return pageNav(items, t('usage.navLabel'), activeTab(items))
 }
 
 function renderUsageGlobal() {
@@ -54,13 +60,14 @@ function renderUsageGlobal() {
     unpriced > 0 ? `<div class="note warn-note">${t('usage.unpricedNote', { count: unpriced })}</div>` : '',
     Number(reconciliation?.mismatched ?? 0) > 0 ? `<div class="usage-note">${t('次运行的用量记录对不上，数据可能不完整。', { count: Number(reconciliation.mismatched) })}</div>` : '',
   ].join('')
+  const navItems = [
+    { id: 'u-overview', label: t('usage.overview') },
+    { id: 'u-distribution', label: t('usage.distTitle') },
+    { id: 'u-price', label: t('usage.priceTitle') },
+  ]
   return pageShell(
     usagePageHead(usage, t('usage.headGlobalHint')),
-    usageNav([
-      { id: 'u-overview', label: t('usage.overview') },
-      { id: 'u-distribution', label: t('usage.distTitle') },
-      { id: 'u-price', label: t('usage.priceTitle') },
-    ]),
+    usageNav(navItems),
     [
       usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewGlobalDesc', { window: windowText }),
         slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeGlobal'), usage)}`)),
@@ -77,6 +84,7 @@ function renderUsageGlobal() {
         </div>`),
       usageSection('03', 'u-price', t('usage.priceTitle'), t('usage.priceDesc'), slot('full', renderPriceCard())),
     ],
+    activeTab(navItems),
   )
 }
 
@@ -124,7 +132,7 @@ function renderUsageDomain() {
       </div>`),
       `<button class="btn small" data-action="usage-clear-drill">${icon('close')}${t('usage.clearDrill')}</button>`))
   }
-  return pageShell(usagePageHead(usage, t('usage.headDomainHint'), t('usage.scopeDomain')), usageNav(nav), sections)
+  return pageShell(usagePageHead(usage, t('usage.headDomainHint'), t('usage.scopeDomain')), usageNav(nav), sections, activeTab(nav))
 }
 
 // 单聊「用量」tab：本 bot 汇总 + 本 bot 分模型，内容严格限本 bot。
@@ -144,13 +152,14 @@ function renderUsageSolo() {
     unpriced > 0 ? `<div class="note warn-note">${t('usage.unpricedNote', { count: unpriced })}</div>` : '',
     usage.solo && tier ? '' : `<div class="usage-note">${t('该 Bot 的单聊明细暂不可用。')}</div>`,
   ].join('')
+  const navItems = [
+    { id: 'u-overview', label: t('usage.overview') },
+    { id: 'u-distribution', label: t('usage.distTitle') },
+    { id: 'u-runs', label: t('usage.runDetailTitle') },
+  ]
   return pageShell(
     usagePageHead(usage, t('usage.headSoloHint'), t('usage.scopeSolo')),
-    usageNav([
-      { id: 'u-overview', label: t('usage.overview') },
-      { id: 'u-distribution', label: t('usage.distTitle') },
-      { id: 'u-runs', label: t('usage.runDetailTitle') },
-    ]),
+    usageNav(navItems),
     [
       usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewSoloDesc', { window: windowText }),
         slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeSolo'), usage)}`)),
@@ -162,6 +171,7 @@ function renderUsageSolo() {
           ${runs.length === 0 ? `<div class="faint">${t('usage.soloRunsEmpty')}</div>` : `<div class="run-list">${runs.map(usageRunRow).join('')}</div>`}
         </div>`)),
     ],
+    activeTab(navItems),
   )
 }
 
@@ -495,14 +505,15 @@ function renderGlobal() {
   const notify = notifyToggleView()
   // 明暗偏好读内存态（非服务端设置）：三档跟随/日间/夜间，与调色板正交。
   const colorSchemePref = state.colorSchemePref || 'auto'
+  const navItems = [
+    { id: 'g-pref', label: t('global.groupPref') },
+    { id: 'g-runtime', label: t('global.groupRuntime') },
+    { id: 'g-prompts', label: t('global.groupPrompts') },
+    { id: 'g-about', label: t('global.groupAbout') },
+  ]
   return pageShell(
     pageHead('GLOBAL CONFIGURATION', t('global.title'), t('global.desc'), refreshAction()),
-    pageNav([
-      { id: 'g-pref', label: t('global.groupPref') },
-      { id: 'g-runtime', label: t('global.groupRuntime') },
-      { id: 'g-prompts', label: t('global.groupPrompts') },
-      { id: 'g-about', label: t('global.groupAbout') },
-    ], t('global.navLabel')),
+    pageNav(navItems, t('global.navLabel')),
     [
       pageSection({
         index: '01', id: 'g-pref', title: t('global.groupPref'), desc: t('global.groupPrefDesc'),
@@ -573,6 +584,7 @@ function renderGlobal() {
         body: `${slot('half', dshPathsCard())}${slot('half', dshServiceCard())}`,
       }),
     ],
+    activeTab(navItems),
   )
 }
 

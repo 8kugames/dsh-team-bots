@@ -113,6 +113,12 @@ export async function handleBoardAction(action, target) {
       render()
       break
     }
+    // 控制台页 tab 分页容器：切换激活分组，只重渲染当前页。
+    case 'page-tab': {
+      state.pageTab = target.dataset.tab || null
+      render()
+      break
+    }
     case 'set-color-scheme': {
       // 明暗三档：跟随宿主/系统、日间、夜间；手动档压过自动判定，落盘后即时生效。
       const pref = setColorSchemePreference(target.dataset.colorScheme)

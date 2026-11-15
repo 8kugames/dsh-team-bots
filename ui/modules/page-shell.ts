@@ -24,10 +24,11 @@ export function refreshAction() {
   return `<button class="btn icon" data-action="refresh" title="${label}" aria-label="${label}">${icon('refresh')}</button>`
 }
 
-// 分组导航：仅当页面有 2 个及以上分组时出现，锚点命中高亮由 CSS :target 负责。
-export function pageNav(items, label) {
-  return `<nav class="global-nav" aria-label="${label}">
-        ${items.map(item => `<a class="global-nav-item" href="#${item.id}">${item.label}</a>`).join('')}
+// 分组导航（tab 分页容器）：仅当页面有 2 个及以上分组时出现；
+// 同一时刻只渲染激活分组，长页由此拆成等高的分页（任务看板除外，不经过本壳）。
+export function pageNav(items, label, activeId) {
+  return `<nav class="global-nav" role="tablist" aria-label="${label}">
+        ${items.map(item => `<button type="button" role="tab" class="global-nav-item${item.id === activeId ? ' active' : ''}" data-action="page-tab" data-tab="${item.id}" aria-selected="${item.id === activeId}">${item.label}</button>`).join('')}
       </nav>`
 }
 
@@ -47,12 +48,14 @@ export function pageSection(section) {
       </section>`
 }
 
-// 页面壳：页头 + 导航 + 分组。sections 为 pageSection 的markup 数组。
-export function pageShell(head, nav, sections) {
+// 页面壳：页头 + 导航 + 分组。sections 为 pageSection 的markup 数组；
+// activeTab 非空时只保留该分组（tab 分页），为空时全量渲染。
+export function pageShell(head, nav, sections, activeTab = '') {
+  const visible = activeTab ? sections.filter(markup => markup.includes(`id="${activeTab}"`)) : sections
   return `<div class="global-page">
       ${head}
       ${nav ?? ''}
-      ${sections.join('')}
+      ${visible.join('')}
     </div>`
 }
 

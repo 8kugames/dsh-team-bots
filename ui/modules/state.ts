@@ -59,6 +59,9 @@ export const state = {
   theme: 'dsh',
   // 明暗偏好三态：auto=跟随宿主/系统，light=日间，dark=夜间（与调色板 theme 正交）。
   colorSchemePref: 'auto',
+  // 控制台页（用量/密钥/全局配置）tab 分页容器的激活分组 id；
+  // 失效值（切视图或分组动态消失）由各页回落第一项，自愈。支持 ?tab= 深链。
+  pageTab: params.get('tab'),
   tree: { chats: true, bots: true, archived: false },
   // 群聊已读水位：`<projectId>:<最新消息时间>`，用于避免重复上报已读。
   markedRead: null,
