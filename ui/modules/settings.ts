@@ -513,7 +513,7 @@ function renderGlobal() {
   ]
   return pageShell(
     pageHead('GLOBAL CONFIGURATION', t('global.title'), t('global.desc'), refreshAction()),
-    pageNav(navItems, t('global.navLabel')),
+    pageNav(navItems, t('global.navLabel'), activeTab(navItems)),
     [
       pageSection({
         index: '01', id: 'g-pref', title: t('global.groupPref'), desc: t('global.groupPrefDesc'),

@@ -1,6 +1,6 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.3.62",
+  "version": "0.3.63",
   "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
   "repository": {
     "type": "git",
@@ -51,6 +51,7 @@
     "start": "node scripts/dev-server.mjs",
     "prepack": "npm run build",
     "doctor": "node scripts/doctor.mjs",
+    "preflight": "node scripts/preflight.mjs",
     "profile:install": "node scripts/install-profile.mjs",
     "verify:agent-team": "node scripts/verify-agent-team.mjs",
     "backup": "node scripts/backup.mjs",

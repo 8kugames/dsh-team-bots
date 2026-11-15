@@ -210,7 +210,7 @@ export function renderSecretsPage() {
   const active = navItems.some(item => item.id === state.pageTab) ? state.pageTab : navItems[0].id
   return pageShell(
     pageHead('SECRETS', t('viewTitle.secrets'), t('secrets.desc'), refreshAction()),
-    pageNav(navItems, t('secrets.navLabel')),
+    pageNav(navItems, t('secrets.navLabel'), active),
     [
       pageSection({
         index: '01', id: 's-requests', title: t('secrets.sectionRequests'), desc: t('secrets.sectionRequestsDesc'),
