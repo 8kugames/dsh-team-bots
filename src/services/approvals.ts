@@ -234,7 +234,12 @@ export function approvalRuleMatches(rule, { botId, toolName, target, sandbox }) 
 }
 
 // 含通配符 → glob；不含通配符 → 存量前缀语义（路径按目录边界、命令按词边界）。
+// 路径维度支持 ~ 开头：~ 与 ~/… 在匹配时展开为当前用户家目录（规则按字面存储，跨机器可移植）。
 function matchesRulePattern(pattern, value, dimension) {
+  if (dimension === 'path' && (pattern === '~' || pattern.startsWith('~/'))) {
+    const home = homedir().replace(/[/\\]+$/, '')
+    pattern = pattern === '~' ? home : `${home}${pattern.slice(1)}`
+  }
   if (/[*?]/.test(pattern)) return approvalGlobMatch(pattern, value)
   if (dimension === 'path') return value === pattern || value.startsWith(`${pattern}/`)
   return value === pattern || value.startsWith(`${pattern} `)
@@ -486,9 +491,10 @@ export const approvalsMethods = {
       const pathPrefix = String(item.path_prefix ?? '').trim().replace(/\/+$/, '')
       const command = String(item.command ?? '').trim().split('\n')[0].trim().slice(0, 200)
       if (!pathPrefix && !command) throw badRequest(`${label}缺少路径规则或命令规则（至少填一项）`)
-      // 路径规则：绝对路径，或含通配符的 glob（关键词规则如 **/tmp/** 不必是绝对路径）。
-      if (pathPrefix && !pathPrefix.startsWith('/') && !/[*?]/.test(pathPrefix)) {
-        throw badRequest(`${label}路径规则必须是以 / 开头的绝对路径或含通配符的 glob`)
+      // 路径规则：绝对路径、~ 开头的家目录路径（~/…，匹配时展开），或含通配符的 glob
+      // （关键词规则如 **/tmp/** 不必是绝对路径）。
+      if (pathPrefix && !pathPrefix.startsWith('/') && !pathPrefix.startsWith('~') && !/[*?]/.test(pathPrefix)) {
+        throw badRequest(`${label}路径规则必须是以 / 开头的绝对路径、~ 开头的家目录路径或含通配符的 glob`)
       }
       if (pathPrefix.length > 500) throw badRequest(`${label}路径规则超长（上限 500 字符）`)
       const botId = String(item.bot_id ?? '').trim()
@@ -513,6 +519,9 @@ export const approvalsMethods = {
       }
     })
     this.store.setSetting(APPROVAL_RULES_SETTING, JSON.stringify(rules))
+    // 推进 settings_revision：免审规则存 settings 表但不进 stateVersion 签名的任何表列，
+    // 不 bump 的话保存后客户端轮询命中 unchanged 短路，规则列表最长 60s 才刷出来。
+    this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
     this.audit(actor, 'approval_rules.update', 'settings', APPROVAL_RULES_SETTING, {
       count: rules.length,
       rules: rules.map(rule => ({ id: rule.id, path_prefix: rule.path_prefix, command: rule.command, sandbox: rule.sandbox })),

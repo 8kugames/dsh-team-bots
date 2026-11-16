@@ -44,7 +44,7 @@ export default {
   "global.approvalRuleCommand": "命令 glob",
   "global.approvalRulePathExample": "例：**/tmp/**",
   "global.approvalRuleCommandExample": "例：git push*",
-  "global.approvalRulePathHint": "匹配操作目标路径：* 不跨目录，** 跨目录。",
+  "global.approvalRulePathHint": "匹配操作目标路径：* 不跨目录，** 跨目录；~ 开头按家目录展开。",
   "global.approvalRuleCommandHint": "匹配命令首行：* 不跨目录，** 跨目录。",
   "global.approvalRuleBot": "限 Bot",
   "global.approvalRuleTool": "限工具",

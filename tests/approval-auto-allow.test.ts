@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { openDatabase } from '../src/db.js'
@@ -153,6 +153,21 @@ test('approvalRuleMatches：含通配符的规则走 glob（** 跨目录、* 不
   assert.equal(approvalRuleMatches(rule({ command: 'git push*' }), { ...dims, target: 'git push' }), true)
   assert.equal(approvalRuleMatches(rule({ command: 'git push*' }), { ...dims, target: 'git-pull' }), false)
   assert.equal(approvalRuleMatches(rule({ command: '**rm -rf*' }), { ...dims, target: 'sudo rm -rf build' }), true)
+})
+
+test('approvalRuleMatches：~ 开头的路径规则匹配时展开为当前用户家目录', () => {
+  const dims = { botId: 'bot_a', toolName: 'bash', sandbox: 'workspace-write' }
+  const home = homedir()
+  // 无通配符：~ 与 ~/… 按展开后的目录边界前缀匹配。
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~' }), { ...dims, target: home }), true)
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~' }), { ...dims, target: `${home}/work/a.js` }), true)
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~/work' }), { ...dims, target: `${home}/work/a.js` }), true)
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~/work' }), { ...dims, target: `${home}/workbook/a.js` }), false)
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~/work' }), { ...dims, target: '/opt/work/a.js' }), false)
+  // 含通配符：展开后再走 glob。
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~/work/**' }), { ...dims, target: `${home}/work/a/b.js` }), true)
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~/work/**' }), { ...dims, target: `${home}/work` }), true)
+  assert.equal(approvalRuleMatches(rule({ path_prefix: '~/work/**' }), { ...dims, target: '/opt/work/a.js' }), false)
 })
 
 test('glob 匹配器：** 跨目录、* 不跨目录、? 单字符，尾部 /** 也命中目录自身', () => {

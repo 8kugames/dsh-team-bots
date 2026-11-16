@@ -44,7 +44,7 @@ export default {
   "global.approvalRuleCommand": "Command glob",
   "global.approvalRulePathExample": "e.g. **/tmp/**",
   "global.approvalRuleCommandExample": "e.g. git push*",
-  "global.approvalRulePathHint": "Matches the operation target path: * stays in one segment, ** crosses directories.",
+  "global.approvalRulePathHint": "Matches the operation target path: * stays in one segment, ** crosses directories; a leading ~ expands to the home directory.",
   "global.approvalRuleCommandHint": "Matches the first line of the command: * stays in one segment, ** crosses directories.",
   "global.approvalRuleBot": "Bot filter",
   "global.approvalRuleTool": "Tool filter",

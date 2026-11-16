@@ -225,6 +225,9 @@ export async function handleBoardAction(action, target) {
       if (fresh) rules.push(fresh)
       await api('update_approval_rules', { rules })
       await loadState(state.projectId)
+      // loadState 只更新 state.data 不重渲染，且下一次轮询因 since=新版本返回 unchanged，
+      // 不主动 render 页面会一直停留在旧规则列表。
+      render()
       toast(action === 'approval-rule-delete' ? t("规则已删除") : t("审批免审规则已保存"), 'success')
       break
     }
