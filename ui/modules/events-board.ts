@@ -201,34 +201,29 @@ export async function handleBoardAction(action, target) {
       toast(t("已恢复默认指令"), 'success')
       break
     }
-    // 审批免审规则（DSHBOTS-365）：服务端权威整表替换——保存 = 存量行 + 新增行全量收集；
-    // 删除 = 去掉该行后整表提交。校验在后端（主维度必填一项等），失败经 api 报错 toast。
-    case 'save-approval-rules':
+    // 审批免审规则（DSHBOTS-365）：服务端权威整表替换。新增/编辑拉起 approval-rule 弹窗
+    // （表单提交走 events-submit 的 save-approval-rule）；删除 = 从 state 规则表去行后整表提交。
+    // 校验在后端（主维度必填一项等），失败经 api 报错 toast。
+    case 'approval-rule-new':
+    case 'approval-rule-edit': {
+      const ruleId = action === 'approval-rule-edit' ? target.dataset.ruleId : null
+      const rule = ruleId
+        ? ((state.data?.approvalRules ?? []) as Array<Record<string, string>>).find(item => item.id === ruleId)
+        : null
+      openModal({ type: 'approval-rule', rule: rule ? { ...rule } : null })
+      break
+    }
     case 'approval-rule-delete': {
-      const removeId = action === 'approval-rule-delete' ? target.dataset.ruleId : null
-      const readRow = (row: Element | null) => {
-        if (!row) return null
-        const value = (name: string) => (row.querySelector(`[data-field="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)?.value ?? ''
-        const item = {
-          path_prefix: value('path_prefix'), command: value('command'), bot_id: value('bot_id'),
-          tool_name: value('tool_name'), sandbox: value('sandbox'), note: value('note'),
-        }
-        return item.path_prefix.trim() || item.command.trim() ? item : null
-      }
-      const rules: Record<string, string>[] = []
-      for (const row of document.querySelectorAll<HTMLElement>('[data-approval-rule-id]')) {
-        if (removeId && row.dataset.approvalRuleId === removeId) continue
-        const item = readRow(row)
-        if (item) rules.push({ ...item, id: row.dataset.approvalRuleId })
-      }
-      const fresh = readRow(document.getElementById('approval-rule-new'))
-      if (fresh) rules.push(fresh)
+      const removeId = target.dataset.ruleId
+      const rules = ((state.data?.approvalRules ?? []) as Array<Record<string, string>>)
+        .filter(item => item.id !== removeId)
+        .map(({ id, path_prefix, command, bot_id, tool_name, sandbox, note }) => ({ id, path_prefix, command, bot_id, tool_name, sandbox, note }))
       await api('update_approval_rules', { rules })
       await loadState(state.projectId)
       // loadState 只更新 state.data 不重渲染，且下一次轮询因 since=新版本返回 unchanged，
       // 不主动 render 页面会一直停留在旧规则列表。
       render()
-      toast(action === 'approval-rule-delete' ? t("规则已删除") : t("审批免审规则已保存"), 'success')
+      toast(t("规则已删除"), 'success')
       break
     }
     case 'reconcile-usage': {

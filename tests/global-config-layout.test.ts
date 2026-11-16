@@ -174,25 +174,27 @@ test('配置页核心组交互入口完整保留（逐 tab 汇总）', async () 
   stopTimers()
 })
 
-test('免审规则编辑面在总览 bots 页「全部 Bots」下方：配置页不渲染，卡片是紧凑权限卡（DSHBOTS-365）', async () => {
+test('免审规则编辑面在总览 bots 页「全部 Bots」下方：卡片式列表 + modal 编辑（DSHBOTS-365）', async () => {
   const rules = [
     { id: 'arul_default_tmp', path_prefix: '**/tmp/**', command: '', bot_id: '', tool_name: '', sandbox: '', note: '' },
     { id: 'arul_2', path_prefix: '', command: 'git push*', bot_id: 'b1', tool_name: '', sandbox: 'workspace-write', note: '' },
   ]
   const global = await renderPage('settings', 'renderGlobal', { approvalRules: rules })
-  assert.doesNotMatch(global.html, /data-action="save-approval-rules"/, '配置页不再承载免审规则编辑面')
-  assert.doesNotMatch(global.html, /id="approval-rule-new"/, '配置页不再有新增规则行')
+  assert.doesNotMatch(global.html, /data-action="approval-rule-new"/, '配置页不渲染免审规则卡')
+  assert.doesNotMatch(global.html, /data-form="save-approval-rule"/, '配置页没有规则表单')
   const overview = await renderPage('tasks', 'renderBotsOverview', {
     approvalRules: rules,
     bots: [{ id: 'b1', name: 'Bot', role: '成员', status: 'active', openTasks: 0, memoryCount: 0, stats: { succeeded: 0 } }],
   })
   assert.match(overview.html, /class="card perm-card"/, '总览页落免审权限卡')
-  assert.match(overview.html, /<details class="perm-rule" data-approval-rule-id="arul_default_tmp"/, '每条规则压成一行可展开的 chip 摘要')
-  assert.match(overview.html, /class="approval-chip mono">路径 \*\*\/tmp\/\*\*</, '摘要行显示 glob 路径 chip')
-  assert.match(overview.html, /class="approval-chip mono">命令 git push\*</, '命令型规则同样只在摘要行占一行')
-  assert.match(overview.html, /data-action="save-approval-rules"/, '保存入口随卡迁入')
-  assert.match(overview.html, /id="approval-rule-new"/, '新增规则行随卡迁入')
-  assert.match(overview.html, /class="perm-more"/, 'Bot / 工具 / 沙箱 / 备注收进「更多条件」')
+  assert.match(overview.html, /class="perm-rule-card" data-approval-rule-id="arul_default_tmp"/, '每条规则一张独立卡片')
+  assert.match(overview.html, /title="\*\*\/tmp\/\*\*">路径 \*\*\/tmp\/\*\*</, '卡片显示 glob 路径 chip')
+  assert.match(overview.html, /title="git push\*">命令 git push\*/, '命令型规则同样出 chip')
+  assert.match(overview.html, /data-action="approval-rule-edit" data-rule-id="arul_2"/, '每张卡带编辑入口（拉起 modal）')
+  assert.match(overview.html, /data-action="approval-rule-delete" data-rule-id="arul_2"/, '每张卡带删除入口')
+  assert.match(overview.html, /data-action="approval-rule-new"/, '新增规则按钮在卡尾')
+  assert.doesNotMatch(overview.html, /data-action="save-approval-rules"/, '卡内不再有内联整表保存按钮')
+  assert.doesNotMatch(overview.html, /class="perm-more"/, '不再有内联「更多条件」折叠区')
   // 位置：权限卡在「全部 Bots」之后，不抢 bots 列表的位置。
   const botsAt = overview.html.indexOf('全部')
   const permAt = overview.html.indexOf('perm-section')

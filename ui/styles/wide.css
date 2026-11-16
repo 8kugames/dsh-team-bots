@@ -181,9 +181,8 @@
     .field-row {
         grid-template-columns: 1fr;
     }
-    /* 免审权限卡的编辑区是多列栅格，窄屏塌成一列 */
-    .perm-rule-body .field-row,
-    .perm-more .field-row {
+    /* 免审规则卡片栅格窄屏单列 */
+    .perm-rule-grid {
         grid-template-columns: 1fr;
     }
     .metric-grid {

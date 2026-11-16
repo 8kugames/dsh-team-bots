@@ -3,6 +3,7 @@ import { attr, esc, overlayInertState, setAppInert } from './util.js'
 import { render, updateRunClocks } from '../app.js'
 import { modalNewProject, modalRemoveTracking, modalRemoveBotTracking, modalBot, modalInviteMember, modalNewTask, modalTask, modalSkill, modalMemory, modalProposal, modalPrice, modalTrajectory } from './modal-forms.js'
 import { modalFilePreview } from './file-preview.js'
+import { modalApprovalRule } from './approval-rule-modal.js'
 import { t } from './i18n.js'
 
 function modalShell({ title, subtitle = '', body = '', footer = '', size = '', badge = '' }) {
@@ -42,6 +43,7 @@ function renderModal() {
     case 'task': return modalTask(modal.detail)
     case 'skill-detail': return modalSkill(modal.detail)
     case 'memory': return modalMemory(modal.memory)
+    case 'approval-rule': return modalApprovalRule(modal.rule)
     case 'proposal': return modalProposal(modal.kind)
     case 'price': return modalPrice(modal.price ?? {})
     case 'trajectory': return modalTrajectory(modal.detail, modal.runId)

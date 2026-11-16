@@ -169,6 +169,30 @@ document.addEventListener('submit', async (event) => {
       toast(t("记忆已更新"), 'success')
       return
     }
+    if (type === 'save-approval-rule') {
+      // 免审规则整表替换：编辑保 id 原位换行，新增不带 id 追加到表尾。
+      const ruleId = String(payload.ruleId || '')
+      const incoming = {
+        path_prefix: String(payload.path_prefix ?? ''),
+        command: String(payload.command ?? ''),
+        bot_id: String(payload.bot_id ?? ''),
+        tool_name: String(payload.tool_name ?? ''),
+        sandbox: String(payload.sandbox ?? ''),
+        note: String(payload.note ?? ''),
+        ...(ruleId ? { id: ruleId } : {}),
+      }
+      const existing = (state.data?.approvalRules ?? []) as Array<Record<string, string>>
+      const index = ruleId ? existing.findIndex(item => item.id === ruleId) : -1
+      const rules: Record<string, string>[] = existing.map(item => ({ id: item.id, path_prefix: item.path_prefix, command: item.command, bot_id: item.bot_id, tool_name: item.tool_name, sandbox: item.sandbox, note: item.note }))
+      if (index >= 0) rules[index] = { ...rules[index], ...incoming }
+      else rules.push(incoming)
+      await api('update_approval_rules', { rules })
+      closeModal()
+      await loadState(state.projectId, { quiet: true })
+      render()
+      toast(t("审批免审规则已保存"), 'success')
+      return
+    }
     if (type === 'create-proposal') {
       const kind = payload.kind
       const proposal = await api('create_proposal', {
