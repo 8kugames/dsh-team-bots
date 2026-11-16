@@ -4,6 +4,22 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.70
+
+### 中文
+
+**审批与配置**
+
+- **免审规则配置改版**：免审规则改为卡片式列表，新增/编辑拉起 modal；路径规则支持 ~ 家目录；规则保存后即时刷新，并对保存时已在等待中的提权卡追溯放行；免审目标提取兜底更多参数名；工具字段 placeholder 给出示例并提示「留空 = 任意工具」。
+- **Bot 级 agent preset 覆盖**：Bot 配置页新增 Agent 预设下拉（默认跟随全局），Bot 单聊配置页（solo-config）同步展示；Worker/Router 预设跟随策略维持全局默认，不做 Worker 缺省 minimal 的变更（相关提交已回退）。
+
+### English
+
+**Approvals and configuration**
+
+- **Approval-bypass rule configuration redesign**: rules become a card list with a modal for creating and editing; path rules accept the ~ home prefix; saving a rule refreshes the list immediately and retroactively releases approval cards that were already waiting; approval-target extraction covers more parameter names; the tool field placeholder shows an example and notes that an empty value matches any tool.
+- **Per-bot agent preset override**: the bot configuration page gains an agent-preset dropdown (defaulting to the global value), mirrored on the solo-config page; the global preset-following behaviour is unchanged, and the "Worker defaults to minimal" change was reverted.
+
 ## v0.3.64
 
 ### 中文
