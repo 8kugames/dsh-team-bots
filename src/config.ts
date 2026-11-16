@@ -556,11 +556,8 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     agentTeam: bool(config.agentTeam ?? process.env.DSH_TEAM_AGENT_TEAM, true),
     maxTeammates: int(config.maxTeammates ?? process.env.DSH_TEAM_MAX_TEAMMATES, 5, 1, 8),
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。
-    // Worker 缺省 minimal（owner 2026-11 拍板）：defaultAgentPreset 只在 preset 存在且
-    // 非 broken 时才选中，minimal 不可用时自动回落 standard，不会起不来会话；
-    // 显式 env / 全局设置保存值仍最高优先。
     routerPreset: String(config.routerPreset ?? process.env.DSH_TEAM_ROUTER_PRESET ?? '').trim(),
-    workerPreset: String(config.workerPreset ?? process.env.DSH_TEAM_WORKER_PRESET ?? 'minimal').trim(),
+    workerPreset: String(config.workerPreset ?? process.env.DSH_TEAM_WORKER_PRESET ?? '').trim(),
     // 读图代理（DSHBOTS-112）：Bot 主模型无视觉能力收图时，自动派生 kind='vision' 只读
     // 转写运行所用的代理模型（provider/model）。两个都非空才启用；任一为空 = 不启用，
     // 此时按现状直接报「模型不支持图片」，不做任何派生。

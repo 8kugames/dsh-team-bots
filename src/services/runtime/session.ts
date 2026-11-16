@@ -242,15 +242,8 @@ export const sessionMethods = {
       if (!presets) return {}
       const list = await presets.list()
       const available = (list ?? []).filter(preset => preset.broken === undefined).map(preset => preset.id)
-      // Router 未显式指定（env/全局设置都为空）时跟随 DSH 宿主默认 preset
-      // （agentPresets.defaultId = 用户「设为新任务默认」的 selectedDefault > 部署 default），
-      // 与用户在 Agent 预设页的选择保持一致；Worker 不跟随（产品缺省 minimal）。
-      let effective = wanted
-      if (kind !== 'task' && !effective) {
-        try { effective = String(presets.defaultId ?? '').trim() } catch { /* 宿主实现缺 getter 时回落 standard */ }
-      }
-      // 只有确认存在的 preset 才会被选中；宿主默认不可用时沿用 standard，避免装错配置直接起不来。
-      const pick = [effective, 'standard'].find(id => id && available.includes(id))
+      // 只有确认存在的 preset 才会被选中；Router 缺省沿用 standard，避免装错配置直接起不来。
+      const pick = [wanted, 'standard'].find(id => id && available.includes(id))
       return pick ? { agentPreset: pick } : {}
     } catch {
       return {}
