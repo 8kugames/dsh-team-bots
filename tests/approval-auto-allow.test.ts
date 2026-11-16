@@ -624,3 +624,40 @@ test('读源断言：免审分支在认领链内（INSERT 之后、锚点之前�
   assert.match(source, /'approval\.auto_allow'/)
   assert.match(source, /`auto:rule:\$\{autoRule\.id\}`/)
 })
+
+test('追溯放行：规则保存后重判已 pending 的审批，命中即时 allowed-once 并留痕', async () => {
+  const ctx = new FakeCordisCtx()
+  const { root, store, service } = await setup({ ctx })
+  try {
+    const project = await primeProject(store, service, 'Retro Allow')
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    bindSession(store, { sessionId: 'sess-retro', botId: director.id, projectId: project.id })
+    seedRules(store, [])
+    service.config.approvalTimeoutMs = 10_000
+
+    // 发起时规则表为空 → 落 pending 卡，宿主侧 Promise 仍挂起。
+    await ctx.waterfall({}, 'tools/pre-execute', { name: 'bash', callId: 'call-retro-1', arguments: { command: 'taptap-maker preview --target-dir /Users/x/.taptap-maker/preview' } }, () => Promise.resolve('ok'))
+    let nexted = false
+    const outcome = service.handleApprovalRequest(makeReq({ sessionId: 'sess-retro', callId: 'call-retro-1', zh: '需要开真窗口' }).req, () => { nexted = true })
+    const pendingRow = store.get("SELECT * FROM approvals WHERE status = 'pending'")
+    assert.ok(pendingRow, '无规则时必须落 pending 卡')
+    assert.equal(nexted, false)
+
+    // owner 补规则（保存动作触发追溯重判）→ pending 卡即时放行，挂起的请求 resolve。
+    await service.updateApprovalRules([{ command: '**taptap-maker preview**' }])
+    assert.equal(await outcome, 'allowed-once', '挂起中的提权请求应被追溯放行结果唤醒')
+    const row = store.get('SELECT * FROM approvals WHERE id = ?', pendingRow.id)
+    assert.equal(row.status, 'allowed')
+    assert.match(row.decided_by, /^auto:rule:/)
+    const auditRow = store.get("SELECT * FROM audit_log WHERE action = 'approval.auto_allow' AND target_id = ?", row.id)
+    assert.ok(auditRow, '追溯放行必须写审计事件')
+    assert.equal(JSON.parse(auditRow.data_json).retroactive, true)
+    // 未命中的 pending 卡不受影响。
+    await ctx.waterfall({}, 'tools/pre-execute', { name: 'bash', callId: 'call-retro-2', arguments: { command: 'rm -rf /elsewhere' } }, () => Promise.resolve('ok'))
+    const other = service.handleApprovalRequest(makeReq({ sessionId: 'sess-retro', callId: 'call-retro-2' }).req, () => {})
+    const otherRow = store.get("SELECT * FROM approvals WHERE status = 'pending' AND call_id = 'call-retro-2'")
+    assert.ok(otherRow, '未命中的 pending 卡保持原样')
+    service.settleApproval(otherRow.id, 'cancelled', 'rejected', null)
+    await other
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

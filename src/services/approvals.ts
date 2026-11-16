@@ -90,14 +90,18 @@ export function ensureApprovalSchema(store) {
 // 目标提取（纯函数）：按参数形状判别，不按工具名——宿主工具族会扩展，形状更稳。
 // bash 类取 command 首行（超长截 120 字符，chip 只需要可辨认的意图）；
 // edit/write/read 类取 file_path 原样（绝对路径入库，展示层再收成工作区相对形）。
+// 路径位参数名按常见形状收口：file_path 优先，path/target_dir/dir/directory/cwd/workdir 兜底
+// （免审不因工具换了参数名就永远提不到目标 → 永远落卡）。
+const TOOL_TARGET_PATH_KEYS = ['file_path', 'path', 'target_dir', 'dir', 'directory', 'cwd', 'workdir']
 export function toolTargetOf(arguments_) {
   if (!arguments_ || typeof arguments_ !== 'object') return null
   if (typeof arguments_.command === 'string') {
     const firstLine = arguments_.command.trim().split('\n')[0].trim()
     return firstLine ? firstLine.slice(0, 120) : null
   }
-  if (typeof arguments_.file_path === 'string' && arguments_.file_path.trim()) {
-    return arguments_.file_path.trim()
+  for (const key of TOOL_TARGET_PATH_KEYS) {
+    const value = arguments_[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
   }
   return null
 }
@@ -522,6 +526,18 @@ export const approvalsMethods = {
     // 推进 settings_revision：免审规则存 settings 表但不进 stateVersion 签名的任何表列，
     // 不 bump 的话保存后客户端轮询命中 unchanged 短路，规则列表最长 60s 才刷出来。
     this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
+    // 追溯放行：发起时未命中而落卡的 pending 审批，保存规则后立刻重判一遍——命中即按同口径
+    // allowed-once 放行并留痕，「先见卡、后补规则」不再要求重跑流程。沙箱档不入 approvals 表，
+    // 限档规则（sandbox 非空）拿空档冒充命中不稳，不参与追溯。
+    const pendingRows = this.store.all("SELECT id, bot_id, tool_name, tool_target FROM approvals WHERE status = 'pending'") ?? []
+    for (const pendingRow of pendingRows) {
+      const hit = this.matchApprovalAutoRule({ botId: pendingRow.bot_id, toolName: pendingRow.tool_name, target: pendingRow.tool_target, sandbox: '' })
+      if (!hit) continue
+      this.settleApproval(pendingRow.id, 'allowed', 'allowed-once', `auto:rule:${hit.id}`)
+      this.audit(actor, 'approval.auto_allow', 'approval', pendingRow.id, {
+        ruleId: hit.id, retroactive: true, toolName: pendingRow.tool_name, botId: pendingRow.bot_id, target: pendingRow.tool_target,
+      })
+    }
     this.audit(actor, 'approval_rules.update', 'settings', APPROVAL_RULES_SETTING, {
       count: rules.length,
       rules: rules.map(rule => ({ id: rule.id, path_prefix: rule.path_prefix, command: rule.command, sandbox: rule.sandbox })),
