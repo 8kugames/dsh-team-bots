@@ -77,7 +77,8 @@ test('updateSettings 保存后 this.config 即时生效；清除保存值回默�
       // 清除保存值（空串）回默认
       service.updateSettings({ max_concurrent_runs: '', worker_preset: '' })
       assert.equal(service.config.maxConcurrentRuns, 10)
-      assert.equal(service.config.workerPreset, '')
+      // 产品级默认 minimal（owner 拍板）：清除保存值回产品默认而非空串
+      assert.equal(service.config.workerPreset, 'minimal')
     } finally { await close() }
   })
 })
@@ -141,4 +142,32 @@ test('applyRuntimeSettingOverrides 无保存值时原样返回 config', async ()
     const config = resolveConfig({})
     assert.equal(applyRuntimeSettingOverrides(config, () => null), config)
   })
+})
+
+test('Router 未显式指定 preset 时跟随 DSH 宿主默认（defaultId）', async () => {
+  const { sessionMethods } = await import('../src/services/runtime/session.js')
+  const make = (config, defaultId) => Object.assign(Object.create(null), sessionMethods, {
+    ctx: { get: name => name === 'agentPresets'
+      ? { list: async () => [{ id: 'standard' }, { id: 'ptc' }, { id: 'minimal' }, { id: 'cordis' }], defaultId }
+      : null },
+    config,
+  })
+  // 宿主默认 ptc → Router 跟随 ptc
+  assert.deepEqual(await make({ routerPreset: '', workerPreset: 'minimal' }, 'ptc').defaultAgentPreset('project'),
+    { agentPreset: 'ptc' })
+  // 显式指定仍最高优先
+  assert.deepEqual(await make({ routerPreset: 'minimal', workerPreset: 'minimal' }, 'ptc').defaultAgentPreset('project'),
+    { agentPreset: 'minimal' })
+  // 宿主默认不可用（不在清单）→ 回落 standard
+  assert.deepEqual(await make({ routerPreset: '' }, 'ghost').defaultAgentPreset('project'),
+    { agentPreset: 'standard' })
+  // Worker 不跟随宿主默认：产品缺省 minimal
+  assert.deepEqual(await make({ routerPreset: '', workerPreset: 'minimal' }, 'ptc').defaultAgentPreset('task'),
+    { agentPreset: 'minimal' })
+  // defaultId getter 缺失（旧宿主）→ 回落 standard，不抛错
+  const legacy = Object.assign(Object.create(null), sessionMethods, {
+    ctx: { get: name => name === 'agentPresets' ? { list: async () => [{ id: 'standard' }] } : null },
+    config: { routerPreset: '', workerPreset: 'minimal' },
+  })
+  assert.deepEqual(await legacy.defaultAgentPreset('project'), { agentPreset: 'standard' })
 })
