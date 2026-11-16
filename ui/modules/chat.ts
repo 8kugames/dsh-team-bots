@@ -1,6 +1,6 @@
 import { state, BOT_STATUS, CHAT_ACTIVE_TASK_LIMIT, CHAT_PAGE_SIZE, COLORS, COLOR_NAMES } from './state.js'
 import { icon } from './icons.js'
-import { activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatTime, memberRunDot, pathCode, runDotHtml, tildePath, timeAgo, toast } from './util.js'
+import { activeProject, agentPresetOptions, attr, avatar, botById, duration, esc, filePolicyOptions, formatTime, memberRunDot, pathCode, runDotHtml, tildePath, timeAgo, toast } from './util.js'
 import { mdPlainSummary } from './markdown.js'
 import { t } from './i18n.js'
 import { api } from './api.js'
@@ -465,6 +465,7 @@ function renderSoloConfig() {
             <div class="field"><label for="solo-bot-model">${t("模型")}</label><select class="select" style="width:100%" id="solo-bot-model" name="modelRef" data-model-select>${modelOptions(bot.provider, bot.model)}</select></div>
             <div class="field"><label for="solo-bot-effort">${t("推理强度")}</label><select class="select" style="width:100%" id="solo-bot-effort" name="effort" data-effort-select>${effortOptions(bot.modelRef ?? '', bot.effort)}</select></div>
             <div class="field"><label for="solo-bot-file-policy">${t("文件权限")}</label><select class="select" style="width:100%" id="solo-bot-file-policy" name="filePolicy" title="Bot ${t("会话内文件操作的沙箱边界，下次运行生效")}">${filePolicyOptions(bot.file_policy)}</select></div>
+            <div class="field"><label for="solo-bot-agent-preset">${t("bots.agentPreset")}</label><select class="select" style="width:100%" id="solo-bot-agent-preset" name="agentPreset" title="${t("bots.agentPresetTitle")}">${agentPresetOptions(bot)}</select><div class="hint">${t("bots.agentPresetHint")}</div></div>
           </div>
           <div class="field-row">
             <div class="field"><label for="solo-bot-fallback-model">${t("备用模型")}</label><select class="select" style="width:100%" id="solo-bot-fallback-model" name="fallbackModelRef" data-fallback-model-select title="${t("主模型不可用时自动接手的备用模型，留空")} = ${t("不启用")}">${fallbackModelOptions(bot.fallbackModelRef ?? '')}</select></div>
