@@ -76,6 +76,7 @@ document.addEventListener('submit', async (event) => {
         model,
         effort: payload.effort || null,
         filePolicy: payload.filePolicy || undefined,
+        agentPreset: payload.agentPreset ?? '',
         fallbackProvider: fallback.fallbackProvider,
         fallbackModel: fallback.fallbackModel,
         fallbackEffort: fallback.fallbackEffort,

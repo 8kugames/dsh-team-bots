@@ -233,10 +233,15 @@ export const sessionMethods = {
     this.selecting = run.catch(() => {})
     return run
   },
-  async defaultAgentPreset(kind) {
-    const wanted = kind === 'task'
-      ? (this.config.workerPreset ?? '')
-      : (this.config.routerPreset ?? '')
+  // kind 'task' = 任务 worker 会话（全局链走 workerPreset）；其余 = 控制面/单聊/核验会话
+  //（全局链走 routerPreset）。bot.agent_preset 非空时逐 bot 覆盖，两级都留空时 kind
+  // 决定用哪个全局链。可选 preset 只从宿主 roster 里实际可用（非 broken）的里挑。
+  async defaultAgentPreset(kind, bot = null) {
+    const botPreset = String(bot?.agent_preset ?? '').trim()
+    const wanted = botPreset
+      || (kind === 'task'
+        ? (this.config.workerPreset ?? '')
+        : (this.config.routerPreset ?? ''))
     try {
       const presets = this.ctx.get?.('agentPresets')
       if (!presets) return {}
@@ -247,6 +252,23 @@ export const sessionMethods = {
       return pick ? { agentPreset: pick } : {}
     } catch {
       return {}
+    }
+  },
+  // 宿主可用 agent preset 清单（Bot 配置下拉数据源）：只列 roster 里非 broken 的，
+  // 附宿主默认 id（用户「设为新任务默认」），供 UI 标注「跟随全局」的当前生效值。
+  // 宿主无 agentPresets 服务（或调用失败）返回 null，UI 下拉退化为自由文本。
+  async agentPresetsRoster() {
+    try {
+      const presets = this.ctx.get?.('agentPresets')
+      if (!presets) return null
+      const list = await presets.list()
+      return {
+        presets: (list ?? []).filter(preset => preset.broken === undefined)
+          .map(preset => ({ id: preset.id, name: preset.name ?? preset.id })),
+        defaultId: (() => { try { return String(presets.defaultId ?? '') } catch { return '' } })(),
+      }
+    } catch {
+      return null
     }
   },
   // 会话当前上下文体积估计（单轮上下文治理 P2）：该会话最近一次模型调用的
@@ -577,7 +599,7 @@ export const sessionMethods = {
       const cwd = await resolveSessionCwd(this.config, { solo: false, bot, project })
       const created = await this.ctx.sessionController.create({
         cwd,
-        ...(await this.defaultAgentPreset('project')),
+        ...(await this.defaultAgentPreset('project', bot)),
       })
       const sessionId = created.sessionId
       const agent = await this.ctx.sessionController.resolveAgent(sessionId)
@@ -645,7 +667,7 @@ export const sessionMethods = {
       const cwd = await resolveSessionCwd(this.config, { solo: !project, bot, project })
       const created = await this.ctx.sessionController.create({
         cwd,
-        ...(await this.defaultAgentPreset('project')),
+        ...(await this.defaultAgentPreset('project', bot)),
       })
       const sessionId = created.sessionId
       const agent = await this.ctx.sessionController.resolveAgent(sessionId)
@@ -733,7 +755,7 @@ export const sessionMethods = {
       const cwd = await resolveSessionCwd(this.config, { solo, bot, project })
       const created = await this.ctx.sessionController.create({
         cwd,
-        ...(await this.defaultAgentPreset('project')),
+        ...(await this.defaultAgentPreset('project', bot)),
       })
       const sessionId = created.sessionId
       const agent = await this.ctx.sessionController.resolveAgent(sessionId)

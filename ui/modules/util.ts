@@ -330,3 +330,18 @@ export function overlayInertState() {
   const viewer = document.getElementById('image-viewer')
   return backgroundInert(Boolean(state?.modal), Boolean(viewer && !viewer.hidden))
 }
+
+// Agent 预设下拉（Bot 级覆盖，空 = 跟随全局）：
+// 数据源 state.data.agentPresets（宿主 roster）；缺宿主服务时退化显示为全局链文本提示。
+export function agentPresetOptions(bot: Record<string, unknown> | null) {
+  const roster = state.data?.agentPresets
+  const presets: { id: string; name: string }[] = roster?.presets ?? []
+  const current = String(bot?.agent_preset ?? bot?.agentPreset ?? '')
+  const follow = t('bots.presetFollow')
+  const rows = presets.map(preset => {
+    const selected = current === preset.id ? ' selected' : ''
+    const label = preset.name && preset.name !== preset.id ? `${preset.name} (${preset.id})` : preset.id
+    return `<option value="${attr(preset.id)}"${selected}>${esc(label)}</option>`
+  })
+  return `<option value=""${current ? '' : ' selected'}>${esc(follow)}</option>${rows.join('')}`
+}

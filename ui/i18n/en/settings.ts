@@ -110,7 +110,7 @@ export default {
   "global.rsGroupReview": "Review",
   "global.rsGroupModels": "Derived model proxies",
   "global.rsFollowDefault": "Follow default",
-  "global.rsEffective": "Effective {value} (default {def})",
+  "global.rsEffective": "Effective ${value} (default ${def})",
   "global.rsSave": "Save runtime parameters",
   "运行参数已保存，即时生效（env 显式设置仍优先）": "Runtime parameters saved, effective immediately (explicit env vars still take priority)",
   "global.rs.max_concurrent_runs": "Max concurrent runs",

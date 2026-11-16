@@ -182,4 +182,8 @@ export default {
   "form.errorRangeUnderflow": "${label}不能小于 ${min}",
   "form.errorRangeOverflow": "${label}不能大于 ${max}",
   "form.errorStepMismatch": "${label}必须是 ${step} 的整数倍",
+  "bots.agentPreset": "Agent 预设",
+  "bots.presetFollow": "跟随全局",
+  "bots.agentPresetTitle": "Bot 会话使用的 agent preset；留空 = 跟随全局（DSH_TEAM_WORKER_PRESET 生效链），下次新建会话生效",
+  "bots.agentPresetHint": "留空跟随全局；选择后仅该 Bot 的新建会话使用所选预设。",
 }

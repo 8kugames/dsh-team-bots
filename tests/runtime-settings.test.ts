@@ -142,3 +142,38 @@ test('applyRuntimeSettingOverrides 无保存值时原样返回 config', async ()
     assert.equal(applyRuntimeSettingOverrides(config, () => null), config)
   })
 })
+
+test('Bot 级 agent preset 覆盖：createBot/updateBot 落库，defaultAgentPreset 逐 bot 生效', async () => {
+  await withEnv({ DSH_TEAM_WORKER_PRESET: undefined, DSH_TEAM_ROUTER_PRESET: undefined }, async () => {
+    const { service, close } = await setup()
+    try {
+      const bot = await service.createBot({ name: 'presetbot', role: '开发', instructions: 'x' })
+      // 新建默认空 = 跟随全局
+      assert.equal(bot.agentPreset, '')
+      // updateBot 设置 per-bot 覆盖
+      const updated = await service.updateBot(bot.id, { agentPreset: 'ptc' })
+      assert.equal(updated.agentPreset, 'ptc')
+      // 清空回跟随全局
+      assert.equal((await service.updateBot(bot.id, { agentPreset: '' })).agentPreset, '')
+
+      // defaultAgentPreset：bot 覆盖 > 全局 workerPreset > standard
+      const { sessionMethods } = await import('../src/services/runtime/session.js')
+      const make = (config, rosterBot) => Object.assign(Object.create(null), sessionMethods, {
+        ctx: { get: name => name === 'agentPresets'
+          ? { list: async () => [{ id: 'standard' }, { id: 'ptc' }, { id: 'minimal' }] } : null },
+        config,
+      })
+      const row = { agent_preset: 'ptc' }
+      assert.deepEqual(await make({ workerPreset: '' }, row).defaultAgentPreset('project', row), { agentPreset: 'ptc' })
+      assert.deepEqual(await make({ workerPreset: 'minimal' }, row).defaultAgentPreset('task', row), { agentPreset: 'ptc' })
+      const plain = { agent_preset: '' }
+      assert.deepEqual(await make({ workerPreset: 'minimal' }, plain).defaultAgentPreset('task', plain), { agentPreset: 'minimal' })
+      assert.deepEqual(await make({ workerPreset: '', routerPreset: '' }, plain).defaultAgentPreset('project', plain), { agentPreset: 'standard' })
+      // bot 覆盖写了不存在的 preset → 回落 standard，不炸
+      const ghost = { agent_preset: 'ghost' }
+      assert.deepEqual(await make({ workerPreset: '' }, ghost).defaultAgentPreset('task', ghost), { agentPreset: 'standard' })
+      // 未传 bot（历史调用形态）走全局链
+      assert.deepEqual(await make({ workerPreset: 'minimal' }, null).defaultAgentPreset('task', null), { agentPreset: 'minimal' })
+    } finally { await close() }
+  })
+})

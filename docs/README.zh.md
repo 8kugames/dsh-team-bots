@@ -87,7 +87,7 @@ Bot 要工具审批、要密钥或要人回答时，工作台在聊天里出一�
 | `DSH_TEAM_WORKSPACE` | `~/.dsh/workspace/team-bots` | 团队工作区根目录 |
 | `DSH_TEAM_DATA` | `<workspace>/.data` | 数据库与运行记录 |
 
-其余变量的默认值与解析顺序（显式环境变量 > 页面上保存的值 > 代码默认值）都写在 `src/config.ts`，常用项见 `.env.example`。除引导期变量（工作区/数据目录/首次种子）与通道凭据（微信/飞书在各自通道页）外，**全部运行期 `DSH_TEAM_*` 变量都可在工作台「全局配置 → 运行与预算 → 运行参数（环境变量）」卡里直接配置**：保存即生效（进行中的运行与已建会话不追溯），显式环境变量仍最高优先。不要在仓库根目录放 `.env`，否则 `DSH_*` 会泄进 `npm test` 和 `npm run dev`。
+其余变量的默认值与解析顺序（显式环境变量 > 页面上保存的值 > 代码默认值）都写在 `src/config.ts`，常用项见 `.env.example`。除引导期变量（工作区/数据目录/首次种子）与通道凭据（微信/飞书在各自通道页）外，**全部运行期 `DSH_TEAM_*` 变量都可在工作台「全局配置 → 运行与预算 → 运行参数（环境变量）」卡里直接配置**：保存即生效（进行中的运行与已建会话不追溯），显式环境变量仍最高优先。Agent 预设还支持 **Bot 级覆盖**：Bot 配置弹窗的「Agent 预设」下拉逐个设置，留空跟随全局。不要在仓库根目录放 `.env`，否则 `DSH_*` 会泄进 `npm test` 和 `npm run dev`。
 
 `DSH_TEAM_DATA` 下有 `team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/`、`messages/` 与 `secrets-runtime/`。备份时把 `secret.key` 和数据一起带走——没有它，已存的密文解不开。
 

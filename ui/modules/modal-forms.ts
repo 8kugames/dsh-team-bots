@@ -1,6 +1,6 @@
 import { state, STATUS, STATUS_ORDER, PRIORITY, BOT_STATUS, SKILL_STATUS, RUN_STATUS, CREATOR_TYPE, EFFORT, COLORS, COLOR_NAMES, stageLabelText } from './state.js'
 import { icon } from './icons.js'
-import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, sandboxPill, timeAgo, tildePath, toast } from './util.js'
+import { activeBots, activeProject, attr, avatar, botById, duration, esc, filePolicyOptions, agentPresetOptions, formatCost, formatNumber, formatTime, inSoloContext, pageProject, runDot, sandboxPill, timeAgo, tildePath, toast } from './util.js'
 import { api } from './api.js'
 import { mdChatScope, richText } from './markdown.js'
 import { t, tMaybe } from './i18n.js'
@@ -221,6 +221,7 @@ function modalBot(detail) {
           <div class="field"><label id="bot-model-label" for="bot-model">${t("模型")}</label><select class="select" style="width:100%" id="bot-model" name="modelRef" data-model-select>${modelOptions(bot?.provider, bot?.model)}</select></div>
           <div class="field"><label id="bot-effort-label" for="bot-effort">${t("推理强度")}</label><select class="select" style="width:100%" id="bot-effort" name="effort" data-effort-select>${effortOptions(modelRef, bot?.effort)}</select></div>
           <div class="field"><label id="bot-file-policy-label" for="bot-file-policy">${t("文件权限")}</label><select class="select" style="width:100%" id="bot-file-policy" name="filePolicy" title="Bot ${t("会话内文件操作的沙箱边界，下次运行生效")}">${filePolicyOptions(bot?.file_policy)}</select></div>
+          <div class="field"><label id="bot-agent-preset-label" for="bot-agent-preset">${t("bots.agentPreset")}</label><select class="select" style="width:100%" id="bot-agent-preset" name="agentPreset" title="${t("bots.agentPresetTitle")}">${agentPresetOptions(bot)}</select><div class="hint">${t("bots.agentPresetHint")}</div></div>
         </div>
         <div class="field-row">
           <div class="field"><label id="bot-fallback-model-label" for="bot-fallback-model">${t("备用模型")}</label><select class="select" style="width:100%" id="bot-fallback-model" name="fallbackModelRef" data-fallback-model-select title="${t("主模型不可用时自动接手的备用模型，留空")} = ${t("不启用")}">${fallbackModelOptions(bot?.fallbackModelRef ?? '')}</select></div>

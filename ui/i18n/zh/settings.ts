@@ -110,7 +110,7 @@ export default {
   "global.rsGroupReview": "验收",
   "global.rsGroupModels": "派生模型代理",
   "global.rsFollowDefault": "跟随默认",
-  "global.rsEffective": "生效 {value}（默认 {def}）",
+  "global.rsEffective": "生效 ${value}（默认 ${def}）",
   "global.rsSave": "保存运行参数",
   "运行参数已保存，即时生效（env 显式设置仍优先）": "运行参数已保存，即时生效（env 显式设置仍优先）",
   "global.rs.max_concurrent_runs": "最大并发运行",

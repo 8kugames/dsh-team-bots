@@ -58,6 +58,9 @@ export const botsMethods = {
     const instructions = text(input.instructions, 12_000)
     const color = COLORS.includes(input.color) ? input.color : 'blue'
     const filePolicy = normalizeFilePolicy(input.filePolicy)
+    // Bot 级 agent preset 覆盖：空 = 跟随全局（DSH_TEAM_WORKER_PRESET 生效链）；
+    // 自由短串，不在此校验存在性——宿主侧 defaultAgentPreset 只选可用 preset，写错回落 standard。
+    const agentPreset = input.agentPreset !== undefined ? text(input.agentPreset, 80) : ''
     // 先建目录再建号：目录建不出来就别留下一个单聊必然失败的 bot 行。
     // 这里预建的是占位候选；并发同名时权威 solo_dir 在事务内重算，输家目录提交后补建。
     const placeholder = this.soloDirFor(name, botId)
@@ -75,11 +78,11 @@ export const botsMethods = {
         try {
           this.store.run(
             `INSERT INTO bots(id, name, role, instructions, color, provider, model, effort,
-              fallback_provider, fallback_model, fallback_effort, file_policy, solo_dir,
+              fallback_provider, fallback_model, fallback_effort, file_policy, agent_preset, solo_dir,
               status, current_revision, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
             botId, name, role, instructions, color, provider, model, effort,
-            fallbackProvider, fallbackModel, fallbackEffort, filePolicy, soloDir, createdAt, createdAt,
+            fallbackProvider, fallbackModel, fallbackEffort, filePolicy, agentPreset, soloDir, createdAt, createdAt,
           )
           break
         } catch (error: any) {
@@ -232,6 +235,11 @@ export const botsMethods = {
       const filePolicy = normalizeFilePolicy(patch.filePolicy)
       if (filePolicy !== bot.file_policy) changes.file_policy = filePolicy
     }
+    // Bot 级 agent preset 覆盖（空 = 跟随全局）：自由短串，不校验存在性（宿主侧安全回落）。
+    if (patch.agentPreset !== undefined) {
+      const agentPreset = text(patch.agentPreset, 80)
+      if (agentPreset !== (bot.agent_preset ?? '')) changes.agent_preset = agentPreset
+    }
     if (patch.status !== undefined) {
       if (!['active', 'paused', 'archived'].includes(patch.status)) throw badRequest('Bot 状态无效')
       changes.status = patch.status
@@ -362,6 +370,7 @@ export const botsMethods = {
     )
     return {
       ...bot,
+      agentPreset: bot.agent_preset ?? '',
       modelRef: bot.provider && bot.model ? `${bot.provider}/${bot.model}` : null,
       fallbackModelRef: bot.fallback_provider && bot.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null,
       fallbackConfigured: Boolean(bot.fallback_provider && bot.fallback_model),

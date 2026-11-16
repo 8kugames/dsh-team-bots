@@ -188,6 +188,8 @@ function migrateBots(db) {
   addColumn(db, 'bots', 'fallback_provider', 'TEXT')
   addColumn(db, 'bots', 'fallback_model', 'TEXT')
   addColumn(db, 'bots', 'fallback_effort', 'TEXT')
+  // Bot 级 agent preset 覆盖：空 = 跟随全局（DSH_TEAM_WORKER_PRESET 生效链）。
+  addColumn(db, 'bots', 'agent_preset', "TEXT NOT NULL DEFAULT ''")
   // bots.avatar_seed：像素块头像（identicon）种子；NULL = 首字母/首字头像，非空 = 像素块头像。
   addColumn(db, 'bots', 'avatar_seed', 'TEXT')
 }

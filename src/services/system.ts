@@ -188,6 +188,8 @@ const systemMethodsBase = {
       // 审批免审规则（DSHBOTS-365）：总览 bots 页「免审权限」卡唯一真值，规则量小随行下发。
       approvalRules: this.approvalRulesView(),
       runLimits: this.runLimitsView(),
+      // Bot 配置页 preset 下拉数据源：宿主可用清单 + 默认值；无宿主服务时 null（UI 退化）。
+      agentPresets: await (this.runtime?.agentPresetsRoster?.() ?? null),
       // 运行参数目录（全局设置「运行参数」卡）：全部 DSH_TEAM_* 运行期变量的可配置视图。
       runtimeSettings: this.runtimeSettingsView(),
       // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。

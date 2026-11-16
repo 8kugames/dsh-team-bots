@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS bots (
   fallback_model TEXT,
   fallback_effort TEXT,
   file_policy TEXT NOT NULL DEFAULT 'workspace-write',
+  -- Bot 级 agent preset 覆盖（空 = 跟随全局 workerPreset 生效链），见 defaultAgentPreset。
+  agent_preset TEXT NOT NULL DEFAULT '',
   solo_dir TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'active',
   current_revision INTEGER NOT NULL DEFAULT 0,

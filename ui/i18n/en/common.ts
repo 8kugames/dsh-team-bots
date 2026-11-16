@@ -182,4 +182,8 @@ export default {
   "form.errorRangeUnderflow": "${label} must be at least ${min}",
   "form.errorRangeOverflow": "${label} must be at most ${max}",
   "form.errorStepMismatch": "${label} must be a multiple of ${step}",
+  "bots.agentPreset": "Agent preset",
+  "bots.presetFollow": "Follow global",
+  "bots.agentPresetTitle": "Agent preset for this bot's sessions; empty = follow global (effective DSH_TEAM_WORKER_PRESET chain), applies to newly created sessions",
+  "bots.agentPresetHint": "Empty follows the global value; selecting one applies to this bot's new sessions only.",
 }
