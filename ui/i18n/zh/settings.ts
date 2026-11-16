@@ -48,6 +48,8 @@ export default {
   "global.approvalRuleCommandHint": "匹配命令首行：* 不跨目录，** 跨目录。",
   "global.approvalRuleBot": "限 Bot",
   "global.approvalRuleTool": "限工具",
+  "global.approvalRuleToolPlaceholder": "如：bash",
+  "global.approvalRuleToolHint": "留空 = 任意工具；填了则须与提权工具名完全一致（如 bash、edit）。",
   "global.approvalRuleSandbox": "限沙箱档",
   "global.approvalRuleNote": "备注",
   "global.approvalRuleAny": "任意",

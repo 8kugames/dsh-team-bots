@@ -48,6 +48,8 @@ export default {
   "global.approvalRuleCommandHint": "Matches the first line of the command: * stays in one segment, ** crosses directories.",
   "global.approvalRuleBot": "Bot filter",
   "global.approvalRuleTool": "Tool filter",
+  "global.approvalRuleToolPlaceholder": "e.g. bash",
+  "global.approvalRuleToolHint": "Empty = any tool; a value must exactly match the escalating tool name (e.g. bash, edit).",
   "global.approvalRuleSandbox": "Sandbox tier",
   "global.approvalRuleNote": "Note",
   "global.approvalRuleAny": "Any",
