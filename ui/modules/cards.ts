@@ -4,7 +4,7 @@ import { icon } from './icons.js'
 import { mdChatScope, mdPlainSummary, richText } from './markdown.js'
 import { t } from './i18n.js'
 import { renderMessageImages } from './composer.js'
-import { refresh, panelAttrs, render } from '../app.js'
+import { refresh, panelAttrs, render, beginChatPending, endChatPending, chatContextPending } from '../app.js'
 
 // ===== approval-card:start 审批卡片（DSHBOTS-32 UI）=====
 // ===== approval-ux:start 审批交互（DSHBOTS-102）=====
@@ -341,6 +341,8 @@ function cardScopeLabel(item) {
 }
 
 // 点通知：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把提问卡滚动到可视区。
+// 乐观切换（与侧栏 select-project 同构，DSHBOTS-167）：目标视图的 state 组装在大库上要数秒，
+// 没有骨架时点击像死点（用户报「点了跳不过去」）——先收面板出骨架，数据到位再落卡片并滚动。
 function focusQuestionCard(question) {
   if (!question) return
   if (question.project_id) {
@@ -353,12 +355,26 @@ function focusQuestionCard(question) {
     state.chatMode = 'solo'
   }
   state.view = 'chat'
+  state.replyTo = null // 跨上下文跳转，引用条不能带到新会话（与 select-project 同口径）
+  const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: state.chatMode, soloBotId: state.chatMode === 'solo' ? state.soloBotId : null })
+  render()
   refresh()
     .then(() => {
+      const stuckOnSkeleton = chatContextPending()
+      endChatPending(pendingSeq)
+      if (stuckOnSkeleton) render()
       const card = document.querySelector(`.question-card[data-question-id="${question.id}"]`)
-      card?.scrollIntoView({ block: 'center' })
+      if (card) {
+        // 定位到卡片即离开底部视角：关掉贴底滚动，防 render 尾帧把卡片再滚出视野。
+        state.chatAtBottom = false
+        card.scrollIntoView({ block: 'center' })
+      }
     })
-    .catch(() => {})
+    .catch(() => {
+      // 取数失败也要清骨架并落回可交互视图，否则骨架常驻（与 select-project 的 finally 同口径）。
+      endChatPending(pendingSeq)
+      render()
+    })
 }
 
 // 跨项目待审入口（DSHBOTS-102）：工作台顶部一条窄条，只计 pending，99+ 封顶。
@@ -452,6 +468,7 @@ function approvalNotifyBody(approval) {
 }
 
 // 点通知：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把审批卡滚动到可视区。
+// 乐观切换与 focusQuestionCard 同构：先出骨架给点击即时反馈，数据到位再滚动定位。
 function focusApprovalCard(approval) {
   if (!approval) return
   if (approval.project_id) {
@@ -464,12 +481,26 @@ function focusApprovalCard(approval) {
     state.chatMode = 'solo'
   }
   state.view = 'chat'
+  state.replyTo = null // 跨上下文跳转，引用条不能带到新会话（与 select-project 同口径）
+  const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: state.chatMode, soloBotId: state.chatMode === 'solo' ? state.soloBotId : null })
+  render()
   refresh()
     .then(() => {
+      const stuckOnSkeleton = chatContextPending()
+      endChatPending(pendingSeq)
+      if (stuckOnSkeleton) render()
       const card = document.querySelector(`.approval-card[data-approval-id="${approval.id}"]`)
-      card?.scrollIntoView({ block: 'center' })
+      if (card) {
+        // 定位到卡片即离开底部视角：关掉贴底滚动，防 render 尾帧把卡片再滚出视野。
+        state.chatAtBottom = false
+        card.scrollIntoView({ block: 'center' })
+      }
     })
-    .catch(() => {})
+    .catch(() => {
+      // 取数失败也要清骨架并落回可交互视图，否则骨架常驻（与 select-project 的 finally 同口径）。
+      endChatPending(pendingSeq)
+      render()
+    })
 }
 
 // 轮询后比较 pending 增量：通知开启且页面不可见或失焦时，对新增 pending 审批各弹一次

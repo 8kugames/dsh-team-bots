@@ -94,7 +94,7 @@ test('连续点击不闪回：先发的旧响应不得清掉新一次的骨架�
   assert.match(source, /function beginChatPending\(pending\) \{/, '缺少取数序号登记')
   assert.match(source, /const seq = \(state\.chatRequestSeq \+= 1\)/, '每次取数应领一个递增序号')
   assert.match(source, /if \(state\.chatPending\?\.seq === seq\) state\.chatPending = null/, '只有仍是最新一次才允许清骨架')
-  assert.equal((source.match(/endChatPending\(pendingSeq\)/g) ?? []).length, 2, 'select-project 与 solo-bot 都要按序号清理')
+  assert.equal((source.match(/endChatPending\(pendingSeq\)/g) ?? []).length, 6, 'select-project、solo-bot、focusQuestionCard、focusApprovalCard 四处切换都要按序号清理（focus 两处各含成功/失败分支）')
 })
 
 test('select-project：取数失败或项目回退时补渲染，骨架不留存', () => {

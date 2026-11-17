@@ -24,9 +24,13 @@ function loadBlock({ Notification = undefined, hidden = true, focused = false, s
   const state = { projectId: null, chatMode: 'group', view: 'global' }
   const refresh = () => Promise.resolve()
   const render = () => { calls.renders += 1 }
-  const exported = new Function('Notification', 'document', 'window', 'localStorage', 'state', 'refresh', 'render',
+  // focusApprovalCard 的乐观切换依赖（骨架登记/清理与判停）：块内真实现调用，这里注入桩。
+  const beginChatPending = () => 1
+  const endChatPending = () => {}
+  const chatContextPending = () => false
+  const exported = new Function('Notification', 'document', 'window', 'localStorage', 'state', 'refresh', 'render', 'beginChatPending', 'endChatPending', 'chatContextPending',
     `${block}\nreturn { notifySupported, notifyOn, toggleDesktopNotify, notifyToggleView, notifyNewApprovals, approvalNotifyBody }`)(
-    Notification, document, window, localStorage, state, refresh, render)
+    Notification, document, window, localStorage, state, refresh, render, beginChatPending, endChatPending, chatContextPending)
   return { calls, store, state, ...exported }
 }
 
