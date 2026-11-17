@@ -7,20 +7,21 @@
     width: 30px;
     height: 30px;
     padding: 0;
-    border: 1px solid var(--line-2);
+    border: 1px solid transparent;
     border-radius: 8px;
     display: inline-grid;
     place-items: center;
     background: var(--surface);
     color: var(--ink-2);
+    box-shadow: var(--shadow-btn);
     transition:
-        background-color 0.13s ease,
+        box-shadow 0.13s ease,
         color 0.13s ease,
         opacity 0.13s ease;
 }
 .attach-btn:hover {
-    background: var(--accent-wash);
     color: var(--accent-text);
+    box-shadow: var(--shadow-btn-hover);
 }
 .attach-btn svg {
     width: 15px;
@@ -48,10 +49,11 @@
     width: 56px;
     height: 56px;
     flex: none;
-    border: 1px solid var(--line-2);
+    border: 1px solid transparent;
     border-radius: 8px;
     overflow: hidden;
-    background: var(--surface-3);
+    background: var(--surface);
+    box-shadow: var(--shadow-btn);
 }
 .image-thumb-img {
     display: block;
@@ -121,18 +123,19 @@
     gap: 4px;
     width: 112px;
     padding: 4px;
-    border: 1px solid var(--line-2);
+    border: 1px solid transparent;
     border-radius: 9px;
-    background: var(--surface-2);
+    background: var(--surface);
+    box-shadow: var(--shadow-1);
     color: var(--ink-2);
     cursor: pointer;
     text-align: left;
     transition:
-        border-color 0.13s ease,
+        box-shadow 0.13s ease,
         color 0.13s ease;
 }
 .msg-image-tile:hover {
-    border-color: var(--accent);
+    box-shadow: var(--shadow-btn-hover);
     color: var(--ink);
 }
 /* 缩略图与图标占位同尺寸：未取到图时瓦片形状不变，不跳动。 */
@@ -206,7 +209,7 @@
     display: flex;
     flex-direction: column;
     background: var(--surface);
-    border: 1px solid var(--line-2);
+    border: 1px solid transparent;
     border-radius: 12px;
     box-shadow: var(--shadow-3);
     overflow: hidden;
@@ -271,7 +274,7 @@
     left: 0;
     right: 0;
     background: var(--surface);
-    border: 1px solid var(--line-2);
+    border: 1px solid transparent;
     border-radius: 12px;
     box-shadow: var(--shadow-2);
     max-height: 300px;
@@ -349,9 +352,9 @@
 .side-card {
     padding: 14px 16px;
     background: var(--surface);
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 12px;
-    box-shadow: var(--shadow-1);
+    box-shadow: var(--shadow-card);
 }
 .side-card-head {
     display: flex;
@@ -563,20 +566,22 @@
     justify-content: flex-start;
     gap: 0;
     padding: 16px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 12px;
     background: var(--surface);
-    box-shadow: var(--shadow-1);
+    box-shadow: var(--shadow-card);
     overflow: hidden;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: box-shadow 0.15s ease;
 }
+/* 悬停用刻线描边＋原浮雕（不是换影），键盘 focus-within 同待遇。 */
 .member-card:hover,
 .member-card:focus-within {
-    border-color: var(--line-2);
-    box-shadow: var(--shadow-2);
+    box-shadow: var(--shadow-card), 0 0 0 1px var(--line-2);
 }
 .member-card.is-owner {
-    border-color: color-mix(in srgb, var(--c-violet) 42%, var(--line));
+    box-shadow:
+        var(--shadow-card),
+        0 0 0 1px color-mix(in srgb, var(--c-violet) 42%, transparent);
 }
 .member-card-top {
     display: flex;

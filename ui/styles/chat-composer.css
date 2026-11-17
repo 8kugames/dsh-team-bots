@@ -5,14 +5,18 @@
     padding: 4px 12px;
     font-size: var(--fs-small);
     color: var(--ink-3);
-    background: transparent;
-    border: 1px solid var(--border);
+    background: var(--surface);
+    border: 1px solid transparent;
     border-radius: 999px;
+    box-shadow: var(--shadow-btn);
     cursor: pointer;
+    transition:
+        box-shadow 0.13s ease,
+        color 0.13s ease;
 }
 .load-older:hover:not(:disabled) {
     color: var(--ink);
-    border-color: var(--ink-3);
+    box-shadow: var(--shadow-btn-hover);
 }
 .load-older:disabled {
     opacity: 0.5;
@@ -56,7 +60,8 @@
     max-width: min(640px, 82%);
     padding: 9px 13px;
     border-radius: 4px 12px 12px 12px;
-    background: var(--surface-3);
+    background: var(--surface);
+    box-shadow: var(--shadow-btn);
     color: var(--ink-2);
     line-height: 1.7;
 }
@@ -110,10 +115,11 @@
     gap: 8px;
     margin: 0 2px 6px;
     padding: 5px 10px;
-    background: var(--surface-2);
-    border: 1px solid var(--line-2);
+    background: var(--surface);
+    border: 1px solid transparent;
     border-left: 2px solid var(--accent);
     border-radius: 8px;
+    box-shadow: var(--shadow-inset);
     font-size: var(--fs-small);
 }
 .reply-bar-icon {
@@ -157,17 +163,15 @@
 }
 .composer-box {
     position: relative;
-    background: var(--surface-2);
-    border: 1px solid var(--line-2);
+    background: var(--surface);
+    border: 1px solid transparent;
     border-radius: 12px;
     padding: 8px 10px;
-    transition:
-        border-color 0.13s ease,
-        background-color 0.13s ease;
+    box-shadow: var(--shadow-inset);
+    transition: box-shadow 0.13s ease;
 }
 .composer-box:focus-within {
-    border-color: var(--accent);
-    background: var(--surface);
+    box-shadow: var(--shadow-inset), 0 0 0 2px var(--accent);
 }
 /* 输入框拖高柄：贴 composer-box 上缘的窄拖拽热区（上下各约 4px），按住垂直拖动调高、双击恢复自动高度。
    颜色全部走主题变量，明暗两套主题自动适配。 */

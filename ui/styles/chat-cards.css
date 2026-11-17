@@ -2,7 +2,7 @@
    五态骨架一致，只有 pending 是强调态；已决四态回中性底、正文降 --ink-2、无倒计时无按钮。
    圆角 12（卡）/ 6（图标徽章）/ 7（chip、pill、按钮），间距 4-8-10，字号 15/13/12。 */
 .approval-card {
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-left: 4px solid var(--accent);
     border-radius: 12px;
     padding: 10px;
@@ -12,6 +12,7 @@
     min-width: 240px;
     max-width: 100%;
     background: var(--surface);
+    box-shadow: var(--shadow-1);
 }
 /* 整行化（DSHBOTS-173）：审批卡占满消息行可用宽度，右侧按钮贴行右缘，不再停在 480px 小卡上。
    选择器带 .message-body-wrap 是为了压过基线的 max-width: min(640px, 82%) 与窄屏的 88% 覆盖——
@@ -58,8 +59,9 @@
     line-height: 1.4;
     padding: 2px 6px;
     border-radius: 7px;
-    background: var(--surface-2);
-    border: 1px solid var(--line);
+    background: var(--surface);
+    border: 1px solid transparent;
+    box-shadow: var(--shadow-btn);
     color: var(--ink-2);
     max-width: 100%;
     overflow: hidden;
@@ -148,14 +150,16 @@
     align-items: center;
     gap: 8px;
     padding: 5px 10px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 8px;
     background: var(--surface);
     color: var(--ink);
     font: 500 var(--fs-small) var(--sans);
+    box-shadow: var(--shadow-btn);
     cursor: pointer;
+    transition: box-shadow 0.13s ease;
 }
-.approval-banner-btn:hover { border-color: var(--line-2); }
+.approval-banner-btn:hover { box-shadow: var(--shadow-btn-hover); }
 .approval-banner-btn > svg { flex: 0 0 auto; color: var(--star); }
 .approval-banner-text { flex: 0 0 auto; }
 .approval-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
@@ -174,7 +178,7 @@
        顶栏滤镜不参与滚动期重录。 */
     will-change: transform;
     padding: 6px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 10px;
     background: var(--surface);
     box-shadow: var(--shadow-3);
@@ -234,7 +238,7 @@
    圆角 12（卡）/ 8（问题块、选项）/ 6（图标徽章）/ 7（pill、进度条），间距 4-6-8-10。
    整行化与右对齐（DSHBOTS-190）：对齐审批卡 D-173/D-180 口径——占满消息行、按钮与 pill 贴右缘。 */
 .question-card {
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-left: 4px solid var(--accent);
     border-radius: 12px;
     padding: 10px;
@@ -244,6 +248,7 @@
     min-width: 240px;
     max-width: 100%;
     background: var(--surface);
+    box-shadow: var(--shadow-1);
 }
 /* 整行化（DSHBOTS-190，同审批卡 D-173）：双类选择器压过基线 .message-body-wrap 的
    max-width: min(640px, 82%) 与窄屏 88% 覆盖；min-width 收缩防窄屏横向滚动。 */
@@ -282,9 +287,10 @@
     flex-direction: column;
     gap: 6px;
     padding: 8px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 8px;
-    background: var(--surface-2);
+    background: var(--surface);
+    box-shadow: var(--shadow-inset);
 }
 .question-item-title { font-size: var(--fs-body); color: var(--ink); }
 .question-item-header { color: var(--ink-3); margin-right: 4px; }
@@ -299,20 +305,22 @@
     align-items: flex-start;
     gap: 2px;
     padding: 5px 9px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 8px;
     background: var(--surface);
+    box-shadow: var(--shadow-btn);
     color: var(--ink-2);
     font: 500 var(--fs-small) var(--sans);
     text-align: left;
     cursor: pointer;
     transition:
+        box-shadow 0.12s ease,
         background-color 0.12s ease,
-        color 0.12s ease,
-        border-color 0.12s ease;
+        color 0.12s ease;
 }
-.question-option:hover { border-color: var(--line-2); color: var(--ink); }
-.question-option.is-selected { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-text); }
+.question-option:hover { box-shadow: var(--shadow-btn-hover); color: var(--ink); }
+/* 选中 = 按下后卡在凹槽里：外浮影翻转为内凹影，语义与触觉一致。 */
+.question-option.is-selected { background: var(--accent-wash); color: var(--accent-text); box-shadow: var(--shadow-inset); }
 .question-option-desc { font-size: var(--fs-caption); color: var(--ink-3); font-weight: 400; }
 .question-option.is-selected .question-option-desc { color: var(--accent-text); }
 .question-custom { width: 100%; }
@@ -367,14 +375,16 @@
     align-items: center;
     gap: 8px;
     padding: 5px 10px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 8px;
     background: var(--surface);
     color: var(--ink);
     font: 500 var(--fs-small) var(--sans);
+    box-shadow: var(--shadow-btn);
     cursor: pointer;
+    transition: box-shadow 0.13s ease;
 }
-.question-banner-btn:hover { border-color: var(--line-2); }
+.question-banner-btn:hover { box-shadow: var(--shadow-btn-hover); }
 .question-banner-btn > svg { flex: 0 0 auto; color: var(--accent-text); }
 .question-banner-text { flex: 0 0 auto; }
 .question-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
@@ -393,7 +403,7 @@
        顶栏滤镜不参与滚动期重录。 */
     will-change: transform;
     padding: 6px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 10px;
     background: var(--surface);
     box-shadow: var(--shadow-3);
@@ -441,19 +451,20 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 8px;
-    background: var(--surface-2);
+    background: var(--surface);
+    box-shadow: var(--shadow-btn);
     padding: 4px 9px;
     color: var(--ink-2);
     font-size: var(--fs-small);
     line-height: 1.2; /* 与 .task-chip strong 拉齐行高，保证「思考过程」「任务」两个 chip 高度一致 */
     transition:
-        background-color 0.12s ease,
+        box-shadow 0.12s ease,
         color 0.12s ease;
 }
 .task-chip:hover {
-    background: var(--surface-3);
+    box-shadow: var(--shadow-btn-hover);
     color: var(--ink);
 }
 .task-chip strong {

@@ -47,7 +47,7 @@
     --surface-2: #eef0f6;
     --surface-3: #e3e7ef;
     --track: #dfe3ec; /* recessed track: board lanes, always darker than a card */
-    --sidebar: #dfe3ec;
+    --sidebar: #e8ebf1;
     --overlay: rgba(255, 255, 255, 0.72);
 
     /* ink family */
@@ -140,7 +140,7 @@
         --surface-2: #21242f;
         --surface-3: #272a37;
         --track: #14161f;
-        --sidebar: #14161f;
+        --sidebar: #101219;
         --overlay: rgba(18, 19, 28, 0.76);
         --ink: #e4e7f3;
         --ink-2: rgba(228, 231, 243, 0.74);
@@ -186,7 +186,7 @@
     --surface-2: #e6e9ef;
     --surface-3: #dce0e8;
     --track: #dce0e8;
-    --sidebar: #dce0e8;
+    --sidebar: #e6e9ef;
     --overlay: rgba(239, 241, 245, 0.78);
     --ink: #4c4f69;
     --ink-2: #54586f;
@@ -227,7 +227,7 @@
         --surface-2: #363a4f;
         --surface-3: #414559;
         --track: #1e2030;
-        --sidebar: #1e2030;
+        --sidebar: #181926;
         --overlay: rgba(24, 25, 38, 0.78);
         --ink: #cad3f5;
         --ink-2: #b8c2ec;

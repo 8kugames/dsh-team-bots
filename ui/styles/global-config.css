@@ -17,7 +17,7 @@
     justify-content: space-between;
     gap: 24px;
     padding: 22px 24px 20px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 14px;
     background: var(--surface);
     box-shadow: var(--shadow-card);
@@ -65,9 +65,10 @@
     flex-wrap: wrap;
     gap: 4px;
     padding: 5px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 12px;
     background: color-mix(in srgb, var(--surface) 92%, transparent);
+    box-shadow: var(--shadow-inset);
     backdrop-filter: blur(10px);
 }
 .global-nav-item {

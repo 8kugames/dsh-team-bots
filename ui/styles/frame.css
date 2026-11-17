@@ -36,6 +36,7 @@
     color: var(--accent-text);
     font: 600 0.6875rem var(--mono);
     letter-spacing: 0.01em;
+    box-shadow: var(--shadow-btn);
     transition: opacity 0.12s ease;
 }
 .brand:hover .brand-mark {
@@ -284,14 +285,15 @@
     align-items: center;
     gap: 6px;
     padding: 3px 9px;
-    border: 1px solid var(--line);
+    border: 1px solid transparent;
     border-radius: 999px;
     background: var(--star-wash);
     color: var(--ink);
     font-size: var(--fs-small);
+    box-shadow: var(--shadow-btn);
     cursor: pointer;
 }
-.sidebar-bubble:hover { border-color: var(--line-2); }
+.sidebar-bubble:hover { border-color: transparent; box-shadow: var(--shadow-btn-hover); }
 .sidebar-bubble .unread-badge { margin-left: 0; }
 .global-config {
     width: 100%;

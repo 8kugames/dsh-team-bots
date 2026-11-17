@@ -78,10 +78,11 @@
     gap: 2px;
     max-height: 190px;
     overflow: auto;
-    background: var(--surface-2);
-    border: 1px solid var(--line);
+    background: var(--surface);
+    border: 1px solid transparent;
     border-radius: 10px;
     padding: 5px;
+    box-shadow: var(--shadow-inset);
 }
 .check-row {
     display: flex;

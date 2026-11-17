@@ -121,9 +121,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* 浮雕气泡：与画布同色，靠小号双影从底面上轻轻挤出；密集流里用按钮级而非卡片级影。 */
 .message-bubble {
     color: var(--ink);
-    background: var(--surface-3);
+    background: var(--surface);
+    box-shadow: var(--shadow-btn);
     border-radius: 4px 12px 12px 12px;
     padding: 9px 13px;
     line-height: 1.7;
@@ -184,7 +186,7 @@
 :is(.message-bubble, .comment-body) a {
     text-decoration: underline;
     text-underline-offset: 2px;
-    /* bot 气泡底是 --surface-3、评论底是 --surface：--accent-text 在四套主题下
+    /* bot 气泡底是 --surface、评论底是 --surface：--accent-text 在四套主题下
        对比 4.22:1 ~ 8.40:1，配合下划线可读。 */
     color: var(--accent-text);
 }
@@ -288,7 +290,7 @@
     white-space: nowrap;
 }
 /* 引用块：气泡顶部的「❝ 名字：摘要」行。颜色继承气泡正文，
-   bot 气泡（surface-3）与用户气泡（accent）各自可读，明暗主题共用变量。 */
+   bot 气泡（surface）与用户气泡（accent）各自可读，明暗主题共用变量。 */
 .msg-quote {
     display: flex;
     align-items: baseline;

@@ -605,7 +605,7 @@
     min-width: 168px;
     padding: 6px;
     background: var(--surface);
-    border: 1px solid var(--line-2);
+    border: 1px solid transparent;
     border-radius: 10px;
     box-shadow: var(--shadow-3);
     pointer-events: auto;
