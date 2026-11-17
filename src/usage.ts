@@ -108,27 +108,23 @@ function andClause(where, clause) {
   return `${where ? `${where} AND` : 'WHERE'} ${clause}`
 }
 
-// 成本聚合（含追认）：已计价明细用入库时算死的成本，未计价明细（total_cost IS NULL）
-// 按当前价目表补算——价目配齐后无需迁移，聚合结果即全量。pricedCalls/unpricedCalls
-// 也随之按「当前能否计价」统计：能追认的未计价计入 priced，仍无价可追认的才是真未计价。
-function costBreakdown(store, where, params, budgetCurrency, prices = null, join = '') {
-  const priceMap = prices ?? currentPriceMap(store)
-  const rows = store.all(
-    `SELECT u.currency AS currency,
-            u.provider AS provider,
-            u.model AS model,
-            SUM(CASE WHEN u.total_cost IS NOT NULL THEN 1 ELSE 0 END) AS priced_calls,
-            SUM(CASE WHEN u.total_cost IS NULL THEN 1 ELSE 0 END) AS null_calls,
-            COALESCE(SUM(CASE WHEN u.total_cost IS NOT NULL THEN u.total_cost ELSE 0 END), 0) AS stored_cost,
-            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.input_tokens ELSE 0 END), 0) AS null_input_tokens,
-            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.cache_read_tokens ELSE 0 END), 0) AS null_cache_read_tokens,
-            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.cache_write_tokens ELSE 0 END), 0) AS null_cache_write_tokens,
-            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.output_tokens ELSE 0 END), 0) AS null_output_tokens,
-            COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.reasoning_tokens ELSE 0 END), 0) AS null_reasoning_tokens
-       FROM usage_events u ${join} ${where}
-      GROUP BY u.currency, u.provider, u.model`,
-    ...params,
-  )
+// 计价状态聚合：与 AGGREGATES 分开——它只服务成本 breakdown，按 (currency, provider, model) 归集。
+const BREAKDOWN_AGGREGATES = `
+  SUM(CASE WHEN u.total_cost IS NOT NULL THEN 1 ELSE 0 END) AS priced_calls,
+  SUM(CASE WHEN u.total_cost IS NULL THEN 1 ELSE 0 END) AS null_calls,
+  COALESCE(SUM(CASE WHEN u.total_cost IS NOT NULL THEN u.total_cost ELSE 0 END), 0) AS stored_cost,
+  COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.input_tokens ELSE 0 END), 0) AS null_input_tokens,
+  COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.cache_read_tokens ELSE 0 END), 0) AS null_cache_read_tokens,
+  COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.cache_write_tokens ELSE 0 END), 0) AS null_cache_write_tokens,
+  COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.output_tokens ELSE 0 END), 0) AS null_output_tokens,
+  COALESCE(SUM(CASE WHEN u.total_cost IS NULL THEN u.reasoning_tokens ELSE 0 END), 0) AS null_reasoning_tokens`
+
+const EMPTY_BREAKDOWN = { cost: null, costByCurrency: {}, pricedCalls: 0, unpricedCalls: 0, unpricedTokens: 0 }
+
+// 分组行 → breakdown：已计价明细用入库时算死的成本，未计价（total_cost IS NULL）按当前价目表
+// 补算；能追认的计入 priced，仍无价可追认的才是真未计价。抽出来给「单次全量查询」与
+// 「分维度预取」共用，避免同一套金额口径在两处各写一遍。
+function mergeBreakdownRows(rows, priceMap, budgetCurrency) {
   const costByCurrency = {}
   let pricedCalls = 0
   let unpricedCalls = 0
@@ -141,7 +137,6 @@ function costBreakdown(store, where, params, budgetCurrency, prices = null, join
       const currency = String(row.currency ?? BUDGET_CURRENCY)
       costByCurrency[currency] = (costByCurrency[currency] ?? 0) + Number(row.stored_cost ?? 0)
     }
-    pricedCalls += priced
     const price = lookupPrice(priceMap, row.provider, row.model)
     if (!price) {
       unpricedCalls += nullCalls
@@ -161,7 +156,7 @@ function costBreakdown(store, where, params, budgetCurrency, prices = null, join
       const priceCurrency = String(price.currency ?? BUDGET_CURRENCY)
       costByCurrency[priceCurrency] = (costByCurrency[priceCurrency] ?? 0) + totalCost
     }
-    pricedCalls += nullCalls
+    pricedCalls += priced + nullCalls
   }
   return {
     cost: costByCurrency[budgetCurrency] ?? null,
@@ -170,6 +165,18 @@ function costBreakdown(store, where, params, budgetCurrency, prices = null, join
     unpricedCalls,
     unpricedTokens,
   }
+}
+
+// 成本聚合（含追认）：整段 scope 一次查完，按 (currency, provider, model) 分组后交给
+// mergeBreakdownRows 折算。where 形态由调用方给（分档维度的逐组条件或空）。
+function costBreakdown(store, where, params, budgetCurrency, prices = null, join = '') {
+  const rows = store.all(
+    `SELECT u.currency AS currency, u.provider AS provider, u.model AS model, ${BREAKDOWN_AGGREGATES}
+       FROM usage_events u ${join} ${where}
+      GROUP BY u.currency, u.provider, u.model`,
+    ...params,
+  )
+  return mergeBreakdownRows(rows, prices ?? currentPriceMap(store), budgetCurrency)
 }
 
 function mapTotals(row, breakdown = {
@@ -429,15 +436,20 @@ function zeroUsageBotRows(store, scope, budgetCurrency) {
   }
   const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
   const runWindow = runWindowFilter(scope)
+  // 用 EXISTS 逐 bot 判定，不 JOIN runs：JOIN 会按「窗口内运行数 × bot」放大行数，
+  // 每个组合再跑一次相关子查询（旧版实测 5.8s）。bots 数量小，两次索引查找即可。
   const rows = store.all(
     `SELECT b.id AS bot_id, b.name AS name
        FROM bots b
-       JOIN runs r ON r.bot_id = b.id
-      WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${runWindow.clause}
+      WHERE EXISTS (
+              SELECT 1 FROM runs r
+               WHERE r.bot_id = b.id
+                 ${runFilters.length ? `AND ${runFilters.join(' AND ')}` : ''} AND ${runWindow.clause}
+            )
         AND NOT EXISTS (
-          SELECT 1 FROM usage_events u WHERE u.bot_id = b.id${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
-        )
-      GROUP BY b.id, b.name
+              SELECT 1 FROM usage_events u
+               WHERE u.bot_id = b.id${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
+            )
       ORDER BY b.name`,
     ...runParams, ...runWindow.params, ...eventParams,
   )
@@ -509,8 +521,9 @@ function byBotRows(store, scope, budgetCurrency, prices = null) {
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
   )
+  const breakdowns = breakdownByDimension(store, scope, 'u.bot_id', budgetCurrency, prices)
   const used = rows.map(row => {
-    const breakdown = costBreakdown(store, andClause(where, 'u.bot_id IS ?'), [...params, row.bot_id], budgetCurrency, prices)
+    const breakdown = breakdowns.get(String(row.bot_id)) ?? EMPTY_BREAKDOWN
     return { botId: row.bot_id, name: row.name, ...mapTotals(row, breakdown) }
   })
   return [...used, ...zeroUsageBotRows(store, scope, budgetCurrency)]
@@ -526,8 +539,9 @@ function byProjectRows(store, scope, budgetCurrency, prices = null) {
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
   )
+  const breakdowns = breakdownByDimension(store, scope, 'u.project_id', budgetCurrency, prices)
   const used = rows.map(row => {
-    const breakdown = costBreakdown(store, andClause(where, 'u.project_id IS ?'), [...params, row.project_id], budgetCurrency, prices)
+    const breakdown = breakdowns.get(String(row.project_id)) ?? EMPTY_BREAKDOWN
     return { projectId: row.project_id, name: row.name, key: row.key, ...mapTotals(row, breakdown) }
   })
   return [...used, ...zeroUsageProjectRows(store, scope, budgetCurrency)]
@@ -544,8 +558,9 @@ function byModelRows(store, scope, budgetCurrency, prices = null) {
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
   )
+  const breakdowns = breakdownByDimension(store, scope, "u.provider || '|' || u.model", budgetCurrency, prices)
   return rows.map(row => {
-    const breakdown = costBreakdown(store, andClause(where, 'u.provider = ? AND u.model = ?'), [...params, row.provider, row.model], budgetCurrency, prices)
+    const breakdown = breakdowns.get(`${row.provider}|${row.model}`) ?? EMPTY_BREAKDOWN
     return { provider: row.provider, model: row.model, ...mapTotals(row, breakdown) }
   })
 }
@@ -562,11 +577,37 @@ function byDayRows(store, scope, budgetCurrency, daySince = null, prices = null)
       GROUP BY day ORDER BY day`,
     ...allParams,
   )
+  const breakdowns = breakdownByDimension(store, scope, dayExpr, budgetCurrency, prices)
   const used = rows.map(row => {
-    const breakdown = costBreakdown(store, andClause(where, `${dayExpr} = ?`), [...allParams, row.day], budgetCurrency, prices)
+    const breakdown = breakdowns.get(String(row.day)) ?? EMPTY_BREAKDOWN
     return { day: row.day, ...mapTotals(row, breakdown) }
   })
   return [...used, ...zeroUsageDayRows(store, scope, budgetCurrency, daySince)]
+}
+
+// 分维度 breakdown 预取：旧口径在每个分组内各调一次 costBreakdown，每次都要扫一遍窗口明细
+// （30 天窗口 × global/project 两套分档 = 上百次全表扫描，实测约 6.5s）。这里按
+// 「维度值 + currency + provider + model」一次聚合，再在内存里归并出各维度值的同一份 breakdown。
+function breakdownByDimension(store, scope, dimensionExpr, budgetCurrency, prices = null) {
+  const { filters, params } = scopeFilters(scope)
+  const rows = store.all(
+    `SELECT ${dimensionExpr} AS dim, u.currency AS currency, u.provider AS provider, u.model AS model,
+            ${BREAKDOWN_AGGREGATES}
+       FROM usage_events u ${filterClause(filters)}
+      GROUP BY ${dimensionExpr}, u.currency, u.provider, u.model`,
+    ...params,
+  )
+  const priceMap = prices ?? currentPriceMap(store)
+  const grouped = new Map()
+  for (const row of rows) {
+    const key = String(row.dim)
+    const bucket = grouped.get(key)
+    if (bucket) bucket.push(row)
+    else grouped.set(key, [row])
+  }
+  const out = new Map()
+  for (const [key, bucket] of grouped) out.set(key, mergeBreakdownRows(bucket, priceMap, budgetCurrency))
+  return out
 }
 
 function tierSet(store, scope, budgetCurrency, daySince = null, prices = null) {
