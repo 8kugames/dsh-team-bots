@@ -4,6 +4,46 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.79
+
+### 中文
+
+**界面**
+
+- **浮雕材质体系**：卡片、按钮、分段、输入、标签等骨架件改为双影浮雕语言，并全局适配到聊天气泡、作曲盒、弹层、侧栏与浮层；顶栏底缘改落影，磨砂顶盖读作有板厚的盖层；轨迹终态条目去掉残留细框，凹槽族视觉统一；测试断言跟随材质体系更新。
+- **待办条目乐观切换**：待回答提问/待处理审批条目点击即乐观切换并先出骨架，不再等待数秒级 state 组装。
+
+**运行时**
+
+- **结转摘要幂等修复**：幂等键带尝试代次，终态运行不再占死补排。
+
+**性能**
+
+- **用量快照装配提速**：零用量判断改 EXISTS、breakdown 按维度一次预取，去掉两处全窗口放大。
+
+**文档**
+
+- README 任务板、用量统计与全局配置双语素材按新界面重拍。
+
+### English
+
+**UI**
+
+- **Embossed material system**: skeleton elements (cards, buttons, segmented controls, inputs, tags) switch to a double-shadow embossed language, applied globally to chat bubbles, composer, modals, sidebar and overlays; the top bar gets a bottom drop shadow reading as a thick frosted lid; trajectory terminal entries lose their leftover hairline borders and the recessed family is visually unified; test assertions follow the material system.
+- **Optimistic pending-item switching**: tapping a pending question or approval entry switches optimistically and shows a skeleton first instead of waiting seconds for the state assembly.
+
+**Runtime**
+
+- **Rollover summary idempotency fix**: the idempotency key now carries the attempt generation, so terminal runs no longer deadlock the re-dispatch.
+
+**Performance**
+
+- **Usage snapshot assembly**: zero-usage checks become EXISTS and the breakdown is prefetched per dimension once, removing two full-window scans.
+
+**Docs**
+
+- README screenshots for the task board, usage stats and global configuration retaken in both languages against the new UI.
+
 ## v0.3.70
 
 ### 中文
