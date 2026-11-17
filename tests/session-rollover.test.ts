@@ -143,7 +143,7 @@ test('阈值触发且摘要未就绪：幂等补排一条摘要运行，并继�
     assert.equal(queued[0].mode, 'read', '摘要运行只读')
     assert.equal(queued[0].session_id, 'sess-old', '摘要运行必须复用旧会话')
     assert.equal(queued[0].trigger_ref, 'sess-old')
-    assert.equal(queued[0].idempotency_key, 'rollover_summary:sess-old')
+    assert.equal(queued[0].idempotency_key, 'rollover_summary:sess-old:0')
     assert.equal(
       ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'queued'", queued[0].id).length,
       1,
@@ -179,6 +179,37 @@ test('运行中触发摘要补排（生产断点回归）：bot 自己的运行�
     assert.equal(queued.length, 1, '当前运行占串行域时也必须能排入摘要运行（治理运行豁免串行索引）')
     assert.equal(queued[0].status, 'queued')
     assert.equal(queued[0].session_id, 'sess-old', '摘要运行复用旧会话')
+  } finally {
+    await cleanup(ctx)
+  }
+})
+
+test('终态摘要运行不占死幂等键：取消/失败后再次触发必须能补排新摘要运行（生产 11-13 断点回归）', async () => {
+  const ctx = await setup()
+  try {
+    const { dev, project } = await primeProject(ctx.service, ctx.store)
+    bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
+    seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
+    // 生产形态一（2026-11-13 director）：唯一一条摘要运行排队后被串行化一次性迁移取消，
+    // 固定会话级键被终态行占死，补排被 INSERT OR IGNORE 静默吞掉，结转从此卡死。
+    ctx.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, queued_at, ended_at, error_code)
+       VALUES ('run_summary_canceled', ?, ?, 'rollover_summary', 'read', 'rollover_summary', 'sess-old', 'canceled', 1, 'rollover_summary:sess-old', 'sess-old', ?, ?, 'BOT_SERIALIZATION')`,
+      project.id, dev.id, new Date().toISOString(), new Date().toISOString(),
+    )
+
+    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old', '摘要未就绪继续复用旧会话')
+    const all = rolloverRuns(ctx.store)
+    assert.equal(all.length, 2, '终态摘要运行占键时也必须能补排新的摘要运行')
+    const queued = all.filter(r => r.status === 'queued')
+    assert.equal(queued.length, 1, '应恰好补排一条排队摘要运行')
+    assert.equal(queued[0].session_id, 'sess-old', '新摘要运行必须复用旧会话')
+    assert.equal(queued[0].idempotency_key, 'rollover_summary:sess-old:1', '新摘要运行带前进后的尝试代次')
+
+    // 排队中的摘要运行未结束：不得重复排队（并发/重复触发仍被幂等键兜住）。
+    assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old')
+    assert.equal(rolloverRuns(ctx.store).filter(r => r.status === 'queued').length, 1, '排队中的摘要运行不得重复补排')
   } finally {
     await cleanup(ctx)
   }

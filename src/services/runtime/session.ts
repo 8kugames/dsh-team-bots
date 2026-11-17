@@ -333,9 +333,18 @@ export const sessionMethods = {
   // 让 bot 在旧上下文里自写交接摘要（进行中任务 / 关键决定 / 未决问题）。
   // 幂等双保险：调用前查 trigger_ref 上的 active 运行；INSERT OR IGNORE 兜住同一
   // idempotency_key 的并发插入，避免唯一约束抛错把当前这条对话运行带崩。
+  // 幂等键带尝试代次，代次 = 该会话已终态的摘要运行数（排队/在跑不计入）：入队本身
+  // 不改终态数，并发双入队代次恒同，唯一约束照旧去重；终态（失败/取消/空产出）后
+  // 再次触发代次前进，键不再被历史终态行永久占坑。生产事故（2026-11-13 起）：固定
+  // 会话级键被唯一一条被取消的摘要运行占死，此后每次复用的补排都被 INSERT OR IGNORE
+  // 静默吞掉，director 控制面会话越过体积/子代理阈值后结转从未再发生。
   enqueueRolloverSummary({ bot, project, sessionId }) {
     const runId = id('run')
     const queuedAt = new Date().toISOString()
+    const generation = this.store.get(
+      "SELECT COUNT(*) AS n FROM runs WHERE kind = 'rollover_summary' AND trigger_ref = ? AND status NOT IN ('queued', 'running')",
+      sessionId,
+    )?.n ?? 0
     const inserted = this.store.run(
       `INSERT OR IGNORE INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, queued_at)
        VALUES (?, ?, ?, 'rollover_summary', 'read', 'rollover_summary', ?, 'queued', 1, ?, ?, ?)`,
@@ -343,7 +352,7 @@ export const sessionMethods = {
       project?.id ?? null,
       bot.id,
       sessionId,
-      `rollover_summary:${sessionId}`,
+      `rollover_summary:${sessionId}:${generation}`,
       sessionId,
       queuedAt,
     )
