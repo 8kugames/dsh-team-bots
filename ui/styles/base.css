@@ -1,6 +1,8 @@
 /* DSH Team Bots — Team OS console.
    Design language: one ink family, one accent, value-driven hierarchy.
    Light and dark surfaces are stepped from the same low-chroma violet-gray family.
+   Material: relief (emboss) — surfaces share the canvas color; pressable things
+   extrude via a light NW / dark SE dual shadow and recess via its inset mirror.
    Type:  5 sizes (24 / 18 / 15 / 13 / 12), 3 weights (400 / 500 / 600).
    Space: 4px base, 8px rhythm. */
 
@@ -38,9 +40,10 @@
     --fs-small: 0.8125rem; /* 13 meta */
     --fs-caption: 0.75rem; /* 12 eyebrow / label */
 
-    /* surfaces: canvas -> card -> well -> track */
+    /* surfaces: canvas -> card -> washes. Relief material: the card plane equals
+       the canvas, so extrusion is carried entirely by light and shadow. */
     --bg: #e8ebf1;
-    --surface: #f7f8fb;
+    --surface: #e8ebf1;
     --surface-2: #eef0f6;
     --surface-3: #e3e7ef;
     --track: #dfe3ec; /* recessed track: board lanes, always darker than a card */
@@ -92,9 +95,20 @@
     --console-line: rgba(221, 224, 239, 0.12);
 
     --code-bg: rgba(51, 54, 76, 0.05);
-    --shadow-1: 0 1px 2px rgba(51, 54, 76, 0.04);
-    --shadow-card:
-        0 1px 2px rgba(51, 54, 76, 0.06), 0 2px 8px -3px rgba(51, 54, 76, 0.16);
+    /* Relief material: light lands NW, shadow falls SE. --shadow-2/3 stay
+       directional drop shadows — they are for floating layers only (modals,
+       menus, toasts), which hover above the material instead of extruding.
+       The var() refs inside resolve at use time, so schemes retune the whole
+       system by redefining only --relief-hi / --relief-lo. */
+    --relief-hi: rgba(255, 255, 255, 0.9);
+    --relief-lo: rgba(51, 54, 76, 0.16);
+    --shadow-1: -2px -2px 5px var(--relief-hi), 2px 3px 6px var(--relief-lo);
+    --shadow-card: -5px -5px 12px var(--relief-hi), 6px 7px 16px var(--relief-lo);
+    --shadow-btn: -1px -1px 3px var(--relief-hi), 2px 2px 5px var(--relief-lo);
+    --shadow-btn-hover: -2px -2px 4px var(--relief-hi), 3px 4px 8px var(--relief-lo);
+    --shadow-inset:
+        inset 2px 2px 5px color-mix(in srgb, var(--relief-lo) 80%, transparent),
+        inset -2px -2px 5px var(--relief-hi);
     --shadow-2:
         0 2px 10px -2px rgba(51, 54, 76, 0.12), 0 1px 3px rgba(51, 54, 76, 0.05);
     --shadow-3:
@@ -119,16 +133,10 @@
    （其 WebView 的 prefers-color-scheme 失真恒报 light），而是给同源父文档 body 打
    data-ds-dark-theme——util.ts resolveColorScheme() 据此同步本属性，嵌入态实时
    跟随宿主深浅，独立态与跨源异常回落系统媒体查询。 */
-:root[data-color-scheme="dark"] .card,
-:root[data-color-scheme="dark"] .side-card {
-    box-shadow:
-        var(--shadow-1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
 :root[data-color-scheme="dark"] {
     color-scheme: dark;
         --bg: #101219;
-        --surface: #191b26;
+        --surface: #101219;
         --surface-2: #21242f;
         --surface-3: #272a37;
         --track: #14161f;
@@ -161,9 +169,9 @@
         --c-green: #86efac;
         --c-gray: #9ca3af;
         --code-bg: rgba(228, 231, 243, 0.06);
-        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-        --shadow-card:
-            0 1px 2px rgba(0, 0, 0, 0.42), 0 2px 10px -3px rgba(0, 0, 0, 0.55);
+        /* 暗色浮雕：受光面只剩微光，投影承担全部体积感 */
+        --relief-hi: rgba(255, 255, 255, 0.07);
+        --relief-lo: rgba(0, 0, 0, 0.5);
         --shadow-2:
             0 2px 12px -2px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
         --shadow-3:
@@ -205,7 +213,6 @@
     --c-green: #40a02b;
     --c-gray: #7c7f92;
     --code-bg: rgba(76, 79, 105, 0.06);
-    --shadow-1: 0 1px 2px rgba(76, 79, 105, 0.05);
     --shadow-2:
         0 2px 10px -2px rgba(76, 79, 105, 0.14),
         0 1px 3px rgba(76, 79, 105, 0.06);
@@ -247,9 +254,6 @@
         --c-green: #a6da95;
         --c-gray: #9399b2;
         --code-bg: rgba(202, 211, 245, 0.07);
-        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-        --shadow-card:
-            0 1px 2px rgba(0, 0, 0, 0.42), 0 2px 10px -3px rgba(0, 0, 0, 0.55);
         --shadow-2:
             0 2px 12px -2px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
         --shadow-3:

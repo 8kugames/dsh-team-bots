@@ -1,15 +1,15 @@
 /* ---------------------------------------------------------------- Buttons
    Four roles, one shape. The rule that matters: a pressable thing must never
-   read as a label. Every button therefore carries a hairline frame on a
-   raised surface; every label stays bare text (eyebrow / note / kv / side-row
-   without data-action).
-   action   — hairline frame on surface-2, the default
+   read as a label. Every button therefore extrudes from the canvas — resting
+   raised, hover raised higher, pressed recessed into the surface; every label
+   stays bare text (eyebrow / note / kv / side-row without data-action).
+   action   — relief raised from the canvas, the default
    emphasis — accent fill, at most one per screen
-   danger   — red text on a faint red frame, destructive actions only
-   icon     — the glyph is the affordance, so it stays frameless */
+   danger   — red text on the relief, destructive actions only
+   icon     — the glyph is the affordance, so it stays flat and frameless */
 .btn {
-    border: 1px solid var(--line-2);
-    background: var(--surface-2);
+    border: 1px solid transparent;
+    background: var(--surface);
     color: var(--ink-2);
     border-radius: 8px;
     padding: 0 10px;
@@ -22,6 +22,7 @@
     gap: 6px;
     white-space: nowrap;
     cursor: pointer;
+    box-shadow: var(--shadow-btn);
     transition:
         background-color var(--motion-fast) var(--ease-out),
         border-color var(--motion-fast) var(--ease-out),
@@ -30,13 +31,15 @@
         transform var(--motion-instant) var(--ease-out);
 }
 .btn:hover {
-    background: var(--surface-3);
-    border-color: var(--line);
+    background: var(--surface);
+    border-color: transparent;
     color: var(--ink);
+    box-shadow: var(--shadow-btn-hover);
 }
-/* 按下要有触觉级回应：80ms 内轻微下沉，松开即回弹。只动 transform，不引发重排。 */
+/* 按下要有触觉级回应：80ms 内轻微下沉并陷入表面（外浮影翻转为内凹影）。 */
 .btn:active {
     transform: scale(0.97);
+    box-shadow: var(--shadow-inset);
 }
 .btn:disabled:active {
     transform: none;
@@ -82,20 +85,23 @@
     border-color: transparent;
     color: var(--accent-ink);
     font-weight: 600;
+    box-shadow: var(--shadow-btn);
 }
 .btn.primary:hover {
     background: color-mix(in srgb, var(--accent) 88%, var(--ink));
     border-color: transparent;
     color: var(--accent-ink);
+    box-shadow: var(--shadow-btn-hover);
 }
 .btn.danger {
     color: var(--danger);
-    border-color: color-mix(in srgb, var(--danger) 22%, var(--line-2));
+    border-color: transparent;
 }
 .btn.danger:hover {
     background: var(--danger-wash);
-    border-color: color-mix(in srgb, var(--danger) 48%, transparent);
+    border-color: transparent;
     color: var(--danger);
+    box-shadow: var(--shadow-btn-hover);
 }
 .btn.small {
     padding: 0 8px;
@@ -141,16 +147,19 @@
 .btn:disabled {
     opacity: 0.4;
     cursor: default;
+    box-shadow: none;
 }
 .btn:disabled:hover {
-    background: var(--surface-2);
-    border-color: var(--line-2);
+    background: var(--surface);
+    border-color: transparent;
     color: var(--ink-2);
+    box-shadow: none;
 }
 .btn.primary:disabled:hover {
     background: var(--accent);
     border-color: transparent;
     color: var(--accent-ink);
+    box-shadow: none;
 }
 .btn-row {
     display: flex;
@@ -159,14 +168,15 @@
     flex-wrap: wrap;
 }
 
-/* Segmented control — mutually exclusive options, one of which is active. */
+/* Segmented control — a recessed well holding one raised thumb. */
 .seg {
     display: inline-flex;
     gap: 2px;
     padding: 2px;
     border-radius: 9px;
-    background: var(--surface-2);
-    border: 1px solid var(--line);
+    background: var(--surface);
+    border: 1px solid transparent;
+    box-shadow: var(--shadow-inset);
 }
 .seg button {
     border: 0;
@@ -180,7 +190,8 @@
     border-radius: 7px;
     transition:
         background-color var(--motion-fast) var(--ease-out),
-        color var(--motion-fast) var(--ease-out);
+        color var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out);
 }
 .seg button:hover {
     color: var(--ink-2);
@@ -188,7 +199,7 @@
 .seg button[aria-pressed="true"] {
     background: var(--surface);
     color: var(--ink);
-    box-shadow: var(--shadow-1);
+    box-shadow: var(--shadow-btn);
 }
 .seg button:disabled {
     opacity: 0.4;
@@ -218,7 +229,10 @@
     place-items: center;
     background: var(--accent);
     color: var(--accent-ink);
-    transition: opacity var(--motion-fast) var(--ease-out);
+    box-shadow: var(--shadow-btn);
+    transition:
+        opacity var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out);
 }
 .send-btn:hover {
     opacity: 0.88;

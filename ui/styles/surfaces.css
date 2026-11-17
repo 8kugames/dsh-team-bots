@@ -1,9 +1,10 @@
 /* ---------------------------------------------------------------- Surfaces */
+/* Relief card: same plane as the canvas, extruded by the dual light. No border —
+   the edge is the shadow, separators inside stay as engraved hairlines. */
 .card {
     background: var(--surface);
-    border: 1px solid var(--line);
     border-radius: 12px;
-    box-shadow: var(--shadow-1);
+    box-shadow: var(--shadow-card);
 }
 .card-head {
     display: flex;
@@ -75,8 +76,9 @@
     width: 40px;
     height: 40px;
     border-radius: 11px;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--ink-3);
+    box-shadow: var(--shadow-1);
     display: grid;
     place-items: center;
     margin-bottom: 14px;

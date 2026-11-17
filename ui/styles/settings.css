@@ -251,5 +251,6 @@
 .input[aria-invalid='true'],
 .select[aria-invalid='true'],
 textarea[aria-invalid='true'] {
-    border-color: var(--danger);
+    /* 输入件无边框后，非法态改用 danger 光环叠加在凹槽影上，保持可见。 */
+    box-shadow: var(--shadow-inset), 0 0 0 1.5px var(--danger);
 }
