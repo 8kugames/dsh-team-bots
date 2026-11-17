@@ -4,6 +4,20 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.80
+
+### 中文
+
+**派单**
+
+- **写范围命中 .gitignore 不再拒绝派单**：命中 .gitignore 的条目改染色进卡（保留声明留痕），不再整卡驳回；既有清洗与审计口径不变。
+
+### English
+
+**Dispatch**
+
+- **Write scopes hitting .gitignore no longer reject dispatch**: entries matching .gitignore are now tinted onto the card (keeping the declaration for the audit trail) instead of rejecting the whole card; the existing cleanup and audit behaviour is unchanged.
+
 ## v0.3.79
 
 ### 中文
