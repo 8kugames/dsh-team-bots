@@ -57,12 +57,14 @@ test('深色 token 由 :root[data-color-scheme="dark"] 承载，媒体查询包�
   assert.match(blockAt(bare, catIndex), /--bg:\s*#181926/, 'Catppuccin 暗色底应为原 #181926')
 })
 
-test('暗色卡片内高光阴影随属性选择器走，不再寄生媒体查询', () => {
-  const index = bare.indexOf(':root[data-color-scheme="dark"] .card,')
-  assert.ok(index >= 0, '缺少 :root[data-color-scheme="dark"] .card 阴影规则')
-  const body = blockAt(bare, index)
-  assert.match(body, /box-shadow:/)
-  assert.match(body, /inset 0 1px 0 rgba\(255, 255, 255, 0\.05\)/, '内高光声明应原样保留')
+test('暗色卡片高光随属性选择器走，不再寄生媒体查询', () => {
+  // 浮雕材质（b162c1c）：卡片边缘即阴影，暗色只重定义 --relief-hi / --shadow-card，
+  // 不再给 .card 单写暗色内高光；深色也不得退回媒体查询承载。
+  assert.match(bare, /\.card \{[^}]*box-shadow: var\(--shadow-card\)/, '卡片用主题浮雕阴影')
+  const darkIndex = bare.indexOf(':root[data-color-scheme="dark"] {')
+  assert.ok(darkIndex >= 0, '缺少暗色属性块')
+  assert.match(blockAt(bare, darkIndex), /--relief-hi:/, '暗色受光面由属性块重定义')
+  assert.doesNotMatch(bare, /@media[^{]*prefers-color-scheme[^{]*\{\s*\.card/, '卡片深色不得寄生媒体查询')
 })
 
 // ---- 源码锚：util/app 接线（编译产物与源码逐行对齐） -------------------------

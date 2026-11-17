@@ -142,7 +142,7 @@ test('表单内联校验：接中央 submit 路径，错误节点与 aria 关联
   // 视觉态与程序化态同一时刻切换：错误节点用 is-visible 控制显隐。
   assert.match(stylesSource, /\.field-error \{[^}]*display: none;/, '错误节点默认隐藏')
   assert.match(stylesSource, /\.field-error\.is-visible \{[^}]*display: block;/, '非法时显示')
-  assert.match(stylesSource, /\[aria-invalid='true'\][^{]*\{[^}]*border-color: var\(--danger\)/, '非法态描边走既有 token')
+  assert.match(stylesSource, /\[aria-invalid='true'\][^{]*\{[^}]*box-shadow:[^}]*var\(--danger\)/, '非法态光环走既有 token')
 })
 
 test('行为断言：#app 的 inert 真值随遮罩开合切换', () => {

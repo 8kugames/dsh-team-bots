@@ -267,8 +267,9 @@ test('任务统计行样式与用量行同层级：caption 小字 + 主题 ink-3
 test('悬停/焦点态给轻量描边', () => {
   const hoverRule = /\.member-card:hover,\s*\n\s*\.member-card:focus-within \{([\s\S]*?)\n\}/.exec(css)?.[1]
   assert.ok(hoverRule, '找不到 .member-card:hover / :focus-within 规则')
-  assert.match(hoverRule, /border-color:/, '悬停/焦点改描边色')
   assert.match(hoverRule, /box-shadow:/, '悬停/焦点有轻量外描边')
+  assert.match(hoverRule, /var\(--shadow-card\)/, '刻线叠加在原浮雕上，不换影')
+  assert.match(hoverRule, /0 0 0 1px var\(--line-2\)/, '刻线环走主题 line-2')
 })
 
 test('移除操作收进卡片角标，hover 才显出', () => {
@@ -295,7 +296,7 @@ test('卡片样式只用主题变量，明暗两套都成立', () => {
   const colorProps = [...cardCss, nameCss, footCss].join('\n').match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g) ?? []
   assert.deepEqual(colorProps, [], '卡片样式不写死颜色，全部走主题变量')
   assert.match(cardCss, /var\(--surface\)/, '卡片底色用主题 surface')
-  assert.match(cardCss, /var\(--line\)/, '卡片描边用主题 line')
+  assert.match(cardCss, /var\(--shadow-card\)/, '卡片边缘由主题浮雕阴影承载')
   assert.match(nameCss, /var\(--ink\)/, '名称文字色用主题 ink')
   assert.match(footCss, /var\(--ink-3\)/, '底部小字用主题 ink-3')
 })
