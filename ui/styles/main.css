@@ -11,7 +11,8 @@
     z-index: 15;
     background: var(--overlay);
     backdrop-filter: saturate(140%) blur(12px);
-    border-bottom: 1px solid var(--line);
+    /* 顶盖压影：与内容区的挤出件同光源，板厚落在下缘而非刻线。 */
+    box-shadow: 0 3px 12px var(--relief-lo);
 }
 .topbar {
     min-height: 68px;
