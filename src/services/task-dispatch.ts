@@ -66,15 +66,15 @@ export const taskDispatchMethods = {
   },
   // 无主卡领取开工的写范围声明闸门（DSHBOTS-270）：与 assignFromBot「派单必须声明写
   // 范围」同口径的预判——卡面清单优先，空则从描述「写范围：」行兜底解析
-  // （parseWriteScopesFromDescription），再过忽略规则清洗（全部命中 .gitignore 被剔除
-  // = 实际未声明）。拒绝文案按 D-269 口径 = 原因 + 替代命令；带声明的卡直接放行。
+  // （parseWriteScopesFromDescription）。声明非空即放行：有效范围进并行锁；
+  // 命中 .gitignore 的条目进染色清单（ignored_write_scopes），不参与锁也不触发拒绝。
   assertClaimScopes(task, project) {
     const declared = readWriteScopes(task.write_scopes)
-    const scopes = filterIgnoredWriteScopes(
+    const { kept, removed } = filterIgnoredWriteScopes(
       declared.length ? declared : parseWriteScopesFromDescription(task.description),
       this.projectWorkDir(project),
-    ).kept
-    if (scopes.length) return
+    )
+    if (kept.length || removed.length) return
     throw badRequest(
       `领取开工必须声明写范围：任务 ${project.key}-${task.number} 未声明写范围，`
       + '其写运行会与同项目其他写运行全部保守串行，一条卡即可堵死队列。'
@@ -309,17 +309,18 @@ export const taskDispatchMethods = {
     }
     return null
   },
-  // 派单清洗（DSHBOTS-168）：写范围声明的程序化质量闸门，三入口共用——
-  // createTask（owner 派单路径权威清洗）、assignFromBot（经 createTask 同一清洗）、
-  // taskUpdateScopes（改卡入口）。两步：
-  // ① ignored 机械移除——命中项目 .gitignore 的条目没有写保护价值，剔除并落审计
-  //   task.scopes_normalize（removed=[...]）；全部被移除后调用方各自的「必须声明写
-  //   范围」闸门自然接管（清单为空）。非 git 目录 / git 不可用时保守放行不清洗。
+  // 派单清洗三入口共用——createTask（owner 派单路径权威清洗）、assignFromBot（经
+  // createTask 同一清洗）、taskUpdateScopes（改卡入口）。两步：
+  // ① ignored 染色——命中项目 .gitignore 的条目没有写保护价值，不进 write_scopes
+  //   （并行锁只认有效范围），但保留进 ignored_write_scopes 供卡面展示：全染色卡
+  //   不再触发「必须声明写范围」拒绝，也不与任何写运行串行（同文件也并行）。审计落
+  //   task.scopes_normalize（ignored=[...]）。非 git 目录 / git 不可用时保守放行不清洗。
   // ② 一级目录驳回——清洗后仍不含 / 的条目（src、tests 这类整目录声明）直接拒绝：
   //   整目录会把同项目全部写运行判为冲突锁死并发，这不是清洗能救的，必须改卡。
+  //   染色条目不参与该闸（它们不进锁，无锁死风险）。
   normalizeDispatchScopes(project, scopes, { actor, taskId }) {
     const { kept, removed } = filterIgnoredWriteScopes(scopes, this.projectWorkDir(project))
-    if (removed.length) this.audit(actor, 'task.scopes_normalize', 'task', taskId, { removed })
+    if (removed.length) this.audit(actor, 'task.scopes_normalize', 'task', taskId, { ignored: removed })
     const bare = kept.filter(scope => !scope.includes('/'))
     if (bare.length) {
       throw badRequest(
@@ -327,7 +328,7 @@ export const taskDispatchMethods = {
         + '整目录声明会锁死同项目全部写运行。',
       )
     }
-    return kept
+    return { scopes: kept, ignored: removed }
   },
   async assignFromBot(sessionId, input) {
     const { project, actor } = this.ownerContextFor(sessionId)
@@ -353,7 +354,11 @@ export const taskDispatchMethods = {
       // 核验纪律派单闸（DSHBOTS-303）：重派/改卡按生效卡面（本次传入优先，缺省回落原卡）。
       this.assertNotVerificationDispatch(project, member.id, input.title ?? task.title, input.description ?? task.description)
       // 派单策略闸（DSHBOTS-314）：重派按原卡声明写范围同闸（重派不改写范围，D-232 口径）。
-      this.assertWritableDispatch(member.id, readWriteScopes(task.write_scopes))
+      // 有效范围 + 染色条目合并判定：染色路径一样会被写盘，不能因染色漏拦只读 bot。
+      this.assertWritableDispatch(member.id, [
+        ...readWriteScopes(task.write_scopes),
+        ...readWriteScopes(task.ignored_write_scopes),
+      ])
       // 任务卡修正闭环（DSHBOTS-232 ①）：重派可同时改卡面（标题/描述/优先级）——先经
       // updateTask 落卡，卡面变化由其统一触发点通知负责人修正，再走原重派链路。
       // 写范围不在此口改：入队运行快照与调度闸门消费的不是同一份数据，
@@ -379,21 +384,23 @@ export const taskDispatchMethods = {
     }
     // 派单必须声明写范围（程序化闸门，不靠派单方自觉）：未声明写范围的任务其写运行会与
     // 同项目所有写运行判为冲突并保守串行，一条空范围任务就能把整队堵死。这里直接拒绝，
-    // 而不是留到调度器里把并发能力悄悄吃掉。
+    // 而不是留到调度器里把并发能力悄悄吃掉。命中 .gitignore 的染色条目算已声明：
+    // 它们进 ignored_write_scopes、不参与并行锁，全染色卡照常派发且不堵任何队列。
     const parsedScopes = input.write_scopes === undefined || input.write_scopes === null
       ? parseWriteScopesFromDescription(input.description)
       : parseWriteScopes(input.write_scopes)
-    // 闸门按清洗后清单预判（DSHBOTS-168）：全部命中忽略规则 = 实际未声明，落上面的
-    // 拒绝。原清单透传 createTask 做权威清洗+审计（审计需真实 taskId），此处只预览不落账。
-    const scopes = filterIgnoredWriteScopes(parsedScopes, this.projectWorkDir(project)).kept
-    // 派单策略闸（DSHBOTS-314）：写卡派只读 bot 在入口拒绝；重派分支按原卡声明补一道。
-    this.assertWritableDispatch(member.id, scopes)
-    if (!scopes.length) {
+    if (!parsedScopes.length) {
       throw badRequest(
         '派单必须声明写范围：传 write_scopes 路径数组，或在描述里写一行「写范围：a, b」。'
         + '未声明会让该任务的写运行与同项目其他写运行全部串行，一条任务即可堵死队列。',
       )
     }
+    // 闸门按清洗后清单预判（DSHBOTS-168）：染色条目剔除后剩下的有效范围才参与
+    // 整目录闸 / 上限闸 / 重复卡闸。原清单透传 createTask 做权威清洗+落库（含染色清单）。
+    const scopes = filterIgnoredWriteScopes(parsedScopes, this.projectWorkDir(project)).kept
+    // 派单策略闸（DSHBOTS-314）：写卡派只读 bot 在入口拒绝；重派分支按原卡声明补一道。
+    // 判定用完整声明清单：染色路径一样会被写盘，不能因染色漏拦只读 bot。
+    this.assertWritableDispatch(member.id, parsedScopes)
     // 大卡拆分闸（产品化派单纪律）：写范围条目超过 maxWriteScopesPerTask 时拒绝整卡
     // 派发——超大范围卡与同项目一切写运行按保守串行互斥，一条卡即可吃掉整队并行能力
     // （2026-11-13 生产实测 run_parallel 触发率仅 26%，主因即大范围声明）。拒绝文案

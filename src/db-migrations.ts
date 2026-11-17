@@ -217,8 +217,11 @@ function migrateRuns(db) {
 // tasks.time_budget_minutes 存发布时的时效要求（分钟，NULL = 未声明不注入提示词）。
 // tasks.deliverables 存卡面声明的交付物文件路径（JSON 路径数组）；核验按路径直接读文件，
 // 交付报告只引用路径不复述正文（DSHBOTS-345 复盘）。
+// tasks.ignored_write_scopes 存声明中被 .gitignore 命中的「染色」条目（JSON 路径数组）：
+// 进卡面展示但不参与并行锁判定（全染色卡不与任何写运行串行，见 scheduler 写范围闸门）。
 function migrateTasks(db) {
   addColumn(db, 'tasks', 'write_scopes', "TEXT NOT NULL DEFAULT '[]'")
+  addColumn(db, 'tasks', 'ignored_write_scopes', "TEXT NOT NULL DEFAULT '[]'")
   addColumn(db, 'tasks', 'time_budget_minutes', 'INTEGER')
   addColumn(db, 'tasks', 'deliverables', "TEXT NOT NULL DEFAULT '[]'")
 }

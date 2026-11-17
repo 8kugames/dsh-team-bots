@@ -143,6 +143,8 @@ body:has(#modal-root .modal-backdrop) #app *::after {
 /* 写范围（DSHBOTS-124）：路径 chip 行（沿用审批卡片的等宽小字 chip）+ 未声明兜底灰字 */
 .scope-block { margin-top: 12px; }
 .scope-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+/* 染色写范围（命中 .gitignore）：进卡展示但不参与并行锁，虚线边框 + 淡墨色与生效条目区分 */
+.scope-chip-ignored { border-style: dashed; color: var(--ink-3); opacity: .85; }
 .scope-empty { color: var(--ink-3); font-size: var(--fs-small); }
 .config-card {
     padding: 20px 22px;

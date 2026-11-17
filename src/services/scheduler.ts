@@ -11,7 +11,7 @@ import { MAX_RATE_LIMIT_RETRIES, isQuotaExhausted, isRetryChainError } from './b
 import { INTERNAL_FALLBACK_KINDS } from './model-fallback.js'
 import { ensureTaskRelationsSchema, unsatisfiedBlockedDeps } from './task-relations.js'
 import { TASK_BUDGET_ROUNDS, TRANSITIONS, taskDeadlineInfo } from './tasks.js'
-import { effectiveWriteScopes, writeScopesOverlap } from './write-scopes.js'
+import { effectiveWriteScopes, readWriteScopes, writeScopesOverlap } from './write-scopes.js'
 import { runReviewWatchdog } from './review-watchdog.js'
 import { pollGithubSources } from './github-source.js'
 import { staleCardHit } from './notify.js'
@@ -571,20 +571,25 @@ export const schedulerMethods = {
         // claimKey 串行域 = (bot, 工作区)（DSHBOTS-308）：键只读 bot_id/project_id（均在列面），
         // 在跑侧与候选侧算的是同一 run 行的同一列，串行不失效（承 DSHBOTS-219 口径）。
         `SELECT r.bot_id, r.kind, r.task_id, r.project_id, r.mode, r.write_scopes, r.trigger_type,
-                t.status AS task_status
+                t.status AS task_status, t.ignored_write_scopes AS task_ignored_scopes
            FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
           WHERE r.status = 'running'`,
       )
       const activeKeys = new Set(activeRows.map(row => this.claimKey(row)))
-      // 同项目在跑的写运行：按写范围判定能否并行。写范围为空 = 未声明 = 保守串行。
+      // 同项目在跑的写运行：按写范围判定能否并行。写范围为空 = 未声明 = 保守串行；
+      // 染色例外（命中 .gitignore）：写范围只剩染色条目的任务运行不参与任何锁——
+      // 染色路径没有写保护价值，即使与别的任务写同一文件也放行并行。
       const activeWriteScopes = new Map()
       for (const row of activeRows) {
         if (row.mode !== 'write' || !row.project_id) continue
         // 任务不在「进行中」就不占写槽（DSHBOTS-73）：写占用随任务离开进行中即时释放。
         if (!runHoldsWriteLock({ kind: row.kind, mode: row.mode, taskStatus: row.task_status })) continue
+        const effective = effectiveWriteScopes(row.write_scopes)
+        // 全染色运行不进冲突名单：与任何候选（含未声明候选）互不阻塞。
+        if (!effective.length && readWriteScopes(row.task_ignored_scopes).length) continue
         const list = activeWriteScopes.get(row.project_id) ?? []
         // package.json 是版本钩子机械改动，比对前剥掉（DSHBOTS-133），否则全队列判交叠串行。
-        list.push(effectiveWriteScopes(row.write_scopes))
+        list.push(effective)
         activeWriteScopes.set(row.project_id, list)
       }
       let activeTotal = activeRows.length
@@ -603,7 +608,7 @@ export const schedulerMethods = {
       // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）的 queued 任务运行不再领取；
       // 只排 kind='task'，非任务运行不受影响。LEFT JOIN 出 NULL 的孤儿任务运行不过滤。
       const candidates = this.store.all(
-        `SELECT r.* FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+        `SELECT r.*, t.ignored_write_scopes AS task_ignored_scopes FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
           LEFT JOIN messages m ON m.id = r.trigger_ref
          WHERE r.status = 'queued'
            AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled'))
@@ -629,8 +634,13 @@ export const schedulerMethods = {
         // 单聊运行 project_id 为空，写锁落在各自独立的 _the_bots/<dir>，不占项目锁。
         // 候选侧同样先剥 package.json（DSHBOTS-133）：存量 queued 运行快照可能带它，
         // 过滤后任一为空仍按「未声明」保守串行，不降低既有安全边界。
+        // 染色例外（命中 .gitignore）：候选只剩染色条目时不参与锁，即使与在跑写运行
+        // 写同一文件也放行——染色路径没有写保护价值。
         const writeScopes = run.mode === 'write' ? effectiveWriteScopes(run.write_scopes) : []
-        if (run.mode === 'write' && run.project_id) {
+        const ignoredOnly = run.mode === 'write'
+          && !writeScopes.length
+          && readWriteScopes(run.task_ignored_scopes).length > 0
+        if (run.mode === 'write' && run.project_id && !ignoredOnly) {
           const runningScopes = activeWriteScopes.get(run.project_id) ?? []
           if (runningScopes.some(other => writeScopesOverlap(writeScopes, other))) continue
         }

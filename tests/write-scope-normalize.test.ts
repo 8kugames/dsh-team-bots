@@ -1,9 +1,10 @@
-// DSHBOTS-168：派单入口写范围清洗（程序化约束，不靠提示词）。
+// 派单入口写范围清洗+染色（程序化约束，不靠提示词）。
 // 三入口共用同一判定链：assignFromBot（闸门按清洗后清单预判 + createTask 权威清洗）、
 // createTask（owner 派单路径，事务内权威清洗）、taskUpdateScopes（改卡入口）。口径：
-// ① 命中项目 .gitignore 的条目机械移除，落审计 task.scopes_normalize（removed=[...]）；
-// ② 清洗后清单为空 → assignFromBot / taskUpdateScopes 走各自既有「必须声明写范围」拒绝；
-// ③ 一级目录（不含 /）驳回；package.json 由 parseWriteScopes 出口剥除（f4763a2），不进驳回；
+// ① 命中项目 .gitignore 的条目染色：不进 write_scopes（并行锁只认有效范围），保留进
+//   ignored_write_scopes 供卡面展示，落审计 task.scopes_normalize（ignored=[...]）；
+// ② 全染色卡照常派发/建卡，不触发「必须声明写范围」拒绝，也不与任何写运行串行；
+// ③ 一级目录（不含 /）驳回（只对有效范围）；package.json 由 parseWriteScopes 出口剥除；
 // ④ 非 git 目录跳过清洗保守放行。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -98,7 +99,7 @@ const taskCount = (store, projectId) =>
 const normalizeAudits = store =>
   store.all("SELECT * FROM audit_log WHERE action = 'task.scopes_normalize' ORDER BY created_at")
 
-test('assignFromBot：ignored 二级目录条目机械移除，落库清单已清洗并留审计', async () => {
+test('assignFromBot：ignored 二级目录条目染色进卡，有效清单清洗并留审计', async () => {
   const { root, workspace, store, service } = await setup()
   try {
     const { director, dev, project } = await seedProject(service, store)
@@ -113,17 +114,18 @@ test('assignFromBot：ignored 二级目录条目机械移除，落库清单已�
 
     assert.equal(task.identifier, 'NRM-1')
     assert.deepEqual(task.writeScopes, ['src/a.js'])
+    assert.deepEqual(task.ignoredWriteScopes, ['dist/build'])
     const audits = normalizeAudits(store)
     assert.equal(audits.length, 1)
     assert.equal(audits[0].target_id, task.id)
-    assert.deepEqual(JSON.parse(audits[0].data_json), { removed: ['dist/build'] })
+    assert.deepEqual(JSON.parse(audits[0].data_json), { ignored: ['dist/build'] })
   } finally {
     await closeQuietly(service, store)
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('assignFromBot：ignored 子路径（文件规则）同样移除', async () => {
+test('assignFromBot：ignored 子路径（文件规则）同样染色', async () => {
   const { root, workspace, store, service } = await setup()
   try {
     const { director, dev, project } = await seedProject(service, store)
@@ -136,7 +138,8 @@ test('assignFromBot：ignored 子路径（文件规则）同样移除', async ()
     })
 
     assert.deepEqual(task.writeScopes, ['src/b.js'])
-    assert.deepEqual(JSON.parse(normalizeAudits(store)[0].data_json), { removed: ['logs/app.log'] })
+    assert.deepEqual(task.ignoredWriteScopes, ['logs/app.log'])
+    assert.deepEqual(JSON.parse(normalizeAudits(store)[0].data_json), { ignored: ['logs/app.log'] })
   } finally {
     await closeQuietly(service, store)
     await rm(root, { recursive: true, force: true })
@@ -156,6 +159,7 @@ test('非 ignored 条目原样保留，且不产生清洗审计', async () => {
     })
 
     assert.deepEqual(task.writeScopes, ['src/a.js', 'docs/guide.md'])
+    assert.deepEqual(task.ignoredWriteScopes, [])
     assert.equal(normalizeAudits(store).length, 0)
   } finally {
     await closeQuietly(service, store)
@@ -163,17 +167,46 @@ test('非 ignored 条目原样保留，且不产生清洗审计', async () => {
   }
 })
 
-test('全部条目被移除 → 既有「派单必须声明写范围」拒绝，不落卡', async () => {
+test('全部条目命中 ignore → 染色建卡不拒绝：有效清单空、染色清单落库、可再派同范围卡', async () => {
   const { root, workspace, store, service } = await setup()
   try {
     const { director, dev, project } = await seedProject(service, store)
     await gitProject(join(workspace, project.slug), ['dist/', 'build/'])
     const sessionId = ownerSession(store, director, project, 'sess-norm-4')
 
+    const task = await service.assignFromBot(sessionId, {
+      assignee: 'Builder', title: '全忽略', description: '做点事。',
+      write_scopes: ['dist/build', 'build/out.js'],
+    })
+    // 全染色：有效范围为空（不参与并行锁），染色清单完整进卡。
+    assert.deepEqual(task.writeScopes, [])
+    assert.deepEqual(task.ignoredWriteScopes, ['dist/build', 'build/out.js'])
+    const audits = normalizeAudits(store)
+    assert.equal(audits.length, 1)
+    assert.deepEqual(JSON.parse(audits[0].data_json), { ignored: ['dist/build', 'build/out.js'] })
+    // 重复卡闸只比有效范围：全染色卡不拦后续同范围派单（染色文件即使相同也允许并行）。
+    const second = await service.assignFromBot(sessionId, {
+      assignee: 'Builder', title: '全忽略二', description: '做点事。',
+      write_scopes: ['dist/build', 'build/out.js'],
+    })
+    assert.deepEqual(second.ignoredWriteScopes, ['dist/build', 'build/out.js'])
+    assert.equal(taskCount(store, project.id), 2)
+  } finally {
+    await closeQuietly(service, store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('未传任何声明 → 仍按「派单必须声明写范围」拒绝，不落卡', async () => {
+  const { root, workspace, store, service } = await setup()
+  try {
+    const { director, dev, project } = await seedProject(service, store)
+    await gitProject(join(workspace, project.slug), ['dist/', 'build/'])
+    const sessionId = ownerSession(store, director, project, 'sess-norm-4b')
+
     await assert.rejects(
       () => service.assignFromBot(sessionId, {
-        assignee: 'Builder', title: '全忽略', description: '做点事。',
-        write_scopes: ['dist/build', 'build/out.js'],
+        assignee: 'Builder', title: '未声明', description: '做点事。',
       }),
       (error: { status: number; message: string }) => {
         assert.equal(error.status, 400)
@@ -289,25 +322,27 @@ test('createTask 直建（owner 派单路径）：同样清洗+审计挂真实 t
       writeScopes: ['dist/build', 'src/a.js'],
     })
     assert.deepEqual(task.writeScopes, ['src/a.js'])
+    assert.deepEqual(task.ignoredWriteScopes, ['dist/build'])
     const audits = normalizeAudits(store)
     assert.equal(audits.length, 1)
     assert.equal(audits[0].target_id, task.id)
-    assert.deepEqual(JSON.parse(audits[0].data_json), { removed: ['dist/build'] })
+    assert.deepEqual(JSON.parse(audits[0].data_json), { ignored: ['dist/build'] })
 
-    // createTask 本无「必须声明」闸门（backlog 卡允许未声明）：全部被移除 → 按未声明建档，
-    // 后续闸门自然保守串行——「走既有」，不新增拒绝分支。
+    // createTask 本无「必须声明」闸门（backlog 卡允许未声明）：全部染色 → 有效清单空建档，
+    // 染色清单照常落库——该卡不参与并行锁（不与任何写运行串行）。
     const undeclared = await service.createTask({
       projectId: project.id, title: '全忽略直建', assigneeBotId: dev.id,
       writeScopes: ['dist/x'],
     })
     assert.deepEqual(undeclared.writeScopes, [])
+    assert.deepEqual(undeclared.ignoredWriteScopes, ['dist/x'])
   } finally {
     await closeQuietly(service, store)
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('taskUpdateScopes 改卡入口：ignored 移除+审计+快照刷新；一级目录驳回', async () => {
+test('taskUpdateScopes 改卡入口：ignored 染色+审计+快照刷新；一级目录驳回；全染色放行', async () => {
   const { root, workspace, store, service } = await setup()
   try {
     const { dev, project } = await seedProject(service, store)
@@ -319,10 +354,16 @@ test('taskUpdateScopes 改卡入口：ignored 移除+审计+快照刷新；一�
 
     const updated = await service.taskUpdateScopes(task.id, ['dist/build', 'src/new.js'], userActor(service))
     assert.deepEqual(updated.writeScopes, ['src/new.js'])
+    assert.deepEqual(updated.ignoredWriteScopes, ['dist/build'])
     const audits = normalizeAudits(store)
     assert.equal(audits.length, 1)
     assert.equal(audits[0].target_id, task.id)
-    assert.deepEqual(JSON.parse(audits[0].data_json), { removed: ['dist/build'] })
+    assert.deepEqual(JSON.parse(audits[0].data_json), { ignored: ['dist/build'] })
+
+    // 全染色改卡：不再拒绝，有效清单空 + 染色清单落库。
+    const dyed = await service.taskUpdateScopes(task.id, ['dist/all'], userActor(service))
+    assert.deepEqual(dyed.writeScopes, [])
+    assert.deepEqual(dyed.ignoredWriteScopes, ['dist/all'])
 
     await assert.rejects(
       () => service.taskUpdateScopes(task.id, ['src'], userActor(service)),

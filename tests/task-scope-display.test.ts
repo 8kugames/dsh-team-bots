@@ -25,33 +25,43 @@ test('任务详情 modal 含「写范围」区块：声明的路径逐条以等�
   assert.match(body, /<div class="eyebrow" style="margin-bottom:6px">\$\{t\("写范围"\)\}<\/div>/, '写范围用与「评论」同款的 eyebrow 标题')
   assert.match(body, /<div class="scope-block">/, '写范围有独立容器')
   assert.match(body, /<div class="scope-chips">/, '非空时用 chip 行承载路径')
-  assert.match(body, /writeScopes\.map\(scope =>/, '声明的路径逐条列出')
-  assert.match(body, /class="approval-chip mono"/, '路径 chip 沿用审批卡片路径 chip 的等宽样式')
-  assert.match(body, /title="\$\{attr\(scope\)\}"/, 'chip 保留完整路径的 title 提示（长路径省略时可查）')
+  assert.match(body, /const chip = \(scope/, 'chip 渲染收敛到单一 helper（生效与染色两态共用）')
+  assert.match(body, /chip\(s, false\)/, '生效范围逐条列出')
+  assert.match(body, /class="approval-chip mono\$\{ignored/, 'chip 样式按染色态切换（染色加 scope-chip-ignored）')
+  assert.match(body, /title="\$\{attr\(ignored/, 'chip 保留完整路径的 title 提示（染色态注明命中 .gitignore）')
   assert.match(body, /esc\(scope\)/, '路径走转义输出')
   // 区块位置：在「评论」分隔线之前，随任务元信息一起露出，不必翻到页尾。
   assert.ok(body.indexOf('scope-block') < body.indexOf('>\$\{t\("评论"\)\}<'), '写范围区块应在评论区之前')
 })
 
+test('染色写范围：命中 .gitignore 的条目进卡展示，虚线样式区分且参与编辑回填', () => {
+  const body = modalTaskBody()
+  assert.match(body, /Array\.isArray\(task\.ignoredWriteScopes\)/, '读取 taskView.ignoredWriteScopes 染色清单')
+  assert.match(body, /chip\(s, true\)/, '染色条目同样以 chip 列出（不参与并行锁但可见）')
+  assert.match(body, /命中 \.gitignore，不参与并行锁/, '染色 chip 的 title 说明其并行锁豁免语义')
+  assert.match(body, /\.\.\.writeScopes, \.\.\.ignoredScopes\]\.join/, '编辑态回填合并生效 + 染色清单')
+})
+
 test('未声明写范围：灰字兜底文案「未声明（保守串行）」，与非空分支同源互斥', () => {
   const body = modalTaskBody()
   assert.match(body, /<div class="scope-empty">\$\{t\("未声明（保守串行）"\)\}<\/div>/, '空集合显示未声明兜底文案')
-  // 兜底与列表是同一个三元的两支：空集合走灰字，非空走 chip 行。
+  // 兜底与列表是同一个三元的两支：空集合走灰字，非空（生效或染色任一）走 chip 行。
   assert.match(
     body,
-    /writeScopes\.length\s*\?[\s\S]{0,400}?scope-chips[\s\S]{0,400}?:\s*`<div class="scope-empty">\$\{t\("未声明（保守串行）"\)\}<\/div>`/,
+    /writeScopes\.length \|\| ignoredScopes\.length\)\s*\?[\s\S]{0,400}?scope-chips[\s\S]{0,400}?:\s*`<div class="scope-empty">\$\{t\("未声明（保守串行）"\)\}<\/div>`/,
     '空/未声明与非空必须是互斥的两支，不会同时渲染',
   )
   assert.match(body, /Array\.isArray\(task\.writeScopes\)/, '缺失或非数组的 writeScopes 一律按未声明兜底')
 })
 
-test('数据源接线：taskView 透出 writeScopes，任务详情走 taskView', () => {
+test('数据源接线：taskView 透出 writeScopes 与染色清单，任务详情走 taskView', () => {
   assert.match(tasksService, /writeScopes: readWriteScopes\(rawScopes\)/, 'taskView 应透出归一化后的 writeScopes')
+  assert.match(tasksService, /ignoredWriteScopes: readWriteScopes\(rawIgnoredScopes\)/, 'taskView 应透出染色清单 ignoredWriteScopes')
   assert.match(tasksService, /async taskDetail\(taskId\) \{[\s\S]*?\.\.\.this\.taskView\(task\)/, '任务详情沿用 taskView 的字段集')
-  assert.match(modalTaskBody(), /task\.writeScopes/, '前端只读取 task.writeScopes，不另取状态源')
+  assert.match(modalTaskBody(), /task\.writeScopes/, '前端只读取 taskView 字段，不另取状态源')
 })
 
-test('CSS：写范围 chip 容器可换行，未声明兜底为灰字', () => {
+test('CSS：写范围 chip 容器可换行，未声明兜底为灰字，染色 chip 虚线弱化', () => {
   const chips = css.match(/\.scope-chips \{[^}]+\}/)?.[0] ?? ''
   assert.ok(chips, '.scope-chips 规则必须存在于 styles.css')
   assert.match(chips, /display: flex/)
@@ -61,4 +71,7 @@ test('CSS：写范围 chip 容器可换行，未声明兜底为灰字', () => {
   assert.match(empty, /var\(--ink-3\)/, '未声明兜底为弱化灰字')
   // chip 本体沿用审批卡片样式：等宽字体 + 卡片底色。
   assert.match(css, /\.approval-chip \{[^}]*font-family: var\(--mono\)/, 'chip 等宽字体沿用 .approval-chip')
+  const dyed = css.match(/\.scope-chip-ignored \{[^}]+\}/)?.[0] ?? ''
+  assert.ok(dyed, '.scope-chip-ignored 规则必须存在于 styles.css')
+  assert.match(dyed, /dashed/, '染色 chip 用虚线边框与生效条目区分')
 })

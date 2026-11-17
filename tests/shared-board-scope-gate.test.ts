@@ -1,7 +1,8 @@
 // tests/shared-board-scope-gate.test.js —— DSHBOTS-270 共享板无主卡领取开工声明闸门守门
 // 纯源码级断言（不建库、不 mkdtemp），钉四件事：
 // ① 无主卡获得 owner 的两条链路（assignTask 领取 / updateTask 编辑表单指派）都挂闸门：
-//    无声明（含全被忽略规则清洗后为空）即拒绝，带声明的卡与改派/重派流程不受影响；
+//    无声明即拒绝；命中 .gitignore 的染色条目算已声明（ignored 清单非空即放行）；
+//    带声明的卡与改派/重派流程不受影响；
 // ② 拒绝文案按 D-269 口径 = 原因（未声明保守串行堵道）+ 替代命令（工作台补 write_scopes
 //    或描述行「写范围：a, b」，由 parseWriteScopesFromDescription 兜底解析）；
 // ③ 描述行兜底生效：卡面清单为空时回落到描述解析，清洗用既有 filterIgnoredWriteScopes；
@@ -54,14 +55,13 @@ test('无声明被拒：拒绝文案 = 原因 + 替代命令（D-269 口径）',
 
 test('补声明后放行 + 描述行兜底生效 + 清洗口径一致', () => {
   const body = methodBody(dispatchSource, 'assertClaimScopes(task, project) {')
-  assert.match(body, /if \(scopes\.length\) return/, '带声明（清单非空）直接放行，领取流程不受影响')
+  assert.match(body, /if \(kept\.length \|\| removed\.length\) return/, '带声明（有效或染色清单任一非空）直接放行，领取流程不受影响')
   assert.match(
     body,
     /declared\.length \? declared : parseWriteScopesFromDescription\(task\.description\)/,
     '卡面清单为空时回落到描述「写范围：」行解析',
   )
-  assert.match(body, /filterIgnoredWriteScopes\(/, '按忽略规则清洗：全被清洗后为空同样算未声明')
-  assert.match(body, /\.kept/, '取清洗后保留清单判定')
+  assert.match(body, /filterIgnoredWriteScopes\(/, '按忽略规则拆分：染色条目进 ignored 清单，同样算已声明')
 })
 
 test('assignFromBot 既有闸门行为不动：重派分支不进新闸门', () => {

@@ -6,7 +6,7 @@
 
 import { badRequest, conflict, notFound } from '../errors.js'
 import { clampNumber, id, nowIso, projectKey, TASK_ID_PATTERN, text } from '../util.js'
-import { parseDeliverables, parseWriteScopes, parseWriteScopesFromDescription, readDeliverables, readWriteScopes } from './write-scopes.js'
+import { filterIgnoredWriteScopes, parseDeliverables, parseWriteScopes, parseWriteScopesFromDescription, readDeliverables, readWriteScopes } from './write-scopes.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 import { SANDBOX_OVERRIDES } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
@@ -173,16 +173,17 @@ export const tasksMethods = {
     ensureTaskSandboxSchema(this.store)
     let number
     this.store.transaction(() => {
-      // 派单清洗（DSHBOTS-168）：ignored 机械移除 + 一级目录驳回，与建档同事务——
-      // 清洗后清单即落库清单（运行快照天然继承），审计挂真实 taskId 不产生孤儿行。
-      const writeScopes = this.normalizeDispatchScopes(project, parsedScopes, { actor, taskId })
+      // 派单清洗：ignored 染色 + 一级目录驳回，与建档同事务——有效清单与染色清单
+      // 分别落 write_scopes / ignored_write_scopes（运行快照天然继承有效清单），
+      // 审计挂真实 taskId 不产生孤儿行。
+      const { scopes: writeScopes, ignored } = this.normalizeDispatchScopes(project, parsedScopes, { actor, taskId })
       const relations = validateTaskRelations({ store: this.store, projectId: project.id, taskId, parentTaskId, blockedBy })
       number = Number(this.store.get('SELECT COALESCE(MAX(number), 0) + 1 AS n FROM tasks WHERE project_id = ?', project.id)?.n ?? 1)
       this.store.run(
         `INSERT INTO tasks(id, project_id, number, title, description, status, priority, assignee_bot_id,
           creator_type, creator_id, review_target, source_message_id, parent_id, parent_task_id, blocked_by, position, due_at, estimate,
-          time_budget_minutes, write_scopes, deliverables, sandbox_override, version, created_at, updated_at, completed_at, canceled_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          time_budget_minutes, write_scopes, ignored_write_scopes, deliverables, sandbox_override, version, created_at, updated_at, completed_at, canceled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         taskId, project.id, number, title, text(input.description, 40_000), status, priority,
         assigneeId, actor.type, actor.id, actor.type === 'bot' ? 'owner_bot' : 'user',
         input.sourceMessageId ?? null, input.parentId ?? null,
@@ -190,6 +191,7 @@ export const tasksMethods = {
         Number.isFinite(Number(input.position)) ? Number(input.position) : number,
         input.dueAt ? new Date(input.dueAt).toISOString() : null,
         clampNumber(input.estimate, 0, 1000, null), timeBudgetMinutes, JSON.stringify(writeScopes),
+        JSON.stringify(ignored),
         JSON.stringify(deliverables),
         sandboxOverride, createdAt, createdAt,
         completedAt, canceledAt,
@@ -335,7 +337,7 @@ export const tasksMethods = {
       task.id,
     )
     const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
-    const { write_scopes: rawScopes, deliverables: rawDeliverables, time_budget_minutes: rawTimeBudget, ...rest } = task
+    const { write_scopes: rawScopes, ignored_write_scopes: rawIgnoredScopes, deliverables: rawDeliverables, time_budget_minutes: rawTimeBudget, ...rest } = task
     // 阶段按事实推导（task-stage 块）：与 latestRun 同源；attention 取最近运行的待回答提问。
     const attention = runs[0] ? parseAttention(runs[0].attention_json) : null
     const stage = taskStage(task, runs[0] ?? null, attention)
@@ -345,6 +347,8 @@ export const tasksMethods = {
       identifier: `${project?.key ?? 'T'}-${task.number}`,
       labels,
       writeScopes: readWriteScopes(rawScopes),
+      // 染色写范围（命中 .gitignore）：进卡面展示但不参与并行锁判定。
+      ignoredWriteScopes: readWriteScopes(rawIgnoredScopes),
       deliverables: readDeliverables(rawDeliverables),
       // 时效要求（分钟）：null=发布方未提；供 UI 展示与提示词注入共用一个口径。
       timeBudgetMinutes: Number.isFinite(rawTimeBudget) ? rawTimeBudget : null,
@@ -441,7 +445,11 @@ export const tasksMethods = {
     if (patch.dueAt !== undefined) updates.due_at = patch.dueAt ? new Date(patch.dueAt).toISOString() : null
     if (patch.estimate !== undefined) updates.estimate = clampNumber(patch.estimate, 0, 1000, null)
     if (patch.writeScopes !== undefined) {
-      updates.write_scopes = JSON.stringify(parseWriteScopes(patch.writeScopes))
+      // 与派单入口同口径拆分：命中 .gitignore 的条目染色进 ignored_write_scopes，
+      // 有效范围进 write_scopes 参与并行锁。
+      const { kept, removed } = filterIgnoredWriteScopes(parseWriteScopes(patch.writeScopes), this.projectWorkDir(this.projectRow(task.project_id)))
+      updates.write_scopes = JSON.stringify(kept)
+      updates.ignored_write_scopes = JSON.stringify(removed)
     }
     if (patch.deliverables !== undefined) {
       updates.deliverables = JSON.stringify(parseDeliverables(patch.deliverables))

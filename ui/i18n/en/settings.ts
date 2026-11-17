@@ -361,6 +361,7 @@ export default {
   "月度预算": "Monthly budget",
   "未启用": "Not enabled",
   "未声明（保守串行）": "Not declared (conservative serial)",
+  "命中 .gitignore，不参与并行锁": "Matched by .gitignore, excluded from the parallel lock",
   "未指派": "Unassigned",
   "未绑定": "Not bound",
   "未设置": "Not set",

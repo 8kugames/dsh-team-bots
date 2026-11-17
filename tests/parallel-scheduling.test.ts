@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db.js'
@@ -284,6 +285,44 @@ test('回归保护：maxConcurrentRuns=3 且写范围互不相交时，三条任
     // 三条同时并行应有两条并行放行事件（首条之外各记一条）。
     const eventCount = Number(store.get("SELECT COUNT(*) AS n FROM run_events WHERE type = 'run_parallel'").n)
     assert.equal(eventCount, 2, '第二、三条运行应各记一条并行放行事件')
+  } finally {
+    await cleanup(root, store)
+  }
+})
+
+// 染色写范围（命中 .gitignore）：全染色任务不参与并行锁——即使与另一条写任务
+// 声明完全相同的文件，两条写运行也同时 running（被忽略路径没有写保护价值）。
+test('全染色任务与同路径写任务并行：ignored 条目不触发串行闸', async () => {
+  const { root, store, service, director, dev, dev2 } = await manualSetup()
+  try {
+    const project = await service.createProject({ name: 'Dyed', key: 'DYE', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
+    // 项目工作目录造成真 git 仓库并忽略 tools/：writeScopes 全部命中染色。
+    const projectDir = join(root, 'workspace', project.slug)
+    await mkdir(projectDir, { recursive: true })
+    execFileSync('git', ['init', '--quiet'], { cwd: projectDir, stdio: 'ignore' })
+    await writeFile(join(projectDir, '.gitignore'), 'tools/\n', 'utf8')
+
+    const dyed = await service.createTask({
+      projectId: project.id, title: '改模拟器', assigneeBotId: dev.id,
+      writeScopes: ['tools/simulate.lua'], autoStart: true,
+    })
+    assert.deepEqual(dyed.writeScopes, [], '全染色：有效范围为空')
+    assert.deepEqual(dyed.ignoredWriteScopes, ['tools/simulate.lua'], '染色清单进卡')
+    // 对照任务声明同一条路径——旧口径会因「未声明（空清单）」保守串行。
+    const samePath = await service.createTask({
+      projectId: project.id, title: '同路径对照', assigneeBotId: dev2.id,
+      writeScopes: ['tools/simulate.lua'], autoStart: true,
+    })
+
+    service.started = true
+    await service.tick()
+
+    const running = taskRuns(store, project.id, 'running')
+    assert.equal(running.length, 2, '全染色任务不与任何写运行串行（同文件也并行）')
+    assert.equal(taskRuns(store, project.id, 'queued').length, 0)
+    assert.ok(running.every(run => JSON.parse(run.write_scopes).length === 0), '全染色运行快照为空清单')
+    void dyed
+    void samePath
   } finally {
     await cleanup(root, store)
   }

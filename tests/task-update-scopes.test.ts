@@ -238,7 +238,7 @@ test('任务详情 modal：写范围段两态——只读 chips 保留 + 编辑�
   // 编辑态表单：预填旧声明、逗号或空格分隔口径、保存/取消、生效范围 hint 逐字
   assert.match(modalTaskBody, /id="task-write-scopes"/, '输入框在场')
   assert.match(modalTaskBody, /placeholder="\$\{t\("逗号或空格分隔路径"\)\}"/, 'placeholder 口径在场')
-  assert.match(modalTaskBody, /writeScopes\.join\(', '\)/, '预填旧声明')
+  assert.match(modalTaskBody, /\.\.\.writeScopes, \.\.\.ignoredScopes\]\.join\(', '\)/, '预填旧声明（生效 + 染色清单）')
   assert.match(modalTaskBody, /data-action="update-scopes"/, '保存按钮在场')
   assert.match(modalTaskBody, /data-action="cancel-scopes-edit"/, '取消按钮在场')
   assert.match(modalTaskBody, /保存后立即生效于排队中的运行；运行中的运行不受影响/, 'hint 逐字在场')

@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   estimate REAL,
   time_budget_minutes INTEGER,
   write_scopes TEXT NOT NULL DEFAULT '[]',
+  ignored_write_scopes TEXT NOT NULL DEFAULT '[]',
   deliverables TEXT NOT NULL DEFAULT '[]',
   version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,

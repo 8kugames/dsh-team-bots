@@ -419,20 +419,20 @@ function modalTask(task) {
   // 任务关系（DSHBOTS-58）：父任务取本项目任务表里的那条，依赖只列未满足项（blockedByNames）。
   const parentTask = (state.data?.tasks ?? []).find(item => item.id === (task.parent_task_id ?? task.parentTaskId ?? null)) ?? null
   const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
-  // 写范围（DSHBOTS-124）：并行调度依据——同项目内两侧都声明且路径互不重叠才并行，任一未声明按保守串行。
-  // 数据源是 taskView.writeScopes（src/services/tasks.js），空数组 = 未声明。
+  // 写范围（DSHBOTS-124）+染色条目（命中 .gitignore）：前者是并行调度依据（互不重叠才并行），
+  // 后者进卡展示但不参与并行锁（同文件也并行）；未声明（两者皆空）保守串行。
   const writeScopes = Array.isArray(task.writeScopes) ? task.writeScopes.filter(item => typeof item === 'string' && item) : []
-  // 写范围编辑态（DSHBOTS-155）：只读展示与编辑表单两态切换；编辑态挂在当前 modal 上，
-  // 保存后由 reloadTaskModal 换掉 state.modal，编辑态随之复位，不进全局轮询状态。
+  const ignoredScopes = Array.isArray(task.ignoredWriteScopes) ? task.ignoredWriteScopes.filter(item => typeof item === 'string' && item) : []
+  // 编辑态（DSHBOTS-155）只读/编辑两态切换；终态卡不进编辑态（与 taskUpdateScopes 终态拒改同口径）。
   const editingScopes = state.modal?.type === 'task' && state.modal?.detail?.id === task.id && state.modal.editingScopes === true
-  // 终态卡不进编辑态——与后端 taskUpdateScopes 的终态拒改（任务已结束）同口径。
   const scopesEditable = !['done', 'canceled'].includes(task.status)
-  const scopesView = writeScopes.length
-    ? `<div class="scope-chips">${writeScopes.map(scope => `<span class="approval-chip mono" title="${attr(scope)}">${esc(scope)}</span>`).join('')}</div>`
+  const chip = (scope: string, ignored: boolean) => `<span class="approval-chip mono${ignored ? ' scope-chip-ignored' : ''}" title="${attr(ignored ? `${t("命中 .gitignore，不参与并行锁")}: ${scope}` : scope)}">${esc(scope)}</span>`
+  const scopesView = (writeScopes.length || ignoredScopes.length)
+    ? `<div class="scope-chips">${writeScopes.map(s => chip(s, false)).join('')}${ignoredScopes.map(s => chip(s, true)).join('')}</div>`
     : `<div class="scope-empty">${t("未声明（保守串行）")}</div>`
   const scopesEdit = `<div class="field">
             <label id="task-write-scopes-label" for="task-write-scopes">${t("写范围路径")}</label>
-            <input class="input mono" style="width:100%" id="task-write-scopes" placeholder="${t("逗号或空格分隔路径")}" value="${attr(writeScopes.join(', '))}">
+            <input class="input mono" style="width:100%" id="task-write-scopes" placeholder="${t("逗号或空格分隔路径")}" value="${attr([...writeScopes, ...ignoredScopes].join(', '))}">
             <div class="btn-row" style="margin-top:7px"><button class="btn small primary" type="button" data-action="update-scopes" data-task-id="${attr(task.id)}">${icon('check')}${t("保存")}</button><button class="btn small" type="button" data-action="cancel-scopes-edit">${t("取消")}</button></div>
             <div class="hint" style="margin-top:6px">${t("保存后立即生效于排队中的运行；运行中的运行不受影响")}</div>
           </div>`

@@ -153,10 +153,10 @@ export const taskReviewMethods = {
     const task = this.taskRow(taskId)
     if (task.status === 'done' || task.status === 'canceled') throw conflict('任务已结束，不能修改写范围')
     const parsedScopes = parseWriteScopes(writeScopesInput)
-    // 派单清洗（DSHBOTS-168）：与派单入口同口径——ignored 机械移除（审计挂本任务）、
-    // 一级目录驳回；清洗后为空落下方既有「写范围不能为空」拒绝。
-    const scopes = this.normalizeDispatchScopes(this.projectRow(task.project_id), parsedScopes, { actor, taskId })
-    if (!scopes.length) throw badRequest('写范围不能为空：未声明的写运行会与同项目所有写运行保守串行')
+    // 派单清洗：与派单入口同口径——ignored 染色（进 ignored_write_scopes，不参与并行锁）
+    // + 一级目录驳回；有效与染色清单同时为空才落「写范围不能为空」拒绝。
+    const { scopes, ignored } = this.normalizeDispatchScopes(this.projectRow(task.project_id), parsedScopes, { actor, taskId })
+    if (!scopes.length && !ignored.length) throw badRequest('写范围不能为空：未声明的写运行会与同项目所有写运行保守串行')
     const runningWrite = this.store.get(
       "SELECT id FROM runs WHERE task_id = ? AND status = 'running' AND mode = 'write'",
       taskId,
@@ -168,10 +168,11 @@ export const taskReviewMethods = {
     )
     const from = readWriteScopes(task.write_scopes)
     const serialized = JSON.stringify(scopes)
+    const ignoredSerialized = JSON.stringify(ignored)
     this.store.transaction(() => {
       this.store.run(
-        'UPDATE tasks SET write_scopes = ?, version = version + 1, updated_at = ? WHERE id = ?',
-        serialized, nowIso(), taskId,
+        'UPDATE tasks SET write_scopes = ?, ignored_write_scopes = ?, version = version + 1, updated_at = ? WHERE id = ?',
+        serialized, ignoredSerialized, nowIso(), taskId,
       )
       for (const run of queuedWrites) {
         this.store.run('UPDATE runs SET write_scopes = ? WHERE id = ?', serialized, run.id)
