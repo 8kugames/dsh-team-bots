@@ -489,9 +489,6 @@
     font-size: var(--fs-caption);
     line-height: 1.65;
 }
-.traj-end {
-    border-color: var(--line-2);
-}
 .traj-end .traj-entry-head {
     color: var(--ink);
     font-weight: 600;
