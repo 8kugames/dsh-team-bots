@@ -330,6 +330,29 @@ test('群聊只放结论，完整交付留在任务评论', async () => {
   }
 })
 
+test('交付摘要保留 markdown 块结构，不被压成一整行标题', async () => {
+  const { root, store, service, runtime, director, dev } = await setup({ chatReplyMaxChars: 800 })
+  try {
+    const project = await service.createProject({ name: 'Shape', key: 'SHP', ownerBotId: director.id, memberIds: [dev.id] })
+    const task = await service.createTask({ projectId: project.id, title: 'Report shape', assigneeBotId: dev.id, autoStart: true })
+    service.started = true
+    await service.tick()
+    const run = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task'", task.id)
+    const report = '# 交付报告\n\n## 结论：前提已失效\n\n- 条目一\n- 条目二\n'
+    await runtime.complete(run.id, 'succeeded', report)
+
+    const message = store.get("SELECT body FROM messages WHERE task_id = ? AND sender_type = 'bot' ORDER BY created_at DESC LIMIT 1", task.id)
+    // 换行是标题/列表的判定依据：压成一行后整条报告会变成一个 ATX 标题，渲染成一整块大号粗体。
+    assert.ok(message.body.includes('# 交付报告\n'), '交付报告标题应独占一行')
+    assert.ok(message.body.includes('\n## 结论：前提已失效\n'), '二级标题应独占一行')
+    assert.ok(message.body.includes('\n- 条目一'), '列表项应独占一行')
+    assert.ok(!message.body.includes('## 结论：前提已失效 - 条目一'), '正文不应与标题挤在同一行')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('team_recall 能按短 id 展开消息、评论、运行和任务', async () => {
   const { root, store, service, runtime, director, dev } = await setup()
   try {

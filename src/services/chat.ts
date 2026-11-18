@@ -18,6 +18,9 @@ export const commandRememberPattern = /^\/remember\s+([\s\S]+)$/u
 
 export const commandClearPattern = /^\/clear$/u
 
+// 交付摘要按行边界截断时，至少要留下预算的一半，否则只剩标题行等于没摘要。
+const CHAT_SUMMARY_MIN_KEPT_RATIO = 0.5
+
 export const chatMethods = {
   insertMessage({ projectId, senderType, senderId, body, mentions = [], taskId = null, runId = null, replyToId = null, images = [], createdAt = nowIso() }) {
     const group = this.groupOf(projectId)
@@ -364,12 +367,24 @@ export const chatMethods = {
     return { messageId, runBot: bot.id }
   },
 
-  // 群聊只放结论：压缩空白、取首段、按上限截断。
+  // 群聊只放结论：保留 markdown 块结构、按上限截断。
+  // 换行不能压成空格——标题与列表靠行首判定，整段压成一行后行首的 "#" 会变成整行的
+  // ATX 标题标记，群聊里整条报告渲染成一个 h1（一整块大号粗体，ZONGM-165 交付消息实测）。
   chatSummary(output, maxChars = this.config.chatReplyMaxChars) {
-    const clean = String(output ?? '').replace(/\s+/g, ' ').trim()
+    const clean = String(output ?? '')
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map(line => line.replace(/[ \t]+$/, ''))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
     if (!clean) return '模型未返回文本。'
     if (clean.length <= maxChars) return clean
-    return `${clean.slice(0, maxChars).trimEnd()}…`
+    // 截断优先落在行边界；行边界太靠前（首行就超预算）时硬截，避免只留半句话。
+    const cut = clean.slice(0, maxChars)
+    const lastBreak = cut.lastIndexOf('\n')
+    const kept = lastBreak >= Math.floor(maxChars * CHAT_SUMMARY_MIN_KEPT_RATIO) ? cut.slice(0, lastBreak) : cut
+    return `${kept.trimEnd()}…`
   },
 
   // ===== Bot 间私信（team_message_bot）=====
