@@ -4,6 +4,24 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.97
+
+### 中文
+
+**数据拓扑（聊天分库 Phase 3，完成体）**
+
+- **控制面明细迁入聊天库**：运行事件（run_events）、任务评论/任务事件、终端命令随运行/项目迁入各自的群聊或单聊 SQLite；`runs` 的交付正文与产物清单转到聊天库 `run_payload`，顶库只保留调度行——领取事务与唯一活跃索引的单库原子性原样保住。顶库 64MB → 43MB，事件 25,615 条精确对账。
+- **跨库事务语义**：顶库事务内的聊天库写（任务事件、交付评论等）改为提交后落库，外层回滚即丢弃，不再残留半截事件。
+- **修复（自 Phase 1 的回归）**：bot @mention 派发的群聊运行恢复「机器流量档」降档——分库后候选排序的旧 JOIN 恒空导致失效；改为领取时按聊天库实测触发消息定档。
+
+### English
+
+**Data topology (chat DB split Phase 3, final)**
+
+- **Control-plane detail moves into chat stores**: run events, task comments/events and terminal commands now live in each group/solo chat SQLite; run output and artifact lists moved to `run_payload`, leaving the top DB with scheduling rows only — claim transactions and unique active-run indexes keep their single-database atomicity. Top DB shrinks 64MB → 43MB with 25,615 events reconciled exactly.
+- **Cross-database transaction semantics**: chat-store writes inside top-database transactions now flush after commit and are discarded on rollback, so no half-written events remain.
+- **Fix (regression since Phase 1)**: chat runs dispatched from bot @mentions regain their machine-traffic tier demotion — the old ordering JOIN went permanently empty after the split; tiers are now measured from the trigger message in its chat store at claim time.
+
 ## v0.3.80
 
 ### 中文
