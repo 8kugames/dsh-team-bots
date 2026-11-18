@@ -108,7 +108,8 @@ test('启动重排队置位：running→queued 且 recovery=1，attempt 不受�
     assert.equal(row.attempt, 1, '重排队不得 bump attempt（与 retryRun 的 +1 语义正交）')
     assert.equal(row.started_at, null, '既有清场行为保持：started_at 清空')
     assert.equal(row.session_id, null, '既有清场行为保持：session_id 清空')
-    const events = ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'recovered'", 'run-a')
+    const events = ctx.service.runChatStore(runRowOf(ctx.store, 'run-a')).all(
+      "SELECT type FROM run_events WHERE run_id = ? AND type = 'recovered'", 'run-a')
     assert.equal(events.length, 1, 'run_events 应留 recovered 痕')
   } finally {
     await cleanup(ctx)
@@ -188,7 +189,8 @@ test('多次重启多次注入：每次重排队后的首跑各注入一次，at
     assert.ok(secondPrompt.includes('# Recovery note'), '第二轮重启后的首跑应再次注入恢复块')
     assert.equal(Number(runRowOf(ctx.store, 'run-twice').recovery), 0, '第二轮消费后标志应再次清零')
     assert.equal(runRowOf(ctx.store, 'run-twice').attempt, 1, '两轮重排队后 attempt 仍为 1')
-    const events = ctx.store.all("SELECT type FROM run_events WHERE run_id = 'run-twice' AND type = 'recovered'")
+    const events = ctx.service.runChatStore(runRowOf(ctx.store, 'run-twice')).all(
+      "SELECT type FROM run_events WHERE run_id = 'run-twice' AND type = 'recovered'")
     assert.equal(events.length, 2, '两次重启应各留一条 recovered 事件')
   } finally {
     await cleanup(ctx)

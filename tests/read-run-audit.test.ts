@@ -154,7 +154,7 @@ test('集成：并发写运行在跑时，只读运行的指纹变化不点名�
       project.id,
     )
     assert.equal(alert, undefined, '有并发写运行时不应点名只读运行')
-    const event = store.get("SELECT * FROM run_events WHERE run_id = ? AND type = 'read_audit_attributed'", chatRun.id)
+    const event = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = ? AND type = 'read_audit_attributed'", chatRun.id)
     assert.ok(event, '应留下归因 run_event')
     assert.match(event.message, /AUD-1/)
   } finally {

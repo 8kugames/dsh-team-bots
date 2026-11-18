@@ -80,7 +80,7 @@ test('额度耗尽（1308）：不合成退避、切备用模型、任务不置 
     const run = store.get("SELECT * FROM runs WHERE id = 'q1'")
     assert.equal(run.retry_after_ms, null, '额度耗尽不合成退避值')
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'q1' AND type = 'rate_limit_backoff'").n, 0,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'q1' AND type = 'rate_limit_backoff'").n, 0,
       '不写指数退避事件',
     )
     const derived = store.get("SELECT * FROM runs WHERE parent_run_id = 'q1'")
@@ -209,7 +209,7 @@ test('瞬时限流（无 Retry-After）：仍合成指数退避（不回归 D-38
     })
 
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q5'").retry_after_ms, rateLimitBackoffMs(1))
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = 'q5' AND type = 'rate_limit_backoff'")
+    const evt = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = 'q5' AND type = 'rate_limit_backoff'")
     assert.ok(evt, '仍写退避事件')
     assert.match(failureMessage(service.groupChatStore(project.id), 'q5'), /指数退避/)
   } finally {
@@ -297,7 +297,7 @@ test('Token Plan 用量上限走真实失败路径：不退避、派生备用运
 
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q7'").retry_after_ms, null, '额度耗尽不合成退避值')
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'q7' AND type = 'rate_limit_backoff'").n, 0,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'q7' AND type = 'rate_limit_backoff'").n, 0,
       '不写指数退避事件',
     )
     const derived = store.get("SELECT * FROM runs WHERE parent_run_id = 'q7'")

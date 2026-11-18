@@ -193,13 +193,14 @@ test('全链路：交付转待验收后委派，结论评论写回任务', async
     })
     await t.service.taskReviewDelegate(task.id, t.actor)
     await waitFor(() => {
-      const comment = t.store.get(
+      // Phase 3：task_comments 住任务所属项目的聊天库。
+      const comment = t.service.groupChatStore(task.project_id).get(
         "SELECT * FROM task_comments WHERE task_id = ? AND author_type = 'bot' AND body LIKE '子代理核验：%'",
         task.id,
       )
       return Boolean(comment)
     })
-    const comment = t.store.get(
+    const comment = t.service.groupChatStore(task.project_id).get(
       "SELECT * FROM task_comments WHERE task_id = ? AND body LIKE '子代理核验：%'",
       task.id,
     )

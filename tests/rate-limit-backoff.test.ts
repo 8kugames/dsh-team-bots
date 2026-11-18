@@ -44,7 +44,7 @@ test('RATE_LIMIT 无 Retry-After：finishRun 合成 retry_after_ms 并写 rate_l
       error: { code: 'RATE_LIMIT', message: 'upstream rate-limited (bili_throttle_terminal)' },
     })
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'sb1'").retry_after_ms, rateLimitBackoffMs(1))
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = 'sb1' AND type = 'rate_limit_backoff'")
+    const evt = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = 'sb1' AND type = 'rate_limit_backoff'")
     assert.ok(evt, '应写 rate_limit_backoff 事件')
     assert.match(evt.message, /第 1 次退避/)
     // 用 run_id + 正文前缀定位：失败消息每 run 恰一条；ORDER BY created_at 在毫秒并列时会拿错行。
@@ -142,7 +142,7 @@ test('真 Retry-After 优先：不被合成值覆盖，也不写退避事件', a
     assert.equal(run.retry_after_ms, 120_000, '真值保留')
     assert.notEqual(run.retry_after_ms, rateLimitBackoffMs(1), '不能被合成值覆盖')
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'ra1' AND type = 'rate_limit_backoff'").n, 0,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'ra1' AND type = 'rate_limit_backoff'").n, 0,
       '有真值时不写合成退避事件',
     )
   } finally {

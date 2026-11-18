@@ -93,7 +93,7 @@ test('ECONNRESET 失败：合成退避落 retry_after_ms，到期派生重排队
       error: { code: 'ECONNRESET', message: 'read ECONNRESET' },
     })
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'tr1'").retry_after_ms, 15_000)
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = 'tr1' AND type = 'transient_backoff'")
+    const evt = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = 'tr1' AND type = 'transient_backoff'")
     assert.ok(evt, '应写 transient_backoff 事件')
     assert.match(evt.message, /第 1 次退避/)
     // 不切备用模型、不派生重试运行（等 plan_retry 到期）、不排总监处理——不是等 owner 的终局 blocked。
@@ -214,10 +214,10 @@ test('429 仍走限流路径：真 Retry-After 优先，不被瞬态合成值覆
     assert.equal(run.retry_after_ms, 120_000, '服务端 retry_after 原样保留')
     assert.notEqual(run.retry_after_ms, transientBackoffMs(1), '不用瞬态合成值')
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'rl1' AND type = 'transient_backoff'").n, 0,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'rl1' AND type = 'transient_backoff'").n, 0,
       '限流失败不写瞬态事件',
     )
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = 'rl1' AND type = 'rate_limit_backoff'")
+    const evt = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = 'rl1' AND type = 'rate_limit_backoff'")
     assert.equal(evt, undefined, '有真值时不写合成退避事件')
     const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'rl1' AND body LIKE '任务执行失败%'")
     assert.match(msg.body, /上游限流/)

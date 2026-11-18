@@ -202,14 +202,15 @@ test('派发覆盖全链：落库 → 起会话生效 → run_events 留档 → 
     assert.deepEqual(effectiveSandbox(runRow, botRow, taskRow), { mode: 'read-only', source: 'override' })
 
     // 起会话：宿主 sandbox/mode 收到收紧档，run_events 落 sandbox_mode 事件（档位+来源）。
+    // Phase 3：run_events 住聊天库——运行时按 run 路由取库。
     const ctx = fakeCtx()
-    const runtime = new DshRuntime({ ctx, config, store, logger: { info() {}, warn() {}, error() {} } })
+    const runtime = new DshRuntime({ ctx, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
     const sessionUsed = await runtime.ensureSession(botRow, project, { run: runRow, task: taskRow })
     assert.equal(sessionUsed, 'sess-1')
     const modes = ctx.appended.filter(call => call.type === 'sandbox/mode')
     assert.equal(modes.length, 1)
     assert.deepEqual(modes[0].data, { mode: 'read-only' }, '覆盖档必须写进宿主会话沙箱')
-    const event = store.get("SELECT * FROM run_events WHERE run_id = ? AND type = 'sandbox_mode'", runRow.id)
+    const event = service.runChatStore(runRow).get("SELECT * FROM run_events WHERE run_id = ? AND type = 'sandbox_mode'", runRow.id)
     assert.ok(event, '起会话必须落 sandbox_mode 事件')
     assert.match(event.message, /read-only/)
     assert.match(event.message, /override/)
@@ -246,7 +247,8 @@ test('覆盖只收紧不放大；重派 inherit 清覆盖、缺省不动；垃�
     })
     await service.assignFromBot(sessionId, { task: `PA-${task.number}`, assignee: 'Builder', sandbox: 'read-only' })
     assert.equal(store.get('SELECT sandbox_override FROM tasks WHERE id = ?', task.id).sandbox_override, 'read-only')
-    const assignedEvent = store.get(
+    // Phase 3：task_events 住项目聊天库。
+    const assignedEvent = service.groupChatStore(project.id).get(
       "SELECT data_json FROM task_events WHERE task_id = ? AND type = 'assigned' ORDER BY created_at DESC LIMIT 1",
       task.id,
     )

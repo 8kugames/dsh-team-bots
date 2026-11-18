@@ -166,7 +166,7 @@ test('target=task 有活跃运行：steer 注入该运行会话并落任务线�
     const message = lastMessage(t.service.groupChatStore(t.project.id), t.project.id)
     assert.equal(message.task_id, task.id, '留痕应锚定任务线程')
     assert.equal(message.sender_id, t.caller.id, '留痕应记录来源 bot')
-    const event = t.store.get('SELECT * FROM run_events WHERE run_id = ? AND type = ?', runId, 'notified')
+    const event = t.service.groupChatStore(t.project.id).get('SELECT * FROM run_events WHERE run_id = ? AND type = ?', runId, 'notified')
     assert.ok(event, '注入应记 run_event notified')
   } finally { await t.close() }
 })

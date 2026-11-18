@@ -155,7 +155,7 @@ test('发送前预判：modalities 无 image 的带图消息直接派生 vision 
     assert.equal(run.model_model, 'MiniMax-M3.1-Flash', '代理模型 model')
     assert.equal(run.idempotency_key, `vision:${sent.messageId}:${t.dev.id}`)
     assert.ok(
-      t.store.get('SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = ?', run.id, 'queued'),
+      t.service.runChatStore(run).get('SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = ?', run.id, 'queued'),
       'run_events 记 queued',
     )
     // 原对话不受派生阻塞：chat_run 照常入列。

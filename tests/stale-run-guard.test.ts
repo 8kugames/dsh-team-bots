@@ -67,10 +67,10 @@ function runRow(store, runId) {
   return store.get('SELECT * FROM runs WHERE id = ?', runId)
 }
 
-function staleEvents(store, runId) {
-  return store.all(
+function staleEvents(service, run) {
+  return service.runChatStore(run).all(
     "SELECT * FROM run_events WHERE run_id = ? AND type = 'stale_superseded' ORDER BY created_at",
-    runId,
+    run.id,
   )
 }
 
@@ -82,17 +82,15 @@ function requeue(store, runId) {
 }
 
 // 种子一条只读运行（review 模式）：复现 DSHBOTS-102 漏网的 read 模式排队运行。
-function seedReadRun(store, { id, projectId, botId, taskId }) {
+// 事件播种走 insertRunEvent 统一收口（自动路由到运行归属聊天库）。
+function seedReadRun(service, store, { id, projectId, botId, taskId }) {
   store.run(
     `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, trigger_ref, status,
        attempt, idempotency_key, queued_at)
      VALUES (?, ?, ?, ?, 'review', 'read', 'review_requested', ?, 'queued', 1, ?, ?)`,
     id, projectId, botId, taskId, taskId, `seed:${id}`, nowIso(),
   )
-  store.run(
-    'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-    `evt_seed_${id}`, id, 'queued', '任务交付，转总监验收', nowIso(),
-  )
+  service.insertRunEvent(id, 'queued', '任务交付，转总监验收')
 }
 
 async function cleanup(root, store) {
@@ -143,7 +141,7 @@ test('任务 done 后：tick 不领取其 queued 任务运行，且置 canceled�
     assert.equal(after.cancel_requested, 1)
     assert.ok(after.ended_at, '终态清理要写结束时间')
     assert.equal(runtime.started.filter(started => started.runId === queued.id).length, 0, '不得被领取起跑')
-    assert.equal(staleEvents(store, queued.id).length, 1, '恰好一条 stale_superseded 留痕')
+    assert.equal(staleEvents(service, queued).length, 1, '恰好一条 stale_superseded 留痕')
     assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'done', '任务状态不被回退')
   } finally {
     await cleanup(root, store)
@@ -167,7 +165,7 @@ test('任务 canceled 后：同口径不领取、置 canceled（SUPERSEDED + 留
     assert.equal(after.status, 'canceled')
     assert.equal(after.error_code, 'SUPERSEDED')
     assert.equal(runtime.started.filter(started => started.runId === queued.id).length, 0)
-    assert.equal(staleEvents(store, queued.id).length, 1)
+    assert.equal(staleEvents(service, queued).length, 1)
   } finally {
     await cleanup(root, store)
   }
@@ -193,13 +191,13 @@ test('任务流转终态时清理残留的 queued 写运行（SUPERSEDED + 留�
     const after = runRow(store, retryRunId)
     assert.equal(after.status, 'canceled', '终态清理要收掉排队的写运行')
     assert.equal(after.error_code, 'SUPERSEDED', '排队运行用 SUPERSEDED 管理清理标记')
-    assert.equal(staleEvents(store, retryRunId).length, 1)
+    assert.equal(staleEvents(service, after).length, 1)
     assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'done')
 
     // 幂等：同任务重复置终态、直接重复调终态清理，都不新增事件。
     await service.updateTask(task.id, { status: 'done' }, actor)
     await service.cancelSupersededQueuedRuns(task.id)
-    assert.equal(staleEvents(store, retryRunId).length, 1, '重复终态清理不重复留痕')
+    assert.equal(staleEvents(service, runRow(store, retryRunId)).length, 1, '重复终态清理不重复留痕')
 
     // 幂等：把写运行放回 queued 模拟调度窗口内漏网后再触发，事件仍只有一条。
     requeue(store, retryRunId)
@@ -207,7 +205,7 @@ test('任务流转终态时清理残留的 queued 写运行（SUPERSEDED + 留�
     await service.tick()
     await service.tick()
     assert.equal(runRow(store, retryRunId).status, 'canceled', '再次触发仍会被守卫收掉')
-    assert.equal(staleEvents(store, retryRunId).length, 1, 'run_id EXISTS 去重生效，不重复写事件')
+    assert.equal(staleEvents(service, runRow(store, retryRunId)).length, 1, 'run_id EXISTS 去重生效，不重复写事件')
   } finally {
     await cleanup(root, store)
   }
@@ -218,7 +216,7 @@ test('任务流转终态时清理残留的 queued 只读运行（补写占用只
   try {
     // 不开 autoStart：任务名下没有写运行，只留一条只读运行排队。
     const { project, task } = await createProjectWithTask(service, director, dev, { autoStart: false })
-    seedReadRun(store, { id: 'run_stale_read', projectId: project.id, botId: director.id, taskId: task.id })
+    seedReadRun(service, store, { id: 'run_stale_read', projectId: project.id, botId: director.id, taskId: task.id })
 
     const actor = service.actor()
     // in_progress → in_review：写占用释放只清 mode='write'，只读运行会漏网；
@@ -231,10 +229,10 @@ test('任务流转终态时清理残留的 queued 只读运行（补写占用只
     const after = runRow(store, 'run_stale_read')
     assert.equal(after.status, 'canceled', '只读运行在任务终态时必须被收掉，否则会被调度器起跑执行')
     assert.equal(after.error_code, 'SUPERSEDED', '只读运行同样用 SUPERSEDED 管理清理标记')
-    assert.equal(staleEvents(store, 'run_stale_read').length, 1)
+    assert.equal(staleEvents(service, after).length, 1)
     // 重复触发不重复留痕。
     await service.cancelSupersededQueuedRuns(task.id)
-    assert.equal(staleEvents(store, 'run_stale_read').length, 1)
+    assert.equal(staleEvents(service, runRow(store, 'run_stale_read')).length, 1)
   } finally {
     await cleanup(root, store)
   }
@@ -244,7 +242,7 @@ test('非任务运行不受守卫影响：queued 只读运行仍照常领取', a
   const { root, store, service, runtime, director, dev } = await manualSetup()
   try {
     const { project, task } = await createProjectWithTask(service, director, dev, { autoStart: false })
-    seedReadRun(store, { id: 'run_stale_read_ok', projectId: project.id, botId: director.id, taskId: task.id })
+    seedReadRun(service, store, { id: 'run_stale_read_ok', projectId: project.id, botId: director.id, taskId: task.id })
 
     service.started = true
     await service.tick()
@@ -252,7 +250,7 @@ test('非任务运行不受守卫影响：queued 只读运行仍照常领取', a
     const after = runRow(store, 'run_stale_read_ok')
     assert.equal(after.status, 'running', '非任务运行不得被终态守卫误杀')
     assert.equal(after.error_code, null)
-    assert.equal(staleEvents(store, 'run_stale_read_ok').length, 0, '非任务运行不得写 stale_superseded')
+    assert.equal(staleEvents(service, after).length, 0, '非任务运行不得写 stale_superseded')
     assert.equal(runtime.started.filter(started => started.runId === 'run_stale_read_ok').length, 1, '只读运行应被正常领取')
   } finally {
     await cleanup(root, store)

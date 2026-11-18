@@ -147,7 +147,7 @@ test('端到端：终态任务不再产生 review run 行；非终态照常入�
     assert.equal(after.status, 'canceled')
     assert.equal(after.error_code, 'SUPERSEDED')
     assert.equal(after.error_message, '任务已结束，排队运行被清理')
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = ? AND type = 'stale_superseded'", runId)
+    const evt = service.runChatStore(after).get("SELECT * FROM run_events WHERE run_id = ? AND type = 'stale_superseded'", runId)
     assert.ok(evt, 'stale_superseded 事件应保留')
   } finally {
     await teardown(state)

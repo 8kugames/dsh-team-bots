@@ -58,7 +58,8 @@ async function bareTask(t) {
   // tick 可能已把卡置 in_progress 并写过 status 事件：统一归一到 todo 并清掉 tick 的
   // status 事件（保留 created），测试从干净事件序列开始。
   t.store.run("UPDATE tasks SET status = 'todo' WHERE id = ?", task.id)
-  t.store.run(
+  // Phase 3：task_events 住项目聊天库。
+  t.service.groupChatStore(t.project.id).run(
     "DELETE FROM task_events WHERE task_id = ? AND type = 'status' AND json_extract(data_json, '$.field') = 'status'",
     task.id,
   )
@@ -70,7 +71,8 @@ const bindOwner = (t) => t.store.run(
   'sess-ledger-owner', t.director.id, t.project.id, 'project', new Date().toISOString(),
 )
 
-const statusEvents = (t, taskId) => t.store.all(
+// Phase 3：task_events 住项目聊天库，状态事件读取走聊天库句柄。
+const statusEvents = (t, taskId) => t.service.groupChatStore(t.project.id).all(
   `SELECT * FROM task_events WHERE task_id = ? AND type = 'status' AND json_extract(data_json, '$.field') = 'status' ORDER BY rowid`,
   taskId,
 )
@@ -108,7 +110,7 @@ test('② 交付/受阻/开工/取消四条直改路径均补写 status 事件�
     t.service.setTaskStatus(task.id, 'in_progress', actor)
     t.service.setTaskStatus(task.id, 'todo', actor, { ifIs: 'in_progress' })
     // created 事件带初始 todo + 四条 status 事件 → 重放终态 todo。
-    const events = t.store.all(
+    const events = t.service.groupChatStore(t.project.id).all(
       `SELECT type, data_json FROM task_events WHERE task_id = ? ORDER BY rowid`,
       task.id,
     )

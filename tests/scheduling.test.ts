@@ -166,7 +166,7 @@ test('同项目写运行：声明的写范围不重叠时并行放行', async ()
     const ids = running.map(run => run.task_id).sort()
     assert.deepEqual(ids, [first.id, second.id].sort())
     // 并行放行留痕，便于事后排查
-    assert.ok(store.get("SELECT id FROM run_events WHERE type = 'run_parallel'"), '并行放行应记一条 run_parallel 事件')
+    assert.ok(service.groupChatStore(project.id).get("SELECT id FROM run_events WHERE type = 'run_parallel'"), '并行放行应记一条 run_parallel 事件')
     // 运行快照带上入队时的写范围
     for (const run of running) {
       assert.ok(Array.isArray(service.runView(run).writeScopes))
@@ -260,7 +260,7 @@ test('运行中的任务会把新评论直通到执行会话', async () => {
     assert.equal(runtime.steers[0].sessionId, 'session-task-1')
     assert.match(runtime.steers[0].text, /STR-\d+/)
     assert.match(runtime.steers[0].text, /改用方案 B/)
-    assert.ok(store.get("SELECT id FROM run_events WHERE run_id = ? AND type = 'steered'", run.id))
+    assert.ok(service.runChatStore(run).get("SELECT id FROM run_events WHERE run_id = ? AND type = 'steered'", run.id))
 
     // 没有运行中的任务时只落库，不投递。
     await runtime.complete(run.id)

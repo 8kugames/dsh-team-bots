@@ -135,10 +135,10 @@ test('queued 写运行：允许改，任务声明与运行快照同拍更新，�
       ['src/new/deep.js', 'tests/new.test.js'],
       '排队运行的写范围快照必须同步为新声明（下一拍调度按它判闸）',
     )
-    const runEvent = store.get("SELECT type, message FROM run_events WHERE run_id = ? AND type = 'scopes_updated'", runId)
+    const runEvent = service.groupChatStore(project.id).get("SELECT type, message FROM run_events WHERE run_id = ? AND type = 'scopes_updated'", runId)
     assert.ok(runEvent, '运行事件应记 scopes_updated')
     assert.match(runEvent.message, /src\/new\/deep\.js/)
-    const taskEvent = store.get("SELECT type, data_json FROM task_events WHERE task_id = ? AND type = 'scopes_updated'", task.id)
+    const taskEvent = service.groupChatStore(project.id).get("SELECT type, data_json FROM task_events WHERE task_id = ? AND type = 'scopes_updated'", task.id)
     assert.ok(taskEvent, '任务事件应记 scopes_updated')
     assert.deepEqual(JSON.parse(taskEvent.data_json), { from: ['src/old.js'], to: ['src/new/deep.js', 'tests/new.test.js'] })
     const audit = store.get("SELECT data_json FROM audit_log WHERE action = 'task.scopes_update' AND target_id = ?", task.id)

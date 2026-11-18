@@ -633,7 +633,7 @@ test('t) 锁定期内审查拒写：run_events 的 reviewed 事件带拒因（�
     assert.equal(first.applied, 0, '触顶时审查写入应被拒')
     assert.equal(first.rejected, 1)
     assert.equal(first.capacityRejected, 1)
-    const event = t.store.get("SELECT message FROM run_events WHERE run_id = ? AND type = 'reviewed'", 'run-review-lock')
+    const event = t.service.runChatStore(reviewRun).get("SELECT message FROM run_events WHERE run_id = ? AND type = 'reviewed'", 'run-review-lock')
     assert.ok(event, '应留下 reviewed 事件')
     const message = String(event.message)
     assert.ok(message.includes('拒写 1 条'), `事件应写明拒写条数：${message}`)

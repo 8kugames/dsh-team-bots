@@ -263,7 +263,7 @@ test('压缩≠结转：不 alias 化绑定、不新建会话、不排 rollover�
 
     await ctx.service.finishRun({ runId: compact.id, status: 'succeeded', output: '当前聚焦 X，进行中 Y，下一步 Z。' })
     assert.equal(
-      ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_done'", compact.id).length,
+      ctx.service.runChatStore(compact).all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_done'", compact.id).length,
       1,
       '成功应留 session_compact_done 事件',
     )
@@ -304,11 +304,11 @@ test('P1 宿主折叠：session_compact 收尾调用 compactNow 并留痕；宿�
     assert.equal(foldCalls[0].agent.id, 'agent-live', '折叠作用于压缩运行的原会话 agent')
     assert.ok(foldCalls[0].signal instanceof AbortSignal, '折叠请求带取消信号（有界超时）')
     assert.equal(
-      ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_fold'", compact.id).length,
+      ctx.service.runChatStore(compact).all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_fold'", compact.id).length,
       1,
       '折叠完成应留 session_compact_fold 事件（含收拢规模）',
     )
-    const foldMsg = ctx.store.get("SELECT message FROM run_events WHERE run_id = ? AND type = 'session_compact_fold'", compact.id)?.message
+    const foldMsg = ctx.service.runChatStore(compact).get("SELECT message FROM run_events WHERE run_id = ? AND type = 'session_compact_fold'", compact.id)?.message
     assert.ok(foldMsg.includes('4242'), '留痕带折叠 token 数')
 
     // 降级：宿主未提供 compaction 服务 → skipped 留痕可见，不静默。
@@ -324,7 +324,7 @@ test('P1 宿主折叠：session_compact 收尾调用 compactNow 并留痕；宿�
       await ctx2.service.finishRun({ runId: compact2.id, status: 'succeeded', output: '总结。' })
       await new Promise(resolve => setImmediate(resolve))
       assert.equal(
-        ctx2.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_fold_skipped'", compact2.id).length,
+        ctx2.service.runChatStore(compact2).all("SELECT type FROM run_events WHERE run_id = ? AND type = 'session_compact_fold_skipped'", compact2.id).length,
         1,
         '宿主无缝隙应留 skipped 事件（降级可见）',
       )

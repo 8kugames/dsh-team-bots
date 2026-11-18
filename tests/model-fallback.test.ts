@@ -116,7 +116,7 @@ test('主 provider 不可用：派生一次备用运行，任务不置 blocked�
     assert.equal(derived.model_model, 'gpt-4o-mini')
     // 原 run 保持 failed，并留 model_fallback 事件
     assert.equal(store.get('SELECT status FROM runs WHERE id = ?', 'f3').status, 'failed')
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = 'f3' AND type = 'model_fallback'")
+    const evt = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = 'f3' AND type = 'model_fallback'")
     assert.ok(evt, '原 run 应留 model_fallback 事件')
     assert.match(evt.message, /AUTH/)
     // 任务不置 blocked，也不派 owner handle
@@ -267,7 +267,7 @@ test('内部运行撞墙派生备用：review 派生 review 运行；chat 不派
     assert.equal(derived.model_model, 'MiniMax-M3.1-Flash')
     assert.equal(derived.status, 'queued')
     assert.equal(derived.task_id, task.id)
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = 'rv1' AND type = 'model_fallback'")
+    const evt = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = 'rv1' AND type = 'model_fallback'")
     assert.ok(evt, '原运行留 model_fallback 事件')
     assert.match(evt.message, /minimax-cn\/MiniMax-M3\.1-Flash/)
     // 额度墙落在主 provider 上（内部运行同样记账）

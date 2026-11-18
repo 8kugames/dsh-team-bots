@@ -117,12 +117,16 @@ test('非只读卡派发：运行档位=执行 bot 自身配置（workspace-writ
 
     // 起会话：缺省档必须真的写进宿主 sandbox/mode（workspace-write 侧），并落 run_events。
     const ctx = fakeCtx()
-    const runtime = new DshRuntime({ ctx, config, store, logger: { info() {}, warn() {}, error() {} } })
+    const runtime = new DshRuntime({
+      ctx, config, store, logger: { info() {}, warn() {}, error() {} },
+      // Phase 3：与 index 同款注入聊天库路由器，sandbox_mode 事件落运行归属库。
+      chatStores: { forRun: (run) => service.runChatStore(run) },
+    })
     await runtime.ensureSession(devBot, project, { run: devRun, task: devTask })
     const modes = ctx.appended.filter(call => call.type === 'sandbox/mode')
     assert.equal(modes.length, 1, '缺省档应写一次 sandbox/mode')
     assert.deepEqual(modes[0].data, { mode: 'workspace-write' }, '缺省档=bot 配置档，不得收紧为 read-only')
-    const event = store.get("SELECT * FROM run_events WHERE run_id = ? AND type = 'sandbox_mode'", devRun.id)
+    const event = service.runChatStore(devRun).get("SELECT * FROM run_events WHERE run_id = ? AND type = 'sandbox_mode'", devRun.id)
     assert.ok(event, '缺省档也要落 sandbox_mode 事件')
     assert.match(event.message, /workspace-write/)
     assert.match(event.message, /bot_config/)
@@ -149,12 +153,15 @@ test('显式只读卡派发：运行档位=read-only（卡面声明优先于 bot
     assert.deepEqual(effectiveSandbox(runRow, botRow, taskRow), { mode: 'read-only', source: 'override' })
 
     const ctx = fakeCtx()
-    const runtime = new DshRuntime({ ctx, config, store, logger: { info() {}, warn() {}, error() {} } })
+    const runtime = new DshRuntime({
+      ctx, config, store, logger: { info() {}, warn() {}, error() {} },
+      chatStores: { forRun: (run) => service.runChatStore(run) },
+    })
     await runtime.ensureSession(botRow, project, { run: runRow, task: taskRow })
     const modes = ctx.appended.filter(call => call.type === 'sandbox/mode')
     assert.equal(modes.length, 1)
     assert.deepEqual(modes[0].data, { mode: 'read-only' }, '显式只读卡必须落 read-only')
-    const event = store.get("SELECT * FROM run_events WHERE run_id = ? AND type = 'sandbox_mode'", runRow.id)
+    const event = service.runChatStore(runRow).get("SELECT * FROM run_events WHERE run_id = ? AND type = 'sandbox_mode'", runRow.id)
     assert.match(event.message, /read-only/)
     assert.match(event.message, /override/)
   } finally {

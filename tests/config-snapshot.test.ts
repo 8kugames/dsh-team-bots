@@ -49,7 +49,7 @@ const teardown = async (root, store) => {
   await rm(root, { recursive: true, force: true })
 }
 
-const snapshotsOf = (store, runId) => store.all(
+const snapshotsOf = (service, runId) => service.runChatStore(service.runRow(runId)).all(
   "SELECT * FROM run_events WHERE run_id = ? AND type = 'config_snapshot'", runId,
 )
 
@@ -63,7 +63,7 @@ test('任务运行记 config_snapshot；消息族运行不记', async (t) => {
   const card = await service.createTask({ projectId: project.id, title: '快照卡', assigneeBotId: builder.id, writeScopes: ['src/a.js'] }, actor)
   const runId = service.enqueueTaskRun(service.taskRow(card.id), 'task_started', actor)
   await service.executeRun(runId)
-  const events = snapshotsOf(store, runId)
+  const events = snapshotsOf(service, runId)
   assert.equal(events.length, 1, '任务运行恰一条快照')
   const payload = JSON.parse(events[0].message)
   assert.equal(payload.bot_revision, Number(builder.current_revision) || 0)
@@ -78,13 +78,13 @@ test('段覆盖变更后下一张卡快照随之变化；覆盖正文与 setting
   const card1 = await service.createTask({ projectId: project.id, title: '卡一', assigneeBotId: director.id }, actor)
   const run1 = { id: service.enqueueTaskRun(service.taskRow(card1.id), 'task_started', actor) }
   await service.executeRun(run1.id)
-  const before = JSON.parse(snapshotsOf(store, run1.id)[0].message)
+  const before = JSON.parse(snapshotsOf(service, run1.id)[0].message)
 
   service.updatePromptSegment('splitting', 'Split only when the owner approves.', actor)
   const card2 = await service.createTask({ projectId: project.id, title: '卡二', assigneeBotId: director.id }, actor)
   const run2 = { id: service.enqueueTaskRun(service.taskRow(card2.id), 'task_started', actor) }
   await service.executeRun(run2.id)
-  const after = JSON.parse(snapshotsOf(store, run2.id)[0].message)
+  const after = JSON.parse(snapshotsOf(service, run2.id)[0].message)
 
   assert.equal(before.prompt_segment_overrides.splitting, null)
   assert.equal(after.prompt_segment_overrides.splitting, 'Split only when the owner approves.')
@@ -99,6 +99,6 @@ test('备用模型运行快照记录 runs 行三列的实际下发模型', async
   const run = { id: service.enqueueTaskRun(service.taskRow(card.id), 'task_started', actor) }
   store.run('UPDATE runs SET model_provider = ?, model_model = ?, model_effort = ? WHERE id = ?', 'fallback-prov', 'fallback-model', 'high', run.id)
   await service.executeRun(run.id)
-  const payload = JSON.parse(snapshotsOf(store, run.id)[0].message)
+  const payload = JSON.parse(snapshotsOf(service, run.id)[0].message)
   assert.deepEqual(payload.model, { provider: 'fallback-prov', model: 'fallback-model', effort: 'high' }, '快照与 D-25 实际下发模型一致')
 })

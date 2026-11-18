@@ -71,7 +71,7 @@ test('① 改卡带过时 expected_version → 拒，文案含错过的事实，
     const task = await bareTask(t)
     const staleVersion = task.version
     // bot 读取之后、改卡之前：成员交付，卡 version 前进。
-    t.store.run(
+    t.service.groupChatStore(t.project.id).run(
       "INSERT INTO task_events(id, task_id, type, actor_type, actor_id, data_json, created_at) VALUES (?, ?, 'run_succeeded', 'bot', ?, ?, ?)",
       `evt-deliver-${task.id}`, task.id, t.dev.id,
       JSON.stringify({ runId: `run-${task.id}`, identifier: 'FENCE-1' }), new Date().toISOString(),

@@ -254,6 +254,77 @@ test('聊天分库 Phase 2：迁移搬明细建汇总、task_id 回填、幂等�
   } finally { await t.close() }
 })
 
+test('聊天分库 Phase 3：事件/评论/终端迁入聊天库、runs 瘦身、幂等可重跑', async () => {
+  const t = await setup('dsh-chatdb-p3m-')
+  try {
+    const project = await t.makeProject('P3M')
+    const now = new Date().toISOString()
+    const runId = 'run_p3_hist'
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at, task_id, output, artifacts)
+       VALUES (?, ?, ?, 'task', 'write', 'dispatch', 'succeeded', 1, 'k-p3', ?, NULL, '历史交付正文', '["a.png"]')`,
+      runId, project.id, t.director.id, now,
+    )
+    t.store.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      'evt_p3_1', runId, 'succeeded', '完成', now,
+    )
+    const taskId = 'task_p3_hist'
+    t.store.run(
+      `INSERT INTO tasks(id, project_id, number, title, status, creator_type, creator_id, created_at, updated_at)
+       VALUES (?, ?, 1, 'P3 历史任务', 'done', 'user', 'u1', ?, ?)`,
+      taskId, project.id, now, now,
+    )
+    t.store.run(
+      'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      'cmt_p3_1', taskId, 'user', 'u1', '历史评论', now,
+    )
+    t.store.run(
+      'INSERT INTO task_events(id, task_id, type, actor_type, actor_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'te_p3_1', taskId, 'commented', 'user', 'u1', '{}', now,
+    )
+    t.store.run(
+      'INSERT INTO terminal_commands(id, project_id, command, status, created_at) VALUES (?, ?, ?, ?, ?)',
+      'tc_p3_1', project.id, 'ls', 'done', now,
+    )
+    // initialize() 空库已记账；清账本后手动重跑验证拷贝路径。
+    t.store.run('DELETE FROM schema_migrations WHERE name LIKE ?', 'chat_split_p3%')
+    t.service.migrateChatSplitP3()
+    const chat = t.service.groupChatStore(project.id)
+    assert.ok(chat.get("SELECT * FROM run_events WHERE id = 'evt_p3_1'"), '事件已迁入聊天库')
+    assert.ok(chat.get("SELECT * FROM task_comments WHERE id = 'cmt_p3_1'"), '评论已迁入聊天库')
+    assert.ok(chat.get("SELECT * FROM task_events WHERE id = 'te_p3_1'"), '任务事件已迁入聊天库')
+    assert.ok(chat.get("SELECT * FROM terminal_commands WHERE id = 'tc_p3_1'"), '终端命令已迁入聊天库')
+    assert.equal(chat.get('SELECT output FROM run_payload WHERE run_id = ?', runId)?.output, '历史交付正文', '胖载荷已入聊天库')
+    assert.equal(t.store.get('SELECT COUNT(*) AS n FROM run_events')?.n, 0, '顶库事件清空')
+    assert.equal(t.store.get('SELECT COUNT(*) AS n FROM task_comments')?.n, 0, '顶库评论清空')
+    const runRow = t.store.get('SELECT * FROM runs WHERE id = ?', runId)
+    assert.equal(runRow.output, null, 'runs 已瘦身（output 清空）')
+    assert.equal(t.service.runOutputOf(runRow), '历史交付正文', '读取经载荷并回')
+    // 幂等重跑：不炸、不重复。
+    t.store.run('DELETE FROM schema_migrations WHERE name = ?', 'chat_split_p3')
+    t.service.migrateChatSplitP3()
+    assert.equal(chat.get('SELECT COUNT(*) AS n FROM run_events')?.n, 1)
+  } finally { await t.close() }
+})
+
+test('聊天分库 Phase 3：insertRunEvent 统一收口按运行归属落库', async () => {
+  const t = await setup('dsh-chatdb-p3w-')
+  try {
+    const project = await t.makeProject('P3W')
+    const now = new Date().toISOString()
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
+       VALUES ('run_p3_w', ?, ?, 'chat', 'read', 'chat_message', 'succeeded', 1, 'k-p3w', ?)`,
+      project.id, t.director.id, now,
+    )
+    t.service.insertRunEvent('run_p3_w', 'succeeded', '完成')
+    const chat = t.service.groupChatStore(project.id)
+    assert.ok(chat.get("SELECT * FROM run_events WHERE run_id = 'run_p3_w' AND type = 'succeeded'"), '事件落在项目聊天库')
+    assert.equal(t.store.get('SELECT COUNT(*) AS n FROM run_events')?.n, 0, '顶库不落')
+  } finally { await t.close() }
+})
+
 test('聊天分库：领取定档按聊天库 sender_type 实测（bot 派发降机器档）', async () => {
   // Phase 1 回归修正：候选排序的 LEFT JOIN messages 在分库后恒 NULL，
   // bot @mention 派发的群聊运行不再被降到机器流量档。定档改为按聊天库实测。

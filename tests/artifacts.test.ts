@@ -145,7 +145,7 @@ test('成功的写运行在 git 项目里记录产物清单，只读运行不记
     const writeRunId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId: writeRunId, status: 'succeeded', output: 'done' })
     const writeRun = store.get('SELECT * FROM runs WHERE id = ?', writeRunId)
-    const list = JSON.parse(writeRun.artifacts)
+    const list = service.runArtifactsOf(writeRun)
     const paths = list.map(item => item.path)
     assert.ok(paths.includes('README.md'), '修改的文件应记录为 M')
     assert.equal(list.find(item => item.path === 'README.md').status, 'M')
@@ -156,7 +156,7 @@ test('成功的写运行在 git 项目里记录产物清单，只读运行不记
 
     const readRunId = insertRun(store, { projectId: project.id, botId: director.id, mode: 'read', kind: 'review' })
     await service.finishRun({ runId: readRunId, status: 'succeeded', output: 'ok' })
-    assert.equal(store.get('SELECT artifacts FROM runs WHERE id = ?', readRunId).artifacts, null)
+    assert.deepEqual(service.runArtifactsOf(store.get('SELECT * FROM runs WHERE id = ?', readRunId)), [], '只读运行不记录产物清单')
 
     const view = service.listRunArtifacts(writeRunId)
     assert.ok(Array.isArray(view.artifacts))
@@ -192,7 +192,7 @@ test('产物清单收下 git 的组合状态：AM、MM 与重命名', async () =
 
     const runId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId, status: 'succeeded', output: 'done' })
-    const list = JSON.parse(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts)
+    const list = service.runArtifactsOf(store.get('SELECT * FROM runs WHERE id = ?', runId))
     const statusOf = path => list.find(item => item.path === path)?.status
 
     assert.equal(statusOf('added.txt'), 'A', 'AM 应归为 A')
@@ -228,7 +228,7 @@ test('产物清单剔除被 .gitignore 忽略的路径', async () => {
 
     const runId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId, status: 'succeeded', output: 'done' })
-    const list = JSON.parse(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts)
+    const list = service.runArtifactsOf(store.get('SELECT * FROM runs WHERE id = ?', runId))
     const paths = list.map(item => item.path)
     assert.ok(paths.includes('notes.md'), '正常文件应保留在产物清单')
     assert.ok(!paths.includes('debug.log'), '被 ignore 的未跟踪文件不应进产物清单')
@@ -263,7 +263,7 @@ test('已跟踪但后来被 ignore 的脏文件不进产物清单', async () => 
 
     const runId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId, status: 'succeeded', output: 'done' })
-    const list = JSON.parse(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts)
+    const list = service.runArtifactsOf(store.get('SELECT * FROM runs WHERE id = ?', runId))
     const paths = list.map(item => item.path)
     assert.ok(!paths.includes('legacy.log'), '已跟踪但被 ignore 的文件不应进产物清单')
     assert.deepEqual(paths, ['README.md'], '未被 ignore 的正常改动应保留')
@@ -280,8 +280,8 @@ test('非 git 项目跳过产物记录并写入 run_event', async () => {
     const project = await service.createProject({ name: 'No Git', key: 'NOGIT', ownerBotId: director.id })
     const runId = insertRun(store, { projectId: project.id, botId: director.id })
     await service.finishRun({ runId, status: 'succeeded', output: 'done' })
-    assert.equal(store.get('SELECT artifacts FROM runs WHERE id = ?', runId).artifacts, null)
-    const events = store.all('SELECT * FROM run_events WHERE run_id = ? AND type = ?', runId, 'artifacts_skipped')
+    assert.deepEqual(service.runArtifactsOf(store.get('SELECT * FROM runs WHERE id = ?', runId)), [], '非 git 项目不记录产物清单')
+    const events = service.runChatStore(store.get('SELECT * FROM runs WHERE id = ?', runId)).all('SELECT * FROM run_events WHERE run_id = ? AND type = ?', runId, 'artifacts_skipped')
     assert.equal(events.length, 1)
   } finally {
     await closeQuietly(store)

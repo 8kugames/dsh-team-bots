@@ -144,7 +144,7 @@ test('撞墙记录：解析恢复时间落库、审计留痕、备用 provider �
     assert.ok(store.get("SELECT 1 AS ok FROM audit_log WHERE action = 'bot.quota_exhausted' AND target_id = ?", bot.id), '审计留痕')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM bot_quota WHERE bot_id = ?', bot.id).n, 1, '备用 provider 不产生额度行')
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_exhausted'", 'r1').n, 1,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_exhausted'", 'r1').n, 1,
       '真撞墙才记一条 quota_exhausted 运行事件',
     )
   } finally {
@@ -161,7 +161,7 @@ test('quota_exhausted 事件条件化（DSHBOTS-246）：成功运行与非额�
     insertRunningRun(store, { id: 'ok-1', projectId: project.id, botId: bot.id, taskId: task.id })
     await service.finishRun({ runId: 'ok-1', status: 'succeeded', output: 'done' })
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_exhausted'", 'ok-1').n, 0,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_exhausted'", 'ok-1').n, 0,
       '成功运行不得记额度耗尽',
     )
     // 交付派生的记忆审查/验收运行会占住 bot：置终态释放后再播下一条撞墙样本。
@@ -172,7 +172,7 @@ test('quota_exhausted 事件条件化（DSHBOTS-246）：成功运行与非额�
     insertRunningRun(store, { id: 'fail-1', projectId: project.id, botId: bot.id, taskId: task2.id })
     await service.finishRun({ runId: 'fail-1', status: 'failed', output: '', error: { code: 'E_OTHER', message: 'boom' } })
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_exhausted'", 'fail-1').n, 0,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_exhausted'", 'fail-1').n, 0,
       '非额度失败不得记额度耗尽',
     )
     assert.equal(
@@ -229,7 +229,7 @@ test('耗尽期派发走备用模型（新语义）：派发直落 runs 行带�
     const nextRun = store.get('SELECT * FROM runs WHERE id = ?', nextRunId)
     assert.equal(nextRun.model_provider, 'minimax-cn', '派发行的备用 provider 快照')
     assert.equal(nextRun.model_model, 'MiniMax-M3.1-Flash', '派发行的备用模型快照')
-    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", nextRunId), '留痕 quota_fallback')
+    assert.ok(service.runChatStore(nextRun).get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", nextRunId), '留痕 quota_fallback')
     assert.deepEqual(heldItems(store, bot.id), [], '任务派发不进挂起队列')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM bot_quota WHERE bot_id = ? AND provider = ?', bot.id, 'minimax-cn').n, 0, '备用 provider 未被标记耗尽')
 
@@ -276,12 +276,12 @@ test('主备都耗尽：派发排队等待，调度器不放行；解除后自�
     const runId = service.enqueueTaskRun(task, 'manual', { type: 'user', id: 'u' })
     assert.ok(runId, 'bot 空闲时直接落 runs 行')
     assert.equal(store.get('SELECT model_provider FROM runs WHERE id = ?', runId).model_provider, null, '无可用备用时不带模型覆盖')
-    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId), '派发时留痕 quota_wait')
+    assert.ok(service.groupChatStore(project.id).get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId), '派发时留痕 quota_wait')
 
     await flushTicks(service)
     assert.equal(store.get('SELECT status FROM runs WHERE id = ?', runId).status, 'queued', '调度器额度闸门：留 queued 不撞墙')
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId).n, 1,
+      service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId).n, 1,
       '同一 run 只记一条 quota_wait，不刷屏',
     )
 
@@ -413,7 +413,7 @@ test('内部运行入队也接额度路由：review 带备用模型快照', asyn
     assert.equal(run.kind, 'review')
     assert.equal(run.model_provider, 'minimax-cn', 'review 入队带备用 provider 快照')
     assert.equal(run.model_model, 'MiniMax-M3.1-Flash', 'review 入队带备用模型快照')
-    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", runId), '留痕 quota_fallback')
+    assert.ok(service.runChatStore(run).get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", runId), '留痕 quota_fallback')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
@@ -439,11 +439,11 @@ test('主备都耗尽：review 入队留 wait，调度器额度闸门留 queued 
     assert.ok(runId, 'review 运行应入队')
     const run = store.get('SELECT * FROM runs WHERE id = ?', runId)
     assert.equal(run.model_provider, null, '无可用备用时不带模型覆盖')
-    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId), '留痕 quota_wait')
+    assert.ok(service.runChatStore(run).get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId), '留痕 quota_wait')
     await flushTicks(service)
     assert.equal(store.get('SELECT status FROM runs WHERE id = ?', runId).status, 'queued', '调度器额度闸门：留 queued 不撞墙')
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId).n, 1,
+      service.runChatStore(run).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'quota_wait'", runId).n, 1,
       '同一 run 只记一条 quota_wait',
     )
   } finally {
@@ -479,7 +479,7 @@ test('额度扣持闸：内部运行留 queued 等恢复；聊天类照常下发
     )
     await service.tick()
     assert.equal(store.get('SELECT status FROM runs WHERE id = ?', 'rvq').status, 'queued', '额度闸门：review 运行留 queued 等恢复')
-    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = 'rvq' AND type = 'quota_wait'"), '留痕 quota_wait')
+    assert.ok(service.groupChatStore(project.id).get("SELECT 1 AS ok FROM run_events WHERE run_id = 'rvq' AND type = 'quota_wait'"), '留痕 quota_wait')
     assert.equal(store.get('SELECT status FROM runs WHERE id = ?', 'chq').status, 'running', '聊天类照常下发')
   } finally {
     store.close()
@@ -586,7 +586,7 @@ test('review 挂起后建回仍带备用模型快照（额度路由随挂起项�
     assert.ok(row, 'owner 空闲后建回 review 运行')
     assert.equal(row.model_provider, 'minimax-cn', '建回仍带备用 provider 快照')
     assert.equal(row.model_model, 'MiniMax-M3.1-Flash', '建回仍带备用模型快照')
-    assert.ok(store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", row.id), '留痕 quota_fallback')
+    assert.ok(service.runChatStore(row).get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_fallback'", row.id), '留痕 quota_fallback')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })

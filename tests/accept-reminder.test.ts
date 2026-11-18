@@ -64,7 +64,7 @@ const reviewable = async (t) => {
   for (const run of t.store.all("SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')", task.id)) {
     await t.service.cancelRunInternal(run.id, false)
   }
-  t.store.run(
+  t.service.groupChatStore(t.project.id).run(
     "INSERT INTO task_events(id, task_id, type, actor_type, actor_id, data_json, created_at) VALUES (?, ?, 'run_succeeded', 'bot', ?, ?, ?)",
     `evt-deliver-${task.id}`, task.id, t.dev.id,
     JSON.stringify({ runId: `run-${task.id}`, identifier: 'RM-1' }), new Date().toISOString(),

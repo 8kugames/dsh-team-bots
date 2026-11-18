@@ -137,7 +137,7 @@ test('b) 超线拒绝启动新 task 运行 + 升级：canceled TASK_DEADLINE + �
     assert.equal(runRow.error_code, 'TASK_DEADLINE', '拒绝原因码 TASK_DEADLINE')
     assert.ok(t.runtime.started.length === 0, '超线运行不得进入执行层')
     assert.ok(await waitFor(() => t.store.get('SELECT status FROM tasks WHERE id = ?', taskId)?.status === 'blocked'), '任务自动转 blocked')
-    const comment = t.store.get('SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1', taskId)
+    const comment = t.service.groupChatStore(t.project.id).get('SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1', taskId)
     assert.match(comment.body, /超时中止（预算×2）已到，任务未关单/, '卡面评论保留超时原因（D-269 口径）')
     assert.match(comment.body, /总监/, '卡面评论点名总监（第一负责人）')
     assert.match(comment.body, /自动重置死线窗口/, '卡面评论含「重派即自动重置窗口」事实口径')
@@ -145,7 +145,7 @@ test('b) 超线拒绝启动新 task 运行 + 升级：canceled TASK_DEADLINE + �
     const notice = t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE task_id = ? AND sender_type = \'system\' ORDER BY created_at DESC LIMIT 1', taskId)
     assert.ok(notice, '总监系统通知落库（复用 insertMessage 通道）')
     assert.deepEqual(JSON.parse(notice.mentions_json ?? '[]'), [t.director.id], '通知点名项目 owner（=总监）')
-    assert.ok(t.store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'task_deadline'", run2), 'run_events 留 task_deadline 锚')
+    assert.ok(t.service.runChatStore(runRow).get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'task_deadline'", run2), 'run_events 留 task_deadline 锚')
 
     // 延期阀兼容：总监改 time_budget_minutes 后重派，死线按新预算从新派发重算，新运行可启动。
     await t.service.updateTask(taskId, { timeBudgetMinutes: 30 }, { type: 'user', id: 'u1' })
@@ -227,7 +227,7 @@ test('e) 重派即新窗口：老卡重派不升级（正例）；新窗口真�
     assert.equal(row.status, 'running', '老卡重派（无预算实改）必须正常领取，不得升级')
     assert.notEqual(row.error_code, 'TASK_DEADLINE')
     assert.equal(t.store.get('SELECT status FROM tasks WHERE id = ?', taskId)?.status, 'in_progress', '重派卡正常进入施工')
-    assert.equal(t.store.get('SELECT COUNT(*) AS n FROM task_comments WHERE task_id = ?', taskId)?.n, 0, '不升级即不落超时评论')
+    assert.equal(t.service.groupChatStore(t.project.id).get('SELECT COUNT(*) AS n FROM task_comments WHERE task_id = ?', taskId)?.n, 0, '不升级即不落超时评论')
 
     // 负例：新窗口内预算×2 耗尽仍照常拦截——收掉本轮后把最新派发整体回拨到窗口之外，
     // 下一次领取照常升级（canceled TASK_DEADLINE + blocked）。

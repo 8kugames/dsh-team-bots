@@ -317,7 +317,7 @@ test('群聊只放结论，完整交付留在任务评论', async () => {
     const longOutput = `${'改了三个文件并跑了测试。'.repeat(40)}`
     await runtime.complete(run.id, 'succeeded', longOutput)
 
-    const comment = store.get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task.id)
+    const comment = service.groupChatStore(project.id).get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task.id)
     assert.equal(comment.body, longOutput)
     const message = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE task_id = ? AND sender_type = 'bot' ORDER BY created_at DESC LIMIT 1", task.id)
     assert.match(message.body, /任务 \S+ 已交付，待(总监)?验收。/)
@@ -365,7 +365,7 @@ test('team_recall 能按短 id 展开消息、评论、运行和任务', async (
     await service.tick()
     const run = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task'", task.id)
     await runtime.complete(run.id, 'succeeded', '运行输出的完整内容')
-    const comment = store.get("SELECT id FROM task_comments WHERE task_id = ? LIMIT 1", task.id)
+    const comment = service.groupChatStore(project.id).get("SELECT id FROM task_comments WHERE task_id = ? LIMIT 1", task.id)
 
     store.run(
       'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',

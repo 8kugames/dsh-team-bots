@@ -67,7 +67,9 @@ const captureHost = (sink) => {
   }
 }
 
-const newRuntime = (ctx, config, store) => new DshRuntime({ ctx, config, store, logger })
+// 与 index 同款注入聊天库路由器（Phase 3）：run_events 等正文按运行归属取库。
+const newRuntime = (ctxHost, { config, store, service }) =>
+  new DshRuntime({ ctx: ctxHost, config, store, logger, chatStores: { forRun: (run) => service.runChatStore(run) } })
 
 async function primeProject(service, store) {
   const director = store.get("SELECT * FROM bots WHERE name = 'director'")
@@ -116,7 +118,7 @@ test('阈值未触发：轮数低于阈值时复用旧会话，且不排摘要�
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS - 1 })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     const sessionId = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
 
     assert.equal(sessionId, 'sess-old', '低于阈值应复用旧会话')
@@ -133,7 +135,7 @@ test('阈值触发且摘要未就绪：幂等补排一条摘要运行，并继�
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     const sessionId = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
 
     assert.equal(sessionId, 'sess-old', '摘要未就绪不得开新会话')
@@ -145,7 +147,7 @@ test('阈值触发且摘要未就绪：幂等补排一条摘要运行，并继�
     assert.equal(queued[0].trigger_ref, 'sess-old')
     assert.equal(queued[0].idempotency_key, 'rollover_summary:sess-old:0')
     assert.equal(
-      ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'queued'", queued[0].id).length,
+      ctx.service.runChatStore(queued[0]).all("SELECT type FROM run_events WHERE run_id = ? AND type = 'queued'", queued[0].id).length,
       1,
       '应留 queued 事件',
     )
@@ -173,7 +175,7 @@ test('运行中触发摘要补排（生产断点回归）：bot 自己的运行�
       project.id, dev.id, new Date().toISOString(),
     )
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat', id: 'run_current' } }), 'sess-old', '摘要未就绪继续复用旧会话')
     const queued = rolloverRuns(ctx.store)
     assert.equal(queued.length, 1, '当前运行占串行域时也必须能排入摘要运行（治理运行豁免串行索引）')
@@ -198,7 +200,7 @@ test('终态摘要运行不占死幂等键：取消/失败后再次触发必须�
       project.id, dev.id, new Date().toISOString(), new Date().toISOString(),
     )
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old', '摘要未就绪继续复用旧会话')
     const all = rolloverRuns(ctx.store)
     assert.equal(all.length, 2, '终态摘要运行占键时也必须能补排新的摘要运行')
@@ -223,7 +225,7 @@ test('P2 体积上限：轮数未到但会话上下文超上限同样触发摘�
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 3 })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     seedUsage(ctx.store, { sessionId: 'sess-old', ctx: 100_000, occurredAt: '2026-11-08T00:00:00Z' })
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old')
     assert.equal(rolloverRuns(ctx.store).length, 0, '体积低于上限且轮数未到：不触发')
@@ -239,14 +241,11 @@ test('P2 体积上限：轮数未到但会话上下文超上限同样触发摘�
 })
 
 // 播种会话累计消费的子代理数：账本口径 = 会话名下运行的 subagent_spawned run_events。
-const seedSubagents = (store, { sessionId, count, offset = 0 }) => {
-  const at = new Date().toISOString()
-  const runs = store.all('SELECT id FROM runs WHERE session_id = ?', sessionId)
+// 事件住运行归属聊天库（Phase 3）：经 service.insertRunEvent 落到路由库。
+const seedSubagents = (service, { sessionId, count, offset = 0 }) => {
+  const runIds = service.store.all('SELECT id FROM runs WHERE session_id = ?', sessionId).map(row => row.id)
   for (let i = 0; i < count; i += 1) {
-    store.run(
-      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      `evt_seed_${sessionId}_${offset + i}`, runs[(offset + i) % runs.length].id, 'subagent_spawned', 'seed', at,
-    )
+    service.insertRunEvent(runIds[(offset + i) % runIds.length], 'subagent_spawned', 'seed')
   }
 }
 
@@ -258,12 +257,12 @@ test('子代理消费上限：轮数未到但会话派满子代理同样触发�
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 3 })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
-    seedSubagents(ctx.store, { sessionId: 'sess-old', count: 1 })
+    const runtime = newRuntime(captureHost([]), ctx)
+    seedSubagents(ctx.service, { sessionId: 'sess-old', count: 1 })
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old')
     assert.equal(rolloverRuns(ctx.store).length, 0, '子代理消费低于上限且轮数未到：不触发')
 
-    seedSubagents(ctx.store, { sessionId: 'sess-old', count: 1, offset: 1 })
+    seedSubagents(ctx.service, { sessionId: 'sess-old', count: 1, offset: 1 })
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old', '摘要未就绪继续复用旧会话')
     const queued = rolloverRuns(ctx.store)
     assert.equal(queued.length, 1, '子代理消费达上限即触发摘要补排，不等待轮数阈值')
@@ -281,7 +280,7 @@ test('摘要就绪后：旧绑定降级为授权别名并新建会话，旧 sess
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
 
     const host = captureHost([])
-    const runtime = newRuntime(host, ctx.config, ctx.store)
+    const runtime = newRuntime(host, ctx)
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'chat' } }), 'sess-old')
     assert.equal(rolloverRuns(ctx.store).length, 1)
 
@@ -312,7 +311,7 @@ test('结转后旧会话 id 仍通过 owner/member 鉴权（DSHBOTS-256）', asy
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-dev-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-dev-old', count: TURNS })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     ctx.store.setSetting(rolloverSummaryKey(director.id, project.id), '总监交接摘要。')
     ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '成员交接摘要。')
     assert.equal(await runtime.ensureSession(owner, project, { run: { kind: 'chat' } }), 'sess-new-1')
@@ -358,7 +357,7 @@ test('结转别名不跨 bot/项目：未绑定或其他项目的 session 不得
     bindSession(ctx.store, { botId: dev2.id, projectId: project2.id, sessionId: 'sess-old-2' })
     seedRuns(ctx.store, { projectId: project2.id, botId: dev2.id, sessionId: 'sess-old-2', count: TURNS })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '项目一交接摘要。')
     ctx.store.setSetting(rolloverSummaryKey(dev2.id, project2.id), '项目二交接摘要。')
     await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
@@ -385,7 +384,7 @@ test('新会话首轮提示词注入摘要块一次，清零后不重复注入',
   const ctx = await setup()
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '交接摘要正文。')
     // 结转路径开新会话时会写入 pending 标记（见 ensureSession），此处按同口径预置。
     ctx.store.setSetting(rolloverPendingKey(dev.id, project.id), 'sess-new-1')
@@ -406,7 +405,7 @@ test('消费闸：非结转顶替会话的普通轮次不消费摘要，阈值�
   const ctx = await setup()
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     // 场景还原（生产 11-04 实发）：旧会话摘要已就绪，但绑定已被非结转路径顶替成替身会话。
     ctx.store.setSetting(rolloverSummaryKey(dev.id, project.id), '旧会话交接摘要。')
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-replacement' })
@@ -438,7 +437,7 @@ test('0=关闭：阈值 0 时不结转、不排摘要运行', async () => {
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 999 })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     const sessionId = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
 
     assert.equal(sessionId, 'sess-old', '关闭时应继续复用旧会话')
@@ -456,7 +455,7 @@ test('摘要运行路由回旧会话：ensureSession 直接复用 run.session_id
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
 
     const host = captureHost([])
-    const runtime = newRuntime(host, ctx.config, ctx.store)
+    const runtime = newRuntime(host, ctx)
     await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
     const summary = rolloverRuns(ctx.store)[0]
 
@@ -482,7 +481,7 @@ test('finishRun 收尾：成功落 settings 并留 ready 痕，失败留 failed 
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old-1', count: TURNS })
     seedRuns(ctx.store, { projectId: project2.id, botId: dev2.id, sessionId: 'sess-old-2', count: TURNS })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
     await runtime.ensureSession(dev2, project2, { run: { kind: 'chat' } })
     const [summary1, summary2] = rolloverRuns(ctx.store)
@@ -490,7 +489,7 @@ test('finishRun 收尾：成功落 settings 并留 ready 痕，失败留 failed 
     await ctx.service.finishRun({ runId: summary1.id, status: 'succeeded', output: '交接：进行中任务 X。' })
     assert.equal(ctx.store.setting(rolloverSummaryKey(dev.id, project.id)), '交接：进行中任务 X。')
     assert.equal(
-      ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'rollover_summary_ready'", summary1.id).length,
+      ctx.service.runChatStore(summary1).all("SELECT type FROM run_events WHERE run_id = ? AND type = 'rollover_summary_ready'", summary1.id).length,
       1,
       '成功应留 rollover_summary_ready 事件',
     )
@@ -498,7 +497,7 @@ test('finishRun 收尾：成功落 settings 并留 ready 痕，失败留 failed 
     await ctx.service.finishRun({ runId: summary2.id, status: 'failed', output: '', error: { message: 'boom' } })
     assert.equal(ctx.store.setting(rolloverSummaryKey(dev2.id, project2.id)), null, '失败不得写摘要')
     assert.equal(
-      ctx.store.all("SELECT type FROM run_events WHERE run_id = ? AND type = 'rollover_summary_failed'", summary2.id).length,
+      ctx.service.runChatStore(summary2).all("SELECT type FROM run_events WHERE run_id = ? AND type = 'rollover_summary_failed'", summary2.id).length,
       1,
       '失败应留 rollover_summary_failed 事件',
     )
@@ -516,7 +515,7 @@ test('单聊结转：无项目上下文也能排摘要运行、落库并注入',
     seedRuns(ctx.store, { projectId: null, botId: dev.id, sessionId: 'sess-solo', count: 2, kind: 'solo_chat' })
 
     const host = captureHost([])
-    const runtime = newRuntime(host, ctx.config, ctx.store)
+    const runtime = newRuntime(host, ctx)
     assert.equal(await runtime.ensureSession(dev, null, { run: { kind: 'solo_chat' } }), 'sess-solo')
 
     const summary = rolloverRuns(ctx.store)[0]
@@ -540,7 +539,7 @@ test('并发兜底：同一会话重复补排摘要运行不抛唯一约束错�
   const ctx = await setup()
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
 
     runtime.enqueueRolloverSummary({ bot: dev, project, sessionId: 'sess-old' })
     assert.doesNotThrow(() => runtime.enqueueRolloverSummary({ bot: dev, project, sessionId: 'sess-old' }), '重复补排不得抛错（否则会带崩当前对话运行）')
@@ -562,7 +561,7 @@ test('task 与 dm 不再走独立车道：task 亲和回原会话，dm 落控制
     // 该绑定无历史轮次，不触发结转。
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-dm' })
 
-    const runtime = newRuntime(captureHost([]), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost([]), ctx)
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'task' }, task }), 'sess-task', '未终态任务按 runs 归属回原会话')
     assert.equal(await runtime.ensureSession(dev, project, { run: { kind: 'dm' } }), 'sess-dm', 'dm 流量应落控制面单绑定')
     assert.equal(rolloverRuns(ctx.store).length, 0, 'task 亲和与 dm 控制面会话均不结转')
@@ -618,7 +617,7 @@ test('完整链路：executeRun 下发生成摘要提示词 → finishRun 落库
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
 
     const prompts = []
-    const runtime = newRuntime(captureHost(prompts), ctx.config, ctx.store)
+    const runtime = newRuntime(captureHost(prompts), ctx)
     // 把真实 runtime 挂到 service，executeRun 才会走真实 startRun。
     ctx.service.attachRuntime(runtime)
 

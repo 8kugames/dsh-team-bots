@@ -83,8 +83,8 @@ function taskRuns(store, projectId, status) {
   )
 }
 
-function runParallelEventCount(store) {
-  return Number(store.get(
+function runParallelEventCount(service, project) {
+  return Number(service.groupChatStore(project.id).get(
     "SELECT COUNT(*) AS n FROM run_events WHERE type = 'run_parallel'",
   ).n)
 }
@@ -150,7 +150,7 @@ test('双方写范围快照都带 package.json、其余路径不相交：tick �
     // 快照里确实带着 package.json：是闸门过滤让它并行，而不是声明侧剥掉。
     const snapshots = running.map(run => JSON.parse(run.write_scopes)).sort()
     assert.deepEqual(snapshots, [['package.json', 'src/services'], ['package.json', 'ui/modules']])
-    assert.equal(runParallelEventCount(store), 1, '应记一条并行放行事件')
+    assert.equal(runParallelEventCount(service, project), 1, '应记一条并行放行事件')
   } finally {
     await cleanup(root, store)
   }
@@ -209,7 +209,7 @@ test('过滤掉 package.json 后仍相交：保守串行', async () => {
     assert.equal(gated[0].bot_id, dev2.id, '被挡下的是另一条 bot 车道上的排队运行')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE bot_id = ? AND status = 'running'", dev2.id).n, 0, '被挡下任务的 bot 没有在跑的运行')
     assert.equal(running[0].task_id, first.id, '先入队的任务应被领取')
-    assert.equal(runParallelEventCount(store), 0, '串行时不记并行放行事件')
+    assert.equal(runParallelEventCount(service, project), 0, '串行时不记并行放行事件')
   } finally {
     await cleanup(root, store)
   }

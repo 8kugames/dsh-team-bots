@@ -87,10 +87,10 @@ function taskRuns(store, projectId, status) {
   )
 }
 
-function runParallelEventCount(store, runId) {
-  return Number(store.get(
+function runParallelEventCount(service, run) {
+  return Number(service.runChatStore(run).get(
     "SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'run_parallel'",
-    runId,
+    run.id,
   ).n)
 }
 
@@ -142,7 +142,7 @@ test('同项目两条写任务：目录级写范围不相交，一次 tick 后�
     assert.deepEqual(scopesByTask.get(first.id), ['ui/modules'])
     assert.deepEqual(scopesByTask.get(second.id), ['src/services'])
     // 并行放行恰好记一条 run_parallel 事件，且落在其中一条任务运行上。
-    const events = store.all("SELECT run_id FROM run_events WHERE type = 'run_parallel'")
+    const events = service.groupChatStore(project.id).all("SELECT run_id FROM run_events WHERE type = 'run_parallel'")
     assert.equal(events.length, 1, '只应记一条并行放行事件')
     const runningIds = new Set(running.map(run => run.id))
     assert.ok(runningIds.has(events[0].run_id), '并行放行事件应落在并行放行的任务运行上')
@@ -166,7 +166,7 @@ test('并行放行事件记在后领取的运行上：首条运行无事件，�
     // 项目里还没有其它在跑写运行时，首条运行不算并行放行。
     const firstRun = taskRuns(store, project.id, 'running').find(run => run.task_id === first.id)
     assert.ok(firstRun)
-    assert.equal(runParallelEventCount(store, firstRun.id), 0, '首条写运行不应记并行放行事件')
+    assert.equal(runParallelEventCount(service, firstRun), 0, '首条写运行不应记并行放行事件')
 
     // DSHBOTS-290：第二条走 dev2 车道——首条在跑时同 bot 新任务只会挂起，不会落 runs 行。
     const second = await service.createTask({
@@ -179,7 +179,7 @@ test('并行放行事件记在后领取的运行上：首条运行无事件，�
     assert.equal(running.length, 2, '后入队任务应与在跑的写运行并行')
     const secondRun = running.find(run => run.task_id === second.id)
     assert.ok(secondRun, '后入队任务应被领取为运行')
-    assert.equal(runParallelEventCount(store, secondRun.id), 1, '并行放行事件应记在第二条运行上')
+    assert.equal(runParallelEventCount(service, secondRun), 1, '并行放行事件应记在第二条运行上')
     assert.deepEqual(JSON.parse(secondRun.write_scopes), ['src/services'])
   } finally {
     await cleanup(root, store)
@@ -283,7 +283,7 @@ test('回归保护：maxConcurrentRuns=3 且写范围互不相交时，三条任
     const snapshots = running.map(run => JSON.parse(run.write_scopes)).sort()
     assert.deepEqual(snapshots, [['src/services'], ['tests/unit'], ['ui/modules']])
     // 三条同时并行应有两条并行放行事件（首条之外各记一条）。
-    const eventCount = Number(store.get("SELECT COUNT(*) AS n FROM run_events WHERE type = 'run_parallel'").n)
+    const eventCount = Number(service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE type = 'run_parallel'").n)
     assert.equal(eventCount, 2, '第二、三条运行应各记一条并行放行事件')
   } finally {
     await cleanup(root, store)

@@ -257,7 +257,7 @@ test('run-finish 钩子：每轮运行结束触发扫描，告警挂 run_id 并�
     assert.equal(alerts.length, 1)
     assert.equal(alerts[0].run_id, runId)
     assert.ok(alerts[0].body.includes('src/big.js（881 行）'))
-    const events = store.all("SELECT * FROM run_events WHERE run_id = ? AND type = 'code_hygiene_alert'", runId)
+    const events = service.groupChatStore(project.id).all("SELECT * FROM run_events WHERE run_id = ? AND type = 'code_hygiene_alert'", runId)
     assert.equal(events.length, 1)
     assert.ok(events[0].message.includes('880'))
 
@@ -270,7 +270,7 @@ test('run-finish 钩子：每轮运行结束触发扫描，告警挂 run_id 并�
     )
     await service.finishRun({ runId: runId2, status: 'succeeded', output: 'ok' } as any)
     assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1)
-    assert.equal(store.all("SELECT * FROM run_events WHERE run_id = ? AND type = 'code_hygiene_alert'", runId2).length, 0)
+    assert.equal(service.groupChatStore(project.id).all("SELECT * FROM run_events WHERE run_id = ? AND type = 'code_hygiene_alert'", runId2).length, 0)
   } finally {
     await rm(root, { recursive: true, force: true })
     store.close()

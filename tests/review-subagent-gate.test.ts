@@ -80,9 +80,10 @@ const T0 = '2026-11-13T03:00:00.000Z'
 const at = (offsetMs) => new Date(new Date(T0).getTime() + offsetMs).toISOString()
 
 // 交付锚点（交付路径）：直插 run_succeeded 事件 + 直改 in_review，复刻 run-finish
-// 同事务写入的事件形态（data: {runId, identifier}）。
+// 同事务写入的事件形态（data: {runId, identifier}）。Phase 3：task_events 住项目聊天库
+// （显式 created_at 锚点，不走 addTaskEvent 的当下时间戳）。
 function deliverAt(t, task, when) {
-  t.store.run(
+  t.service.groupChatStore(t.project.id).run(
     'INSERT INTO task_events(id, task_id, type, actor_type, actor_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
     `evt-deliver-${task.id}-${when}`, task.id, 'run_succeeded', 'bot', t.director.id,
     JSON.stringify({ runId: `run-deliver-${task.id}`, identifier: `GATE-${task.number}` }), when,
@@ -93,6 +94,7 @@ function deliverAt(t, task, when) {
 // 种一条运行；ledgerAt 给定则同时落 subagent_spawned 账目。
 function seedRun(t: {
   store: { run: (sql: string, ...params: unknown[]) => unknown }
+  service: { groupChatStore: (projectId: string) => { run: (sql: string, ...params: unknown[]) => unknown } }
   project: { id: string }
   director: { id: string }
 }, {
@@ -115,7 +117,8 @@ function seedRun(t: {
     sessionId, now, now, status === 'succeeded' ? now : null,
   )
   if (ledgerAt) {
-    t.store.run(
+    // Phase 3：run_events 住运行归属聊天库（本播种恒为项目运行 → 项目聊天库）。
+    t.service.groupChatStore(t.project.id).run(
       "INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, 'subagent_spawned', ?, ?)",
       `evt-${id}`, id, 'GATE 核验子代理 spawned', ledgerAt,
     )

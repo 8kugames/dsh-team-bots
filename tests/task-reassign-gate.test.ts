@@ -43,8 +43,6 @@ const activeTaskRuns = (store, taskId) => store.all(
   "SELECT * FROM runs WHERE task_id = ? AND kind = 'task' AND status IN ('queued', 'running')",
   taskId,
 )
-const runEventTypes = (store, runId) =>
-  store.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
 
 async function closeQuietly(store, timeout = 2000) {
   const started = Date.now()
@@ -83,7 +81,7 @@ test('仅有 queued 占位：换负责人成功，旧运行被 SUPERSEDED 清理
     const old = store.get('SELECT * FROM runs WHERE id = ?', placeholder.id)
     assert.equal(old.status, 'canceled', '旧 queued 运行已清理')
     assert.equal(old.error_code, 'SUPERSEDED', '清理口径是 SUPERSEDED')
-    assert.ok(runEventTypes(store, placeholder.id).includes('stale_superseded'), '清理留有 stale_superseded 事件')
+    assert.ok(service.groupChatStore(project.id).all('SELECT type FROM run_events WHERE run_id = ?', placeholder.id).map(row => row.type).includes('stale_superseded'), '清理留有 stale_superseded 事件')
     const actives = activeTaskRuns(store, task.id)
     assert.equal(actives.length, 1, '清理后恰好一条新任务运行')
     assert.equal(actives[0].status, 'queued', '新运行已入队')

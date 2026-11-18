@@ -82,9 +82,6 @@ const taskRuns = (store, projectId, status) => store.all(
   projectId, status,
 )
 
-const runEventTypes = (store, runId) =>
-  store.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
-
 async function waitFor(predicate, timeout = 3000) {
   const started = Date.now()
   while (Date.now() - started < timeout) {
@@ -203,7 +200,7 @@ test('写占用随任务离开「进行中」释放：先跑那条取消后，�
     assert.equal(released.error_code, 'TASK_LEFT_IN_PROGRESS', '稳定错误码，便于事后区分')
     assert.ok(released.ended_at)
     assert.equal(released.cancel_requested, 1)
-    assert.ok(runEventTypes(store, firstRun.id).includes('task_left_in_progress'), 'run 侧记写占用释放事件')
+    assert.ok(service.runChatStore(firstRun).all('SELECT type FROM run_events WHERE run_id = ?', firstRun.id).map(row => row.type).includes('task_left_in_progress'), 'run 侧记写占用释放事件')
 
     await service.tick()
     const nowRunning = taskRuns(store, project.id, 'running')

@@ -155,7 +155,7 @@ test('project, group task assignment and completion form a closed loop', async (
     assert.ok(first.taskId)
     await waitFor(() => service.store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status === 'in_review')
     // 自动核验委派（DSHBOTS-113 默认开）：交付报告之外再落一条核验结论评论。
-    await waitFor(() => Number(service.store.get(
+    await waitFor(() => Number(service.groupChatStore(project.id).get(
       "SELECT COUNT(*) AS n FROM task_comments WHERE task_id = ?", first.taskId,
     )?.n ?? 0) >= 2)
     const task = await service.taskDetail(first.taskId)
@@ -275,7 +275,7 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
 })
 
 test('owner return sends the task back for rework and it re-enters owner review', async () => {
-  const { root, store, service, sessionId } = await ownerSetup('RET')
+  const { root, store, service, project, sessionId } = await ownerSetup('RET')
   try {
     const task = await service.assignFromBot(sessionId, {
       assignee: 'Builder', title: 'Fix bug', description: 'Fix it.',
@@ -288,7 +288,7 @@ test('owner return sends the task back for rework and it re-enters owner review'
     })
     assert.equal(returned.status, 'in_progress')
     assert.match(
-      store.get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task.id)?.body ?? '',
+      service.groupChatStore(project.id).get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task.id)?.body ?? '',
       /退回重做/,
     )
     await waitFor(() => (store.get("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND kind = 'task'", task.id)?.n ?? 0) >= 2)

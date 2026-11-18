@@ -114,10 +114,7 @@ test('③ 机械闸认领线：reviewer 的核验账目放行总监裁决，无�
        VALUES ('run-rv', ?, ?, ?, 'review', 'read', 'review_delegate', 'succeeded', 1, 'key-rv', ?, ?, ?, 'sess-rv')`,
       project.id, t.reviewer.id, task.id, new Date().toISOString(), new Date().toISOString(), new Date().toISOString(),
     )
-    t.store.run(
-      "INSERT INTO run_events(id, run_id, type, message, created_at) VALUES ('evt-rv', 'run-rv', 'subagent_spawned', 'spawned', ?)",
-      new Date().toISOString(),
-    )
+    t.service.insertRunEvent('run-rv', 'subagent_spawned', 'spawned')
     t.service.assertReviewSubagentVerified('sess-none', project, task, '子代理核验：建议 accept')
   } finally { await t.close() }
 })

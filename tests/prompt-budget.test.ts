@@ -38,7 +38,11 @@ async function setup() {
   const projectView = await service.createProject({ name: 'Order', key: 'ORD', ownerBotId: director.id, memberIds: [devView.id] })
   const dev = store.get('SELECT * FROM bots WHERE id = ?', devView.id)
   const project = store.get('SELECT * FROM projects WHERE id = ?', projectView.id)
-  const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const runtime = new DshRuntime({
+    ctx: null, config, store, logger: { info() {}, warn() {}, error() {} },
+    // Phase 3：与 index 同款注入聊天库路由器，评论等正文读取走项目聊天库。
+    chatStores: { forRun: (run: any) => (service as any).runChatStore(run) },
+  })
   const close = async () => {
     try { store.close() } catch {}
     await rm(root, { recursive: true, force: true })
@@ -133,7 +137,7 @@ test('评论注入预算：≤3 条、合计 ≤1.5k、只取最近', async () =
     t.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', card.id)
     const base = Date.now()
     for (let i = 1; i <= 4; i++) {
-      t.store.run(
+      t.service.groupChatStore(t.project.id).run(
         'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         `cmt_budget_${i}`, card.id, 'user', 'u1', `第${i}条-${'x'.repeat(700)}`, new Date(base + i * 1_000).toISOString(),
       )

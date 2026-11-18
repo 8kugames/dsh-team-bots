@@ -88,7 +88,7 @@ test('满并发时人消息运行借保底槽仍能起来 1 条，并写 human_s
     const runId = primeChatRun(service, project, dev2, '@Builder2 追问一句')
     await service.tick()
     assert.ok(runtime.started.includes(runId), '人消息运行应借保底槽启动')
-    const event = store.get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'human_slot'", runId)
+    const event = service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'human_slot'", runId)
     assert.equal(Number(event.n), 1, '应写 human_slot 事件')
   } finally { await cleanup(root, store) }
 })

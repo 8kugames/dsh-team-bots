@@ -113,7 +113,7 @@ test('到期派生：attempt+1、parent 链、plan_retry 事件，重复扫描�
     assert.equal(derived.trigger_type, 'plan_retry')
     assert.equal(derived.status, 'queued')
     assert.equal(derived.task_id, task.id)
-    const evt = store.get("SELECT * FROM run_events WHERE run_id = 't1' AND type = 'plan_retry'")
+    const evt = service.groupChatStore(project.id).get("SELECT * FROM run_events WHERE run_id = 't1' AND type = 'plan_retry'")
     assert.ok(evt, '原 run 应留 plan_retry 事件')
 
     // 再次扫描：幂等，不重复派生

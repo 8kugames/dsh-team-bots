@@ -175,7 +175,8 @@ test('派生运行提示词同步时效：review/handle/memory_review 与任务�
   const ctx = await setup()
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
-    const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
+    // Phase 3：派生运行提示词读源运行 output（run_payload）与交付评论，均住聊天库——运行时按 run 路由取库。
+    const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => ctx.service.runChatStore(run) } })
     const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
     const actor = ctx.service.actor()
@@ -201,7 +202,8 @@ test('派生运行提示词同步时效：review/handle/memory_review 与任务�
     const review = insertRun('run-review', { kind: 'review', taskId: budgeted.id })
     const handle = insertRun('run-handle', { kind: 'handle', taskId: budgeted.id })
     const finished = insertRun('run-finished', { kind: 'task', taskId: budgeted.id, status: 'succeeded' })
-    ctx.store.run('UPDATE runs SET output = ? WHERE id = ?', '交付说明', finished.id)
+    // Phase 3：output 住运行归属聊天库的 run_payload（顶库 runs.output 恒 NULL）。
+    ctx.service.saveRunPayload(finished, { output: '交付说明' })
     const memory = insertRun('run-memory', { kind: 'memory_review', taskId: budgeted.id, triggerRef: finished.id })
 
     // 这些派生运行与任务卡共用同一时效上限（run.task_id 非空即继承），提示词必须同步告知，
@@ -342,9 +344,11 @@ test('时效到期即中止：到点杀运行，run 置 failed/RUN_TIMEOUT 且 r
     const task = await ctx.service.createTask({ projectId: project.id, title: '到期任务', time_budget_minutes: 30 }, actor)
     const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
-    const runtime = new DshRuntime({ ctx: stubHost(), config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
+    // Phase 3：run_events 住聊天库——运行时按 run 路由取库；run 种子对象须带路由列
+    // （project_id/bot_id），与 insertTaskRun 落库的行一致，缺列会错路由到 solo-undefined。
+    const runtime = new DshRuntime({ ctx: stubHost(), config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => ctx.service.runChatStore(run) } })
     ctx.service.attachRuntime(runtime)
-    const run = { id: 'run-expire', kind: 'task', mode: 'write', task_id: task.id }
+    const run = { id: 'run-expire', kind: 'task', mode: 'write', task_id: task.id, project_id: project.id, bot_id: dev.id }
     insertTaskRun(ctx.store, { runId: run.id, projectId: project.id, botId: dev.id, taskId: task.id, sessionId: 'sess-expire' })
 
     await runtime.startRun({ run, bot: botRow, project: projectRow, task: rowOf(ctx.store, task.id), sessionKind: 'task' })
@@ -364,7 +368,7 @@ test('时效到期即中止：到点杀运行，run 置 failed/RUN_TIMEOUT 且 r
     assert.equal(runRow.error_code, 'RUN_TIMEOUT', '失败码应为 RUN_TIMEOUT')
     assert.match(runRow.error_message, /30 分钟/, '中止文案应带上时效分钟数')
     assert.equal(runtime.pendingByRun.has(run.id), false, 'pending 应已清理')
-    const events = ctx.store.all('SELECT * FROM run_events WHERE run_id = ? ORDER BY rowid', run.id)
+    const events = ctx.service.runChatStore(runRow).all('SELECT * FROM run_events WHERE run_id = ? ORDER BY rowid', run.id)
     assert.ok(events.some(item => item.type === 'started'), '应有 started 事件')
     assert.ok(
       events.some(item => item.type === 'failed' && item.message === runRow.error_message),

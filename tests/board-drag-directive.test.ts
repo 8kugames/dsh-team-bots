@@ -84,8 +84,9 @@ async function closeQuietly(store, timeout = 2000) {
 const systemMessages = (store, projectId) =>
   store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' ORDER BY rowid", projectId)
 
-const runEventTypes = (store, runId) =>
-  store.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
+// Phase 3：run_events 住运行归属聊天库（本项目任务运行 → 项目聊天库）。
+const runEventTypes = (chatStore, runId) =>
+  chatStore.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
 
 test('拖入执行中：自动入队 board_resume 运行并发系统指令消息（文案全等、mentions 带 assignee、返回视图不过期）', async () => {
   const { root, store, service } = await setup()
@@ -103,7 +104,7 @@ test('拖入执行中：自动入队 board_resume 运行并发系统指令消息
     assert.equal(run.trigger_type, 'board_resume')
     assert.ok(run.write_scopes, '写范围快照照旧落库')
     await waitFor(() => store.get('SELECT status FROM runs WHERE id = ?', run.id).status === 'running')
-    assert.ok(runEventTypes(store, run.id).includes('board_resume'), 'run 侧记 board_resume 事件')
+    assert.ok(runEventTypes(service.groupChatStore(project.id), run.id).includes('board_resume'), 'run 侧记 board_resume 事件')
 
     assert.equal(view.status, 'in_progress')
     assert.equal(view.identifier, `BRD-${task.number}`)
@@ -146,7 +147,7 @@ test('拖出执行中（todo 与 blocked 两跳）：活跃运行 canceled + PAU
     assert.equal(paused1.error_message, '任务被移出执行中，运行暂停')
     assert.ok(paused1.ended_at)
     assert.equal(paused1.cancel_requested, 1)
-    assert.ok(runEventTypes(store, run1.id).includes('board_pause'), 'run 侧记 board_pause 事件')
+    assert.ok(runEventTypes(service.groupChatStore(project.id), run1.id).includes('board_pause'), 'run 侧记 board_pause 事件')
     assert.ok(runtime.canceled.includes(run1.id), 'runtime.cancelRun 已下发')
     assert.equal(service.taskRow(task.id).status, 'todo')
     assert.equal(systemMessages(service.groupChatStore(project.id), project.id).at(-1).body, pauseBody)
@@ -162,7 +163,7 @@ test('拖出执行中（todo 与 blocked 两跳）：活跃运行 canceled + PAU
     const paused2 = store.get('SELECT * FROM runs WHERE id = ?', run2.id)
     assert.equal(paused2.status, 'canceled')
     assert.equal(paused2.error_code, 'PAUSED_BY_BOARD')
-    assert.ok(runEventTypes(store, run2.id).includes('board_pause'))
+    assert.ok(runEventTypes(service.groupChatStore(project.id), run2.id).includes('board_pause'))
     assert.equal(service.taskRow(task.id).status, 'blocked')
 
     const bodies = systemMessages(service.groupChatStore(project.id), project.id).map(message => message.body)
@@ -189,11 +190,19 @@ test('重复拖拽零副作用；拖出到 in_review 释放写占用（中止写
     await service.transitionTask(task.id, 'in_progress', actor)
     await waitFor(() => store.get("SELECT status FROM runs WHERE task_id = ? AND status = 'running'", task.id))
 
-    const counts = () => ({
-      runs: Number(store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', task.id).n),
-      messages: systemMessages(service.groupChatStore(project.id), project.id).length,
-      events: Number(store.get('SELECT COUNT(*) AS n FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)', task.id).n),
-    })
+    // Phase 3：run_events 住聊天库、runs 留顶库——先取任务运行 id 清单，再回聊天库计数。
+    const counts = () => {
+      const runIds = store.all('SELECT id FROM runs WHERE task_id = ?', task.id).map(row => row.id)
+      return {
+        runs: Number(store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', task.id).n),
+        messages: systemMessages(service.groupChatStore(project.id), project.id).length,
+        events: runIds.length
+          ? Number(service.groupChatStore(project.id).get(
+            `SELECT COUNT(*) AS n FROM run_events WHERE run_id IN (${runIds.map(() => '?').join(',')})`, ...runIds,
+          ).n)
+          : 0,
+      }
+    }
     const before = counts()
     await service.transitionTask(task.id, 'in_progress', actor)
     await service.transitionTask(task.id, 'in_progress', actor)
@@ -209,7 +218,7 @@ test('重复拖拽零副作用；拖出到 in_review 释放写占用（中止写
     const run = store.get('SELECT * FROM runs WHERE task_id = ?', task.id)
     assert.equal(run.status, 'canceled', 'in_review 出向中止写运行，释放写占用')
     assert.equal(run.error_code, 'TASK_LEFT_IN_PROGRESS')
-    assert.ok(runEventTypes(store, run.id).includes('task_left_in_progress'), 'run 侧记写占用释放事件')
+    assert.ok(runEventTypes(service.groupChatStore(project.id), run.id).includes('task_left_in_progress'), 'run 侧记写占用释放事件')
     assert.equal(service.taskRow(task.id).status, 'in_review')
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})

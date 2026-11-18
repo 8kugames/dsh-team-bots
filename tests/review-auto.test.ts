@@ -94,7 +94,9 @@ async function setup({ auto = false, autoReviewDelegate }: { auto?: boolean; aut
   const project = await service.createProject({
     name: 'AutoDelegate', key: 'ADL', ownerBotId: director.id, memberIds: [dev.id],
   })
-  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  // 提示词断言用真实 DshRuntime（FakeRuntime 无 promptFor）；Phase 3 后评论/载荷住聊天库，
+  // 运行时按 run 路由取库（与 questions/chat-reply 等测试同款接线）。
+  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
   const actor = { type: 'user', id: service.localUserId }
   const close = async () => {
     if (auto) {
@@ -149,7 +151,7 @@ test('交付迁移 in_review 自动派生核验运行：同入口形态、留痕
     const task = await deliverTask(t)
     // 迁移未被阻塞：任务确实进了 in_review，且交付评论落库。
     assert.equal(task.status, 'in_review')
-    assert.ok(t.store.get('SELECT id FROM task_comments WHERE task_id = ? AND author_type = ?', task.id, 'bot'))
+    assert.ok(t.service.groupChatStore(task.project_id).get('SELECT id FROM task_comments WHERE task_id = ? AND author_type = ?', task.id, 'bot'))
     // 自动派生：与手动同一 spawnReviewDelegate 入口的运行形态。
     const delegate = await waitFor(() => runRow(
       t, "task_id = ? AND kind = 'review' AND trigger_type = 'review_delegate'", task.id,
@@ -158,7 +160,7 @@ test('交付迁移 in_review 自动派生核验运行：同入口形态、留痕
     assert.equal(delegate.bot_id, t.director.id, '核验运行绑总监')
     assert.equal(delegate.write_scopes, null, '核验运行写范围为空')
     // 留痕：run_events 标注自动来源，审计 review.auto_delegate。
-    const event = t.store.get("SELECT * FROM run_events WHERE run_id = ? AND type = 'queued'", delegate.id)
+    const event = t.service.runChatStore(delegate).get("SELECT * FROM run_events WHERE run_id = ? AND type = 'queued'", delegate.id)
     assert.match(event.message, /交付后自动委派子代理核验（system:system）/)
     assert.ok(
       t.store.get("SELECT id FROM audit_log WHERE action = 'review.auto_delegate' AND target_id = ?", task.id),
@@ -353,7 +355,7 @@ test('owner_bot 卡串联两跳：核验结论评论写回后自动触发总监�
     const delegate = await waitFor(() => runRow(
       t, "task_id = ? AND trigger_type = 'review_delegate'", ownerCard.id,
     ))
-    await waitFor(() => t.store.get(
+    await waitFor(() => t.service.groupChatStore(ownerCard.project_id).get(
       "SELECT * FROM task_comments WHERE task_id = ? AND author_type = 'bot' AND body LIKE '子代理核验：%'",
       ownerCard.id,
     ))
@@ -371,7 +373,7 @@ test('owner_bot 卡串联两跳：核验结论评论写回后自动触发总监�
 
     // user 卡：同样自动核验评论，但不触发总监裁决（人工验收维持现状）。
     const userCard = await deliverTask(t, { actor: { type: 'user', id: 'u1' } })
-    await waitFor(() => t.store.get(
+    await waitFor(() => t.service.groupChatStore(userCard.project_id).get(
       "SELECT * FROM task_comments WHERE task_id = ? AND body LIKE '子代理核验：%'", userCard.id,
     ))
     assert.equal(
@@ -429,7 +431,8 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
 // review_delegate 共用同一 8K 截断管线——超长描述不再全文拼装（防 400 Prompt exceeds
 // max length 重演）；标题/状态/写范围/最近交付评论开头是截断点外的保底字段，恒在场。
 function insertDeliveryComment(t, taskId, body) {
-  t.store.run(
+  // Phase 3：task_comments 住任务所属项目的聊天库。
+  t.service.groupChatStore(t.project.id).run(
     'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     `task_c_${taskId.slice(-6)}_${Math.random().toString(36).slice(2, 6)}`,
     taskId, 'bot', t.dev.id, body, new Date().toISOString(),
@@ -690,7 +693,7 @@ test('硬闸解除：无子代理账目亲做交付照转 in_review', async () =
     await t.service.finishRun({ runId: 'run_no_ledger', status: 'succeeded', output: '亲做交付' })
     assert.equal(t.store.get('SELECT status FROM runs WHERE id = ?', 'run_no_ledger').status, 'succeeded', '运行正常完结')
     assert.equal(t.store.get('SELECT status FROM tasks WHERE id = ?', task1.id).status, 'in_review', '无账目亲做交付照转 in_review（硬闸已解除）')
-    const comment = t.store.get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task1.id)
+    const comment = t.service.groupChatStore(task1.project_id).get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task1.id)
     assert.equal(comment.body, '亲做交付', '交付文本照落评论且无闸门提示')
   } finally { await t.close() }
 })

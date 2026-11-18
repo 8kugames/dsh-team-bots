@@ -100,7 +100,7 @@ test('同指纹跨运行去重：第二次不再插群消息，只留 run_event'
     // 工作区状态不变：同 before('') → 同 after 字符串 → 同指纹
     t.service.auditReadRunWrites(runB, t.projectRow)
     assert.equal(t.alerts().length, 1, '同指纹不重复点名')
-    const dupEvent = t.store.get("SELECT * FROM run_events WHERE run_id = 'run_second' AND type = 'read_audit_dup'")
+    const dupEvent = t.service.groupChatStore(t.project.id).get("SELECT * FROM run_events WHERE run_id = 'run_second' AND type = 'read_audit_dup'")
     assert.ok(dupEvent, '重复应记 read_audit_dup 事件')
   } finally { await t.close() }
 })

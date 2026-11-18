@@ -92,8 +92,9 @@ async function closeQuietly(store, timeout = 2000) {
   } catch {}
 }
 
-const blockedEvents = (store, runId) =>
-  store.all("SELECT * FROM run_events WHERE run_id = ? AND type = 'task_blocked_dep'", runId)
+// run_events 住运行归属聊天库（Phase 3）：经项目群聊库读取。
+const blockedEvents = (service, project, runId) =>
+  service.groupChatStore(project.id).all("SELECT * FROM run_events WHERE run_id = ? AND type = 'task_blocked_dep'", runId)
 
 const taskRun = (store, taskId) =>
   store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task' ORDER BY queued_at DESC LIMIT 1", taskId)
@@ -274,7 +275,7 @@ test('调度闸门：依赖未完结 run 留 queued，task_blocked_dep 恰记一
     await service.tick()
     assert.equal(taskRun(store, blocked.id).status, 'queued', '依赖未完结：run 不得领取')
     assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', blocked.id).status, 'todo', '任务不得被置 in_progress')
-    const events = blockedEvents(store, run.id)
+    const events = blockedEvents(service, gate, run.id)
     assert.equal(events.length, 1, 'task_blocked_dep 事件只记一次')
     assert.match(events[0].message, /GATE-1/)
     assert.ok(runtime.started.every(started => started.taskId !== blocked.id), '运行时从未领到被阻塞任务')
@@ -283,7 +284,7 @@ test('调度闸门：依赖未完结 run 留 queued，task_blocked_dep 恰记一
     await service.tick()
     await waitFor(() => taskRun(store, blocked.id).status === 'running')
     assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', blocked.id).status, 'in_progress')
-    assert.equal(blockedEvents(store, run.id).length, 1, '放行后不追加阻塞事件')
+    assert.equal(blockedEvents(service, gate, run.id).length, 1, '放行后不追加阻塞事件')
     assert.ok(runtime.started.some(started => started.taskId === blocked.id))
   } finally {
     closeQuietly(store)
@@ -298,7 +299,7 @@ test('调度闸门不拦无依赖任务：正常领取，不产生阻塞事件',
     const plain = await service.createTask({ projectId: gate.id, title: '普通任务', assigneeBotId: dev.id, autoStart: true })
     await service.tick()
     await waitFor(() => taskRun(store, plain.id)?.status === 'running')
-    assert.equal(blockedEvents(store, taskRun(store, plain.id).id).length, 0)
+    assert.equal(blockedEvents(service, gate, taskRun(store, plain.id).id).length, 0)
     assert.ok(runtime.started.some(started => started.taskId === plain.id))
   } finally {
     closeQuietly(store)
@@ -315,7 +316,7 @@ test('调度闸门不拦依赖已满足的任务：dep 已 done 的 blocked_by �
     const ready = await service.createTask({ projectId: gate.id, title: '就绪任务', assigneeBotId: dev.id, blockedBy: [dep.id], autoStart: true })
     await service.tick()
     await waitFor(() => taskRun(store, ready.id)?.status === 'running')
-    assert.equal(blockedEvents(store, taskRun(store, ready.id).id).length, 0)
+    assert.equal(blockedEvents(service, gate, taskRun(store, ready.id).id).length, 0)
     assert.ok(runtime.started.some(started => started.taskId === ready.id))
   } finally {
     closeQuietly(store)

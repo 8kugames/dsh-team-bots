@@ -48,7 +48,8 @@ async function seedReviewTask(service, project, idleMinutes, { title = '滞留�
 }
 
 const seedComment = (service, task, minutesAgo, body = '核验结论：建议 accept') => {
-  service.store.run(
+  // Phase 3：task_comments 住任务所属项目的聊天库。
+  service.groupChatStore(task.project_id).run(
     'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     `cmt-${task.id}-${minutesAgo}-${Math.floor(Math.random() * 1e6)}`, task.id, 'bot', 'reviewer', body, minutesAgoIso(minutesAgo),
   )
@@ -233,15 +234,18 @@ test('接线锁：scheduler tick 调 runReviewWatchdog；UI badge 读 runLimits.
 // ── DSHBOTS-235 三档规则引擎守门 ─────────────────────────────────────────────
 
 // 播种交付方 task 运行：kind='task'，可带 output（交付报告）与终态。
+// Phase 3：runs 留顶库当调度索引（output 恒 NULL），胖载荷经 saveRunPayload 落运行归属聊天库。
 const seedTaskRun = (service, task, minutesAgo, botId, { status = 'succeeded', output = null, kind = 'task', trigger = 'task_started', error_code = null } = {}) => {
+  const runId = `trun-${task.id}-${minutesAgo}-${Math.floor(Math.random() * 1e6)}`
   service.store.run(
-    `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, error_code, output, idempotency_key, queued_at, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, 'write', ?, ?, ?, ?, ?, ?, ?, ?)`,
-    `trun-${task.id}-${minutesAgo}-${Math.floor(Math.random() * 1e6)}`, task.project_id, botId, task.id,
-    kind, trigger, status, error_code, output,
+    `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, error_code, idempotency_key, queued_at, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, 'write', ?, ?, ?, ?, ?, ?, ?)`,
+    runId, task.project_id, botId, task.id,
+    kind, trigger, status, error_code,
     `tidem-${task.id}-${minutesAgo}-${Math.floor(Math.random() * 1e6)}`,
     minutesAgoIso(minutesAgo + 5), minutesAgoIso(minutesAgo + 4), minutesAgoIso(minutesAgo),
   )
+  if (output !== null) service.saveRunPayload(service.store.get('SELECT * FROM runs WHERE id = ?', runId), { output })
 }
 
 // 播种核验委派运行（成功结论落 output；评论同步落一条以贴近 finishRun 真实链路）。
@@ -291,7 +295,7 @@ test('规则 A·交付证据链：报告 commit 在 dev + 测试绿 → 自动 a
   assert.equal(audits[0].actor_type, 'system')
   assert.ok(audits[0].data_json.includes('accept'))
   assert.ok(audits[0].data_json.includes('依据=交付证据'), '审计标注依据来源')
-  const comments = store.all('SELECT body FROM task_comments WHERE task_id = ?', task.id)
+  const comments = service.groupChatStore(task.project_id).all('SELECT body FROM task_comments WHERE task_id = ?', task.id)
   assert.ok(comments.some(c => c.body.includes('程序化收口')), '收口评论留痕')
 })
 
@@ -343,7 +347,7 @@ test('规则 B：交付方 run 中止无进展 → 自动 return 附「交付方
   runReviewWatchdog(service)
   await settle()
   assert.equal(service.taskRow(task.id).status, 'in_progress', 'B 档自动 return 回到进行中')
-  const comments = store.all('SELECT body FROM task_comments WHERE task_id = ?', task.id)
+  const comments = service.groupChatStore(task.project_id).all('SELECT body FROM task_comments WHERE task_id = ?', task.id)
   assert.ok(comments.some(c => c.body.includes('交付方无响应')), '退回评论附交付方无响应')
   assert.equal(autoCloseAudits(store, task.id).length, 1)
 })
@@ -515,7 +519,8 @@ test('H5 扫描过滤归档项目 + 索引迁移落库', async (t) => {
   assert.deepEqual(result.alerted, [], '归档项目不扫')
   assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
   const runIndexes = store.all('PRAGMA index_list(runs)').map(row => row.name)
-  const commentIndexes = store.all('PRAGMA index_list(task_comments)').map(row => row.name)
+  // Phase 3：task_comments 表住项目聊天库，索引断言随之取聊天库句柄。
+  const commentIndexes = service.groupChatStore(project.id).all('PRAGMA index_list(task_comments)').map(row => row.name)
   assert.ok(runIndexes.includes('runs_task_idx'), 'runs.task_id 索引存在')
   assert.ok(commentIndexes.includes('task_comments_task_idx'), 'task_comments.task_id 索引存在')
   assert.ok(Boolean(store.get("SELECT 1 AS ok FROM schema_migrations WHERE name = 'review_watchdog_indexes'").ok))

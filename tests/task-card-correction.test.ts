@@ -94,8 +94,9 @@ async function closeQuietly(store, timeout = 2000) {
 const cardChangedMessages = (store, projectId) =>
   store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%卡面已变更%' ORDER BY rowid", projectId)
 
-const runEventTypes = (store, runId) =>
-  store.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
+// Phase 3：run_events 住运行归属聊天库（本项目任务运行 → 项目聊天库）。
+const runEventTypes = (chatStore, runId) =>
+  chatStore.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
 
 test('改卡→通知发出：系统消息点名负责人；活跃运行注入修正提示并记 card_changed 事件', async () => {
   const { root, store, service, runtime } = await setup()
@@ -121,7 +122,7 @@ test('改卡→通知发出：系统消息点名负责人；活跃运行注入�
     assert.equal(runtime.steered.length, 1, '活跃运行注入一条修正提示')
     assert.equal(runtime.steered[0].sessionId, run.session_id)
     assert.ok(runtime.steered[0].body.includes(`Task card CFX-${task.number} has just been amended`))
-    assert.ok(runEventTypes(store, run.id).includes('card_changed'), 'run 侧记 card_changed 事件')
+    assert.ok(runEventTypes(service.groupChatStore(project.id), run.id).includes('card_changed'), 'run 侧记 card_changed 事件')
 
     await service.pauseRunsForBoard(task.id).catch(() => {})
   } finally {
@@ -205,7 +206,7 @@ test('强制受阻：进行中任务移 blocked，运行走既有 abort 链路�
     assert.equal(stopped.error_code, 'TASK_FORCE_BLOCKED', '强制受阻专用稳定码，区别于看板暂停')
     assert.ok(stopped.ended_at, '运行已结束')
     assert.ok(runtime.canceled.includes(run.id), 'runtime.cancelRun 已下发（既有 abort 链路）')
-    assert.ok(runEventTypes(store, run.id).includes('force_blocked'), 'run 侧记 force_blocked 事件')
+    assert.ok(runEventTypes(service.groupChatStore(project.id), run.id).includes('force_blocked'), 'run 侧记 force_blocked 事件')
     const audit = store.get("SELECT * FROM audit_log WHERE action = 'task.force_blocked' AND target_id = ?", task.id)
     assert.ok(audit, '审计留痕 task.force_blocked')
     assert.deepEqual(JSON.parse(audit.data_json).stoppedRuns, [run.id], '审计记录被停运行清单')

@@ -69,7 +69,7 @@ test('observe 干跑：判定留痕不收口，提醒照常', async (t) => {
   assert.equal(result.observed[0].would, 'return')
   assert.equal(service.taskRow(task.id).status, 'in_review', '干跑不改变卡状态')
   assert.equal(store.all("SELECT * FROM audit_log WHERE action = 'review.auto_close' AND target_id = ?", task.id).length, 0, 'applyReview 不调用（零收口审计）')
-  const events = store.all("SELECT * FROM task_events WHERE task_id = ? AND type = 'review_watchdog_observe'", task.id)
+  const events = service.groupChatStore(project.id).all("SELECT * FROM task_events WHERE task_id = ? AND type = 'review_watchdog_observe'", task.id)
   assert.equal(events.length, 1, '判定留痕进任务时间线（task_detail 可回看）')
   assert.deepEqual(JSON.parse(events[0].data_json), { verdict: 'B', would: 'return', basis: JSON.parse(events[0].data_json).basis, tier: 1 })
   assert.equal(service.groupChatStore(project.id).all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND (body LIKE '[SYSTEM ALERT]%' OR body LIKE '【系统指令】%')", project.id).length, 1, '提醒照常（干跑不吞催办，建卡文案不算）')
@@ -105,7 +105,7 @@ test('observe 与去重表兼容：同档位只留痕一次，档位推进再留
   service.store.setSetting('review_idle_minutes', '45')
   runReviewWatchdog(service)
   runReviewWatchdog(service)
-  assert.equal(store.all("SELECT * FROM task_events WHERE task_id = ? AND type = 'review_watchdog_observe'", task.id).length, 1, '同档位去重（去重表同键）')
+  assert.equal(service.groupChatStore(project.id).all("SELECT * FROM task_events WHERE task_id = ? AND type = 'review_watchdog_observe'", task.id).length, 1, '同档位去重（去重表同键）')
   assert.equal(JSON.parse(store.setting(REVIEW_IDLE_ALERTED_KEY))[task.id].tier, 1)
   // 二次催办档：锚点推进到 2×阈值（90 分钟），下一轮档位推进再留痕一次。
   service.store.run('UPDATE tasks SET updated_at = ? WHERE id = ?', minutesAgoIso(95), task.id)
@@ -114,5 +114,5 @@ test('observe 与去重表兼容：同档位只留痕一次，档位推进再留
   delete map[task.id]
   store.setSetting(REVIEW_IDLE_ALERTED_KEY, JSON.stringify(map))
   runReviewWatchdog(service)
-  assert.equal(store.all("SELECT * FROM task_events WHERE task_id = ? AND type = 'review_watchdog_observe'", task.id).length, 2, '档位推进再留痕')
+  assert.equal(service.groupChatStore(project.id).all("SELECT * FROM task_events WHERE task_id = ? AND type = 'review_watchdog_observe'", task.id).length, 2, '档位推进再留痕')
 })
