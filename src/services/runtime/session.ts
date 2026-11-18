@@ -290,11 +290,16 @@ export const sessionMethods = {
   // type='subagent_spawned' 计数（DSHBOTS-294 账本落账）。无账本记录返回 0，不误触发。
   sessionSubagentCount(sessionId) {
     if (!sessionId) return 0
-    return this.store.get(
-      `SELECT COUNT(*) AS n FROM run_events re JOIN runs r ON r.id = re.run_id
-        WHERE r.session_id = ? AND re.type = 'subagent_spawned'`,
-      sessionId,
-    )?.n ?? 0
+    // 事件住各运行归属的聊天库（chat-db-split Phase 3）：按会话名下运行逐库计数合并。
+    const runs = this.store.all('SELECT id, project_id, bot_id FROM runs WHERE session_id = ?', sessionId)
+    let n = 0
+    for (const run of runs) {
+      n += this.chatStoreForRun(run).get(
+        "SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'subagent_spawned'",
+        run.id,
+      )?.n ?? 0
+    }
+    return n
   },
   // 结转判定（DSHBOTS-145 / DSHBOTS-286）：旧会话是否该让位。返回 true 表示旧绑定已
   // alias 化、调用方走新建路径；false 表示继续复用旧会话。
@@ -358,7 +363,7 @@ export const sessionMethods = {
       queuedAt,
     )
     if (!inserted.changes) return runId
-    this.store.run(
+    this.chatStoreForRun({ project_id: project?.id ?? null, bot_id: bot.id }).run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'),
       runId,
@@ -423,7 +428,7 @@ export const sessionMethods = {
       queuedAt,
     )
     if (!inserted.changes) return runId
-    this.store.run(
+    this.chatStoreForRun({ project_id: project?.id ?? null, bot_id: bot.id }).run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'),
       runId,
@@ -877,7 +882,7 @@ export const sessionMethods = {
       'UPDATE runs SET session_id = ?, started_at = ?, last_progress_at = ? WHERE id = ?',
       sessionId, startedAt, startedAt, run.id,
     )
-    this.store.run(
+    this.chatStoreForRun(run).run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), run.id, 'started', `Session ${sessionId}`, new Date().toISOString(),
     )

@@ -75,12 +75,13 @@ export const memoryMethods = {
       return `[${raw}] ${message.sender_type}:${message.sender_id} at ${message.created_at}\n\n${message.body}`
     }
     if (raw.startsWith('c_')) {
-      const comment = this.store.get(
-        `SELECT tc.*, t.number FROM task_comments tc JOIN tasks t ON t.id = tc.task_id
-         WHERE t.project_id = ? AND substr(tc.id, -6) = ?`,
-        project.id, raw.slice(2),
+      // Phase 3：task_comments 住项目聊天库；任务号回顶库 tasks 取。
+      const comment = this.groupChatStore(project.id).get(
+        'SELECT * FROM task_comments WHERE substr(id, -6) = ?',
+        raw.slice(2),
       )
       if (!comment) throw notFound('评论不存在')
+      comment.number = this.store.get('SELECT number FROM tasks WHERE id = ?', comment.task_id)?.number
       return `[${raw}] ${project.key}-${comment.number} ${comment.author_type}:${comment.author_id} at ${comment.created_at}\n\n${comment.body}`
     }
     if (raw.startsWith('run_')) {
@@ -93,11 +94,11 @@ export const memoryMethods = {
         `[${raw}] kind=${run.kind} status=${run.status} bot=${run.bot_id}`,
         run.error_code ? `error=${run.error_code}: ${run.error_message}` : '',
         '',
-        run.output ?? '(no output)',
+        this.runOutputOf(run) || '(no output)',
       ].filter(Boolean).join('\n')
     }
     const task = this.resolveBotTask(project, raw)
-    const comments = this.store.all(
+    const comments = this.groupChatStore(task.project_id).all(
       'SELECT author_type, author_id, body, created_at FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 10',
       task.id,
     ).reverse()
@@ -201,7 +202,8 @@ export const memoryMethods = {
       }
       throw error
     }
-    this.store.run(
+    const reviewRun = this.store.get('SELECT * FROM runs WHERE id = ?', reviewRunId)
+    this.runChatStore(reviewRun).run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), reviewRunId, 'queued', '任务交付完成，触发记忆审查', createdAt,
     )
@@ -215,7 +217,7 @@ export const memoryMethods = {
     if (!items.length) {
       // 审查失败或模型没给出可用结论时，回退到规则沉淀，保证任务交付不会颗粒无收。
       if (sourceRun?.task_id) {
-        this.store.run(
+        this.runChatStore(reviewRun).run(
           'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
           id('evt'), reviewRun.id, 'review_fallback', `记忆审查未产出可用结论，回退规则沉淀：${error?.message ?? '无有效条目'}`, nowIso(),
         )
@@ -286,7 +288,7 @@ export const memoryMethods = {
     const rejectNote = rejected
       ? `，拒写 ${rejected} 条${capacityRejected ? `（其中 ${capacityRejected} 条因容量锁被拒）` : ''}：${rejectReasons.join('；')}`
       : ''
-    this.store.run(
+    this.runChatStore(reviewRun).run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${deduped ? `，去重 ${deduped} 条` : ''}${rejectNote}`, nowIso(),
     )

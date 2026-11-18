@@ -44,14 +44,15 @@ export const terminalMethods = {
     if (!clean) throw badRequest('命令不能为空')
     if (clean.length > TERMINAL_COMMAND_MAX) throw badRequest(`命令过长（最多 ${TERMINAL_COMMAND_MAX} 字符）`)
     // 同项目同时只允许一条运行：检查与插入之间无 await，单线程内不会交错。
-    if (this.store.get("SELECT id FROM terminal_commands WHERE project_id = ? AND status = 'running'", project.id)) {
+    if (this.groupChatStore(project.id).get("SELECT id FROM terminal_commands WHERE project_id = ? AND status = 'running'", project.id)) {
       throw conflict('该项目已有终端命令在运行，请先停止或等待它结束')
     }
     const commandId = id('term')
     const createdAt = nowIso()
     // 命令与聊天消息同一姿势：可能拼进密钥值，入库（行、审计）前先过掩码，密钥原文不落库。
     const storableCommand = this.maskSecretValues(clean)
-    this.store.run(
+    // 终端命令住各项目聊天库（chat-db-split Phase 3）：按 project_id 路由。
+    this.groupChatStore(project.id).run(
       `INSERT INTO terminal_commands(id, project_id, command, status, created_at) VALUES (?, ?, ?, 'running', ?)`,
       commandId, project.id, storableCommand, createdAt,
     )
@@ -87,10 +88,18 @@ export const terminalMethods = {
       this.finishTerminalCommand(commandId, 'failed', null, `命令执行失败：${error?.message ?? error}`)
     })
     this.audit(actor, 'terminal.run', 'project', project.id, { command: storableCommand })
-    return this.terminalCommandView(this.store.get('SELECT * FROM terminal_commands WHERE id = ?', commandId))
+    return this.terminalCommandView(this.groupChatStore(project.id).get('SELECT * FROM terminal_commands WHERE id = ?', commandId))
+  },
+  // 命令行住各项目聊天库，commandId 不含项目信息：跨库扇出找行（库数是个位数、主键查）。
+  terminalCommandRow(commandId) {
+    for (const chatStore of this.allChatStores()) {
+      const row = chatStore.get('SELECT * FROM terminal_commands WHERE id = ?', commandId)
+      if (row) return row
+    }
+    return null
   },
   cancelTerminalCommand(commandId, actor = this.actor()) {
-    const row = this.store.get('SELECT * FROM terminal_commands WHERE id = ?', commandId)
+    const row = this.terminalCommandRow(commandId)
     if (!row) throw notFound('终端命令不存在')
     if (row.status !== 'running') throw conflict('命令已结束，无需停止')
     const entry = this.terminalActive.get(commandId)
@@ -102,16 +111,16 @@ export const terminalMethods = {
       killTerminalGroup(entry.child)
     }
     this.audit(actor, 'terminal.cancel', 'terminal_command', commandId, {})
-    return this.terminalCommandView(this.store.get('SELECT * FROM terminal_commands WHERE id = ?', commandId))
+    return this.terminalCommandView(this.groupChatStore(row.project_id).get('SELECT * FROM terminal_commands WHERE id = ?', commandId))
   },
   terminalState(projectId) {
     // 顺手清理：每项目只保留最近 TERMINAL_HISTORY_LIMIT 条，不新增定时器。
-    this.store.run(
+    this.groupChatStore(projectId).run(
       `DELETE FROM terminal_commands WHERE project_id = ? AND id NOT IN (
          SELECT id FROM terminal_commands WHERE project_id = ? ORDER BY created_at DESC LIMIT ?)`,
       projectId, projectId, TERMINAL_HISTORY_LIMIT,
     )
-    const history = this.store.all(
+    const history = this.groupChatStore(projectId).all(
       'SELECT * FROM terminal_commands WHERE project_id = ? ORDER BY created_at DESC LIMIT ?',
       projectId, TERMINAL_HISTORY_LIMIT,
     ).map(row => this.terminalCommandView(row))
@@ -140,18 +149,20 @@ export const terminalMethods = {
     const output = this.maskSecretValues(String(entry?.buffer ?? '').slice(-TERMINAL_OUTPUT_CAP))
     // 服务停机竞态：子进程在 store 关闭后才退出时，收尾写库失败只告警，不再炸进程。
     try {
-      const row = this.store.get('SELECT project_id FROM terminal_commands WHERE id = ?', commandId)
-      this.store.run(
-        `UPDATE terminal_commands SET status = ?, exit_code = ?, output = ?, error_message = ?, ended_at = ? WHERE id = ?`,
-        status, exitCode, output, errorMessage, nowIso(), commandId,
-      )
-      if (row) this.trimTerminalHistory(row.project_id)
+      const row = this.terminalCommandRow(commandId)
+      if (row) {
+        this.groupChatStore(row.project_id).run(
+          `UPDATE terminal_commands SET status = ?, exit_code = ?, output = ?, error_message = ?, ended_at = ? WHERE id = ?`,
+          status, exitCode, output, errorMessage, nowIso(), commandId,
+        )
+        this.trimTerminalHistory(row.project_id)
+      }
     } catch (error: any) {
       this.logger.warn?.(`dsh-team: terminal command ${commandId} 收尾落库失败：${error?.message ?? error}`)
     }
   },
   trimTerminalHistory(projectId) {
-    this.store.run(
+    this.groupChatStore(projectId).run(
       `DELETE FROM terminal_commands WHERE project_id = ? AND id NOT IN (
          SELECT id FROM terminal_commands WHERE project_id = ? ORDER BY created_at DESC LIMIT ?)`,
       projectId, projectId, TERMINAL_HISTORY_LIMIT,

@@ -33,7 +33,8 @@ export function apply(ctx, config = {}) {
   service.attachRuntime(runtime)
   runtime.attach()
   installTeamTools(ctx, service)
-  installSubagentLedger(ctx, store, logger)
+  // Phase 3：账本事件住运行归属聊天库，与 DshRuntime 同款路由器。
+  installSubagentLedger(ctx, store, logger, { forRun: (run: any) => (service as any).runChatStore(run) })
   installSkillProvider(ctx, resolved, logger, store)
   installHttp(ctx, service, logger)
 

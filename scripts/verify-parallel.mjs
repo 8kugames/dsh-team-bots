@@ -63,9 +63,10 @@ async function runCase({ name, scopesA, scopesB }) {
     await service.tick()
     const running = store.all("SELECT task_id FROM runs WHERE status = 'running'")
     const queued = store.all("SELECT task_id FROM runs WHERE status = 'queued'")
-    const parallelEvents = store.all(
-      `SELECT e.run_id FROM run_events e JOIN runs r ON r.id = e.run_id
-       WHERE e.type = 'run_parallel' AND r.task_id IN (?, ?)`,
+    // Phase 3：run_events 住各聊天库，按项目库直查。
+    const parallelEvents = service.groupChatStore(project.id).all(
+      `SELECT e.run_id FROM run_events e
+       WHERE e.type = 'run_parallel' AND e.run_id IN (SELECT id FROM runs WHERE task_id IN (?, ?))`,
       t1.id, t2.id,
     )
     return {

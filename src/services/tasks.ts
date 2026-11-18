@@ -235,10 +235,14 @@ export const tasksMethods = {
     return this.taskView(this.taskRow(taskId))
   },
   addTaskEvent(taskId, type, actor, data = {}) {
-    this.store.run(
+    // 任务事件住任务所属项目的聊天库（chat-db-split Phase 3）：task 行在顶库，按 project_id 路由。
+    const projectId = this.store.get('SELECT * FROM tasks WHERE id = ?', taskId)?.project_id
+    // afterCommit：调用方常包在顶库事务里（setTaskStatus 等）——聊天库写跟随顶库
+    // 提交/回滚，外层回滚不残留事件（Phase 3 跨库原子性收口）。
+    this.store.afterCommit(() => this.groupChatStore(projectId).run(
       'INSERT INTO task_events(id, task_id, type, actor_type, actor_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       id('tevt'), taskId, type, actor.type, actor.id, JSON.stringify(data), nowIso(),
-    )
+    ))
   },
   // 统一状态迁移落点（吸收 dsh-agent-team「账本为权威、投影可重放」理念）：所有直接改
   // tasks.status 的路径都经此走——同一事务内 UPDATE + 权威 'status' 事件（from/to），
@@ -267,7 +271,7 @@ export const tasksMethods = {
   taskProjectionDrift() {
     const drifted = []
     for (const task of this.store.all('SELECT id, number, project_id, status FROM tasks')) {
-      const events = this.store.all(
+      const events = this.groupChatStore(task.project_id).all(
         `SELECT type, data_json FROM task_events WHERE task_id = ?
            AND (type = 'created' OR (type = 'status' AND json_extract(data_json, '$.field') = 'status'))
          ORDER BY created_at, rowid`,
@@ -292,7 +296,8 @@ export const tasksMethods = {
   // 增量非一一对应（交付是一事件一增量，updateTask 是一增量多事件），故按时间取最近
   // N 条而非按版本切割。
   taskChangesSince(taskId, limit = 5) {
-    const rows = this.store.all(
+    const projectId = this.store.get('SELECT * FROM tasks WHERE id = ?', taskId)?.project_id
+    const rows = this.groupChatStore(projectId).all(
       'SELECT type, actor_type, actor_id, data_json, created_at FROM task_events WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
       taskId, limit,
     )
@@ -356,7 +361,7 @@ export const tasksMethods = {
       blockedBy: deps.blockedBy,
       depsSatisfied: deps.depsSatisfied,
       blockedByNames: deps.blockedByNames,
-      comments: Number(this.store.get('SELECT COUNT(*) AS count FROM task_comments WHERE task_id = ?', task.id)?.count ?? 0),
+      comments: Number(this.groupChatStore(task.project_id).get('SELECT COUNT(*) AS count FROM task_comments WHERE task_id = ?', task.id)?.count ?? 0),
       latestRun: runs[0] ?? null,
       runs,
       stage,
@@ -565,7 +570,7 @@ export const tasksMethods = {
       // 指派者名（DSHBOTS-257）：/detail 卡片直读 assigneeName，在此按 assignee_bot_id
       // 解析（同 task-notify 口径），不进 taskView 列表热路径（每卡一次 bots 查询）。
       assigneeName: task.assignee_bot_id ? this.botRow(task.assignee_bot_id)?.name ?? null : null,
-      comments: this.store.all(
+      comments: this.groupChatStore(task.project_id).all(
         'SELECT author_type, author_id, body, created_at FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 3',
         task.id,
       ).reverse(),
@@ -574,8 +579,9 @@ export const tasksMethods = {
   async taskDetail(taskId) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
-    const comments = this.store.all('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at', taskId)
-    const events = this.store.all('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at', taskId)
+    // 评论与事件住任务所属项目的聊天库（chat-db-split Phase 3）；runs/依赖仍在顶库。
+    const comments = this.groupChatStore(task.project_id).all('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at', taskId)
+    const events = this.groupChatStore(task.project_id).all('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at', taskId)
     const runs = this.store.all("SELECT * FROM runs WHERE task_id = ? AND COALESCE(error_code, '') <> 'SUPERSEDED' ORDER BY queued_at DESC", taskId)
     const dependencies = this.store.all(
       'SELECT t.id, t.number, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id WHERE d.task_id = ?',

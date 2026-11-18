@@ -478,8 +478,9 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
     ].join('\n')
     // 任务评论注入（DSHBOTS-254 收口）：最近 3 条、合计 ≤1.5k——每条正文 500 上限
     // （按 1.5k/3 比例缩减）+ 拼接后 1500 硬顶（兜住行前缀开销），最坏 ~4k 压到 1.5k。
+    // Phase 3：任务评论住项目聊天库（顶库已迁空）。
     const taskComments = task
-      ? this.store.all(
+      ? this.chatStoreForRun({ project_id: task.project_id, bot_id: run.bot_id }).all(
         'SELECT id, author_type, author_id, body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 3',
         task.id,
       ).reverse()
@@ -622,7 +623,7 @@ Rules:
 
 Task: ${sourceTask ? `${project.key}-${sourceTask.number} ${sourceTask.title}` : '(unknown task)'}
 Delivery output:
-${(sourceRun.output ?? '').slice(0, 6000)}${timeBudgetBlockFor(sourceTask)}`
+${(sourceRun ? (this.chatStoreForRun(sourceRun).get('SELECT output FROM run_payload WHERE run_id = ?', sourceRun.id)?.output ?? sourceRun.output ?? '') : '').slice(0, 6000)}${timeBudgetBlockFor(sourceTask)}`
       }
       const userMessage = sourceRun?.trigger_ref
         ? this.chatStoreForRun(sourceRun).get(
@@ -646,7 +647,7 @@ Rules:
 User message:
 ${(userMessage?.body ?? '(missing)').slice(0, 2000)}
 Your reply:
-${(sourceRun?.output ?? '').slice(0, 4000)}`
+${(sourceRun ? (this.chatStoreForRun(sourceRun).get('SELECT output FROM run_payload WHERE run_id = ?', sourceRun.id)?.output ?? sourceRun.output ?? '') : '').slice(0, 4000)}`
     }
     if (task) {
       // 超长防护（DSHBOTS-254）：任务分支与 review/handle 同口径复用 truncateTaskDescription

@@ -20,7 +20,7 @@ export const taskRunMethods = {
       return await this.pauseRunsForBoard(taskId)
     }
     const runs = this.store.all(
-      "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running') AND mode = 'write'",
+      "SELECT * FROM runs WHERE task_id = ? AND status IN ('queued', 'running') AND mode = 'write'",
       taskId,
     )
     const errorMessage = `任务离开「进行中」（${fromStatus ?? '-'} → ${toStatus ?? '-'}），写运行中止，写占用已释放`
@@ -30,7 +30,10 @@ export const taskRunMethods = {
         'UPDATE runs SET error_code = ?, error_message = ? WHERE id = ?',
         'TASK_LEFT_IN_PROGRESS', errorMessage, run.id,
       )
-      this.insertRunEvent(run.id, 'task_left_in_progress', errorMessage)
+      this.runChatStore(run).run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), run.id, 'task_left_in_progress', errorMessage, nowIso(),
+      )
     }
     return runs.length
   },
@@ -55,15 +58,17 @@ export const taskRunMethods = {
     const body = text(bodyInput, 20_000)
     if (!body) throw badRequest('评论不能为空')
     const commentId = id('cmt')
+    const chat = this.groupChatStore(task.project_id)
     this.store.transaction(() => {
-      this.store.run(
+      // 评论写经 afterCommit 跟随外层提交/回滚（addTaskEvent 同理，内部已挂）。
+      this.store.afterCommit(() => chat.run(
         'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         commentId, taskId, actor.type, actor.id, body, nowIso(),
-      )
+      ))
       this.addTaskEvent(taskId, 'commented', actor, { commentId })
       this.audit(actor, 'task.comment', 'task', taskId, { commentId })
     })
-    const comment = this.store.get('SELECT * FROM task_comments WHERE id = ?', commentId)
+    const comment = chat.get('SELECT * FROM task_comments WHERE id = ?', commentId)
     const steered = await this.steerRunningTaskRun(task, comment, actor)
     return { ...comment, steered }
   },
@@ -82,7 +87,7 @@ export const taskRunMethods = {
         run.session_id,
         `New comment on ${project?.key ?? 'TASK'}-${task.number} from ${author}:\n${comment.body}\n\nIf this changes the plan, adjust the work in progress; otherwise keep going and mention it in the delivery report.`,
       )
-      this.store.run(
+      this.runChatStore(run).run(
         'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
         id('evt'), run.id, 'steered', `评论直通（${author}）`, nowIso(),
       )
@@ -134,25 +139,34 @@ export const taskRunMethods = {
       if (this.activeRunByTaskId(task.id)) return this.activeRunByTaskId(task.id)
       throw error
     }
-    this.store.run(
+    // run_events 住运行归属的聊天库（chat-db-split Phase 3）：取回 run 行统一路由，
+    // queued 沿用与 runs.queued_at 同刻的 createdAt。
+    const run = this.store.get('SELECT * FROM runs WHERE id = ?', runId)
+    const chatStore = this.runChatStore(run)
+    chatStore.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued', `由 ${actor.type}:${actor.id} 触发`, createdAt,
     )
     if (routing.mode === 'fallback') {
-      this.insertRunEvent(
-        runId,
-        'quota_fallback',
+      chatStore.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'quota_fallback',
         `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref}（预计 ${this.botQuotaState(bot.id, bot.provider)?.resetAt ?? '未知'} 恢复）`,
+        nowIso(),
       )
     } else if (routing.mode === 'wait') {
-      this.insertRunEvent(
-        runId,
-        'quota_wait',
+      chatStore.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'quota_wait',
         `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`,
+        nowIso(),
       )
     }
     if (triggerType === 'board_resume') {
-      this.insertRunEvent(runId, 'board_resume', '看板拖入执行中，系统指令自动开工')
+      chatStore.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'board_resume', '看板拖入执行中，系统指令自动开工', nowIso(),
+      )
     }
     return runId
   },
@@ -218,7 +232,10 @@ export const taskRunMethods = {
       }
       throw error
     }
-    this.store.run(
+    // 同 enqueueTaskRun：run_events 按运行归属聊天库路由，queued 沿用 createdAt。
+    const ownerRun = this.store.get('SELECT * FROM runs WHERE id = ?', runId)
+    const chatStore = this.runChatStore(ownerRun)
+    chatStore.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
       kind === 'review' ? '任务交付，转总监验收' : '任务受阻，转总监处理',
@@ -227,16 +244,18 @@ export const taskRunMethods = {
     // DSHBOTS-358：内部运行同样接额度路由——主 provider 耗尽时直接走备用模型；
     // 无可用备用则留 queued 等恢复（调度器额度闸门兜底），不再照常下发撞墙。
     if (routing.mode === 'fallback') {
-      this.insertRunEvent(
-        runId,
-        'quota_fallback',
+      chatStore.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'quota_fallback',
         `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref}（预计 ${this.botQuotaState(owner.id, owner.provider)?.resetAt ?? '未知'} 恢复）`,
+        nowIso(),
       )
     } else if (routing.mode === 'wait') {
-      this.insertRunEvent(
-        runId,
-        'quota_wait',
+      chatStore.run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'quota_wait',
         `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`,
+        nowIso(),
       )
     }
     void this.tick()

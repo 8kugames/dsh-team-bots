@@ -498,16 +498,12 @@ export const runsMethods = {
       }
       throw error
     }
-    this.store.run(
-      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, 'queued',
+    this.insertRunEvent(runId, 'queued',
       triggerType === 'wechat'
         ? '微信消息触发（项目外单聊直达）'
         : triggerType === 'feishu'
           ? '飞书消息触发（项目外单聊直达）'
-          : '单聊消息触发',
-      createdAt,
-    )
+          : '单聊消息触发')
     return runId
   },
   enqueueChatRun(project, bot, messageId, origin = null) {
@@ -545,16 +541,12 @@ export const runsMethods = {
       }
       throw error
     }
-    this.store.run(
-      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, 'queued',
+    this.insertRunEvent(runId, 'queued',
       triggerType === 'wechat'
         ? '微信群聊消息触发（直达）'
         : triggerType === 'feishu'
           ? '飞书群聊消息触发（直达）'
-          : '群聊消息触发',
-      createdAt,
-    )
+          : '群聊消息触发')
     return runId
   },
   async cancelRunInternal(runId, updateTask = true) {
@@ -566,10 +558,7 @@ export const runsMethods = {
       nowIso(),
       runId,
     )
-    this.store.run(
-      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, 'canceled', '运行已取消', nowIso(),
-    )
+    this.insertRunEvent(runId, 'canceled', '运行已取消')
     if (updateTask && run.task_id) {
       this.setTaskStatus(run.task_id, 'todo', { type: 'system', id: 'system' }, { ifIs: 'in_progress' })
       this.addTaskEvent(run.task_id, 'run_canceled', { type: 'system', id: 'system' }, { runId })
@@ -645,10 +634,7 @@ export const runsMethods = {
       newRunId, task.project_id, task.assignee_bot_id, task.id, task.id,
       Number(run.attempt) + 1, `retry:${task.id}:${Date.now()}:${newRunId}`, writeScopes, createdAt,
     )
-    this.store.run(
-      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), newRunId, 'queued', `重试 ${run.attempt}`, createdAt,
-    )
+    this.insertRunEvent(newRunId, 'queued', `重试 ${run.attempt}`)
     this.addTaskEvent(task.id, 'retried', actor, { runId: newRunId, previousRunId: runId })
     void this.tick()
     return this.store.get('SELECT * FROM runs WHERE id = ?', newRunId)
@@ -671,12 +657,8 @@ export const runsMethods = {
       const model = run.model_provider
         ? { provider: run.model_provider, model: run.model_model, effort: run.model_effort ?? null }
         : { provider: bot.provider, model: bot.model, effort: bot.effort ?? null }
-      this.store.run(
-        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-        id('evt'), run.id, 'config_snapshot',
-        JSON.stringify({ bot_revision: Number(bot.current_revision) || 0, model, prompt_segment_overrides: segments }),
-        nowIso(),
-      )
+      this.insertRunEvent(run.id, 'config_snapshot',
+        JSON.stringify({ bot_revision: Number(bot.current_revision) || 0, model, prompt_segment_overrides: segments }))
     }
     try {
       const task = run.task_id ? this.taskRow(run.task_id) : null
@@ -765,7 +747,11 @@ if (run.kind === 'dm_reply') {
   },
   insertRunEvent(runId, type, message) {
     if (!runId) return
-    this.store.run(
+    // Phase 3：事件住运行归属的聊天库（全站写入的统一收口点，调用方无感）。
+    // 运行行已不在（删除竞态的孤儿事件）时回落顶库留痕，不丢审计线索。
+    const run = this.store.get('SELECT id, project_id, bot_id FROM runs WHERE id = ?', runId)
+    const target = run ? this.runChatStore(run) : this.store
+    target.run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, type, this.maskSecretValues(message), nowIso(),
     )
@@ -935,7 +921,8 @@ if (run.kind === 'dm_reply') {
     const usedRef = run.model_provider && run.model_model ? `${run.model_provider}/${run.model_model}` : null
     return {
       ...rest,
-      artifacts: jsonParse(run.artifacts, []),
+      output: this.runOutputOf(run) || null,
+      artifacts: this.runArtifactsOf(run),
       attention: parseAttention(attentionJson),
       mergedMessageIds: Array.isArray(jsonParse(mergedRaw, [])) ? jsonParse(mergedRaw, []) : [],
       botName: bot?.name ?? 'Bot',
@@ -1016,8 +1003,7 @@ if (run.kind === 'dm_reply') {
   // 产物清单视图：HTTP 端点与运行详情面板共用。
   listRunArtifacts(runId) {
     const run = this.runRow(runId)
-    const list = jsonParse(run.artifacts, [])
-    return { runId, artifacts: Array.isArray(list) ? list : [] }
+    return { runId, artifacts: this.runArtifactsOf(run) }
   },
 
   // 产物文件定位：仅允许读取该运行清单里的相对路径，且必须落在项目工作区内（含符号链接校验）。
@@ -1027,8 +1013,8 @@ if (run.kind === 'dm_reply') {
       ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
       : null
     if (!project?.slug) throw notFound('运行没有关联的项目工作区')
-    const list = jsonParse(run.artifacts, [])
-    if (!Array.isArray(list) || !list.some(item => item?.path === relPath)) {
+    const list = this.runArtifactsOf(run)
+    if (!list.some(item => item?.path === relPath)) {
       throw forbidden('文件不在该运行的产物清单中')
     }
     const dir = this.projectWorkDir(project)

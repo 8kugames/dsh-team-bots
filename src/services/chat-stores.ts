@@ -8,7 +8,7 @@ import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Store } from '../db.js'
-import { nowIso } from '../util.js'
+import { jsonParse, nowIso } from '../util.js'
 
 // 句柄上限：聊天库懒打开、LRU 关闭。当前规模（项目数 + bot 数）远低于上限，
 // 上限只防长期运行进程的句柄漂移。
@@ -112,6 +112,58 @@ CREATE INDEX IF NOT EXISTS usage_events_run_idx ON usage_events(run_id);
 CREATE INDEX IF NOT EXISTS usage_events_task_idx ON usage_events(task_id);
 CREATE INDEX IF NOT EXISTS usage_events_occurred_idx ON usage_events(occurred_at);
 
+CREATE TABLE IF NOT EXISTS run_events (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS run_events_run_idx ON run_events(run_id, created_at);
+CREATE INDEX IF NOT EXISTS run_events_type_idx ON run_events(type);
+
+-- run 胖载荷（Phase 3）：runs 瘦身留顶库当调度索引，output/artifacts 住这里。
+CREATE TABLE IF NOT EXISTS run_payload (
+  run_id TEXT PRIMARY KEY,
+  output TEXT,
+  artifacts TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS task_comments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS task_comments_task_idx ON task_comments(task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS task_events (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  actor_type TEXT,
+  actor_id TEXT,
+  data_json TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS task_events_task_idx ON task_events(task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS terminal_commands (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  command TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  exit_code INTEGER,
+  output TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  ended_at TEXT
+);
+CREATE INDEX IF NOT EXISTS terminal_commands_project_idx ON terminal_commands(project_id, created_at);
+
 CREATE TABLE IF NOT EXISTS usage_reconciliation (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL,
@@ -162,6 +214,10 @@ const CHAT_TABLE_COLUMNS = {
   run_trajectory: 'id, run_id, seq, kind, title, detail, turn, step, created_at',
   usage_events: 'id, source_key, source_event_id, run_id, project_id, bot_id, task_id, provider, model, purpose, currency, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, input_cost, output_cost, total_cost, occurred_at, created_at',
   usage_reconciliation: 'id, run_id, event_calls, event_tokens, run_tokens, delta_tokens, status, note, checked_at',
+  run_events: 'id, run_id, type, message, created_at',
+  task_comments: 'id, task_id, author_type, author_id, body, created_at',
+  task_events: 'id, task_id, type, actor_type, actor_id, data_json, created_at',
+  terminal_commands: 'id, project_id, command, status, exit_code, output, error_message, created_at, ended_at',
 }
 
 export const chatStoreMethods = {
@@ -268,6 +324,32 @@ export const chatStoreMethods = {
       try { rmSync(`${base}${suffix}`, { force: true }) } catch { /* 删除失败留人工处理 */ }
     }
   },
+  // Phase 3 路由助手：run 胖载荷住运行归属的聊天库。
+  // 顶库 runs 已瘦身（output/artifacts 住 run_payload）：读取经助手并到载荷。
+  runOutputOf(run) {
+    if (!run) return ''
+    const payload = this.runPayloadOf(run)
+    return payload?.output ?? run.output ?? ''
+  },
+  runArtifactsOf(run) {
+    if (!run) return []
+    const payload = this.runPayloadOf(run)
+    const list = jsonParse(payload?.artifacts ?? run.artifacts, [])
+    return Array.isArray(list) ? list : []
+  },
+  runPayloadOf(run) {
+    if (!run) return null
+    return this.runChatStore(run).get('SELECT * FROM run_payload WHERE run_id = ?', run.id)
+  },
+  saveRunPayload(run, { output = null, artifacts = null }) {
+    this.runChatStore(run).run(
+      `INSERT INTO run_payload(run_id, output, artifacts, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(run_id) DO UPDATE SET output = COALESCE(excluded.output, output),
+         artifacts = COALESCE(excluded.artifacts, artifacts), updated_at = excluded.updated_at`,
+      run.id, output, artifacts, nowIso(),
+    )
+  },
+
   // Phase 1 一次性迁移：见文件头注释。任意步崩溃重启续跑，最终记账后不再进入。
   migrateChatSplitP1() {
     const ledgerName = 'chat_split_p1'
@@ -414,5 +496,69 @@ export const chatStoreMethods = {
     })
     this.store.exec('VACUUM')
     this.logger?.info?.('dsh-team: 聊天分库 Phase 2 迁移完成：usage_events/usage_reconciliation 已迁入各聊天库，顶库改读 usage_rollup 汇总')
+  },
+  // Phase 3 一次性迁移：run_events/胖载荷/任务评论事件/终端命令迁入聊天库；
+  // runs 瘦身留顶库当调度索引（output/artifacts 清空转 run_payload）。
+  migrateChatSplitP3() {
+    const ledgerName = 'chat_split_p3'
+    if (this.store.get('SELECT 1 FROM schema_migrations WHERE name = ?', ledgerName)) return
+    mkdirSync(this.chatStoresDir(), { recursive: true })
+    const targets = []
+    for (const project of this.store.all('SELECT id FROM projects')) {
+      targets.push({ file: this.groupChatFileName(project.id), ledger: `chat_split_p3:p:${project.id}`, pid: project.id })
+    }
+    for (const bot of this.store.all('SELECT id FROM bots')) {
+      targets.push({ file: this.soloChatFileName(bot.id), ledger: `chat_split_p3:s:${bot.id}`, bid: bot.id })
+    }
+    for (const target of targets) {
+      if (this.store.get('SELECT 1 FROM schema_migrations WHERE name = ?', target.ledger)) continue
+      const chat = this.openChatStoreFile(target.file)
+      const copies = target.pid
+        ? [
+          { table: 'run_events', where: 'run_id IN (SELECT id FROM runs WHERE project_id = ?)', params: [target.pid] },
+          { table: 'task_comments', where: 'task_id IN (SELECT id FROM tasks WHERE project_id = ?)', params: [target.pid] },
+          { table: 'task_events', where: 'task_id IN (SELECT id FROM tasks WHERE project_id = ?)', params: [target.pid] },
+          { table: 'terminal_commands', where: 'project_id = ?', params: [target.pid] },
+        ]
+        : [
+          { table: 'run_events', where: 'run_id IN (SELECT id FROM runs WHERE project_id IS NULL AND bot_id = ?)', params: [target.bid] },
+        ]
+      for (const copy of copies) {
+        copyRowsBetween(this.store, chat, copy.table, CHAT_TABLE_COLUMNS[copy.table], copy.where, copy.params)
+      }
+      // run 胖载荷：output/artifacts 非空的运行搬进 run_payload（幂等）。
+      chat.transaction(() => {
+        const rows = this.store.all(
+          `SELECT id, output, artifacts FROM runs WHERE ${target.pid ? 'project_id = ?' : 'project_id IS NULL AND bot_id = ?'}
+             AND (output IS NOT NULL OR artifacts IS NOT NULL)`,
+          target.pid ?? target.bid,
+        )
+        for (const row of rows) {
+          chat.run(
+            `INSERT INTO run_payload(run_id, output, artifacts, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(run_id) DO NOTHING`,
+            row.id, row.output, row.artifacts, nowIso(),
+          )
+        }
+      })
+      this.store.run(
+        'INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING',
+        target.ledger, nowIso(),
+      )
+    }
+    // 清空与 runs 瘦身一个事务；无主行（join 不上 runs/tasks 的孤儿）留顶库由保留期兜底。
+    this.store.transaction(() => {
+      this.store.run('DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs)')
+      this.store.run('DELETE FROM task_comments WHERE task_id IN (SELECT id FROM tasks)')
+      this.store.run('DELETE FROM task_events WHERE task_id IN (SELECT id FROM tasks)')
+      this.store.run('DELETE FROM terminal_commands WHERE project_id IS NOT NULL')
+      this.store.run('UPDATE runs SET output = NULL, artifacts = NULL WHERE output IS NOT NULL OR artifacts IS NOT NULL')
+      this.store.run(
+        'INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING',
+        ledgerName, nowIso(),
+      )
+    })
+    this.store.exec('VACUUM')
+    this.logger?.info?.('dsh-team: 聊天分库 Phase 3 迁移完成：run_events/胖载荷/任务评论事件/终端命令已迁入各聊天库，runs 已瘦身')
   },
 }

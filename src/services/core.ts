@@ -111,10 +111,8 @@ export const coreMethods = {
          WHERE status = 'running'`,
       )
       for (const run of interrupted) {
-        this.store.run(
-          `INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, 'recovered', ?, ?)`,
-          id('evt'), run.id, '宿主重启，运行重新排队', nowIso(),
-        )
+        // Phase 3：事件住运行归属聊天库（统一收口自动路由）。
+        this.insertRunEvent(run.id, 'recovered', '宿主重启，运行重新排队')
       }
       // 审批表与 messages 审批列的迁移由审批域自管（db.js 保持不超 800 行）；
       // 同一步顺手把残留 pending 置 timeout——宿主侧请求随进程消失，不可能再被应答。
@@ -139,11 +137,15 @@ export const coreMethods = {
       // 崩溃重启续跑。必须在正文读写路径工作前完成。
       this.migrateChatSplitP1()
       this.migrateChatSplitP2()
+      this.migrateChatSplitP3()
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
-      this.store.run(
-        `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,
-        nowIso(),
-      )
+      // Phase 3：terminal_commands 住各聊天库，重启置 interrupted 扇出执行。
+      for (const chat of this.allChatStores()) {
+        chat.run(
+          `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,
+          nowIso(),
+        )
+      }
       // 挂载决策按生效开关（DSHBOTS-334）：通道页 settings 显式值 > patch.yml/env 默认。
       if (this.wechatChannelEnabled()) {
         // 微信通道是可选集成，其 vendor 依赖按需加载：缺失或损坏时只降级该通道，

@@ -206,7 +206,12 @@ export function applyRetention(store, {
     removed.usage = { removed: removed.usageEvents, before }
   }
   if (runEventDays > 0) {
-    removed.runEvents = store.run('DELETE FROM run_events WHERE created_at < ?', cutoff(runEventDays)).changes
+    // run_events 住各聊天库（Phase 3）：逐库清理并合计，顶库只兜孤儿行。
+    removed.runEvents = Number(store.run('DELETE FROM run_events WHERE created_at < ?', cutoff(runEventDays)).changes ?? 0)
+    for (const chatStore of chatStores) {
+      if (chatStore === store) continue
+      removed.runEvents += Number(chatStore.run('DELETE FROM run_events WHERE created_at < ?', cutoff(runEventDays)).changes ?? 0)
+    }
     // 顶库轨迹兜底清理：独立构造的 runtime（未注入聊天库路由）仍把轨迹落顶库；
     // 分库后的常规数据在各聊天库，逐库清理。计数两边合计。
     removed.runTrajectory = Number(store.run('DELETE FROM run_trajectory WHERE created_at < ?', cutoff(runEventDays)).changes ?? 0)

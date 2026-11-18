@@ -43,7 +43,7 @@ export const sandboxMethods = {
     const { mode, source } = effectiveSandbox(run, bot, task)
     if (!SANDBOX_MODES.includes(mode)) return
     if (run?.id) {
-      this.store.run(
+      this.chatStoreForRun(run).run(
         'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
         id('evt'), run.id, 'sandbox_mode', `沙箱档位 ${mode}（来源：${source}）`, nowIso(),
       )

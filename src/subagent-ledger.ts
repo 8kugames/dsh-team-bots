@@ -1,4 +1,6 @@
-// DSHBOTS-294 子代理账本（ADR §4.2.1）：宿主事件缝 → 所属 task 运行的 run_events。
+// DSHBOTS-294 子代理账本（ADR §4.2.1）：宿主事件缝 → 所属 task 运行的 run_events
+// （chat-db-split Phase 3 起事件住运行归属聊天库，路由器 { forRun } 由调用方注入，
+// 未注入时回落顶库，行为与分库前一致）。
 // 双缝互补：tools 瀑布带 caller agent（父归属权威源，任务号标签在参数里）；
 // subagent/start|end 带 stopReason+lastAssistantMessage（终态摘要源，载荷无父身份，
 // 靠 tools/result 配对或唯一 running task 运行兜底归属）。子代理不占 runs 行（§4.2）。
@@ -31,7 +33,7 @@ const truncate = (text) => {
 }
 
 // 在插件根 ctx 注册事件监听（根级注册面实测见 tests/subagent-ledger.test.ts）。
-export function installSubagentLedger(ctx, store, logger) {
+export function installSubagentLedger(ctx, store, logger, chatStores = null) {
   // callId → 派发时快照（tools/result 按 callId 配对父归属）
   const byCall = new Map()
   // botId → 未消费的标签栈（subagent/end 兜底归属时取最近一次派发的标签）
@@ -58,10 +60,16 @@ export function installSubagentLedger(ctx, store, logger) {
     return run ? { botId: binding.bot_id, runId: run.id } : null
   }
 
-  const record = (runId, type, message) => store.run(
-    'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-    id('rev'), runId, type, message, nowIso(),
-  )
+  // 事件住运行归属聊天库（Phase 3）：只有 runId，先取路由列再走注入的路由器；
+  // 运行行已不在（删除竞态）或未注入路由器时回落顶库留痕，不丢审计线索。
+  const record = (runId, type, message) => {
+    const run = store.get('SELECT id, project_id, bot_id FROM runs WHERE id = ?', runId)
+    const target = run && chatStores?.forRun ? chatStores.forRun(run) : store
+    target.run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('rev'), runId, type, message, nowIso(),
+    )
+  }
 
   const stashLabel = (botId, label) => {
     const list = labelsByBot.get(botId) ?? []

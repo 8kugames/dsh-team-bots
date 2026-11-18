@@ -126,18 +126,20 @@ export const runFinishMethods = {
     // 额度耗尽时 provider 真给的重置时间照样保留（信息不丢，供 UI 显示额度恢复时间），
     // 但它不再触发对主模型的自动重试（见下方失败分支与 scheduler.retryExpiredPlanWaits）。
     const retryAfterMs = Number(error?.retryAfterMs) > 0 ? Number(error.retryAfterMs) : synthesizedMs
-    this.store.run(
-      `UPDATE runs SET status = ?, output = ?, artifacts = ?, error_code = ?, error_message = ?, retry_after_ms = ?, ended_at = ?,
+    const changed = this.store.run(
+      `UPDATE runs SET status = ?, error_code = ?, error_message = ?, retry_after_ms = ?, ended_at = ?,
        usage_input = ?, usage_cache_read = ?, usage_cache_write = ?, usage_output = ?, usage_cost = ?
        WHERE id = ? AND status IN ('running', 'queued')`,
-      status, cleanOutput, artifactsJson, error?.code ?? null, error?.message ?? null, retryAfterMs, endedAt,
+      status, error?.code ?? null, error?.message ?? null, retryAfterMs, endedAt,
       usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens, usage.cost,
       runId,
     )
-    this.store.run(
-      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''), endedAt,
-    )
+    // Phase 3：output/artifacts 住运行归属聊天库的 run_payload（顶库 runs 已瘦身）。
+    // 收尾 UPDATE 未命中（运行已终态）时不写载荷，避免覆盖既有结果。
+    if (Number(changed?.changes ?? 0) === 1) {
+      this.saveRunPayload(run, { output: cleanOutput, artifacts: artifactsJson })
+    }
+    this.insertRunEvent(runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''))
     // DSHBOTS-241：撞 provider 额度墙时记录该 bot 的额度状态（含恢复时间），
     // 供派发前路由（耗尽期走备用模型/排队）与 UI 手动解除；审计 bot.quota_exhausted。
     // DSHBOTS-246：事件与状态记录同条件——只有真撞墙才写「额度耗尽」，成功运行或
@@ -384,12 +386,12 @@ export const runFinishMethods = {
         // 施工方式由 bot 自选（亲做或派「bot 名+任务号」子代理），账本（D-294）仍照记。
         this.store.transaction(() => {
           this.setTaskStatus(task.id, 'in_review', { type: 'bot', id: bot.id })
-          this.store.run(
+          this.store.afterCommit(() => this.groupChatStore(task.project_id).run(
             'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
             id('cmt'), task.id, 'bot', bot.id,
             cleanOutput || '运行完成，但模型未返回文本。',
             endedAt,
-          )
+          ))
           this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, { runId, identifier: `${project.key}-${task.number}` })
           // 自动核验委派（DSHBOTS-113）：与 in_review 迁移同一事务触发留痕；实际派生由
           // review_delegate_auto outbox 承接（幂等键绑定本次交付运行），守卫冲突的退避重试

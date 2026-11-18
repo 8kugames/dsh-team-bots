@@ -143,19 +143,29 @@ const judgeCard = (service, row) => {
      ORDER BY COALESCE(ended_at, queued_at) DESC LIMIT 1`,
     row.id,
   )
-  const delivery = service.store.get(
-    `SELECT output FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'succeeded'
+  const deliveryRun = service.store.get(
+    `SELECT id, project_id, bot_id FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'succeeded'
        AND COALESCE(error_code, '') <> 'SUPERSEDED'
      ORDER BY ended_at DESC LIMIT 1`,
     row.id,
   )
+  // Phase 3：output 住运行归属聊天库的 run_payload（顶库 runs 已瘦身）。
+  const delivery = deliveryRun
+    ? service.runChatStore(deliveryRun).get('SELECT output FROM run_payload WHERE run_id = ?', deliveryRun.id)
+    : null
   // 子代理核验结论（DSHBOTS-235 用户拍板）：最近一次成功核验委派运行的 output（含结束时间，
   // 供 B 压 A 时序降级比较「建议 accept」是否晚于失败 run）。
-  const review = service.store.get(
-    `SELECT output, ended_at FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND status = 'succeeded'
+  const reviewRun = service.store.get(
+    `SELECT id, project_id, bot_id, ended_at FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND status = 'succeeded'
      ORDER BY ended_at DESC LIMIT 1`,
     row.id,
   )
+  const review = reviewRun
+    ? {
+        ended_at: reviewRun.ended_at,
+        output: service.runChatStore(reviewRun).get('SELECT output FROM run_payload WHERE run_id = ?', reviewRun.id)?.output ?? '',
+      }
+    : null
   const report = delivery?.output ?? ''
   const verify = report
     ? commitOnDevVerifier(service.projectWorkDir(service.projectRow(row.project_id)))
@@ -203,12 +213,17 @@ export function runReviewWatchdog(service) {
     const rows = service.store.all(`
       SELECT t.id, t.project_id, t.updated_at, t.assignee_bot_id, p.key AS project_key, t.number,
         t.review_target,
-        (SELECT MAX(c.created_at) FROM task_comments c WHERE c.task_id = t.id) AS last_comment_at,
         (SELECT MAX(COALESCE(r.last_progress_at, r.ended_at, r.started_at, r.queued_at))
            FROM runs r WHERE r.task_id = t.id) AS last_run_at
       FROM tasks t JOIN projects p ON p.id = t.project_id
       WHERE t.status = 'in_review' AND p.status = 'active'
     `)
+    // 评论锚点住各项目聊天库（chat-db-split Phase 3）：逐卡按 project_id 取，行字段形状不变。
+    for (const row of rows) {
+      row.last_comment_at = service.groupChatStore(row.project_id).get(
+        'SELECT MAX(created_at) AS v FROM task_comments WHERE task_id = ?', row.id,
+      )?.v ?? null
+    }
     const map = JSON.parse(service.store.setting(REVIEW_IDLE_ALERTED_KEY) ?? '{}')
     const inReviewIds = new Set(rows.map(row => row.id))
     // 去重表回收：已离开 in_review（或已删除）的卡摘除，恢复再报资格。
@@ -295,13 +310,17 @@ export function runReviewWatchdog(service) {
 // （含最新评论与 run 活动，UI badge 不再自算口径）+ 生效阈值/升级线 + 最近一次判定与依据。
 export const reviewWatchdogMethods = {
   reviewIdleView(task) {
-    const anchors = this.store.get(
-      `SELECT
-         (SELECT MAX(c.created_at) FROM task_comments c WHERE c.task_id = ?) AS last_comment_at,
-         (SELECT MAX(COALESCE(r.last_progress_at, r.ended_at, r.started_at, r.queued_at))
-            FROM runs r WHERE r.task_id = ?) AS last_run_at`,
-      task.id, task.id,
-    )
+    // 评论锚点住任务所属项目的聊天库（chat-db-split Phase 3）；runs 锚点仍在顶库。
+    const anchors = {
+      last_comment_at: this.groupChatStore(task.project_id).get(
+        'SELECT MAX(created_at) AS v FROM task_comments WHERE task_id = ?', task.id,
+      )?.v ?? null,
+      last_run_at: this.store.get(
+        `SELECT MAX(COALESCE(r.last_progress_at, r.ended_at, r.started_at, r.queued_at)) AS v
+           FROM runs r WHERE r.task_id = ?`,
+        task.id,
+      )?.v ?? null,
+    }
     const anchorMs = latestAnchorMs({
       updated_at: task.updated_at,
       last_comment_at: anchors?.last_comment_at ?? null,

@@ -513,8 +513,8 @@ export const projectsMethods = {
     )
     if (Number(active?.n) > 0) throw badRequest('项目仍有排队或运行中的 run，不能移除追踪')
     const dir = this.projectWorkDir(project)
-    // 群聊正文（messages/message_images/run_trajectory）住项目聊天库（chat-db-split
-    // Phase 1）：管理数据清完后整库文件删除即完成正文清理，不再逐表 DELETE。
+    // 群聊正文（messages/message_images/run_trajectory，Phase 1）与任务评论/事件、终端命令
+    // （Phase 3）住项目聊天库：管理数据清完后整库文件删除即完成正文清理，不再逐表 DELETE。
     this.store.transaction(() => {
       const runIds = 'SELECT id FROM runs WHERE project_id = ?'
       const taskIds = 'SELECT id FROM tasks WHERE project_id = ?'
@@ -524,11 +524,8 @@ export const projectsMethods = {
       this.store.run('DELETE FROM runs WHERE project_id = ?', projectId)
       this.store.run(`DELETE FROM task_labels WHERE task_id IN (${taskIds})`, projectId)
       this.store.run(`DELETE FROM task_dependencies WHERE task_id IN (${taskIds}) OR depends_on_task_id IN (${taskIds})`, projectId, projectId)
-      this.store.run(`DELETE FROM task_comments WHERE task_id IN (${taskIds})`, projectId)
-      this.store.run(`DELETE FROM task_events WHERE task_id IN (${taskIds})`, projectId)
       this.store.run('DELETE FROM tasks WHERE project_id = ?', projectId)
       this.store.run('DELETE FROM session_bindings WHERE project_id = ?', projectId)
-      this.store.run('DELETE FROM terminal_commands WHERE project_id = ?', projectId)
       this.store.run('DELETE FROM outbox WHERE project_id = ?', projectId)
       this.store.run('DELETE FROM group_chats WHERE project_id = ?', projectId)
       this.store.run('DELETE FROM secret_requests WHERE project_id = ?', projectId)

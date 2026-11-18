@@ -548,6 +548,7 @@ export function openDatabase(path) {
 export class Store {
   // 同连接事务深度（transaction 嵌套时内层加入外层，见 transaction 实现）。
   declare txDepth: number
+  declare txHooks: Array<() => void> | null
   // 预编译语句缓存：热路径（调度 tick、UI 轮询、消息尾窗）反复执行同一批语句，
   // 按语句文本缓存 StatementSync，免去每次调用的 SQL 解析；语句系于本连接，随 Store 一起丢弃。
   // 值类型保持 any：精确标注 StatementSync 会让 all/get 摆脱 any 推断，
@@ -606,16 +607,29 @@ export class Store {
     if (this.txDepth > 0) return fn()
     this.db.exec('BEGIN IMMEDIATE')
     this.txDepth = 1
+    this.txHooks = []
     try {
       const result = fn()
       this.db.exec('COMMIT')
       this.txDepth = 0
+      // 提交后钩子（Phase 3 跨库写）：顶库 COMMIT 成功后才把聊天库侧写真正落库，
+      // 外层回滚即丢弃——跨库跟随顶库事务的提交/回滚语义。
+      const hooks = this.txHooks
+      this.txHooks = null
+      for (const hook of hooks) hook()
       return result
     } catch (error) {
       this.txDepth = 0
+      this.txHooks = null
       try { this.db.exec('ROLLBACK') } catch {}
       throw error
     }
+  }
+
+  // 事务内登记「提交后执行」的跨库写；事务外直接执行。
+  afterCommit(fn) {
+    if (this.txDepth > 0 && this.txHooks) this.txHooks.push(fn)
+    else fn()
   }
 
   close() {

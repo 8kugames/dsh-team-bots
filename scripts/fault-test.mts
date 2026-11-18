@@ -147,7 +147,7 @@ async function scenarioRestartRecovery() {
     service2.attachRuntime(runtime2)
     await service2.initialize()
     const recovered = store2.get('SELECT * FROM runs WHERE id = ?', run.id)
-    const recoveredEvents = Number(store2.get(
+    const recoveredEvents = Number(service2.runChatStore(recovered).get(
       "SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'recovered'", run.id,
     )?.n ?? 0)
     checks.push({ name: '重启后运行回到 queued', pass: recovered.status === 'queued' })
@@ -166,7 +166,7 @@ async function scenarioRestartRecovery() {
     service3.attachRuntime(new FakeRuntime())
     await service3.initialize()
     const recoveredAgain = store3.get('SELECT * FROM runs WHERE id = ?', run.id)
-    const recoveredEventsAgain = Number(store3.get(
+    const recoveredEventsAgain = Number(service3.runChatStore(recoveredAgain).get(
       "SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'recovered'", run.id,
     )?.n ?? 0)
     const runsAfterSecondRestart = Number(store3.get('SELECT COUNT(*) AS n FROM runs')?.n ?? 0)

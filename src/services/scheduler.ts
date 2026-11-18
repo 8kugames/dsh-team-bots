@@ -229,7 +229,7 @@ export const schedulerMethods = {
       const reviewRunId = this.enqueueMemoryReview(project, bot, task, sourceRun.id)
       if (!reviewRunId) {
         // 记忆审查未启用：按规则沉淀兜底，保证任务交付有沉淀。
-        this.learnFromTask(project, bot, task, sourceRun.output ?? '', sourceRun.id)
+        this.learnFromTask(project, bot, task, this.runOutputOf(sourceRun) ?? '', sourceRun.id)
       }
       return reviewRunId
     }
@@ -340,9 +340,13 @@ export const schedulerMethods = {
              <= CAST(strftime('%s', 'now') AS REAL)
          AND CAST(strftime('%s', COALESCE(r.ended_at, r.queued_at)) AS REAL) + r.retry_after_ms / 1000.0
              > CAST(strftime('%s', 'now') AS REAL) - ${PLAN_RETRY_MAX_LATE_SECONDS}
-         AND NOT EXISTS(SELECT 1 FROM run_events e WHERE e.run_id = r.id AND e.type = 'plan_retry')`,
+        `,
     )
     for (const run of expired) {
+      // 幂等闸（Phase 3 起事件住聊天库）：已派生过的运行跳过。
+      if (this.runChatStore(run).get(
+        "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'plan_retry'", run.id,
+      )) continue
       // DSHBOTS-266：重试链判定（限流码 ∪ 网络瞬态）在 JS 做；非链内错误码不派生（现状不变）。
       if (!isRetryChainError({ code: run.error_code, message: run.error_message })) continue
       // DSHBOTS-99：额度耗尽（已达到限额）的运行不再自动派生重试——额度窗口用尽时重打主模型
@@ -370,11 +374,8 @@ export const schedulerMethods = {
           runId, run.project_id, run.bot_id, run.task_id, run.id, run.task_id,
           (run.attempt ?? 1) + 1, `plan_retry:${run.id}`, run.write_scopes, createdAt,
         )
-        this.store.run(
-          'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-          id('evt'), run.id, 'plan_retry',
-          `限流重试到期，派生新运行 ${runId}（attempt ${(run.attempt ?? 1) + 1}）`, createdAt,
-        )
+        this.insertRunEvent(run.id, 'plan_retry',
+          `限流重试到期，派生新运行 ${runId}（attempt ${(run.attempt ?? 1) + 1}）`)
       } catch (error: any) {
         // idempotency_key UNIQUE 撞车 = 另一个 tick 已派生过，跳过即可。
         if (String(error).includes('UNIQUE')) continue
@@ -395,15 +396,13 @@ export const schedulerMethods = {
       runId,
     )
     if (Number(changed?.changes ?? 0) !== 1) return false
-    const alreadyNoted = this.store.get(
+    const run = this.store.get('SELECT id, project_id, bot_id FROM runs WHERE id = ?', runId)
+    const alreadyNoted = run && this.runChatStore(run).get(
       "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'stale_superseded'",
       runId,
     )
     if (!alreadyNoted) {
-      this.store.run(
-        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-        id('evt'), runId, 'stale_superseded', '任务已结束，排队运行被清理（SUPERSEDED）', nowIso(),
-      )
+      this.insertRunEvent(runId, 'stale_superseded', '任务已结束，排队运行被清理（SUPERSEDED）')
     }
     return true
   },
@@ -484,14 +483,11 @@ export const schedulerMethods = {
         "UPDATE runs SET status = 'canceled', ended_at = ?, error_code = 'TASK_DEADLINE', error_message = ? WHERE id = ? AND status = 'queued'",
         now, body, runId,
       )
-      this.store.run(
-        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-        id('evt'), runId, 'task_deadline', `整卡死线已到（${deadlineIso}），拒绝启动新施工运行`, now,
-      )
-      this.store.run(
+      this.insertRunEvent(runId, 'task_deadline', `整卡死线已到（${deadlineIso}），拒绝启动新施工运行`)
+      this.store.afterCommit(() => this.groupChatStore(project.id).run(
         'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         commentId, task.id, 'system', 'system', body, now,
-      )
+      ))
       this.addTaskEvent(task.id, 'commented', { type: 'system', id: 'system' }, { commentId, deadline: deadlineIso, runId })
     })
     if (TRANSITIONS[task.status]?.has('blocked')) {
@@ -669,7 +665,7 @@ export const schedulerMethods = {
         if (INTERNAL_FALLBACK_KINDS.has(run.kind) && !run.model_provider) {
           const quota = this.botQuotaState(run.bot_id, bot.provider)
           if (quota?.exhausted) {
-            const alreadyNoted = this.store.get(
+            const alreadyNoted = this.runChatStore(run).get(
               "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'quota_wait'",
               run.id,
             )
@@ -696,18 +692,14 @@ export const schedulerMethods = {
           const taskRow = this.store.get('SELECT * FROM tasks WHERE id = ?', run.task_id)
           const blockers = unsatisfiedBlockedDeps(this.store, taskRow)
           if (blockers.length) {
-            const alreadyNoted = this.store.get(
+            const alreadyNoted = this.runChatStore(run).get(
               "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'task_blocked_dep'",
               run.id,
             )
             if (!alreadyNoted) {
               const projectKeyRow = this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id)
-              this.store.run(
-                'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-                id('evt'), run.id, 'task_blocked_dep',
-                `依赖未完结，暂缓领取：${blockers.map(row => `${projectKeyRow?.key ?? 'T'}-${row.number}`).join('、')}`,
-                nowIso(),
-              )
+              this.insertRunEvent(run.id, 'task_blocked_dep',
+                `依赖未完结，暂缓领取：${blockers.map(row => `${projectKeyRow?.key ?? 'T'}-${row.number}`).join('、')}`)
             }
             continue
           }
@@ -732,10 +724,7 @@ export const schedulerMethods = {
         // 借用了人的消息保底槽（超出并发上限放行）：记事件并占住额外槽，下一次归还前不再放第二条。
         if (human && activeTotal >= maxRuns) {
           humanSlotTaken = true
-          this.store.run(
-            'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-            id('evt'), run.id, 'human_slot', '并发已满，借人的消息保底槽放行', nowIso(),
-          )
+          this.insertRunEvent(run.id, 'human_slot', '并发已满，借人的消息保底槽放行')
         }
         activeTotal += 1
         activeKeys.add(claimKey)
@@ -748,10 +737,7 @@ export const schedulerMethods = {
           list.push(writeScopes)
           activeWriteScopes.set(run.project_id, list)
           if (parallel) {
-            this.store.run(
-              'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-              id('evt'), run.id, 'run_parallel', '写范围与同项目在跑的写运行不重叠，并行放行', nowIso(),
-            )
+            this.insertRunEvent(run.id, 'run_parallel', '写范围与同项目在跑的写运行不重叠，并行放行')
           }
         }
         if (run.task_id && run.kind === 'task') {

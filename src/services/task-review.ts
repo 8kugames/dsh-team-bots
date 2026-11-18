@@ -8,7 +8,7 @@
 import { badRequest, conflict, forbidden } from '../errors.js'
 import { bool } from '../config.js'
 import { REVIEWER_BOT_NAME } from '../seed-bots.js'
-import { id, nowIso, text } from '../util.js'
+import { id, nowIso, text, jsonParse} from '../util.js'
 import { parseWriteScopes, readWriteScopes } from './write-scopes.js'
 import { effectiveSandbox } from './runtime/sandbox-policy.js'
 
@@ -54,30 +54,36 @@ export const taskReviewMethods = {
   // 仅机器人路径：微信管理员/看板 owner 走 applyReview，不经过本闸。
   assertReviewSubagentVerified(sessionId, project, task, comment) {
     if (comment?.includes('兜底验收')) return
-    // run_events 无 run_id 索引：先筛 runs 再 EXISTS，量级与旧「当运行」查询相同。
-    const windowStart = this.store.get(
+    // run_events 住各运行归属的聊天库（Phase 3）：先筛 runs 再逐运行查归属库，量级与旧「当运行」查询相同。
+    const windowStart = this.groupChatStore(task.project_id).get(
       `SELECT MAX(created_at) AS t FROM task_events WHERE task_id = ?
         AND (type = 'run_succeeded' OR (type = 'status' AND json_extract(data_json, '$.to') = 'in_review'))`,
       task.id,
     )?.t ?? ''
     // 核验分档：本评审周期的交付运行为只读档（事件载荷 runId 指回交付运行）时免子代理
     // 账目——与自动委派豁免同口径；无交付运行锚（如纯看板流转）时保持强制，不放宽。
-    const delivered = this.store.get(
-      `SELECT r.* FROM task_events e JOIN runs r ON r.id = json_extract(e.data_json, '$.runId')
-        WHERE e.task_id = ? AND e.type = 'run_succeeded' AND e.created_at >= ?
-        ORDER BY e.created_at DESC LIMIT 1`,
+    // Phase 3：task_events 住项目聊天库（runs 仍顶库）：先取事件，再回顶库取运行行。
+    const chat = this.groupChatStore(task.project_id)
+    const event = chat.get(
+      `SELECT data_json FROM task_events WHERE task_id = ? AND type = 'run_succeeded' AND created_at >= ?
+        ORDER BY created_at DESC LIMIT 1`,
       task.id, windowStart,
     )
+    const deliveredRunId = event ? (jsonParse(event.data_json, {}) ?? {}).runId : null
+    const delivered = deliveredRunId
+      ? this.store.get('SELECT * FROM runs WHERE id = ?', deliveredRunId)
+      : null
     if (delivered && this.readOnlyDelivery(delivered, task)) return
-    const ledger = this.store.get(
-      `SELECT 1 AS hit FROM runs r
-        WHERE ((r.task_id = ? AND r.bot_id = ?) OR r.session_id = ?
-          OR (r.task_id = ? AND r.trigger_type = 'review_delegate'))
-          AND EXISTS (SELECT 1 FROM run_events e
-            WHERE e.run_id = r.id AND e.type = 'subagent_spawned' AND e.created_at >= ?)
-        LIMIT 1`,
-      task.id, project.owner_bot_id, sessionId, task.id, windowStart,
+    const candidates = this.store.all(
+      `SELECT id, project_id, bot_id FROM runs
+        WHERE (task_id = ? AND bot_id = ?) OR session_id = ?
+          OR (task_id = ? AND trigger_type = 'review_delegate')`,
+      task.id, project.owner_bot_id, sessionId, task.id,
     )
+    const ledger = candidates.some(run => this.runChatStore(run).get(
+      "SELECT 1 AS hit FROM run_events WHERE run_id = ? AND type = 'subagent_spawned' AND created_at >= ?",
+      run.id, windowStart,
+    ))
     if (ledger) return
     // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 正确下一步。
     throw badRequest(
@@ -163,7 +169,7 @@ export const taskReviewMethods = {
     )
     if (runningWrite) throw badRequest('任务有运行中的写运行，先等运行结束或取消，再修改写范围')
     const queuedWrites = this.store.all(
-      "SELECT id FROM runs WHERE task_id = ? AND status = 'queued' AND mode = 'write'",
+      "SELECT id, project_id, bot_id FROM runs WHERE task_id = ? AND status = 'queued' AND mode = 'write'",
       taskId,
     )
     const from = readWriteScopes(task.write_scopes)
@@ -262,15 +268,17 @@ export const taskReviewMethods = {
       }
       throw error
     }
-    this.store.run(
+    this.runChatStore({ project_id: project.id, bot_id: verifier.id }).run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
       id('evt'), runId, 'queued',
       `${origin === 'auto' ? '交付后自动' : 'owner'}委派子代理核验（${actor.type}:${actor.id}）`, createdAt,
     )
     if (routing.mode === 'fallback') {
-      this.insertRunEvent(runId, 'quota_fallback', `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref}`)
+      const run = this.store.get('SELECT * FROM runs WHERE id = ?', runId)
+      this.insertRunEvent(run.id, 'quota_fallback', `主 provider 额度耗尽，本次直接走备用模型 ${routing.ref}`)
     } else if (routing.mode === 'wait') {
-      this.insertRunEvent(runId, 'quota_wait', `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`)
+      const run = this.store.get('SELECT * FROM runs WHERE id = ?', runId)
+      this.insertRunEvent(run.id, 'quota_wait', `主 provider 额度耗尽且无可用备用模型，排队等待至 ${routing.resetAt ?? '恢复'}`)
     }
     this.audit(actor, origin === 'auto' ? 'review.auto_delegate' : 'task.review_delegate', 'task', task.id, { runId })
     void this.tick()

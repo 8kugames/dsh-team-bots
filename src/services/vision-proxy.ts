@@ -76,7 +76,9 @@ export function spawnVisionProxyRun(service, { bot, message, target }) {
         runId, message.project_id ?? null, bot.id, message.id, idempotencyKey,
         proxy.provider, proxy.model, createdAt,
       )
-      service.store.run(
+      // run_events 住运行归属的聊天库（chat-db-split Phase 3）：路由行取自本回调刚
+      // 插入的 runs 参数（project_id/bot_id），与 runs 插入同回调保持撞车不落事件。
+      service.runChatStore({ id: runId, project_id: message.project_id ?? null, bot_id: bot.id }).run(
         'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
         id('evt'), runId, 'queued',
         `主模型无视觉，派生读图代理运行（${proxy.ref}）转写消息 ${message.id} 的图片`,

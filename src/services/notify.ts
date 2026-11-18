@@ -7,7 +7,7 @@
 // 走它，句柄不可达或目标无绑定会话时降级为群聊流（insertMessage + chat_run）。
 
 import { badRequest, notFound } from '../errors.js'
-import { text } from '../util.js'
+import { id, nowIso, text } from '../util.js'
 
 // ── 防循环三上限（DSHBOTS-267，配置默认值写死常量，KISS）──────────────────
 // 真实事故背书：伙伴回执淹没主对话、委派续跑近百轮重发已推翻目标。
@@ -62,7 +62,9 @@ export const notifyMethods = {
   // run 归属不到（发起方无活跃运行）时不设限——空闲/人工会话的零星通知无循环风险。
   allowPartnerNotice(runId, targetId) {
     if (!runId || !targetId) return true
-    const distinctTargets = this.store.get(
+    // run_events 住运行归属的聊天库（chat-db-split Phase 3）：按 run 行路由后计数。
+    const chatStore = this.runChatStore(this.store.get('SELECT * FROM runs WHERE id = ?', runId))
+    const distinctTargets = chatStore.get(
       "SELECT COUNT(DISTINCT message) AS n FROM run_events WHERE run_id = ? AND type = 'partner_notice'",
       runId,
     ).n
@@ -70,7 +72,7 @@ export const notifyMethods = {
       this.logger.warn?.('dsh-team: 伙伴提醒超单 run 上限（%s 个目标），静默丢弃：run=%s target=%s', RUN_PARTNER_NOTICE_CAP, runId, targetId)
       return false
     }
-    const todayCount = this.store.get(
+    const todayCount = chatStore.get(
       "SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = 'partner_notice' AND message = ? AND date(created_at) = date('now')",
       runId, `partner_notice:${targetId}`,
     ).n
@@ -82,9 +84,14 @@ export const notifyMethods = {
   },
 
   // 记一条放行的伙伴提醒事件（配额闸通过后调用；chat 唤醒路径共用同一事件流）。
+  // 运行行已不在时 runChatStore 回落顶库留痕，不丢审计线索（同 runs.ts 收口口径）。
   recordPartnerNotice(runId, targetId) {
     if (!runId || !targetId) return
-    this.insertRunEvent(runId, 'partner_notice', `partner_notice:${targetId}`)
+    const run = this.store.get('SELECT * FROM runs WHERE id = ?', runId)
+    this.runChatStore(run).run(
+      'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      id('evt'), runId, 'partner_notice', `partner_notice:${targetId}`, nowIso(),
+    )
   },
 
   // 滞留提醒投递（DSHBOTS-280）：等价 owner 通知通道——与 D-274 死线升级同款
@@ -222,13 +229,16 @@ export const notifyMethods = {
       mentions: task.assignee_bot_id ? [task.assignee_bot_id] : [],
     })
     const run = this.store.get(
-      "SELECT id, session_id FROM runs WHERE task_id = ? AND status = 'running' AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
+      "SELECT * FROM runs WHERE task_id = ? AND status = 'running' AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
       task.id,
     )
     if (run && typeof this.runtime?.steer === 'function') {
       try {
         await this.runtime.steer(run.session_id, `Task reminder from ${from.name}: ${body}`)
-        this.insertRunEvent(run.id, 'notified', `任务提醒已注入（${identifier}）`)
+        this.runChatStore(run).run(
+          'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+          id('evt'), run.id, 'notified', `任务提醒已注入（${identifier}）`, nowIso(),
+        )
         return `已向任务 ${identifier} 的活跃运行注入提醒（留痕 ${messageId?.slice(-6) ?? '无'}）。`
       } catch (error: any) {
         this.logger.warn?.('dsh-team: 任务提醒注入失败 %s: %s', identifier, error?.message ?? error)

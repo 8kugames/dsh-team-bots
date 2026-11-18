@@ -143,7 +143,9 @@ export const modelFallbackMethods = {
           run.trigger_type, run.trigger_ref, attempt, `model_fallback:${run.id}`,
           fallback.provider, fallback.model, fallback.effort, createdAt,
         )
-        this.store.run(
+        // run_events 住运行归属的聊天库（chat-db-split Phase 3）：事件挂在原运行 run 名下，
+        // 与 runs 插入同回调——UNIQUE 撞车时回调中止，事件不落，与原原子语义一致。
+        this.runChatStore(run).run(
           'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
           id('evt'), run.id, 'model_fallback',
           isQuotaExhausted(error)
