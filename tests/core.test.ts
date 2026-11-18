@@ -45,7 +45,7 @@ class FakeRuntime {
     const shouldFail = this.failNextTaskRun && run.kind === 'task'
     if (shouldFail) this.failNextTaskRun = false
     recordUsage(this.service.store, {
-      chatStore: this.service.runChatStore(run),
+      chatStore: (this.service as any).runChatStore(run),
       sourceKey: `test:${run.id}`,
       run,
       provider: bot.provider,

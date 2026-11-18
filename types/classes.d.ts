@@ -266,6 +266,10 @@ declare module '../src/service.js' {
     timer: ReturnType<typeof setInterval> | null
     ticking: boolean
     started: boolean
+    /** 停机标志：插件卸载后实例完全静默（库已关闭，任何再触发的写库都是错的）。 */
+    stopped: boolean
+    /** 启动期首拍定时器句柄（stop() 清理）。 */
+    bootTimer: ReturnType<typeof setTimeout> | null
     ready: Promise<unknown> | null
     rate: Record<string, unknown>
     fingerprints: Map<string, unknown>

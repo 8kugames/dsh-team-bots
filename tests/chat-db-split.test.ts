@@ -168,7 +168,7 @@ test('聊天分库：memory_review 引用单聊源运行读对库，不再产生
     const run = t.store.get('SELECT * FROM runs WHERE id = ?', 'run_review_1')
     const { DshRuntime } = await import('../src/runtime.js')
     const runtime = new DshRuntime({
-      config: t.config, store: t.store,
+      ctx: null, config: t.config, store: t.store,
       logger: { info() {}, warn() {}, error() {} },
       chatStores: { forRun: (source: any) => t.service.runChatStore(source) },
     })

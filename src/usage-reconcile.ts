@@ -279,7 +279,7 @@ export function exportUsageCsv(store, { projectId = null, soloBotId = null, days
     filters.push('u.bot_id = ?', 'u.project_id IS NULL')
     params.push(soloBotId)
   }
-  const rows = []
+  const rows: any[] = []
   for (const detailStore of stores) {
     rows.push(...detailStore.all(
       `SELECT u.occurred_at AS occurred_at, u.run_id AS run_id, u.task_id AS task_id,
@@ -295,10 +295,10 @@ export function exportUsageCsv(store, { projectId = null, soloBotId = null, days
     ))
   }
   rows.sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)))
-  const projectMap = new Map(store.all('SELECT id, key, name FROM projects')
-    .map(row => [row.id, row]))
-  const botMap = new Map(store.all('SELECT id, name FROM bots')
-    .map(row => [row.id, row]))
+  const projectMap: Map<string, any> = new Map(store.all('SELECT id, key, name FROM projects')
+    .map((row: any): [string, any] => [row.id, row]))
+  const botMap: Map<string, any> = new Map(store.all('SELECT id, name FROM bots')
+    .map((row: any): [string, any] => [row.id, row]))
   for (const row of rows) {
     const project = row.project_id ? projectMap.get(row.project_id) : null
     row.project_key = project?.key ?? ''

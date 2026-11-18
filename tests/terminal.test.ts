@@ -176,7 +176,7 @@ test('历史每项目只保留最近 20 条', async () => {
     assert.equal(state.history[0].command, 'echo 24')
     assert.equal(state.history[19].command, 'echo 5')
   } finally {
-    await closeQuietly(store)
+    await closeQuietly(store, service.groupChatStore(project.id))
     await rm(root, { recursive: true, force: true })
   }
 })
