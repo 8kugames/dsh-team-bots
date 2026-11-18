@@ -9,6 +9,7 @@ import { openDatabase } from '../src/db.js'
 import {
   USAGE_WINDOW_KEYS,
   USAGE_WINDOW_LABELS,
+  recordUsage,
   resolveUsageWindow,
   usageSnapshot,
 } from '../src/usage.js'
@@ -51,14 +52,18 @@ async function withStore(fn) {
 }
 
 // 造一条用量明细：occurred_at 由测试精确控制（窗口边界的关键）。
+// 造一条用量：经 recordUsage 落明细并同步累加顶库 usage_rollup（chat-db-split
+// Phase 2 起快照读汇总；occurred_at 由测试精确控制窗口边界）。
 function seedEvent(store, { id, occurredAt, tokens = 100, projectId = null, botId = null }) {
-  store.run(
-    `INSERT INTO usage_events(id, source_key, run_id, project_id, bot_id, task_id, provider, model, purpose,
-        currency, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,
-        input_cost, output_cost, total_cost, occurred_at, created_at)
-     VALUES (?, ?, NULL, ?, ?, NULL, 'fake', 'fake-model', 'run', 'CNY', ?, 0, 0, 0, 0, NULL, NULL, NULL, ?, ?)`,
-    id, `d121:${id}`, projectId, botId, tokens, occurredAt, occurredAt,
-  )
+  const row = recordUsage(store, {
+    sourceKey: `d121:${id}`,
+    run: { id: null, project_id: projectId, bot_id: botId, task_id: null },
+    provider: 'fake',
+    model: 'fake-model',
+    usage: { input: tokens },
+    occurredAt,
+  })
+  assert.ok(row, 'recordUsage 应落一条明细')
 }
 
 function iso(ms) {

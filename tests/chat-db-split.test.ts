@@ -183,6 +183,77 @@ test('聊天分库：memory_review 引用单聊源运行读对库，不再产生
   } finally { await t.close() }
 })
 
+test('聊天分库 Phase 2：recordUsage 明细落聊天库、顶库汇总同步累加', async () => {
+  const t = await setup('dsh-chatdb-p2w-')
+  try {
+    const project = await t.makeProject('P2W')
+    const chatStore = t.service.groupChatStore(project.id)
+    const { recordUsage } = await import('../src/usage.js')
+    recordUsage(t.store, {
+      chatStore, sourceKey: 'p2-a',
+      run: { id: 'r1', project_id: project.id, bot_id: t.director.id, task_id: null },
+      provider: 'fake', model: 'm1', usage: { input: 100, output: 40 },
+      occurredAt: '2026-11-18T09:30:00.000Z',
+    })
+    recordUsage(t.store, {
+      chatStore, sourceKey: 'p2-b',
+      run: { id: 'r2', project_id: project.id, bot_id: t.director.id, task_id: null },
+      provider: 'fake', model: 'm1', usage: { input: 50, output: 10 },
+      occurredAt: '2026-11-18T09:45:00.000Z',
+    })
+    assert.equal(chatStore.get('SELECT COUNT(*) AS n FROM usage_events')?.n, 2, '明细住聊天库')
+    assert.equal(t.store.get('SELECT COUNT(*) AS n FROM usage_events')?.n, 0, '顶库不落明细')
+    const rollup = t.store.get('SELECT * FROM usage_rollup')
+    assert.equal(rollup.calls, 2, '同小时桶累加为一条汇总')
+    assert.equal(rollup.input_tokens, 150)
+    assert.equal(rollup.project_key, project.key, 'project_key 冗余存档')
+    // 幂等：同 sourceKey 重放只记一次
+    recordUsage(t.store, {
+      chatStore, sourceKey: 'p2-a',
+      run: { id: 'r1', project_id: project.id, bot_id: t.director.id, task_id: null },
+      provider: 'fake', model: 'm1', usage: { input: 100, output: 40 },
+      occurredAt: '2026-11-18T09:30:00.000Z',
+    })
+    assert.equal(rollup.calls, 2)
+  } finally { await t.close() }
+})
+
+test('聊天分库 Phase 2：迁移搬明细建汇总、task_id 回填、幂等可重跑', async () => {
+  const t = await setup('dsh-chatdb-p2m-')
+  try {
+    const project = await t.makeProject('P2M')
+    const now = new Date().toISOString()
+    const runId = 'run_p2_hist'
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at, task_id)
+       VALUES (?, ?, ?, 'chat', 'read', 'chat_message', 'succeeded', 1, 'k-p2', ?, NULL)`,
+      runId, project.id, t.director.id, now,
+    )
+    // 历史行：task_id 为 NULL，归属靠 run（迁移应回填）。
+    t.store.run(
+      `INSERT INTO usage_events(id, source_key, source_event_id, run_id, project_id, bot_id, task_id, provider, model, purpose, currency,
+         input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, input_cost, output_cost, total_cost, occurred_at, created_at)
+       VALUES ('use_p2_1', 'sk-p2-1', NULL, ?, ?, ?, NULL, 'fake', 'm1', 'run', 'CNY', 300, 0, 0, 100, 0, NULL, NULL, NULL, ?, ?)`,
+      runId, project.id, t.director.id, now, now,
+    )
+    // initialize() 在空库上已跑过一轮迁移并记账；清账本后手动重跑验证拷贝路径。
+    t.store.run('DELETE FROM schema_migrations WHERE name LIKE ?', 'chat_split_p2%')
+    t.service.migrateChatSplitP2()
+    const chat = t.service.groupChatStore(project.id)
+    const row = chat.get("SELECT * FROM usage_events WHERE id = 'use_p2_1'")
+    assert.ok(row, '明细已迁入聊天库')
+    const rollup = t.store.get('SELECT * FROM usage_rollup')
+    assert.equal(rollup?.calls ?? 0, 1, '汇总已按明细建桶')
+    assert.equal(rollup.input_tokens + rollup.output_tokens, 400)
+    assert.equal(t.store.get('SELECT COUNT(*) AS n FROM usage_events')?.n, 0, '顶库明细清空')
+    // 幂等重跑：不炸、不重复。
+    t.store.run('DELETE FROM schema_migrations WHERE name = ?', 'chat_split_p2')
+    t.service.migrateChatSplitP2()
+    assert.equal(chat.get('SELECT COUNT(*) AS n FROM usage_events')?.n, 1)
+    assert.equal(t.store.get("SELECT SUM(calls) AS c FROM usage_rollup")?.c, 1, '汇总不重复累加')
+  } finally { await t.close() }
+})
+
 test('聊天分库：批量快照不返回 LRU 淘汰关闭的句柄', async () => {
   // 生产事故（2026-11-18）：聊天库数超过 LRU 上限时，allChatStores() 边开边淘汰，
   // 淘汰当场关闭了本轮已收集进数组的句柄，applyRetention 随后的扇出清理

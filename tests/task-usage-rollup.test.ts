@@ -65,22 +65,23 @@ test('taskUsageTotals 双路径归因：新明细直读 + 历史明细经 run_id
 
     // 路径 1（修复后的新明细）：recordUsage 带 task_id。
     const failedRun = insertRun(ctx.store, { id: 'run_fail', projectId: project.id, botId: dev.id, taskId: main.id, status: 'failed' })
-    recordUsage(ctx.store, { sourceKey: 'f1', run: failedRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 300, cacheReadTokens: 100, outputTokens: 80 } })
-    // 路径 2（历史明细）：task_id 为 NULL，只有 run_id 指向带 task_id 的 runs 行。
+    recordUsage(ctx.store, { chatStore: ctx.service.groupChatStore(project.id), sourceKey: 'f1', run: failedRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 300, cacheReadTokens: 100, outputTokens: 80 } })
+    // 路径 2（历史明细）：迁移把 task_id 回填进明细（chat-db-split Phase 2 起
+    // 归因只认明细自身的 task_id，聊天库里没有 runs 表可 JOIN 追认）。
     const retryRun = insertRun(ctx.store, { id: 'run_retry', projectId: project.id, botId: dev.id, taskId: main.id })
-    ctx.store.run(
+    ctx.service.groupChatStore(project.id).run(
       `INSERT INTO usage_events(id, source_key, run_id, project_id, bot_id, task_id, provider, model, purpose, currency,
          input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, occurred_at, created_at)
-       VALUES ('use_hist_1', 'h1', ?, ?, ?, NULL, 'fake', 'model-a', 'run', 'CNY', 500, 200, 60, 120, 0, ?, ?)`,
-      retryRun.id, project.id, dev.id, new Date().toISOString(), new Date().toISOString(),
+       VALUES ('use_hist_1', 'h1', ?, ?, ?, ?, 'fake', 'model-a', 'run', 'CNY', 500, 200, 60, 120, 0, ?, ?)`,
+      retryRun.id, project.id, dev.id, main.id, new Date().toISOString(), new Date().toISOString(),
     )
     // 隔壁任务的用量不得混入。
     const otherRun = insertRun(ctx.store, { id: 'run_other', projectId: project.id, botId: dev.id, taskId: other.id })
-    recordUsage(ctx.store, { sourceKey: 'o1', run: otherRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 999, outputTokens: 999 } })
+    recordUsage(ctx.store, { chatStore: ctx.service.groupChatStore(project.id), sourceKey: 'o1', run: otherRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 999, outputTokens: 999 } })
 
-    const totals = taskUsageTotals(ctx.store, main.id)
+    const totals = taskUsageTotals(ctx.service.groupChatStore(project.id), main.id, undefined, ctx.store)
     assert.equal(totals.calls, 2, '失败重试与成功运行都计入端到端口径')
-    assert.equal(totals.inputTokens, 800, '输入含历史行 500（JOIN 追认）+ 新行 300')
+    assert.equal(totals.inputTokens, 800, '输入含历史行 500（迁移回填 task_id）+ 新行 300')
     assert.equal(totals.cacheReadTokens, 300, '缓存读分列：100 + 200')
     assert.equal(totals.cacheWriteTokens, 60)
     assert.equal(totals.outputTokens, 200, '输出 80 + 120')
@@ -126,14 +127,15 @@ test('taskTreeUsageTotals：主项+全部后代子卡端到端聚合，兄弟任
     const sibling = await ctx.service.createTask({ projectId: project.id, title: '兄弟卡', writeScopes: ['src/b.js'] }, { type: 'bot', id: director.id })
 
     const mainRun = insertRun(ctx.store, { id: 'run_main', projectId: project.id, botId: dev.id, taskId: main.id })
-    recordUsage(ctx.store, { sourceKey: 'm1', run: mainRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 400, outputTokens: 100 } })
+    recordUsage(ctx.store, { chatStore: ctx.service.groupChatStore(project.id), sourceKey: 'm1', run: mainRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 400, outputTokens: 100 } })
     const childRun = insertRun(ctx.store, { id: 'run_child', projectId: project.id, botId: dev.id, taskId: child.id })
-    recordUsage(ctx.store, { sourceKey: 'c1', run: childRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 200, cacheWriteTokens: 40, outputTokens: 60 } })
+    recordUsage(ctx.store, { chatStore: ctx.service.groupChatStore(project.id), sourceKey: 'c1', run: childRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 200, cacheWriteTokens: 40, outputTokens: 60 } })
     const sibRun = insertRun(ctx.store, { id: 'run_sib', projectId: project.id, botId: dev.id, taskId: sibling.id })
-    recordUsage(ctx.store, { sourceKey: 's1', run: sibRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 777, outputTokens: 777 } })
+    recordUsage(ctx.store, { chatStore: ctx.service.groupChatStore(project.id), sourceKey: 's1', run: sibRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 777, outputTokens: 777 } })
 
-    const own = taskUsageTotals(ctx.store, main.id)
-    const total = taskTreeUsageTotals(ctx.store, main.id)
+    const usageStore = ctx.service.groupChatStore(project.id)
+    const own = taskUsageTotals(usageStore, main.id, undefined, ctx.store)
+    const total = taskTreeUsageTotals(usageStore, main.id, undefined, taskSubtreeIds(ctx.store, main.id), ctx.store)
     assert.equal(own.inputTokens, 400, '本卡口径只含主项自身运行')
     assert.equal(total.inputTokens, 600, '含子树口径 = 主项 400 + 子卡 200，兄弟 777 不计')
     assert.equal(total.cacheWriteTokens, 40)
@@ -151,7 +153,7 @@ test('taskDetail 暴露 usage.own / usage.total / subtaskCount（单卡详情，
     const main = await ctx.service.createTask({ projectId: project.id, title: '主项', writeScopes: ['src/a.js'] }, { type: 'bot', id: director.id })
     await ctx.service.createTask({ projectId: project.id, title: '子卡', writeScopes: ['src/a/one.js'], parentTaskId: main.id }, { type: 'bot', id: director.id })
     const run = insertRun(ctx.store, { id: 'run_main', projectId: project.id, botId: dev.id, taskId: main.id })
-    recordUsage(ctx.store, { sourceKey: 'm1', run, provider: 'fake', model: 'model-a', usage: { inputTokens: 400, outputTokens: 100 } })
+    recordUsage(ctx.store, { chatStore: ctx.service.groupChatStore(project.id), sourceKey: 'm1', run, provider: 'fake', model: 'model-a', usage: { inputTokens: 400, outputTokens: 100 } })
 
     const detail = await ctx.service.taskDetail(main.id)
     assert.equal(detail.usage.subtaskCount, 1)

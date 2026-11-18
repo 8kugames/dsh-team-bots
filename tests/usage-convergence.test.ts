@@ -107,7 +107,7 @@ test('⑧ 服务端口径：全局 / 本群 / 单聊三套 tier 齐备', () => {
     /scopeTiers: \{ global: globalTiers, project: projectTiers, solo: soloTiers \}/,
     '三套 scopeTiers 齐备（群内分 bot 走 scopeTiers.project.byBot）',
   )
-  assert.match(usageSource, /if \(scope\.soloBotId\) \{[\s\S]*?u\.bot_id = \?', 'u\.project_id IS NULL/, 'solo 口径过滤：该 bot 且项目外')
+  assert.match(usageSource, /if \(scope\.soloBotId\) \{[\s\S]*?u\.bot_id = \?', "u\.project_id = ''"/, 'solo 口径过滤：该 bot 且项目外（汇总空串哨兵）')
   const sysSource = readFileSync(fileURLToPath(new URL('../src/services/system.js', import.meta.url)), 'utf8')
   assert.match(sysSource, /soloBotId: soloBotId \?\? null/, 'state 的 usageSnapshot 携带 soloBotId')
 })
