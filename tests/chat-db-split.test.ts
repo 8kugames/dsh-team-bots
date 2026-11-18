@@ -145,6 +145,44 @@ test('聊天分库：移除追踪删除整个聊天库文件', async () => {
   } finally { await t.close() }
 })
 
+test('聊天分库：memory_review 引用单聊源运行读对库，不再产生 solo-undefined', async () => {
+  // 生产事故（2026-11-18 15:54）：memory_review 的源运行查询漏选路由列
+  // （project_id/bot_id），chatStoreForRun 把 undefined 当单聊 bot id，
+  // 凭空造出 solo-undefined.sqlite，且单聊源消息永远读不到。
+  const t = await setup('dsh-chatdb-mrev-')
+  try {
+    const bot = await t.service.createBot({ name: '记忆审阅', role: '开发', instructions: 'X.', provider: 'fake', model: 'm' })
+    await t.service.sendSoloMessage(bot.id, '请记住我喜欢简短的回复', { type: 'user', id: 'u1' })
+    const message = t.service.soloChatStore(bot.id).get("SELECT * FROM solo_messages WHERE body = '请记住我喜欢简短的回复'")
+    assert.ok(message, '源消息已落单聊库')
+    const now = new Date().toISOString()
+    const columns = 'id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at, trigger_ref'
+    t.store.run(
+      `INSERT INTO runs(${columns}) VALUES ('run_src_solo', NULL, ?, 'solo_chat', 'read', 'chat_message', 'succeeded', 1, 'k-src', ?, ?)`,
+      bot.id, now, message.id,
+    )
+    t.store.run(
+      `INSERT INTO runs(${columns}) VALUES ('run_review_1', NULL, ?, 'memory_review', 'read', 'schedule', 'succeeded', 1, 'k-rev', ?, 'run_src_solo')`,
+      bot.id, now,
+    )
+    const run = t.store.get('SELECT * FROM runs WHERE id = ?', 'run_review_1')
+    const { DshRuntime } = await import('../src/runtime.js')
+    const runtime = new DshRuntime({
+      config: t.config, store: t.store,
+      logger: { info() {}, warn() {}, error() {} },
+      chatStores: { forRun: (source: any) => t.service.runChatStore(source) },
+    })
+    const prompt = runtime.promptFor({
+      run, bot: { name: bot.name },
+      project: { id: 'p-solo', key: 'SOLO', name: '单聊', slug: 'solo' } as any,
+    })
+    assert.ok(String(prompt).includes('请记住我喜欢简短的回复'), '单聊源消息正文进得了 memory review 提示词')
+    const files = readdirSync(join(t.config.dataDir, 'chats'))
+    assert.equal(files.some(f => f.startsWith('solo-undefined') || f.startsWith('solo-null')), false,
+      '不得产生路由列缺失导致的垃圾库文件')
+  } finally { await t.close() }
+})
+
 test('聊天分库：批量快照不返回 LRU 淘汰关闭的句柄', async () => {
   // 生产事故（2026-11-18）：聊天库数超过 LRU 上限时，allChatStores() 边开边淘汰，
   // 淘汰当场关闭了本轮已收集进数组的句柄，applyRetention 随后的扇出清理

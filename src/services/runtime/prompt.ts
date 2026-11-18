@@ -601,8 +601,10 @@ Last failure: ${failure?.error_message ?? 'unknown'}`
       return `${header}\n\n[Direct-message delivery record missing; nothing to do. Reply with a short note only.]`
     }
     if (run.kind === 'memory_review') {
+      // 路由列（project_id/bot_id）必须选出来：chatStoreForRun 靠它们定位聊天库，
+      // 缺列会以 undefined 落进单聊分支，凭空造出 solo-undefined.sqlite。
       const sourceRun = run.trigger_ref
-        ? this.store.get('SELECT id, kind, task_id, trigger_ref, output FROM runs WHERE id = ?', run.trigger_ref)
+        ? this.store.get('SELECT id, kind, task_id, trigger_ref, output, project_id, bot_id FROM runs WHERE id = ?', run.trigger_ref)
         : null
       if (sourceRun?.task_id) {
         const sourceTask = this.store.get('SELECT number, title, time_budget_minutes FROM tasks WHERE id = ?', sourceRun.task_id)
@@ -623,7 +625,12 @@ Delivery output:
 ${(sourceRun.output ?? '').slice(0, 6000)}${timeBudgetBlockFor(sourceTask)}`
       }
       const userMessage = sourceRun?.trigger_ref
-        ? this.chatStoreForRun(sourceRun).get('SELECT body FROM messages WHERE id = ?', sourceRun.trigger_ref)
+        ? this.chatStoreForRun(sourceRun).get(
+          sourceRun.project_id
+            ? 'SELECT body FROM messages WHERE id = ?'
+            : 'SELECT body FROM solo_messages WHERE id = ?',
+          sourceRun.trigger_ref,
+        )
         : null
       return `${header}
 
