@@ -82,6 +82,48 @@ CREATE TABLE IF NOT EXISTS run_trajectory (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS run_trajectory_run_idx ON run_trajectory(run_id, seq);
+
+CREATE TABLE IF NOT EXISTS usage_events (
+  id TEXT PRIMARY KEY,
+  source_key TEXT NOT NULL UNIQUE,
+  source_event_id TEXT,
+  run_id TEXT,
+  project_id TEXT,
+  bot_id TEXT,
+  task_id TEXT,
+  provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  purpose TEXT NOT NULL DEFAULT 'run',
+  currency TEXT NOT NULL DEFAULT 'CNY',
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+  input_cost REAL,
+  output_cost REAL,
+  total_cost REAL,
+  occurred_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS usage_project_idx ON usage_events(project_id, occurred_at);
+CREATE INDEX IF NOT EXISTS usage_bot_idx ON usage_events(bot_id, occurred_at);
+CREATE INDEX IF NOT EXISTS usage_events_run_idx ON usage_events(run_id);
+CREATE INDEX IF NOT EXISTS usage_events_task_idx ON usage_events(task_id);
+CREATE INDEX IF NOT EXISTS usage_events_occurred_idx ON usage_events(occurred_at);
+
+CREATE TABLE IF NOT EXISTS usage_reconciliation (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  event_calls INTEGER NOT NULL DEFAULT 0,
+  event_tokens INTEGER NOT NULL DEFAULT 0,
+  run_tokens INTEGER NOT NULL DEFAULT 0,
+  delta_tokens INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ok',
+  note TEXT NOT NULL DEFAULT '',
+  checked_at TEXT NOT NULL,
+  UNIQUE(run_id)
+);
 `
 
 export function openChatDatabase(path) {
@@ -118,6 +160,8 @@ const CHAT_TABLE_COLUMNS = {
   solo_messages: 'id, bot_id, sender_type, sender_id, body, run_id, kind, question_id, approval_id, created_at',
   message_images: 'id, message_id, solo_message_id, project_id, bot_id, media_type, data, bytes, name, created_at',
   run_trajectory: 'id, run_id, seq, kind, title, detail, turn, step, created_at',
+  usage_events: 'id, source_key, source_event_id, run_id, project_id, bot_id, task_id, provider, model, purpose, currency, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, input_cost, output_cost, total_cost, occurred_at, created_at',
+  usage_reconciliation: 'id, run_id, event_calls, event_tokens, run_tokens, delta_tokens, status, note, checked_at',
 }
 
 export const chatStoreMethods = {
@@ -280,5 +324,95 @@ export const chatStoreMethods = {
     // 删除只进 freelist，主文件不缩：一次性 VACUUM 回收（生产库量级数十秒，仅本迁移触发）。
     this.store.exec('VACUUM')
     this.logger?.info?.('dsh-team: 聊天分库 Phase 1 迁移完成：messages/solo_messages/message_images/run_trajectory 已迁入各聊天库')
+  },
+  // Phase 2 一次性迁移：用量明细与对账迁入聊天库，顶库一次性构建 usage_rollup 汇总
+  // （视图/预算自此只读汇总）。同样账本闸控、崩溃可续跑。
+  migrateChatSplitP2() {
+    const ledgerName = 'chat_split_p2'
+    if (this.store.get('SELECT 1 FROM schema_migrations WHERE name = ?', ledgerName)) return
+    mkdirSync(this.chatStoresDir(), { recursive: true })
+    // 历史行 task_id 预回填（DSHBOTS-212 之前的存量行）：聊天库里没有 runs 表可 JOIN
+    // 追认，迁移时在顶库一次性补齐，之后明细拷贝就是自足的。
+    this.store.run(
+      `UPDATE usage_events SET task_id = (SELECT task_id FROM runs WHERE id = usage_events.run_id)
+        WHERE task_id IS NULL AND run_id IS NOT NULL`,
+    )
+    const targets = []
+    for (const project of this.store.all('SELECT id FROM projects')) {
+      const pid = project.id
+      targets.push({
+        file: this.groupChatFileName(pid),
+        ledger: `chat_split_p2:p:${pid}`,
+        copies: [
+          { table: 'usage_events', where: 'project_id = ? OR run_id IN (SELECT id FROM runs WHERE project_id = ?)', params: [pid, pid] },
+          { table: 'usage_reconciliation', where: 'run_id IN (SELECT id FROM runs WHERE project_id = ?)', params: [pid] },
+        ],
+      })
+    }
+    for (const bot of this.store.all('SELECT id FROM bots')) {
+      const bid = bot.id
+      targets.push({
+        file: this.soloChatFileName(bid),
+        ledger: `chat_split_p2:s:${bid}`,
+        copies: [
+          { table: 'usage_events', where: '(project_id IS NULL AND bot_id = ?) OR run_id IN (SELECT id FROM runs WHERE project_id IS NULL AND bot_id = ?)', params: [bid, bid] },
+          { table: 'usage_reconciliation', where: 'run_id IN (SELECT id FROM runs WHERE project_id IS NULL AND bot_id = ?)', params: [bid] },
+        ],
+      })
+    }
+    for (const target of targets) {
+      if (this.store.get('SELECT 1 FROM schema_migrations WHERE name = ?', target.ledger)) continue
+      const chat = this.openChatStoreFile(target.file)
+      for (const copy of target.copies) {
+        copyRowsBetween(this.store, chat, copy.table, CHAT_TABLE_COLUMNS[copy.table], copy.where, copy.params)
+      }
+      this.store.run(
+        'INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING',
+        target.ledger, nowIso(),
+      )
+    }
+    // 顶库汇总一次性构建（单条 INSERT..SELECT 原子完成，但重跑会重复累加——
+    // 单独账本闸兜崩溃续跑：建桶即记账，续跑只在闸缺失时重建）。
+    // project_key 冗余存档：项目移除后历史汇总仍可读。未落在任何聊天库的无主行
+    // （无 project/bot/run 归属）也进汇总——用量是全局历史，不因无法路由而丢账。
+    if (!this.store.get('SELECT 1 FROM schema_migrations WHERE name = ?', `${ledgerName}:rollup`)) {
+    this.store.exec(`
+      INSERT INTO usage_rollup(hour_utc, project_id, project_key, bot_id, provider, model, currency, priced,
+        calls, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, stored_cost)
+      SELECT substr(occurred_at, 1, 13),
+             COALESCE(project_id, ''),
+             COALESCE((SELECT key FROM projects WHERE id = usage_events.project_id), ''),
+             COALESCE(bot_id, ''), provider, model, currency,
+             CASE WHEN total_cost IS NOT NULL THEN 1 ELSE 0 END,
+             COUNT(*), SUM(input_tokens), SUM(cache_read_tokens), SUM(cache_write_tokens),
+             SUM(output_tokens), SUM(reasoning_tokens),
+             COALESCE(SUM(CASE WHEN total_cost IS NOT NULL THEN total_cost ELSE 0 END), 0)
+        FROM usage_events
+       GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+      ON CONFLICT(hour_utc, project_id, bot_id, provider, model, currency, priced) DO UPDATE SET
+        calls = calls + excluded.calls,
+        input_tokens = input_tokens + excluded.input_tokens,
+        cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+        cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+        output_tokens = output_tokens + excluded.output_tokens,
+        reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
+        stored_cost = stored_cost + excluded.stored_cost
+    `)
+    this.store.run(
+      'INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING',
+      `${ledgerName}:rollup`, nowIso(),
+    )
+    }
+    // 拷贝幂等 + 汇总闸幂等，清空与记账一个事务；无主行留在顶库由保留期清理兜底。
+    this.store.transaction(() => {
+      this.store.run('DELETE FROM usage_events WHERE project_id IS NOT NULL OR bot_id IS NOT NULL OR run_id IS NOT NULL')
+      this.store.run('DELETE FROM usage_reconciliation WHERE run_id IN (SELECT id FROM runs)')
+      this.store.run(
+        'INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING',
+        ledgerName, nowIso(),
+      )
+    })
+    this.store.exec('VACUUM')
+    this.logger?.info?.('dsh-team: 聊天分库 Phase 2 迁移完成：usage_events/usage_reconciliation 已迁入各聊天库，顶库改读 usage_rollup 汇总')
   },
 }

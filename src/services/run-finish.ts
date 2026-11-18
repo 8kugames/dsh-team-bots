@@ -104,7 +104,7 @@ export const runFinishMethods = {
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
     const project = this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id)
     this.auditReadRunWrites(run, project)
-    const usage = runUsageTotals(this.store, runId, this.budgetCurrency())
+    const usage = runUsageTotals(this.runChatStore(run), runId, this.budgetCurrency(), this.store)
     const cleanOutput = this.maskSecretValues(text(output, 120_000))
     const artifactsJson = status === 'succeeded' && run.mode === 'write' && project
       ? this.captureRunArtifacts(run, project)

@@ -587,12 +587,14 @@ export const tasksMethods = {
     // 只挂 taskDetail 单卡详情，不进 taskView 列表热路径（每卡一次聚合会放大列表查询）。
     const subtreeIds = taskSubtreeIds(this.store, taskId)
     const budgetCurrency = this.budgetCurrency()
+    // 任务用量明细住该任务项目的聊天库（chat-db-split Phase 2）；子树 id 集来自顶库 tasks。
+    const usageStore = this.groupChatStore(project.id)
     return {
       ...this.taskView(task),
       projectKey: project.key,
       usage: {
-        own: taskUsageTotals(this.store, taskId, budgetCurrency),
-        total: taskTreeUsageTotals(this.store, taskId, budgetCurrency),
+        own: taskUsageTotals(usageStore, taskId, budgetCurrency, this.store),
+        total: taskTreeUsageTotals(usageStore, taskId, budgetCurrency, subtreeIds, this.store),
         subtaskCount: subtreeIds.length - 1,
       },
       comments: comments.map(comment => ({

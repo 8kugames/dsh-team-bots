@@ -217,7 +217,11 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
           soloBotId: payload.soloBotId ?? null,
           days: payload.days ?? 30,
           window: payload.window ?? null,
-        }),
+        }, payload.projectId
+          ? [service.groupChatStore(payload.projectId)]
+          : payload.soloBotId
+            ? [service.soloChatStore(payload.soloBotId)]
+            : service.allChatStores()),
       }
     case 'usage_window':
       // 用量时间窗快照（DSHBOTS-121）：按需取，不进 state 轮询。

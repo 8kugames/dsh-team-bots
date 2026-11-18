@@ -138,6 +138,7 @@ export const coreMethods = {
       // message_images/run_trajectory 一次性迁入各聊天库；账本闸保证只跑一次，
       // 崩溃重启续跑。必须在正文读写路径工作前完成。
       this.migrateChatSplitP1()
+      this.migrateChatSplitP2()
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
       this.store.run(
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,

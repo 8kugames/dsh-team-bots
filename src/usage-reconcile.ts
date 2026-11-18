@@ -2,7 +2,7 @@
 // 覆盖对账摘要、价目设置、月度用量、运行明细对账、保留期清理与 CSV 导出。
 // 用量明细记录、聚合与窗口解析见 ./usage.js。
 
-import { BUDGET_CURRENCY, aggregateUsage, clearUsageSnapshotCache, costForTokens, filterClause, resolveUsageWindow } from './usage.js'
+import { BUDGET_CURRENCY, clearUsageSnapshotCache, costForTokens, filterClause, resolveUsageWindow, rollupTotals } from './usage.js'
 import { currentPriceMap, lookupPrice } from './pricing.js'
 import { id, nowIso } from './util.js'
 
@@ -53,24 +53,29 @@ export function setPrice(store, input) {
   return priceId
 }
 
+// 月度预算口径（chat-db-split Phase 2 起读顶库 usage_rollup）：
+// 小时桶的 UTC 月份与原明细 occurred_at 的 UTC 月份一致，口径不变。
 export function monthUsageForProject(store, projectId, budgetCurrency = BUDGET_CURRENCY) {
   const month = new Date().toISOString().slice(0, 7)
-  return aggregateUsage(store, ['u.project_id = ?', 'substr(u.occurred_at, 1, 7) = ?'], [projectId, month], budgetCurrency)
+  return rollupTotals(store, ['u.project_id = ?', 'substr(u.hour_utc, 1, 7) = ?'], [projectId, month], budgetCurrency)
 }
 
 export function monthUsageGlobal(store, budgetCurrency = BUDGET_CURRENCY) {
   const month = new Date().toISOString().slice(0, 7)
-  return aggregateUsage(store, ['substr(u.occurred_at, 1, 7) = ?'], [month], budgetCurrency)
+  return rollupTotals(store, ['substr(u.hour_utc, 1, 7) = ?'], [month], budgetCurrency)
 }
 
 // 对账：运行表记录的用量与 usage_events 明细比对，修复「事件晚到」造成的缺口。
 // expiredBefore：用量明细的保留期清理边界（ISO 字符串或毫秒时间戳）。
 // 早于该边界、且明细已被清理的 run 判为 'expired'（不是丢数据，不计入不一致）。
-export function reconcileUsage(store, { days = 30, expiredBefore = null } = {}) {
+export function reconcileUsage(store, { days = 30, expiredBefore = null, chatStoreFor = null } = {}) {
+  // chatStoreFor(run)（chat-db-split Phase 2）：明细与对账行住运行归属的聊天库；
+  // 未注入路由时回落顶库（测试/独立构造形态，明细仍在顶库）。
+  const detailStoreFor = run => (chatStoreFor ? chatStoreFor(run) : store)
   const since = new Date(Date.now() - days * 86_400_000).toISOString()
   const expiredAt = toMillis(expiredBefore)
   const runs = store.all(
-    `SELECT id, ended_at, usage_input, usage_cache_read, usage_cache_write, usage_output
+    `SELECT id, project_id, bot_id, ended_at, usage_input, usage_cache_read, usage_cache_write, usage_output
        FROM runs WHERE ended_at IS NOT NULL AND ended_at >= ?`,
     since,
   )
@@ -84,7 +89,8 @@ export function reconcileUsage(store, { days = 30, expiredBefore = null } = {}) 
     repaired: 0,
   }
   for (const run of runs) {
-    const events = store.get(
+    const detailStore = detailStoreFor(run)
+    const events = detailStore.get(
       `SELECT COUNT(*) AS calls,
               COALESCE(SUM(input_tokens), 0) AS input,
               COALESCE(SUM(cache_read_tokens), 0) AS cacheRead,
@@ -131,7 +137,7 @@ export function reconcileUsage(store, { days = 30, expiredBefore = null } = {}) 
         summary.mismatched += 1
       }
     }
-    store.run(
+    detailStore.run(
       `INSERT INTO usage_reconciliation(id, run_id, event_calls, event_tokens, run_tokens, delta_tokens, status, note, checked_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(run_id) DO UPDATE SET event_calls = excluded.event_calls, event_tokens = excluded.event_tokens,
@@ -148,6 +154,20 @@ export function reconcileUsage(store, { days = 30, expiredBefore = null } = {}) 
       summary.checkedAt,
     )
   }
+  // 顶库权威计数覆写（usageSnapshot 的摘要与缓存版本读这里）。
+  store.run(
+    `INSERT INTO usage_recon_state(id, runs_checked, ok_runs, missing_usage, expired_usage, repaired, checked_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET runs_checked = excluded.runs_checked, ok_runs = excluded.ok_runs,
+       missing_usage = excluded.missing_usage, expired_usage = excluded.expired_usage,
+       repaired = excluded.repaired, checked_at = excluded.checked_at`,
+    summary.runsChecked,
+    summary.runsWithEvents - summary.repaired,
+    summary.missingUsage,
+    summary.expiredUsage,
+    summary.repaired,
+    summary.checkedAt,
+  )
   // 对账写回后立即失效快照缓存：否则页面会拿旧对账摘要显示 30s，用户会以为对账没生效。
   clearUsageSnapshotCache()
   return summary
@@ -177,7 +197,12 @@ export function applyRetention(store, {
   const cutoff = days => new Date(Date.now() - days * 86_400_000).toISOString()
   if (usageDays > 0) {
     const before = cutoff(usageDays)
-    removed.usageEvents = store.run('DELETE FROM usage_events WHERE occurred_at < ?', before).changes
+    // 明细住各聊天库（Phase 2）；顶库兜底清无主遗留行，两边合计。
+    removed.usageEvents = Number(store.run('DELETE FROM usage_events WHERE occurred_at < ?', before).changes ?? 0)
+    for (const chatStore of chatStores) {
+      if (chatStore === store) continue
+      removed.usageEvents += Number(chatStore.run('DELETE FROM usage_events WHERE occurred_at < ?', before).changes ?? 0)
+    }
     removed.usage = { removed: removed.usageEvents, before }
   }
   if (runEventDays > 0) {
@@ -200,9 +225,13 @@ export function applyRetention(store, {
     }
   }
   if (reconciliationDays > 0) {
-    // 对账记录同样按保留期清理，避免 usage_reconciliation 无限增长。
+    // 对账记录同样按保留期清理，避免 usage_reconciliation 无限增长；明细在各聊天库。
     const before = cutoff(reconciliationDays)
-    removed.reconciliationRecords = store.run('DELETE FROM usage_reconciliation WHERE checked_at < ?', before).changes
+    removed.reconciliationRecords = Number(store.run('DELETE FROM usage_reconciliation WHERE checked_at < ?', before).changes ?? 0)
+    for (const chatStore of chatStores) {
+      if (chatStore === store) continue
+      removed.reconciliationRecords += Number(chatStore.run('DELETE FROM usage_reconciliation WHERE checked_at < ?', before).changes ?? 0)
+    }
     removed.reconciliation = { removed: removed.reconciliationRecords, before }
   }
   // 保留期清理会删明细与对账记录，清缓存避免页面继续显示已删数据。
@@ -223,8 +252,11 @@ function csvCell(value) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-export function exportUsageCsv(store, { projectId = null, soloBotId = null, days = 30, window = null } = {}) {
-  // 时间窗口径（DSHBOTS-121）：导出跟随页面选中的窗口；至今窗口没有下界，不加时间过滤。
+export function exportUsageCsv(store, { projectId = null, soloBotId = null, days = 30, window = null } = {}, detailStores = null) {
+  // 明细住各聊天库（chat-db-split Phase 2）：detailStores 为本口径涉及的明细库列表
+  // （全局=allChatStores、项目/单聊=对应单库）；缺省回落顶库（测试/独立构造形态）。
+  // projects/bots 的富化列在顶库 JS 侧补——聊天库里没有这两张表可 JOIN。
+  const stores = detailStores && detailStores.length ? detailStores : [store]
   const resolved = window ? resolveUsageWindow(window) : null
   const since = resolved ? resolved.since : new Date(Date.now() - days * 86_400_000).toISOString()
   const filters = []
@@ -242,21 +274,32 @@ export function exportUsageCsv(store, { projectId = null, soloBotId = null, days
     filters.push('u.bot_id = ?', 'u.project_id IS NULL')
     params.push(soloBotId)
   }
-  const rows = store.all(
-    `SELECT u.occurred_at AS occurred_at, u.run_id AS run_id, u.task_id AS task_id,
-            u.provider AS provider, u.model AS model, u.purpose AS purpose, u.currency AS currency,
-            u.input_tokens AS input_tokens, u.cache_read_tokens AS cache_read_tokens,
-            u.cache_write_tokens AS cache_write_tokens, u.output_tokens AS output_tokens,
-            u.reasoning_tokens AS reasoning_tokens, u.input_cost AS input_cost,
-            u.output_cost AS output_cost, u.total_cost AS total_cost,
-            p.key AS project_key, p.name AS project_name, b.name AS bot_name
-       FROM usage_events u
-       LEFT JOIN projects p ON p.id = u.project_id
-       LEFT JOIN bots b ON b.id = u.bot_id
-       ${filterClause(filters)}
-      ORDER BY u.occurred_at`,
-    ...params,
-  )
+  const rows = []
+  for (const detailStore of stores) {
+    rows.push(...detailStore.all(
+      `SELECT u.occurred_at AS occurred_at, u.run_id AS run_id, u.task_id AS task_id,
+              u.project_id AS project_id, u.bot_id AS bot_id,
+              u.provider AS provider, u.model AS model, u.purpose AS purpose, u.currency AS currency,
+              u.input_tokens AS input_tokens, u.cache_read_tokens AS cache_read_tokens,
+              u.cache_write_tokens AS cache_write_tokens, u.output_tokens AS output_tokens,
+              u.reasoning_tokens AS reasoning_tokens, u.input_cost AS input_cost,
+              u.output_cost AS output_cost, u.total_cost AS total_cost
+         FROM usage_events u
+         ${filterClause(filters)}`,
+      ...params,
+    ))
+  }
+  rows.sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)))
+  const projectMap = new Map(store.all('SELECT id, key, name FROM projects')
+    .map(row => [row.id, row]))
+  const botMap = new Map(store.all('SELECT id, name FROM bots')
+    .map(row => [row.id, row]))
+  for (const row of rows) {
+    const project = row.project_id ? projectMap.get(row.project_id) : null
+    row.project_key = project?.key ?? ''
+    row.project_name = project?.name ?? ''
+    row.bot_name = row.bot_id ? botMap.get(row.bot_id)?.name ?? '' : ''
+  }
   // 与用量页同口径：入库时未计价的明细按当前价目追认后再导出，避免页面与导出不一致。
   const prices = currentPriceMap(store)
   const lines = [CSV_COLUMNS.join(',')]

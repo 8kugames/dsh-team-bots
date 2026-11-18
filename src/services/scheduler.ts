@@ -782,7 +782,7 @@ export const schedulerMethods = {
       messageDays: Number(this.store.setting('retention_message_days', '0') || 0),
       reconciliationDays: Number(this.store.setting('retention_reconciliation_days', '30') || 0),
     }, this.allChatStores())
-    const reconciliation = reconcileUsage(this.store, { days: 30, expiredBefore: retention.usage.before })
+    const reconciliation = reconcileUsage(this.store, { days: 30, expiredBefore: retention.usage.before, chatStoreFor: run => this.runChatStore(run) })
     const reapedMessages = this.reapStuckMessages()
     return { reconciliation, retention, reapedMessages }
   },

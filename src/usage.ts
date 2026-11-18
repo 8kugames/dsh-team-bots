@@ -33,6 +33,7 @@ export function recordUsage(store, {
   usage,
   occurredAt = nowIso(),
   purpose = 'run',
+  chatStore = null,
 }) {
   if (!usage || typeof usage !== 'object') return null
   const input = count(usage.inputTokens ?? usage.input)
@@ -41,7 +42,9 @@ export function recordUsage(store, {
   const output = count(usage.outputTokens ?? usage.output)
   const reasoning = count(usage.reasoningTokens ?? usage.reasoning)
   if (input + cacheRead + cacheWrite + output + reasoning === 0) return null
-  const existing = store.get('SELECT * FROM usage_events WHERE source_key = ?', sourceKey)
+  // 明细住运行归属的聊天库（chat-db-split Phase 2）；未注入路由（测试/独立构造）回落顶库。
+  const detailStore = chatStore ?? store
+  const existing = detailStore.get('SELECT * FROM usage_events WHERE source_key = ?', sourceKey)
   if (existing) return existing
   const price = currentPrice(store, provider, model)
   let inputCost = null
@@ -55,7 +58,7 @@ export function recordUsage(store, {
   }
   const currency = String(price?.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const eventId = id('use')
-  store.run(
+  detailStore.run(
     `INSERT INTO usage_events(id, source_key, source_event_id, run_id, project_id, bot_id, task_id,
        provider, model, purpose, currency,
        input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,
@@ -83,8 +86,49 @@ export function recordUsage(store, {
     occurredAt,
     nowIso(),
   )
-  return store.get('SELECT * FROM usage_events WHERE id = ?', eventId)
+  // 顶库小时汇总同步累加（视图/预算只读这里）；project_key 冗余存档，项目移除后不丢账。
+  const projectId = run?.project_id ?? null
+  const projectKey = projectId
+    ? String(store.get('SELECT key FROM projects WHERE id = ?', projectId)?.key ?? '')
+    : ''
+  store.run(
+    `INSERT INTO usage_rollup(hour_utc, project_id, project_key, bot_id, provider, model, currency, priced,
+        calls, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, stored_cost)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(hour_utc, project_id, bot_id, provider, model, currency, priced) DO UPDATE SET
+       calls = calls + 1,
+       input_tokens = input_tokens + excluded.input_tokens,
+       cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+       cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+       output_tokens = output_tokens + excluded.output_tokens,
+       reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
+       stored_cost = stored_cost + excluded.stored_cost`,
+    String(occurredAt).slice(0, 13),
+    projectId ?? '',
+    projectKey,
+    run?.bot_id ?? '',
+    provider ?? '',
+    model ?? '',
+    currency,
+    totalCost === null ? 0 : 1,
+    input, cacheRead, cacheWrite, output, reasoning,
+    totalCost ?? 0,
+  )
+  return detailStore.get('SELECT * FROM usage_events WHERE id = ?', eventId)
 }
+
+// —— 汇总读层（chat-db-split Phase 2）——
+// 视图/预算全部走顶库 usage_rollup（小时粒度）：滚动窗口最多带进边界处的
+// 不足一小时用量；日历日/月度分组按小时桶换算，与明细口径一致。
+// project_id/bot_id 空串哨兵对应「无归属」。
+
+const ROLLUP_TOKENS = `
+  COALESCE(SUM(input_tokens), 0) AS input_tokens,
+  COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+  COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+  COALESCE(SUM(output_tokens), 0) AS output_tokens,
+  COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+  COALESCE(SUM(calls), 0) AS calls`
 
 // 明细级聚合：token 与调用次数。计价状态（priced/unpriced）由 costBreakdown 统一给出，
 // 口径是「入库已算死 + 现价可追认」，避免同一语义在两处各统计一遍。
@@ -238,23 +282,22 @@ export function aggregateUsage(store, filters = [], params = [], budgetCurrency 
   return mapTotals(row, breakdown)
 }
 
-export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY) {
-  return aggregateUsage(store, ['u.run_id = ?'], [runId], budgetCurrency)
+// priceStore：价目表所在库（顶库）。明细聚合跑在聊天库上，model_prices 不在聊天库里。
+export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY, priceStore = null) {
+  const prices = currentPriceMap(priceStore ?? store)
+  return aggregateUsage(store, ['u.run_id = ?'], [runId], budgetCurrency, prices)
 }
 
 // —— 任务级 usage 聚合（DSHBOTS-212）——
-// 口径：一个任务端到端花多少 token。两条归因路径合一：
-//   1) 新明细：usage_events.task_id（lifecycle 记账时随 run 透传，DSHBOTS-212 起）。
-//   2) 历史明细：task_id 列上线前的存量行 task_id 为 NULL，经 run_id JOIN runs 追认
-//      （runs.task_id 自始有值）。COALESCE 两条路径同权，不做一次性回填迁移。
+// 口径：一个任务端到端花多少 token。明细按 task_id 归因（lifecycle 记账随 run 透传；
+// chat-db-split Phase 2 迁移把历史 NULL 行经顶库 runs 一次性回填），调用方传任务
+// 所属项目的聊天库（明细住那里），不再 JOIN runs——聊天库里没有 runs 表。
 // 覆盖该任务全部运行：成功交付、失败重试（attempt 递增仍同 run 行）、核验/受阻处理
 // 派生运行（task_id 相同）——「端到端成本」即该任务名下发生过的一切模型消费。
 // 缓存 token 分列（cache_read/cache_write），计价沿用 costForTokens 既有口径，不另算。
-const RUN_TASK_JOIN = 'LEFT JOIN runs r ON r.id = u.run_id'
-const EFFECTIVE_TASK_ID = 'COALESCE(u.task_id, r.task_id)'
-
-export function taskUsageTotals(store, taskId, budgetCurrency = BUDGET_CURRENCY) {
-  return aggregateUsage(store, [`${EFFECTIVE_TASK_ID} = ?`], [taskId], budgetCurrency, null, RUN_TASK_JOIN)
+export function taskUsageTotals(store, taskId, budgetCurrency = BUDGET_CURRENCY, priceStore = null) {
+  const prices = currentPriceMap(priceStore ?? store)
+  return aggregateUsage(store, ['u.task_id = ?'], [taskId], budgetCurrency, prices)
 }
 
 // 任务子树 id 集（含自身）：沿 tasks.parent_task_id 下钻全部后代。
@@ -275,11 +318,12 @@ export function taskSubtreeIds(store, taskId) {
 // 拆分划算判定（C_removed > C_introduced）用它与「同类整卡任务」的 taskUsageTotals
 // 对比：拆分后总成本 = 主项 usageTotal（含子卡），拆掉的是串行等待，引入的是每卡的
 // 会话预热/交接重复上下文——两个口径都含缓存 token 分列，可直接看输入侧增量。
-export function taskTreeUsageTotals(store, taskId, budgetCurrency = BUDGET_CURRENCY) {
-  const ids = taskSubtreeIds(store, taskId)
+export function taskTreeUsageTotals(store, taskId, budgetCurrency = BUDGET_CURRENCY, subtreeIds = null, priceStore = null) {
+  const ids = subtreeIds ?? taskSubtreeIds(store, taskId)
   if (!ids.length) return { ...ZERO_TOTALS }
   const marks = `(${ids.map(() => '?').join(', ')})`
-  return aggregateUsage(store, [`${EFFECTIVE_TASK_ID} IN ${marks}`], ids, budgetCurrency, null, RUN_TASK_JOIN)
+  const prices = currentPriceMap(priceStore ?? store)
+  return aggregateUsage(store, [`u.task_id IN ${marks}`], ids, budgetCurrency, prices)
 }
 
 // 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
@@ -367,6 +411,14 @@ export function resolveUsageWindow(key, options = {} as any) {
   }
 }
 
+// 小时桶列（'YYYY-MM-DDTHH'）的日历日表达式：与 dayExpression 同口径，
+// 但要补 ':00:00' 才是 SQLite datetime() 认的完整时刻。
+function hourDayExpression(column, offsetMinutes) {
+  if (offsetMinutes === null || offsetMinutes === undefined) return `substr(${column}, 1, 10)`
+  const sign = offsetMinutes < 0 ? '-' : '+'
+  return `substr(datetime(substr(replace(${column}, 'T', ' '), 1, 13) || ':00:00', '${sign}${Math.abs(offsetMinutes)} minutes'), 1, 10)`
+}
+
 // 日历日表达式：offsetMinutes 为空时沿用 UTC 日期（旧口径），否则按固定偏移换算到产品时区。
 function dayExpression(column, offsetMinutes) {
   if (offsetMinutes === null || offsetMinutes === undefined) return `substr(${column}, 1, 10)`
@@ -380,8 +432,8 @@ function scopeFilters(scope) {
   const filters = []
   const params = []
   if (scope.since) {
-    filters.push('u.occurred_at >= ?')
-    params.push(scope.since)
+    filters.push('u.hour_utc >= ?')
+    params.push(String(scope.since).slice(0, 13))
   }
   if (scope.projectId) {
     filters.push('u.project_id = ?')
@@ -389,7 +441,7 @@ function scopeFilters(scope) {
   }
   // 单聊口径（DSHBOTS-9）：该 Bot 的项目外用量，与 view.solo.runs 同口径。
   if (scope.soloBotId) {
-    filters.push('u.bot_id = ?', 'u.project_id IS NULL')
+    filters.push('u.bot_id = ?', "u.project_id = ''")
     params.push(scope.soloBotId)
   }
   // 至今窗口没有时间下界时可能一条条件都不剩，补一条恒真条件，保证 where 子句非空。
@@ -447,7 +499,7 @@ function zeroUsageBotRows(store, scope, budgetCurrency) {
                  ${runFilters.length ? `AND ${runFilters.join(' AND ')}` : ''} AND ${runWindow.clause}
             )
         AND NOT EXISTS (
-              SELECT 1 FROM usage_events u
+              SELECT 1 FROM usage_rollup u
                WHERE u.bot_id = b.id${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
             )
       ORDER BY b.name`,
@@ -472,7 +524,7 @@ function zeroUsageProjectRows(store, scope, budgetCurrency) {
        JOIN runs r ON r.project_id = p.id
       WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${runWindow.clause}
         AND NOT EXISTS (
-          SELECT 1 FROM usage_events u WHERE u.project_id = p.id${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
+          SELECT 1 FROM usage_rollup u WHERE u.project_id = p.id${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
         )
       GROUP BY p.id, p.name, p.key
       ORDER BY p.name`,
@@ -492,7 +544,7 @@ function zeroUsageDayRows(store, scope, budgetCurrency, daySince) {
   const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
   const runWindow = runWindowFilter(scope)
   const runDay = dayExpression('COALESCE(r.ended_at, r.started_at, r.queued_at)', scope.offsetMinutes)
-  const eventDay = dayExpression('u.occurred_at', scope.offsetMinutes)
+  const eventDay = hourDayExpression('u.hour_utc', scope.offsetMinutes)
   const rows = store.all(
     `SELECT d.day AS day FROM (
         SELECT DISTINCT ${runDay} AS day
@@ -500,7 +552,7 @@ function zeroUsageDayRows(store, scope, budgetCurrency, daySince) {
          WHERE ${runFilters.length ? `${runFilters.join(' AND ')} AND` : ''} ${runWindow.clause}
        ) d
       WHERE ${daySince ? 'd.day >= ? AND' : ''} NOT EXISTS (
-        SELECT 1 FROM usage_events u
+        SELECT 1 FROM usage_rollup u
          WHERE ${eventDay} = d.day${eventFilters.length ? ` AND ${eventFilters.join(' AND ')}` : ''}
       )
       ORDER BY d.day`,
@@ -515,8 +567,8 @@ function byBotRows(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
-    `SELECT u.bot_id AS bot_id, b.name AS name, ${AGGREGATES}
-       FROM usage_events u LEFT JOIN bots b ON b.id = u.bot_id ${where}
+    `SELECT u.bot_id AS bot_id, b.name AS name, ${ROLLUP_TOKENS}
+       FROM usage_rollup u LEFT JOIN bots b ON b.id = u.bot_id ${where}
       GROUP BY u.bot_id, b.name
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
@@ -533,8 +585,8 @@ function byProjectRows(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
-    `SELECT u.project_id AS project_id, p.name AS name, p.key AS key, ${AGGREGATES}
-       FROM usage_events u LEFT JOIN projects p ON p.id = u.project_id ${where}
+    `SELECT u.project_id AS project_id, p.name AS name, COALESCE(p.key, u.project_key) AS key, ${ROLLUP_TOKENS}
+       FROM usage_rollup u LEFT JOIN projects p ON p.id = u.project_id ${where}
       GROUP BY u.project_id, p.name, p.key
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
@@ -552,8 +604,8 @@ function byModelRows(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
   const where = filterClause(filters)
   const rows = store.all(
-    `SELECT u.provider AS provider, u.model AS model, ${AGGREGATES}
-       FROM usage_events u ${where}
+    `SELECT u.provider AS provider, u.model AS model, ${ROLLUP_TOKENS}
+       FROM usage_rollup u ${where}
       GROUP BY u.provider, u.model
       ORDER BY input_tokens + output_tokens DESC`,
     ...params,
@@ -567,13 +619,13 @@ function byModelRows(store, scope, budgetCurrency, prices = null) {
 
 function byDayRows(store, scope, budgetCurrency, daySince = null, prices = null) {
   const { filters, params } = scopeFilters(scope)
-  const dayExpr = dayExpression('u.occurred_at', scope.offsetMinutes)
+  const dayExpr = hourDayExpression('u.hour_utc', scope.offsetMinutes)
   const allFilters = daySince ? [...filters, `${dayExpr} >= ?`] : filters
   const allParams = daySince ? [...params, daySince] : params
   const where = filterClause(allFilters)
   const rows = store.all(
-    `SELECT ${dayExpr} AS day, ${AGGREGATES}
-       FROM usage_events u ${where}
+    `SELECT ${dayExpr} AS day, ${ROLLUP_TOKENS}
+       FROM usage_rollup u ${where}
       GROUP BY day ORDER BY day`,
     ...allParams,
   )
@@ -592,8 +644,15 @@ function breakdownByDimension(store, scope, dimensionExpr, budgetCurrency, price
   const { filters, params } = scopeFilters(scope)
   const rows = store.all(
     `SELECT ${dimensionExpr} AS dim, u.currency AS currency, u.provider AS provider, u.model AS model,
-            ${BREAKDOWN_AGGREGATES}
-       FROM usage_events u ${filterClause(filters)}
+            SUM(CASE WHEN u.priced = 1 THEN u.calls ELSE 0 END) AS priced_calls,
+            SUM(CASE WHEN u.priced = 0 THEN u.calls ELSE 0 END) AS null_calls,
+            COALESCE(SUM(u.stored_cost), 0) AS stored_cost,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.input_tokens ELSE 0 END), 0) AS null_input_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.cache_read_tokens ELSE 0 END), 0) AS null_cache_read_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.cache_write_tokens ELSE 0 END), 0) AS null_cache_write_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.output_tokens ELSE 0 END), 0) AS null_output_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.reasoning_tokens ELSE 0 END), 0) AS null_reasoning_tokens
+       FROM usage_rollup u ${filterClause(filters)}
       GROUP BY ${dimensionExpr}, u.currency, u.provider, u.model`,
     ...params,
   )
@@ -619,17 +678,39 @@ function tierSet(store, scope, budgetCurrency, daySince = null, prices = null) {
   }
 }
 
+// 汇总层通用聚合（scope 口径与月度预算共用）：token/调用数直读 usage_rollup，
+// 成本含按当前价目表追认未计价部分，口径与明细版 mergeBreakdownRows 一致。
+export function rollupTotals(store, filters = [], params = [], budgetCurrency = BUDGET_CURRENCY, prices = null) {
+  const where = filterClause(filters)
+  const row = store.get(`SELECT ${ROLLUP_TOKENS} FROM usage_rollup u ${where}`, ...params)
+  const breakdownRows = store.all(
+    `SELECT u.currency AS currency, u.provider AS provider, u.model AS model,
+            SUM(CASE WHEN u.priced = 1 THEN u.calls ELSE 0 END) AS priced_calls,
+            SUM(CASE WHEN u.priced = 0 THEN u.calls ELSE 0 END) AS null_calls,
+            COALESCE(SUM(u.stored_cost), 0) AS stored_cost,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.input_tokens ELSE 0 END), 0) AS null_input_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.cache_read_tokens ELSE 0 END), 0) AS null_cache_read_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.cache_write_tokens ELSE 0 END), 0) AS null_cache_write_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.output_tokens ELSE 0 END), 0) as null_output_tokens,
+            COALESCE(SUM(CASE WHEN u.priced = 0 THEN u.reasoning_tokens ELSE 0 END), 0) AS null_reasoning_tokens
+       FROM usage_rollup u ${where}
+      GROUP BY u.currency, u.provider, u.model`,
+    ...params,
+  )
+  return mapTotals(row, mergeBreakdownRows(breakdownRows, prices ?? currentPriceMap(store), budgetCurrency))
+}
+
 function scopeUsage(store, scope, budgetCurrency, prices = null) {
   const { filters, params } = scopeFilters(scope)
-  return aggregateUsage(store, filters, params, budgetCurrency, prices)
+  return rollupTotals(store, filters, params, budgetCurrency, prices)
 }
 
 // 日均折算用的实际天数：滚动窗口用窗口天数；至今用最早明细到今天跨过的天数。
 function windowSpanDays(store, window) {
   if (Number.isFinite(window.days) && window.days > 0) return window.days
-  const earliest = store.get('SELECT MIN(occurred_at) AS earliest FROM usage_events')?.earliest ?? null
+  const earliest = store.get('SELECT MIN(hour_utc) AS earliest FROM usage_rollup')?.earliest ?? null
   if (!earliest) return 1
-  const from = Date.parse(String(earliest))
+  const from = Date.parse(`${String(earliest).slice(0, 13)}:00:00.000Z`)
   if (!Number.isFinite(from)) return 1
   return Math.max(1, Math.ceil((Date.now() - from) / DAY_MS))
 }
@@ -675,10 +756,10 @@ function snapshotCacheKey(projectId, days, budgetCurrency, soloBotId, options) {
 }
 
 function snapshotDataVersion(store) {
-  const events = store.get('SELECT COUNT(*) AS n, MAX(rowid) AS maxId FROM usage_events') ?? {}
-  const recon = store.get('SELECT COUNT(*) AS n, MAX(checked_at) AS checkedAt FROM usage_reconciliation') ?? {}
+  const events = store.get('SELECT COUNT(*) AS n, MAX(hour_utc) AS latest FROM usage_rollup') ?? {}
+  const recon = store.get('SELECT runs_checked AS n, checked_at AS checkedAt FROM usage_recon_state WHERE id = 1') ?? {}
   const prices = store.get('SELECT COUNT(*) AS n, MAX(effective_at) AS effectiveAt FROM model_prices') ?? {}
-  return [events.n, events.maxId, recon.n, recon.checkedAt, prices.n, prices.effectiveAt].join(':')
+  return [events.n, events.latest, recon.n, recon.checkedAt, prices.n, prices.effectiveAt].join(':')
 }
 
 // 写回方在改完明细 / 对账 / 价目后调用；测试也用它隔离用例。
@@ -752,15 +833,9 @@ function computeUsageSnapshot(store, projectId, days = 30, options = {} as any) 
 
 // 对账结果摘要（只读，不触发对账）。
 export function reconciliationSummary(store) {
-  const row = store.get(
-    `SELECT COUNT(*) AS runs_checked,
-            SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok_runs,
-            SUM(CASE WHEN status = 'missing' THEN 1 ELSE 0 END) AS missing_usage,
-            SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired_usage,
-            SUM(CASE WHEN status = 'repaired' THEN 1 ELSE 0 END) AS repaired,
-            MAX(checked_at) AS checked_at
-       FROM usage_reconciliation`,
-  )
+  // 对账明细住各聊天库（chat-db-split Phase 2）；顶库 usage_recon_state 存每轮对账的
+  // 权威计数，由 reconcileUsage 每轮整体覆写——摘要读它，不再扫明细表。
+  const row = store.get('SELECT * FROM usage_recon_state WHERE id = 1')
   return {
     checkedAt: row?.checked_at ?? null,
     runsChecked: Number(row?.runs_checked ?? 0),

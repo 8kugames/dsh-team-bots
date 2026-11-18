@@ -327,6 +327,44 @@ CREATE TABLE IF NOT EXISTS usage_reconciliation (
   UNIQUE(run_id)
 );
 
+-- usage_rollup（chat-db-split Phase 2）：用量小时汇总，顶库唯一用量账本。
+-- 明细住各聊天库，视图/预算/月度口径全部读这里；project_key 冗余存档，
+-- 项目移除后历史汇总仍可读（承 2026-11-02 拍板：用量是全局历史）。
+-- project_id/bot_id 用空串哨兵（非 NULL）保证复合主键的 upsert 冲突检测命中。
+CREATE TABLE IF NOT EXISTS usage_rollup (
+  hour_utc TEXT NOT NULL,
+  project_id TEXT NOT NULL DEFAULT '',
+  project_key TEXT NOT NULL DEFAULT '',
+  bot_id TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT '',
+  priced INTEGER NOT NULL DEFAULT 0,
+  calls INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+  stored_cost REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY (hour_utc, project_id, bot_id, provider, model, currency, priced)
+);
+
+CREATE INDEX IF NOT EXISTS usage_rollup_project_idx ON usage_rollup(project_id, hour_utc);
+CREATE INDEX IF NOT EXISTS usage_rollup_bot_idx ON usage_rollup(bot_id, hour_utc);
+
+-- 对账摘要（chat-db-split Phase 2）：对账明细住各聊天库，顶库只留每轮对账的权威计数，
+-- 由 reconcileUsage 每轮整体覆写；usageSnapshot 的摘要与缓存版本读这里。
+CREATE TABLE IF NOT EXISTS usage_recon_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  runs_checked INTEGER NOT NULL DEFAULT 0,
+  ok_runs INTEGER NOT NULL DEFAULT 0,
+  missing_usage INTEGER NOT NULL DEFAULT 0,
+  expired_usage INTEGER NOT NULL DEFAULT 0,
+  repaired INTEGER NOT NULL DEFAULT 0,
+  checked_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
   name TEXT PRIMARY KEY,
   applied_at TEXT NOT NULL

@@ -179,6 +179,7 @@ export const lifecycleMethods = {
     pending.usageCounters.set(fingerprint, ordinal + 1)
     const sourceKey = `run:${pending.runId}:sess:${sessionId}:turn:${pending.turn ?? 0}:msg:${fingerprint}:${ordinal}`
     const row = recordUsage(this.store, {
+      chatStore: this.chatStoreForRun({ project_id: pending.projectId, bot_id: pending.bot.id }),
       sourceKey,
       sourceEventId: messageId || null,
       // task_id（DSHBOTS-212）：任务运行的用量归因到任务，支撑任务级端到端成本聚合
