@@ -77,6 +77,9 @@ export class TeamService {
     this.timer = null
     this.ticking = false
     this.started = false
+    // 停机标志：插件卸载后实例必须完全静默（库已关闭，任何再触发的写库都是错的）。
+    this.stopped = false
+    this.bootTimer = null
     this.ready = null
     this.rate = {}
     // 只读运行开始时的项目工作区指纹，用于事后发现“只读会话改了文件”。

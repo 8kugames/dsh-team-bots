@@ -39,6 +39,8 @@ export const coreMethods = {
   async initialize() {
     if (this.ready) return this.ready
     this.ready = (async () => {
+      // 已停机的实例不再初始化：插件卸载会关闭底层库，初始化里的写库动作会撞上已关闭的库。
+      if (this.stopped) return
       await ensureDirResilient(this.config.dataDir)
       await ensureDirResilient(this.config.memoryDir)
       await ensureDirResilient(this.config.messageDir)
@@ -414,17 +416,26 @@ export const coreMethods = {
   },
 
   start() {
-    if (this.started) return
+    // 停机不变量（DSHBOTS 热重载）：插件卸载会关闭底层库，已停机的实例不得再起拍——
+    // 否则延迟首拍会打到已关闭的库，报 "database is not open"。
+    if (this.started || this.stopped) return
     this.started = true
     // 周期拍走空载门：空闲时降频为一次索引计数，有工作立即恢复全量拍；
     // 事件唤醒（各入队路径的 void this.tick()）不经此门。
     this.timer = setInterval(() => void this.tickIdleGate(), this.config.schedulerIntervalMs)
     this.timer.unref?.()
-    setTimeout(() => void this.tick(), 300).unref?.()
+    // 延迟首拍单独留句柄：停机时必须摘除，否则它会在库关闭后触发一轮。
+    this.bootTimer = setTimeout(() => void this.tick(), 300)
+    this.bootTimer.unref?.()
   },
   stop() {
+    if (this.stopped) return
+    this.stopped = true
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    // 延迟首拍的定时器也要摘除：停机后它再触发就会打到已关闭的库。
+    if (this.bootTimer) clearTimeout(this.bootTimer)
+    this.bootTimer = null
     this.started = false
     // 聊天库句柄一并关闭（LRU 常驻句柄不留到进程退出）。
     this.closeChatStores?.()

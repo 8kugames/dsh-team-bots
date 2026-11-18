@@ -522,6 +522,8 @@ export const schedulerMethods = {
   // 有工作或窗口到期则照常全量。提醒类扫描（滞留卡/验收守门）与到期重试派生在慢拍粒度
   // （默认 15s）下运行，阈值均为分钟级，无感；入队路径的事件唤醒 tick() 与测试直调不经此门。
   tickIdleGate() {
+    // 已停机不再探库：停机后底层库已关闭，这里的读会抛错并变成未处理的 rejection。
+    if (this.stopped || !this.started) return null
     const idleMs = Number(this.config.schedulerIdleIntervalMs ?? 15_000)
     if (Date.now() - this.lastFullTickAt < idleMs) {
       const probe = this.store.get(
@@ -536,7 +538,7 @@ export const schedulerMethods = {
   },
 
   async tick() {
-    if (this.ticking || !this.started) return
+    if (this.ticking || !this.started || this.stopped) return
     this.ticking = true
     this.lastFullTickAt = Date.now()
     try {
