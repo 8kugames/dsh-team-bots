@@ -384,7 +384,7 @@ function renderBots() {
         <div class="bot-card-head">
           ${avatar(bot, 'lg')}
           <div class="bot-card-title"><strong>${esc(bot.name)}</strong><span>${esc(bot.role || t("通用成员"))}</span></div>
-          <span class="bot-status ${attr(bot.status)}">${esc(BOT_STATUS[bot.status] ?? bot.status)}</span>
+          <span class="bot-status ${bot.status === 'active' ? (bot.busy ? 'busy' : 'idle') : attr(bot.status)}">${esc(bot.status === 'active' ? (bot.busy ? t("任务中") : t("空闲中")) : (BOT_STATUS[bot.status] ?? bot.status))}</span>
         </div>
         <div class="bot-model"><span>${esc(bot.modelRef ?? t("未配置模型"))}${bot.effort ? ` · ${esc(EFFORT[bot.effort] ?? bot.effort)}` : ''}</span>${bot.quota?.exhausted ? `<span class="quota-badge">${t("额度耗尽")}</span>` : ''}</div>
         <div class="bot-metrics"><span><strong>${bot.openTasks}</strong> ${t("任务")}</span><span class="dot-sep"></span><span><strong>${bot.memoryCount}</strong> ${t("记忆")}</span><span class="dot-sep"></span><span><strong>${bot.stats.succeeded}</strong> ${t("次成功")}</span></div>

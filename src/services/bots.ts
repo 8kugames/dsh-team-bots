@@ -9,6 +9,7 @@ import { badRequest, conflict, notFound } from '../errors.js'
 import { botWorkspaceDir, botsHome, SLUG_MAX } from '../paths.js'
 import { id, nowIso, slugify, text } from '../util.js'
 import { normalizeFilePolicy } from './file-policy.js'
+import { runningSubagentCount } from '../subagent-ledger.js'
 
 export const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
 
@@ -368,6 +369,10 @@ export const botsMethods = {
        FROM runs WHERE bot_id = ?`,
       bot.id,
     )
+    const activeRuns = this.store.get(
+      "SELECT EXISTS(SELECT 1 FROM runs WHERE bot_id = ? AND status IN ('queued', 'running')) AS n",
+      bot.id,
+    )?.n ?? 0
     return {
       ...bot,
       agentPreset: bot.agent_preset ?? '',
@@ -379,6 +384,8 @@ export const botsMethods = {
       soloWorkspace: bot.solo_dir ? join(this.config.workspace, '_the_bots', bot.solo_dir) : null,
       memoryCount: Number(memoryCount),
       openTasks: Number(openTasks),
+      // 任务中口径：有排队/运行中的 run，或有在跑的子代理（子代理不占 runs 行）。
+      busy: activeRuns > 0 || runningSubagentCount(bot.id) > 0,
       stats: {
         runs: Number(runs?.total ?? 0),
         succeeded: Number(runs?.succeeded ?? 0),

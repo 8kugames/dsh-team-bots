@@ -108,6 +108,19 @@
 .bot-status.active::before {
     background: var(--green);
 }
+/* 工作负载态（总览 bots 卡片）：任务中琥珀、空闲中绿——与项目成员卡的 pill 同色语义。 */
+.bot-status.busy {
+    color: var(--ink-3);
+}
+.bot-status.busy::before {
+    background: var(--star);
+}
+.bot-status.idle {
+    color: var(--ink-3);
+}
+.bot-status.idle::before {
+    background: var(--green);
+}
 .bot-status.paused {
     color: var(--ink-3);
 }

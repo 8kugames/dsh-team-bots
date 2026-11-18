@@ -8,6 +8,13 @@ const SUBAGENT_TOOLS = new Set(['subagent', 'subagent_fork'])
 const SUMMARY_LIMIT = 400
 const STASH_LIMIT = 64
 
+// bot → 在跑子代理计数（内存态，仅本轮进程内准确）：总览 bots 页的「任务中」判定用。
+const runningByBot = new Map()
+
+export function runningSubagentCount(botId) {
+  return runningByBot.get(botId) ?? 0
+}
+
 // 任务号标签（DSHBOTS-292 约定标签=任务号，如 DSHBOTS-294）：优先 description，其次 prompt。
 export function taskLabelOf(args) {
   const source = typeof args?.description === 'string' ? args.description
@@ -108,6 +115,7 @@ export function installSubagentLedger(ctx, store, logger) {
           record(owner.runId, 'subagent_spawned', `${exec.name} label=${label ?? '-'} bot=${owner.botId}`)
           byCall.set(exec.callId, { ...owner, label })
           stashLabel(owner.botId, label)
+          runningByBot.set(owner.botId, (runningByBot.get(owner.botId) ?? 0) + 1)
         }
       }
     } catch (error) {
@@ -144,6 +152,7 @@ export function installSubagentLedger(ctx, store, logger) {
       const entry = byCall.get(exec?.callId)
       if (!entry) return
       byCall.delete(exec?.callId)
+      runningByBot.set(entry.botId, Math.max(0, (runningByBot.get(entry.botId) ?? 1) - 1))
       // 配对暂存的 subagent/end：child id 出现在结果 JSON 里即认领其终态摘要
       let matched = null
       const haystack = JSON.stringify(result ?? {})
