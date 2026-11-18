@@ -4,7 +4,7 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
-## v0.3.97
+## v0.3.98
 
 ### 中文
 
@@ -13,6 +13,20 @@ This file records the externally visible behaviour changes of every release; the
 - **控制面明细迁入聊天库**：运行事件（run_events）、任务评论/任务事件、终端命令随运行/项目迁入各自的群聊或单聊 SQLite；`runs` 的交付正文与产物清单转到聊天库 `run_payload`，顶库只保留调度行——领取事务与唯一活跃索引的单库原子性原样保住。顶库 64MB → 43MB，事件 25,615 条精确对账。
 - **跨库事务语义**：顶库事务内的聊天库写（任务事件、交付评论等）改为提交后落库，外层回滚即丢弃，不再残留半截事件。
 - **修复（自 Phase 1 的回归）**：bot @mention 派发的群聊运行恢复「机器流量档」降档——分库后候选排序的旧 JOIN 恒空导致失效；改为领取时按聊天库实测触发消息定档。
+
+**Agent preset 与界面**
+
+- **team-bots agent preset 随包发布并设为默认**：插件会话命中该默认；worker 会话跟随宿主默认预设，不再硬编码 standard。
+- **总览 bots 卡片状态按工作负载显示**：空闲中/任务中两态，子代理在跑也计为任务中。
+- **交付摘要保留 markdown 块结构**，整段交付报告不再被压成一个标题。
+- **免审规则修复**：行首 `**/` glob 边界允许空白前缀，相对路径命令可命中关键词免审规则。
+
+**English**
+
+- **A team-bots agent preset ships as the default**: plugin sessions match this default; worker sessions follow the host default preset instead of a hardcoded standard.
+- **Overview bot cards show workload-based status**: idle vs. working, with running subagents counted as working.
+- **Delivery summaries keep their markdown block structure**, so whole reports are no longer collapsed into a single heading.
+- **Approval-bypass fix**: a leading `**/` glob boundary now allows whitespace prefixes, so relative-path commands can match keyword bypass rules.
 
 ### English
 
