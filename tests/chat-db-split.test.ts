@@ -254,6 +254,23 @@ test('聊天分库 Phase 2：迁移搬明细建汇总、task_id 回填、幂等�
   } finally { await t.close() }
 })
 
+test('聊天分库：领取定档按聊天库 sender_type 实测（bot 派发降机器档）', async () => {
+  // Phase 1 回归修正：候选排序的 LEFT JOIN messages 在分库后恒 NULL，
+  // bot @mention 派发的群聊运行不再被降到机器流量档。定档改为按聊天库实测。
+  const t = await setup('dsh-chatdb-tier-')
+  try {
+    const project = await t.makeProject('TIER')
+    const userMsg = t.service.insertMessage({ projectId: project.id, senderType: 'user', senderId: 'u1', body: '用户提问' })
+    const botMsg = t.service.insertMessage({ projectId: project.id, senderType: 'bot', senderId: t.director.id, body: 'bot 回复并 @同伴' })
+    assert.equal(t.service.claimTierOf({ kind: 'chat', project_id: project.id, trigger_ref: userMsg }), 1, '用户触发的群聊是 tier 1')
+    assert.equal(t.service.claimTierOf({ kind: 'chat', project_id: project.id, trigger_ref: botMsg }), 2, 'bot 触发的群聊降到机器流量档')
+    assert.equal(t.service.claimTierOf({ kind: 'chat', project_id: project.id, trigger_ref: 'msg_missing' }), 1, '触发消息缺失按用户档不降级')
+    assert.equal(t.service.claimTierOf({ kind: 'task', task_priority: 'urgent' }), 0, 'urgent 任务最先')
+    assert.equal(t.service.claimTierOf({ kind: 'task', task_priority: 'low' }), 3)
+    assert.equal(t.service.claimTierOf({ kind: 'solo_chat' }), 1, '非群聊运行视同 high')
+  } finally { await t.close() }
+})
+
 test('聊天分库：批量快照不返回 LRU 淘汰关闭的句柄', async () => {
   // 生产事故（2026-11-18）：聊天库数超过 LRU 上限时，allChatStores() 边开边淘汰，
   // 淘汰当场关闭了本轮已收集进数组的句柄，applyRetention 随后的扇出清理

@@ -314,11 +314,11 @@ test('源码锚点：挂起分组的提问保护/窗口/上限与出队降档的
   assert.ok(RUNS_SRC.includes("'coalesce_window_ms'"), '合并窗口设置项在建回侧消费')
   assert.ok(RUNS_SRC.includes("'coalesce_max_messages'"), '合并上限设置项在建回侧消费')
   assert.ok(
-    SCHEDULER_SRC.includes("LEFT JOIN messages m ON m.id = r.trigger_ref"),
-    '出队候选查询应 join 触发消息以识别用户提问',
+    SCHEDULER_SRC.includes('claimTierOf(run)'),
+    '出队候选逐条经 claimTierOf 定档（分库后 sender_type 住聊天库，SQL JOIN 恒空已废）',
   )
   assert.ok(
-    SCHEDULER_SRC.includes("WHEN r.kind = 'chat' AND m.sender_type = 'bot' THEN 2"),
+    SCHEDULER_SRC.includes("return sender === 'bot' ? 2 : 1"),
     '通知/伙伴唤醒触发的 chat 运行必须降档（机器流量档），用户提问先于它领取（不被静默压后）',
   )
 })

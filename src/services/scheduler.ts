@@ -610,21 +610,18 @@ export const schedulerMethods = {
       // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）的 queued 任务运行不再领取；
       // 只排 kind='task'，非任务运行不受影响。LEFT JOIN 出 NULL 的孤儿任务运行不过滤。
       const candidates = this.store.all(
-        `SELECT r.*, t.ignored_write_scopes AS task_ignored_scopes FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
-          LEFT JOIN messages m ON m.id = r.trigger_ref
+        `SELECT r.*, t.priority AS task_priority, t.ignored_write_scopes AS task_ignored_scopes
+           FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
          WHERE r.status = 'queued'
            AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled'))
-         ORDER BY CASE
-           WHEN r.kind = 'chat' AND m.sender_type = 'bot' THEN 2
-           WHEN r.kind <> 'task' OR t.priority IS NULL THEN 1
-           WHEN t.priority = 'urgent' THEN 0
-           WHEN t.priority = 'high' THEN 1
-           WHEN t.priority = 'medium' THEN 2
-           WHEN t.priority = 'low' THEN 3
-           ELSE 4
-         END, r.queued_at
-         LIMIT 50`,
+          LIMIT 200`,
       )
+      // 出队定档移到 JS：分库后 messages 住各聊天库（顶库 messages 已空，
+      // 旧 LEFT JOIN 恒 NULL，DSHBOTS-272 的机器流量档自 Phase 1 起失效）——
+      // 群聊运行改按触发消息的 sender_type 实测定档，任务优先级档照旧。
+      for (const run of candidates) run.claim_tier = this.claimTierOf(run)
+      candidates.sort((a, b) =>
+        (a.claim_tier - b.claim_tier) || String(a.queued_at ?? '').localeCompare(String(b.queued_at ?? '')))
       for (const run of candidates) {
         const human = isHumanRun(run)
         if (activeTotal >= maxRuns + (human && !humanSlotTaken ? 1 : 0)) break
@@ -785,6 +782,20 @@ export const schedulerMethods = {
     const reconciliation = reconcileUsage(this.store, { days: 30, expiredBefore: retention.usage.before, chatStoreFor: run => this.runChatStore(run) })
     const reapedMessages = this.reapStuckMessages()
     return { reconciliation, retention, reapedMessages }
+  },
+
+  // 领取定档（DSHBOTS-272 口径，分库修正）：任务运行按任务优先级（urgent 先），
+  // 其余运行视同 high；群聊运行的触发消息来自 bot（@mention 派发）时降到机器流量档，
+  // 同车道内用户提问（tier 1）必然先于它领取。sender_type 住聊天库，按运行归属实测。
+  claimTierOf(run) {
+    if (run.kind === 'chat') {
+      const sender = run.project_id && run.trigger_ref
+        ? this.groupChatStore(run.project_id).get('SELECT sender_type FROM messages WHERE id = ?', run.trigger_ref)?.sender_type
+        : null
+      return sender === 'bot' ? 2 : 1
+    }
+    if (run.kind !== 'task' || !run.task_priority) return 1
+    return { urgent: 0, high: 1, medium: 2, low: 3 }[run.task_priority] ?? 4
   },
 
   // 私信卡死回收：消息停在 pending 说明入队或投递链路断了。
