@@ -150,7 +150,7 @@ async function main() {
 
     // 附件校验（chat-db-split Phase 1 起聊天正文全在聊天库附件里）：逐个核对 sha256
     // 与清单一致；聊天库附件缺失/损坏按演练失败处理，其余附件只报不判失败。
-    const extrasMismatch = []
+    const extrasMismatch                                          = []
     for (const extra of manifest?.extras ?? []) {
       if (!extra?.backup) continue
       if (!existsSync(extra.backup)) {
@@ -184,8 +184,7 @@ async function main() {
         .filter(entry => entry.restored !== entry.production)
     }
 
-    const ok = integrity === 'ok' && foreignKeyIssues.length === 0
-      && mismatch.length === 0
+    const ok = integrity === 'ok' && foreignKeyIssues.length === 0 && mismatch.length === 0
       && extrasMismatch.every(item => !String(item.name ?? '').startsWith('chats/'))
     console.log(JSON.stringify({
       ok,
