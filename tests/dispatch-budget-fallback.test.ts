@@ -150,7 +150,7 @@ test('④ 描述「N 分钟档」与兜底档不一致：回执提示一行；�
       title: '档不符卡', write_scopes: ['src/i.js'], priority: 'medium',
       description: '写范围：src/i.js。45 分钟档。',
     })
-    const mismatchBodies = taskMessages(ctx.store, mismatch.id).map(message => message.body)
+    const mismatchBodies = taskMessages(ctx.service.groupChatStore(project.id), mismatch.id).map(message => message.body)
     assert.ok(
       mismatchBodies.some(body => body.includes('budget=60（priority 兜底，描述写 45 分钟档）')),
       `应有兜底档提示消息，实际消息：${JSON.stringify(mismatchBodies)}`,
@@ -161,7 +161,7 @@ test('④ 描述「N 分钟档」与兜底档不一致：回执提示一行；�
       title: '档一致卡', write_scopes: ['src/j.js'], priority: 'high',
       description: '写范围：src/j.js。90 分钟档。',
     })
-    const consistentBodies = taskMessages(ctx.store, consistent.id).map(message => message.body)
+    const consistentBodies = taskMessages(ctx.service.groupChatStore(project.id), consistent.id).map(message => message.body)
     assert.ok(
       consistentBodies.every(body => !body.includes('priority 兜底')),
       '描述档与兜底档一致时不得提示',
@@ -172,7 +172,7 @@ test('④ 描述「N 分钟档」与兜底档不一致：回执提示一行；�
       title: '显式档卡', write_scopes: ['src/k.js'], priority: 'medium',
       description: '写范围：src/k.js。45 分钟档。', time_budget_minutes: 90,
     })
-    const explicitBodies = taskMessages(ctx.store, explicit.id).map(message => message.body)
+    const explicitBodies = taskMessages(ctx.service.groupChatStore(project.id), explicit.id).map(message => message.body)
     assert.ok(
       explicitBodies.every(body => !body.includes('priority 兜底')),
       '显式预算时不得提示 priority 兜底',

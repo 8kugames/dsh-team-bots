@@ -77,7 +77,10 @@ async function setup() {
   const director = store.get('SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)')
   const dev = await service.createBot({ name: 'DeadlineDev', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
   const project = await service.createProject({ name: 'Deadline', key: 'TDL', ownerBotId: director.id, memberIds: [dev.id] })
-  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const promptRuntime = new DshRuntime({
+    ctx: null, config, store, logger: { info() {}, warn() {}, error() {} },
+    chatStores: { forRun: run => service.runChatStore(run) },
+  })
   return { root, store, service, runtime, promptRuntime, director, dev, project }
 }
 
@@ -139,7 +142,7 @@ test('b) 超线拒绝启动新 task 运行 + 升级：canceled TASK_DEADLINE + �
     assert.match(comment.body, /总监/, '卡面评论点名总监（第一负责人）')
     assert.match(comment.body, /自动重置死线窗口/, '卡面评论含「重派即自动重置窗口」事实口径')
     assert.doesNotMatch(comment.body, /owner 可改/, '不得再写「owner 可改 time_budget_minutes」转接话术')
-    const notice = t.store.get('SELECT * FROM messages WHERE task_id = ? AND sender_type = \'system\' ORDER BY created_at DESC LIMIT 1', taskId)
+    const notice = t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE task_id = ? AND sender_type = \'system\' ORDER BY created_at DESC LIMIT 1', taskId)
     assert.ok(notice, '总监系统通知落库（复用 insertMessage 通道）')
     assert.deepEqual(JSON.parse(notice.mentions_json ?? '[]'), [t.director.id], '通知点名项目 owner（=总监）')
     assert.ok(t.store.get("SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'task_deadline'", run2), 'run_events 留 task_deadline 锚')

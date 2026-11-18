@@ -114,7 +114,7 @@ test('滞留判定边界：31m 报、29m 不报；文案含「验收已滞留 N 
   assert.equal(result.skipped, undefined)
   assert.equal(result.alerted.length, 1)
   assert.equal(result.alerted[0], over.id)
-  const alerts = systemAlerts(store, project.id)
+  const alerts = systemAlerts(service.groupChatStore(project.id), project.id)
   assert.equal(alerts.length, 1)
   assert.match(alerts[0].body, /\[SYSTEM ALERT\] RVW-\d+ 验收已滞留 \d+ 分钟/)
   assert.equal(alerts[0].task_id, over.id)
@@ -136,7 +136,7 @@ test('活动重置锚点：旧 updated_at + 新评论或新 run 结束都不报�
   primeThreshold(service, '')
   const result = runReviewWatchdog(service)
   assert.deepEqual(result.alerted, [stale.id])
-  assert.equal(systemAlerts(store, project.id).length, 1)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1)
 })
 
 test('i18n 前缀（DSHBOTS-228）：缺省 [SYSTEM ALERT]，ui_language=zh 时为【系统指令】', async (t) => {
@@ -147,7 +147,7 @@ test('i18n 前缀（DSHBOTS-228）：缺省 [SYSTEM ALERT]，ui_language=zh 时�
   await seedReviewTask(service, project, 45, { title: '缺省英文' })
   primeThreshold(service, '')
   runReviewWatchdog(service)
-  assert.match(systemAlerts(store, project.id)[0].body, /\[SYSTEM ALERT\] I18N-\d+ 验收已滞留/)
+  assert.match(systemAlerts(service.groupChatStore(project.id), project.id)[0].body, /\[SYSTEM ALERT\] I18N-\d+ 验收已滞留/)
 
   // 播种期回到静默（阈值 0，tick 不插队），显式 zh 后同步段再切阈值触发。
   silenceWatchdog(service)
@@ -155,7 +155,7 @@ test('i18n 前缀（DSHBOTS-228）：缺省 [SYSTEM ALERT]，ui_language=zh 时�
   store.setSetting('ui_language', 'zh')
   primeThreshold(service, '')
   runReviewWatchdog(service)
-  const alerts = systemAlerts(store, project.id)
+  const alerts = systemAlerts(service.groupChatStore(project.id), project.id)
   assert.equal(alerts.length, 2)
   assert.match(alerts[1].body, /【系统指令】I18N-\d+ 验收已滞留/)
 })
@@ -170,7 +170,7 @@ test('非 in_review 卡不扫：todo 卡再旧也不报', async (t) => {
   primeThreshold(service, '')
   const result = runReviewWatchdog(service)
   assert.deepEqual(result.alerted, [])
-  assert.equal(systemAlerts(store, project.id).length, 0)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
 })
 
 test('0 关闭：settings 保存 0 → skipped 且不产生消息', async (t) => {
@@ -181,7 +181,7 @@ test('0 关闭：settings 保存 0 → skipped 且不产生消息', async (t) =>
   await seedReviewTask(service, project, 500)
   const result = runReviewWatchdog(service)
   assert.equal(result.skipped, 'disabled')
-  assert.equal(systemAlerts(store, project.id).length, 0)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
 })
 
 test('单卡去重：同滞留卡只报一次；离开 in_review 摘除；再次滞留重报', async (t) => {
@@ -193,7 +193,7 @@ test('单卡去重：同滞留卡只报一次；离开 in_review 摘除；再次
   primeThreshold(service, '')
   runReviewWatchdog(service)
   runReviewWatchdog(service)
-  assert.equal(systemAlerts(store, project.id).length, 1)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1)
   assert.ok(alertedMap(store)[task.id])
   // 卡离开 in_review：去重表摘除，恢复再报资格。
   service.store.run("UPDATE tasks SET status = 'in_progress' WHERE id = ?", task.id)
@@ -204,7 +204,7 @@ test('单卡去重：同滞留卡只报一次；离开 in_review 摘除；再次
   service.store.run("UPDATE tasks SET status = 'in_review', updated_at = ? WHERE id = ?", minutesAgoIso(50), task.id)
   const again = runReviewWatchdog(service)
   assert.deepEqual(again.alerted, [task.id])
-  assert.equal(systemAlerts(store, project.id).length, 2)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 2)
 })
 
 test('阈值可经 settings 覆盖：90m 卡在阈值 120 下不报', async (t) => {
@@ -216,7 +216,7 @@ test('阈值可经 settings 覆盖：90m 卡在阈值 120 下不报', async (t) 
   primeThreshold(service, '120')
   const result = runReviewWatchdog(service)
   assert.deepEqual(result.alerted, [])
-  assert.equal(systemAlerts(store, project.id).length, 0)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
 })
 
 test('接线锁：scheduler tick 调 runReviewWatchdog；UI badge 读 runLimits.reviewIdleMinutes', () => {
@@ -325,7 +325,7 @@ test('规则 A 证据不全不自动：commit 不在 dev → C 仅提醒，卡�
   await settle()
   assert.equal(service.taskRow(task.id).status, 'in_review', '证据链不全一律不自动')
   assert.equal(autoCloseAudits(store, task.id).length, 0)
-  assert.equal(systemAlerts(store, project.id).length, 1, '回落 C 档提醒')
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1, '回落 C 档提醒')
   const verdict = alertedMap(store)[task.id]
   assert.equal(verdict.verdict, 'C')
   assert.ok(verdict.basis.includes('commit 未验证在 dev'))
@@ -361,7 +361,7 @@ test('规则 B 的 SUPERSEDED 剔除防线：最新 task run 仅清理标记 →
   await settle()
   assert.equal(service.taskRow(task.id).status, 'in_review', 'SUPERSEDED 是清理标记非执行历史，不得触发 B 自动退回')
   assert.equal(autoCloseAudits(store, task.id).length, 0)
-  assert.equal(systemAlerts(store, project.id).length, 1, '回落 C 档提醒')
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1, '回落 C 档提醒')
   const verdict = alertedMap(store)[task.id]
   assert.equal(verdict.verdict, 'C')
 })
@@ -384,7 +384,7 @@ test('B 压 A 时序降级：失败 run 后有更新的建议 accept 核验 → 
   await settle()
   assert.equal(service.taskRow(downgraded.id).status, 'in_review', '较新的建议 accept 不被失败 run 盖过：不自动退回')
   assert.equal(autoCloseAudits(store, downgraded.id).length, 0)
-  assert.equal(systemAlerts(store, project.id).length, 1, '降级后照常提醒')
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1, '降级后照常提醒')
   const verdict = alertedMap(store)[downgraded.id]
   assert.equal(verdict.verdict, 'C', 'B 降级 C 仅提醒（绝不因此自动 accept）')
   assert.ok(verdict.basis.includes('建议 accept'), '降级依据说明时序冲突')
@@ -406,7 +406,7 @@ test('开关关闭：review_auto_close=0 时 A/B 证据齐全也只提醒不自�
   await settle()
   assert.equal(service.taskRow(task.id).status, 'in_review', '关闭时不自动收口')
   assert.equal(autoCloseAudits(store, task.id).length, 0)
-  assert.equal(systemAlerts(store, project.id).length, 1, '提醒照常')
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1, '提醒照常')
   assert.equal(alertedMap(store)[task.id].verdict, 'B', '判定仍记录供面板展示')
 })
 
@@ -443,7 +443,7 @@ test('H2 分级升级：45m 首报；静置到 65m 二次催办升级语气；�
   const second = runReviewWatchdog(service)
   assert.deepEqual(second.escalated, [task.id])
   assert.deepEqual(second.alerted, [])
-  const alerts = systemAlerts(store, project.id)
+  const alerts = systemAlerts(service.groupChatStore(project.id), project.id)
   assert.equal(alerts.length, 2)
   assert.match(alerts[1].body, /二次催办/)
   assert.doesNotMatch(alerts[0].body, /二次催办/)
@@ -497,7 +497,7 @@ test('H5 逐卡容错：单卡异常不拖垮整轮，其余卡照常提醒；�
   const result = runReviewWatchdog(service)
   service.projectWorkDir = original
   assert.deepEqual(result.alerted, [normal.id], '异常卡跳过，正常卡照常提醒')
-  assert.equal(systemAlerts(store, project.id).length, 1)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1)
   const map = alertedMap(store)
   assert.ok(map[normal.id], '正常卡去重已落库')
   assert.ok(!map[boom.id], '异常卡未写去重，下轮可重试')
@@ -513,7 +513,7 @@ test('H5 扫描过滤归档项目 + 索引迁移落库', async (t) => {
   primeThreshold(service, '')
   const result = runReviewWatchdog(service)
   assert.deepEqual(result.alerted, [], '归档项目不扫')
-  assert.equal(systemAlerts(store, project.id).length, 0)
+  assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
   const runIndexes = store.all('PRAGMA index_list(runs)').map(row => row.name)
   const commentIndexes = store.all('PRAGMA index_list(task_comments)').map(row => row.name)
   assert.ok(runIndexes.includes('runs_task_idx'), 'runs.task_id 索引存在')

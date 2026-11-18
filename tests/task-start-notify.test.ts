@@ -103,7 +103,7 @@ test('todo → in_progress（看板拖拽路径）：发一条 @负责人的系�
 
     await service.transitionTask(task.id, 'in_progress', { type: 'user', id: service.localUserId })
 
-    const messages = startMessages(store, project.id)
+    const messages = startMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 1, '只发一条开始消息')
     assert.equal(messages[0].body, `任务 TSN-${task.number} 已开始（Builder）。`)
     assert.equal(messages[0].sender_type, 'system')
@@ -133,7 +133,7 @@ test('blocked → in_progress（用户把卡移出受阻再移回执行中）：
 
     await service.transitionTask(task.id, 'in_progress', actor)
 
-    const messages = startMessages(store, project.id)
+    const messages = startMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 1, 'blocked → in_progress 也要发开始消息')
     assert.equal(messages[0].body, `任务 TSN-${task.number} 已开始（Builder）。`)
     assert.deepEqual(JSON.parse(messages[0].mentions_json), [dev.id])
@@ -163,7 +163,7 @@ test('in_review → in_progress（总监退回/用户改回执行中）：同样
 
     await service.transitionTask(task.id, 'in_progress', actor)
 
-    const messages = startMessages(store, project.id)
+    const messages = startMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 2, '两次进入执行中各一条开始消息')
     assert.equal(messages[1].body, `任务 TSN-${task.number} 已开始（Builder）。`)
     assert.deepEqual(JSON.parse(messages[1].mentions_json), [dev.id])
@@ -188,7 +188,7 @@ test('update_task 改成 in_progress（任务编辑表单）：同样通知并�
 
     await service.updateTask(task.id, { status: 'in_progress' }, actor)
 
-    const messages = startMessages(store, project.id)
+    const messages = startMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 1, 'update_task 路径也要发开始消息')
     assert.equal(messages[0].body, `任务 TSN-${task.number} 已开始（Builder）。`)
     assert.equal(messages[0].task_id, task.id)
@@ -200,7 +200,7 @@ test('update_task 改成 in_progress（任务编辑表单）：同样通知并�
 
     // 同一任务重复提交同一状态：零新消息、零新运行（幂等）
     await service.updateTask(task.id, { status: 'in_progress' }, actor)
-    assert.equal(startMessages(store, project.id).length, 1, '重复提交不重复发消息')
+    assert.equal(startMessages(service.groupChatStore(project.id), project.id).length, 1, '重复提交不重复发消息')
     assert.equal(taskRuns(store, task.id).length, 1, '重复提交不重复入队')
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})
@@ -229,7 +229,7 @@ test('总监退回重做（in_review → in_progress）：负责人收到开始�
       actor,
     )
 
-    const messages = startMessages(store, project.id)
+    const messages = startMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 2, '退回重做也算一次「进入进行中」，负责人收到开始消息')
     assert.equal(messages[1].body, `任务 TSN-${task.number} 已开始（Builder）。`)
     assert.deepEqual(JSON.parse(messages[1].mentions_json), [dev.id])
@@ -258,7 +258,7 @@ test('无负责人：不发消息、不入队（没人可通知、也没人可�
     await service.transitionTask(task.id, 'in_progress', { type: 'user', id: service.localUserId })
 
     assert.equal(service.taskRow(task.id).status, 'in_progress', '状态迁移本身照常生效')
-    assert.equal(startMessages(store, project.id).length, 0, '无负责人不发开始消息')
+    assert.equal(startMessages(service.groupChatStore(project.id), project.id).length, 0, '无负责人不发开始消息')
     assert.equal(taskRuns(store, task.id).length, 0, '无负责人不入队运行')
   } finally {
     await closeQuietly(store)
@@ -280,7 +280,7 @@ test('已有活跃运行：既不重复入队也不重复发消息（幂等）',
     const runs = taskRuns(store, task.id)
     assert.equal(runs.length, 1, '不重复入队')
     assert.equal(runs[0].trigger_type, 'manual', '既有运行不被替换')
-    assert.equal(startMessages(store, project.id).length, 0, '不重复发消息（不能对已在跑的任务喊开始）')
+    assert.equal(startMessages(service.groupChatStore(project.id), project.id).length, 0, '不重复发消息（不能对已在跑的任务喊开始）')
     assert.equal(service.taskRow(task.id).status, 'in_progress', '状态迁移本身照常生效')
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})

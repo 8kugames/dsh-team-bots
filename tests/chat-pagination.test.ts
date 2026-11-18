@@ -32,12 +32,12 @@ async function setup() {
 
 const at = i => new Date(Date.parse('2026-01-01T00:00:00Z') + i * 1000).toISOString()
 
-function seedGroup(store, projectId, count) {
+function seedGroup(chatStore, projectId, groupChatId, count) {
   for (let i = 0; i < count; i += 1) {
-    store.run(
+    chatStore.run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at)
-       VALUES (?, ?, (SELECT id FROM group_chats WHERE project_id = ?), 'user', 'u1', ?, ?)`,
-      `msg_seed_${i}`, projectId, projectId, `消息 ${i}`, at(i),
+       VALUES (?, ?, ?, 'user', 'u1', ?, ?)`,
+      `msg_seed_${i}`, projectId, groupChatId, `消息 ${i}`, at(i),
     )
   }
 }
@@ -47,7 +47,7 @@ test('群聊分页：450 条翻三页 200/200/50，页间无漏无重', async ()
   try {
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const project = await service.createProject({ name: 'Page Demo', key: 'PAGEDMO', ownerBotId: director.id })
-    seedGroup(store, project.id, 450)
+    seedGroup(service.groupChatStore(project.id), project.id, store.get('SELECT id FROM group_chats WHERE project_id = ?', project.id)?.id, 450)
 
     // 模拟前端：state 已回最后 200 条，取其最旧一条作游标。
     const stateView = await service.state(project.id)
@@ -86,10 +86,10 @@ test('同毫秒消息：id 游标兜底，不漏不重', async () => {
     const same = at(5)
     // 三条同毫秒，id 依次递增（同毫秒内按 id 升序即写入顺序）。
     for (const [i, mid] of ['msg_t1', 'msg_t2', 'msg_t3'].entries()) {
-      store.run(
+      service.groupChatStore(project.id).run(
         `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at)
-         VALUES (?, ?, (SELECT id FROM group_chats WHERE project_id = ?), 'user', 'u1', ?, ?)`,
-        mid, project.id, project.id, `同毫秒 ${i}`, same,
+         VALUES (?, ?, ?, 'user', 'u1', ?, ?)`,
+        mid, project.id, store.get('SELECT id FROM group_chats WHERE project_id = ?', project.id)?.id, `同毫秒 ${i}`, same,
       )
     }
     // 游标取 msg_t2：应恰好返回 msg_t1 一条。
@@ -110,7 +110,7 @@ test('单聊按 bot_id 分路，互不串线', async () => {
     const b = bots[1] ?? store.get("SELECT * FROM bots WHERE name = 'director'")
     for (const [bot, tag] of [[a, 'A'], [b, 'B']]) {
       for (let i = 0; i < 3; i += 1) {
-        store.run(
+        service.soloChatStore(bot.id).run(
           `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, created_at)
            VALUES (?, ?, 'user', 'u1', ?, ?)`,
           `solo_${tag}_${i}`, bot.id, `${tag} 的消息 ${i}`, at(i),
@@ -130,7 +130,7 @@ test('limit 边界：超上限压到 200，小值生效，非法回默认', asyn
   try {
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const project = await service.createProject({ name: 'Limit Demo', key: 'LMTDEMO', ownerBotId: director.id })
-    seedGroup(store, project.id, 250)
+    seedGroup(service.groupChatStore(project.id), project.id, store.get('SELECT id FROM group_chats WHERE project_id = ?', project.id)?.id, 250)
     const page = service.messagesPage({ projectId: project.id, beforeCreatedAt: at(249), beforeId: 'msg_seed_249', limit: 500 })
     assert.equal(page.messages.length, 200)
     assert.equal(page.hasMore, true)

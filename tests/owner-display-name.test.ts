@@ -71,7 +71,7 @@ test('用户消息 messageView senderName 为 Owner', async () => {
     const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
     const project = await service.createProject({ name: 'OwnerName', key: 'OWN', ownerBotId: director.id, memberIds: [dev.id] })
     const messageId = service.insertMessage({ projectId: project.id, senderType: 'user', senderId: service.localUserId, body: '本地用户发言' })
-    const row = store.get('SELECT * FROM messages WHERE id = ?', messageId)
+    const row = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', messageId)
     assert.equal(service.messageView(row).senderName, 'Owner')
   })
 })

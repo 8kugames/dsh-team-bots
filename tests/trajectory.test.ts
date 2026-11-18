@@ -29,16 +29,20 @@ function seedRun(store, { runId = 'r1', sessionId = 'sess-root' } = {}) {
   return sessionId
 }
 
-function makeRuntime(store) {
+function makeRuntime(store, service = null) {
   const runtime = new DshRuntime({
     ctx: {},
     config: { runTimeoutMs: 60_000 },
     store,
     logger: { info() {}, warn() {}, error() {} },
+    // 聊天分库 Phase 1：与生产 index.ts 同款注入；不注入时回落顶库（本文件其余用例走该路径）。
+    chatStores: service ? { forRun: run => service.runChatStore(run) } : null,
   })
   runtime.pending.set('sess-root', {
     runId: 'r1', sessionId: 'sess-root', bot: { id: 'b1', provider: 'fake', model: 'model-a' },
     projectId: 'p1', started: false, texts: [], lastText: '', usageCounter: 0, tokens: 0, timeout: null,
+    // 聊天分库：手工构造的 pending 也要带正文库（与 startRun 构造的口径一致）。
+    chatStore: service ? service.runChatStore({ project_id: 'p1', bot_id: 'b1' }) : store,
   })
   runtime.pendingByRun.set('r1', runtime.pending.get('sess-root'))
   return runtime
@@ -139,10 +143,10 @@ test('子代理会话的思考条目归到根运行', async () => {
 })
 
 test('轨迹接口按 seq 返回条目，未知运行报 NOT_FOUND', async () => {
-  await withStore(async (store) => {
+  await withStore(async (store, root) => {
     seedRun(store)
-    const runtime = makeRuntime(store)
-    const service = new TeamService({ store, config: {}, logger: { info() {}, warn() {}, error() {} } })
+    const service = new TeamService({ store, config: { dataDir: join(root, 'data') }, logger: { info() {}, warn() {}, error() {} } })
+    const runtime = makeRuntime(store, service)
 
     await runtime.handleEvent({ id: 'sess-root' }, { type: 'turn/start', data: { turn: 1 } })
     await runtime.handleEvent({ id: 'sess-root' }, {

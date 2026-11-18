@@ -89,7 +89,11 @@ function makeReq({ sessionId, toolName = 'bash', reason = 'run elevated command'
 }
 
 const approvalsOf = (store, id) => store.get('SELECT * FROM approvals WHERE id = ?', id)
-const messageOf = (store, approvalId) => store.get('SELECT * FROM messages WHERE approval_id = ?', approvalId)
+const messageOf = (chatStore, approvalId) => chatStore.get('SELECT * FROM messages WHERE approval_id = ?', approvalId)
+// 跨聊天全局断言：任何聊天库里都不得出现群聊审批卡片。
+const approvalMsgCount = service => service.allChatStores().reduce(
+  (n, s) => n + Number(s.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'")?.n ?? 0), 0,
+)
 
 test('命中 bot 会话：落 pending 审批与 kind=approval 消息，allow 返回 allowed-once 并写审计', async () => {
   const { root, store, service } = await setup()
@@ -103,7 +107,7 @@ test('命中 bot 会话：落 pending 审批与 kind=approval 消息，allow 返
     assert.equal(nexted, false)
     const row = store.get("SELECT * FROM approvals WHERE status = 'pending'")
     assert.ok(row && row.tool_name === 'bash' && row.display_reason === '需要执行一次提权 bash 命令')
-    const msg = messageOf(store, row.id)
+    const msg = messageOf(service.groupChatStore(project.id), row.id)
     assert.equal(msg.kind, 'approval')
     assert.ok(msg.body.includes('bash'))
     const view = await service.decideApproval(row.id, 'allow')
@@ -127,10 +131,10 @@ test('单聊会话的提权请求由工作台单聊卡片承接，不落群聊�
     const row = store.get("SELECT * FROM approvals WHERE status = 'pending'")
     assert.ok(row && row.tool_name === 'bash')
     assert.equal(row.project_id, null, '单聊审批无项目归属')
-    const anchor = store.get('SELECT * FROM solo_messages WHERE approval_id = ?', row.id)
+    const anchor = service.soloChatStore(director.id).get('SELECT * FROM solo_messages WHERE approval_id = ?', row.id)
     assert.ok(anchor, '单聊会话里落一条卡片锚点消息')
     assert.equal(anchor.kind, 'approval')
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 0, '不得落群聊消息')
+    assert.equal(approvalMsgCount(service), 0, '不得落群聊消息')
     const view = await service.decideApproval(row.id, 'allow')
     assert.equal(view.status, 'allowed')
     assert.equal(await outcome, 'allowed-once')
@@ -153,7 +157,7 @@ test('未绑定会话与项目型空绑定都透传：next() 接管，不落审�
       assert.equal(result, 'unavailable')
     }
     assert.equal(store.get('SELECT COUNT(*) AS n FROM approvals').n, 0)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 0)
+    assert.equal(approvalMsgCount(service), 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -258,7 +262,7 @@ test('reason 与 displayReason 落库前过密钥掩码', async () => {
     assert.ok(!row.reason.includes('sk-live-abc123'))
     assert.ok(!row.display_reason.includes('sk-live-abc123'))
     assert.ok(row.reason.includes('DEPLOY_TOKEN'))
-    const msg = messageOf(store, row.id)
+    const msg = messageOf(service.groupChatStore(project.id), row.id)
     assert.ok(!msg.body.includes('sk-live-abc123'))
     service.settleApproval(row.id, 'cancelled', null, null)
   } finally { await rm(root, { recursive: true, force: true }) }
@@ -280,8 +284,8 @@ test('state 视图带 approvals，审批消息不进 bot 上下文', async () =>
     assert.equal(view.approvals[0].status, 'pending')
     assert.equal(view.messages.filter(m => m.kind === 'approval').length, 1)
     // 上下文隔离：bot 提示词只取 kind='text' 的消息，审批卡片绝不进上下文（防 bot 自批）。
-    const runtime = new DshRuntime({ ctx: { on() {} }, config: service.config, store, logger: { info() {}, warn() {}, error() {} } })
-    const context = runtime.promptFor({ run: { kind: 'task' }, bot: director, project, task: null } as any)
+    const runtime = new DshRuntime({ ctx: { on() {} }, config: service.config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
+    const context = runtime.promptFor({ run: { kind: 'task', project_id: project.id }, bot: director, project, task: null } as any)
     assert.ok(!context.includes('【审批请求】'), '审批卡片不得进入 bot 提示词上下文')
     service.settleApproval(view.approvals[0].id, 'cancelled', null, null)
   } finally { await rm(root, { recursive: true, force: true }) }
@@ -315,7 +319,7 @@ test('任务运行会话的审批被插件认领：插件先于原生面板应�
     assert.equal(row.session_id, 'sess-task-run')
     assert.equal(row.tool_name, 'bash')
     assert.equal(native.length, 0, '插件认领后原生审批面板不应再参与')
-    assert.equal(messageOf(store, row.id).kind, 'approval')
+    assert.equal(messageOf(service.groupChatStore(project.id), row.id).kind, 'approval')
     const view = await service.decideApproval(row.id, 'allow')
     assert.equal(view.status, 'allowed')
     assert.equal(await outcome, 'allowed-once')
@@ -336,6 +340,6 @@ test('未绑定会话仍透传：原生面板照常接管，不落审批', async
     assert.equal(native.length, 1, '未绑定会话应透传给宿主原生界面')
     assert.equal(outcome, 'allowed-once')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM approvals').n, 0)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 0)
+    assert.equal(approvalMsgCount(service), 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

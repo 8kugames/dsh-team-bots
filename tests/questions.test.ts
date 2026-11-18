@@ -104,7 +104,11 @@ function makeReq({ sessionId, questions, signal }: Record<string, unknown> = {})
 }
 
 const questionOf = (store, id) => store.get('SELECT * FROM questions WHERE id = ?', id)
-const messageOf = (store, questionId) => store.get('SELECT * FROM messages WHERE question_id = ?', questionId)
+const messageOf = (chatStore, questionId) => chatStore.get('SELECT * FROM messages WHERE question_id = ?', questionId)
+// 聊天分库：messages 分布在各聊天库，跨聊天全局断言逐库求和。
+const questionCardCount = service => service.allChatStores().reduce(
+  (sum, chatStore) => sum + Number(chatStore.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'")?.n ?? 0), 0,
+)
 
 test('命中 bot 会话：落 pending 提问与 kind=question 消息，单选映射回宿主答案并写审计', async () => {
   const { root, store, service } = await setup()
@@ -119,7 +123,7 @@ test('命中 bot 会话：落 pending 提问与 kind=question 消息，单选映
     const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
     assert.ok(row)
     assert.equal(JSON.parse(row.questions)[0].id, 'q1')
-    const msg = messageOf(store, row.id)
+    const msg = messageOf(service.groupChatStore(project.id), row.id)
     assert.equal(msg.kind, 'question')
     assert.ok(msg.body.includes('director'))
     // 单选：只回一个 label，映射成 {answers:[{id,selected}]}。
@@ -150,7 +154,7 @@ test('权限收紧：非总监 bot 在项目群发起 ask 被明确拒绝，不�
     )
     assert.equal(nexted, false, '拒绝路径不得透传原生界面')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0, '不得落提问行')
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0, '不得落提问卡消息')
+    assert.equal(questionCardCount(service), 0, '不得落提问卡消息')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -185,7 +189,7 @@ test('未绑定会话透传：next() 接管，不落提问（D-190 后仅此路�
     assert.equal(nexted, true)
     assert.deepEqual(result, { answers: [] })
     assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0)
+    assert.equal(questionCardCount(service), 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -203,10 +207,10 @@ test('单聊会话发起 ask 由工作台单聊卡片承接，不落群聊、不
     const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
     assert.ok(row)
     assert.equal(row.project_id, null, '单聊提问无项目归属')
-    const anchor = store.get('SELECT * FROM solo_messages WHERE question_id = ?', row.id)
+    const anchor = service.soloChatStore(director.id).get('SELECT * FROM solo_messages WHERE question_id = ?', row.id)
     assert.ok(anchor, '单聊会话里落一条卡片锚点消息')
     assert.equal(anchor.kind, 'question')
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0, '不得落群聊消息')
+    assert.equal(questionCardCount(service), 0, '不得落群聊消息')
     const view = await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['dev'] }] })
     assert.equal(view.status, 'answered')
     assert.deepEqual(await outcome, { answers: [{ id: 'q1', selected: ['dev'] }] })
@@ -390,8 +394,9 @@ test('state 视图带 questions 与 pendingQuestions，提问消息不进 bot �
     assert.equal(view.pendingQuestions.count, 1)
     assert.equal(view.messages.filter(m => m.kind === 'question').length, 1)
     // 上下文隔离：bot 提示词只取 kind='text' 的消息，提问卡片绝不进上下文。
-    const runtime = new DshRuntime({ ctx: { on() {} }, config: service.config, store, logger: { info() {}, warn() {}, error() {} } })
-    const context = runtime.promptFor({ run: { kind: 'task' }, bot: director, project, task: null } as any)
+    // 聊天分库：运行时经 chatStores.forRun 路由到项目聊天库读尾窗。
+    const runtime = new DshRuntime({ ctx: { on() {} }, config: service.config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
+    const context = runtime.promptFor({ run: { kind: 'task', project_id: project.id }, bot: director, project, task: null } as any)
     assert.ok(!context.includes('【提问】'), '提问卡片不得进入 bot 提示词上下文')
     service.settleQuestion(view.questions[0].id, 'expired', null, null)
   } finally { await rm(root, { recursive: true, force: true }) }
@@ -415,7 +420,7 @@ test('任务运行会话的提问被插件认领：插件先于原生面板应�
     assert.ok(row, '任务运行会话的提问应被插件认领')
     assert.equal(row.session_id, 'sess-task-run')
     assert.equal(native.length, 0, '插件认领后原生提问面板不应再参与')
-    assert.equal(messageOf(store, row.id).kind, 'question')
+    assert.equal(messageOf(service.groupChatStore(project.id), row.id).kind, 'question')
     const view = await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['main'] }] })
     assert.equal(view.status, 'answered')
     assert.deepEqual(await outcome, { answers: [{ id: 'q1', selected: ['main'] }] })
@@ -436,7 +441,7 @@ test('未绑定会话仍透传：原生面板照常接管，不落提问', async
     assert.equal(native.length, 1, '未绑定会话应透传给宿主原生界面')
     assert.deepEqual(outcome, { answers: [] })
     assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'question'").n, 0)
+    assert.equal(questionCardCount(service), 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

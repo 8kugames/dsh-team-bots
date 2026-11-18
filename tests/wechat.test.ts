@@ -693,7 +693,7 @@ test('wechat 直达真 service：/tr 直达项目群聊（chat 运行 trigger_ty
     assert.ok(reply.includes('已直达【Dispatch Demo】'))
 
     const projectId = store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id
-    const message = store.get("SELECT * FROM messages WHERE body = ?", '上线新版官网')
+    const message = service.groupChatStore(projectId).get("SELECT * FROM messages WHERE body = ?", '上线新版官网')
     assert.ok(message, '直达消息必须落项目群聊')
     assert.equal(message.project_id, projectId)
     assert.equal(message.sender_id, 'wx_admin_peer', '身份用微信 admin peer id，不冒充工作台用户')
@@ -721,7 +721,7 @@ test('wechat 直达真 service：/tr 直达项目群聊（chat 运行 trigger_ty
     // /tr 不再首触 solo 通道，本条才是首触回执。
     const first = await handleCommand(service, '顺带把首页也改了', { boundKey: 'DISPATCH', bind() {} })
     assert.ok(first.includes('已直达【director】专属工作区'), `自由文本首触回执 director 通道：${first}`)
-    const soloMessage = store.get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer' AND body LIKE ?", '%顺带把首页也改了')
+    const soloMessage = service.soloChatStore(director.id).get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer' AND body LIKE ?", '%顺带把首页也改了')
     assert.ok(soloMessage, '自由文本必须落 director 的 solo 会话')
     assert.equal(soloMessage.bot_id, director.id)
     assert.equal(soloMessage.sender_id, 'wx_admin_peer', '身份用微信 admin peer id，不冒充工作台用户')
@@ -734,7 +734,7 @@ test('wechat 直达真 service：/tr 直达项目群聊（chat 运行 trigger_ty
     assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败（超时）：上游响应超时。', 'solo 通道失败提示同样推回（白名单分类）')
 
     await service.sendMessage(store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id, '工作台普通群聊消息', { type: 'user', id: service.localUserId })
-    const uiRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", store.get("SELECT id FROM messages WHERE body = '工作台普通群聊消息'").id)
+    const uiRun = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", service.groupChatStore(projectId).get("SELECT id FROM messages WHERE body = '工作台普通群聊消息'").id)
     assert.equal(uiRun.trigger_type, 'mention', '工作台消息不带微信标记')
     const before = pushed.length
     await service.finishRun({ runId: uiRun.id, status: 'succeeded', output: '普通群聊回复' } as any)

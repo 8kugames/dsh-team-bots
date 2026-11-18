@@ -149,7 +149,7 @@ test('集成：并发写运行在跑时，只读运行的指纹变化不点名�
     await writeFile(join(dir, 'main.js'), 'module.exports = 1\n')
     await runtime.complete(chatRun.id, 'succeeded', '好的')
 
-    const alert = store.get(
+    const alert = service.groupChatStore(project.id).get(
       "SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%只读运行%'",
       project.id,
     )
@@ -185,7 +185,7 @@ test('集成：并发写运行范围对不上号时仍告警，嫌疑写运行�
     await writeFile(join(dir, 'note.txt'), 'outside declared scopes\n')
     await runtime.complete(chatRun.id, 'succeeded', '好的')
 
-    const alert = store.get(
+    const alert = service.groupChatStore(project.id).get(
       "SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%只读运行%'",
       project.id,
     )

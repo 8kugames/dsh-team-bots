@@ -404,7 +404,7 @@ test('服务层：软移除成功 → 状态 removed + audit 留痕 + 数据全�
   try {
     const bot = await makeArchivedBot(service)
     const ts = new Date().toISOString()
-    store.run(
+    service.soloChatStore(bot.id).run(
       `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, created_at)
        VALUES ('msg-1', ?, 'user', 'owner', '历史消息保留', ?)`,
       bot.id, ts,
@@ -422,7 +422,7 @@ test('服务层：软移除成功 → 状态 removed + audit 留痕 + 数据全�
     )
     assert.ok(audit, 'audit_log 应有 bot.remove_tracking 留痕')
     // 非物理删除口径：消息、版本行、目录全部保留。
-    assert.ok(store.get('SELECT 1 AS ok FROM solo_messages WHERE id = ?', 'msg-1'), '单聊消息保留')
+    assert.ok(service.soloChatStore(bot.id).get('SELECT 1 AS ok FROM solo_messages WHERE id = ?', 'msg-1'), '单聊消息保留')
     assert.ok(
       store.get('SELECT 1 AS ok FROM bot_revisions WHERE bot_id = ? ORDER BY version DESC LIMIT 1', bot.id),
       '版本历史保留',

@@ -184,10 +184,10 @@ test('plain mention runs a chat reply while an empty mention goes to owner', asy
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const project = await service.createProject({ name: 'Chat Project', key: 'CHAT', ownerBotId: director.id })
     await service.sendMessage(project.id, '你好，总监')
-    await waitFor(() => service.store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 1)
+    await waitFor(() => service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 1)
     await service.sendMessage(project.id, ' @director 请回复')
-    await waitFor(() => service.store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 2)
-    const botMessages = service.store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)
+    await waitFor(() => service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)?.n >= 2)
+    const botMessages = service.groupChatStore(project.id).all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'bot'", project.id)
     assert.equal(botMessages.length, 2)
   } finally {
     await closeQuietly(store)
@@ -258,7 +258,7 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
     assert.equal(state.project.stats.ownerReview, 1)
     assert.equal(state.projects.find(item => item.id === project.id).reviewTasks, 0)
     assert.equal(state.projects.find(item => item.id === project.id).ownerReviewTasks, 1)
-    assert.ok(store.all('SELECT body FROM messages WHERE project_id = ?', project.id)
+    assert.ok(service.groupChatStore(project.id).all('SELECT body FROM messages WHERE project_id = ?', project.id)
       .some(message => message.body.includes('待总监验收')))
     // 总监验收通过 → done
     // DSHBOTS-318 验收机械闸：无 subagent_spawned 账目的直调验收须显式兜底。
@@ -432,12 +432,12 @@ test('/clear empties group chat history without touching tasks or memories', asy
     await service.sendMessage(project.id, '/remember 先写测试再上线', { type: 'user', id: 'u1' })
     await service.sendMessage(project.id, '你好，请看一下这个问题', { type: 'user', id: 'u1' })
     await waitFor(() => store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued','running')")?.n === 0)
-    const before = Number(store.get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0)
+    const before = Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0)
     assert.ok(before >= 3, '清空前应已有消息')
 
     const result = await service.sendMessage(project.id, '/clear', { type: 'user', id: 'u1' })
     assert.equal(result.cleared, before)
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 0)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 0)
     // /clear 不入消息、不触发 Bot 运行
     const runsAfter = Number(store.get('SELECT COUNT(*) AS n FROM runs')?.n ?? 0)
     await waitFor(() => store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued','running')")?.n === 0)
@@ -445,7 +445,7 @@ test('/clear empties group chat history without touching tasks or memories', asy
     // 记忆与后续聊天不受影响
     assert.ok(store.get("SELECT COUNT(*) AS n FROM memories WHERE scope_type = 'project' AND scope_id = ?", project.id)?.n >= 1)
     await service.sendMessage(project.id, '继续聊', { type: 'user', id: 'u1' })
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 1)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 1)
     // 审计留痕
     assert.ok(store.get("SELECT id FROM audit_log WHERE action = 'chat.clear' AND target_id = ?", project.id))
   } finally {

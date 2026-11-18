@@ -117,20 +117,21 @@ test('④写入侧：bot 纯残片不落库、夹残片只留正常文本，用�
       body: '</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>',
     })
     assert.equal(skipped, null)
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM messages WHERE sender_type = ?', 'bot')?.n, 0)
+    const groupChat = service.groupChatStore(project.id)
+    assert.equal(groupChat.get('SELECT COUNT(*) AS n FROM messages WHERE sender_type = ?', 'bot')?.n, 0)
 
     const mixedId = service.insertMessage({
       projectId: project.id, senderType: 'bot', senderId: builder.id,
       body: '结论如下。\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>\n完整交付见评论。',
     })
     assert.ok(mixedId)
-    assert.equal(store.get('SELECT body FROM messages WHERE id = ?', mixedId).body, '结论如下。\n\n完整交付见评论。')
+    assert.equal(groupChat.get('SELECT body FROM messages WHERE id = ?', mixedId).body, '结论如下。\n\n完整交付见评论。')
 
     const userId = service.insertMessage({
       projectId: project.id, senderType: 'user', senderId: 'u1',
       body: '</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls> 结论是什么？',
     })
-    assert.equal(store.get('SELECT body FROM messages WHERE id = ?', userId).body, '</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls> 结论是什么？')
+    assert.equal(groupChat.get('SELECT body FROM messages WHERE id = ?', userId).body, '</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls> 结论是什么？')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -141,22 +142,22 @@ test('④读取侧：历史脏数据在消息视图/引用视图/单聊视图被
   const { root, store, service, builder, project } = await sanitizeSetup()
   try {
     const group = service.groupOf(project.id)
-    // 模拟历史脏数据：绕过 insertMessage 直接落库残片行
+    // 模拟历史脏数据：绕过 insertMessage 直接落库残片行（聊天分库：正文住项目聊天库）
     const legacyId = 'msg_legacy01'
-    store.run(
+    service.groupChatStore(project.id).run(
       'INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       legacyId, project.id, group.id, 'bot', builder.id, '</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>', nowIso(),
     )
-    const view = service.messageView(store.get('SELECT * FROM messages WHERE id = ?', legacyId))
+    const view = service.messageView(service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', legacyId))
     assert.equal(view.body, '')
-    assert.equal(service.replyView(legacyId).excerpt, '')
+    assert.equal(service.replyView(legacyId, project.id).excerpt, '')
 
     const soloLegacy = 'msg_legacy02'
-    store.run(
+    service.soloChatStore(builder.id).run(
       'INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       soloLegacy, builder.id, 'bot', builder.id, '</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>', nowIso(),
     )
-    assert.equal(service.soloMessageView(store.get('SELECT * FROM solo_messages WHERE id = ?', soloLegacy)).body, '')
+    assert.equal(service.soloMessageView(service.soloChatStore(builder.id).get('SELECT * FROM solo_messages WHERE id = ?', soloLegacy)).body, '')
 
     // 单聊写入侧同样不落纯残片
     const soloSkipped = service.insertSoloMessage({

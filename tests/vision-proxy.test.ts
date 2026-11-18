@@ -110,7 +110,7 @@ async function setup({ runtime, proxy = true }: { runtime?: unknown; proxy?: boo
   const project = await service.createProject({
     name: 'Vision', key: 'VIS', ownerBotId: director.id, memberIds: [dev.id],
   })
-  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
   const actor = { type: 'user', id: service.localUserId }
   const visionRuns = () => store.all("SELECT * FROM runs WHERE kind = 'vision' ORDER BY queued_at")
   const close = async () => {
@@ -144,7 +144,7 @@ test('发送前预判：modalities 无 image 的带图消息直接派生 vision 
     // 争用口径 A：sendMessage 同步排上的 chat 运行占住 bot 槽，fire-and-forget 预判
     // 撞 UNIQUE 静默让位——置终态腾槽后走同一真实入口补派生，验证预判派生语义。
     settleActiveRuns(t.store)
-    const run = await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
+    const run = await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id }, messageStore: t.service.groupChatStore(t.project.id) })
     assert.ok(run, '预判派生 vision 运行')
     assert.equal(run.kind, 'vision')
     assert.equal(run.mode, 'read', '只读转写')
@@ -172,7 +172,7 @@ test('有 image modality 的模型不派生，消息照常直发', async () => {
   try {
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看图', t.actor, null, imageInput())
     // 直接 await 决策入口拿确定性结论（sendMessage 内同一函数 fire-and-forget）。
-    const decision = await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
+    const decision = await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id }, messageStore: t.service.groupChatStore(t.project.id) })
     assert.equal(decision, null, '有视觉不派生')
     assert.equal(t.visionRuns().length, 0)
     assert.ok(
@@ -191,7 +191,7 @@ test('代理未配置：不派生，只审计 vision.fallback（proxy_not_config
   try {
     assert.equal(visionProxyTarget(t.config), null, '双双非空才启用')
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看图', t.actor, null, imageInput())
-    const decision = await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
+    const decision = await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id }, messageStore: t.service.groupChatStore(t.project.id) })
     assert.equal(decision, null)
     assert.equal(t.visionRuns().length, 0, '不派生运行')
     const audit = t.store.get("SELECT * FROM audit_log WHERE action = 'vision.fallback'")
@@ -224,10 +224,11 @@ test('同消息幂等：重复评估/重复派生/UNIQUE 撞车都只留一条 v
   try {
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看图', t.actor, null, imageInput())
     const message = { id: sent.messageId, project_id: t.project.id }
+    const messageStore = t.service.groupChatStore(t.project.id)
     // 幂等语义在空闲态验证：先腾出 bot 槽（chat 运行置终态），重复调用都应同 id。
     settleActiveRuns(t.store)
-    const first = await considerVisionProxy(t.service, { bot: t.dev, message })
-    const second = await considerVisionProxy(t.service, { bot: t.dev, message })
+    const first = await considerVisionProxy(t.service, { bot: t.dev, message, messageStore })
+    const second = await considerVisionProxy(t.service, { bot: t.dev, message, messageStore })
     const third = spawnVisionProxyRun(t.service, { bot: t.dev, message } as any)
     assert.ok(first && second && third)
     assert.equal(second.id, first.id, '重复评估幂等')
@@ -250,7 +251,7 @@ test('能力声明缺失（modalities undefined）：主动预判不派生，失
   try {
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看图', t.actor, null, imageInput())
     const message = { id: sent.messageId, project_id: t.project.id }
-    assert.equal(await considerVisionProxy(t.service, { bot: t.dev, message }), null, '声明缺失不冒险派生')
+    assert.equal(await considerVisionProxy(t.service, { bot: t.dev, message, messageStore: t.service.groupChatStore(t.project.id) }), null, '声明缺失不冒险派生')
     assert.equal(t.visionRuns().length, 0)
     // 腾出 bot 槽（chat 运行置终态）再造一条带图失败的 chat 运行走真实 finishRun：
     // 错误表明模型无视觉 → 兜底派生 + 按现状落「运行失败：」bot 消息（不静默）。
@@ -269,7 +270,7 @@ test('能力声明缺失（modalities undefined）：主动预判不派生，失
     const vision = t.visionRuns()[0]
     assert.ok(vision, '失败后兜底派生')
     assert.equal(vision.trigger_ref, sent.messageId)
-    const failureNotice = t.store.get(
+    const failureNotice = t.service.groupChatStore(t.project.id).get(
       "SELECT * FROM messages WHERE project_id = ? AND sender_type = 'bot' AND body LIKE '运行失败（%'",
       t.project.id,
     )
@@ -287,7 +288,7 @@ test('全链路（群聊）：转写成功以「[图片转写]」system 消息�
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看图', t.actor, null, imageInput())
     // chat 运行置终态腾槽后由真实主动入口派生（争用口径 A：忙时直接 INSERT 撞 UNIQUE）。
     settleActiveRuns(t.store)
-    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id }, messageStore: t.service.groupChatStore(t.project.id) })
     const vision = await waitFor(() => t.visionRuns()[0])
     await t.service.finishRun({
       runId: vision.id,
@@ -295,7 +296,7 @@ test('全链路（群聊）：转写成功以「[图片转写]」system 消息�
       output: '图片 1\n【类型】界面截图\n【主体】构建失败的任务列表\n【文字】ERROR at src/index.ts:12',
       error: null,
     } as any)
-    const writeback = t.store.get(
+    const writeback = t.service.groupChatStore(t.project.id).get(
       "SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '[图片转写]%'",
       t.project.id,
     )
@@ -304,9 +305,9 @@ test('全链路（群聊）：转写成功以「[图片转写]」system 消息�
     assert.match(writeback.body, /【类型】界面截图/)
     assert.equal(writeback.run_id, vision.id)
     // UI 原图照常显示：message_images 行未被动过，且原消息视图带 images。
-    const imageRow = t.store.get('SELECT * FROM message_images WHERE message_id = ?', sent.messageId)
+    const imageRow = t.service.groupChatStore(t.project.id).get('SELECT * FROM message_images WHERE message_id = ?', sent.messageId)
     assert.ok(imageRow, '原图行保留')
-    const view = t.service.messageView(t.store.get('SELECT * FROM messages WHERE id = ?', sent.messageId))
+    const view = t.service.messageView(t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE id = ?', sent.messageId))
     assert.equal(view.images.length, 1, '原消息视图仍带图片')
     const audit = t.store.get("SELECT * FROM audit_log WHERE action = 'vision.transcribe'")
     assert.ok(audit, '审计 vision.transcribe')
@@ -321,8 +322,8 @@ test('全链路（单聊）：无项目 vision 运行可被调度执行，转写
     const sent = await t.service.sendSoloMessage(t.dev.id, '这张图是什么', t.actor, imageInput())
     // auto 运行时先等 solo_chat 运行自然收尾腾槽，再走真实主动入口派生（同 bot 串行）。
     await waitForBotIdle(t.store)
-    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId } })
-    const writeback = await waitFor(() => t.store.get(
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId }, messageStore: t.service.soloChatStore(t.dev.id) })
+    const writeback = await waitFor(() => t.service.soloChatStore(t.dev.id).get(
       "SELECT * FROM solo_messages WHERE bot_id = ? AND sender_type = 'system' AND body LIKE '[图片转写]%'",
       t.dev.id,
     ))
@@ -333,7 +334,7 @@ test('全链路（单聊）：无项目 vision 运行可被调度执行，转写
     assert.equal(writeback.run_id, vision.id)
     assert.ok(t.store.get("SELECT * FROM audit_log WHERE action = 'vision.transcribe'"), '审计落库')
     // 原消息图片行照常。
-    assert.ok(t.store.get('SELECT * FROM message_images WHERE solo_message_id = ?', sent.messageId))
+    assert.ok(t.service.soloChatStore(t.dev.id).get('SELECT * FROM message_images WHERE solo_message_id = ?', sent.messageId))
   } finally { await t.close() }
 })
 
@@ -345,7 +346,7 @@ test('转写失败：只审计 vision.fallback，不写回消息、不重试（�
     // 入口），随后自动收尾为失败。
     await waitForBotIdle(t.store)
     const vision = maybeSpawnVisionAfterFailure(t.service, {
-      run: { id: 'run_x', kind: 'solo_chat', trigger_ref: sent.messageId, project_id: null },
+      run: { id: 'run_x', kind: 'solo_chat', trigger_ref: sent.messageId, project_id: null, bot_id: t.dev.id },
       bot: t.dev,
       error: { message: 'Model "model-a" does not support image input.' },
     })
@@ -354,7 +355,7 @@ test('转写失败：只审计 vision.fallback，不写回消息、不重试（�
     const audit = await waitFor(() => t.store.get("SELECT * FROM audit_log WHERE action = 'vision.fallback' AND data_json LIKE '%transcribe_failed%'"))
     assert.ok(audit, '失败有审计')
     assert.equal(
-      t.store.get("SELECT COUNT(*) AS n FROM solo_messages WHERE sender_type = 'system' AND body LIKE '[图片转写]%'").n, 0,
+      t.service.soloChatStore(t.dev.id).get("SELECT COUNT(*) AS n FROM solo_messages WHERE sender_type = 'system' AND body LIKE '[图片转写]%'").n, 0,
       '失败不写回',
     )
     assert.equal(t.visionRuns().length, 1, '失败后不重派（幂等键挡住）')
@@ -367,9 +368,9 @@ test('转写提示词：中文结构化要求 + 原文引用 + 禁工具，群�
     const sent = await t.service.sendMessage(t.project.id, '@Builder 看看这张截图', t.actor, null, imageInput())
     // chat 运行置终态腾槽后由真实主动入口派生，取派生行断言两态提示词。
     settleActiveRuns(t.store)
-    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id } })
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id }, messageStore: t.service.groupChatStore(t.project.id) })
     const vision = await waitFor(() => t.visionRuns()[0])
-    const chatMessage = t.store.get('SELECT * FROM messages WHERE id = ?', sent.messageId)
+    const chatMessage = t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE id = ?', sent.messageId)
     const groupPrompt = t.promptRuntime.promptFor({
       run: vision, bot: t.dev, project: t.project, task: null, chatMessage, sessionId: 's-vision-1',
     })
@@ -381,7 +382,7 @@ test('转写提示词：中文结构化要求 + 原文引用 + 禁工具，群�
     // 单聊态：project 为 null，header 退到 one-on-one，不触碰 project.name。
     const soloPrompt = t.promptRuntime.promptFor({
       run: { ...vision, project_id: null }, bot: t.dev, project: null, task: null,
-      chatMessage: t.store.get('SELECT * FROM solo_messages WHERE id = ?', 'solo-none-x') ?? { body: '看图', sender_type: 'user', sender_id: 'u1' },
+      chatMessage: t.service.soloChatStore(t.dev.id).get('SELECT * FROM solo_messages WHERE id = ?', 'solo-none-x') ?? { body: '看图', sender_type: 'user', sender_id: 'u1' },
       sessionId: 's-vision-2',
     })
     assert.match(soloPrompt, /one-on-one conversation/, '单聊 header 兜底')

@@ -97,7 +97,7 @@ test('作用域口径：懒建表齐备时视图无关写入不再打穿短路�
     // 视图相关写入仍然失效短路：新群消息必须回全量。
     const groupChat = t.store.get('SELECT id FROM group_chats WHERE project_id = ?', t.project.id)?.id
       ?? (() => { t.store.run('INSERT INTO group_chats(id, project_id, title, owner_bot_id, created_at) VALUES (?, ?, ?, ?, ?)', 'gc1', t.project.id, 'Ver', t.director.id, new Date().toISOString()); return 'gc1' })()
-    t.store.run('INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', 'msg1', t.project.id, groupChat, 'user', 'user_local', 'hi', new Date().toISOString())
+    t.service.groupChatStore(t.project.id).run('INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', 'msg1', t.project.id, groupChat, 'user', 'user_local', 'hi', new Date().toISOString())
     const afterMessage = await t.service.state(t.project.id, null, { since: first.version })
     assert.ok(!afterMessage.unchanged, 'messages 新行必须重回全量')
   } finally { await t.close() }
@@ -131,7 +131,7 @@ test('切换 SWR：缓存视图版本已变仍即时回放，后台重组入缓�
     const a1 = await t.service.state(t.project.id)
     assert.equal(assemblies, 1)
     // 版本推进（新消息）后切回：SWR 立即回放旧载荷，不等重组。
-    t.store.run('INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', 'msg-swr', t.project.id, (t.store.get('SELECT id FROM group_chats WHERE project_id = ?', t.project.id)?.id ?? ''), 'bot', 'director', 'x', new Date().toISOString())
+    t.service.groupChatStore(t.project.id).run('INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', 'msg-swr', t.project.id, (t.store.get('SELECT id FROM group_chats WHERE project_id = ?', t.project.id)?.id ?? ''), 'bot', 'director', 'x', new Date().toISOString())
     const a2 = await t.service.state(t.project.id, null, { since: 'other@1' })
     assert.ok(Array.isArray(a2.projects) && a2.project?.id === t.project.id, 'SWR 回放要带完整数据体')
     assert.equal(assemblies, 1, '同步路径不得重组')

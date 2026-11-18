@@ -14,12 +14,13 @@ async function setup() {
 }
 
 // 在项目创建时间之后落消息，保证越过「无水位时以项目创建时间为基线」的判定。
-function insertMessage(store, { projectId, groupChatId, senderType, senderId, offsetMs, body = 'hi' }) {
-  const project = store.get('SELECT created_at FROM projects WHERE id = ?', projectId)
+// 聊天分库：projects 仍在顶库，messages 落项目群聊库。
+function insertMessage(service, { projectId, groupChatId, senderType, senderId, offsetMs, body = 'hi' }) {
+  const project = service.store.get('SELECT created_at FROM projects WHERE id = ?', projectId)
   const base = Date.parse(project.created_at)
   const createdAt = new Date(base + offsetMs).toISOString()
   const id = `msg_${senderType}_${offsetMs}`
-  store.run(
+  service.groupChatStore(projectId).run(
     `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, '[]', ?)`,
     id, projectId, groupChatId, senderType, senderId, body, createdAt,
@@ -34,9 +35,9 @@ test('未读计数：只算水位之后的 bot 消息，已读后清零', async 
     const project = await service.createProject({ name: 'Demo', key: 'DEMO', ownerBotId: director.id })
     const group = service.groupOf(project.id)
 
-    insertMessage(store, { projectId: project.id, groupChatId: group.id, senderType: 'bot', senderId: director.id, offsetMs: 1000 })
-    insertMessage(store, { projectId: project.id, groupChatId: group.id, senderType: 'bot', senderId: director.id, offsetMs: 2000 })
-    insertMessage(store, { projectId: project.id, groupChatId: group.id, senderType: 'user', senderId: 'user_local', offsetMs: 3000 })
+    insertMessage(service, { projectId: project.id, groupChatId: group.id, senderType: 'bot', senderId: director.id, offsetMs: 1000 })
+    insertMessage(service, { projectId: project.id, groupChatId: group.id, senderType: 'bot', senderId: director.id, offsetMs: 2000 })
+    insertMessage(service, { projectId: project.id, groupChatId: group.id, senderType: 'user', senderId: 'user_local', offsetMs: 3000 })
 
     let counts = service.unreadChatCounts()
     assert.equal(counts.get(project.id), 2, '用户自己发的消息不算未读')
@@ -44,7 +45,7 @@ test('未读计数：只算水位之后的 bot 消息，已读后清零', async 
     const stateView = await service.state(project.id)
     assert.equal(stateView.projects.find(item => item.id === project.id).unreadCount, 2, 'state 下发未读数')
 
-    const first = store.get(
+    const first = service.groupChatStore(project.id).get(
       "SELECT created_at FROM messages WHERE project_id = ? AND sender_type = 'bot' ORDER BY created_at LIMIT 1",
       project.id,
     ).created_at
@@ -67,11 +68,11 @@ test('已读水位不得越过服务端最新消息（否则会吞掉新消息�
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const project = await service.createProject({ name: 'Demo2', key: 'DEMO2', ownerBotId: director.id })
     const group = service.groupOf(project.id)
-    insertMessage(store, { projectId: project.id, groupChatId: group.id, senderType: 'bot', senderId: director.id, offsetMs: 1000 })
+    insertMessage(service, { projectId: project.id, groupChatId: group.id, senderType: 'bot', senderId: director.id, offsetMs: 1000 })
 
     const future = new Date(Date.now() + 3600_000).toISOString()
     const marked = await handleAction(service, 'mark_chat_read', { projectId: project.id, readAt: future }, { type: 'user', id: 'user_local' })
-    const newest = store.get(
+    const newest = service.groupChatStore(project.id).get(
       "SELECT MAX(created_at) AS ts FROM messages WHERE project_id = ? AND sender_type = 'bot'",
       project.id,
     ).ts

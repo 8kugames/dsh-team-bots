@@ -410,11 +410,11 @@ test('只读运行改动了工作区会在群聊里点名', async () => {
   }
 })
 
-test('Router 与 Worker 会话按配置选择 agent preset，未配置时跟随宿主默认，缺失时回退 standard', async () => {
+test('Router 与 Worker 会话按配置选择 agent preset，未配置时用插件自带预设，缺失时回退 standard', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-team-preset-'))
   const store = openDatabase(join(root, 'team.sqlite'))
   try {
-    const presets = { list: async () => [{ id: 'standard' }, { id: 'router-lite' }, { id: 'worker-full' }] }
+    const presets = { list: async () => [{ id: 'standard' }, { id: 'router-lite' }, { id: 'worker-full' }, { id: 'team-bots' }] }
     const runtime = new DshRuntime({
       ctx: { get: name => (name === 'agentPresets' ? presets : undefined) },
       config: { routerPreset: 'router-lite', workerPreset: 'does-not-exist' },
@@ -422,28 +422,28 @@ test('Router 与 Worker 会话按配置选择 agent preset，未配置时跟随�
       logger: { warn() {} } as DshLogger,
     })
     assert.deepEqual(await runtime.defaultAgentPreset('project'), { agentPreset: 'router-lite' })
-    assert.deepEqual(await runtime.defaultAgentPreset('task'), { agentPreset: 'standard' })
+    assert.deepEqual(await runtime.defaultAgentPreset('task'), { agentPreset: 'team-bots' })
     assert.deepEqual(await runtime.defaultAgentPreset('review'), { agentPreset: 'router-lite' })
 
-    // 未配置且宿主注册表带 defaultId：两级留空/失效时跟随宿主默认
+    // 未配置时用插件自带预设，不跟随宿主全局默认
     const withDefault = new DshRuntime({
       ctx: { get: name => (name === 'agentPresets'
         ? { list: presets.list, defaultId: 'worker-full' } : undefined) },
-      config: { workerPreset: 'does-not-exist', routerPreset: '' },
-      store,
-      logger: { warn() {} } as DshLogger,
-    })
-    assert.deepEqual(await withDefault.defaultAgentPreset('task'), { agentPreset: 'worker-full' })
-    assert.deepEqual(await withDefault.defaultAgentPreset('project'), { agentPreset: 'worker-full' })
-    // 宿主默认不在可用清单里 → 继续 standard
-    const ghostDefault = new DshRuntime({
-      ctx: { get: name => (name === 'agentPresets'
-        ? { list: presets.list, defaultId: 'ghost' } : undefined) },
       config: {},
       store,
       logger: { warn() {} } as DshLogger,
     })
-    assert.deepEqual(await ghostDefault.defaultAgentPreset('task'), { agentPreset: 'standard' })
+    assert.deepEqual(await withDefault.defaultAgentPreset('task'), { agentPreset: 'team-bots' })
+    assert.deepEqual(await withDefault.defaultAgentPreset('project'), { agentPreset: 'team-bots' })
+    // 插件自带预设不可用时回落 standard
+    const noTeamBots = new DshRuntime({
+      ctx: { get: name => (name === 'agentPresets'
+        ? { list: async () => [{ id: 'standard' }], defaultId: 'worker-full' } : undefined) },
+      config: {},
+      store,
+      logger: { warn() {} } as DshLogger,
+    })
+    assert.deepEqual(await noTeamBots.defaultAgentPreset('task'), { agentPreset: 'standard' })
 
     const bare = new DshRuntime({ ctx: { get: () => undefined }, config: {}, store, logger: { warn() {} } as DshLogger })
     assert.deepEqual(await bare.defaultAgentPreset('task'), {})

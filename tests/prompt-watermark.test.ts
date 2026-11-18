@@ -39,10 +39,12 @@ async function setup() {
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
   const project = await service.createProject({ name: 'Watermark', key: 'WM', ownerBotId: director.id, memberIds: [dev.id] })
-  const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  // 聊天分库：独立构造的 runtime 经 chatStores.forRun 路由到真实 service 的聊天库；
+  // 合成 run 行按真实 runs 行形状带 project_id/bot_id 供路由。
+  const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
   const botRow = store.get('SELECT * FROM bots WHERE id = ?', dev.id)
   const projectRow = store.get('SELECT * FROM projects WHERE id = ?', project.id)
-  const chatRun = { kind: 'chat', mode: 'read' }
+  const chatRun = { kind: 'chat', mode: 'read', project_id: project.id }
   return {
     root, store, service, close: async () => {
       try { store.close() } catch {}
@@ -51,9 +53,9 @@ async function setup() {
     director, dev, botRow, projectRow, runtime, chatRun,
     say: body => {
       const id = service.insertMessage({ projectId: project.id, senderType: 'user', senderId: 'u1', body })
-      return store.get('SELECT * FROM messages WHERE id = ?', id)
+      return service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', id)
     },
-    msgRow: id => store.get('SELECT * FROM messages WHERE id = ?', id),
+    msgRow: id => service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', id),
   }
 }
 
@@ -73,7 +75,7 @@ test('新会话首次注入：无水位回退尾 12 条全量窗，并落水位'
     assert.match(prompt, /Recent project messages \(truncated, ids are for team_recall\):/)
     assert.ok(prompt.includes('历史消息 4'), '尾窗应含第 4 条（尾 12 起点）')
     assert.ok(!prompt.includes('历史消息 3'), '尾 12 之外的第 3 条不注入')
-    const maxRow = t.store.get("SELECT MAX(rowid) AS m FROM messages WHERE project_id = ? AND kind = 'text'", t.projectRow.id).m
+    const maxRow = t.service.groupChatStore(t.projectRow.id).get("SELECT MAX(rowid) AS m FROM messages WHERE project_id = ? AND kind = 'text'", t.projectRow.id).m
     assert.equal(t.runtime.messageWatermarks.get('s1'), maxRow, '水位应推进到当前最大 rowid')
   } finally { await t.close() }
 })
@@ -112,7 +114,7 @@ test('并发共用 session：先取窗者带走积压并前移水位，后取窗
     assert.ok(!promptA.includes(`m_${m5.id.slice(-6)}`), 'A 的触发消息不重复进自己的窗')
     assert.match(promptB, /No new project messages since your last turn\./, '后取窗者窗口为空（m5 已由 A 的 prompt 带入 session 历史）')
     assert.ok(!promptB.includes('底料 4'), '历史消息不再回烧')
-    const maxRow = t.store.get("SELECT MAX(rowid) AS m FROM messages WHERE project_id = ? AND kind = 'text'", t.projectRow.id).m
+    const maxRow = t.service.groupChatStore(t.projectRow.id).get("SELECT MAX(rowid) AS m FROM messages WHERE project_id = ? AND kind = 'text'", t.projectRow.id).m
     assert.equal(t.runtime.messageWatermarks.get('shared'), maxRow, '水位推进到全局最大，两条 prompt 合计不丢不重')
   } finally { await t.close() }
 })
@@ -162,20 +164,20 @@ test('solo 单聊同款水位：首次全量、次轮增量、触发消息排除
     for (let i = 1; i <= 3; i++) {
       t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body: `单聊历史 ${i}` })
     }
-    const soloRun = { kind: 'solo_chat', mode: 'read' }
+    const soloRun = { kind: 'solo_chat', mode: 'read', bot_id: t.dev.id }
     const first = t.runtime.promptFor({ run: soloRun, bot: t.botRow, project: null, task: null, chatMessage: null, sessionId: 'ss1' })
     assert.match(first, /Recent conversation \(truncated, ids are for team_recall\):/)
     assert.ok(first.includes('单聊历史 3'))
     const freshId = t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body: '单聊新消息' })
     const triggerId = t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body: '单聊触发消息' })
-    const trigger = t.store.get('SELECT * FROM solo_messages WHERE id = ?', triggerId)
+    const trigger = t.service.soloChatStore(t.dev.id).get('SELECT * FROM solo_messages WHERE id = ?', triggerId)
     const second = t.runtime.promptFor({ run: soloRun, bot: t.botRow, project: null, task: null, chatMessage: trigger, sessionId: 'ss1' })
     assert.match(second, /New messages since your last turn \(ids are for team_recall\):/)
     assert.ok(second.includes('单聊新消息'), '增量窗只含水位后新消息')
     assert.ok(!second.includes('单聊历史 3'), '旧单聊消息不再回烧')
     assert.ok(!second.includes(`m_${triggerId.slice(-6)}`), '触发消息不进增量窗')
     assert.ok(second.includes('# Solo message\n单聊触发消息'), '触发正文完整呈现')
-    assert.equal(t.runtime.messageWatermarks.get('ss1'), t.store.get('SELECT MAX(rowid) AS m FROM solo_messages WHERE bot_id = ?', t.dev.id).m)
+    assert.equal(t.runtime.messageWatermarks.get('ss1'), t.service.soloChatStore(t.dev.id).get('SELECT MAX(rowid) AS m FROM solo_messages WHERE bot_id = ?', t.dev.id).m)
     assert.ok(freshId, '占位断言：新消息 id 存在')
   } finally { await t.close() }
 })

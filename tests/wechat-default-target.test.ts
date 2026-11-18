@@ -22,6 +22,10 @@ class StubRuntime {
 }
 
 const count = (store, sql, ...args) => Number(store.get(sql, ...args)?.n ?? 0)
+// 聊天分库 Phase 1：正文表分住各聊天库——跨库计数遍历聊天库求和，solo 通道固定读 director 单聊库。
+const chatCount = (service, sql, ...args) =>
+  service.allChatStores().reduce((sum, chatStore) => sum + Number(chatStore.get(sql, ...args)?.n ?? 0), 0)
+const soloDbOf = (service, directorId) => service.soloChatStore(directorId)
 
 async function boot(prefix) {
   const root = await mkdtemp(join(tmpdir(), prefix))
@@ -52,7 +56,7 @@ test('① 无 key 自由文本：一律落 director solo 通道，不进任何�
     // 多 active 项目：证明自由文本不随 active 项目数变化
     await service.createProject({ name: 'Alpha', key: 'ALPHA', ownerBotId: director.id })
     await service.createProject({ name: 'Beta', key: 'BETA', ownerBotId: director.id })
-    const messagesBefore = count(store, 'SELECT COUNT(*) AS n FROM messages')
+    const messagesBefore = chatCount(service, 'SELECT COUNT(*) AS n FROM messages')
 
     let bound = null
     const reply = await handleCommand(service, '帮我看下今天的安排', {
@@ -63,7 +67,7 @@ test('① 无 key 自由文本：一律落 director solo 通道，不进任何�
     assert.ok(!reply.includes('还没有选定直达的项目'), '自由文本永不触发 needPickProject')
     assert.equal(bound, null, 'director 通道是项目外的，不得回写项目绑定')
 
-    const solo = store.get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer'")
+    const solo = soloDbOf(service, director.id).get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer'")
     assert.ok(solo, '消息必须落 director 的 solo_messages')
     assert.equal(solo.bot_id, director.id)
     assert.equal(solo.sender_type, 'user')
@@ -71,7 +75,7 @@ test('① 无 key 自由文本：一律落 director solo 通道，不进任何�
     assert.ok(solo.body.startsWith('[微信管理员] '), '正文带来源标记，director 能看出消息来自微信')
     assert.ok(solo.body.endsWith('帮我看下今天的安排'))
     assert.equal(
-      count(store, 'SELECT COUNT(*) AS n FROM messages'),
+      chatCount(service, 'SELECT COUNT(*) AS n FROM messages'),
       messagesBefore,
       '不得产生任何项目群聊 messages 行',
     )
@@ -89,9 +93,9 @@ test('① 无 key 自由文本：一律落 director solo 通道，不进任何�
     // 同一通道的第二条：静默直达（回复由回程推送，不逐条回执）
     const second = await handleCommand(service, '另外把周报也发了', { boundKey: null, bind() {} })
     assert.equal(second, '', '首触之后的自由文本静默直达 director')
-    assert.equal(count(store, "SELECT COUNT(*) AS n FROM solo_messages WHERE sender_id = 'wx_admin_peer'"), 2)
+    assert.equal(count(soloDbOf(service, director.id), "SELECT COUNT(*) AS n FROM solo_messages WHERE sender_id = 'wx_admin_peer'"), 2)
     assert.equal(
-      count(store, 'SELECT COUNT(*) AS n FROM messages'),
+      chatCount(service, 'SELECT COUNT(*) AS n FROM messages'),
       messagesBefore,
       '第二条同样不进项目群聊',
     )
@@ -110,12 +114,12 @@ test('② /tr <key>: 显式直达项目群聊（管理员身份插群 + wechat �
     // 冒号写法（卡面口径 /tr <key>: <消息>）
     const colon = await handleCommand(service, '/tr jhy: 上线新版官网', { boundKey: null, bind() {}, isAdmin: true })
     assert.ok(colon.includes('已直达【JHY】'), `冒号写法回执指向项目：${colon}`)
-    let message = store.get("SELECT * FROM messages WHERE body = ?", '上线新版官网')
+    let message = service.groupChatStore(projectId).get("SELECT * FROM messages WHERE body = ?", '上线新版官网')
     assert.ok(message, '/tr 消息必须落项目群聊')
     assert.equal(message.project_id, projectId)
     assert.equal(message.sender_type, 'user')
     assert.equal(message.sender_id, 'wx_admin_peer', '身份用微信 admin peer id，不冒充工作台用户')
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM solo_messages'), 0, '不落 director solo 通道')
+    assert.equal(count(soloDbOf(service, director.id), 'SELECT COUNT(*) AS n FROM solo_messages'), 0, '不落 director solo 通道')
     let run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
     assert.ok(run, 'chat 运行必须建行')
     assert.equal(run.project_id, projectId, '直达运行落项目域')
@@ -130,14 +134,14 @@ test('② /tr <key>: 显式直达项目群聊（管理员身份插群 + wechat �
     // 空格写法（既有语法不变）
     const space = await handleCommand(service, '/tr jhy 顺带改个样式', { boundKey: null, bind() {}, isAdmin: true })
     assert.ok(space.includes('已直达【JHY】'), `空格写法照旧：${space}`)
-    message = store.get("SELECT * FROM messages WHERE body = ?", '顺带改个样式')
+    message = service.groupChatStore(projectId).get("SELECT * FROM messages WHERE body = ?", '顺带改个样式')
     assert.ok(message)
     run = store.get("SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ?", message.id)
     assert.ok(run && run.trigger_type === 'wechat', '第二条直达同样落项目群聊且打 wechat 标记')
     // key 未命中：可选项目提示，不落任何项目
     const miss = await handleCommand(service, '/tr nope 干活', { boundKey: null, bind() {}, isAdmin: true })
     assert.ok(miss.includes('没有找到项目 NOPE'))
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM messages'), 2, '未命中不新增项目消息')
+    assert.equal(chatCount(service, 'SELECT COUNT(*) AS n FROM messages'), 2, '未命中不新增项目消息')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
@@ -150,7 +154,7 @@ test('③ 已绑定 direct_project_key 且恰有一个 active 项目：自由文
     const director = store.get("SELECT id FROM bots WHERE name = 'director'")
     // 恰一个 active 项目 + 已绑定：两条旧路由的同时在场也不得改变自由文本去向
     await service.createProject({ name: 'Alpha', key: 'ALPHA', ownerBotId: director.id })
-    const messagesBefore = count(store, 'SELECT COUNT(*) AS n FROM messages')
+    const messagesBefore = chatCount(service, 'SELECT COUNT(*) AS n FROM messages')
 
     const reply = await handleCommand(service, '把首页改成深色模式', {
       boundKey: 'ALPHA',
@@ -158,12 +162,12 @@ test('③ 已绑定 direct_project_key 且恰有一个 active 项目：自由文
     })
     // 该管理员在此专属工作区的首条：回执说明去向（绑定与否不影响）
     assert.ok(reply.includes('已直达【director】专属工作区'), '绑定+单项目场景仍回 director 首触回执')
-    const solo = store.get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer'")
+    const solo = soloDbOf(service, director.id).get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer'")
     assert.ok(solo, '自由文本必须落 director solo 通道')
     assert.equal(solo.bot_id, director.id)
     assert.ok(!reply.includes('还没有选定直达的项目'), '不得触发 needPickProject')
     assert.equal(
-      count(store, 'SELECT COUNT(*) AS n FROM messages'),
+      chatCount(service, 'SELECT COUNT(*) AS n FROM messages'),
       messagesBefore,
       '绑定项目与唯一 active 项目都不得截走自由文本（负向）',
     )
@@ -174,13 +178,13 @@ test('③ 已绑定 direct_project_key 且恰有一个 active 项目：自由文
       bind() {},
     })
     assert.equal(colon, '', '冒号派单写法按自由文本静默直达 director')
-    const solo2 = store.get(
+    const solo2 = soloDbOf(service, director.id).get(
       "SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer' AND body LIKE ?",
       '%alpha: 上线新版官网',
     )
     assert.ok(solo2, '冒号写法原文落 director solo，不进项目群聊')
     assert.equal(
-      count(store, 'SELECT COUNT(*) AS n FROM messages'),
+      chatCount(service, 'SELECT COUNT(*) AS n FROM messages'),
       messagesBefore,
       '冒号派单写法不得产生项目 messages 行',
     )
@@ -199,7 +203,7 @@ test('④ / 前缀指令：不进 director 通道（solo_messages 无微信来�
     assert.ok(keys.startsWith('项目 key：'), '/keys 应走固定指令集')
     const help = await handleCommand(service, '/?', { boundKey: null, bind() {} })
     assert.ok(help.includes('可用指令'))
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM solo_messages'), 0, '/ 指令不得触发 solo 通道')
+    assert.equal(count(soloDbOf(service, director.id), 'SELECT COUNT(*) AS n FROM solo_messages'), 0, '/ 指令不得触发 solo 通道')
     assert.equal(count(store, "SELECT COUNT(*) AS n FROM runs WHERE kind = 'solo_chat'"), 0)
   } finally {
     store.close()
@@ -219,9 +223,9 @@ test('⑥ director 不可达：独立 no_director 出口，绝不触发 no_targe
     assert.ok(reply.includes('导演通道暂不可用'), `应回通道异常文案：${reply}`)
     assert.ok(!reply.includes('还没有选定直达的项目'), 'director 不可达绝不触发 no_target/needPickProject')
     assert.ok(!reply.includes('可选的项目'), '不给选项目清单（那不是本异常的用户动作）')
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM solo_messages'), 0, '无可投目标，不落库')
+    assert.equal(count(soloDbOf(service, director.id), 'SELECT COUNT(*) AS n FROM solo_messages'), 0, '无可投目标，不落库')
     assert.equal(count(store, 'SELECT COUNT(*) AS n FROM runs WHERE kind = \'solo_chat\''), 0)
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM messages'), 0, '也不得改投项目群聊')
+    assert.equal(chatCount(service, 'SELECT COUNT(*) AS n FROM messages'), 0, '也不得改投项目群聊')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
@@ -237,13 +241,13 @@ test('⑤ solo_dir 为空的 director：仍路由 solo 通道（目录读到哪�
     store.run("UPDATE bots SET solo_dir = '' WHERE id = ?", director.id)
     const reply = await handleCommand(service, '看下部署状态', { boundKey: null, bind() {} })
     assert.ok(!reply.includes('还没有选定直达的项目'), 'solo_dir 为空也不得触发 needPickProject')
-    const solo = store.get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer'")
+    const solo = soloDbOf(service, director.id).get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer'")
     assert.ok(solo, 'solo_dir 为空时消息仍落 director solo 通道')
     assert.equal(solo.bot_id, director.id)
     const run = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ?", solo.id)
     assert.ok(run, 'solo 运行照常派生（运行时目录由 soloPromptFor 兜底，不在路由层写死）')
     assert.equal(run.trigger_type, 'wechat')
-    assert.equal(count(store, 'SELECT COUNT(*) AS n FROM messages'), 0, '同样不进项目群聊')
+    assert.equal(chatCount(service, 'SELECT COUNT(*) AS n FROM messages'), 0, '同样不进项目群聊')
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })

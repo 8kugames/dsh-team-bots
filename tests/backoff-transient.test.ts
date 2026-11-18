@@ -102,7 +102,7 @@ test('ECONNRESET 失败：合成退避落 retry_after_ms，到期派生重排队
       store.get("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'owner_task_run' AND task_id = ?", task.id).n, 0,
       'attempt<上限不应排 owner handle',
     )
-    const msg = store.get("SELECT body FROM messages WHERE run_id = 'tr1' AND body LIKE '任务执行失败%'")
+    const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'tr1' AND body LIKE '任务执行失败%'")
     assert.match(msg.body, /网络瞬态失败，第 1 次退避/)
     assert.match(msg.body, /后自动重试/)
 
@@ -162,7 +162,7 @@ test('第 4 次 transient（attempt=3 链耗尽）：照常转 blocked + 延迟�
     store.run("UPDATE runs SET ended_at = ? WHERE id = 'ex3'", mins(-1))
     service.retryExpiredPlanWaits()
     assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = \'ex3\'').n, 0, '不再派生')
-    const msg = store.get("SELECT body FROM messages WHERE run_id = 'ex3' AND body LIKE '任务执行失败%'")
+    const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'ex3' AND body LIKE '任务执行失败%'")
     assert.match(msg.body, /已达自动重试上限/)
   } finally {
     store.close()
@@ -219,7 +219,7 @@ test('429 仍走限流路径：真 Retry-After 优先，不被瞬态合成值覆
     )
     const evt = store.get("SELECT * FROM run_events WHERE run_id = 'rl1' AND type = 'rate_limit_backoff'")
     assert.equal(evt, undefined, '有真值时不写合成退避事件')
-    const msg = store.get("SELECT body FROM messages WHERE run_id = 'rl1' AND body LIKE '任务执行失败%'")
+    const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'rl1' AND body LIKE '任务执行失败%'")
     assert.match(msg.body, /上游限流/)
     assert.doesNotMatch(msg.body, /网络瞬态失败/)
   } finally {

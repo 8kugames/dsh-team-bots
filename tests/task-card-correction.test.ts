@@ -112,7 +112,7 @@ test('改卡→通知发出：系统消息点名负责人；活跃运行注入�
 
     await service.updateTask(task.id, { description: '按新需求修正后的卡面' }, { type: 'user', id: service.localUserId })
 
-    const messages = cardChangedMessages(store, project.id)
+    const messages = cardChangedMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 1, '卡面变更恰好发一条系统消息')
     assert.equal(messages[0].task_id, task.id)
     assert.equal(messages[0].body, `任务 CFX-${task.number} 卡面已变更，请按新卡面修正。`)
@@ -137,11 +137,11 @@ test('不触发口径：同值重写、纯状态流转、未派单卡改卡面�
     const dispatched = await service.createTask({ projectId: project.id, title: '已派单', description: '描述甲', assigneeBotId: dev.id, postCard: false })
     await service.updateTask(dispatched.id, { description: '描述甲' }, { type: 'user', id: service.localUserId })
     await service.updateTask(dispatched.id, { status: 'in_progress' }, { type: 'user', id: service.localUserId })
-    assert.equal(cardChangedMessages(store, project.id).length, 0, '同值重写与状态流转不触发')
+    assert.equal(cardChangedMessages(service.groupChatStore(project.id), project.id).length, 0, '同值重写与状态流转不触发')
 
     const unassigned = await service.createTask({ projectId: project.id, title: '未派单', description: '描述乙', postCard: false })
     await service.updateTask(unassigned.id, { description: '描述乙改' }, { type: 'user', id: service.localUserId })
-    assert.equal(cardChangedMessages(store, project.id).length, 0, '未派单卡无人可通知，不触发')
+    assert.equal(cardChangedMessages(service.groupChatStore(project.id), project.id).length, 0, '未派单卡无人可通知，不触发')
 
     await service.pauseRunsForBoard(dispatched.id).catch(() => {})
     await service.cancelRunsForTask(unassigned.id).catch(() => {})
@@ -173,7 +173,7 @@ test('总监重派改卡（team_assign_task 语义）：description 随重派落
     })
 
     assert.equal(updated.description, '整合后的新卡面', '重派带 description 已落卡')
-    const messages = cardChangedMessages(store, project.id)
+    const messages = cardChangedMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 1, '改卡通知已发出')
     assert.deepEqual(JSON.parse(messages[0].mentions_json), [dev.id])
     assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', task.id).n), 1, '同负责人重派不另起运行')
@@ -209,7 +209,7 @@ test('强制受阻：进行中任务移 blocked，运行走既有 abort 链路�
     const audit = store.get("SELECT * FROM audit_log WHERE action = 'task.force_blocked' AND target_id = ?", task.id)
     assert.ok(audit, '审计留痕 task.force_blocked')
     assert.deepEqual(JSON.parse(audit.data_json).stoppedRuns, [run.id], '审计记录被停运行清单')
-    const last = store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' ORDER BY rowid", project.id).at(-1)
+    const last = service.groupChatStore(project.id).all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' ORDER BY rowid", project.id).at(-1)
     assert.equal(last.body, `任务 CFX-${task.number} 被总监强制移为受阻，运行已中止。`)
 
     // 非进行中任务不可强制受阻（口径收紧：只收 in_progress）

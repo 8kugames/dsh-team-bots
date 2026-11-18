@@ -121,7 +121,7 @@ test('bot 交付收尾（→in_review 待验收）：不推微信，交付群消
     assert.equal(pushed.length, 0, '交付（待验收）节点不推微信')
     // 反证收尾真的走了交付分支：群里的「已交付」消息不受影响，撤的只是微信推送。
     assert.ok(
-      store.all("SELECT * FROM messages WHERE project_id = ? AND body LIKE '%已交付%'", project.id).length >= 1,
+      service.groupChatStore(project.id).all("SELECT * FROM messages WHERE project_id = ? AND body LIKE '%已交付%'", project.id).length >= 1,
       '交付消息照常落群',
     )
   } finally {

@@ -112,7 +112,7 @@ test('bot 回复含 @mention → 派发 chat_run（chat_bot 幂等键 + mentions
     assert.ok(builderRun, 'Builder 应有一条 chat 运行')
     assert.ok(await waitFor(store, s => chatRunsFor(s, bots.Polisher.id).length > 0), 'Polisher 应被唤醒')
 
-    const replyRow = store.get('SELECT * FROM messages WHERE run_id = ?', builderRun.id)
+    const replyRow = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE run_id = ?', builderRun.id)
     assert.ok(replyRow, 'Builder 回复应落库')
     assert.deepEqual(JSON.parse(replyRow.mentions_json), [bots.Polisher.id], '回复行应记录 @ 目标')
 
@@ -158,7 +158,7 @@ test('@自己被剔除，@他 bot 照常唤醒', async () => {
     assert.ok(await waitFor(store, s => chatRunsFor(s, bots.Polisher.id).length > 0), 'Polisher 应被唤醒')
 
     const builderRun = chatRunsFor(store, bots.Builder.id)[0]
-    const replyRow = store.get('SELECT * FROM messages WHERE run_id = ?', builderRun.id)
+    const replyRow = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE run_id = ?', builderRun.id)
     assert.deepEqual(JSON.parse(replyRow.mentions_json), [bots.Polisher.id], '自 mention 不进目标列表')
     // 唤醒自己的唯一入口不存在：Builder 全程只有用户消息触发的那一条 chat 运行。
     await settle(store)
@@ -187,7 +187,7 @@ test('链路深度 2 截断：第二跳回复不再派发第三跳', async () =>
     assert.equal(chatRunsFor(store, bots.Builder.id).length, 1, '链尾不得回环唤醒 Builder')
 
     const secondRun = chatRunsFor(store, bots.Second.id)[0]
-    const secondReply = store.get('SELECT * FROM messages WHERE run_id = ?', secondRun.id)
+    const secondReply = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE run_id = ?', secondRun.id)
     // mentions_json 记录内容引用（含被截断目标），派发与否由护栏决定——两者解耦。
     assert.deepEqual(JSON.parse(secondReply.mentions_json), [bots.Third.id])
     assert.equal(
@@ -215,7 +215,7 @@ test('护栏三双保险：taskId 非空的消息不参与派发', async () => {
     const woken = service.dispatchBotMentionRuns(projectRow, { trigger_ref: null }, builderRow, taskMessageId)
     assert.deepEqual(woken, [])
     assert.equal(store.get("SELECT COUNT(*) AS n FROM outbox WHERE idempotency_key LIKE 'chat_bot:%'")?.n, 0)
-    assert.equal(store.get('SELECT mentions_json FROM messages WHERE id = ?', taskMessageId)?.mentions_json, '[]')
+    assert.equal(service.groupChatStore(project.id).get('SELECT mentions_json FROM messages WHERE id = ?', taskMessageId)?.mentions_json, '[]')
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -228,7 +228,7 @@ test('用户消息路径行为不变：chat: 幂等键与 runBots 语义保持',
     const sent = await service.sendMessage(project.id, '@Builder 用户直发', { type: 'user', id: 'u1' })
     assert.deepEqual(sent.runBots, [bots.Builder.id])
 
-    const userRow = store.get('SELECT * FROM messages WHERE id = ?', sent.messageId)
+    const userRow = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', sent.messageId)
     assert.deepEqual(JSON.parse(userRow.mentions_json), [bots.Builder.id])
 
     const outboxRow = store.get('SELECT * FROM outbox WHERE idempotency_key = ?', `chat:${sent.messageId}:${bots.Builder.id}`)

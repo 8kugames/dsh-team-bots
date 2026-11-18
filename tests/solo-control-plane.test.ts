@@ -95,7 +95,7 @@ test('项目外 solo bot（kind=bot 控制面绑定、无项目关系）提问�
     const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
     assert.ok(row, '提问必须被认领落库')
     assert.equal(row.project_id, null)
-    const anchor = store.get('SELECT * FROM solo_messages WHERE question_id = ?', row.id)
+    const anchor = service.soloChatStore(loner.id).get('SELECT * FROM solo_messages WHERE question_id = ?', row.id)
     assert.ok(anchor && anchor.kind === 'question', '单聊卡片锚点必须落 solo_messages')
     const view = await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['a'] }] })
     assert.equal(view.status, 'answered')
@@ -113,7 +113,7 @@ test('同款 isSolo 审批：项目外 solo bot 提权由单聊卡片承接', as
     assert.equal(nexted, false)
     const row = store.get("SELECT * FROM approvals WHERE status = 'pending'")
     assert.ok(row && row.project_id === null, '审批必须被认领且无项目归属')
-    const anchor = store.get('SELECT * FROM solo_messages WHERE approval_id = ?', row.id)
+    const anchor = service.soloChatStore(loner.id).get('SELECT * FROM solo_messages WHERE approval_id = ?', row.id)
     assert.ok(anchor && anchor.kind === 'approval', '审批卡片锚点必须落 solo_messages')
     const view = await service.decideApproval(row.id, 'allow')
     assert.equal(view.status, 'allowed')
@@ -134,7 +134,8 @@ test('仍处活跃项目的成员 bot（绑定无 project）提问走透传，�
     assert.equal(nexted, true, '有活跃项目语境的成员 bot 控制面绑定不得按单聊承接')
     assert.deepEqual(await outcome, { answers: [] })
     assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0)
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM solo_messages').n, 0)
+    // 聊天分库：solo_messages 分布在各聊天库，全局断言逐库求和
+    assert.equal(service.allChatStores().reduce((sum, chatStore) => sum + Number(chatStore.get('SELECT COUNT(*) AS n FROM solo_messages')?.n ?? 0), 0), 0)
   } finally { await teardown(service, store, root) }
 })
 
@@ -151,7 +152,7 @@ test('项目归档后成员关系不再构成项目语境，提问回退单聊�
     assert.equal(nexted, false, '归档项目成员关系不算活跃语境，应按单聊承接')
     const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
     assert.ok(row)
-    assert.ok(store.get("SELECT * FROM solo_messages WHERE kind = 'question'"))
+    assert.ok(service.soloChatStore(member.id).get("SELECT * FROM solo_messages WHERE kind = 'question'"))
     await service.answerQuestion(row.id, { answers: [{ id: 'q1', selected: ['a'] }] })
     await outcome
   } finally { await teardown(service, store, root) }

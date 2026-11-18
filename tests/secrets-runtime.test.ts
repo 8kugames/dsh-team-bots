@@ -96,7 +96,7 @@ test('批准后一次性文件落在数据目录而非项目工作区，权限 0
     assert.equal(existsSync(ctx.legacyEnvOf()), false)
     assert.equal(existsSync(join(ctx.workspace, ctx.project.slug, '.team')), false)
     // 批准回执披露数据目录路径与即焚语义。
-    const receipt = ctx.store.get(
+    const receipt = ctx.service.groupChatStore(ctx.project.id).get(
       "SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%已批准%' ORDER BY created_at DESC LIMIT 1",
       ctx.project.id,
     )

@@ -46,8 +46,8 @@ async function setup() {
   return { store, service, warnings, director, newcomer: newcomerRow, project, workspace, close }
 }
 
-const systemMessages = (store, projectId) =>
-  store.all(
+const systemMessages = (chatStore, projectId) =>
+  chatStore.all(
     "SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' ORDER BY created_at DESC",
     projectId,
   )
@@ -58,7 +58,7 @@ test('入群通知：addProjectMember 向其他成员发群系统消息，@其�
     const view = await t.service.addProjectMember(t.project.id, t.newcomer.id, { type: 'user', id: 'u1' })
     assert.ok(view.members.find(row => row.id === t.newcomer.id), '新成员应出现在项目视图')
 
-    const rows = systemMessages(t.store, t.project.id)
+    const rows = systemMessages(t.service.groupChatStore(t.project.id), t.project.id)
     const notice = rows.find(row => row.body.includes('已加入项目群'))
     assert.ok(notice, '应发出入群通知系统消息')
     assert.equal(notice.body, '成员 Newcomer 已加入项目群。')
@@ -89,6 +89,6 @@ test('项目初建不触发入群通知（初建无「其他成员」语义）',
   const t = await setup()
   try {
     // 初建项目时 owner 与成员一并落库，不应产生入群通知。
-    assert.equal(systemMessages(t.store, t.project.id).length, 0, '初建项目不应有入群通知')
+    assert.equal(systemMessages(t.service.groupChatStore(t.project.id), t.project.id).length, 0, '初建项目不应有入群通知')
   } finally { await t.close() }
 })

@@ -88,7 +88,7 @@ test('单 run 伙伴提醒上限：前 3 个目标放行，第 4 条静默丢弃
     }
     const fourth = await t.service.notifyFromBot('sess-caller', { target: 'member', member: t.targets[3].name, message: '第 4 条' })
     assert.match(fourth, /防循环上限/, '第 4 条应被静默丢弃')
-    const noticeCount = t.store.get(
+    const noticeCount = t.service.groupChatStore(t.project.id).get(
       "SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND body LIKE '【通知】%'", t.project.id,
     ).n
     assert.equal(noticeCount, 3, '第 4 条不得落任何留痕')
@@ -111,7 +111,7 @@ test('同 run+同目标每日上限：前 5 次放行，第 6 次静默丢弃并
     }
     const sixth = await t.service.notifyFromBot('sess-caller', { target: 'member', member: t.targets[0].name, message: '第 6 次' })
     assert.match(sixth, /防循环上限/, '当日第 6 次应被静默丢弃')
-    const noticeCount = t.store.get(
+    const noticeCount = t.service.groupChatStore(t.project.id).get(
       "SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND body LIKE '【通知】%'", t.project.id,
     ).n
     assert.equal(noticeCount, 5, '第 6 次不得落任何留痕')
@@ -160,7 +160,7 @@ test('任务跟进提醒幂等：在途提醒未消费前，重复提醒静默�
     assert.match(first, /活跃运行注入提醒/, '首条跟进提醒应注入')
     const second = await t.service.notifyFromBot('sess-caller', { target: 'task', task: `LCP-${task.number}`, message: '再说一遍' })
     assert.match(second, /已有在途跟进提醒，本次重复未投递/, '重复跟进应幂等吸收')
-    const reminders = t.store.get(
+    const reminders = t.service.groupChatStore(t.project.id).get(
       "SELECT COUNT(*) AS n FROM messages WHERE task_id = ? AND body LIKE '【任务提醒】%'", task.id,
     ).n
     assert.equal(reminders, 1, '重复跟进不得落新留痕（不计新）')
@@ -191,7 +191,7 @@ test('chat 运行失败：群聊与微信只透类别+摘要，原始错误串�
       t.project.id, t.caller.id, now, now,
     )
     await t.service.finishRun({ runId: 'run-chat-fail', status: 'failed', output: '', error: { code: 'AUTH', message: raw } })
-    const msg = t.store.get("SELECT * FROM messages WHERE run_id = 'run-chat-fail'")
+    const msg = t.service.groupChatStore(t.project.id).get("SELECT * FROM messages WHERE run_id = 'run-chat-fail'")
     assert.ok(msg, '失败仍应落群聊可见消息')
     assert.match(msg.body, /运行失败（未知）：/, '群聊载荷应含类别词')
     assert.ok(!msg.body.includes(raw), '群聊载荷不得含原始错误串')
@@ -216,7 +216,7 @@ test('成功回复不受影响：chat 运行成功照常落原文并推微信', 
       t.project.id, t.caller.id, now, now,
     )
     await t.service.finishRun({ runId: 'run-chat-ok', status: 'succeeded', output: '正常回复正文。' })
-    const msg = t.store.get("SELECT * FROM messages WHERE run_id = 'run-chat-ok'")
+    const msg = t.service.groupChatStore(t.project.id).get("SELECT * FROM messages WHERE run_id = 'run-chat-ok'")
     assert.equal(msg.body, '正常回复正文。', '成功回复原样落库')
     assert.ok(t.wechatPushes.at(-1)!.includes('正常回复正文。'), '成功回复照常推微信')
   } finally { await t.close() }

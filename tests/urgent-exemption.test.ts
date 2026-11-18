@@ -102,7 +102,10 @@ test('提示词注入：urgent 任务卡注入豁免指令（车道豁免 + git 
   const ctx = await setup()
   try {
     const { dev, project } = await seedProject(ctx.service, ctx.store)
-    const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} } })
+    const runtime = new DshRuntime({
+      ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} },
+      chatStores: { forRun: run => ctx.service.runChatStore(run) },
+    })
     const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
     const actor = ctx.service.actor()
@@ -149,7 +152,7 @@ test('urgent 新卡对同写范围拒单守卫放行：落卡带 priority、派�
     assert.equal(taskRow(ctx.store, urgent.id).priority, 'urgent', 'priority=urgent 应落卡（回读核验，不信透传）')
 
     // 豁免放行 ≠ 静默并行：创建消息必须报备与哪张在办卡共用车道。
-    const bodies = taskMessages(ctx.store, urgent.id).map(message => message.body)
+    const bodies = taskMessages(ctx.service.groupChatStore(gate.id), urgent.id).map(message => message.body)
     assert.ok(
       bodies.some(body => body.includes('紧急豁免：与在办卡 GATE-1 共用写范围车道，立即开工')),
       `创建消息应报备共用车道，实际消息：${JSON.stringify(bodies)}`,
@@ -227,7 +230,7 @@ test('urgent 无重复卡：正常创建不误报共用车道，消息保持原�
       priority: 'urgent',
     })
     assert.equal(urgent.identifier, 'GATE-1')
-    const bodies = taskMessages(ctx.store, urgent.id).map(message => message.body)
+    const bodies = taskMessages(ctx.service.groupChatStore(gate.id), urgent.id).map(message => message.body)
     assert.ok(
       bodies.some(body => body.startsWith('任务 GATE-1 已创建')),
       `应有创建消息，实际消息：${JSON.stringify(bodies)}`,

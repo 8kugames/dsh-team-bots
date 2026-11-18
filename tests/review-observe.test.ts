@@ -72,7 +72,7 @@ test('observe 干跑：判定留痕不收口，提醒照常', async (t) => {
   const events = store.all("SELECT * FROM task_events WHERE task_id = ? AND type = 'review_watchdog_observe'", task.id)
   assert.equal(events.length, 1, '判定留痕进任务时间线（task_detail 可回看）')
   assert.deepEqual(JSON.parse(events[0].data_json), { verdict: 'B', would: 'return', basis: JSON.parse(events[0].data_json).basis, tier: 1 })
-  assert.equal(store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND (body LIKE '[SYSTEM ALERT]%' OR body LIKE '【系统指令】%')", project.id).length, 1, '提醒照常（干跑不吞催办，建卡文案不算）')
+  assert.equal(service.groupChatStore(project.id).all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND (body LIKE '[SYSTEM ALERT]%' OR body LIKE '【系统指令】%')", project.id).length, 1, '提醒照常（干跑不吞催办，建卡文案不算）')
 })
 
 test('observe 档位解析与设置校验：0/observe/1 合法，其他拒绝', async (t) => {

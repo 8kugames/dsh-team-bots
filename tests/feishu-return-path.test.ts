@@ -86,7 +86,7 @@ test('origin=feishu：solo 直达与群聊直达的运行 trigger_type 都落 fe
     ;(service as any).feishu = { status: () => ({ adminOuId: 'ou_admin_1' }) }
     const tr = await service.feishuChat('FSR', '@director /tr 直达的项目消息')
     assert.ok(tr?.project, '/tr 命中项目返回 project 形态')
-    const trMessage = store.get("SELECT * FROM messages WHERE body = ?", '@director /tr 直达的项目消息')
+    const trMessage = service.groupChatStore(project.id).get("SELECT * FROM messages WHERE body = ?", '@director /tr 直达的项目消息')
     assert.ok(trMessage, '/tr 消息必须落项目群聊')
     assert.equal(trMessage.project_id, project.id)
     assert.equal(trMessage.sender_id, 'ou_admin_1', '身份用飞书管理员 ou id，不冒充工作台用户')
@@ -165,7 +165,7 @@ test('origin=wechat：回程零回归（微信通道照收一条、排版不变�
       [],
       { origin: 'wechat' },
     )
-    const message = store.get("SELECT * FROM solo_messages WHERE body = '微信来的一条消息'")
+    const message = service.soloChatStore(director.id).get("SELECT * FROM solo_messages WHERE body = '微信来的一条消息'")
     const run = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ?", message.id)
     assert.ok(run)
     assert.equal(run.trigger_type, 'wechat', '微信来源 solo 运行标记不变')
@@ -193,7 +193,7 @@ test('普通 UI 消息不受影响：trigger_type 仍 mention，收尾不推任�
 
     // UI 单聊（不带 origin）
     await service.sendSoloMessage(director.id, '界面单聊消息', { type: 'user', id: service.localUserId })
-    const soloMessage = store.get("SELECT * FROM solo_messages WHERE body = '界面单聊消息'")
+    const soloMessage = service.soloChatStore(director.id).get("SELECT * FROM solo_messages WHERE body = '界面单聊消息'")
     const soloRun = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ?", soloMessage.id)
     assert.ok(soloRun)
     assert.equal(soloRun.trigger_type, 'mention', 'UI 单聊运行保持 mention')

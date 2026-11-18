@@ -200,7 +200,7 @@ test('sendMessage：超阈值 PNG 无解码能力时原样落库，消息发送�
       { mediaType: 'image/png', data: BIG_PNG_DATA, name: 'big.png' },
     ])
     assert.ok(result.messageId)
-    const row = store.get('SELECT * FROM message_images WHERE message_id = ?', result.messageId)
+    const row = service.groupChatStore(project.id).get('SELECT * FROM message_images WHERE message_id = ?', result.messageId)
     assert.equal(row.media_type, 'image/png')
     assert.equal(row.bytes, BIG_PNG_BYTES)
     assert.equal(row.data, BIG_PNG_DATA)

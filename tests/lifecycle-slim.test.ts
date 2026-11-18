@@ -38,7 +38,7 @@ async function setup() {
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
   const project = await service.createProject({ name: 'Slim', key: 'SLM', ownerBotId: director.id, memberIds: [dev.id] })
-  const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
   const botRow = store.get('SELECT * FROM bots WHERE id = ?', dev.id)
   const projectRow = store.get('SELECT * FROM projects WHERE id = ?', project.id)
   return {
@@ -61,7 +61,7 @@ test('P3-1：无信息量 system 短状态不进尾窗，有信息量的照常�
     await t.system('任务 SLM-2 被总监退回重做。')
     await t.say('普通消息正文')
     const prompt = t.runtime.promptFor({
-      run: { kind: 'chat', mode: 'read' }, bot: t.botRow, project: t.projectRow,
+      run: { kind: 'chat', mode: 'read', project_id: t.projectRow.id }, bot: t.botRow, project: t.projectRow,
       task: null, chatMessage: null, sessionId: 's-noise',
     })
     assert.ok(!prompt.includes('已写入项目记忆'), '记忆写入回执不进尾窗')
@@ -79,7 +79,7 @@ test('P2-2：Open tasks 注入收紧到 5 条', async () => {
       await t.service.createTask({ projectId: t.projectRow.id, title: `任务零${i}`, assigneeBotId: t.dev.id, postCard: false })
     }
     const prompt = t.runtime.promptFor({
-      run: { kind: 'chat', mode: 'read' }, bot: t.botRow, project: t.projectRow,
+      run: { kind: 'chat', mode: 'read', project_id: t.projectRow.id }, bot: t.botRow, project: t.projectRow,
       task: null, chatMessage: null, sessionId: 's-tasks',
     })
     const listed = prompt.match(/^- SLM-\d+ \[.*$/gm) ?? []
@@ -91,7 +91,7 @@ test('P2-1：创建卡消息压缩为「已创建 → @负责人」，不再重�
   const t = await setup()
   try {
     await t.service.createTask({ projectId: t.projectRow.id, title: '落地看板联动', assigneeBotId: t.dev.id })
-    const card = t.store.get(
+    const card = t.service.groupChatStore(t.projectRow.id).get(
       "SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '任务 SLM-%'",
       t.projectRow.id,
     )
@@ -99,7 +99,7 @@ test('P2-1：创建卡消息压缩为「已创建 → @负责人」，不再重�
     assert.equal(card.body, '任务 SLM-1 已创建 → @Builder')
     assert.ok(!card.body.includes('落地看板联动'), '标题不重复携带（任务详情在卡与看板里）')
     const unassigned = await t.service.createTask({ projectId: t.projectRow.id, title: '无主任务', postCard: true })
-    const card2 = t.store.get('SELECT body FROM messages WHERE body LIKE ?', `任务 SLM-${unassigned.number} 已创建%`)
+    const card2 = t.service.groupChatStore(t.projectRow.id).get('SELECT body FROM messages WHERE body LIKE ?', `任务 SLM-${unassigned.number} 已创建%`)
     assert.equal(card2.body, `任务 SLM-${unassigned.number} 已创建`, '无负责人时不带指派尾巴')
   } finally { await t.close() }
 })
@@ -114,11 +114,11 @@ test('P3-2：密钥请求理由 >100 字符进围栏，短理由保持单行', a
     )
     const longReason = '需要在 CI 流水线里拉取私有 npm 包做端到端安装验证，本地已用只读 token 验证过 registry 可达性、鉴权头格式与包元数据拉取，当前缺正式发布凭据，无法在干净环境复现完整安装链路，详情见任务卡里的联调记录与回执截图说明。'
     t.service.requestSecretFromBot({ sessionId, name: 'NPM_TOKEN', reason: longReason })
-    const longBody = t.store.get("SELECT body FROM messages WHERE body LIKE '%NPM_TOKEN%' AND body LIKE '%理由%'").body
+    const longBody = t.service.groupChatStore(t.projectRow.id).get("SELECT body FROM messages WHERE body LIKE '%NPM_TOKEN%' AND body LIKE '%理由%'").body
     assert.ok(longBody.includes(`理由：\n\`\`\`\n${longReason}\n\`\`\``), '长理由独立成围栏块')
 
     t.service.requestSecretFromBot({ sessionId, name: 'SHORT_KEY', reason: '支付联调' })
-    const shortBody = t.store.get("SELECT body FROM messages WHERE body LIKE '%SHORT_KEY%' AND body LIKE '%理由%'").body
+    const shortBody = t.service.groupChatStore(t.projectRow.id).get("SELECT body FROM messages WHERE body LIKE '%SHORT_KEY%' AND body LIKE '%理由%'").body
     assert.ok(shortBody.includes('\n理由：支付联调\n'), '短理由保持单行不围栏')
   } finally { await t.close() }
 })

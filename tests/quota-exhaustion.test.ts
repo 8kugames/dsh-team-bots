@@ -39,8 +39,8 @@ async function withFallback(service, botId, { provider = 'openai', model = 'gpt-
 }
 
 // 任务失败消息：每次失败每 run 恰一条，用 run_id 定位（毫秒并列时 ORDER BY 会拿错行）。
-function failureMessage(store, runId) {
-  return store.get('SELECT body FROM messages WHERE run_id = ? AND body LIKE ?', runId, '任务执行失败%')?.body ?? ''
+function failureMessage(chatStore, runId) {
+  return chatStore.get('SELECT body FROM messages WHERE run_id = ? AND body LIKE ?', runId, '任务执行失败%')?.body ?? ''
 }
 
 test('额度判定：额度码/限额语义/长窗口重置算耗尽，网关节流与短 Retry-After 不算', () => {
@@ -93,9 +93,9 @@ test('额度耗尽（1308）：不合成退避、切备用模型、任务不置 
       store.get("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'owner_task_run' AND task_id = ?", task.id).n, 0,
       '不排总监处理运行',
     )
-    const body = failureMessage(store, 'q1')
+    const body = failureMessage(service.groupChatStore(project.id), 'q1')
     assert.equal(body, '', '切备用时不发失败消息')
-    const msg = store.get("SELECT body FROM messages WHERE run_id = 'q1' AND body LIKE '%已切换备用模型%'")
+    const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'q1' AND body LIKE '%已切换备用模型%'")
     assert.ok(msg, '应告知已切备用模型')
     assert.match(msg.body, /已达限额（1308）/)
     assert.match(msg.body, /minimax-cn\/MiniMax-M3\.1-Flash/)
@@ -121,7 +121,7 @@ test('额度耗尽且无备用：任务直接转受阻，不派生运行，文�
     assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = ?', 'q2').n, 0, '无备用不派生')
     assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'blocked')
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q2'").retry_after_ms, null)
-    const body = failureMessage(store, 'q2')
+    const body = failureMessage(service.groupChatStore(project.id), 'q2')
     assert.match(body, /限额/)
     assert.match(body, /主备模型均不可用，任务转为受阻/)
     assert.doesNotMatch(body, /指数退避/, '额度耗尽消息不用指数退避字样')
@@ -157,7 +157,7 @@ test('主备都限额才进受阻：备用运行再次额度耗尽 → 不派生
     assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = ?', fallbackRun.id).n, 0, '不再派生')
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = ?", fallbackRun.id).retry_after_ms, null, '不再退避')
     assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'blocked')
-    const body = failureMessage(store, fallbackRun.id)
+    const body = failureMessage(service.groupChatStore(project.id), fallbackRun.id)
     assert.match(body, /主备模型均不可用，任务转为受阻/)
     assert.equal(
       store.get("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'owner_task_run' AND task_id = ?", task.id).n, 0,
@@ -185,7 +185,7 @@ test('瞬时限流（短 Retry-After）：仍走退避等待、不切备用（�
 
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q4'").retry_after_ms, 30_000, '真 Retry-After 保留')
     assert.equal(store.get('SELECT COUNT(*) AS n FROM runs WHERE parent_run_id = ?', 'q4').n, 0, '等待期内不切备用')
-    const body = failureMessage(store, 'q4')
+    const body = failureMessage(service.groupChatStore(project.id), 'q4')
     assert.match(body, /上游限流/)
     const row = service.projectView(service.projectRow(project.id)).members.find(m => m.id === director.id)
     assert.equal(row.run_status, 'plan_wait', '仍显示 plan_wait')
@@ -211,7 +211,7 @@ test('瞬时限流（无 Retry-After）：仍合成指数退避（不回归 D-38
     assert.equal(store.get("SELECT retry_after_ms FROM runs WHERE id = 'q5'").retry_after_ms, rateLimitBackoffMs(1))
     const evt = store.get("SELECT * FROM run_events WHERE run_id = 'q5' AND type = 'rate_limit_backoff'")
     assert.ok(evt, '仍写退避事件')
-    assert.match(failureMessage(store, 'q5'), /指数退避/)
+    assert.match(failureMessage(service.groupChatStore(project.id), 'q5'), /指数退避/)
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
@@ -304,7 +304,7 @@ test('Token Plan 用量上限走真实失败路径：不退避、派生备用运
     assert.ok(derived, 'Token Plan 用量上限应派生备用模型运行')
     assert.equal(derived.model_provider, 'minimax-cn')
     assert.notEqual(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'blocked', '切备用后任务不置 blocked')
-    const msg = store.get("SELECT body FROM messages WHERE run_id = 'q7' AND body LIKE '%已切换备用模型%'")
+    const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'q7' AND body LIKE '%已切换备用模型%'")
     assert.ok(msg, '应告知已切备用模型')
     assert.match(msg.body, /已达限额（RATE_LIMIT）/)
   } finally {
@@ -388,7 +388,7 @@ test('review 运行撞墙切备用：派生 review 备用运行，任务状态�
     assert.equal(derived.model_model, 'MiniMax-M3.1-Flash')
     assert.equal(derived.status, 'queued')
     assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'in_review', '任务不因验收失败转受阻')
-    const msg = store.get("SELECT body FROM messages WHERE run_id = 'rv1' AND body LIKE '%已切换备用模型%'")
+    const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'rv1' AND body LIKE '%已切换备用模型%'")
     assert.ok(msg, '应告知已切备用模型')
     assert.match(msg.body, /已达限额（1308）/)
   } finally {

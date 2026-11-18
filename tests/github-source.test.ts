@@ -92,7 +92,7 @@ test('首拍留痕+候选通知，次拍去重零重发；observe 不建卡', as
   assert.deepEqual(view.items.map(item => `${item.externalId}:${item.disposition}`),
     ['o/r#9:notified', 'o/r#7:notified'])
   assert.match(view.items[0].preview, /导出 CSV 慢/)
-  const messages = store.all("SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '【外部触发】%'", project.id)
+  const messages = service.groupChatStore(project.id).all("SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '【外部触发】%'", project.id)
   assert.equal(messages.length, 2, '每个新 issue 一条候选通知')
   assert.match(messages[0].body, /不自动建卡/)
   assert.equal(store.get("SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?", project.id).count, 0, 'observe：零建卡')
@@ -100,7 +100,7 @@ test('首拍留痕+候选通知，次拍去重零重发；observe 不建卡', as
   // 次拍：同一 issue 集合 → 全部 duplicate，零新通知。
   const second = await pollGithubSource(service, { projectKey: 'ORD', repo: 'o/r' })
   assert.deepEqual(second, { recorded: 0, notified: 0 })
-  assert.equal(store.all("SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '【外部触发】%'", project.id).length, 2)
+  assert.equal(service.groupChatStore(project.id).all("SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '【外部触发】%'", project.id).length, 2)
 })
 
 test('项目 key 不可达 filtered；gh 失败 failed 留痕', async (t) => {

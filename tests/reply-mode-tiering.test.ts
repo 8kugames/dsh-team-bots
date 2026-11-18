@@ -39,10 +39,14 @@ async function setup() {
   const director = store.get("SELECT * FROM bots WHERE name = 'director'")
   const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
   const project = await service.createProject({ name: 'Reply', key: 'REPLY', ownerBotId: director.id, memberIds: [dev.id] })
-  const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const runtime = new DshRuntime({
+    ctx: null, config, store, logger: { info() {}, warn() {}, error() {} },
+    chatStores: { forRun: run => service.runChatStore(run) },
+  })
   const botRow = store.get('SELECT * FROM bots WHERE id = ?', dev.id)
   const projectRow = store.get('SELECT * FROM projects WHERE id = ?', project.id)
-  const chatRun = { kind: 'chat', mode: 'read' }
+  // 聊天分库路由按 run.project_id 定库：真实 chat 运行行带 project_id，桩对齐。
+  const chatRun = { kind: 'chat', mode: 'read', project_id: project.id }
   return {
     root, store, service, runtime, chatRun, director, dev, botRow, projectRow,
     close: async () => {
@@ -111,17 +115,18 @@ test('注入面：@本 bot 全文加 [→你] 标记，其他 bot 闲聊折叠 8
   try {
     // 其他 bot 的长闲聊：应折叠到 80 字并标 (背景)。
     const chatter = 'B'.repeat(200)
-    t.store.run(
+    const tierGroupChat = t.store.get('SELECT * FROM group_chats WHERE project_id = ?', t.projectRow.id)
+    t.service.groupChatStore(t.projectRow.id).run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, created_at)
-       SELECT ?, g.project_id, g.id, 'bot', ?, ?, '[]', ? FROM group_chats g WHERE g.project_id = ?`,
-      'msg_chatter', t.director.id, chatter, new Date().toISOString(), t.projectRow.id,
+       VALUES (?, ?, ?, 'bot', ?, ?, '[]', ?)`,
+      'msg_chatter', t.projectRow.id, tierGroupChat.id, t.director.id, chatter, new Date().toISOString(),
     )
     // @本 bot 的长消息：应保持 240 全文并标 [→你]。
     const directed = 'D'.repeat(200)
-    t.store.run(
+    t.service.groupChatStore(t.projectRow.id).run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, created_at)
-       SELECT ?, g.project_id, g.id, 'user', 'u1', ?, ?, ? FROM group_chats g WHERE g.project_id = ?`,
-      'msg_directed', directed, JSON.stringify([t.dev.id]), new Date().toISOString(), t.projectRow.id,
+       VALUES (?, ?, ?, 'user', 'u1', ?, ?, ?)`,
+      'msg_directed', t.projectRow.id, tierGroupChat.id, directed, JSON.stringify([t.dev.id]), new Date().toISOString(),
     )
     const prompt = t.runtime.promptFor({
       run: t.chatRun, bot: t.botRow, project: t.projectRow, task: null, chatMessage: null, sessionId: 's-tier',

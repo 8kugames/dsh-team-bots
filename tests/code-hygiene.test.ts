@@ -110,12 +110,12 @@ test('默认 800：880 行不报、881 行即报，消息含文件/行数/上限
     let result = service.runCodeHygieneScan(project)
     assert.equal(result.skipped, undefined)
     assert.deepEqual(result.alerted, [])
-    assert.equal(systemAlerts(store, project.id).length, 0)
+    assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
 
     await workFile(service, project, 'src/big.js', lines(881))
     result = service.runCodeHygieneScan(project)
     assert.deepEqual(result.alerted, ['src/big.js'])
-    const alerts = systemAlerts(store, project.id)
+    const alerts = systemAlerts(service.groupChatStore(project.id), project.id)
     assert.equal(alerts.length, 1)
     const body = alerts[0].body
     assert.ok(body.startsWith('[SYSTEM ALERT] 代码卫生告警'))
@@ -147,13 +147,13 @@ test('i18n 前缀（DSHBOTS-228）：缺省英文 [SYSTEM ALERT]，ui_language=z
     const { project } = await seedProject(service, 'I18N')
     await workFile(service, project, 'src/big.js', lines(881))
     service.runCodeHygieneScan(project)
-    assert.ok(systemAlerts(store, project.id)[0].body.startsWith('[SYSTEM ALERT] 代码卫生告警'))
+    assert.ok(systemAlerts(service.groupChatStore(project.id), project.id)[0].body.startsWith('[SYSTEM ALERT] 代码卫生告警'))
 
     // 显式 zh：前缀切换为【系统指令】，正文其余不变。
     store.setSetting('ui_language', 'zh')
     await workFile(service, project, 'src/another.js', lines(881))
     service.runCodeHygieneScan(project)
-    const alerts = systemAlerts(store, project.id)
+    const alerts = systemAlerts(service.groupChatStore(project.id), project.id)
     assert.equal(alerts.length, 2)
     assert.ok(alerts[1].body.startsWith('【系统指令】代码卫生告警'))
   } finally {
@@ -172,7 +172,7 @@ test('项目级配置：codeHygieneLimitLines 读写、空串回 NULL、越界�
     await workFile(service, project, 'src/b.js', lines(111))
     const result = service.runCodeHygieneScan(service.projectRow(project.id))
     assert.deepEqual(result.alerted, ['src/b.js'])
-    assert.ok(systemAlerts(store, project.id)[0].body.includes('判定线 110 行'))
+    assert.ok(systemAlerts(service.groupChatStore(project.id), project.id)[0].body.includes('判定线 110 行'))
 
     // 空串/非法 → NULL（回到默认 800）；越界钳到 100000
     await service.updateProject(project.id, { codeHygieneLimitLines: '' })
@@ -195,7 +195,7 @@ test('0 = 关闭：扫描跳过、不落任何告警', async () => {
     await workFile(service, project, 'src/big.js', lines(5000))
     const result = service.runCodeHygieneScan(service.projectRow(project.id))
     assert.deepEqual(result, { skipped: 'disabled' })
-    assert.equal(systemAlerts(store, project.id).length, 0)
+    assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
     assert.equal(store.setting(`code_hygiene_alerted:${project.id}`), null)
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -210,13 +210,13 @@ test('告警去重：同文件不重复报，回落到判定线内解除，再�
     const key = `code_hygiene_alerted:${project.id}`
     await workFile(service, project, 'src/big.js', lines(900))
     service.runCodeHygieneScan(project)
-    assert.equal(systemAlerts(store, project.id).length, 1)
+    assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1)
     assert.equal(store.setting(key), '{"src/big.js":true}')
 
     // 同一状态再扫：不再发
     const again = service.runCodeHygieneScan(project)
     assert.deepEqual(again.alerted, [])
-    assert.equal(systemAlerts(store, project.id).length, 1)
+    assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1)
 
     // 回落到判定线以内：解除告警记忆（值回落到不再越线，即摘除）
     await workFile(service, project, 'src/big.js', lines(800))
@@ -228,8 +228,8 @@ test('告警去重：同文件不重复报，回落到判定线内解除，再�
     await workFile(service, project, 'src/big.js', lines(950))
     const reAlerted = service.runCodeHygieneScan(project)
     assert.deepEqual(reAlerted.alerted, ['src/big.js'])
-    assert.equal(systemAlerts(store, project.id).length, 2)
-    assert.ok(systemAlerts(store, project.id)[1].body.includes('src/big.js（950 行）'))
+    assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 2)
+    assert.ok(systemAlerts(service.groupChatStore(project.id), project.id)[1].body.includes('src/big.js（950 行）'))
   } finally {
     await rm(root, { recursive: true, force: true })
     store.close()
@@ -253,7 +253,7 @@ test('run-finish 钩子：每轮运行结束触发扫描，告警挂 run_id 并�
     )
     await service.finishRun({ runId, status: 'succeeded', output: 'ok' } as any)
 
-    const alerts = systemAlerts(store, project.id)
+    const alerts = systemAlerts(service.groupChatStore(project.id), project.id)
     assert.equal(alerts.length, 1)
     assert.equal(alerts[0].run_id, runId)
     assert.ok(alerts[0].body.includes('src/big.js（881 行）'))
@@ -269,7 +269,7 @@ test('run-finish 钩子：每轮运行结束触发扫描，告警挂 run_id 并�
       runId2, project.id, director.id, `test:${runId2}`, now, now,
     )
     await service.finishRun({ runId: runId2, status: 'succeeded', output: 'ok' } as any)
-    assert.equal(systemAlerts(store, project.id).length, 1)
+    assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 1)
     assert.equal(store.all("SELECT * FROM run_events WHERE run_id = ? AND type = 'code_hygiene_alert'", runId2).length, 0)
   } finally {
     await rm(root, { recursive: true, force: true })

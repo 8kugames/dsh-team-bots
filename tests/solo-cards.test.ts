@@ -39,8 +39,12 @@ async function setup() {
   return { root, store, service, config }
 }
 
-function bindSession(store, { sessionId, botId, projectId, kind = 'project', taskId = null }) {
-  store.run(
+// 聊天分库 Phase 1：正文表分住各聊天库，跨库计数用这个小助手逐库求和。
+function sumChatColumn(service, sql, ...params) {
+  return service.allChatStores().reduce((sum, chatStore) => sum + Number(chatStore.get(sql, ...params)?.n ?? 0), 0)
+}
+
+function bindSession(store, { sessionId, botId, projectId, kind = 'project', taskId = null }) {  store.run(
     `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
     sessionId, botId, projectId, kind, taskId, now(),
   )
@@ -84,14 +88,14 @@ test('单聊提问卡：落项目外提问 + solo_messages 卡片锚点，不转
     assert.equal(row.project_id, null, '单聊提问不归属任何项目')
     assert.equal(row.bot_id, director.id)
 
-    const anchor = store.get('SELECT * FROM solo_messages WHERE question_id = ?', row.id)
+    const anchor = service.soloChatStore(director.id).get('SELECT * FROM solo_messages WHERE question_id = ?', row.id)
     assert.ok(anchor, '单聊卡片锚点必须落 solo_messages')
     assert.equal(anchor.kind, 'question')
     assert.equal(anchor.bot_id, director.id)
     assert.equal(anchor.sender_type, 'system')
     assert.ok(anchor.body.includes('发起提问'))
 
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM messages WHERE question_id IS NOT NULL').n, 0, '单聊提问不进群消息')
+    assert.equal(sumChatColumn(service, 'SELECT COUNT(*) AS n FROM messages WHERE question_id IS NOT NULL'), 0, '单聊提问不进群消息')
     assert.equal(forwarded, 0, '单聊没有项目语境，不得转发微信')
 
     // state 视图：单聊条目既在 solo 子树，也并进 questions 供卡片渲染/点击查状态。
@@ -130,11 +134,11 @@ test('单聊审批卡：落项目外审批 + solo_messages 卡片锚点，不转
     assert.equal(row.project_id, null)
     assert.equal(row.tool_name, 'bash')
 
-    const anchor = store.get('SELECT * FROM solo_messages WHERE approval_id = ?', row.id)
+    const anchor = service.soloChatStore(director.id).get('SELECT * FROM solo_messages WHERE approval_id = ?', row.id)
     assert.ok(anchor, '单聊卡片锚点必须落 solo_messages')
     assert.equal(anchor.kind, 'approval')
     assert.ok(anchor.body.includes('bash'))
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM messages WHERE approval_id IS NOT NULL').n, 0)
+    assert.equal(sumChatColumn(service, 'SELECT COUNT(*) AS n FROM messages WHERE approval_id IS NOT NULL'), 0)
     assert.equal(forwarded, 0)
 
     const view = await service.state(null, director.id)
@@ -168,7 +172,7 @@ test('非单聊绑定仍透传：未绑定、kind=project 无项目、kind=dm �
     }
     assert.equal(store.get('SELECT COUNT(*) AS n FROM questions').n, 0)
     assert.equal(store.get('SELECT COUNT(*) AS n FROM approvals').n, 0)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM solo_messages WHERE kind <> 'text'").n, 0)
+    assert.equal(service.soloChatStore(director.id).get("SELECT COUNT(*) AS n FROM solo_messages WHERE kind <> 'text'").n, 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -184,8 +188,8 @@ test('群聊卡片口径不回归：项目会话仍落群消息、仍转发微�
     service.handleQuestionRequest(req, () => {})
     const row = store.get("SELECT * FROM questions WHERE status = 'pending'")
     assert.equal(row.project_id, project.id)
-    assert.ok(store.get('SELECT * FROM messages WHERE question_id = ?', row.id), '群聊提问必须落群消息')
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM solo_messages WHERE question_id IS NOT NULL').n, 0)
+    assert.ok(service.groupChatStore(project.id).get('SELECT * FROM messages WHERE question_id = ?', row.id), '群聊提问必须落群消息')
+    assert.equal(sumChatColumn(service, 'SELECT COUNT(*) AS n FROM solo_messages WHERE question_id IS NOT NULL'), 0)
     assert.equal(forwarded, 1, '群聊提问仍按 DSHBOTS-215 转发微信')
     service.settleQuestion(row.id, 'cancelled', null, null)
   } finally { await rm(root, { recursive: true, force: true }) }

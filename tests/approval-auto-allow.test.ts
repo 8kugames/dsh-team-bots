@@ -97,6 +97,10 @@ function makeReq({ sessionId, toolName = 'bash', callId = null, zh = null }) {
 // 直写规则表（绕过编辑面）：单测匹配语义用；链路用例走 service.updateApprovalRules。
 const seedRules = (store, rules) => store.setSetting('approval_auto_rules', JSON.stringify(rules))
 const rule = (fields) => ({ id: 'arul_t1', path_prefix: '', command: '', bot_id: '', tool_name: '', sandbox: '', note: '', ...fields })
+// 跨聊天全局断言：对全部聊天库逐库求和。
+const chatRowCount = (service, sql) => service.allChatStores().reduce(
+  (n, s) => n + Number(s.get(sql)?.n ?? 0), 0,
+)
 
 // ===== 纯函数 =====
 
@@ -221,8 +225,8 @@ test('命中命令规则：即时 allowed-once，行落 allowed + decided_by=aut
     assert.equal(row.tool_target, 'git push origin dev')
     // 无待办卡 / 无群聊锚点 / 无通知面：pending 计数为 0，messages 零审批锚点。
     assert.equal(service.approvalsPending().count, 0)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 0)
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM solo_messages').n, 0)
+    assert.equal(chatRowCount(service, "SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'"), 0)
+    assert.equal(chatRowCount(service, 'SELECT COUNT(*) AS n FROM solo_messages'), 0)
     // 留痕事件：approval.auto_allow 审计行存在且带规则 id。
     const auditRow = store.get("SELECT * FROM audit_log WHERE action = 'approval.auto_allow' AND target_id = ?", row.id)
     assert.ok(auditRow, '免审放行必须写审计事件')
@@ -252,7 +256,7 @@ test('命中工作区外目录前缀：edit 提权直接放行；边界外（/tm
     const pending = service.handleApprovalRequest(makeReq({ sessionId: 'sess-auto-path', toolName: 'edit', callId: 'call-path-2' }).req, () => {})
     const pendingRow = store.get("SELECT * FROM approvals WHERE status = 'pending'")
     assert.ok(pendingRow, '未命中规则必须回落原卡流程')
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM messages WHERE approval_id = ?', pendingRow.id).n, 1)
+    assert.equal(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM messages WHERE approval_id = ?', pendingRow.id).n, 1)
     service.settleApproval(pendingRow.id, 'cancelled', 'rejected', null)
     await pending
   } finally { await rm(root, { recursive: true, force: true }) }
@@ -270,7 +274,7 @@ test('未命中（无目标缓存不命中规则）：原卡流程逐字不变�
     const outcome = service.handleApprovalRequest(req, () => {})
     const row = store.get("SELECT * FROM approvals WHERE status = 'pending'")
     assert.ok(row)
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 1)
+    assert.equal(service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 1)
     const view = await service.decideApproval(row.id, 'allow')
     assert.equal(view.status, 'allowed')
     assert.equal(view.decided_by, 'user:user_local')
@@ -496,7 +500,7 @@ test('链路命中默认行：/tmp 与 /var/temp 下的 edit 提权即时放行�
     assert.ok(rows.every(row => row.decided_at))
     assert.equal(store.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'approval.auto_allow'").n, 2, '每次默认放行都留审计事件')
     assert.equal(service.approvalsPending().count, 0, '无待办卡')
-    assert.equal(store.get("SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'").n, 0, '无群聊锚点')
+    assert.equal(chatRowCount(service, "SELECT COUNT(*) AS n FROM messages WHERE kind = 'approval'"), 0, '无群聊锚点')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

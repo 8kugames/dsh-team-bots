@@ -129,7 +129,7 @@ async function staleTask(t, { status, idleHours }) {
   return task
 }
 
-const staleMessages = (t, taskId) => t.store.all(
+const staleMessages = (t, taskId) => t.service.groupChatStore(t.project.id).all(
   "SELECT * FROM messages WHERE task_id = ? AND sender_type = 'system' AND body LIKE ? ORDER BY created_at, rowid",
   taskId, `${STALE_CARD_NOTICE_PREFIX}%`,
 )

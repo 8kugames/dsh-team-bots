@@ -118,7 +118,7 @@ test('单聊消息走 solo_chat 运行并回写单聊消息', async () => {
     assert.equal(runtime.started[0].chatMessage, '单独问你一个问题')
 
     await runtime.complete(run.id, 'succeeded', '这是单聊回复。')
-    const reply = store.get("SELECT * FROM solo_messages WHERE sender_type = 'bot'")
+    const reply = service.soloChatStore(dev.id).get("SELECT * FROM solo_messages WHERE sender_type = 'bot'")
     assert.ok(reply)
     assert.equal(reply.body, '这是单聊回复。')
     assert.equal(reply.run_id, run.id)
@@ -130,7 +130,7 @@ test('单聊消息走 solo_chat 运行并回写单聊消息', async () => {
     await service.tick()
     const failing = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND status = 'running'")
     await runtime.complete(failing.id, 'failed', '', { code: 'X', message: 'boom' })
-    const failReply = store.get('SELECT * FROM solo_messages WHERE run_id = ?', failing.id)
+    const failReply = service.soloChatStore(dev.id).get('SELECT * FROM solo_messages WHERE run_id = ?', failing.id)
     // DSHBOTS-267：失败只落白名单类别+摘要，原始错误串 boom 不透传。
     assert.match(failReply.body, /运行失败（未知）：/)
     assert.doesNotMatch(failReply.body, /boom/)
@@ -150,13 +150,13 @@ test('单聊 /clear 与 /remember：清空会话与写 bot 记忆', async () => 
     assert.ok(memory)
     assert.match(memory.content, /中文回复/)
     assert.equal(memory.source, 'chat-command')
-    const notice = store.all("SELECT * FROM solo_messages WHERE sender_type = 'system'")
+    const notice = service.soloChatStore(dev.id).all("SELECT * FROM solo_messages WHERE sender_type = 'system'")
     assert.equal(notice.length, 1)
     assert.match(notice[0].body, /记忆/)
 
     const cleared = await service.sendSoloMessage(dev.id, '/clear')
     assert.ok(cleared.cleared >= 2)
-    assert.equal(store.get('SELECT COUNT(*) AS n FROM solo_messages').n, 0)
+    assert.equal(service.soloChatStore(dev.id).get('SELECT COUNT(*) AS n FROM solo_messages').n, 0)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -275,6 +275,7 @@ test('单聊会话：身份提示词、运行提示词与 recall', async () => {
   await mkdir(workspace, { recursive: true })
   const config = resolveConfig({ workspace, dataDir: join(root, 'data'), skillRoot: join(workspace, '.agents'), modelCacheMs: 0 })
   const store = openDatabase(config.dbPath)
+  const service = new TeamService({ store, config, logger: { warn() {} } as DshLogger })
   try {
     const now = new Date().toISOString()
     store.run(
@@ -285,7 +286,8 @@ test('单聊会话：身份提示词、运行提示词与 recall', async () => {
       `INSERT INTO memories(scope_type, scope_id, topic, content, status, created_by, created_at, updated_at)
        VALUES ('bot', 'b1', '偏好', '回复保持简短', 'active', 'user:user_local', ?, ?)`, now, now,
     )
-    store.run(
+    // 聊天分库：solo_messages 住 b1 自己的单聊库
+    service.soloChatStore('b1').run(
       'INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       'msg_000123', 'b1', 'user', 'user_local', '之前那条消息', now,
     )
@@ -293,7 +295,7 @@ test('单聊会话：身份提示词、运行提示词与 recall', async () => {
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('sess-solo', 'b1', NULL, 'solo', NULL, ?)",
       now,
     )
-    const runtime = new DshRuntime({ ctx: {}, config, store, logger: { warn() {} } as DshLogger })
+    const runtime = new DshRuntime({ ctx: {}, config, store, logger: { warn() {} } as DshLogger, chatStores: { forRun: run => service.runChatStore(run) } })
 
     const identity = runtime.systemPromptFor({ agent: { id: 'sess-solo' } })
     assert.match(identity, /Solo conversation/)
@@ -314,7 +316,6 @@ test('单聊会话：身份提示词、运行提示词与 recall', async () => {
     assert.match(prompt, /m_000123/)
     assert.match(prompt, /one-on-one/)
 
-    const service = new TeamService({ store, config, logger: { warn() {} } as DshLogger })
     const recalled = service.recall('sess-solo', 'm_000123')
     assert.match(recalled, /之前那条消息/)
     assert.throws(() => service.recall('sess-solo', 'c_abc123'), /只支持展开 m_ 消息引用/)

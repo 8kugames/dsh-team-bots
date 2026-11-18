@@ -154,7 +154,7 @@ test('群消息持久化前把密钥值掩码为标签', async () => {
       body: 'token 是 ghp_abcdefghijklmnop 请检查',
     })
 
-    const row = store.get('SELECT body FROM messages WHERE id = ?', messageId)
+    const row = service.groupChatStore(alpha.id).get('SELECT body FROM messages WHERE id = ?', messageId)
     // 占位符与一次性 env 文件里的变量名保持一致（不再带 DSH_SECRET_ 前缀）
     assert.equal(row.body, 'token 是 $GITHUB_TOKEN 请检查')
     noPlaintextAnywhere()
@@ -182,7 +182,7 @@ test('Bot 密钥请求规范化名称，批准物化到数据目录，拒绝不�
     assert.equal(reqRow.project_id, alpha.id)
     assert.equal(reqRow.bot_id, dev.id)
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%STRIPE_KEY%'", alpha.id).n,
+      service.groupChatStore(alpha.id).get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%STRIPE_KEY%'", alpha.id).n,
       1,
     )
 
@@ -202,7 +202,7 @@ test('Bot 密钥请求规范化名称，批准物化到数据目录，拒绝不�
     assert.equal(existsSync(legacyEnvOf(alpha.id)), false)
     assert.ok(!existsSync(join(workspace, alpha.slug ?? '', '.team')), '项目工作区不得出现 .team 明文目录')
     // 批准回执向 Bot 披露数据目录里的一次性路径与即焚语义，而不是项目内路径。
-    const receipt = store.get(
+    const receipt = service.groupChatStore(alpha.id).get(
       "SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%已批准%' ORDER BY created_at DESC LIMIT 1",
       alpha.id,
     )
@@ -219,7 +219,7 @@ test('Bot 密钥请求规范化名称，批准物化到数据目录，拒绝不�
     assert.equal(store.get('SELECT status FROM secret_requests WHERE id = ?', denied.requestId).status, 'denied')
     assert.equal(store.get("SELECT COUNT(*) AS n FROM secrets WHERE name = 'OLD_KEY'").n, 0)
     assert.equal(
-      store.get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND body LIKE '%被拒绝%'", alpha.id).n,
+      service.groupChatStore(alpha.id).get("SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND body LIKE '%被拒绝%'", alpha.id).n,
       1,
     )
   } finally {

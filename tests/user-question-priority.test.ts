@@ -59,7 +59,7 @@ async function setup() {
   const director = store.get("SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)")
   const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
   const project = await service.createProject({ name: 'Priority', key: 'UQP', ownerBotId: director.id, memberIds: [dev.id] })
-  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
   return { root, store, service, runtime, promptRuntime, director, dev, project }
 }
 
@@ -109,9 +109,10 @@ test('判定：heldItemIsUserQuestion 按触发消息 sender_type 区分用户�
     const userMsg = userMessage(t.service, t.project.id, '评估一下 GS 生产数据')
     const noticeMsg = noticeMessage(t.service, t.project.id, '【通知】备忘一条', t.director.id)
     // DSHBOTS-290：run 向判定随 mergeRunIntoQueuedLane 删除，语义迁到挂起消息向
-    // （drainPendingMessages 分组用 heldItemIsUserQuestion）。
-    assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', messageId: userMsg }), true, '用户消息触发的 chat 运行是用户提问')
-    assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', messageId: noticeMsg }), false, '通知（bot 消息）触发的 chat 运行不是用户提问')
+    // （drainPendingMessages 分组用 heldItemIsUserQuestion）。挂起项带 projectId
+    // （与 holdPendingMessage 落项同形），聊天分库后按它路由群聊库。
+    assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', projectId: t.project.id, messageId: userMsg }), true, '用户消息触发的 chat 运行是用户提问')
+    assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', projectId: t.project.id, messageId: noticeMsg }), false, '通知（bot 消息）触发的 chat 运行不是用户提问')
   } finally {
     await cleanup(t.root, t.store)
   }
@@ -286,12 +287,12 @@ test('提示层：用户触发的 chat 运行注入直接回答锚点，通知�
     const userRunId = t.service.enqueueChatRun(t.project, t.dev, userMsg)
     const noticeMsg = noticeMessage(t.service, t.project.id, '【通知】背景备忘', t.director.id)
     const noticeRunId = t.service.enqueueChatRun(t.project, t.director, noticeMsg)
-    const userPrompt = groupPrompt(t, chatRunRow(t, userRunId), t.store.get('SELECT * FROM messages WHERE id = ?', userMsg))
+    const userPrompt = groupPrompt(t, chatRunRow(t, userRunId), t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE id = ?', userMsg))
     assert.ok(userPrompt.includes('# Owner question priority'), '用户触发的提示词应含提问优先锚点段')
     assert.match(userPrompt, /answer it directly in this reply/, '锚点句式：必须直接回答')
     assert.match(userPrompt, /must not substitute for the answer/, '锚点句式：通知内容不得顶替答案')
 
-    const noticePrompt = groupPrompt(t, chatRunRow(t, noticeRunId), t.store.get('SELECT * FROM messages WHERE id = ?', noticeMsg))
+    const noticePrompt = groupPrompt(t, chatRunRow(t, noticeRunId), t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE id = ?', noticeMsg))
     assert.ok(!noticePrompt.includes('# Owner question priority'), '通知触发的运行不注入提问锚点')
     assert.ok(noticePrompt.includes('# Group message'), '通知运行提示词仍走群聊分支（既有语义不变）')
   } finally {
@@ -301,12 +302,13 @@ test('提示层：用户触发的 chat 运行注入直接回答锚点，通知�
 
 test('源码锚点：挂起分组的提问保护/窗口/上限与出队降档的代码路径被钉住', () => {
   // DSHBOTS-290：合批语义随争用口径 A 迁到 runs.ts drainPendingMessages（入队合并已删）。
+  // 聊天分库后 heldItemIsUserQuestion 增加 botId 参（单聊路由到对应单聊库），锚点同步跟签。
   assert.ok(
-    RUNS_SRC.includes('this.heldItemIsUserQuestion(item) === this.heldItemIsUserQuestion(last.first)'),
+    RUNS_SRC.includes('this.heldItemIsUserQuestion(item, botId) === this.heldItemIsUserQuestion(last.first, botId)'),
     '合批保护守卫必须在 drainPendingMessages 分组循环内（用户提问不被通知挂起组吸收）',
   )
   assert.ok(
-    RUNS_SRC.includes('Number(this.heldItemIsUserQuestion(b.first)) - Number(this.heldItemIsUserQuestion(a.first))'),
+    RUNS_SRC.includes('Number(this.heldItemIsUserQuestion(b.first, botId)) - Number(this.heldItemIsUserQuestion(a.first, botId))'),
     '用户提问组必须排序优先放行（不被更早挂起的通知压后）',
   )
   assert.ok(RUNS_SRC.includes("'coalesce_window_ms'"), '合并窗口设置项在建回侧消费')
@@ -339,7 +341,7 @@ test('提示层（D-283）：分级要求注入所有群聊提示，微信运行
   try {
     const userMsg = userMessage(t.service, t.project.id, '给我一份进展评估')
     const runId = t.service.enqueueChatRun(t.project, t.dev, userMsg)
-    const msgRow = t.store.get('SELECT * FROM messages WHERE id = ?', userMsg)
+    const msgRow = t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE id = ?', userMsg)
     const prompt = groupPrompt(t, chatRunRow(t, runId), msgRow)
     assert.match(
       prompt,

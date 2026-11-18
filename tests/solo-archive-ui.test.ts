@@ -60,7 +60,7 @@ test('契约·keep 窗口：150 条只显 100，archived={count:50,hasMore:true}
   const { root, store, service } = await setup()
   try {
     const bot = firstBot(store)
-    for (let i = 0; i < 150; i += 1) seedSolo(store, bot.id, `s_c_${String(i).padStart(3, '0')}`, i * SEC)
+    for (let i = 0; i < 150; i += 1) seedSolo(service.soloChatStore(bot.id), bot.id, `s_c_${String(i).padStart(3, '0')}`, i * SEC)
 
     const view = await service.state(null, bot.id)
     assert.equal(view.solo.messages.length, 100, 'keep=100 只留最近 100 条')
@@ -84,7 +84,7 @@ test('契约·两维全关：回退 200 上限隐去的 50 条也计入契约，
   const { root, store, service } = await setup({ dmArchiveDays: 0, dmKeepRecent: 0 })
   try {
     const bot = firstBot(store)
-    for (let i = 0; i < 250; i += 1) seedSolo(store, bot.id, `s_f_${String(i).padStart(3, '0')}`, i * SEC)
+    for (let i = 0; i < 250; i += 1) seedSolo(service.soloChatStore(bot.id), bot.id, `s_f_${String(i).padStart(3, '0')}`, i * SEC)
 
     const view = await service.state(null, bot.id)
     assert.equal(view.solo.messages.length, 200, '两维全关回退 200 条上限')
@@ -104,7 +104,7 @@ test('契约·窗口全空（消息全被归档）：如实上报 count/hasMore�
   const { root, store, service } = await setup()
   try {
     const bot = firstBot(store)
-    for (let i = 0; i < 3; i += 1) seedSolo(store, bot.id, `s_e_${i}`, 8 * DAY + i * SEC)
+    for (let i = 0; i < 3; i += 1) seedSolo(service.soloChatStore(bot.id), bot.id, `s_e_${i}`, 8 * DAY + i * SEC)
 
     const view = await service.state(null, bot.id)
     assert.equal(view.solo.messages.length, 0, '三天窗外的消息全被隐去')
@@ -119,10 +119,10 @@ test('契约·无隐去：archived={count:0,hasMore:false}，入口不亮', asyn
   const { root, store, service } = await setup()
   try {
     const bot = firstBot(store)
-    for (let i = 0; i < 50; i += 1) seedSolo(store, bot.id, `s_n_${String(i).padStart(3, '0')}`, i * SEC)
+    for (let i = 0; i < 50; i += 1) seedSolo(service.soloChatStore(bot.id), bot.id, `s_n_${String(i).padStart(3, '0')}`, i * SEC)
     // 第二个 bot 的消息不得计入本 bot 契约（COUNT 按 bot_id 收敛）。
     const other = store.get("SELECT * FROM bots WHERE name = 'director'")
-    if (other && other.id !== bot.id) seedSolo(store, other.id, 's_other_0', 1 * SEC)
+    if (other && other.id !== bot.id) seedSolo(service.soloChatStore(other.id), other.id, 's_other_0', 1 * SEC)
 
     const view = await service.state(null, bot.id)
     assert.equal(view.solo.messages.length, 50)

@@ -156,11 +156,11 @@ test('Bot 级 agent preset 覆盖：createBot/updateBot 落库，defaultAgentPre
       // 清空回跟随全局
       assert.equal((await service.updateBot(bot.id, { agentPreset: '' })).agentPreset, '')
 
-      // defaultAgentPreset：bot 覆盖 > 全局 workerPreset > standard
+      // defaultAgentPreset：bot 覆盖 > 全局 workerPreset > 插件自带预设 > standard
       const { sessionMethods } = await import('../src/services/runtime/session.js')
       const make = (config, rosterBot) => Object.assign(Object.create(null), sessionMethods, {
         ctx: { get: name => name === 'agentPresets'
-          ? { list: async () => [{ id: 'standard' }, { id: 'ptc' }, { id: 'minimal' }] } : null },
+          ? { list: async () => [{ id: 'standard' }, { id: 'ptc' }, { id: 'minimal' }, { id: 'team-bots' }] } : null },
         config,
       })
       const row = { agent_preset: 'ptc' }
@@ -168,18 +168,18 @@ test('Bot 级 agent preset 覆盖：createBot/updateBot 落库，defaultAgentPre
       assert.deepEqual(await make({ workerPreset: 'minimal' }, row).defaultAgentPreset('task', row), { agentPreset: 'ptc' })
       const plain = { agent_preset: '' }
       assert.deepEqual(await make({ workerPreset: 'minimal' }, plain).defaultAgentPreset('task', plain), { agentPreset: 'minimal' })
-      assert.deepEqual(await make({ workerPreset: '', routerPreset: '' }, plain).defaultAgentPreset('project', plain), { agentPreset: 'standard' })
-      // bot 覆盖写了不存在的 preset → 回落 standard，不炸
+      assert.deepEqual(await make({ workerPreset: '', routerPreset: '' }, plain).defaultAgentPreset('project', plain), { agentPreset: 'team-bots' })
+      // bot 覆盖写了不存在的 preset → 回落插件自带预设，不炸
       const ghost = { agent_preset: 'ghost' }
-      assert.deepEqual(await make({ workerPreset: '' }, ghost).defaultAgentPreset('task', ghost), { agentPreset: 'standard' })
+      assert.deepEqual(await make({ workerPreset: '' }, ghost).defaultAgentPreset('task', ghost), { agentPreset: 'team-bots' })
       // 未传 bot（历史调用形态）走全局链
       assert.deepEqual(await make({ workerPreset: 'minimal' }, null).defaultAgentPreset('task', null), { agentPreset: 'minimal' })
-      // 两级都空且宿主注册表带 defaultId：跟随宿主默认
+      // 两级都空：用插件自带预设，不跟随宿主全局默认
       const withDefault = Object.assign(Object.create(null), sessionMethods, {
-        ctx: { get: () => ({ list: async () => [{ id: 'standard' }, { id: 'ptc' }], defaultId: 'ptc' }) },
+        ctx: { get: () => ({ list: async () => [{ id: 'standard' }, { id: 'ptc' }, { id: 'team-bots' }], defaultId: 'ptc' }) },
         config: { workerPreset: '', routerPreset: '' },
       })
-      assert.deepEqual(await withDefault.defaultAgentPreset('task', plain), { agentPreset: 'ptc' })
+      assert.deepEqual(await withDefault.defaultAgentPreset('task', plain), { agentPreset: 'team-bots' })
     } finally { await close() }
   })
 })

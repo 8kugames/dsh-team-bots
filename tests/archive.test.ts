@@ -138,7 +138,7 @@ test('移除追踪：逐表清空、usage_events 保留置空、audit 留痕、�
       `INSERT INTO run_events(id, run_id, type, message, created_at) VALUES ('rev-1', 'run-1', 'note', '', ?)`,
       ts,
     )
-    store.run(
+    service.groupChatStore(projectId).run(
       `INSERT INTO run_trajectory(id, run_id, seq, kind, title, created_at) VALUES ('traj-1', 'run-1', 1, 'turn', '回合', ?)`,
       ts,
     )
@@ -152,7 +152,7 @@ test('移除追踪：逐表清空、usage_events 保留置空、audit 留痕、�
       projectId, director.id, ts, ts,
     )
     const group = store.get('SELECT * FROM group_chats WHERE project_id = ?', projectId)
-    store.run(
+    service.groupChatStore(projectId).run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, created_at)
        VALUES ('msg-1', ?, ?, 'user', 'owner', '你好', ?)`,
       projectId, group.id, ts,
@@ -202,10 +202,14 @@ test('移除追踪：逐表清空、usage_events 保留置空、audit 留痕、�
     assert.deepEqual(result, { removed: true, key: 'ARCHIVED' })
 
     // 逐表断言无残留（含跨表依赖：另一任务的 task_dependencies、proposals 的 SET NULL FK）。
+    // messages/message_images/run_trajectory 住项目聊天库文件（chat-db-split Phase 1），
+    // 移除追踪即整库删除——文件级断言覆盖全部三张表。
+    assert.ok(
+      !service.listChatStoreFiles().includes(service.groupChatFileName(projectId)),
+      '项目聊天库文件应随移除追踪删除（messages/message_images/run_trajectory 全在其中）',
+    )
     const leftovers = [
-      ['messages', 'project_id', projectId],
       ['bot_messages', 'project_id', projectId],
-      ['run_trajectory', 'run_id', 'run-1'],
       ['run_events', 'run_id', 'run-1'],
       ['usage_reconciliation', 'run_id', 'run-1'],
       ['runs', 'project_id', projectId],

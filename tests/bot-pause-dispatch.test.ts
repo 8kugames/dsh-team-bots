@@ -114,7 +114,7 @@ test('③ notify：member 目标 paused 不投递；task 目标负责人 paused 
   try {
     const task = await service.createTask({ projectId: project.id, title: '提醒对象', assigneeBotId: builder.id, writeScopes: ['src/a/'], autoStart: false })
     await pause(service, builder.id)
-    const messagesBefore = messagesCount(store)
+    const messagesBefore = messagesCount(service.groupChatStore(project.id))
     await assert.rejects(
       service.notifyMemberFromBot({ project, from: director, memberName: 'Builder', body: '醒醒' }),
       /已暂停，先恢复再通知/,
@@ -123,12 +123,12 @@ test('③ notify：member 目标 paused 不投递；task 目标负责人 paused 
       service.notifyTaskFromBot({ project, from: director, ref: `BPD-${task.number}`, body: '继续' }),
       /已暂停，先恢复再提醒/,
     )
-    assert.equal(messagesCount(store), messagesBefore, '两条拒绝都不落消息行')
+    assert.equal(messagesCount(service.groupChatStore(project.id)), messagesBefore, '两条拒绝都不落消息行')
     assert.equal(runtime.sent.length, 0, '没有 steer 唤醒调用')
     // active 目标不受影响（回归锚）：member 通知照常投递。
     const ok = await service.notifyMemberFromBot({ project, from: director, memberName: 'Other', body: '在吗' })
     assert.match(ok, /已通知 Other/)
-    assert.equal(messagesCount(store), messagesBefore + 1, 'active 目标正常留痕一条')
+    assert.equal(messagesCount(service.groupChatStore(project.id)), messagesBefore + 1, 'active 目标正常留痕一条')
   } finally {
     await close()
   }
@@ -143,7 +143,7 @@ test('④ 看板/表单转「进行中」不唤醒 paused 负责人；pending ta
     await service.updateTask(task.id, { status: 'in_progress' }, userActor(service))
     assert.equal(runsCount(store, task.id), 0, 'paused 负责人转进行中不建运行')
     assert.equal(
-      Number(store.get("SELECT COUNT(*) AS n FROM messages WHERE task_id = ? AND body LIKE '%已开始%'", task.id)?.n ?? 0),
+      Number(service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM messages WHERE task_id = ? AND body LIKE '%已开始%'", task.id)?.n ?? 0),
       0, 'paused 负责人转进行中不发「已开始」',
     )
     // 补投路径：active 时入队一条延迟投递的 task_run（availableAt 在未来 → 留 pending），
@@ -200,7 +200,7 @@ test('⑥ active bot 全路径行为不变：新建即入队、通知照常、�
     service.dispatchOutbox()
     assert.ok(runsCount(store, task2.id) >= 1, 'active 负责人转进行中照常开工')
     assert.equal(
-      Number(store.get("SELECT COUNT(*) AS n FROM messages WHERE task_id = ? AND body LIKE '%已开始%'", task2.id)?.n ?? 0),
+      Number(service.groupChatStore(project.id).get("SELECT COUNT(*) AS n FROM messages WHERE task_id = ? AND body LIKE '%已开始%'", task2.id)?.n ?? 0),
       1, 'active 负责人转进行中发一条「已开始」',
     )
     // 任务提醒（无活跃运行）照常落线程。

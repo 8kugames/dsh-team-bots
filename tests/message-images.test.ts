@@ -99,11 +99,11 @@ test('send_message 带图片：图片单独落 message_images，正文不含 bas
     ])
     assert.ok(result.messageId)
 
-    const row = store.get('SELECT * FROM messages WHERE id = ?', result.messageId)
+    const row = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', result.messageId)
     assert.equal(row.body, '看看这张图')
     assert.ok(!row.body.includes(PNG_BASE64))
 
-    const imageRows = store.all('SELECT * FROM message_images WHERE message_id = ?', result.messageId)
+    const imageRows = service.groupChatStore(project.id).all('SELECT * FROM message_images WHERE message_id = ?', result.messageId)
     assert.equal(imageRows.length, 1)
     assert.equal(imageRows[0].media_type, 'image/png')
     assert.equal(imageRows[0].name, 'shot.png')
@@ -149,7 +149,7 @@ test('图片校验：超 5MB / 第 5 张 / 非白名单 MIME / 非法 base64 一
     )
 
     // 校验失败不留任何行。
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 0)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 0)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -163,12 +163,12 @@ test('单聊同样支持图片：solo_messages 走 solo_message_id 分支', asyn
       { mediaType: 'image/jpeg', data: PNG_BASE64 },
     ])
     assert.ok(result.messageId)
-    const imageRows = store.all('SELECT * FROM message_images WHERE solo_message_id = ?', result.messageId)
+    const imageRows = service.soloChatStore(builder.id).all('SELECT * FROM message_images WHERE solo_message_id = ?', result.messageId)
     assert.equal(imageRows.length, 1)
     assert.equal(imageRows[0].bot_id, builder.id)
     assert.equal(imageRows[0].message_id, null)
 
-    const view = service.soloMessageView(store.get('SELECT * FROM solo_messages WHERE id = ?', result.messageId))
+    const view = service.soloMessageView(service.soloChatStore(builder.id).get('SELECT * FROM solo_messages WHERE id = ?', result.messageId))
     assert.equal(view.images.length, 1)
     assert.equal(view.images[0].mediaType, 'image/jpeg')
   } finally {
@@ -183,7 +183,7 @@ test('get_message_image：用户取得到 base64，bot 越权被拒，id 不存�
     const sent = await service.sendMessage(project.id, '取图', actor(), null, [
       { mediaType: 'image/png', data: PNG_BASE64, name: 'a.png' },
     ])
-    const imageId = service.messageView(store.get('SELECT * FROM messages WHERE id = ?', sent.messageId)).images[0].id
+    const imageId = service.messageView(service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', sent.messageId)).images[0].id
 
     const image = await handleAction(service, 'get_message_image', { imageId }, actor())
     assert.equal(image.mediaType, 'image/png')
@@ -215,6 +215,7 @@ test('steer 组装 content：带图片时有 image 分片，不带图片时与�
       config,
       store,
       logger: { info() {}, warn() {}, error() {} },
+      chatStores: { forRun: run => service.runChatStore(run) },
     })
 
     await runtime.steer('sess-1', '看下这张', [{ mediaType: 'image/png', data: PNG_BASE64, name: 'a.png' }])
@@ -239,7 +240,7 @@ test('新会话首条 prompt 带图片分片', async () => {
     const sent = await service.sendMessage(project.id, '这张图里有啥', actor(), null, [
       { mediaType: 'image/png', data: PNG_BASE64 },
     ])
-    const chatMessage = store.get('SELECT * FROM messages WHERE id = ?', sent.messageId)
+    const chatMessage = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', sent.messageId)
 
     const calls = []
     const runtime = new DshRuntime({
@@ -254,6 +255,7 @@ test('新会话首条 prompt 带图片分片', async () => {
       config,
       store,
       logger: { info() {}, warn() {}, error() {} },
+      chatStores: { forRun: run => service.runChatStore(run) },
     })
 
     const bot = store.get('SELECT * FROM bots WHERE id = ?', director.id)
@@ -290,12 +292,12 @@ test('消息行被删除时图片行随 FK 级联一起消失（覆盖留存清�
     const sent = await service.sendMessage(project.id, '待清理', actor(), null, [
       { mediaType: 'image/png', data: PNG_BASE64 },
     ])
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 1)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 1)
 
     // 留存清理（src/usage.js 的按天删旧消息）走的是直接删 messages 行，
     // 图片行靠 message_images 的 ON DELETE CASCADE 跟随。
-    store.run('DELETE FROM messages WHERE id = ?', sent.messageId)
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 0)
+    service.groupChatStore(project.id).run('DELETE FROM messages WHERE id = ?', sent.messageId)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 0)
   } finally {
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
@@ -306,17 +308,17 @@ test('不带 images 时消息视图的图片字段是空数组，清空历史会
   const { root, store, service, project } = await setup()
   try {
     const plain = await service.sendMessage(project.id, '纯文字消息', actor())
-    const plainView = service.messageView(store.get('SELECT * FROM messages WHERE id = ?', plain.messageId))
+    const plainView = service.messageView(service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', plain.messageId))
     assert.deepEqual(plainView.images, [])
 
     const withImage = await service.sendMessage(project.id, '带图消息', actor(), null, [
       { mediaType: 'image/png', data: PNG_BASE64 },
     ])
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 1)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 1)
 
     service.clearChatHistory(project.id, actor())
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 0)
-    assert.equal(Number(store.get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 0)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 0)
+    assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM messages WHERE project_id = ?', project.id)?.n ?? 0), 0)
     assert.ok(withImage.messageId)
   } finally {
     await closeQuietly(store)
@@ -331,7 +333,7 @@ test('纯图片消息：正文可为空，但正文与图片不能同时为空',
       { mediaType: 'image/png', data: PNG_BASE64 },
     ])
     assert.ok(imageOnly.messageId)
-    assert.equal(store.get('SELECT body FROM messages WHERE id = ?', imageOnly.messageId).body, '')
+    assert.equal(service.groupChatStore(project.id).get('SELECT body FROM messages WHERE id = ?', imageOnly.messageId).body, '')
 
     await assert.rejects(
       () => service.sendMessage(project.id, '', actor(), null, []),

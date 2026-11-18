@@ -36,13 +36,15 @@ async function setup() {
   const pB = store.get('SELECT * FROM projects WHERE id = ?', (await service.createProject({ name: 'B', key: 'BBB', ownerBotId: director.id })).id)
   const now = new Date().toISOString()
   const other = await service.createBot({ name: 'Other', role: '成员', instructions: '', provider: 'fake', model: 'model-a' })
-  store.run(
+  // 聊天分库：messages 住项目聊天库；group_chats 仍是顶库控制面表，先取 id 再落聊天库。
+  const groupIdOf = projectId => store.get('SELECT id FROM group_chats WHERE project_id = ?', projectId).id
+  service.groupChatStore(pA.id).run(
     `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, kind, created_at)
-     VALUES ('msg_aaaaaa', ?, (SELECT id FROM group_chats WHERE project_id = ?), 'user', 'u1', 'A 项目的机密上下文', 'text', ?)`, pA.id, pA.id, now,
+     VALUES ('msg_aaaaaa', ?, ?, 'user', 'u1', 'A 项目的机密上下文', 'text', ?)`, pA.id, groupIdOf(pA.id), now,
   )
-  store.run(
+  service.groupChatStore(pB.id).run(
     `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, kind, created_at)
-     VALUES ('msg_bbbbbb', ?, (SELECT id FROM group_chats WHERE project_id = ?), 'user', 'u1', 'B 项目的机密上下文', 'text', ?)`, pB.id, pB.id, now,
+     VALUES ('msg_bbbbbb', ?, ?, 'user', 'u1', 'B 项目的机密上下文', 'text', ?)`, pB.id, groupIdOf(pB.id), now,
   )
   store.run(
     `INSERT INTO tasks(id, project_id, number, title, status, priority, creator_type, creator_id, created_at, updated_at)
@@ -56,11 +58,11 @@ async function setup() {
     `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, idempotency_key, queued_at)
      VALUES ('run_bbbbbb', ?, ?, 'chat', 'read', 'chat', 'succeeded', 'ik-runb', ?)`, pB.id, director.id, now,
   )
-  store.run(
+  service.soloChatStore(director.id).run(
     `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, created_at)
      VALUES ('solo_aaaaaa', ?, 'user', 'u1', '总监单聊的私有内容', ?)`, director.id, now,
   )
-  store.run(
+  service.soloChatStore(other.id).run(
     `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, created_at)
      VALUES ('solo_bbbbbb', ?, 'user', 'u1', '别的 bot 单聊的私有内容', ?)`, other.id, now,
   )

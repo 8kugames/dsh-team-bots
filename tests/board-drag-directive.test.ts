@@ -109,7 +109,7 @@ test('拖入执行中：自动入队 board_resume 运行并发系统指令消息
     assert.equal(view.identifier, `BRD-${task.number}`)
     assert.equal(view.latestRun?.id, run.id, '返回视图带最新入队的运行，不是过期快照')
 
-    const messages = systemMessages(store, project.id)
+    const messages = systemMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 1)
     assert.equal(messages[0].task_id, task.id)
     assert.equal(messages[0].sender_id, 'system')
@@ -149,7 +149,7 @@ test('拖出执行中（todo 与 blocked 两跳）：活跃运行 canceled + PAU
     assert.ok(runEventTypes(store, run1.id).includes('board_pause'), 'run 侧记 board_pause 事件')
     assert.ok(runtime.canceled.includes(run1.id), 'runtime.cancelRun 已下发')
     assert.equal(service.taskRow(task.id).status, 'todo')
-    assert.equal(systemMessages(store, project.id).at(-1).body, pauseBody)
+    assert.equal(systemMessages(service.groupChatStore(project.id), project.id).at(-1).body, pauseBody)
 
     // 再拖入 → 新运行；再拖出到 blocked（出向枚举第二跳）→ 同样暂停
     await service.transitionTask(task.id, 'in_progress', actor)
@@ -165,7 +165,7 @@ test('拖出执行中（todo 与 blocked 两跳）：活跃运行 canceled + PAU
     assert.ok(runEventTypes(store, run2.id).includes('board_pause'))
     assert.equal(service.taskRow(task.id).status, 'blocked')
 
-    const bodies = systemMessages(store, project.id).map(message => message.body)
+    const bodies = systemMessages(service.groupChatStore(project.id), project.id).map(message => message.body)
     assert.deepEqual(bodies, [resumeBody, pauseBody, resumeBody, pauseBody], '两轮拖入+拖出各一条指令消息')
 
     // 暂停的运行保留在执行历史（latestRun 可见），不会被 SUPERSEDED 口径排除
@@ -191,7 +191,7 @@ test('重复拖拽零副作用；拖出到 in_review 释放写占用（中止写
 
     const counts = () => ({
       runs: Number(store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', task.id).n),
-      messages: systemMessages(store, project.id).length,
+      messages: systemMessages(service.groupChatStore(project.id), project.id).length,
       events: Number(store.get('SELECT COUNT(*) AS n FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)', task.id).n),
     })
     const before = counts()
@@ -227,7 +227,7 @@ test('系统指令消息不触发 bot 运行：无会话类 run、无以消息�
     await service.transitionTask(task.id, 'in_progress', { type: 'user', id: service.localUserId })
     await waitFor(() => store.get("SELECT status FROM runs WHERE task_id = ? AND status = 'running'", task.id))
 
-    const messages = systemMessages(store, project.id)
+    const messages = systemMessages(service.groupChatStore(project.id), project.id)
     assert.equal(messages.length, 1)
     assert.ok(messages[0].body.startsWith('任务 '), '生命周期状态消息照常投递')
     assert.equal(messages[0].sender_type, 'system')
@@ -256,7 +256,7 @@ test('已有活跃运行时拖入执行中：不重复入队、不发指令消�
     const runs = store.all('SELECT * FROM runs WHERE task_id = ?', task.id)
     assert.equal(runs.length, 1, '不重复入队')
     assert.equal(runs[0].trigger_type, 'manual')
-    assert.equal(systemMessages(store, project.id).length, 0, '不发指令消息（不能对已在跑的任务喊立即开始）')
+    assert.equal(systemMessages(service.groupChatStore(project.id), project.id).length, 0, '不发指令消息（不能对已在跑的任务喊立即开始）')
     assert.equal(service.taskRow(task.id).status, 'in_progress', '状态迁移本身照常生效')
   } finally {
     if (task) await service.pauseRunsForBoard(task.id).catch(() => {})

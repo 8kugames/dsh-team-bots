@@ -327,7 +327,7 @@ test('重试耗尽（上限 3 次）转终态：消息+审计+owner_bot 兜底�
     // 失败可见：系统消息 + owner_bot 卡兜底交接已排（占位运行在途时 enqueueOwnerTaskRun
     // 幂等跳过插入，交接仍记 delivered；占位运行结束后由人工/下轮补上）。
     assert.ok(
-      t.store.get(
+      t.service.groupChatStore(t.project.id).get(
         "SELECT id FROM messages WHERE task_id = ? AND body LIKE '自动核验委派连续失败%'", task.id,
       ),
       '耗尽必须发消息，不得只写日志',

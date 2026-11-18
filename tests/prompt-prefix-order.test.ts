@@ -35,7 +35,10 @@ async function setup() {
   const projectView = await service.createProject({ name: 'Order', key: 'ORD', ownerBotId: director.id, memberIds: [devView.id] })
   const dev = store.get('SELECT * FROM bots WHERE id = ?', devView.id)
   const project = store.get('SELECT * FROM projects WHERE id = ?', projectView.id)
-  const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+  const runtime = new DshRuntime({
+    ctx: null, config, store, logger: { info() {}, warn() {}, error() {} },
+    chatStores: { forRun: run => service.runChatStore(run) },
+  })
   const close = async () => {
     try { store.close() } catch {}
     await rm(root, { recursive: true, force: true })
@@ -202,7 +205,7 @@ test('memory_review 两分支：Extract/Rules 静态块先于 Task/User message 
     ], 'memory_review 任务分支')
 
     const groupChat = t.store.get('SELECT * FROM group_chats WHERE project_id = ?', t.project.id)
-    t.store.run(
+    t.service.groupChatStore(t.project.id).run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, kind, created_at)
        VALUES ('msg_ord_chat', ?, ?, 'user', 'u1', '历史消息。', 'text', ?)`,
       t.project.id, groupChat.id, now,
@@ -228,26 +231,26 @@ test('solo/vision/群聊三分支：Reply 指令段先于消息变化段', async
   const t = await setup()
   try {
     const soloPrompt = t.runtime.promptFor({
-      run: { kind: 'solo_chat' }, bot: t.dev,
+      run: { kind: 'solo_chat', bot_id: t.dev.id }, bot: t.dev,
       chatMessage: { id: 'solo_x', body: '在吗' }, sessionId: 'sess-order-solo',
     })
     assertAscending(soloPrompt, ['Reply as Builder in this one-on-one chat', '# Solo message'], 'solo 分支')
 
     const visionPrompt = t.runtime.promptFor({
-      run: { kind: 'vision' }, bot: t.dev, project: t.project,
+      run: { kind: 'vision', project_id: t.project.id }, bot: t.dev, project: t.project,
       chatMessage: { sender_type: 'user', sender_id: 'u1', body: '看看这张图' },
     })
     assertAscending(visionPrompt, ['# Image transcription request', 'Transcription requirements:', 'Original message from user:u1'], 'vision 分支')
 
     const now = new Date().toISOString()
     const groupChat = t.store.get('SELECT * FROM group_chats WHERE project_id = ?', t.project.id)
-    t.store.run(
+    t.service.groupChatStore(t.project.id).run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, kind, created_at)
        VALUES ('msg_ord_g', ?, ?, 'user', 'u1', '群聊历史。', 'text', ?)`,
       t.project.id, groupChat.id, now,
     )
     const groupPrompt = t.runtime.promptFor({
-      run: { kind: 'chat' }, bot: t.dev, project: t.project, task: null,
+      run: { kind: 'chat', project_id: t.project.id }, bot: t.dev, project: t.project, task: null,
       chatMessage: { id: 'msg_ord_new', body: '@builder 看看' }, sessionId: 'sess-order-group',
     })
     assertAscending(groupPrompt, ['Reply as Builder in the project group', '# Group message'], '群聊分支')

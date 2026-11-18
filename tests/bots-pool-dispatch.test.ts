@@ -127,7 +127,7 @@ test('加人申请链路：team_add_member 复用 addProjectMember（校验/审�
     const audit = auditOf(t.store, 'project.add_member', t.project.id)
     assert.equal(audit.actor_type, 'bot', '审计应为 bot  actor')
     assert.equal(audit.actor_id, t.director.id, '审计应记总监为请求人')
-    const notice = t.store.get(
+    const notice = t.service.groupChatStore(t.project.id).get(
       "SELECT * FROM messages WHERE project_id = ? AND body LIKE '%已加入项目群%' ORDER BY created_at DESC LIMIT 1",
       t.project.id,
     )

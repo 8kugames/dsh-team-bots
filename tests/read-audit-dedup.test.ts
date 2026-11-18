@@ -54,7 +54,7 @@ async function setup() {
     )
     return { id, project_id: project.id, bot_id: dev.id, task_id: null, kind: 'chat', mode: 'read', started_at: nowIso(), ended_at: null, ...extra }
   }
-  const alerts = () => store.all(
+  const alerts = () => service.groupChatStore(project.id).all(
     "SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%只读运行%'",
     project.id,
   )

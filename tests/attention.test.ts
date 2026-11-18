@@ -89,7 +89,7 @@ test('answer_attention：回答作为 mention 消息投递、清空 attention、
     const event = store.get("SELECT type, message FROM run_events WHERE run_id = ? AND type = 'attention_answered'", runId)
     assert.ok(event, '应写 attention_answered 事件')
     // 回答作为一条 @Builder 的群聊消息投回会话（同秒可能有多条消息，按用户消息过滤）
-    const message = store.get("SELECT * FROM messages WHERE run_id = ? AND sender_type = 'user' ORDER BY created_at DESC LIMIT 1", runId)
+    const message = service.groupChatStore(project.id).get("SELECT * FROM messages WHERE run_id = ? AND sender_type = 'user' ORDER BY created_at DESC LIMIT 1", runId)
     assert.ok(message, '应插入群聊消息')
     assert.ok(JSON.parse(message.mentions_json).includes(dev.id), '消息应 mention 目标 bot')
     assert.ok(message.body.includes('用方案 B'))

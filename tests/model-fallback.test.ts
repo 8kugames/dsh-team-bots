@@ -275,7 +275,7 @@ test('内部运行撞墙派生备用：review 派生 review 运行；chat 不派
     assert.ok(quota, 'review 撞墙同样记额度墙')
     assert.equal(quota.state, 'exhausted')
     // 群聊提示切备用，不发失败文案
-    const msg = store.get("SELECT body FROM messages WHERE run_id = 'rv1' AND body LIKE '%已切换备用模型%'")
+    const msg = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE run_id = 'rv1' AND body LIKE '%已切换备用模型%'")
     assert.ok(msg, '应告知已切备用模型')
     assert.match(msg.body, /minimax-cn\/MiniMax-M3\.1-Flash/)
 

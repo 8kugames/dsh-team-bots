@@ -94,7 +94,7 @@ test('replyTo 落库并出现在消息视图的 reply_to 字段', async () => {
     const botMessageId = service.insertMessage({ projectId: project.id, senderType: 'bot', senderId: builder.id, body: '这是 Bot 的原始回答' })
     const actor = { type: 'user', id: 'u1' }
     const result = await service.sendMessage(project.id, '针对这条再补充一下', actor, botMessageId)
-    const row = store.get('SELECT * FROM messages WHERE id = ?', result.messageId)
+    const row = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', result.messageId)
     assert.equal(row.reply_to_id, botMessageId)
 
     const state = await service.state(project.id)
@@ -147,7 +147,7 @@ test('无显式 @mention 回复 bot 消息时定向到该 bot 而非总监', asy
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     assert.notEqual(result.runBots[0], director.id)
 
-    const row = store.get('SELECT * FROM messages WHERE id = ?', result.messageId)
+    const row = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', result.messageId)
     assert.equal(row.reply_to_id, botMessageId)
   } finally {
     await closeQuietly(store)
@@ -163,7 +163,7 @@ test('显式 @mention 优先于引用定向，引用仍落库作上下文', asyn
     const result = await service.sendMessage(project.id, '@director 帮忙看看这个回答', actor, botMessageId)
     assert.deepEqual(result.runBots, [director.id])
 
-    const row = store.get('SELECT * FROM messages WHERE id = ?', result.messageId)
+    const row = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', result.messageId)
     assert.equal(row.reply_to_id, botMessageId)
   } finally {
     await closeQuietly(store)
@@ -195,12 +195,12 @@ test('chat 运行提示词包含引用上下文行（含 m_ 短 id 与 200 字�
     const botMessageId = service.insertMessage({ projectId: project.id, senderType: 'bot', senderId: builder.id, body: longBody })
     const actor = { type: 'user', id: 'u1' }
     const result = await service.sendMessage(project.id, '接着这条说', actor, botMessageId)
-    const userMessage = store.get('SELECT * FROM messages WHERE id = ?', result.messageId)
+    const userMessage = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', result.messageId)
 
-    const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} } })
+    const runtime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
     const botRow = store.get('SELECT * FROM bots WHERE id = ?', builder.id)
     const projectRow = store.get('SELECT * FROM projects WHERE id = ?', project.id)
-    const prompt = runtime.promptFor({ run: { kind: 'chat' }, bot: botRow, project: projectRow, task: null, chatMessage: userMessage } as any)
+    const prompt = runtime.promptFor({ run: { kind: 'chat', project_id: project.id }, bot: botRow, project: projectRow, task: null, chatMessage: userMessage } as any)
 
     assert.ok(prompt.includes("The user quoted Builder's message"), '提示词应包含引用行')
     assert.ok(prompt.includes(`[m_${botMessageId.slice(-6)}]`), '引用行应带 m_ 短 id 供 team_recall')
