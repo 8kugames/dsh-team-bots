@@ -174,6 +174,12 @@ test('Bot 级 agent preset 覆盖：createBot/updateBot 落库，defaultAgentPre
       assert.deepEqual(await make({ workerPreset: '' }, ghost).defaultAgentPreset('task', ghost), { agentPreset: 'standard' })
       // 未传 bot（历史调用形态）走全局链
       assert.deepEqual(await make({ workerPreset: 'minimal' }, null).defaultAgentPreset('task', null), { agentPreset: 'minimal' })
+      // 两级都空且宿主注册表带 defaultId：跟随宿主默认
+      const withDefault = Object.assign(Object.create(null), sessionMethods, {
+        ctx: { get: () => ({ list: async () => [{ id: 'standard' }, { id: 'ptc' }], defaultId: 'ptc' }) },
+        config: { workerPreset: '', routerPreset: '' },
+      })
+      assert.deepEqual(await withDefault.defaultAgentPreset('task', plain), { agentPreset: 'ptc' })
     } finally { await close() }
   })
 })

@@ -319,7 +319,7 @@ test('群聊只放结论，完整交付留在任务评论', async () => {
 
     const comment = store.get("SELECT body FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", task.id)
     assert.equal(comment.body, longOutput)
-    const message = store.get("SELECT body FROM messages WHERE task_id = ? AND sender_type = 'bot' ORDER BY created_at DESC LIMIT 1", task.id)
+    const message = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE task_id = ? AND sender_type = 'bot' ORDER BY created_at DESC LIMIT 1", task.id)
     assert.match(message.body, /任务 \S+ 已交付，待(总监)?验收。/)
     assert.match(message.body, /（完整记录见任务评论）/)
     assert.ok(message.body.length < longOutput.length / 2)
@@ -341,7 +341,7 @@ test('交付摘要保留 markdown 块结构，不被压成一整行标题', asyn
     const report = '# 交付报告\n\n## 结论：前提已失效\n\n- 条目一\n- 条目二\n'
     await runtime.complete(run.id, 'succeeded', report)
 
-    const message = store.get("SELECT body FROM messages WHERE task_id = ? AND sender_type = 'bot' ORDER BY created_at DESC LIMIT 1", task.id)
+    const message = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE task_id = ? AND sender_type = 'bot' ORDER BY created_at DESC LIMIT 1", task.id)
     // 换行是标题/列表的判定依据：压成一行后整条报告会变成一个 ATX 标题，渲染成一整块大号粗体。
     assert.ok(message.body.includes('# 交付报告\n'), '交付报告标题应独占一行')
     assert.ok(message.body.includes('\n## 结论：前提已失效\n'), '二级标题应独占一行')
@@ -400,7 +400,7 @@ test('只读运行改动了工作区会在群聊里点名', async () => {
     await writeFile(join(dir, 'sneaky.txt'), 'written by a read-only run\n')
     await runtime.complete(run.id, 'succeeded', '好的')
 
-    const alert = store.get("SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system'", project.id)
+    const alert = service.groupChatStore(project.id).get("SELECT body FROM messages WHERE project_id = ? AND sender_type = 'system'", project.id)
     assert.ok(alert, '应产生越权写入提示')
     assert.match(alert.body, /只读运行/)
     assert.match(alert.body, /sneaky\.txt/)
@@ -410,7 +410,7 @@ test('只读运行改动了工作区会在群聊里点名', async () => {
   }
 })
 
-test('Router 与 Worker 会话按配置选择 agent preset，缺失时回退 standard', async () => {
+test('Router 与 Worker 会话按配置选择 agent preset，未配置时跟随宿主默认，缺失时回退 standard', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-team-preset-'))
   const store = openDatabase(join(root, 'team.sqlite'))
   try {
@@ -424,6 +424,26 @@ test('Router 与 Worker 会话按配置选择 agent preset，缺失时回退 sta
     assert.deepEqual(await runtime.defaultAgentPreset('project'), { agentPreset: 'router-lite' })
     assert.deepEqual(await runtime.defaultAgentPreset('task'), { agentPreset: 'standard' })
     assert.deepEqual(await runtime.defaultAgentPreset('review'), { agentPreset: 'router-lite' })
+
+    // 未配置且宿主注册表带 defaultId：两级留空/失效时跟随宿主默认
+    const withDefault = new DshRuntime({
+      ctx: { get: name => (name === 'agentPresets'
+        ? { list: presets.list, defaultId: 'worker-full' } : undefined) },
+      config: { workerPreset: 'does-not-exist', routerPreset: '' },
+      store,
+      logger: { warn() {} } as DshLogger,
+    })
+    assert.deepEqual(await withDefault.defaultAgentPreset('task'), { agentPreset: 'worker-full' })
+    assert.deepEqual(await withDefault.defaultAgentPreset('project'), { agentPreset: 'worker-full' })
+    // 宿主默认不在可用清单里 → 继续 standard
+    const ghostDefault = new DshRuntime({
+      ctx: { get: name => (name === 'agentPresets'
+        ? { list: presets.list, defaultId: 'ghost' } : undefined) },
+      config: {},
+      store,
+      logger: { warn() {} } as DshLogger,
+    })
+    assert.deepEqual(await ghostDefault.defaultAgentPreset('task'), { agentPreset: 'standard' })
 
     const bare = new DshRuntime({ ctx: { get: () => undefined }, config: {}, store, logger: { warn() {} } as DshLogger })
     assert.deepEqual(await bare.defaultAgentPreset('task'), {})

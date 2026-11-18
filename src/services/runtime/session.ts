@@ -234,8 +234,9 @@ export const sessionMethods = {
     return run
   },
   // kind 'task' = 任务 worker 会话（全局链走 workerPreset）；其余 = 控制面/单聊/核验会话
-  //（全局链走 routerPreset）。bot.agent_preset 非空时逐 bot 覆盖，两级都留空时 kind
-  // 决定用哪个全局链。可选 preset 只从宿主 roster 里实际可用（非 broken）的里挑。
+  //（全局链走 routerPreset）。bot.agent_preset 非空时逐 bot 覆盖，两级都留空或指向不可用
+  // preset 时跟随宿主注册表 defaultId，宿主默认也不可用才回落 standard。可选 preset 只从
+  // 宿主 roster 里实际可用（非 broken）的里挑。
   async defaultAgentPreset(kind, bot = null) {
     const botPreset = String(bot?.agent_preset ?? '').trim()
     const wanted = botPreset
@@ -247,8 +248,9 @@ export const sessionMethods = {
       if (!presets) return {}
       const list = await presets.list()
       const available = (list ?? []).filter(preset => preset.broken === undefined).map(preset => preset.id)
-      // 只有确认存在的 preset 才会被选中；Router 缺省沿用 standard，避免装错配置直接起不来。
-      const pick = [wanted, 'standard'].find(id => id && available.includes(id))
+      // 未配置（或配置失效）时选宿主默认 preset，再回落 standard，避免装错配置直接起不来。
+      const hostDefault = (() => { try { return String(presets.defaultId ?? '') } catch { return '' } })()
+      const pick = [wanted, hostDefault, 'standard'].find(id => id && available.includes(id))
       return pick ? { agentPreset: pick } : {}
     } catch {
       return {}
@@ -836,6 +838,8 @@ export const sessionMethods = {
       sessionId,
       bot: effectiveBot,
       projectId: project?.id ?? null,
+      // 聊天分库（chat-db-split Phase 1）：本运行的正文库（轨迹记账/附图读取用）。
+      chatStore: this.chatStoreForRun(run),
       // 任务归因（DSHBOTS-212）：记账时透传到 usage_events.task_id；
       // 非任务运行为 null，沿用既有「无任务归因」口径。
       taskId: run.task_id ?? null,
@@ -881,7 +885,8 @@ export const sessionMethods = {
     try {
       // 聊天附图：首条 prompt 一并带上 image 分片，模型这轮就能看到用户发的图。
       // 宿主会把不能吃图片的模型降级成占位文本，插件不判模型能力。
-      const imageParts = chatMessage?.id ? imageContentPartsForMessage(this.store, chatMessage.id) : []
+      // 附图随消息住在聊天库里（chat-db-split Phase 1）。
+      const imageParts = chatMessage?.id ? imageContentPartsForMessage(pending.chatStore ?? this.store, chatMessage.id) : []
       await this.ctx.sessionController.prompt({
         requestId: randomUUID(),
         sessionId,
