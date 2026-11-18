@@ -1,13 +1,6 @@
 - insert:
     - id: dsh-team-bots
       name: dsh-team-bots
-    # Override the shipped web-app registry row so newly created sessions
-    # default to the team-bots preset instead of standard. A preset the user
-    # explicitly selected in settings (selectedDefault) still wins.
-    - id: agent-preset-registry
-      name: '@deepseek-ai/dsh-agent-preset-registry'
-      config:
-        default: team-bots
     - id: preset-team-bots
       name: '@deepseek-ai/dsh-agent-preset'
       config:

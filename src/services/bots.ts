@@ -60,7 +60,7 @@ export const botsMethods = {
     const color = COLORS.includes(input.color) ? input.color : 'blue'
     const filePolicy = normalizeFilePolicy(input.filePolicy)
     // Bot 级 agent preset 覆盖：空 = 跟随全局（DSH_TEAM_WORKER_PRESET 生效链）；
-    // 自由短串，不在此校验存在性——宿主侧 defaultAgentPreset 只选可用 preset，写错回落宿主默认再回落 standard。
+    // 自由短串，不在此校验存在性——宿主侧 defaultAgentPreset 只选可用 preset，写错回落插件自带预设再回落 standard。
     const agentPreset = input.agentPreset !== undefined ? text(input.agentPreset, 80) : ''
     // 先建目录再建号：目录建不出来就别留下一个单聊必然失败的 bot 行。
     // 这里预建的是占位候选；并发同名时权威 solo_dir 在事务内重算，输家目录提交后补建。
