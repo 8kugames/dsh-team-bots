@@ -97,11 +97,12 @@ export function spawnVisionProxyRun(service, { bot, message, target }) {
 // 主动评估入口（sendMessage / sendSoloMessage 落库投递后 fire-and-forget 调用）：
 // 消息带图 && 主模型确定无视觉 → 已配置代理则派生转写运行；未配置则只记
 // vision.fallback 审计（按现状报错，不派生不重试）。任何异常只告警，绝不阻塞发送。
-export async function considerVisionProxy(service, { bot, message }) {
+// messageStore（chat-db-split Phase 1）：附图所在聊天库，由调用方随消息上下文带入。
+export async function considerVisionProxy(service, { bot, message, messageStore = null }) {
   try {
     if (!bot || !message?.id) return null
     if (bot.status !== 'active') return null
-    if (!messageHasImages(service.store, message.id)) return null
+    if (!messageHasImages(messageStore ?? service.store, message.id)) return null
     if (!await modelLacksImageSupport(service.runtime, bot)) return null
     const target = visionProxyTarget(service.config)
     if (!target) {
@@ -125,14 +126,14 @@ export function maybeSpawnVisionAfterFailure(service, { run, bot, error }) {
     if (!isImageUnsupportedError(error)) return null
     if (run?.kind !== 'chat' && run?.kind !== 'solo_chat') return null
     const message = run.trigger_ref
-      ? service.store.get(
+      ? service.runChatStore(run).get(
         run.kind === 'chat'
           ? 'SELECT * FROM messages WHERE id = ?'
           : 'SELECT * FROM solo_messages WHERE id = ?',
         run.trigger_ref,
       )
       : null
-    if (!message || !messageHasImages(service.store, message.id)) return null
+    if (!message || !messageHasImages(service.runChatStore(run), message.id)) return null
     const target = visionProxyTarget(service.config)
     if (!target) {
       service.audit({ type: 'bot', id: bot.id }, 'vision.fallback', 'bot', bot.id, {
@@ -154,7 +155,7 @@ export function maybeSpawnVisionAfterFailure(service, { run, bot, error }) {
 export async function completeVisionRun(service, { run, bot, status, output, error }) {
   const actor = { type: 'bot', id: bot?.id }
   const message = run.trigger_ref
-    ? service.store.get(
+    ? service.runChatStore(run).get(
       run.project_id
         ? 'SELECT * FROM messages WHERE id = ?'
         : 'SELECT * FROM solo_messages WHERE id = ?',

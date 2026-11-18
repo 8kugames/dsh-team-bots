@@ -4,6 +4,7 @@
 // 用法：
 //   node scripts/restore-check.mjs [--backup <备份文件>] [--db <生产库>] [--dir <备份目录>]
 import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -62,6 +63,13 @@ function countRows(db, table) {
 
 function tableCounts(db) {
   return Object.fromEntries(tableNames(db).map(table => [table, countRows(db, table)]))
+}
+
+async function sha256File(path) {
+  const { createReadStream } = await import('node:fs')
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(path)) hash.update(chunk)
+  return hash.digest('hex')
 }
 
 // 备份目录里既有主备份 `team-<stamp>.sqlite`，也有同名的附件
@@ -140,6 +148,19 @@ async function main() {
       if (!(table in manifestTables)) mismatch.push({ table, expected: null, actual: restoredTables[table], reason: '清单里没有该表' })
     }
 
+    // 附件校验（chat-db-split Phase 1 起聊天正文全在聊天库附件里）：逐个核对 sha256
+    // 与清单一致；聊天库附件缺失/损坏按演练失败处理，其余附件只报不判失败。
+    const extrasMismatch = []
+    for (const extra of manifest?.extras ?? []) {
+      if (!extra?.backup) continue
+      if (!existsSync(extra.backup)) {
+        extrasMismatch.push({ name: extra.name, reason: '备份文件缺失' })
+        continue
+      }
+      const digest = await sha256File(extra.backup)
+      if (digest !== extra.sha256) extrasMismatch.push({ name: extra.name, reason: 'sha256 不一致' })
+    }
+
     // 与当前生产库对照：生产库一直在变，差异是正常的，只报告不判失败。
     const productionPath = resolve(args.db && args.db !== true ? args.db : config.dbPath)
     let productionDiff = []
@@ -163,7 +184,9 @@ async function main() {
         .filter(entry => entry.restored !== entry.production)
     }
 
-    const ok = integrity === 'ok' && foreignKeyIssues.length === 0 && mismatch.length === 0
+    const ok = integrity === 'ok' && foreignKeyIssues.length === 0
+      && mismatch.length === 0
+      && extrasMismatch.every(item => !String(item.name ?? '').startsWith('chats/'))
     console.log(JSON.stringify({
       ok,
       backup: backupPath,
@@ -173,6 +196,7 @@ async function main() {
       integrity,
       foreignKeyIssues: foreignKeyIssues.length,
       manifestMismatch: mismatch,
+      extrasMismatch,
       productionChecked,
       productionDiff,
       tables: restoredTables,

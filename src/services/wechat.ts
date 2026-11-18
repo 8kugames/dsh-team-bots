@@ -160,7 +160,7 @@ export const wechatMethods = {
   async wechatDirectorChat(director, body) {
     const adminPeerId = this.wechat?.status?.()?.adminPeerId ?? null
     const actor = { type: 'user', id: adminPeerId ?? 'user:wechat' }
-    const firstContact = !this.store.get(
+    const firstContact = !this.soloChatStore(director.id).get(
       "SELECT id FROM solo_messages WHERE bot_id = ? AND sender_type = 'user' AND sender_id = ? LIMIT 1",
       director.id,
       actor.id,

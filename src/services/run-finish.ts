@@ -607,9 +607,10 @@ export const runFinishMethods = {
     let depth = 0
     let ref = run?.trigger_ref
     const seen = new Set()
+    const chatStore = this.runChatStore(run)
     while (depth < 2 && ref && !seen.has(ref)) {
       seen.add(ref)
-      const message = this.store.get('SELECT sender_type, run_id FROM messages WHERE id = ?', ref)
+      const message = chatStore.get('SELECT sender_type, run_id FROM messages WHERE id = ?', ref)
       // 人发消息与结构化 bot 落库（notify 等无 run_id 的 bot 消息）都是链根，回溯到此为止。
       if (!message || message.sender_type !== 'bot' || !message.run_id) break
       const parent = this.store.get('SELECT kind, trigger_ref FROM runs WHERE id = ?', message.run_id)
@@ -625,7 +626,8 @@ export const runFinishMethods = {
   dispatchBotMentionRuns(project, run, bot, messageId) {
     if (!messageId) return []
     // 护栏三双保险：唯一调用点不带 taskId，这里按落库行复核，兜未来调用面扩张。
-    const message = this.store.get('SELECT id, task_id, body FROM messages WHERE id = ?', messageId)
+    const chatStore = this.groupChatStore(project.id)
+    const message = chatStore.get('SELECT id, task_id, body FROM messages WHERE id = ?', messageId)
     if (!message || message.task_id) return []
     const members = this.membersOf(project.id).filter(member => member.status === 'active')
     // 护栏一：禁自唤醒——剔除回复 bot 自身。
@@ -633,7 +635,7 @@ export const runFinishMethods = {
     if (targets.length === 0) return []
     // mentions_json 记录过滤后的全部 @ 目标（对齐用户路径的 UI mention 渲染口径），
     // 与实际派发数（slice(0,3)）允许在 >3 目标时不同。
-    this.store.run(
+    chatStore.run(
       'UPDATE messages SET mentions_json = ? WHERE id = ?',
       JSON.stringify(targets.map(member => member.id)), messageId,
     )

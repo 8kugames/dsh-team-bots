@@ -46,6 +46,7 @@ import { feishuMethods } from './services/feishu.js'
 import { githubSourceMethods } from './services/github-source.js'
 import { approvalsMethods } from './services/approvals.js'
 import { questionsMethods } from './services/questions.js'
+import { chatStoreMethods } from './services/chat-stores.js'
 import { coreMethods } from './services/core.js'
 
 export { WRITE_SCOPE_MAX, WRITE_SCOPE_MAX_LEN, parseWriteScopes, readWriteScopes, writeScopePathsOverlap, writeScopesOverlap } from './services/write-scopes.js'
@@ -137,5 +138,6 @@ defineMethods(TeamService.prototype, [
   githubSourceMethods,
   approvalsMethods,
   questionsMethods,
+  chatStoreMethods,
   coreMethods,
 ])

@@ -89,8 +89,9 @@ const systemMethodsBase = {
         // runs 不含 updated_at：新运行看行数、启动/结束看 started_at/ended_at；
         // last_progress_at 的巡检心跳不进签名——它不改变视图载荷，计入会重新引入高频失效。
         sig(`SELECT COUNT(*) AS n, COALESCE(MAX(queued_at), '') || COALESCE(MAX(started_at), '') || COALESCE(MAX(ended_at), '') AS m FROM runs`),
-        stamp('messages', 'rowid'),
-        stamp('solo_messages', 'rowid'),
+        // 聊天正文已分库（chat-db-split Phase 1）：messages/solo_messages 的签名由各聊天库
+        // 的本连接累计变更数承接，任一库的写都会推进版本；读路径不触库。
+        ...this.chatVersionParts(),
         // bot_messages 的 status/reply 变更不推 rowid，靠 replied_at 捕捉。
         sig(`SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(replied_at, created_at)), '') AS m FROM bot_messages`),
         stamp('memories', 'updated_at'),
@@ -236,7 +237,8 @@ const systemMethodsBase = {
     if (project) {
       const group = this.groupOf(project.id)
       view.project = this.projectView(project)
-      const messages = this.store.all(
+      // 聊天正文住项目聊天库（chat-db-split Phase 1）。
+      const messages = this.groupChatStore(project.id).all(
         `SELECT * FROM (SELECT * FROM messages WHERE project_id = ? ORDER BY created_at DESC LIMIT 200) ORDER BY created_at ASC`,
         project.id,
       )
@@ -286,11 +288,11 @@ const systemMethodsBase = {
         // 归档契约（DSHBOTS-174）：默认视图（归档窗口交集，或两维全关时的 200 条回退上限）隐去的
         // 更早消息数。被隐去的都严格早于窗口最旧一条，UI 据此点亮「加载更早」入口，经 messagesPage
         // 游标必可翻回；无隐去时 count=0 / hasMore=false，入口不出现。
-        const soloWindow = soloVisibleMessages(this.store, soloBot.id, {
+        const soloWindow = soloVisibleMessages(this.soloChatStore(soloBot.id), soloBot.id, {
           days: this.config.dmArchiveDays,
           keep: this.config.dmKeepRecent,
         })
-        const soloTotal = Number(this.store.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', soloBot.id)?.count ?? 0)
+        const soloTotal = Number(this.soloChatStore(soloBot.id).get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', soloBot.id)?.count ?? 0)
         const archivedCount = Math.max(0, soloTotal - soloWindow.length)
         // 单聊卡片条目（DSHBOTS-218）：提问/审批在单聊会话里发起时落 solo_messages 卡片锚点，
         // 状态查 questions/approvals 表（project_id 为空的那批）。
@@ -432,7 +434,7 @@ const systemMethodsBase = {
     // 单聊分页与默认视图同源取数（DSHBOTS-171）：翻页不过归档窗口，被归档的更早消息
     // 仍可见——「归档」只是默认视图隐去，不是删除。群聊保持原口径，不受私信归档影响。
     if (isSolo) {
-      const page = soloVisibleMessages(this.store, soloBotId, { beforeCreatedAt, beforeId, limit: pageSize })
+      const page = soloVisibleMessages(this.soloChatStore(soloBotId), soloBotId, { beforeCreatedAt, beforeId, limit: pageSize })
       return {
         messages: page.messages.map(row => this.soloMessageView(row)),
         hasMore: page.hasMore,
@@ -440,7 +442,7 @@ const systemMethodsBase = {
     }
     // 游标口径：取「严格早于游标」的最近 pageSize 条（第 pageSize+1 条仅作 hasMore 探位，不进结果）。
     // 先按 DESC 取回、slice 掉探位行、再翻回 ASC——顺序不能反，否则会丢掉紧邻游标的那条。
-    const rows = this.store.all(
+    const rows = this.groupChatStore(projectId).all(
       `SELECT * FROM messages
        WHERE project_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
        ORDER BY created_at DESC, id DESC

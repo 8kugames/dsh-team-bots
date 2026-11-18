@@ -156,12 +156,14 @@ export function reconcileUsage(store, { days = 30, expiredBefore = null } = {}) 
 // 数据保留：按天清理明细与事件，审计与聚合结果保留。
 // 返回值里带上每类清理的时间边界（before = 被删掉内容的时间上界，ISO 字符串），
 // 调用方可以把 usage.before 传给 reconcileUsage，让「明细被清理」的 run 判为 expired。
+// chatStores（chat-db-split Phase 1）：正文类表（run_trajectory/messages/solo_messages）
+// 已分住各聊天库，清理逐库执行；缺省空数组时跳过正文清理（调用方未接入分库的旧形态）。
 export function applyRetention(store, {
   usageDays = 0,
   runEventDays = 0,
   messageDays = 0,
   reconciliationDays = 30,
-} = {}) {
+} = {}, chatStores = []) {
   const removed = {
     usageEvents: 0,
     runEvents: 0,
@@ -180,11 +182,22 @@ export function applyRetention(store, {
   }
   if (runEventDays > 0) {
     removed.runEvents = store.run('DELETE FROM run_events WHERE created_at < ?', cutoff(runEventDays)).changes
-    removed.runTrajectory = store.run('DELETE FROM run_trajectory WHERE created_at < ?', cutoff(runEventDays)).changes
+    // 顶库轨迹兜底清理：独立构造的 runtime（未注入聊天库路由）仍把轨迹落顶库；
+    // 分库后的常规数据在各聊天库，逐库清理。计数两边合计。
+    removed.runTrajectory = Number(store.run('DELETE FROM run_trajectory WHERE created_at < ?', cutoff(runEventDays)).changes ?? 0)
+    for (const chatStore of chatStores) {
+      if (chatStore === store) continue
+      removed.runTrajectory += Number(chatStore.run('DELETE FROM run_trajectory WHERE created_at < ?', cutoff(runEventDays)).changes ?? 0)
+    }
   }
   if (messageDays > 0) {
-    removed.messages = store.run('DELETE FROM messages WHERE created_at < ?', cutoff(messageDays)).changes
-    removed.soloMessages = store.run('DELETE FROM solo_messages WHERE created_at < ?', cutoff(messageDays)).changes
+    removed.messages = Number(store.run('DELETE FROM messages WHERE created_at < ?', cutoff(messageDays)).changes ?? 0)
+    removed.soloMessages = Number(store.run('DELETE FROM solo_messages WHERE created_at < ?', cutoff(messageDays)).changes ?? 0)
+    for (const chatStore of chatStores) {
+      if (chatStore === store) continue
+      removed.messages += Number(chatStore.run('DELETE FROM messages WHERE created_at < ?', cutoff(messageDays)).changes ?? 0)
+      removed.soloMessages += Number(chatStore.run('DELETE FROM solo_messages WHERE created_at < ?', cutoff(messageDays)).changes ?? 0)
+    }
   }
   if (reconciliationDays > 0) {
     // 对账记录同样按保留期清理，避免 usage_reconciliation 无限增长。

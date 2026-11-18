@@ -6,7 +6,10 @@ import { trajectoryMethods } from './services/runtime/trajectory.js'
 import { lifecycleMethods } from './services/runtime/lifecycle.js'
 
 export class DshRuntime {
-  constructor({ ctx, config, store, logger = console as DshLogger, mask = null }) {
+  // 聊天分库路由器（chat-db-split Phase 1）：{ forRun(run) -> 聊天库 Store }，由 index 注入。
+  chatStores: any = null
+
+  constructor({ ctx, config, store, logger = console as DshLogger, mask = null, chatStores = null }) {
     this.ctx = ctx
     // config 存活覆盖视图（与 TeamService 同款）：workerPreset/routerPreset 等
     // 运行参数经全局设置改值后，下一次会话创建即用新值，无需重启。
@@ -25,6 +28,9 @@ export class DshRuntime {
     })
     this.store = store
     this.logger = logger
+    // 聊天分库路由（chat-db-split Phase 1）：service 注入 { forRun(run) -> 聊天库 Store }。
+    // 未注入（独立构造/测试桩）时一律回落顶库，行为与分库前一致。
+    this.chatStores = chatStores
     // 密钥掩码钩子：service 层注入，轨迹等落库内容在写入前先脱敏。
     this.mask = typeof mask === 'function' ? mask : null
     this.pending = new Map()
@@ -50,6 +56,12 @@ export class DshRuntime {
   // 由 service 层注入密钥掩码函数。
   setMask(fn) {
     this.mask = typeof fn === 'function' ? fn : null
+  }
+
+  // 聊天分库路由（chat-db-split Phase 1）：按运行归属取正文库（群聊库/单聊库）。
+  // 未注入解析器（测试桩/独立构造）时回落顶库，行为与分库前一致。
+  chatStoreForRun(run) {
+    return this.chatStores?.forRun?.(run) ?? this.store
   }
 }
 

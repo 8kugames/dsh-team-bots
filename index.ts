@@ -27,7 +27,9 @@ export function apply(ctx, config = {}) {
   const logger = createLogger()
   const store = openDatabase(resolved.dbPath)
   const service = new TeamService({ store, config: resolved, logger })
-  const runtime = new DshRuntime({ ctx, config: resolved, store, logger })
+  // 聊天分库（chat-db-split Phase 1）：运行时按运行归属路由正文读写到对应聊天库；
+  // 注入解析器而非库本身，懒打开与 LRU 都收敛在 service 侧。
+  const runtime = new DshRuntime({ ctx, config: resolved, store, logger, chatStores: { forRun: (run: any) => (service as any).runChatStore(run) } })
   service.attachRuntime(runtime)
   runtime.attach()
   installTeamTools(ctx, service)

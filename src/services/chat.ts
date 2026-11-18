@@ -32,14 +32,16 @@ export const chatMethods = {
     if (senderType === 'bot' && !cleanedBody) return null
     // 群消息持久化前过密钥掩码：密文值不进转录，模型下一轮只会看到 $<NAME> 标签（NAME 与一次性 env 文件里的变量名一致）。
     const maskedBody = this.maskSecretValues(cleanedBody)
-    this.store.run(
-      `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, reply_to_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    // 聊天分库（chat-db-split Phase 1）：群聊消息正文住该项目自己的聊天库。
+    const chatStore = this.groupChatStore(projectId)
+    chatStore.run(
+      `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, reply_to_id, kind, question_id, approval_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'text', NULL, NULL, ?)`,
       messageId, projectId, group.id, senderType, senderId, maskedBody, JSON.stringify(mentions), taskId, runId, replyToId, createdAt,
     )
     // 图片另存 message_images：正文列保持纯文本，base64 不进 messages.body。
     if (images.length > 0) {
-      insertMessageImages(this.store, { messageId, images, projectId })
+      insertMessageImages(chatStore, { messageId, images, projectId })
     }
     return messageId
   },
@@ -54,9 +56,11 @@ export const chatMethods = {
   // 引用视图：excerpt 取原消息正文前 120 字。入库正文已过 maskSecretValues，这里不再掩码；
   // bot 历史消息读取时再过一遍标记清洗（幂等），历史上已落库的残片不再显示成乱码。
   // 目标行已被删（/clear 或级联）时 reply_to 置 null，引用悬空不炸视图。
-  replyView(replyToId) {
+  // 被引消息与触发消息同项目（chat-db-split Phase 1：同库），projectId 由调用方随行带入。
+  replyView(replyToId, projectId = null) {
     if (!replyToId) return null
-    const row = this.store.get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', replyToId)
+    const row = (projectId ? this.groupChatStore(projectId) : this.store)
+      .get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', replyToId)
     if (!row) return null
     const excerpt = row.sender_type === 'bot' ? stripLeakedToolMarkup(row.body) : row.body
     return { id: row.id, sender_name: this.senderNameOf(row.sender_type, row.sender_id), excerpt: excerpt.slice(0, 120) }
@@ -69,23 +73,30 @@ export const chatMethods = {
     const senderName = this.senderNameOf(row.sender_type, row.sender_id)
     const task = row.task_id ? this.store.get('SELECT number, title, project_id FROM tasks WHERE id = ?', row.task_id) : undefined
     const project = task ? this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id) : undefined
+    // 消息正文与附图住聊天库（chat-db-split Phase 1）；任务/项目仍是顶库控制面数据。
+    const chatStore = this.groupChatStore(row.project_id)
     return {
       ...row,
       body: this.chatBodyView(row),
       mentions: jsonParse(row.mentions_json, []),
       senderName,
-      reply_to: this.replyView(row.reply_to_id),
+      reply_to: this.replyView(row.reply_to_id, row.project_id),
       taskIdentifier: task && project ? `${project.key}-${task.number}` : null,
       taskTitle: task?.title ?? null,
       // 附图元数据（不含 base64）：前端拿 id 再按需取图。
-      images: messageImageViews(this.store, row.id),
+      images: messageImageViews(chatStore, row.id),
     }
   },
   // 按 id 取聊天图片（含 base64）：前端渲染 <img src="data:..."> 用。
   // 鉴权：仅工作台本地用户可取；bot 一律拒绝（图片是用户上传内容，不是 bot 的可读范围）。
+  // 图片随消息分住各聊天库（chat-db-split Phase 1）：按库扫一遍找行，库数是个位数、主键查。
   messageImage(imageId, actor = this.actor()) {
     if (actor?.type !== 'user') throw forbidden('仅工作台用户可读取聊天图片')
-    const row = messageImageRow(this.store, String(imageId ?? ''))
+    let row = null
+    for (const chatStore of this.allChatStores()) {
+      row = messageImageRow(chatStore, String(imageId ?? ''))
+      if (row) break
+    }
     if (!row) throw notFound('图片不存在')
     return {
       id: row.id,
@@ -144,12 +155,12 @@ export const chatMethods = {
         sourceMessageId: messageId,
         postCard: true,
       }, actor)
-      this.store.run('UPDATE messages SET task_id = ? WHERE id = ?', task.id, messageId)
+      this.groupChatStore(projectId).run('UPDATE messages SET task_id = ? WHERE id = ?', task.id, messageId)
       return { messageId, taskId: task.id }
     }
     // 引用回复：目标消息必须存在于同项目，否则 400。命令路径（/clear、/remember、/task）不走到这里，按规格忽略引用。
     const replyMessage = replyTo
-      ? this.store.get('SELECT id, sender_type, sender_id FROM messages WHERE id = ? AND project_id = ?', String(replyTo), projectId)
+      ? this.groupChatStore(projectId).get('SELECT id, sender_type, sender_id FROM messages WHERE id = ? AND project_id = ?', String(replyTo), projectId)
       : null
     if (replyTo && !replyMessage) throw badRequest('引用的消息不存在')
     const mentions = parseMentions(body, members)
@@ -198,8 +209,8 @@ export const chatMethods = {
         idempotencyKey: `chat:${messageId}:${bot.id}`,
       })
       // DSHBOTS-112 读图代理：带图消息投递后即评估是否派生转写运行（fire-and-forget，
-      // 不阻塞发送；判据与派生见 vision-proxy.js）。
-      void considerVisionProxy(this, { bot, message: { id: messageId, project_id: project.id } })
+      // 不阻塞发送；判据与派生见 vision-proxy.js）。附图住聊天库（chat-db-split Phase 1）。
+      void considerVisionProxy(this, { bot, message: { id: messageId, project_id: project.id }, messageStore: this.groupChatStore(project.id) })
     }
     void this.tick()
     // 环境接单的回传：runBots 带总监供 UI 立思考气泡；真实运行由 1 秒后的接单入列。
@@ -217,7 +228,7 @@ export const chatMethods = {
     try {
       const project = this.store.get("SELECT id FROM projects WHERE id = ? AND status = 'active'", projectId)
       const bot = this.store.get("SELECT id FROM bots WHERE id = ? AND status = 'active'", botId)
-      const message = this.store.get("SELECT id FROM messages WHERE id = ? AND project_id = ?", messageId, projectId)
+      const message = this.groupChatStore(projectId).get("SELECT id FROM messages WHERE id = ? AND project_id = ?", messageId, projectId)
       if (!project || !bot || !message) return false
       this.enqueueOutbox({
         kind: 'chat_run',
@@ -237,11 +248,13 @@ export const chatMethods = {
   // /clear：清空本群全部聊天记录。任务、记忆等不受影响；操作进审计。
   clearChatHistory(projectId, actor = this.actor()) {
     const project = this.projectRow(projectId)
-    const count = Number(this.store.get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)?.count ?? 0)
+    // 聊天正文住项目聊天库（chat-db-split Phase 1）：清记录即清该库两张正文表。
+    const chatStore = this.groupChatStore(project.id)
+    const count = Number(chatStore.get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)?.count ?? 0)
     // 附图行随消息一起清：FK 级联已覆盖，这里再显式删一次，
     // 避免外键开关被临时关掉时留下孤儿图片。
-    this.store.run('DELETE FROM message_images WHERE project_id = ?', project.id)
-    this.store.run('DELETE FROM messages WHERE project_id = ?', project.id)
+    chatStore.run('DELETE FROM message_images WHERE project_id = ?', project.id)
+    chatStore.run('DELETE FROM messages WHERE project_id = ?', project.id)
     this.audit(actor, 'chat.clear', 'project', project.id, { cleared: count })
     return count
   },
@@ -276,13 +289,15 @@ export const chatMethods = {
     if (senderType === 'bot' && !cleanedBody) return null
     // 单聊同样过密钥掩码：单聊正文会进模型上下文，明文密钥不该落库。
     const maskedBody = this.maskSecretValues(cleanedBody)
-    this.store.run(
+    // 聊天分库（chat-db-split Phase 1）：单聊正文住该 bot 自己的聊天库。
+    const chatStore = this.soloChatStore(botId)
+    chatStore.run(
       `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, run_id, kind, question_id, approval_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       messageId, botId, senderType, senderId, maskedBody, runId, kind, questionId, approvalId, createdAt,
     )
     if (images.length > 0) {
-      insertMessageImages(this.store, { messageId, soloMessageId: messageId, images, botId })
+      insertMessageImages(chatStore, { messageId, soloMessageId: messageId, images, botId })
     }
     return messageId
   },
@@ -294,15 +309,17 @@ export const chatMethods = {
       ...row,
       body: this.chatBodyView(row),
       senderName,
-      // 附图元数据（不含 base64）：前端拿 id 再按需取图。
-      images: messageImageViews(this.store, row.id),
+      // 附图元数据（不含 base64）：前端拿 id 再按需取图；随消息住聊天库。
+      images: messageImageViews(this.soloChatStore(row.bot_id), row.id),
     }
   },
   clearSoloHistory(botId, actor = this.actor()) {
     const bot = this.botRow(botId)
-    const count = Number(this.store.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', bot.id)?.count ?? 0)
-    this.store.run('DELETE FROM message_images WHERE bot_id = ?', bot.id)
-    this.store.run('DELETE FROM solo_messages WHERE bot_id = ?', bot.id)
+    // 单聊正文住该 bot 聊天库（chat-db-split Phase 1）。
+    const chatStore = this.soloChatStore(bot.id)
+    const count = Number(chatStore.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', bot.id)?.count ?? 0)
+    chatStore.run('DELETE FROM message_images WHERE bot_id = ?', bot.id)
+    chatStore.run('DELETE FROM solo_messages WHERE bot_id = ?', bot.id)
     this.audit(actor, 'chat.solo_clear', 'bot', bot.id, { cleared: count })
     return count
   },
@@ -362,7 +379,7 @@ export const chatMethods = {
       idempotencyKey: `solo_chat:${messageId}`,
     })
     // DSHBOTS-112 读图代理：单聊带图消息同样评估派生（fire-and-forget，见 vision-proxy.js）。
-    void considerVisionProxy(this, { bot, message: { id: messageId } })
+    void considerVisionProxy(this, { bot, message: { id: messageId }, messageStore: this.soloChatStore(bot.id) })
     void this.tick()
     return { messageId, runBot: bot.id }
   },

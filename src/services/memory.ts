@@ -55,9 +55,9 @@ export const memoryMethods = {
     const raw = String(ref ?? '').trim()
     if (!raw) throw badRequest('缺少要展开的引用 id')
     if (!binding.project_id) {
-      // 单聊会话：没有项目上下文，只能展开本会话的消息引用。
+      // 单聊会话：没有项目上下文，只能展开本会话的消息引用（正文住该 bot 单聊库）。
       if (!raw.startsWith('m_')) throw notFound('单聊会话中只支持展开 m_ 消息引用')
-      const message = this.store.get(
+      const message = this.soloChatStore(binding.bot_id).get(
         'SELECT * FROM solo_messages WHERE bot_id = ? AND substr(id, -6) = ?',
         binding.bot_id, raw.slice(2),
       )
@@ -67,7 +67,7 @@ export const memoryMethods = {
     const project = this.projectRow(binding.project_id)
 
     if (raw.startsWith('m_')) {
-      const message = this.store.get(
+      const message = this.groupChatStore(project.id).get(
         'SELECT * FROM messages WHERE project_id = ? AND substr(id, -6) = ?',
         project.id, raw.slice(2),
       )

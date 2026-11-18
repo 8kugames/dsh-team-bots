@@ -29,17 +29,21 @@ export const projectsMethods = {
 
   // 群聊未读计数（IM 式）：以该读者对各项目的已读水位为界，统计其后到达的 bot 群聊消息。
   // 没有水位的项目以项目创建时间为基线，历史消息不会一上来就全红。
+  // 聊天正文已分库（chat-db-split Phase 1）：按项目聊天库逐库计数，库数是个位数。
   unreadChatCounts() {
-    const rows = this.store.all(
-      `SELECT m.project_id AS project_id, COUNT(*) AS unread
-         FROM messages m
-         JOIN projects p ON p.id = m.project_id
-         LEFT JOIN chat_reads cr ON cr.project_id = m.project_id AND cr.reader_id = ?
-         WHERE m.sender_type = 'bot'
-           AND m.created_at > COALESCE(cr.read_at, p.created_at)
-         GROUP BY m.project_id`,
-      this.localUserId,
-    )
+    const rows = []
+    for (const project of this.store.all('SELECT id, created_at FROM projects')) {
+      const readAt = this.store.get(
+        'SELECT read_at FROM chat_reads WHERE project_id = ? AND reader_id = ?',
+        project.id, this.localUserId,
+      )?.read_at
+      const watermark = readAt ?? project.created_at
+      const unread = Number(this.groupChatStore(project.id).get(
+        "SELECT COUNT(*) AS unread FROM messages WHERE project_id = ? AND sender_type = 'bot' AND created_at > ?",
+        project.id, watermark,
+      )?.unread ?? 0)
+      if (unread > 0) rows.push({ project_id: project.id, unread })
+    }
     return new Map(rows.map(row => [row.project_id, Number(row.unread ?? 0)]))
   },
 
@@ -47,7 +51,7 @@ export const projectsMethods = {
   markChatRead(projectId, readAt) {
     const stamp = String(readAt ?? '').trim()
     if (!projectId || !stamp) return { ok: false, readAt: '' }
-    const latest = this.store.get(
+    const latest = this.groupChatStore(projectId).get(
       "SELECT MAX(created_at) AS ts FROM messages WHERE project_id = ? AND sender_type = 'bot'",
       projectId,
     )
@@ -242,7 +246,7 @@ export const projectsMethods = {
       "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running FROM runs WHERE project_id = ?",
       project.id,
     )
-    const messages = this.store.get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)
+    const messages = this.groupChatStore(project.id).get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)
     return {
       ...project,
       workspace_path: this.projectWorkDir(project),
@@ -509,14 +513,12 @@ export const projectsMethods = {
     )
     if (Number(active?.n) > 0) throw badRequest('项目仍有排队或运行中的 run，不能移除追踪')
     const dir = this.projectWorkDir(project)
+    // 群聊正文（messages/message_images/run_trajectory）住项目聊天库（chat-db-split
+    // Phase 1）：管理数据清完后整库文件删除即完成正文清理，不再逐表 DELETE。
     this.store.transaction(() => {
       const runIds = 'SELECT id FROM runs WHERE project_id = ?'
       const taskIds = 'SELECT id FROM tasks WHERE project_id = ?'
-      // 聊天附图随消息一起清（FK 级联是主路径，这里再显式删一次防孤儿行）。
-      this.store.run('DELETE FROM message_images WHERE project_id = ?', projectId)
-      this.store.run('DELETE FROM messages WHERE project_id = ?', projectId)
       this.store.run('DELETE FROM bot_messages WHERE project_id = ?', projectId)
-      this.store.run(`DELETE FROM run_trajectory WHERE run_id IN (${runIds})`, projectId)
       this.store.run(`DELETE FROM run_events WHERE run_id IN (${runIds})`, projectId)
       this.store.run(`DELETE FROM usage_reconciliation WHERE run_id IN (${runIds})`, projectId)
       this.store.run('DELETE FROM runs WHERE project_id = ?', projectId)
@@ -542,6 +544,13 @@ export const projectsMethods = {
         deleteProductionDir: input.deleteProductionDir === true, dir,
       })
     })
+    // 事务提交后再删聊天库文件（含 -wal/-shm）：删库不是数据库事务的一部分，
+    // 失败只 warn，管理数据已清完，残留文件可人工处理。
+    try {
+      this.dropGroupChatDb(projectId)
+    } catch (error: any) {
+      this.logger.warn?.(`dsh-team: 移除项目 ${project.key} 聊天库文件失败：${error?.message ?? error}`)
+    }
     // 生产目录默认保留；仅显式要求且确认名已匹配时，删解析出的这一个精确路径，不做任何路径推导。
     // 失败只 warn 不回滚（管理数据已按口径清完），并补审计行如实记录。
     if (input.deleteProductionDir === true) {

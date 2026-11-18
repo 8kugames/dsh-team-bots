@@ -235,8 +235,8 @@ export const sessionMethods = {
   },
   // kind 'task' = 任务 worker 会话（全局链走 workerPreset）；其余 = 控制面/单聊/核验会话
   //（全局链走 routerPreset）。bot.agent_preset 非空时逐 bot 覆盖，两级都留空或指向不可用
-  // preset 时跟随宿主注册表 defaultId，宿主默认也不可用才回落 standard。可选 preset 只从
-  // 宿主 roster 里实际可用（非 broken）的里挑。
+  // preset 时用插件自带预设，再回落 standard。可选 preset 只从宿主 roster 里实际可用
+  //（非 broken）的里挑；插件不改动宿主全局默认。
   async defaultAgentPreset(kind, bot = null) {
     const botPreset = String(bot?.agent_preset ?? '').trim()
     const wanted = botPreset
@@ -248,9 +248,8 @@ export const sessionMethods = {
       if (!presets) return {}
       const list = await presets.list()
       const available = (list ?? []).filter(preset => preset.broken === undefined).map(preset => preset.id)
-      // 未配置（或配置失效）时选宿主默认 preset，再回落 standard，避免装错配置直接起不来。
-      const hostDefault = (() => { try { return String(presets.defaultId ?? '') } catch { return '' } })()
-      const pick = [wanted, hostDefault, 'standard'].find(id => id && available.includes(id))
+      // 未配置（或配置失效）时用插件自带预设，再回落 standard，避免装错配置直接起不来。
+      const pick = [wanted, 'team-bots', 'standard'].find(id => id && available.includes(id))
       return pick ? { agentPreset: pick } : {}
     } catch {
       return {}

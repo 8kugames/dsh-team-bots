@@ -136,7 +136,7 @@ export const feishuMethods = {
   async feishuDirectorChat(director, body) {
     const adminOuId = this.feishu?.status?.()?.adminOuId ?? null
     const actor = { type: 'user', id: adminOuId ?? 'user:feishu' }
-    const firstContact = !this.store.get(
+    const firstContact = !this.soloChatStore(director.id).get(
       "SELECT id FROM solo_messages WHERE bot_id = ? AND sender_type = 'user' AND sender_id = ? LIMIT 1",
       director.id,
       actor.id,

@@ -414,6 +414,7 @@ This message is from the project owner on Feishu — a real multi-turn conversat
       where: 'bot_id = ?',
       params: [bot.id],
       excludeId: chatMessage?.id,
+      store: this.chatStoreForRun(run ?? { project_id: null, bot_id: bot.id }),
     })
     // P3-1：单聊同款，无信息量 system 短状态不进尾窗。
     const mergedIds = new Set((extraMessages ?? []).map(item => item.id))
@@ -622,7 +623,7 @@ Delivery output:
 ${(sourceRun.output ?? '').slice(0, 6000)}${timeBudgetBlockFor(sourceTask)}`
       }
       const userMessage = sourceRun?.trigger_ref
-        ? this.store.get('SELECT body FROM messages WHERE id = ?', sourceRun.trigger_ref)
+        ? this.chatStoreForRun(sourceRun).get('SELECT body FROM messages WHERE id = ?', sourceRun.trigger_ref)
         : null
       return `${header}
 
@@ -722,6 +723,7 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
       where: "project_id = ? AND kind = 'text'",
       params: [project.id],
       excludeId: chatMessage?.id,
+      store: this.chatStoreForRun(run),
     })
     // P3-1：无信息量 system 短状态不进尾窗；合批消息已在专门段落呈现，同样不进尾窗（不双份）。
     const mergedIds = new Set((extraMessages ?? []).map(item => item.id))
@@ -750,7 +752,7 @@ ${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteB
       ? 'none'
       : openTasks.map(item => `- ${project.key}-${item.number} [${item.status}] ${item.title}`).join('\n')
     // 引用回复上下文：本次消息带 reply_to 时，明确告知 bot 用户在回哪条消息（含 m_ 短 id 供 team_recall 取全文）。
-    const quoteLine = this.quotedLineFor(chatMessage)
+    const quoteLine = this.quotedLineFor(chatMessage, this.chatStoreForRun(run))
     // 通道直达语境块（DSHBOTS-215 微信 / DSHBOTS-330 飞书）：按 trigger_type 分流。
     // 两版同结构：多轮连续对话（项目会话复用），不要每条当新指令；派活意图要真建卡/派单；
     // 需要用户决策时用 ask_user_question（会转发到对应通道，回复回到本轮）。
@@ -798,9 +800,11 @@ ${taskList}`
   },
 
   // 引用行：正文控制在 200 字内；bot 发送者查名字，其余回退 sender_type:sender_id 展示。
-  quotedLineFor(chatMessage) {
+  // chatStore（chat-db-split Phase 1）：被引消息与触发消息同库；缺省回落顶库。
+  quotedLineFor(chatMessage, chatStore = null) {
     if (!chatMessage?.reply_to_id) return ''
-    const quoted = this.store.get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', chatMessage.reply_to_id)
+    const readFrom = chatStore ?? this.store
+    const quoted = readFrom.get('SELECT id, sender_type, sender_id, body FROM messages WHERE id = ?', chatMessage.reply_to_id)
     if (!quoted) return '\n(The quoted message no longer exists.)\n'
     const senderName = quoted.sender_type === 'bot'
       ? this.store.get('SELECT name FROM bots WHERE id = ?', quoted.sender_id)?.name ?? `bot:${quoted.sender_id}`

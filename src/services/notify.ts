@@ -95,7 +95,7 @@ export const notifyMethods = {
   // notifyMemberFromBot 路径照旧走同一配额流，本扫描路径的防重落点即消息留痕流。
   notifyStaleCardOwner({ project, task, hit }) {
     const identifier = `${project.key}-${task.number}`
-    const already = this.store.get(
+    const already = this.groupChatStore(project.id).get(
       "SELECT id FROM messages WHERE task_id = ? AND sender_type = 'system' AND body LIKE ? AND date(created_at) = date('now') LIMIT 1",
       task.id, `${STALE_CARD_NOTICE_PREFIX}%`,
     )
@@ -201,7 +201,7 @@ export const notifyMethods = {
     // DSHBOTS-267 单跟进者在途幂等：每张任务同时只允许一个跟进提醒在途。
     // 在途判定=最近一条任务提醒落库后，该任务没有启动过新运行（提醒尚未被任何运行消费）；
     // 重复提醒静默吸收（不落新留痕、不注入、不计新），warn 留痕。
-    const lastNotice = this.store.get(
+    const lastNotice = this.groupChatStore(task.project_id).get(
       "SELECT created_at FROM messages WHERE task_id = ? AND sender_type = 'bot' AND body LIKE '【任务提醒】%' ORDER BY created_at DESC, rowid DESC LIMIT 1",
       task.id,
     )

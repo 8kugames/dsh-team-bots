@@ -46,6 +46,7 @@ import { feishuMethods } from '../src/services/feishu.js'
 import { approvalsMethods } from '../src/services/approvals.js'
 import { questionsMethods } from '../src/services/questions.js'
 import { coreMethods } from '../src/services/core.js'
+import { chatStoreMethods } from '../src/services/chat-stores.js'
 import { githubSourceMethods } from '../src/services/github-source.js'
 import { promptMethods } from '../src/services/runtime/prompt.js'
 import { sessionMethods } from '../src/services/runtime/session.js'
@@ -61,6 +62,7 @@ type TeamServiceMethods =
   & typeof secretsMethods & typeof proposalsMethods & typeof terminalMethods
   & typeof usageMethods & typeof systemMethods & typeof wechatMethods & typeof feishuMethods
   & typeof approvalsMethods & typeof questionsMethods & typeof coreMethods
+  & typeof chatStoreMethods
   & typeof githubSourceMethods
 
 type DshRuntimeMethods =

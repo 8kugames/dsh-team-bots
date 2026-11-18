@@ -29,15 +29,17 @@ export const contextMethods = {
   //   两条提示词进同一宿主会话历史，消息不丢不重；
   // - excludeId 排除本轮触发消息（正文已在 # Group message / # Solo message 完整呈现，不再双份）。
   // 无会话上下文时不读不写水位，等价旧的固定尾窗。
-  watermarkWindow({ sessionId, table, columns, where, params, excludeId }) {
-    const advance = this.store.get(`SELECT MAX(rowid) AS m FROM ${table} WHERE ${where}`, ...params)?.m ?? null
+  // store（chat-db-split Phase 1）：消息尾窗读聊天库；缺省回落顶库（测试桩/独立构造）。
+  watermarkWindow({ sessionId, table, columns, where, params, excludeId, store = null }) {
+    const readFrom = store ?? this.store
+    const advance = readFrom.get(`SELECT MAX(rowid) AS m FROM ${table} WHERE ${where}`, ...params)?.m ?? null
     const watermark = sessionId ? this.messageWatermarks.get(sessionId) : undefined
     const rows = watermark === undefined
-      ? this.store.all(
+      ? readFrom.all(
         `SELECT ${columns} FROM ${table} WHERE ${where} ORDER BY rowid DESC LIMIT ?`,
         ...params, RECENT_FALLBACK_LIMIT,
       ).reverse()
-      : this.store.all(
+      : readFrom.all(
         `SELECT ${columns} FROM ${table} WHERE ${where} AND rowid > ? ORDER BY rowid DESC LIMIT ?`,
         ...params, watermark, RECENT_INCREMENTAL_LIMIT,
       ).reverse()

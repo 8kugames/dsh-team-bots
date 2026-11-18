@@ -255,13 +255,13 @@ export const runsMethods = {
   // dm/dm_reply 查 bot_messages（DSHBOTS-291 覆盖补测实测）——该表无 sender_type 列且
   // from_bot_id 恒为 bot（bot 间私信），不存在用户触发形态，恒为 false（逐条放行不参与合批，
   // 该标记对 dm 组也无分组意义）。
-  heldItemIsUserQuestion(item) {
+  heldItemIsUserQuestion(item, botId = null) {
     if (item?.kind === 'chat') {
-      const row = this.store.get('SELECT sender_type FROM messages WHERE id = ?', item.messageId)
+      const row = this.groupChatStore(item.projectId).get('SELECT sender_type FROM messages WHERE id = ?', item.messageId)
       return row?.sender_type === 'user'
     }
     if (item?.kind === 'solo_chat') {
-      const row = this.store.get('SELECT sender_type FROM solo_messages WHERE id = ?', item.messageId)
+      const row = this.soloChatStore(botId).get('SELECT sender_type FROM solo_messages WHERE id = ?', item.messageId)
       return row?.sender_type === 'user'
     }
     return false
@@ -337,14 +337,14 @@ export const runsMethods = {
           && last.first.projectId === item.projectId
           && last.merge.length + 1 < cap
           && withinWindow
-          && this.heldItemIsUserQuestion(item) === this.heldItemIsUserQuestion(last.first)) {
+          && this.heldItemIsUserQuestion(item, botId) === this.heldItemIsUserQuestion(last.first, botId)) {
           last.merge.push(item)
         } else {
           groups.push({ first: item, merge: [] })
         }
       }
       // 用户提问组优先放行（D-272 出队优先的队列侧对偶），sort 稳定保住组间先后。
-      groups.sort((a, b) => Number(this.heldItemIsUserQuestion(b.first)) - Number(this.heldItemIsUserQuestion(a.first)))
+      groups.sort((a, b) => Number(this.heldItemIsUserQuestion(b.first, botId)) - Number(this.heldItemIsUserQuestion(a.first, botId)))
       const consumed = new Set()
       for (const group of groups) {
         if (this.botBusy(botId, domain)) break
@@ -584,9 +584,10 @@ export const runsMethods = {
   },
 
   // 运行轨迹：模型回合、思考文本、助手文本、工具调用与工具结果的展示账本。
+  // 轨迹住运行归属的聊天库（chat-db-split Phase 1）。
   runTrajectory(runId) {
     const run = this.runRow(runId)
-    const rows = this.store.all(
+    const rows = this.runChatStore(run).all(
       'SELECT seq, kind, title, detail, turn, step, created_at FROM run_trajectory WHERE run_id = ? ORDER BY seq ASC',
       run.id,
     )
@@ -683,9 +684,9 @@ export const runsMethods = {
       // solo_messages），trigger_ref 即原消息 id——startRun 据此把附图随首条 prompt
       // 带给代理模型（与 chat/solo_chat 同一链路）。
       const chatMessage = (run.kind === 'chat' || (run.kind === 'vision' && run.project_id)) && run.trigger_ref
-        ? this.store.get('SELECT * FROM messages WHERE id = ?', run.trigger_ref)
+        ? this.runChatStore(run).get('SELECT * FROM messages WHERE id = ?', run.trigger_ref)
         : (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) && run.trigger_ref
-          ? this.store.get('SELECT * FROM solo_messages WHERE id = ?', run.trigger_ref)
+          ? this.runChatStore(run).get('SELECT * FROM solo_messages WHERE id = ?', run.trigger_ref)
           : null
       // 合批消息（DSHBOTS-231）：领取时合并进来的同通道排队消息，与触发消息同一轮注入。
       const extraMessages = this.mergedMessagesFor(run)
@@ -754,9 +755,10 @@ if (run.kind === 'dm_reply') {
       ? 'id, sender_type, sender_id, body'
       : 'id, sender_type, sender_id, body, reply_to_id'
     const table = run.kind === 'solo_chat' ? 'solo_messages' : 'messages'
+    const chatStore = this.runChatStore(run)
     const rows = []
     for (const messageId of ids) {
-      const row = this.store.get(`SELECT ${columns} FROM ${table} WHERE id = ?`, messageId)
+      const row = chatStore.get(`SELECT ${columns} FROM ${table} WHERE id = ?`, messageId)
       if (row) rows.push(row)
     }
     return rows

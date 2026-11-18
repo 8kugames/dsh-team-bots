@@ -132,6 +132,10 @@ export const coreMethods = {
       ensureWechatTriggerSchema(this.store)
       // 外部触发留痕表（B4-②/DSHBOTS-335）：GitHub 源的 (source, external_id) 已见集合。
       ensureExternalTriggerSchema(this.store)
+      // 聊天分库 Phase 1（docs/plans/chat-db-split.md）：messages/solo_messages/
+      // message_images/run_trajectory 一次性迁入各聊天库；账本闸保证只跑一次，
+      // 崩溃重启续跑。必须在正文读写路径工作前完成。
+      this.migrateChatSplitP1()
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
       this.store.run(
         `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,
@@ -422,6 +426,8 @@ export const coreMethods = {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.started = false
+    // 聊天库句柄一并关闭（LRU 常驻句柄不留到进程退出）。
+    this.closeChatStores?.()
     // 在途审批定时器一并清空：abort 监听由宿主信号持有无法摘除（迟到结算已由
     // settleApproval 容错），但停机后不得再由自身定时器主动触发写库。
     for (const pending of this.approvalPending?.values() ?? []) clearTimeout(pending.timer)

@@ -189,7 +189,8 @@ export const questionsMethods = {
       })
     } else {
       const group = this.groupOf(project.id)
-      store.run(
+      // 卡片锚点住项目聊天库（chat-db-split Phase 1）。
+      this.groupChatStore(project.id).run(
         `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, kind, question_id, created_at)
          VALUES (?, ?, ?, 'system', ?, ?, '[]', 'question', ?, ?)`,
         id('msg'), project.id, group?.id ?? null, bot.id, anchorBody, questionId, createdAt,

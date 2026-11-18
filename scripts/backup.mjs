@@ -13,6 +13,7 @@ import {
   createReadStream,
   existsSync,
   mkdirSync,
+  readdirSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -206,6 +207,30 @@ async function backupExtras({ dataDir, outDir, base }) {
     })
   } else {
     extras.push({ name: 'wechat-channel.sqlite', source: wechatDb, backup: null, missing: true })
+  }
+
+  // 聊天分库（chat-db-split Phase 1）：每个群聊/单聊一个库文件，正文数据全在其中，
+  // 逐库 VACUUM INTO 备份；目录不存在（尚未分库的旧数据目录）时记一条缺失留痕。
+  const chatsDir = join(dataDir, 'chats')
+  if (existsSync(chatsDir)) {
+    for (const file of readdirSync(chatsDir).filter(item => item.endsWith('.sqlite')).sort()) {
+      const source = openSqlite(join(chatsDir, file))
+      const target = join(outDir, `${base}.chat-${file}`)
+      try {
+        source.exec(`VACUUM INTO ${quoteSql(target)}`)
+      } finally {
+        source.close()
+      }
+      extras.push({
+        name: `chats/${file}`,
+        source: join(chatsDir, file),
+        backup: target,
+        bytes: statSync(target).size,
+        sha256: await sha256File(target),
+      })
+    }
+  } else {
+    extras.push({ name: 'chats/', source: chatsDir, backup: null, missing: true })
   }
 
   return extras
