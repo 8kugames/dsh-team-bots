@@ -185,6 +185,15 @@ test('glob 匹配器：** 跨目录、* 不跨目录、? 单字符，尾部 /** 
   assert.equal(approvalGlobMatch('**', 'anything at all'), true)
   assert.equal(approvalGlobMatch('', 'x'), false)
   assert.equal(approvalGlobMatch('*', ''), false)
+  // 行首 **/ 的边界放宽：目标不是绝对路径而是命令首行时，相对路径前面是空格或串首——
+  // 预置关键词规则（**/tmp/**、**/.tmp/**）必须能命中相对路径，否则命令免审整体失明。
+  assert.equal(approvalGlobMatch('**/.tmp/**', 'mkdir -p .tmp/bots/agent/x && echo hi > .tmp/bots/agent/x/t.txt'), true)
+  assert.equal(approvalGlobMatch('**/tmp/**', 'cd tmp/work && ls'), true)
+  assert.equal(approvalGlobMatch('**/.tmp/**', 'echo hi > .tmp/x'), true)
+  // 边界仍是「串首 / / 或空白」，不能退化成子串匹配。
+  assert.equal(approvalGlobMatch('**/tmp/**', 'cat mytmp/a'), false)
+  assert.equal(approvalGlobMatch('**/tmp/**', 'echo nontmp/x'), false)
+  assert.equal(approvalGlobMatch('**/tmp/**', '/tmpfoo/a'), false)
 })
 
 // ===== 链路：命中免审 =====

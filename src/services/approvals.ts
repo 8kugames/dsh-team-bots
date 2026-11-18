@@ -196,8 +196,12 @@ export function approvalGlobToRegExp(pattern) {
       }
       index += 2
       if (text[index] === '/') {
+        // 行首的 **/：前缀边界除「/ 结尾的任意前缀」外还允许「以空白结尾」（或串首）——
+        // 命令维度的目标是命令首行（如 `mkdir -p .tmp/bots/x`），相对路径前面是空格不是 /，
+        // 旧的 (?:.*/)? 永远吃不到这段前缀，关键词免审规则对相对路径命令整体失明。
+        const atPatternStart = index === 2
         index += 1
-        out += '(?:.*/)?'
+        out += atPatternStart ? '(?:.*?[/\\s])?' : '(?:.*/)?'
       } else {
         out += '.*'
       }
