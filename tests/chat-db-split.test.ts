@@ -144,3 +144,30 @@ test('聊天分库：移除追踪删除整个聊天库文件', async () => {
     assert.equal(readdirSync(join(t.config.dataDir, 'chats')).includes(`p-${project.id}.sqlite`), false)
   } finally { await t.close() }
 })
+
+test('聊天分库：批量快照不返回 LRU 淘汰关闭的句柄', async () => {
+  // 生产事故（2026-11-18）：聊天库数超过 LRU 上限时，allChatStores() 边开边淘汰，
+  // 淘汰当场关闭了本轮已收集进数组的句柄，applyRetention 随后的扇出清理
+  // 打到已关闭的库报 "database is not open"。批量快照期间必须不做淘汰。
+  const t = await setup('dsh-chatdb-batch-')
+  try {
+    // 建出超过 LRU 上限（32）的聊天库数，逐个落一条消息让文件真实存在。
+    const projectIds: string[] = []
+    for (let i = 0; i < 34; i++) {
+      const project = await t.makeProject(`BATCH${i}`)
+      projectIds.push(project.id)
+      await t.service.sendMessage(project.id, `批量消息${i}`, { type: 'user', id: 'u1' })
+    }
+    assert.equal(readdirSync(join(t.config.dataDir, 'chats')).filter(f => f.endsWith('.sqlite')).length >= 34, true)
+    // 批量快照里每个句柄都必须仍可用：任何一个被淘汰关闭都会在这里抛错。
+    const snapshot = t.service.allChatStores()
+    assert.equal(snapshot.length >= 34, true)
+    for (const chatStore of snapshot) {
+      assert.equal(chatStore.get('SELECT COUNT(*) AS n FROM messages') !== undefined, true)
+    }
+    // 紧接扇出清理（生产路径 runMaintenance → applyRetention 同口径）不得再报库已关。
+    const { applyRetention } = await import('../src/usage-reconcile.js')
+    applyRetention(t.store, { usageDays: 0, runEventDays: 0, messageDays: 7, reconciliationDays: 30 }, t.service.allChatStores())
+    assert.equal(t.service.groupChatStore(projectIds[0]).get('SELECT 1 AS ok')?.ok, 1, '首开的库在扇出后仍可用')
+  } finally { await t.close() }
+})

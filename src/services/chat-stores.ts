@@ -12,7 +12,7 @@ import { nowIso } from '../util.js'
 
 // 句柄上限：聊天库懒打开、LRU 关闭。当前规模（项目数 + bot 数）远低于上限，
 // 上限只防长期运行进程的句柄漂移。
-const CHAT_STORE_LIMIT = 16
+const CHAT_STORE_LIMIT = 32
 
 // 迁移拷贝分块：每片一个聊天库事务，避免整表载入内存（生产轨迹 18.7 万行 / 186MB）。
 const COPY_CHUNK_ROWS = 500
@@ -130,7 +130,7 @@ export const chatStoreMethods = {
   soloChatFileName(botId) {
     return `solo-${botId}.sqlite`
   },
-  openChatStoreFile(file) {
+  openChatStoreFile(file, { evict = true } = {}) {
     if (!this.chatStoreCache) this.chatStoreCache = new Map()
     const hit = this.chatStoreCache.get(file)
     if (hit) {
@@ -139,7 +139,7 @@ export const chatStoreMethods = {
     }
     const store = openChatDatabase(join(this.chatStoresDir(), file))
     this.chatStoreCache.set(file, { store, at: Date.now() })
-    if (this.chatStoreCache.size > CHAT_STORE_LIMIT) {
+    if (evict && this.chatStoreCache.size > CHAT_STORE_LIMIT) {
       let oldestKey = null
       let oldestAt = Infinity
       for (const [key, entry] of this.chatStoreCache) {
@@ -175,7 +175,11 @@ export const chatStoreMethods = {
     }
   },
   allChatStores() {
-    return this.listChatStoreFiles().map(file => this.openChatStoreFile(file))
+    // 批量快照期间不做 LRU 淘汰：淘汰会当场关闭本轮已收集进数组的句柄，
+    // 随后的扇出清理（applyRetention/未读数/图片回填）就会打到已关闭的库，
+    // 报 "database is not open"（聊天库数超过 LRU 上限时必现）。
+    // 批量后缓存可能暂时超上限，由后续单开的 LRU 逐步收敛。
+    return this.listChatStoreFiles().map(file => this.openChatStoreFile(file, { evict: false }))
   },
   // state 版本签名段：每个聊天库一条「引用 id:本连接累计变更数」。
   // 取聊天实体清单（顶库的 projects/bots）而不是文件系统列表：文件清单会随「首次打开某聊天库」
