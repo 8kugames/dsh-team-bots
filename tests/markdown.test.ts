@@ -10,11 +10,11 @@ const mdSource = readFileSync(fileURLToPath(new URL('../ui/modules/markdown.ts',
 const html = readFileSync(fileURLToPath(new URL('../ui/index.html', import.meta.url)), 'utf8')
 const css = await uiStylesSource()
 
-// —— markdown 渲染纯逻辑块（mdImageFileUrl / mdRewriteImageSources / mdCreateRenderer）——
+// —— markdown 渲染纯逻辑块（mdImageFileUrl / mdRewriteFileSources / mdCreateRenderer）——
 const mdBlock = /\/\/ markdown-render:start[\s\S]*?\/\/ markdown-render:end/.exec(source)?.[0]
 assert.ok(mdBlock, 'ui/app.js 缺少 markdown-render 标记块')
-const { mdImageFileUrl, mdRewriteImageSources, mdCreateRenderer } = new Function(
-  `${mdBlock}\nreturn { mdImageFileUrl, mdRewriteImageSources, mdCreateRenderer }`,
+const { mdImageFileUrl, mdRewriteFileSources, mdCreateRenderer } = new Function(
+  `${mdBlock}\nreturn { mdImageFileUrl, mdRewriteFileSources, mdCreateRenderer }`,
 )()
 
 const groupScope = { projectId: 'p1', root: '/srv/ws/art' }
@@ -52,23 +52,31 @@ test('mdImageFileUrl：协议引用与越界路径不改写（交消毒层/服�
   assert.equal(mdImageFileUrl('', groupScope), null, '空 href 不改写')
 })
 
-test('mdRewriteImageSources：只改图片引用，链接与正文不动', () => {
+test('mdRewriteFileSources：图片与本地文件链接都改写，协议引用与正文不动', () => {
   const md = [
     '# 标题',
     '',
     '看 ![预览](assets/preview.png) 和 ![带标题](shots/draft.png "示意")',
     '',
-    '[文档](assets/doc.md) 与 ![外链](https://cdn.example.com/x.png) 保持原样',
+    '[文档](assets/doc.md) 与 [外链](https://example.com/a.md) 及 ![协议图](https://cdn.example.com/x.png)',
   ].join('\n')
-  const out = mdRewriteImageSources(md, groupScope)
+  const out = mdRewriteFileSources(md, groupScope)
   assert.ok(out.includes(`![预览](${fileUrl(groupScope, 'assets/preview.png')})`), '相对路径图片被改写')
   assert.ok(out.includes(`![带标题](${fileUrl(groupScope, 'shots/draft.png')})`), '带标题图片被改写（改写只保留 url，丢弃标题）')
-  assert.ok(out.includes('[文档](assets/doc.md)'), '普通链接不改写')
-  assert.ok(out.includes('![外链](https://cdn.example.com/x.png)'), '协议图片不改写')
+  assert.ok(out.includes(`[文档](${fileUrl(groupScope, 'assets/doc.md')})`), '相对路径链接改写为文件端点（本地文件可预览）')
+  assert.ok(out.includes('[外链](https://example.com/a.md)'), '协议链接不改写')
+  assert.ok(out.includes('![协议图](https://cdn.example.com/x.png)'), '协议图片不改写')
   assert.ok(out.includes('# 标题'), '正文不动')
 })
 
-test('mdRewriteImageSources：含空格 / file:// / 反斜杠 / 转义路径都改写到文件端点', () => {
+test('mdRewriteFileSources：链接与图片同口径——剥标题、空格路径、越界拒绝、单聊 scope', () => {
+  assert.ok(mdRewriteFileSources('[说明文档](docs/a.md "注释")', groupScope).includes(`[说明文档](${fileUrl(groupScope, 'docs/a.md')})`), '带标题链接剥标题后改写')
+  assert.ok(mdRewriteFileSources('[报告](docs/我的 报告.md)', groupScope).includes(`[报告](${fileUrl(groupScope, 'docs/我的 报告.md')})`), '含空格路径链接改写')
+  assert.equal(mdRewriteFileSources('[越界](../etc/passwd)', groupScope), '[越界](../etc/passwd)', '.. 段链接不改写')
+  assert.ok(mdRewriteFileSources('[草稿](shots/draft.png)', soloScope).includes(`[草稿](${fileUrl(soloScope, 'shots/draft.png')})`), '单聊链接走 soloBotId')
+})
+
+test('mdRewriteFileSources：含空格 / file:// / 反斜杠 / 转义路径都改写到文件端点', () => {
   const cases: Array<[string, string]> = [
     ['![x](bench/xxx.png)', 'bench/xxx.png'],
     ['![x](bench/a b.png)', 'bench/a b.png'],
@@ -80,7 +88,7 @@ test('mdRewriteImageSources：含空格 / file:// / 反斜杠 / 转义路径都�
     ['![x](bench/a b.png "示意")', 'bench/a b.png'],
   ]
   for (const [md, rel] of cases) {
-    const out = mdRewriteImageSources(md, groupScope)
+    const out = mdRewriteFileSources(md, groupScope)
     assert.ok(out.includes(`![x](${fileUrl(groupScope, rel)})`), `${md} → ${out}`)
   }
   // 未改写形态原样保留：协议引用与越界段都不该被改写正则接走。
@@ -90,7 +98,7 @@ test('mdRewriteImageSources：含空格 / file:// / 反斜杠 / 转义路径都�
     '![x](bench/../../x.png)',
     '![x](file://../../etc/x.png)',
   ]) {
-    assert.equal(mdRewriteImageSources(md, groupScope), md, `${md} 应原样保留`)
+    assert.equal(mdRewriteFileSources(md, groupScope), md, `${md} 应原样保留`)
   }
 })
 

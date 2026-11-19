@@ -3,13 +3,15 @@ import { esc, inSoloContext, botById, pageProject } from './util.js'
 import { t } from './i18n.js'
 
 // markdown-render:start —— 聊天 markdown 渲染纯逻辑（tests/markdown.test.js 抽取此块断言）。
-// 管线固定：md → mdRewriteImageSources → marked.parse → DOMPurify.sanitize → innerHTML。
+// 管线固定：md → mdRewriteFileSources → marked.parse → DOMPurify.sanitize → innerHTML。
 // 消毒不可绕：marked 或 DOMPurify 缺席、或 DOMPurify.isSupported=false（node/损坏安装）时
 // mdCreateRenderer 返回 null，调用方回退 esc 纯文本，绝不裸插 HTML。
-// 工作区图片路径改写成 GET /api/dsh-team/file（服务端再做 MIME 白名单与防穿越）。
+// 工作区相对路径的图片与文件链接都改写成 GET /api/dsh-team/file（服务端再做 MIME 白名单与防穿越），
+// 与 DSH 宿主一致：消息里的本地文件引用可预览，而不是按页面 URL 解析成死链。
 const MD_SCHEME = /^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/i
-// 图片语法内部：href 允许含空格（到标题或右括号前止），标题可为 "..." / '...' / (...)。
-const MD_IMAGE = /(!\[[^\]]*\]\()([^)\n]*?)(?:\s+("[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g
+// 图片/链接语法同构：(!?) 前缀区分两种语法；href 允许含空格（到标题或右括号前止），
+// 标题可为 "..." / '...' / (...)。单遍匹配，已改写的图片 URL 不会被链接分支二次处理。
+const MD_MEDIA = /(!?)\[([^\]]*)\]\(([^)\n]*?)(?:\s+("[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g
 // 只剥尾部标题：含空格的路径若被标题正则误切会丢文件名，故仅匹配整段结尾的引号/括号标题。
 const MD_IMAGE_TITLE = /\s+("[^"]*"|'[^']*'|\([^)]*\))$/
 function mdImageTarget(inner) {
@@ -46,10 +48,10 @@ function mdImageFileUrl(href, scope) {
   params.set('path', rel)
   return `/api/dsh-team/file?${params.toString()}`
 }
-function mdRewriteImageSources(source, scope) {
-  return String(source ?? '').replace(MD_IMAGE, (whole, lead, inner) => {
+function mdRewriteFileSources(source, scope) {
+  return String(source ?? '').replace(MD_MEDIA, (whole, bang, label, inner) => {
     const url = mdImageFileUrl(mdImageTarget(inner), scope)
-    return url ? `${lead}${url})` : whole
+    return url ? `${bang}[${label}](${url})` : whole
   })
 }
 function mdCreateRenderer(deps) {
@@ -81,7 +83,7 @@ function mdCreateRenderer(deps) {
       cache.set(key, hit)
       return hit
     }
-    const html = marked.parse(mdRewriteImageSources(body, scope), { gfm: true, breaks: true })
+    const html = marked.parse(mdRewriteFileSources(body, scope), { gfm: true, breaks: true })
     const safe = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
     cache.set(key, safe)
     if (cache.size > MD_RENDER_CACHE_MAX) cache.delete(cache.keys().next().value)

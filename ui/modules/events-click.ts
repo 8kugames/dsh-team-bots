@@ -9,7 +9,7 @@ import { exportUsageCsv, switchUsageWindow, usageMode } from './usage.js'
 import { focusApprovalCard, focusQuestionCard, questionDraftSelection, questionSelectOption } from './cards.js'
 import { loadSoloDetail } from './chat.js'
 import { searchMemories } from './tasks.js'
-import { openFilePreview } from './file-preview.js'
+import { ARTIFACT_IMAGE, openFilePreview } from './file-preview.js'
 import { handleBoardAction } from './events-board.js'
 import { refresh, renderKeepingChatScroll, render, beginChatPending, endChatPending } from '../app.js'
 
@@ -26,6 +26,19 @@ document.addEventListener('click', async (event) => {
   if (bubbleImg) {
     event.preventDefault()
     openInlineImage(bubbleImg)
+    return
+  }
+  // 本地文件链接（markdown.ts 把消息里的相对路径图片/链接统一改写成 /api/dsh-team/file）：
+  // 点击不跳页，按扩展分流——图片扩展进现有查看器，其余进交付产物同款文本预览弹层，
+  // 非白名单类型由弹层显示加载失败；中键/Ctrl 点仍走浏览器原生新窗口。
+  const fileLink = (event.target as any).closest?.('a[href^="/api/dsh-team/file"]')
+  if (fileLink) {
+    event.preventDefault()
+    const href = fileLink.getAttribute('href') ?? ''
+    let linkPath = ''
+    try { linkPath = new URL(href, location.href).searchParams.get('path') ?? '' } catch { /* 非法 href 按无路径处理 */ }
+    if (linkPath && ARTIFACT_IMAGE.test(linkPath)) openInlineImage({ currentSrc: href, getAttribute: () => '' })
+    else await openFilePreview(href, linkPath)
     return
   }
   const target = (event.target as any).closest('[data-action]')
