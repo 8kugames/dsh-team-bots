@@ -53,14 +53,19 @@ export function outboundChunks(text, maxChars = CHUNK_MAX_CHARS) {
 export function questionCard(projectName, botName, items, token) {
   const lines = [`**【提问】${botName}（${projectName}）**`]
   for (const [index, item] of (items ?? []).entries()) {
+    // 题块之间空行分段：markdown 里列表/段落靠空行断开，否则下一题会被吞进上一题的列表。
+    lines.push('')
     lines.push(`**Q${index + 1}: ${item.question}**`)
     if (item.detail) lines.push(item.detail)
     for (const [optionIndex, option] of (item.options ?? []).entries()) {
       const description = option.description ? ` — ${option.description}` : ''
-      lines.push(`- ${optionIndex + 1}. ${option.label}${description}`)
+      // 用「1:」不用「- 1.」：markdown 列表标记会被飞书重新编号（整卡编成 a./b./c.…），
+      // 「1:」既不是列表标记，又和回复格式「1:选项一」同口径。
+      lines.push(`${optionIndex + 1}: ${option.label}${description}`)
     }
   }
-  lines.push('', `回复「答 ${token} 选项号或文字」`)
+  lines.push('')
+  lines.push(`回复「答 ${token} 选项号或文字」`)
   if ((items ?? []).length > 1) lines.push(`多个问题用「;」分隔，如：答 ${token} 1:选项一;2:补充说明`)
   return lines.join('\n')
 }

@@ -48,7 +48,7 @@ test('出站一律交互卡片：正文进 markdown 组件，纯文本消息不�
   assert.equal(card.elements[0].content, '第一行\n第二行')
 })
 
-test('飞书提问卡片是 markdown：题头加粗、选项列表化、带 token 与回复格式', () => {
+test('飞书提问卡片是 markdown：题头加粗、选项按「1:」编号、题块空行分段', () => {
   const items = [{
     id: 'q1',
     question: 'D1 怪物牌四点照准？',
@@ -60,10 +60,25 @@ test('飞书提问卡片是 markdown：题头加粗、选项列表化、带 toke
   const body = questionCard('镜花缘', 'director', items, 'f9288c')
   assert.ok(body.startsWith('**【提问】director（镜花缘）**'))
   assert.ok(body.includes('**Q1: D1 怪物牌四点照准？**'))
-  assert.ok(body.includes('- 1. 照准（推荐） — A 版绢白纸底'))
-  assert.ok(body.includes('- 2. 部分调整'))
+  assert.ok(body.includes('1: 照准（推荐） — A 版绢白纸底'))
+  assert.ok(body.includes('2: 部分调整'))
   assert.ok(body.includes('答 f9288c'))
   assert.ok(!body.includes('\r'))
+  // markdown 列表标记会被飞书整卡重新编号（a./b./c.…），卡片里不得出现列表记号。
+  assert.ok(!/^\s*[-*+]\s/m.test(body), '卡片正文不得用 markdown 列表记号')
+  assert.ok(!/^\s*\d+[.)]\s/m.test(body), '卡片正文不得用有序列表记号')
+})
+
+test('多题卡片：每题独立编号，题块之间空行断开', () => {
+  const items = [
+    { id: 'q1', question: '第一题？', options: [{ label: '甲' }, { label: '乙' }] },
+    { id: 'q2', question: '第二题？', options: [{ label: '丙' }] },
+  ]
+  const body = questionCard('镜花缘', 'director', items, 'f9288c')
+  assert.ok(body.includes('1: 甲'))
+  assert.ok(body.includes('2: 乙'))
+  assert.ok(body.includes('1: 丙'), '第二题从 1 重新编号，不接着上一题排')
+  assert.ok(body.includes('2: 乙\n\n**Q2: 第二题？**'), '题块之间必须空行，否则下一题会被并进上一题那一段')
 })
 
 test('飞书审批卡片是 markdown：工具/原因/答复格式齐备', () => {
@@ -94,7 +109,7 @@ test('提问转发逐通道正文：微信纯文本镜像，飞书 markdown 卡�
     assert.ok(!wechatPushed[0].includes('**'))
     // 飞书：markdown 卡片。
     assert.ok(feishuPushed[0].startsWith('**【提问】'))
-    assert.ok(feishuPushed[0].includes('- 1. 方案一'))
+    assert.ok(feishuPushed[0].includes('1: 方案一'))
     assert.ok(feishuPushed[0].includes('答 123xyz'))
   } finally {
     store.close()
