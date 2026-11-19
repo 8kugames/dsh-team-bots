@@ -40,12 +40,15 @@ async function setup() {
   return { root, store, service }
 }
 
-test('出站一律交互卡片：正文进 markdown 组件，纯文本消息不再用', () => {
+test('出站一律交互卡片：JSON 2.0 结构，正文进 markdown 组件', () => {
   const payload = outboundPayload('第一行\n第二行')
   assert.equal(payload.msgType, 'interactive')
   const card = JSON.parse(payload.content)
-  assert.equal(card.elements[0].tag, 'markdown')
-  assert.equal(card.elements[0].content, '第一行\n第二行')
+  // 2.0 才支持标题、引用、表格等标准 markdown（1.0 里 "# 标题" 会原样显示成井号文本）。
+  assert.equal(card.schema, '2.0')
+  assert.equal(card.config.width_mode, 'fill')
+  assert.equal(card.body.elements[0].tag, 'markdown')
+  assert.equal(card.body.elements[0].content, '第一行\n第二行')
 })
 
 test('飞书提问卡片是 markdown：题头加粗、选项按「1:」编号、题块空行分段', () => {

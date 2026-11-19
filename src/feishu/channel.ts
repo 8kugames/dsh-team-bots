@@ -133,14 +133,16 @@ function sdkLogger(log: any, secret: string) {
 }
 
 /**
- * 出站载荷：一律走交互卡片的富文本（markdown）组件。
- * 飞书原生渲染 markdown——卡片里单个 \n 即换行，纯文本消息的 \n 是段落间距（版面松）；
- * 加粗、列表、分割线也只有卡片才渲染得了。文本一律按 markdown 语义解释。
+ * 出站载荷：一律走交互卡片的富文本（markdown）组件，卡片用 JSON 2.0 结构。
+ * 2.0 才支持标题、引用、表格等标准 markdown——1.0 里 "# 标题" 会原样显示成井号文本，
+ * 表格也是一串竖线。width_mode=fill 等同 1.0 的 wide_screen_mode（撑满聊天窗口）。
+ * 客户端需 7.20 及以上（更低版本会显示升级提示兜底文案）。
  */
 export function outboundPayload(text) {
   const card = {
-    config: { wide_screen_mode: true },
-    elements: [{ tag: 'markdown', content: String(text ?? '') }],
+    schema: '2.0',
+    config: { width_mode: 'fill' },
+    body: { elements: [{ tag: 'markdown', content: String(text ?? '') }] },
   }
   return { msgType: 'interactive', content: JSON.stringify(card) }
 }
