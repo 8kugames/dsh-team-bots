@@ -27,8 +27,8 @@ const httpJs = readFileSync(join(root, 'src', 'http.js'), 'utf8')
 // —— file-preview-logic 标记块抽取（同 tests/markdown.test.js 的求值方式）——
 const logicBlock = /\/\/ file-preview-logic:start[\s\S]*?\/\/ file-preview-logic:end/.exec(filePreviewJs)?.[0]
 assert.ok(logicBlock, 'ui/modules/file-preview.js 缺少 file-preview-logic 标记块')
-const { isPreviewableText, clipPreviewText, deliverableFileUrl } = new Function(
-  `${logicBlock}\nreturn { isPreviewableText, clipPreviewText, deliverableFileUrl }`,
+const { isPreviewableText, isMarkdownPath, clipPreviewText, deliverableFileUrl } = new Function(
+  `${logicBlock}\nreturn { isPreviewableText, isMarkdownPath, clipPreviewText, deliverableFileUrl }`,
 )()
 
 test('isPreviewableText：白名单只收文本扩展，svg/env/zip/图片不入列', () => {
@@ -37,6 +37,15 @@ test('isPreviewableText：白名单只收文本扩展，svg/env/zip/图片不入
   }
   for (const path of ['a.svg', 'a.zip', 'a.env', 'config.env', '.env', 'a.png', 'a.bin', 'noext']) {
     assert.ok(!isPreviewableText(path), `${path} 不得进预览白名单`)
+  }
+})
+
+test('isMarkdownPath：.md/.markdown 走渲染预览，其余文本仍纯文本展示', () => {
+  for (const path of ['readme.md', 'docs/说明.MARKDOWN', 'a/b.md', 'x.markdown']) {
+    assert.ok(isMarkdownPath(path), `${path} 应按 markdown 渲染`)
+  }
+  for (const path of ['a.txt', 'b.json', 'c.js', 'd.htm', 'e.png', 'noext', 'md.txt']) {
+    assert.ok(!isMarkdownPath(path), `${path} 不得按 markdown 渲染`)
   }
 })
 
@@ -85,6 +94,13 @@ test('源码锚：modal-forms.js 文本分支 preview-file，非白名单仍新�
   assert.ok(anchorAt > 0, '非白名单应保留 <a target="_blank">')
   assert.ok(buttonAt < anchorAt, '文本分支先于 <a> 兜底分支')
   assert.ok(modalFormsJs.indexOf("ARTIFACT_IMAGE.test(path)") > 0, '图片分支不动')
+})
+
+test('源码锚：markdown 预览走 richText 消毒管线，文本通道 textContent 不变', () => {
+  assert.match(filePreviewJs, /isMarkdownPath\(path\) \? 'md' : 'text'/, 'openFilePreview 按扩展分 kind')
+  assert.match(filePreviewJs, /dsh-file-preview-md/, 'md 弹层容器存在')
+  assert.match(filePreviewJs, /node\.innerHTML = richText\(state\.modal\.content/, 'md 水合只经 richText（marked→DOMPurify）')
+  assert.match(filePreviewJs, /node\.textContent = state\.modal\.content/, '文本水合仍是 textContent')
 })
 
 test('源码锚：chat.js 白名单含 .md/.json 且拒 .svg/.zip/.env；http.js 校验与上限仍在', () => {

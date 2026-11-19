@@ -332,4 +332,8 @@ body:has(#modal-root .modal-backdrop) #app *::after {
         translate: 0 -8px;
     }
 }
+/* markdown 文件预览：沿用 comment-body 排版，内嵌图不撑破弹层。 */
+#dsh-file-preview-md img {
+    max-width: 100%;
+}
 
