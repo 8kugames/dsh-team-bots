@@ -63,7 +63,8 @@ export async function handleCommand(service, rawText, ctx = null) {
   }
 
   // DSHBOTS-249 固定指令：/ 前缀一律不进对话链路，未知 /xxx 回简短帮助提示。
-  if (body.startsWith('/')) return handleFixedCommand(service, body, ctx)
+  const command = normalizeCommandPrefix(body)
+  if (command.startsWith('/')) return handleFixedCommand(service, command, ctx)
 
   // DSHBOTS-215 问答回路：微信答复/审批按 token 路由回对应条目，绝不进普通对话。
   // 仅在 service 实现了对应方法时拦截（测试桩未实现时按普通文本处理）。
@@ -101,6 +102,17 @@ export async function handleCommand(service, rawText, ctx = null) {
     return needPickProject(service.stateView().projects ?? [])
   }
   return ''
+}
+
+/**
+ * 固定指令前缀归一化：中文输入法常把指令里的 "/" 与 "?" 打成全角（／ 与 ？），
+ * 不归一化时 "/？" 匹配不上固定指令集，会被当成普通文本发进对话链路，用户看到的
+ * 却是「没有这个指令」。只改指令符号本身，正文原样保留。
+ */
+function normalizeCommandPrefix(body) {
+  return String(body ?? '')
+    .replace(/^\uFF0F/, '/')
+    .replace(/^\/([a-z?？]+)/i, (matched, verb) => `/${verb.replace(/？/g, '?')}`)
 }
 
 /**

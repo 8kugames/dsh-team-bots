@@ -53,6 +53,17 @@ test('/? 输出固定指令帮助，含七条指令一行一条', async () => {
   }
 })
 
+test('全角指令符号（／ 与 ？）归一化后按半角匹配：/？ 回帮助而不是「没有这个指令」', async () => {
+  for (const body of ['/?', '/？', '／？', '／?']) {
+    const reply = await handleCommand(SERVICE_STUB(), body)
+    assert.ok(reply.includes('可用指令'), `${body} 应回帮助`)
+    assert.ok(!reply.includes('没有这个指令'), `${body} 不应回未知指令提示`)
+  }
+  const service = SERVICE_STUB()
+  await handleCommand(service, '把／首页改成深色模式', ADMIN_CTX)
+  assert.equal(service.chatted?.body, '把／首页改成深色模式', '非指令正文不做全角归一化')
+})
+
 test('/keys 输出项目清单并标注当前绑定', async () => {
   const reply = await handleCommand(SERVICE_STUB(), '/keys', ADMIN_CTX)
   assert.ok(reply.includes('web  Web（当前）'), '绑定项目应带（当前）标注')
