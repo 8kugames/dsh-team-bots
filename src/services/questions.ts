@@ -6,7 +6,7 @@
 // questionTimeoutMs 窗口，窗口内迟到作答经宿主 userQuestions.answer 回投原 agent；其余 abort 立即失效。
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 approvals.js 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
-import { id, jsonParse, nowIso, text as textValue } from '../util.js'
+import { flattenWhitespace, id, jsonParse, nowIso, text as textValue } from '../util.js'
 import { effectiveQuestionTimeoutMs } from '../config.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
@@ -62,26 +62,48 @@ export function ensureQuestionSchema(store) {
 
 // 问题条目清洗：文案统一过密钥掩码（会进群聊与 bot 可见范围），并夹取长度防单条撑爆卡片。
 // intent 只保留 plan-review 的展示字段；未知 intent 一律按通用选项列表渲染（协议允许）。
-function cleanQuestionItem(item) {
+// 文案再过一道单行化：模型工具入参偶发把空格写成 CR（U+000D），渲染器把 CR 当行尾，
+// 一句话会被劈成多段（飞书卡片里「（推荐）」裂成两行）。此处折成单行，落库即干净。
+export function cleanQuestionItem(item) {
   const cleaned: any = {
     id: String(item?.id ?? '').slice(0, 100),
-    question: textValue(item?.question, 4_000),
+    question: textValue(flattenWhitespace(item?.question), 4_000),
   }
-  if (item?.detail) cleaned.detail = textValue(item.detail, 20_000)
-  if (item?.header) cleaned.header = textValue(item.header, 200)
+  if (item?.detail) cleaned.detail = textValue(flattenWhitespace(item.detail), 20_000)
+  if (item?.header) cleaned.header = textValue(flattenWhitespace(item.header), 200)
   if (Array.isArray(item?.options)) {
     cleaned.options = item.options.slice(0, 20).map(option => {
-      const row: any = { label: textValue(option?.label, 200) }
-      if (option?.description) row.description = textValue(option.description, 1_000)
+      const row: any = { label: textValue(flattenWhitespace(option?.label), 200) }
+      if (option?.description) row.description = textValue(flattenWhitespace(option.description), 1_000)
       return row
     })
   }
   if (item?.multiSelect === true) cleaned.multiSelect = true
   if (item?.intent?.kind === 'plan-review') {
-    cleaned.intent = { kind: 'plan-review', approve: textValue(item.intent.approve, 200) }
+    // approve 标签必须与选项 label 同一口径（宿主按「approve ∈ options」校验 intent）。
+    cleaned.intent = { kind: 'plan-review', approve: textValue(flattenWhitespace(item.intent.approve), 200) }
     if (item.intent.callId) cleaned.intent.callId = String(item.intent.callId)
   }
   return cleaned
+}
+
+// 答案条目清洗：selected 是选项 label（与 cleanQuestionItem 同口径，保证前端高亮匹配），
+// custom 是自由文本——同样折成单行，答复回宿主时不再带坏版面。
+export function cleanAnswerItem(answer) {
+  const cleaned: any = { id: String(answer?.id ?? '') }
+  cleaned.selected = (Array.isArray(answer?.selected) ? answer.selected : [])
+    .map(value => flattenWhitespace(value))
+    .filter(Boolean)
+    .slice(0, 20)
+  const custom = answer?.custom ? flattenWhitespace(answer.custom) : ''
+  if (custom) cleaned.custom = custom
+  return cleaned
+}
+
+// 答复批次清洗：{answers:[...]} 结构逐条过 cleanAnswerItem；非批次结构原样返回。
+export function cleanAnswerPayload(answer) {
+  if (!answer || !Array.isArray(answer.answers)) return answer
+  return { ...answer, answers: answer.answers.map(cleanAnswerItem) }
 }
 
 // DSHBOTS-294：该 bot 是否仍有活跃项目语境（成员或总监）。无语境的控制面会话按单聊承接。
@@ -308,7 +330,7 @@ export const questionsMethods = {
       const selected = (Array.isArray(answer?.selected) ? answer.selected : [])
         .map(value => String(value)).filter(Boolean).slice(0, 20)
       const custom = answer?.custom ? String(answer.custom).slice(0, 2_000) : undefined
-      return { id: String(item.id), selected, ...(custom ? { custom } : {}) }
+      return cleanAnswerItem({ id: String(item.id), selected, custom })
     })
     const decidedBy = `${actor.type}:${actor.id}`
     const hostAnswer = { answers }
@@ -327,8 +349,10 @@ export const questionsMethods = {
       // 视图缺该字段时，提交作答后的服务端终态覆盖乐观对象即丢键，下一轮旧 pending
       // 轮询快照会把「已回答」卡闪回问题卡；提问卡 pill 的作答时间戳也读它。
       ...(row.status === 'answered' ? { answered_at: row.ended_at } : {}),
-      questions: jsonParse(row.questions, []),
-      answer: jsonParse(row.answer, null),
+      // 存量行可能带 CR 坏空白（模型工具入参污染，落库前的老数据）：读出时再洗一遍，
+      // 历史提问卡与答复展示同步恢复单行版面；洗后 label 与 selected 仍是同一口径。
+      questions: jsonParse(row.questions, []).map(cleanQuestionItem),
+      answer: cleanAnswerPayload(jsonParse(row.answer, null)),
       botName: bot?.name ?? 'Bot',
       // 会话归属（DSHBOTS-218）：单聊提问没有项目，UI 据此显示来源列并决定跳转目标。
       scope: row.project_id ? 'project' : 'solo',

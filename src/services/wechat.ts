@@ -7,8 +7,9 @@ import { createRequire } from 'node:module'
 import { effectiveWechatEnabled } from '../config.js'
 import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
-import { jsonParse, nowIso, parseMentions } from '../util.js'
+import { flattenWhitespace, jsonParse, nowIso, parseMentions } from '../util.js'
 import { answerFailed, answerReceipt, approvalCard, questionCard, wechatToken } from '../wechat/format.js'
+import { cleanQuestionItem } from './questions.js'
 import { recordWechatTriggerRow } from './wechat-trigger-schema.js'
 
 // 微信登录二维码：服务端直接出 SVG，UI 注入即可，无需前端 QR 库（vendor/qrcode，MIT）。
@@ -345,7 +346,8 @@ export const wechatMethods = {
   async wechatAnswerQuestion(token, body, fallbackKey = null) {
     const row = this.pendingWechatRow('questions', token, fallbackKey)
     if (!row) return answerFailed(token, '没有匹配的待答提问（可能已作答或已过期）')
-    const items = jsonParse(row.questions, [])
+    // 选项 label 与工作台同口径（单行化）：存量行带 CR 时也能按清洗后的文字命中。
+    const items = jsonParse(row.questions, []).map(cleanQuestionItem)
     const parsed = parseWechatAnswers(items, body)
     if (parsed.error) return answerFailed(token, parsed.error)
     this.settleQuestion(row.id, 'answered', { answers: parsed.answers }, 'user:wechat')
@@ -427,7 +429,7 @@ function parseWechatAnswers(items, body) {
       answers.push({ id: String(item.id), selected })
       parts.push(`Q${i + 1}: ${selected.join('、')}`)
     } else {
-      answers.push({ id: String(item.id), selected: [], ...(raw ? { custom: raw } : {}) })
+      answers.push({ id: String(item.id), selected: [], ...(raw ? { custom: flattenWhitespace(raw) } : {}) })
       parts.push(`Q${i + 1}: ${raw || '(未填)'}`)
     }
   }

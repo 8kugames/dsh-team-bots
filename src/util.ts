@@ -24,6 +24,23 @@ export const projectKey = (value) => String(value ?? '')
 
 export const text = (value, max = 20_000) => String(value ?? '').trim().slice(0, max)
 
+/**
+ * 去 CR：CRLF 归一为 LF，其余孤立 CR 直接丢弃。
+ * 模型工具入参偶发把空格写成 CR（U+000D）——渲染器按行尾处理，一句话会被劈成多段
+ * （飞书卡片 markdown、聊天气泡都把 CR 当换行）。
+ */
+export const stripCarriageReturns = (value) => String(value ?? '')
+  .replace(/\r\n/g, '\n')
+  .replace(/\r/g, '')
+
+/**
+ * 单行化：去 CR 后把其余空白（空格/Tab/换行）折叠成单个半角空格并去首尾空白。
+ * 提问、选项这类单行字段统一过这一道，避免残留空白把版面撑散。
+ */
+export const flattenWhitespace = (value) => stripCarriageReturns(value)
+  .replace(/\s+/g, ' ')
+  .trim()
+
 export const jsonParse = (value, fallback) => {
   if (value === null || value === undefined || value === '') return fallback
   try { return JSON.parse(value) } catch { return fallback }

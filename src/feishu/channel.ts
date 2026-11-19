@@ -1,5 +1,6 @@
 import { outboundChunks, failureText, welcomeAdmin } from './format.js'
 import { handleCommand, NON_OWNER_NOTICE } from './commands.js'
+import { stripCarriageReturns } from '../util.js'
 
 /** 出站最大尝试次数（含首次）：达到上限废弃，永不补发（与微信通道同治理口径）。 */
 const OUTBOX_MAX_ATTEMPTS = 3
@@ -395,7 +396,8 @@ export class FeishuChannel {
   async sendFeishu(messageId, text, idempotencyKey) {
     if (!messageId) throw new Error('缺少飞书回复目标消息 id')
     if (!idempotencyKey) throw new Error('缺少幂等键（应为 outbox 行 id）')
-    const chunks = outboundChunks(text)
+    // 出站边界去 CR：模型文本偶发带 CR，飞书按行尾渲染会把一句话劈成多段。
+    const chunks = outboundChunks(stripCarriageReturns(text))
     for (let index = 0; index < chunks.length; index++) {
       const key = index > 0 ? `${idempotencyKey}#${index}` : idempotencyKey
       for (let attempt = 1; ; attempt++) {

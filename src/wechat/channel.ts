@@ -5,6 +5,7 @@ import { TencentIlinkTransport } from '../../vendor/wechat-ilink/index.js'
 import { handleCommand, isRetryable, outboundChunks, WechatBusinessError, WechatIlinkError } from './commands.js'
 import { batchDigest, failureText, welcomeAdmin } from './format.js'
 import { AppError } from '../errors.js'
+import { stripCarriageReturns } from '../util.js'
 
 const { version: PLUGIN_VERSION } = createRequire(import.meta.url)('../../package.json')
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000]
@@ -455,7 +456,8 @@ export class WechatChannel {
     const peer = this.peers.get(peerId)
     // 尚无会话凭证属于可恢复状态（等对方发来消息即可），重试有意义
     if (!peer?.contextToken) throw new Error('尚无该联系人的会话凭证，等待对方发来消息')
-    const body = String(text ?? '').trim()
+    // 出站边界去 CR：模型文本偶发带 CR，按行尾渲染会把一句话劈成多段。
+    const body = stripCarriageReturns(text).trim()
     if (!body) return
     // 拒发观测上下文：桥接 fetch 记录 ret!=0，vendor 抛错后由 attachRejectDetail 拼进文案
     await ilinkRejectSlot.run({}, async () => {
