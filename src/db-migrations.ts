@@ -40,7 +40,8 @@ export const RUNS_DDL = `
   usage_output INTEGER NOT NULL DEFAULT 0,
   usage_cost REAL,
   cancel_requested INTEGER NOT NULL DEFAULT 0,
-  merged_messages TEXT
+  merged_messages TEXT,
+  image_offload INTEGER NOT NULL DEFAULT 0
 `
 
 export const RUNS_INDEXES = `
@@ -209,6 +210,9 @@ function migrateRuns(db) {
   addColumn(db, 'runs', 'model_effort', 'TEXT')
   // 入站消息合批（DSHBOTS-231）：领取时同通道排队消息被合并进来，存被合并消息的 id 列表（JSON）。
   addColumn(db, 'runs', 'merged_messages', 'TEXT')
+  // 续答运行（DSHBOTS-112 闭环）：转写写回后同消息再排一次 chat/solo_chat，
+  // 不下发二进制图（首轮已因主模型无视觉失败），转写正文由提示词近期窗口带入。
+  addColumn(db, 'runs', 'image_offload', "INTEGER NOT NULL DEFAULT 0")
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
 }
 

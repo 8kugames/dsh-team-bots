@@ -1,8 +1,9 @@
 // src/services/vision-proxy.js —— 读图代理域（DSHBOTS-112）
 // Bot 主模型无视觉能力却收到带图消息时，自动派生 kind='vision'、mode='read' 的
 // 只读转写运行：用配置的代理模型（visionProxyProvider/visionProxyModel）把图片
-// 转写成中文结构化文本，以「[图片转写] …」system 消息写回原消息所在会话，
-// Bot 下一轮上下文即可见。原对话不受派生阻塞：原 chat 运行照常带图下发，
+// 转写成中文结构化文本，以「[图片转写] …」system 消息写回原消息所在会话，并给同
+// 一条消息派生续答运行（image_offload=1，不再下发二进制图），主模型当轮即可基于
+// 转写正文回答用户。原对话不受派生阻塞：原 chat 运行照常带图下发，
 // 宿主仍按现状报「模型不支持图片」（不静默）；转写失败或代理未配置时同样
 // 只留审计（vision.fallback），不重试、不刷额度。
 // 本文件是纯函数模块（手法同 message-images.js）：service 实例由调用方显式传入，
@@ -150,9 +151,56 @@ export function maybeSpawnVisionAfterFailure(service, { run, bot, error }) {
   }
 }
 
+// 续答派生（闭环）：转写写回后同一条消息再排一次 chat/solo_chat 运行，让主模型基于
+// 转写正文回答用户。首发运行已因主模型无视觉失败，其幂等键（chat:<msg>:<bot>）会被
+// enqueueChatRun 的既有行查询挡下，所以续答自带新键；image_offload=1 让 startRun
+// 跳过二进制附图，转写正文由提示词近期窗口带入。
+export function spawnVisionFollowupRun(service, { run, bot, message }) {
+  if (!bot || !message?.id) return null
+  const isSolo = !run?.project_id
+  const idempotencyKey = isSolo
+    ? `solo_chat:${message.id}:vision`
+    : `chat:${message.id}:${bot.id}:vision`
+  const existing = service.store.get('SELECT * FROM runs WHERE idempotency_key = ?', idempotencyKey)
+  if (existing) return existing
+  // 沿用首发运行的 trigger_type：通道直达（微信/飞书）的回推语义不能丢。
+  const source = service.store.get(
+    `SELECT trigger_type FROM runs WHERE trigger_ref = ? AND bot_id = ?
+       AND kind IN ('chat', 'solo_chat') ORDER BY queued_at DESC LIMIT 1`,
+    message.id, bot.id,
+  )
+  const runId = id('run')
+  const createdAt = nowIso()
+  try {
+    service.store.transaction(() => {
+      service.store.run(
+        `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref,
+           status, attempt, idempotency_key, image_offload, queued_at)
+         VALUES (?, ?, ?, ?, 'read', ?, ?, 'queued', 1, ?, 1, ?)`,
+        runId, run?.project_id ?? null, bot.id, isSolo ? 'solo_chat' : 'chat',
+        source?.trigger_type ?? 'mention', message.id, idempotencyKey, createdAt,
+      )
+      service.runChatStore({ id: runId, project_id: run?.project_id ?? null, bot_id: bot.id }).run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), runId, 'queued',
+        `转写完成，续答消息 ${message.id}（本轮不下发二进制图）`,
+        createdAt,
+      )
+    })
+  } catch (insertError: any) {
+    if (String(insertError).includes('UNIQUE')) {
+      return service.store.get('SELECT * FROM runs WHERE idempotency_key = ?', idempotencyKey) ?? null
+    }
+    throw insertError
+  }
+  service.logger?.info?.('dsh-team: vision followup run %s queued for message %s', runId, message.id)
+  void service.tick()
+  return service.store.get('SELECT * FROM runs WHERE id = ?', runId)
+}
+
 // 转写运行收尾（runs.finishRun 的 kind='vision' 分支）：成功且产出非空 → 以
 // 「[图片转写] …」system 消息写回原消息所在会话（群聊挂 reply_to 原消息，单聊
-// 落 solo_messages），并审计 vision.transcribe；失败或空产出 → 只审计
+// 落 solo_messages），并审计 vision.transcribe，随后派生续答运行；失败或空产出 → 只审计
 // vision.fallback（原对话已按现状报过「模型不支持图片」，这里不再插消息、不重试）。
 export async function completeVisionRun(service, { run, bot, status, output, error }) {
   const actor = { type: 'bot', id: bot?.id }
@@ -188,6 +236,13 @@ export async function completeVisionRun(service, { run, bot, status, output, err
     service.audit(actor, 'vision.transcribe', 'bot', bot.id, {
       runId: run.id, messageId: message?.id ?? run.trigger_ref,
     })
+    // 闭环：转写已写回，同一条消息再排一次续答运行，让主模型基于转写正文回答用户
+    // （首发运行已因主模型无视觉失败，不会自己产出正文）。派生失败只告警，不拖累收尾。
+    try {
+      if (message) spawnVisionFollowupRun(service, { run, bot, message })
+    } catch (followupError: any) {
+      service.logger?.warn?.('dsh-team: vision followup spawn failed: %s', followupError?.message ?? followupError)
+    }
     return
   }
   service.audit(actor, 'vision.fallback', 'bot', bot.id, {

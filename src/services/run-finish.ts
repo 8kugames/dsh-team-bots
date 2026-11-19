@@ -19,7 +19,7 @@ import {
   transientBackoffMs,
 } from './backoff.js'
 import { ensureAttentionSchema, normalizeAttention } from './attention-schema.js'
-import { completeVisionRun, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
+import { completeVisionRun, isImageUnsupportedError, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
 import { chatReply } from '../wechat/format.js'
 
 // ── 失败终态白名单分类（DSHBOTS-267）──────────────────────────────────────
@@ -42,6 +42,8 @@ const FAILURE_CATEGORY_NOTICES = {
   stalled: { label: '停滞', summary: '运行长时间无进展，已被看门狗中止。' },
   network: { label: '网络', summary: '网络瞬态失败，已按退避策略自动重试。' },
   blocked: { label: '会话受阻', summary: '宿主拒绝执行该会话（可能已被归档），未产生任何模型输出。' },
+  // DSHBOTS-112：主模型无视觉导致带图消息失败，与「未知」区分——读图代理已接手转写。
+  no_vision: { label: '模型无视觉', summary: '主模型不支持图片输入，已转交读图代理转写。' },
   internal: { label: '内部错误', summary: '服务内部错误。' },
   unknown: { label: '未知', summary: '运行失败，完整原因见运行日志。' },
 }
@@ -49,6 +51,7 @@ export function classifyFailure(error) {
   const raw = `${String(error?.code ?? '')} ${String(error?.message ?? '')}`
   if (isQuotaExhausted(error)) return FAILURE_CATEGORY_NOTICES.quota
   if (isRateLimitError(error)) return FAILURE_CATEGORY_NOTICES.rate_limited
+  if (isImageUnsupportedError(error)) return FAILURE_CATEGORY_NOTICES.no_vision
   if (SANDBOX_DENIED_PATTERN.test(raw)) return FAILURE_CATEGORY_NOTICES.sandbox_denied
   if (error?.code === 'RUN_TIMEOUT') return FAILURE_CATEGORY_NOTICES.run_timeout
   if (error?.code === 'RUN_STALLED') return FAILURE_CATEGORY_NOTICES.stalled

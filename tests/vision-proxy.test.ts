@@ -17,6 +17,7 @@ import {
   considerVisionProxy,
   spawnVisionProxyRun,
   maybeSpawnVisionAfterFailure,
+  spawnVisionFollowupRun,
 } from '../src/services/vision-proxy.js'
 
 // 1x1 红色 PNG（70 字节）：走真实图片校验/落库链路。
@@ -276,7 +277,7 @@ test('能力声明缺失（modalities undefined）：主动预判不派生，失
     )
     assert.ok(failureNotice, '失败消息仍落群聊可见（DSHBOTS-267 白名单分类文案）')
     // DSHBOTS-267：只透出类别+摘要，原始错误串（含模型名）不得透传。
-    assert.match(failureNotice.body, /运行失败（未知）：/)
+    assert.match(failureNotice.body, /运行失败（模型无视觉）：/)
     assert.doesNotMatch(failureNotice.body, /does not support image input/)
   } finally { await t.close() }
 })
@@ -387,5 +388,61 @@ test('转写提示词：中文结构化要求 + 原文引用 + 禁工具，群�
     })
     assert.match(soloPrompt, /one-on-one conversation/, '单聊 header 兜底')
     assert.match(soloPrompt, /Builder \(fake\/model-a\)/, '标注被代理的主模型')
+  } finally { await t.close() }
+})
+
+test('全链路闭环（群聊）：转写成功后派生续答运行，主模型当轮拿到转写正文', async () => {
+  const t = await setup({ runtime: new ModalitiesRuntime(['text']) })
+  try {
+    const sent = await t.service.sendMessage(t.project.id, '@Builder 看看这张截图', t.actor, null, imageInput())
+    // 争用口径 A：chat 运行置终态腾槽后由真实主动入口派生。
+    settleActiveRuns(t.store)
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId, project_id: t.project.id }, messageStore: t.service.groupChatStore(t.project.id) })
+    const vision = await waitFor(() => t.visionRuns()[0])
+    await t.service.finishRun({
+      runId: vision.id,
+      status: 'succeeded',
+      output: '图片 1\n【类型】界面截图\n【文字】ERROR at src/index.ts:12',
+      error: null,
+    } as any)
+    const followup = t.store.get(
+      "SELECT * FROM runs WHERE kind = 'chat' AND trigger_ref = ? AND image_offload = 1",
+      sent.messageId,
+    )
+    assert.ok(followup, '转写成功后派生续答运行')
+    assert.equal(followup.idempotency_key, `chat:${sent.messageId}:${t.dev.id}:vision`)
+    assert.equal(followup.mode, 'read')
+    assert.equal(followup.project_id, t.project.id)
+    assert.ok(followup.trigger_type, '沿用首发 trigger_type')
+    // 幂等：重复派生只留一条。
+    const again = spawnVisionFollowupRun(t.service, { run: vision, bot: t.dev, message: { id: sent.messageId } } as any)
+    assert.equal(again.id, followup.id, '续答幂等')
+    assert.equal(
+      t.store.get("SELECT COUNT(*) AS n FROM runs WHERE idempotency_key = ?", followup.idempotency_key).n,
+      1,
+    )
+    // 续答提示词同时带原消息正文与转写正文（近期窗口）。
+    const chatMessage = t.service.groupChatStore(t.project.id).get('SELECT * FROM messages WHERE id = ?', sent.messageId)
+    const prompt = t.promptRuntime.promptFor({
+      run: followup, bot: t.dev, project: t.project, task: null, chatMessage, sessionId: 's-followup-1',
+    })
+    assert.ok(prompt.includes('看看这张截图'), '携带原消息正文')
+    assert.ok(prompt.includes('【类型】界面截图'), '携带转写正文')
+  } finally { await t.close() }
+})
+
+test('全链路闭环（单聊）：派生 solo_chat 续答运行', async () => {
+  const t = await setup({ runtime: new ModalitiesRuntime(['text'], { auto: true }) })
+  try {
+    const sent = await t.service.sendSoloMessage(t.dev.id, '这张图是什么', t.actor, imageInput())
+    await waitForBotIdle(t.store)
+    await considerVisionProxy(t.service, { bot: t.dev, message: { id: sent.messageId }, messageStore: t.service.soloChatStore(t.dev.id) })
+    const followup = await waitFor(() => t.store.get(
+      "SELECT * FROM runs WHERE kind = 'solo_chat' AND trigger_ref = ? AND image_offload = 1",
+      sent.messageId,
+    ))
+    assert.equal(followup.project_id, null, '单聊续答不带项目')
+    assert.equal(followup.bot_id, t.dev.id)
+    assert.equal(followup.idempotency_key, `solo_chat:${sent.messageId}:vision`)
   } finally { await t.close() }
 })

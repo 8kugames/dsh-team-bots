@@ -820,7 +820,7 @@ export const sessionMethods = {
       this.sessionCreates.delete(key)
     }
   },
-  async startRun({ run, bot, project, task, chatMessage, extraMessages, sessionKind }: { run: { id: string; kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number; model_provider?: string; model_model?: string; model_effort?: string }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; timeBudgetMinutes?: number; time_budget_minutes?: number }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; extraMessages?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }[]; sessionKind: string }) {
+  async startRun({ run, bot, project, task, chatMessage, extraMessages, sessionKind }: { run: { id: string; kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number; model_provider?: string; model_model?: string; model_effort?: string; image_offload?: number }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; timeBudgetMinutes?: number; time_budget_minutes?: number }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; extraMessages?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }[]; sessionKind: string }) {
     if (!this.ctx?.sessionController) throw new AppError('DSH_UNAVAILABLE', 'DSH Session 服务不可用')
     // 备用模型覆盖：派生运行在 runs 行里带 model_* 三列，指明这条运行改用备用模型下发。
     // 不带 override 的运行照旧走 Bot 主模型——「运行结束自动回退」就靠这条默认路径实现。
@@ -888,9 +888,12 @@ export const sessionMethods = {
     )
     try {
       // 聊天附图：首条 prompt 一并带上 image 分片，模型这轮就能看到用户发的图。
-      // 宿主会把不能吃图片的模型降级成占位文本，插件不判模型能力。
+      // 宿主对吃不了图片的模型直接抛 attachment-invalid（不降级），所以续答运行
+      // （image_offload=1）跳过附图，转写正文已由提示词近期窗口带入。
       // 附图随消息住在聊天库里（chat-db-split Phase 1）。
-      const imageParts = chatMessage?.id ? imageContentPartsForMessage(pending.chatStore ?? this.store, chatMessage.id) : []
+      const imageParts = chatMessage?.id && !run.image_offload
+        ? imageContentPartsForMessage(pending.chatStore ?? this.store, chatMessage.id)
+        : []
       await this.ctx.sessionController.prompt({
         requestId: randomUUID(),
         sessionId,

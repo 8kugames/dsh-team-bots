@@ -4,6 +4,36 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.105
+
+### 中文
+
+**读图代理闭环（DSHBOTS-112）**
+
+- **无视觉主模型也能回答带图消息**：主模型不支持图片导致首轮失败时，读图代理转写图片并写回会话，随后给同一条消息自动派生续答运行（runs.image_offload=1，不再下发二进制图），主模型当轮即可基于转写正文回答用户；续答沿用首发运行的通道 trigger_type，幂等键防重派。
+- **失败分类新增「模型无视觉」**：与「未知」失败区分，通知里说明已转交读图代理转写。
+
+**界面与通道**
+
+- **markdown 文件预览渲染展示**：.md/.markdown 文件走聊天气泡同款 richText 消毒管线渲染；聊天消息里的本地文件链接（普通链接也改写）点击按扩展分流进图片查看器或文本预览弹层。
+- **飞书出站全面改 markdown 卡片**：出站一律走 markdown 卡片并改用 JSON 2.0 结构（标题/表格等标准 markdown 才渲染）；提问卡去掉 markdown 列表记号、选项按「1:」编号并分段，防整卡被重编号。
+- **微信指令归一化**：固定指令前缀归一化全角符号，中文输入法的 `/？` 与 `／？` 按半角匹配。
+- **提问答复文案去 CR**：提问与答复文案去掉 CR 坏空白，飞书卡片与答复气泡不再被劈行。
+
+### English
+
+**Vision proxy closed loop (DSHBOTS-112)**
+
+- **Vision-less main models can now answer image messages**: when the primary model rejects image input, the vision proxy transcribes the image into the conversation and automatically derives a follow-up run for the same message (runs.image_offload=1, no binary re-send), so the main model answers from the transcription in the same turn; the follow-up keeps the original channel trigger_type and is idempotency-keyed.
+- **A new "no vision" failure category** distinguishes this from unknown failures, noting that the vision proxy took over transcription.
+
+**UI and channels**
+
+- **Markdown file preview renders**: .md/.markdown files go through the same richText sanitization pipeline as chat bubbles; local file links inside chat messages (plain links included) route by extension to the image viewer or text preview modal.
+- **Feishu goes all-in on markdown cards**: outbound cards use the JSON 2.0 structure so standard markdown (headings/tables) renders; question cards drop list markers and number options "1:"-style with paragraph breaks to prevent re-numbering.
+- **WeChat command normalization**: fixed command prefixes normalize full-width symbols, so `/？` and `／？` from Chinese IMEs match the half-width forms.
+- **CR cleanup for Q&A text**: question and answer text strips CR whitespace, so Feishu cards and reply bubbles no longer break mid-line.
+
 ## v0.3.98
 
 ### 中文

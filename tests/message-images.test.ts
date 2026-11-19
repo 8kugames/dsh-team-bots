@@ -344,3 +344,49 @@ test('纯图片消息：正文可为空，但正文与图片不能同时为空',
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('image_offload=1 的运行不下发图片分片（续答运行口径）', async () => {
+  const { root, store, service, config, director, project } = await setup()
+  try {
+    const sent = await service.sendMessage(project.id, '这张图里有啥', actor(), null, [
+      { mediaType: 'image/png', data: PNG_BASE64 },
+    ])
+    const chatMessage = service.groupChatStore(project.id).get('SELECT * FROM messages WHERE id = ?', sent.messageId)
+    const calls = []
+    const runtime = new DshRuntime({
+      ctx: {
+        sessionController: {
+          create: async () => ({ sessionId: 'sess-img-offload' }),
+          resolveAgent: async () => ({ agent: { session: {} } }),
+          selectModel: async () => ({ selected: {} }),
+          prompt: async (arg) => { calls.push(arg) },
+        },
+      },
+      config,
+      store,
+      logger: { info() {}, warn() {}, error() {} },
+      chatStores: { forRun: run => service.runChatStore(run) },
+    })
+    const bot = store.get('SELECT * FROM bots WHERE id = ?', director.id)
+    // 争用口径 A：等 sendMessage 排上的 chat 运行收尾腾出 bot 槽再播种本用例运行。
+    const drainDeadline = Date.now() + 2000
+    while (Date.now() < drainDeadline) {
+      const active = Number(store.get("SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued','running')")?.n ?? 0)
+      if (active === 0) break
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, image_offload, queued_at)
+       VALUES ('run-img-offload', ?, ?, 'chat', 'read', 'chat_message', ?, 'running', 1, 'img-offload-key', 1, ?)`,
+      project.id, director.id, sent.messageId, new Date().toISOString(),
+    )
+    const run = store.get('SELECT * FROM runs WHERE id = ?', 'run-img-offload')
+    await runtime.startRun({ run, bot, project, task: null, chatMessage, sessionKind: 'project' })
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].content.length, 1, '续答运行不带 image 分片')
+    assert.equal(calls[0].content[0].type, 'text')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
