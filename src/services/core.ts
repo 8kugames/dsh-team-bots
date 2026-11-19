@@ -458,7 +458,7 @@ export const coreMethods = {
    * 幂等——两套 outbox 是彼此独立的库与唯一索引，键空间互不干扰。
    * 返回逐通道结果 [{channel, ok, error}]，供调用方判断是否至少推成功一路。
    */
-  channelNotify(text, opts = {}) {
+  channelNotify(text, opts: any = {}) {
     const targets = [
       { name: 'wechat', channel: this.wechat },
       { name: 'feishu', channel: this.feishu },
@@ -467,7 +467,8 @@ export const coreMethods = {
     for (const { name, channel } of targets) {
       if (!channel || typeof channel.notify !== 'function') continue
       try {
-        channel.notify(text, opts)
+        // opts.texts 给逐通道正文（飞书 markdown 卡片 / 微信纯文本镜像），缺省共用同一正文。
+        channel.notify(opts.texts?.[name] ?? text, opts)
         results.push({ channel: name, ok: true, error: null })
       } catch (error: any) {
         this.logger.warn?.('dsh-team: %s 通道推送失败（其他通道不受影响）: %s', name, error?.message ?? error)

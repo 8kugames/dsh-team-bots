@@ -9,6 +9,7 @@ import { AppError, conflict } from '../errors.js'
 import { WechatIlinkError } from '../wechat/commands.js'
 import { flattenWhitespace, jsonParse, nowIso, parseMentions } from '../util.js'
 import { answerFailed, answerReceipt, approvalCard, questionCard, wechatToken } from '../wechat/format.js'
+import { approvalCard as feishuApprovalCard, questionCard as feishuQuestionCard } from '../feishu/format.js'
 import { cleanQuestionItem } from './questions.js'
 import { recordWechatTriggerRow } from './wechat-trigger-schema.js'
 
@@ -244,9 +245,16 @@ export const wechatMethods = {
    *  （各通道 outbox 库彼此独立，同键在两套库里各自幂等，互不干扰）。
    *  DSHBOTS-326：出站经 channelNotify 扇出到微信与飞书，单通道失败不阻断另一通道。 */
   wechatQuestion(project, row, items) {
+    const token = wechatToken(row.id)
+    const projectName = project.name || project.key
+    const botName = row.bot_name ?? 'Bot'
     const results = this.channelNotify?.(
-      questionCard(project.name || project.key, row.bot_name ?? 'Bot', items, wechatToken(row.id)),
-      { receiptKey: `question:${row.id}` },
+      questionCard(projectName, botName, items, token),
+      {
+        receiptKey: `question:${row.id}`,
+        // 飞书原生渲染 markdown：给 markdown 卡片；微信仍走纯文本镜像（窄屏、字数受限）。
+        texts: { feishu: feishuQuestionCard(projectName, botName, items, token) },
+      },
     ) ?? []
     return results.some(result => result.ok)
   },
@@ -255,9 +263,15 @@ export const wechatMethods = {
    *  幂等收据键（A3/DSHBOTS-323）：approval:<row.id>（各通道 outbox 库内各自幂等）。
    *  DSHBOTS-326：出站经 channelNotify 扇出，单通道失败只留痕不阻断另一通道。 */
   wechatApproval(project, row) {
+    const token = wechatToken(row.id)
+    const projectName = project.name || project.key
+    const botName = row.bot_name ?? 'Bot'
     const results = this.channelNotify?.(
-      approvalCard(project.name || project.key, row.bot_name ?? 'Bot', row.tool_name, row.reason, wechatToken(row.id)),
-      { receiptKey: `approval:${row.id}` },
+      approvalCard(projectName, botName, row.tool_name, row.reason, token),
+      {
+        receiptKey: `approval:${row.id}`,
+        texts: { feishu: feishuApprovalCard(projectName, botName, row.tool_name, row.reason, token) },
+      },
     ) ?? []
     return results.some(result => result.ok)
   },

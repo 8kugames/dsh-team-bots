@@ -73,7 +73,9 @@ test('通道分发：两通道都启用时同一事件两边各收一条（提�
     assert.equal(service.wechatQuestion(project, { id: 'qstABC123XYZ', bot_name: director.name }, ITEMS), true)
     assert.equal(wechatPushed.length, 1, '微信通道收到提问')
     assert.equal(feishuPushed.length, 1, '飞书通道收到同一提问')
-    assert.equal(wechatPushed[0].text, feishuPushed[0].text, '两通道正文一致')
+    // 同一事件两边各收一条，正文按通道排版：微信纯文本镜像，飞书 markdown 卡片（飞书原生渲染 markdown）。
+    assert.ok(wechatPushed[0].text.startsWith('【提问】') && !wechatPushed[0].text.includes('**'), '微信正文是纯文本镜像')
+    assert.ok(feishuPushed[0].text.startsWith('**【提问】') && feishuPushed[0].text.includes('- 1. 方案一'), '飞书正文是 markdown 卡片')
     assert.equal(wechatPushed[0].opts.receiptKey, 'question:qstABC123XYZ')
     assert.equal(feishuPushed[0].opts.receiptKey, 'question:qstABC123XYZ', '同一收据键两通道各自幂等')
 

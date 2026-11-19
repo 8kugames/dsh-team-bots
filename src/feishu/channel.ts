@@ -132,17 +132,17 @@ function sdkLogger(log: any, secret: string) {
   }
 }
 
-/** 出站载荷：含 markdown 记号走交互卡片（飞书卡片 markdown 元素原生渲染），纯文本走 text 消息。 */
-function outboundPayload(text) {
-  const body = String(text ?? '')
-  if (/[*#`_]|\n\s*[-*]\s|\[[^\]]+\]\(/.test(body)) {
-    const card = {
-      config: { wide_screen_mode: true },
-      elements: [{ tag: 'markdown', content: body }],
-    }
-    return { msgType: 'interactive', content: JSON.stringify(card) }
+/**
+ * 出站载荷：一律走交互卡片的富文本（markdown）组件。
+ * 飞书原生渲染 markdown——卡片里单个 \n 即换行，纯文本消息的 \n 是段落间距（版面松）；
+ * 加粗、列表、分割线也只有卡片才渲染得了。文本一律按 markdown 语义解释。
+ */
+export function outboundPayload(text) {
+  const card = {
+    config: { wide_screen_mode: true },
+    elements: [{ tag: 'markdown', content: String(text ?? '') }],
   }
-  return { msgType: 'text', content: JSON.stringify({ text: body }) }
+  return { msgType: 'interactive', content: JSON.stringify(card) }
 }
 
 /** SDK 抛出的错误归一：尽量取出飞书业务错误码（axios 响应体 code / 错误文案里的 code），
