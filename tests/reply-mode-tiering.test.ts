@@ -132,10 +132,10 @@ test('注入面：@本 bot 全文加 [→你] 标记，其他 bot 闲聊折叠 8
       run: t.chatRun, bot: t.botRow, project: t.projectRow, task: null, chatMessage: null, sessionId: 's-tier',
     })
     const chatterLine = prompt.split('\n').find(line => line.includes('msg_chatter'.slice(-6)) || line.includes('director'))
-    assert.ok(chatterLine?.includes('(背景)'), 'bot 闲聊标 (背景)')
+    assert.ok(chatterLine?.includes('(background)'), 'bot 闲聊标 (background)')
     assert.ok(!chatterLine?.includes('B'.repeat(100)), 'bot 闲聊折叠（200 字不得全文出现）')
     const directedLine = prompt.split('\n').find(line => line.includes('D'.repeat(100)))
-    assert.ok(directedLine?.includes('[→你]'), '@本 bot 的消息加 [→你] 标记')
+    assert.ok(directedLine?.includes('[→you]'), '@本 bot 的消息加 [→you] 标记')
     assert.ok(prompt.includes('D'.repeat(200)), '直接信号保持全文（240 上限内）')
   } finally { await t.close() }
 })

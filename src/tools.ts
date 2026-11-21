@@ -366,7 +366,7 @@ export function installTeamTools(ctx, service) {
         kind: { type: 'string', enum: ['bot_update', 'skill'], description: 'bot_update changes your role/instructions; skill publishes a reusable skill proposal' },
         title: { type: 'string', description: 'Short proposal title' },
         rationale: { type: 'string', description: 'Why this change is useful and what evidence supports it' },
-        instructions: { type: 'string', description: 'For bot_update: 进化指令必须是原指令+新增内容的融合稿：保留原有指令全文再写改动，不是全新替换稿也不是增量补丁（保留率低于 60% 会被系统拒绝）' },
+        instructions: { type: 'string', description: 'For bot_update: the evolution instructions must merge the original instructions with the new content — keep the original instructions in full and then append the changes; it is neither a fresh replacement draft nor an incremental patch (retention below 60% is rejected).' },
         slug: { type: 'string', description: 'For skill: lowercase skill slug' },
         name: { type: 'string', description: 'For skill: display name' },
         description: { type: 'string', description: 'For skill: one-line description' },

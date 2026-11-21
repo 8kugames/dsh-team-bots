@@ -345,12 +345,12 @@ test('提示层（D-283）：分级要求注入所有群聊提示，微信运行
     const prompt = groupPrompt(t, chatRunRow(t, runId), msgRow)
     assert.match(
       prompt,
-      /Long replies \(deliveries, progress updates, assessments\) use Markdown headings 结论\/证据\/风险\/下一步/,
-      '分级口径必须进群聊提示：长文用固定小标题',
+      /In a long reply \(delivery, progress update, assessment\), add Markdown headings only where the content genuinely splits into sections/,
+      '分级口径必须进群聊提示：长文仅在天然分节时加小标题',
     )
-    assert.ok(prompt.includes('short replies stay natural'), '短回复保持自然语言豁免必须在场')
+    assert.ok(prompt.includes('never compress them into keyword fragments, telegraphic skeletons or translated-from-English phrasing'), '电报体/翻译腔禁令必须在场')
     assert.ok(
-      prompt.indexOf('结论/证据/风险/下一步') < prompt.indexOf('# Group message'),
+      prompt.indexOf('genuinely splits into sections') < prompt.indexOf('# Group message'),
       '分级要求属静态指令段，必须先于消息变化段（前缀缓存原则）',
     )
     assert.ok(!prompt.includes('WeChat renders no Markdown'), '非微信运行不得注入纯文本版式段')
@@ -368,8 +368,8 @@ test('提示层（D-283）：分级要求注入所有群聊提示，微信运行
 })
 
 test('源码锚点：D-283 chatRunPrompt 分级要求与微信纯文本分支被钉住', () => {
-  assert.ok(PROMPT_SRC.includes('结论/证据/风险/下一步'), '分级段：固定小标题在场')
-  assert.ok(PROMPT_SRC.includes('short replies stay natural'), '分级段：短回复自然语言豁免在场')
+  assert.ok(PROMPT_SRC.includes('genuinely splits into sections'), '分级段：长文天然分节才加小标题在场')
+  assert.ok(PROMPT_SRC.includes('never compress them into keyword fragments, telegraphic skeletons or translated-from-English phrasing'), '分级段：电报体/翻译腔禁令在场')
   assert.ok(PROMPT_SRC.includes("run.trigger_type === 'wechat' ?"), '微信分支门控保留（差异化提示只进微信运行）')
   assert.ok(PROMPT_SRC.includes('WeChat renders no Markdown'), '微信分支：纯文本版式提示在场')
   assert.ok(PROMPT_SRC.includes('never * or #'), '微信分支：明示禁 * # 原样字符')

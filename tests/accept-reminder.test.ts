@@ -97,7 +97,7 @@ test('负责人下次运行：提示词渲染一次性提醒块并清标记，�
       run: t.taskRun, bot: t.devRow, project: t.projectRow, task: taskRow, sessionId: 's1',
     })
     assert.match(first, /Accepted tasks — persist durable conclusions/, '提醒块注入下一次运行')
-    assert.match(first, /RM-1（提醒卡/, '点名任务号与标题')
+    assert.match(first, /RM-1 \(提醒卡, accepted at/, '点名任务号与标题')
     assert.match(first, /team_remember/, '指引沉淀工具')
     assert.equal(JSON.parse(t.store.get('SELECT value FROM settings WHERE key = ?', flagKey(t)).value).length, 0, '渲染即清标记')
     const second = t.promptRuntime.promptFor({
