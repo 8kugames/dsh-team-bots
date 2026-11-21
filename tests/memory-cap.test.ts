@@ -1,10 +1,11 @@
 // tests/memory-cap.test.ts —— DSHBOTS-339/342/360 守门：bot/project 作用域 64 条硬顶与滞回放行。
 // a 触顶拦截文案；b 滞回 55 拒/54 放行；c 作用域独立（team 不限）；d 64 顶下覆盖写与编辑；
-// e approve 触顶拒；f 自动沉淀降级；g 篇幅上限与自动截断；
+// e approve 触顶拒；f 触顶后审查降级；g 篇幅上限与审查截断；
 // h 项目再开容量闸（DSHBOTS-342）；i UTF-16 口径（星面字符算 2 码元）；j bot 触顶+滞回标志置/清；
 // k approve 滞回中间带（55–63 持续拒）；l memoryWriteFromBot 新建路径满顶拒；m 超长存量 topic-only 编辑放行。
 // n 锁定带文案如实（DSHBOTS-355，61 条不得谎称已达上限）；o 触顶态文案回归；p 放行/拒绝边界矩阵；
-// q 锁定带覆盖写放行；r 现场序列回归（64→62→61 全链路）；s logger %s 插值（根 index.ts createLogger）；
+// q 锁定带覆盖写放行；r 现场序列回归（64→62→61 全链路）；u 审查通用知识准入（覆写/日志 topic 降待审/空产出不沉淀）；
+// s logger %s 插值（根 index.ts createLogger）；
 // t 锁定期内审查拒写 → run_events reviewed 事件带拒因（DSHBOTS-360）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -195,27 +196,12 @@ test('e) active 已 64 时 approveMemory 拒绝（conflict 同文案）', async 
   }
 })
 
-test('f) 自动沉淀触顶降级：learnFromTask 不抛不落行、completeMemoryReview applied=0', async () => {
+test('f) 触顶后审查写入全部降级丢弃：completeMemoryReview applied=0', async () => {
   const t = await setup()
   try {
     t.seed('bot', t.director.id, MEMORY_CAP)
     t.seed('project', t.project.id, MEMORY_CAP)
     const now = new Date().toISOString()
-    t.store.run(
-      `INSERT INTO tasks(id, project_id, number, title, status, priority, creator_type, creator_id, created_at, updated_at)
-       VALUES ('task-1', ?, 1, '示例任务', 'done', 'medium', 'user', ?, ?, ?)`,
-      t.project.id, t.service.localUserId, now, now,
-    )
-    const task = t.store.get('SELECT * FROM tasks WHERE id = ?', 'task-1')
-    const output = '这是一段足够长的任务交付输出内容用于触发自动沉淀。'.repeat(2)
-    assert.doesNotThrow(
-      () => t.service.learnFromTask(t.project, t.director, task, output, 'run-auto-1'),
-      'learnFromTask 触顶不得抛',
-    )
-    assert.equal(t.service.memoryActiveCount('bot', t.director.id), MEMORY_CAP, 'bot 域不得落行')
-    assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_CAP, 'project 域不得落行')
-    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE source = 'run:run-auto-1'").n, 0)
-
     t.store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
        VALUES ('run-review-1', ?, ?, 'memory_review', 'read', 'memory_review', 'run-source-1', 'running', 1, 'memory_review:run-source-1', ?)`,
@@ -265,19 +251,8 @@ test('g) 单条记忆篇幅上限 256 字：超长写入被拒，自动沉淀/�
       /256/,
       '同名覆盖写同样受篇幅上限约束',
     )
-    // 自动沉淀：超长输出截断到 256 字内落库。
+    // 审查产出：超长条目截断后仍计入 applied（规则沉淀已下线，截断只发生在审查路径）。
     const now = new Date().toISOString()
-    t.store.run(
-      `INSERT INTO tasks(id, project_id, number, title, status, priority, creator_type, creator_id, created_at, updated_at)
-       VALUES ('task-long', ?, 1, '长输出任务', 'done', 'medium', 'user', ?, ?, ?)`,
-      t.project.id, t.service.localUserId, now, now,
-    )
-    const task = t.store.get('SELECT * FROM tasks WHERE id = ?', 'task-long')
-    t.service.learnFromTask(t.project, t.director, task, '很长的交付输出'.repeat(100), 'run-long-1')
-    const settled = t.store.get("SELECT * FROM memories WHERE source = 'run:run-long-1' AND scope_type = 'bot'")
-    assert.ok(settled, '自动沉淀应落行')
-    assert.ok(settled.content.length <= MEMORY_MAX_CHARS, `沉淀应截断到 ${MEMORY_MAX_CHARS} 字内，实际 ${settled.content.length}`)
-    // 审查产出：超长条目截断后仍计入 applied。
     t.store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
        VALUES ('run-review-long', ?, ?, 'memory_review', 'read', 'memory_review', 'run-long-src', 'running', 1, 'memory_review:run-long-src', ?)`,
@@ -643,6 +618,75 @@ test('t) 锁定期内审查拒写：run_events 的 reviewed 事件带拒因（�
     // 锁定期语义不变：被拒条目不得转 pending 堆积，也不得静默丢弃留痕。
     assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE source = 'run:run-src-lock'").n, 0)
     assert.equal(t.service.memoryActiveCount('bot', t.director.id), MEMORY_CAP)
+  } finally {
+    await t.close()
+  }
+})
+
+test('u) 审查通用知识准入：同主题覆写、日志式 topic 降待审、空产出不沉淀', async () => {
+  const t = await setup()
+  try {
+    // 预置一条概念主题的 active 记忆，审查产出同主题 → 原地覆写（revision+1）。
+    t.service.createMemory({ scopeType: 'bot', scopeId: t.director.id, topic: 'node:sqlite API 陷阱', content: '旧结论：DatabaseSync 用法待核', actor: t.actor })
+    const now = new Date().toISOString()
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES ('run-review-u', ?, ?, 'memory_review', 'read', 'memory_review', 'run-src-u', 'running', 1, 'memory_review:run-src-u', ?)`,
+      t.project.id, t.director.id, now,
+    )
+    const reviewRun = t.store.get('SELECT * FROM runs WHERE id = ?', 'run-review-u')
+    const reviewOutput = JSON.stringify([
+      { scope: 'bot', topic: 'node:sqlite API 陷阱', content: '新结论：DatabaseSync 只有 prepare().run()，没有 db.run()，误用即 TypeError', confidence: 0.9 },
+      { scope: 'bot', topic: '任务 MEM-1 交付', content: '某次交付的过程记录', confidence: 0.9 },
+    ])
+    const result = await t.service.completeMemoryReview(reviewRun, reviewOutput, null)
+    assert.equal(result.updated, 1, '同主题条目应覆写')
+    assert.equal(result.applied, 1, '新主题条目应新建')
+    const overwritten = t.store.get("SELECT * FROM memories WHERE topic = 'node:sqlite API 陷阱' AND status = 'active'")
+    assert.equal(overwritten.content, '新结论：DatabaseSync 只有 prepare().run()，没有 db.run()，误用即 TypeError')
+    assert.equal(overwritten.revision, 2, '覆写应叠 revision')
+    assert.equal(overwritten.confidence, 0.9)
+    const logish = t.store.get("SELECT * FROM memories WHERE topic = '任务 MEM-1 交付'")
+    assert.equal(logish.status, 'pending', '日志式主题（任务号/交付字样）即使高置信也须降待审')
+    assert.equal(t.service.memoryActiveCount('bot', t.director.id), 1, '覆写不占新行，active 仅原 1 条')
+
+    // 空产出/审查失败：不落任何记忆，只留 review_fallback 事件。
+    t.store.run("UPDATE runs SET status = 'succeeded' WHERE id = 'run-review-u'")
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES ('run-review-u2', ?, ?, 'memory_review', 'read', 'memory_review', 'run-src-u2', 'running', 1, 'memory_review:run-src-u2', ?)`,
+      t.project.id, t.director.id, now,
+    )
+    const emptyRun = t.store.get('SELECT * FROM runs WHERE id = ?', 'run-review-u2')
+    const empty = await t.service.completeMemoryReview(emptyRun, '(no json)', new Error('模型超时'))
+    assert.equal(empty.applied, 0)
+    assert.equal(empty.updated ?? 0, 0)
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE source = 'run:run-src-u2'").n, 0, '失败兜底不得落记忆')
+  } finally {
+    await t.close()
+  }
+})
+
+test('v) 覆写权限闸：成员 Bot 经覆写路径不得改写 team 域记忆', async () => {
+  const t = await setup()
+  try {
+    const builder = t.store.get("SELECT * FROM bots WHERE name = 'Builder'")
+    t.service.createMemory({ scopeType: 'team', scopeId: 'team', topic: '团队记忆规范', content: '总监定的团队级规范', actor: t.actor })
+    const now = new Date().toISOString()
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at)
+       VALUES ('run-review-v', ?, ?, 'memory_review', 'read', 'memory_review', 'run-src-v', 'running', 1, 'memory_review:run-src-v', ?)`,
+      t.project.id, builder.id, now,
+    )
+    const reviewRun = t.store.get('SELECT * FROM runs WHERE id = ?', 'run-review-v')
+    const reviewOutput = JSON.stringify([
+      { scope: 'team', topic: '团队记忆规范', content: '成员 Bot 试图覆写的团队规范', confidence: 0.9 },
+    ])
+    const result = await t.service.completeMemoryReview(reviewRun, reviewOutput, null)
+    assert.equal(result.updated, 0, '成员 Bot 不得覆写 team 域')
+    assert.equal(result.rejected, 1, '应按拒写计数留痕')
+    const row = t.store.get("SELECT * FROM memories WHERE topic = '团队记忆规范' AND status = 'active'")
+    assert.equal(row.content, '总监定的团队级规范', '原内容不得被改写')
   } finally {
     await t.close()
   }

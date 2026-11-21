@@ -464,6 +464,22 @@ Transcription requirements:
 Original message from ${chatMessage?.sender_type ?? 'user'}:${chatMessage?.sender_id ?? ''}
 ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
   },
+  // 记忆审查的存量清单：让审查模型看见当前 active 记忆，才能按同主题覆写融合而不是
+  // 追加近义条目（completeMemoryReview 的覆写按 topic 精确匹配）。每域取最近 8 条，
+  // content 截 80 字，总预算 2k。
+  memoryDigest(bot, project) {
+    const scopes = [['bot', bot.id]]
+    if (project) scopes.push(['project', project.id], ['team', 'team'])
+    const lines = []
+    for (const [type, scopeId] of scopes) {
+      const rows = this.store.all(
+        "SELECT topic, content FROM memories WHERE scope_type = ? AND scope_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 8",
+        type, scopeId,
+      )
+      for (const row of rows) lines.push(`- ${row.topic}：${row.content.slice(0, 80)}`)
+    }
+    return lines.length ? lines.join('\n').slice(0, 2_000) : '(none)'
+  },
   promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId }: { run: { kind: string; mode?: string; bot_id?: string; project_id?: string; task_id?: string; trigger_ref?: string; trigger_type?: string; recovery?: number }; bot: { name: string }; project?: { id: string; key: string; name: string; slug: string; production_dir?: string }; task?: { id: string; number: number; title: string; status: string; priority: string; description?: string; write_scopes?: string; deliverables?: string; timeBudgetMinutes?: number; time_budget_minutes?: number; project_id?: string }; chatMessage?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }; extraMessages?: { id?: string; body?: string; sender_type?: string; sender_id?: string; reply_to_id?: string }[]; sessionId?: string }) {
     if (run.kind === 'solo_chat') return this.soloRunPrompt({ run, bot, chatMessage, extraMessages, sessionId })
     if (run.kind === 'vision') return this.visionRunPrompt({ run, bot, project, chatMessage })
@@ -612,14 +628,21 @@ Last failure: ${failure?.error_message ?? 'unknown'}`
         return `${header}
 
 # Memory review for a finished task
-Extract the durable facts worth remembering for later runs. Reply with a JSON array only, no prose and no code fence. Each item:
-{"scope":"bot|project|team","topic":"short label","content":"one durable fact","confidence":0.0-1.0}
+Extract durable, reusable knowledge from this delivery. Reply with a JSON array only, no prose and no code fence. Each item:
+{"scope":"bot|project|team","topic":"short concept label","content":"one durable fact","confidence":0.0-1.0}
 Rules:
-- scope "bot" for your own working habits, "project" for project-level facts and decisions, "team" for rules that apply to every project.
-- Only durable facts: decisions, constraints, conventions, preferences, recurring pitfalls. Skip transient steps, file listings, and anything already stated in the task description.
+- Admission test: write an item only if you can name the concrete mistake a future run would make without it (a wrong API call, a broken assumption, a repeated detour). Delivery narratives, file listings, transient steps, and anything already stated in the task description fail this test.
+- Phrase each fact as trigger → action → consequence, e.g. 「看到 X / 做 Y 时 → 先 Z → 否则 W」. Strip task coordinates: no task ids, run ids, dates, or temporary paths.
+- When a fact holds only under a version, module, or environment, put the boundary inside content as 「适用：…；不适用：…」. A fact without an explicit boundary gets misapplied later.
+- topic is the retrieval key: a short conceptual label reusable in a different task (e.g. 「node:sqlite API 陷阱」). Never put task ids or 「交付」 into topic.
+- Pick scope by who will use it next: this bot's own habits → "bot"; anyone in this project → "project"; true across all projects → "team".
+- Existing memories are listed below. When a new fact refines one, reuse its exact topic so it overwrites that entry in place; do not output a near-duplicate under a new label.
 - Never store secrets, tokens, credentials or personal data.
 - Use confidence 0.5-0.7 for inferences and 0.8-1.0 for facts stated explicitly in the output.
-- Return [] when nothing is worth remembering.
+- Return [] when nothing passes the admission test.
+
+Existing active memories (topic：content, truncated):
+${this.memoryDigest(bot, project)}
 
 Task: ${sourceTask ? `${project.key}-${sourceTask.number} ${sourceTask.title}` : '(unknown task)'}
 Delivery output:
@@ -637,12 +660,17 @@ ${(sourceRun ? (this.chatStoreForRun(sourceRun).get('SELECT output FROM run_payl
 
 # Memory review for a finished chat reply
 Extract the durable facts worth remembering from this exchange. Reply with a JSON array only, no prose and no code fence. Each item:
-{"scope":"bot|project","topic":"short label","content":"one durable fact","confidence":0.0-1.0}
+{"scope":"bot|project","topic":"short concept label","content":"one durable fact","confidence":0.0-1.0}
 Rules:
-- Only durable facts: user preferences, project decisions, constraints, conventions. Skip small talk, transient questions and one-off answers.
+- Admission test: write an item only if you can name the concrete mistake a future reply would make without it (an ignored preference, a repeated wrong assumption). Small talk, transient questions and one-off answers fail this test.
+- When a fact is not universal, put the boundary inside content as 「适用：…；不适用：…」 (version, module, environment).
+- topic is a short conceptual label reusable later; when a new fact refines an existing memory listed below, reuse its exact topic so it overwrites that entry instead of duplicating.
 - Never store secrets, tokens, credentials or personal data.
 - Use confidence 0.5-0.7 for inferences and 0.8-1.0 for facts stated explicitly.
-- Return [] when nothing is worth remembering. Chat replies rarely need more than one entry.
+- Return [] when nothing passes the admission test. Chat replies rarely need more than one entry.
+
+Existing active memories (topic：content, truncated):
+${this.memoryDigest(bot, project)}
 
 User message:
 ${(userMessage?.body ?? '(missing)').slice(0, 2000)}

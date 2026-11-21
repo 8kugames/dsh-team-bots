@@ -239,8 +239,8 @@ export const runFinishMethods = {
       return
     }
     if (run.kind === 'memory_review') {
-      // DSHBOTS-358：记忆审查撞 provider 额度墙时切备用模型重跑同一条审查链，
-      // 规则沉淀兜底留到备用链也失败时再做，避免同一次交付落两份记忆。
+      // DSHBOTS-358：记忆审查撞 provider 额度墙时切备用模型重跑同一条审查链；
+      // 备用链也失败时本次不沉淀（completeMemoryReview 只留痕），交付输出仍在 run_payload。
       const fallback = status === 'failed'
         ? this.spawnModelFallback({ run: refreshed, bot, error })
         : null

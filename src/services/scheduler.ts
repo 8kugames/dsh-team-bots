@@ -226,12 +226,9 @@ export const schedulerMethods = {
       if (!task) return null
       const project = this.projectRow(sourceRun.project_id)
       const bot = this.botRow(sourceRun.bot_id)
-      const reviewRunId = this.enqueueMemoryReview(project, bot, task, sourceRun.id)
-      if (!reviewRunId) {
-        // 记忆审查未启用：按规则沉淀兜底，保证任务交付有沉淀。
-        this.learnFromTask(project, bot, task, this.runOutputOf(sourceRun) ?? '', sourceRun.id)
-      }
-      return reviewRunId
+      // 审查未启用（或撞串行域跳过）时不做规则沉淀兜底：交付输出本身在 run_payload 可经
+      // recall(run_xxx) 取回，机械截断的「任务 KEY-N」式条目过不了记忆准入判据，只会堆积触顶。
+      return this.enqueueMemoryReview(project, bot, task, sourceRun.id)
     }
     if (row.kind === 'solo_chat_run') {
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)

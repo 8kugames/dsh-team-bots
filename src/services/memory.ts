@@ -14,8 +14,8 @@ import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '..
 export const MEMORY_CAP = 64
 // 恢复线（DSHBOTS-360）：触顶后须整理到 ≤MEMORY_COMPACT_TO 条才恢复新增（滞回带宽度 10 条）。
 // 取 MEMORY_CAP−10：滞回带要宽过单轮最大突发，否则一轮自动沉淀就能把刚整理出的余量再次吃满。
-// 10 条恰好覆盖记忆审查单轮最大突发（parseMemoryReview ≤10 条）；规则沉淀（learnFromTask ≤2 条）
-// 与审查同轮发生时会略超，属已知余量收紧，必要时可再放宽。早期取 33（≈CAP/2）等于强制腰斩，过苛：
+// 10 条恰好覆盖记忆审查单轮最大突发（parseMemoryReview ≤10 条）。早期取 33（≈CAP/2）
+// 等于强制腰斩，过苛：
 // 61 条需清 28 条才解锁，恢复线本身成了新的阻塞源。
 export const MEMORY_COMPACT_TO = MEMORY_CAP - 10
 // 单条记忆篇幅上限（owner 补充）：content 不得超过 256 字。
@@ -44,6 +44,14 @@ export function parseMemoryReview(output) {
   } catch {
     return []
   }
+}
+
+// 日志式主题判据：主题里带任务号或交付字样的条目按定义是执行记录而非可复用知识，
+// 一律降为 pending 待审（owner 可改写主题后放行），不得直接 active 进入召回。
+export function isLogTopic(topic) {
+  const value = String(topic ?? '').trim()
+  if (!value) return true
+  return /(任务|交付记录|交付历史)/.test(value) || /[A-Z]{2,}-\d+/.test(value)
 }
 
 export const memoryMethods = {
@@ -110,36 +118,6 @@ export const memoryMethods = {
       comments.length === 0 ? '' : `\nComments:\n${comments.map(item => `- ${item.author_type}:${item.author_id} (${item.created_at}): ${item.body}`).join('\n')}`,
     ].filter(Boolean).join('\n')
   },
-  learnFromTask(project, bot, task, output, runId) {
-    if (!output || output.trim().length < 40) return
-    // 自动沉淀按篇幅预算截断，保证落库单条 ≤ MEMORY_MAX_CHARS 字。
-    const content = maskSecrets(redactSecrets(`${task.title}：${output.trim().slice(0, 900)}`), this.secretEntries()).slice(0, MEMORY_MAX_CHARS)
-    const source = `run:${runId}`
-    const existing = this.store.get("SELECT id FROM memories WHERE source = ? AND scope_type = 'bot' AND scope_id = ?", source, bot.id)
-    if (existing) return
-    // 自动沉淀是尽力而为：触顶（或任何写入失败）只 warn 丢弃，不得炸任务交付 run。
-    const settle = (scopeType, scopeId, topic, confidence) => {
-      try {
-        this.createMemory({
-          scopeType,
-          scopeId,
-          topic,
-          content,
-          source,
-          confidence,
-          createdBy: `bot:${bot.id}`,
-          actor: { type: 'bot', id: bot.id },
-        })
-      } catch (error: any) {
-        this.logger.warn?.('dsh-team: 任务记忆沉淀被拒（%s/%s）：%s', scopeType, scopeId, error?.message ?? error)
-      }
-    }
-    settle('bot', bot.id, `任务 ${project.key}-${task.number}`, 0.7)
-    if (project.owner_bot_id === bot.id) {
-      settle('project', project.id, `${project.key}-${task.number} 交付记录`, 0.6)
-    }
-  },
-
   // 记忆审查：任务交付后由模型抽取可复用事实，置信度不足的进入待审队列。
   memoryReviewEnabled() {
     if (this.config.memoryReview === false) return false
@@ -215,23 +193,20 @@ export const memoryMethods = {
     const sourceRun = sourceRunId ? this.store.get('SELECT * FROM runs WHERE id = ?', sourceRunId) : null
     const items = error ? [] : parseMemoryReview(output)
     if (!items.length) {
-      // 审查失败或模型没给出可用结论时，回退到规则沉淀，保证任务交付不会颗粒无收。
-      if (sourceRun?.task_id) {
-        this.runChatStore(reviewRun).run(
-          'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-          id('evt'), reviewRun.id, 'review_fallback', `记忆审查未产出可用结论，回退规则沉淀：${error?.message ?? '无有效条目'}`, nowIso(),
-        )
-        const project = this.projectRow(reviewRun.project_id)
-        const bot = this.botRow(reviewRun.bot_id)
-        const task = this.taskRow(sourceRun.task_id)
-        this.learnFromTask(project, bot, task, sourceRun.output ?? '', sourceRun.id)
-      }
+      // 审查失败或无可用结论时不做规则沉淀兜底：交付输出本身留在 run_payload，可经 recall(run_xxx)
+      // 取回；机械截断的「任务 KEY-N」式条目过不了准入判据（缺了它下次不会犯具体的错），只会
+      // 挤占召回预算、线性堆积到触顶（memoryCleanupFromBot 的 task 口径即为其存量清扫通道）。
+      this.runChatStore(reviewRun).run(
+        'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        id('evt'), reviewRun.id, 'review_fallback', `记忆审查未产出可用结论，本次不沉淀：${error?.message ?? '无有效条目'}`, nowIso(),
+      )
       return { applied: 0 }
     }
     const project = this.projectRow(reviewRun.project_id)
     const bot = this.botRow(reviewRun.bot_id)
     const source = `run:${sourceRunId}`
     let applied = 0
+    let updated = 0
     let deduped = 0
     // 拒写留痕（DSHBOTS-360）：审查写入被拒时把拒因带内化——写进 run_events，
     // 不再只丢一条系统日志（run_events 只说「写入 0 条」而无人知道为什么，锁定期会无限期无人处理）。
@@ -261,17 +236,62 @@ export const memoryMethods = {
         continue
       }
       const confidence = Math.min(1, Math.max(0, Number(item.confidence) || 0.5))
+      // 同主题覆写（原 DSHBOTS-360 挂起项，owner 已批准落地）：同 scope+topic 已有 active
+      // 记忆时原地更新（revision+1、事件留痕），不再叠近义新条；无同名才走新建。
+      // 覆写不占新行，天然不受容量闸约束，与 memoryWriteFromBot 的同名覆盖语义一致。
+      const topic = text(item.topic, 120)
+      // 同名条目含 pending：active 才覆写；pending 视为本批重复，跳过去重（防止同批同主题双落）。
+      const sameTopic = topic
+        ? this.store.get(
+          "SELECT * FROM memories WHERE scope_type = ? AND scope_id = ? AND topic = ? AND status IN ('active', 'pending')",
+          scopeType, scopeId, topic,
+        )
+        : null
+      if (sameTopic && sameTopic.status !== 'active') {
+        deduped += 1
+        continue
+      }
+      if (sameTopic) {
+        // 覆写与新建走同一权限口径：成员 Bot 不得经覆写路径改写 team 域（新建路径在
+        // createMemory 内断言 403，这里同款断言，失败按拒写计数留痕）。
+        try {
+          this.assertMemoryWriteScope(scopeType, scopeId, { type: 'bot', id: bot.id })
+        } catch (scopeError: any) {
+          rejected += 1
+          if (rejectReasons.length < 3) rejectReasons.push(String(scopeError?.message ?? scopeError))
+          this.logger.warn?.('dsh-team: 记忆审查覆写被拒（%s/%s）：%s', scopeType, scopeId, scopeError?.message ?? scopeError)
+          continue
+        }
+        const now = nowIso()
+        const refs = jsonParse(sameTopic.source_refs_json, [])
+        this.store.run(
+          'UPDATE memories SET content = ?, source = ?, confidence = ?, revision = revision + 1, updated_at = ? WHERE id = ?',
+          content, source, confidence, now, sameTopic.id,
+        )
+        if (sourceRunId && !refs.includes(sourceRunId)) {
+          this.store.run('UPDATE memories SET source_refs_json = ? WHERE id = ?', JSON.stringify([...refs, sourceRunId].slice(0, 50)), sameTopic.id)
+        }
+        this.store.run(
+          'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          id('mevt'), sameTopic.id, 'updated', 'bot', bot.id, sameTopic.content, content, now,
+        )
+        this.audit({ type: 'bot', id: bot.id }, 'memory.overwrite', 'memory', sameTopic.id, { scopeType, scopeId, topic })
+        this.writeMemoryMirror(sameTopic.id)
+        updated += 1
+        continue
+      }
       try {
         this.createMemory({
           scopeType,
           scopeId,
-          topic: text(item.topic, 120) || `任务 ${project.key} 记忆`,
+          topic: topic || '未命名记忆',
           content,
           source,
           confidence,
           createdBy: `bot:${bot.id}`,
           actor: { type: 'bot', id: bot.id },
-          status: confidence >= 0.8 ? 'active' : 'pending',
+          // 准入闸（置信度 + 主题形态）：日志式主题（任务号/交付字样）即使高置信也降待审。
+          status: confidence >= 0.8 && !isLogTopic(topic) ? 'active' : 'pending',
           sourceRefs: sourceRunId ? [sourceRunId] : [],
         })
         applied += 1
@@ -281,7 +301,6 @@ export const memoryMethods = {
         // 容量锁（conflict 409）与其它拒因分开计数：容量锁意味着作用域处在整理锁定期，需要人处理。
         if (writeError?.status === 409) capacityRejected += 1
         if (rejectReasons.length < 3) rejectReasons.push(reason)
-        // 同主题覆盖写降级属可选能力：owner 未点头，本卡不实现（不改写既有条目、不把被拒条目转 pending 堆积）。
         this.logger.warn?.('dsh-team: 记忆审查写入失败：%s', reason)
       }
     }
@@ -290,9 +309,9 @@ export const memoryMethods = {
       : ''
     this.runChatStore(reviewRun).run(
       'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
-      id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${deduped ? `，去重 ${deduped} 条` : ''}${rejectNote}`, nowIso(),
+      id('evt'), reviewRun.id, 'reviewed', `记忆审查完成，写入 ${applied} 条${updated ? `，覆写 ${updated} 条` : ''}${deduped ? `，去重 ${deduped} 条` : ''}${rejectNote}`, nowIso(),
     )
-    return { applied, deduped, rejected, capacityRejected }
+    return { applied, updated, deduped, rejected, capacityRejected }
   },
 
   // 记忆写入权限：用户可写任意作用域；Bot 只能写自己的记忆、是成员的项目记忆，
@@ -685,7 +704,7 @@ export const memoryMethods = {
         throw badRequest(`仅已闭环（done/canceled）任务的历史记录可清理，${project.key}-${task.number} 当前为 ${task.status}`)
       }
       taskLabel = `${project.key}-${task.number}`
-      // learnFromTask 的两类过程记录主题形态：任务 KEY-N（bot 域）/ KEY-N 交付记录（项目域）。
+      // 规则沉淀已下线，此处按主题形态清扫存量：任务 KEY-N（bot 域）/ KEY-N 交付记录（项目域）。
       taskTopics = [`任务 ${taskLabel}`, `${taskLabel} 交付记录`]
     }
     const wanted = [...new Set([...topics, ...taskTopics])]
