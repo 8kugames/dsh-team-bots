@@ -4,6 +4,36 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.109
+
+### 中文
+
+**记忆**
+
+- **记忆审查准入泛化**：下线按规则沉淀的准入口径，改同主题覆写融合；日志式主题降级为待审，减少低价值记忆占用配额。
+
+**提示词**
+
+- **表述去电报体/翻译腔**：去除诱导生硬句式的表述；字数帽明确只约束内容量、不限句子结构。
+
+**工程**
+
+- **脏产物检测**：构建覆盖前发现手改的 .js 产物即报错；RULES.md 固化 TypeScript 单一真源规则。
+
+### English
+
+**Memory**
+
+- **Generalized memory review admission**: the rule-based promotion gate is retired in favour of same-topic overwrite merging; log-style topics are demoted to pending review, keeping low-value memories out of the quota.
+
+**Prompts**
+
+- **Copy de-telegraphed**: wording that induced telegram-style or translated prose was removed; word caps now explicitly limit content volume only, not sentence structure.
+
+**Tooling**
+
+- **Dirty-artifact detection**: the build errors if a hand-edited .js artifact is about to be overwritten; RULES.md now fixes TypeScript as the single source of truth.
+
 ## v0.3.105
 
 ### 中文
