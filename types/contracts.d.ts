@@ -39,7 +39,7 @@ type TeamActionName =
   | 'retry_run' | 'cancel_run' | 'run_trajectory' | 'answer_attention'
   | 'create_memory' | 'update_memory' | 'delete_memory' | 'search_memories' | 'approve_memory' | 'reject_memory'
   | 'create_proposal' | 'decide_proposal' | 'evaluate_proposal' | 'promote_proposal'
-  | 'approval_decide' | 'approvals_pending' | 'approval_rules' | 'update_approval_rules' | 'question_answer' | 'questions_pending'
+  | 'approval_decide' | 'approvals_pending' | 'approval_rules' | 'update_approval_rules' | 'approval_full_access' | 'update_approval_full_access' | 'question_answer' | 'questions_pending'
   | 'sync_skills' | 'skill_detail' | 'toggle_skill' | 'set_skill_binding' | 'rollback_skill'
   | 'save_price' | 'reset_price' | 'settings' | 'update_settings' | 'update_prompt_segment' | 'export_usage_csv' | 'usage_window' | 'reconcile_usage' | 'outbox'
   | 'dsh_update_info' | 'upgrade_dsh' | 'reboot_dsh'
@@ -115,6 +115,8 @@ interface TeamActionPayload {
   evaluation?: unknown
   /** update_approval_rules 的规则数组（DSHBOTS-365）：字段由服务端逐条校验。 */
   rules?: unknown[]
+  /** update_approval_full_access（DSHBOTS-366）：true=所有 bot 与派发任务统一 danger-full-access。 */
+  enabled?: boolean
   /** update_settings 的设置键补丁：键集由服务端 settingsView 白名单校验，不受 action 入参白名单约束。 */
   patch?: Record<string, unknown>
 }

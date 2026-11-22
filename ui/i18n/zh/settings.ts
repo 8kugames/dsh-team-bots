@@ -64,6 +64,11 @@ export default {
   "global.approvalRuleChipSandbox": "沙箱",
   "global.approvalRuleChipNote": "备注",
   "global.saveApprovalRules": "保存免审规则",
+  // 完全权限总开关（DSHBOTS-366，免审权限卡顶）
+  "global.approvalFullAccess": "完全权限",
+  "global.approvalFullAccessHint": "打开后所有 Bot 与派发任务统一按完全访问（danger-full-access）运行，不再收紧只读；各 Bot 的文件策略与派发覆盖原样保留，关闭后恢复原判定。仅工作台 owner 可切换。",
+  "完全权限已开启：所有 Bot 与派发任务统一按完全访问运行": "完全权限已开启：所有 Bot 与派发任务统一按完全访问运行",
+  "完全权限已关闭：恢复按各 Bot 配置档与派发覆盖判定": "完全权限已关闭：恢复按各 Bot 配置档与派发覆盖判定",
   "global.approvalRulesHint": "命中的提权请求不落审批卡：插件即时按 allowed-once 放行，并在审批记录与审计里留痕（decided_by=auto:rule:*）。路径与命令规则都用 glob 匹配目标（* 不跨目录，** 跨目录）；不含通配符的旧规则按前缀匹配，存量不失效。系统临时目录（$TMPDIR）随预置一并放行。每次调用一放行一结，改规则即时生效；仅工作台 owner 可修改。",
   "审批免审规则已保存": "审批免审规则已保存",
   "新增免审规则": "新增免审规则",

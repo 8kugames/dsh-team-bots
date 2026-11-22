@@ -16,6 +16,8 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'approval_decide', 'approvals_pending',
   // 免审规则编辑面（DSHBOTS-365）：读走 state.approvalRules，此处备用直查；写仅 type=user。
   'approval_rules', 'update_approval_rules',
+  // 完全权限总开关（DSHBOTS-366）：读走 state.approvalFullAccess；写仅 type=user。
+  'approval_full_access', 'update_approval_full_access',
   'question_answer', 'questions_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
   'save_price', 'reset_price',
@@ -168,6 +170,11 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.approvalRulesView()
     case 'update_approval_rules':
       return service.updateApprovalRules(payload.rules, actor)
+    // 完全权限总开关（DSHBOTS-366）：服务层守卫 actor.type!=='user' 拒绝 bot 自批。
+    case 'approval_full_access':
+      return { enabled: service.fullAccessAllEnabled() }
+    case 'update_approval_full_access':
+      return service.updateApprovalFullAccess(payload.enabled === true, actor)
     case 'question_answer':
       return service.answerQuestion(required(payload.questionId, 'questionId'), payload, actor)
     case 'questions_pending':

@@ -45,6 +45,9 @@ export const taskDispatchMethods = {
   // 采用，拒绝回执更显式、卡面归属与预期一致，后续要自动降级再立卡。
   assertWritableDispatch(botId, writeScopes) {
     if (!writeScopes?.length) return
+    // 完全权限总开关（DSHBOTS-366）打开时生效档恒 danger-full-access，配置只读的
+    // bot 实际可写，本闸不再拦截；关掉即恢复按配置档判定。
+    if (this.fullAccessAllEnabled()) return
     if (this.botRow(botId)?.file_policy !== 'read-only') return
     const name = this.store.get('SELECT name FROM bots WHERE id = ?', botId)?.name ?? botId
     throw badRequest(

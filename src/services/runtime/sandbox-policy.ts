@@ -8,10 +8,21 @@ import { id, nowIso } from '../../util.js'
 // 与 DSH 宿主 dsh-sandbox-policy 的 SANDBOX_MODES 保持一致；库里值不合法时不向宿主写覆盖。
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
 
+// 完全权限总开关（总览 bots 页「免审权限」卡）：settings 键存 '1'/'0'。'1' 时所有
+// bot 与派发任务的生效沙箱统一 danger-full-access，不再收紧只读（含非写运行的
+// run_type 降档与任务派发覆盖）；各 bot 配置档与覆盖值原样保留，关掉即恢复原判定。
+export const APPROVAL_FULL_ACCESS_SETTING = 'approval_full_access'
+
+export function fullAccessEnabledOf(store) {
+  return store?.setting?.(APPROVAL_FULL_ACCESS_SETTING, '0') === '1'
+}
+
 // 沙箱档位按运行类型收紧：一切非写运行（mode!=='write'，如 dm/dm_reply/chat/review 等）
 // 物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
 // 无运行上下文（run 为空）时同样保持 bot.file_policy。
-export function sandboxModeForRun(run, bot) {
+// 完全权限总开关打开时（fullAccess=true）统一 danger-full-access，不再降只读。
+export function sandboxModeForRun(run, bot, fullAccess = false) {
+  if (fullAccess) return 'danger-full-access'
   return run && run.mode !== 'write' ? 'read-only' : bot?.file_policy
 }
 
@@ -22,7 +33,10 @@ export function sandboxModeForRun(run, bot) {
 //   （只收紧不放大：运行侧兜底，防旁路落库的旧覆盖在换负责人后放大权限）；
 // - 其余回落 bot.file_policy（来源 bot_config）。
 // 覆盖或配置档不合法（不在 SANDBOX_MODES）时不采用，落 bot_config 由 applyFilePolicy 拦截。
-export function effectiveSandbox(run, bot, task) {
+export function effectiveSandbox(run, bot, task, fullAccess = false) {
+  // 完全权限总开关（full_access 来源）优先于一切收紧：run_type 降档、任务覆盖、
+  // bot 配置档都不再看，统一 danger-full-access。
+  if (fullAccess) return { mode: 'danger-full-access', source: 'full_access' }
   if (run && run.mode !== 'write') return { mode: 'read-only', source: 'run_type' }
   const override = task?.sandbox_override
   const policyRank = SANDBOX_MODES.indexOf(bot?.file_policy)
@@ -40,7 +54,7 @@ export const sandboxMethods = {
   // DSHBOTS-156：带运行上下文时把生效档与来源落 run_events（type='sandbox_mode'）——
   // run_events 是运行时间线，复用会话的每条运行也各自留档，与 sandbox/mode 追加的去重无关。
   applyFilePolicy(agent, bot, run?, task?) {
-    const { mode, source } = effectiveSandbox(run, bot, task)
+    const { mode, source } = effectiveSandbox(run, bot, task, fullAccessEnabledOf(this.store))
     if (!SANDBOX_MODES.includes(mode)) return
     if (run?.id) {
       this.chatStoreForRun(run).run(

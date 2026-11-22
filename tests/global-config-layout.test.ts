@@ -202,6 +202,24 @@ test('免审规则编辑面在总览 bots 页「全部 Bots」下方：卡片式
   stopTimers()
 })
 
+test('完全权限总开关在总览 bots 页免审权限卡：开关行随 approvalFullAccess 翻转，配置页不渲染（DSHBOTS-366）', async () => {
+  const global = await renderPage('settings', 'renderGlobal')
+  assert.doesNotMatch(global.html, /data-action="toggle-full-access"/, '配置页不渲染完全权限开关')
+  const off = await renderPage('tasks', 'renderBotsOverview', {
+    bots: [{ id: 'b1', name: 'Bot', role: '成员', status: 'active', openTasks: 0, memoryCount: 0, stats: { succeeded: 0 } }],
+  })
+  assert.match(off.html, /class="perm-full-access"/, '免审权限卡顶渲染开关行')
+  assert.match(off.html, /data-action="toggle-full-access" data-next="1"/, '默认关闭，点按打开')
+  assert.match(off.html, /aria-checked="false"/, 'switch 角色默认未选中')
+  const on = await renderPage('tasks', 'renderBotsOverview', {
+    approvalFullAccess: true,
+    bots: [{ id: 'b1', name: 'Bot', role: '成员', status: 'active', openTasks: 0, memoryCount: 0, stats: { succeeded: 0 } }],
+  })
+  assert.match(on.html, /data-action="toggle-full-access" data-next="0"/, '开启态点按关闭')
+  assert.match(on.html, /aria-checked="true"/, '开启态 switch 选中')
+  stopTimers()
+})
+
 test('通道页承载微信通道卡：停用态出启停开关、启用后可绑定', async () => {
   const empty = await renderPage('global-pages', 'renderChannel')
   assert.match(empty.html, /data-action="wechat-toggle" data-next="1"/, '停用态应渲染启用开关（DSHBOTS-334，不再依赖服务端注入）')

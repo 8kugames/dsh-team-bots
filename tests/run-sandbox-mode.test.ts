@@ -144,6 +144,30 @@ test('run 为空保持 bot.file_policy 现行为；档位选择纯函数边界',
   }
 })
 
+test('完全权限总开关：applyFilePolicy 现读 settings，打开后读运行不再降只读（DSHBOTS-366）', async () => {
+  const { root, store, config } = await setup()
+  try {
+    const ctx = fakeCtx()
+    const runtime = await runtimeOf(ctx, store, config)
+    const bot = { name: 'A', file_policy: 'workspace-write' }
+
+    // 默认关闭：dm 读运行照旧收到 read-only（run_type 收紧口径不变）。
+    runtime.applyFilePolicy({ agent: { session: ctx.session } }, bot, { kind: 'dm', mode: 'read' })
+    assert.deepEqual(ctx.appended.filter(call => call.type === 'sandbox/mode')[0].data, { mode: 'read-only' })
+
+    // 打开开关后同一调用路径收到 danger-full-access：settings 现读现解析，即时生效。
+    store.setSetting('approval_full_access', '1')
+    ctx.appended.length = 0
+    runtime.applyFilePolicy({ agent: { session: ctx.session } }, bot, { kind: 'dm', mode: 'read' })
+    const modes = ctx.appended.filter(call => call.type === 'sandbox/mode')
+    assert.equal(modes.length, 1)
+    assert.deepEqual(modes[0].data, { mode: 'danger-full-access' }, '开关打开后读运行统一完全访问')
+  } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('同一会话先读后写：append 以新档位调用，同档位不重复追加', async () => {
   const { root, store, config } = await setup()
   try {

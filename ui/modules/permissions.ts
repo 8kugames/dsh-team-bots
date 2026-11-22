@@ -24,6 +24,8 @@ function approvalRuleChips(rule: Record<string, string>) {
 
 function renderApprovalPermissionsCard() {
   const rules = (state.data?.approvalRules ?? []) as Array<Record<string, string>>
+  // 完全权限总开关（DSHBOTS-366）：卡顶独立开关行，开关态随 state.approvalFullAccess 下发。
+  const fullAccess = Boolean(state.data?.approvalFullAccess)
   return `
     <section class="perm-section">
       <div class="section-head">
@@ -31,6 +33,13 @@ function renderApprovalPermissionsCard() {
         <span class="meta">${t('global.approvalRulesMeta', { count: rules.length })}</span>
       </div>
       <div class="card perm-card">
+        <div class="perm-full-access">
+          <div class="perm-full-access-main">
+            <div class="perm-full-access-title">${t('global.approvalFullAccess')}</div>
+            <div class="perm-full-access-hint">${t('global.approvalFullAccessHint')}</div>
+          </div>
+          <button type="button" class="switch" role="switch" aria-checked="${fullAccess ? 'true' : 'false'}" aria-label="${attr(t('global.approvalFullAccess'))}" data-action="toggle-full-access" data-next="${fullAccess ? '0' : '1'}"><span class="switch-knob"></span></button>
+        </div>
         ${rules.length === 0 ? `<div class="faint perm-empty">${t('global.approvalRulesEmpty')}</div>` : ''}
         <div class="perm-rule-grid">
           ${rules.map(rule => `

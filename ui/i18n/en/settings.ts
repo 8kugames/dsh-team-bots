@@ -64,6 +64,11 @@ export default {
   "global.approvalRuleChipSandbox": "Sandbox",
   "global.approvalRuleChipNote": "Note",
   "global.saveApprovalRules": "Save auto-allow rules",
+  // Full-access master toggle (DSHBOTS-366, top of the approval permissions card)
+  "global.approvalFullAccess": "Full access",
+  "global.approvalFullAccessHint": "When on, every bot and dispatched task runs at full access (danger-full-access) with no read-only tightening. Per-bot file policies and dispatch overrides are kept untouched and apply again once this is off. Only the workbench owner can toggle it.",
+  "完全权限已开启：所有 Bot 与派发任务统一按完全访问运行": "Full access on: all bots and dispatched tasks now run at full access",
+  "完全权限已关闭：恢复按各 Bot 配置档与派发覆盖判定": "Full access off: per-bot file policies and dispatch overrides apply again",
   "global.approvalRulesHint": "Matching escalation requests skip the approval card: the plugin answers allowed-once immediately and leaves an audit trail (decided_by=auto:rule:*). Path and command rules match the target as globs (* stays in one segment, ** crosses directories); legacy rules without wildcards keep prefix matching, so existing entries stay effective. The system temp directory ($TMPDIR) is allowed out of the box. Each call is allowed once per match; rule changes take effect immediately. Only the workbench owner can edit rules.",
   "审批免审规则已保存": "Approval auto-allow rules saved",
   "新增免审规则": "Add auto-allow rule",

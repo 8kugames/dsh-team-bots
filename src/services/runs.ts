@@ -929,9 +929,9 @@ if (run.kind === 'dm_reply') {
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,
       writeScopes: readWriteScopes(rawScopes),
-      // 生效沙箱档（DSHBOTS-156）：非 write 运行恒 read-only，任务写运行取派发覆盖（只收紧）或 bot 配置档。
-      // 口径唯一来源 effectiveSandbox，与起会话落 run_events 的档位一致。
-      sandboxMode: effectiveSandbox(run, bot, task).mode ?? null,
+      // 生效沙箱档（DSHBOTS-156）：非 write 运行恒 read-only，任务写运行取派发覆盖（只收紧）或 bot 配置档；
+      // 完全权限总开关（DSHBOTS-366）打开时统一 danger-full-access，口径仍唯一走 effectiveSandbox。
+      sandboxMode: effectiveSandbox(run, bot, task, this.fullAccessAllEnabled()).mode ?? null,
       // 备用模型标记：configured=配了备用，applied=这条运行走了备用，
       // degraded=主模型不可用且配了备用但这条没走（自动切换只对任务运行生效）。
       modelFallback: {

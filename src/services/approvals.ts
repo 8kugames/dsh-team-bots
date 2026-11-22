@@ -14,6 +14,7 @@ import { id, nowIso } from '../util.js'
 import { effectiveApprovalTimeoutMs } from '../config.js'
 import { botInActiveProject } from './questions.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
+import { APPROVAL_FULL_ACCESS_SETTING } from './runtime/sandbox-policy.js'
 
 // project_id 可空：单聊会话没有项目归属（DSHBOTS-218），卡片锚点改落 solo_messages。
 const APPROVALS_TABLE_DDL = `
@@ -548,6 +549,25 @@ export const approvalsMethods = {
       rules: rules.map(rule => ({ id: rule.id, path_prefix: rule.path_prefix, command: rule.command, sandbox: rule.sandbox })),
     })
     return this.approvalRulesView()
+  },
+
+  // 完全权限总开关（DSHBOTS-366 免审权限卡）：读侧每次现读现解析——无缓存，改开关对
+  // 下一次会话/运行即时生效（applyFilePolicy 每次会话创建/复用都重读）。
+  fullAccessAllEnabled() {
+    return this.store.setting(APPROVAL_FULL_ACCESS_SETTING, '0') === '1'
+  },
+
+  // 开关写侧与免审规则同一信任边界：仅工作台 owner（type=user）可切，bot 不能自批
+  // 权限面。存 '1'/'0'（仿 wechat_channel_enabled 先例）；bump settings_revision 让
+  // 客户端轮询立刻刷到新状态（settings 不进 stateVersion 表列签名，走 revision 分量）。
+  // bot 配置档与任务覆盖原样保留：关掉开关即恢复原判定，不做破坏性改写。
+  async updateApprovalFullAccess(enabled, actor = this.actor()) {
+    if (actor?.type !== 'user') throw forbidden('仅工作台 owner 可切换完全权限，bot 不能自批')
+    const next = enabled === true || enabled === '1' || enabled === 'true'
+    this.store.setSetting(APPROVAL_FULL_ACCESS_SETTING, next ? '1' : '0')
+    this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
+    this.audit(actor, 'approval_full_access.update', 'settings', APPROVAL_FULL_ACCESS_SETTING, { enabled: next })
+    return { enabled: next }
   },
 
   // 目标展示形：绝对路径落在项目工作区内且剩余段非空、不含空白时收成相对路径（chip 少占宽）；

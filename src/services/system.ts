@@ -188,6 +188,8 @@ const systemMethodsBase = {
       promptSegments: this.promptSegmentsView(),
       // 审批免审规则（DSHBOTS-365）：总览 bots 页「免审权限」卡唯一真值，规则量小随行下发。
       approvalRules: this.approvalRulesView(),
+      // 完全权限总开关（DSHBOTS-366）：同卡 toggle 的唯一真值，随行下发。
+      approvalFullAccess: this.fullAccessAllEnabled(),
       runLimits: this.runLimitsView(),
       // Bot 配置页 preset 下拉数据源：宿主可用清单 + 默认值；无宿主服务时 null（UI 退化）。
       agentPresets: await (this.runtime?.agentPresetsRoster?.() ?? null),

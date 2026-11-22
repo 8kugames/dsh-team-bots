@@ -201,6 +201,18 @@ export async function handleBoardAction(action, target) {
       toast(t("已恢复默认指令"), 'success')
       break
     }
+    // 完全权限总开关（DSHBOTS-366）：切换存 settings，下一次会话/运行即生效；
+    // loadState 后手动 render（since=新版本轮询会 unchanged 短路，与免审规则删除同款）。
+    case 'toggle-full-access': {
+      const next = target.dataset.next === '1'
+      await api('update_approval_full_access', { enabled: next })
+      await loadState(state.projectId)
+      render()
+      toast(next
+        ? t("完全权限已开启：所有 Bot 与派发任务统一按完全访问运行")
+        : t("完全权限已关闭：恢复按各 Bot 配置档与派发覆盖判定"), 'success')
+      break
+    }
     // 审批免审规则（DSHBOTS-365）：服务端权威整表替换。新增/编辑拉起 approval-rule 弹窗
     // （表单提交走 events-submit 的 save-approval-rule）；删除 = 从 state 规则表去行后整表提交。
     // 校验在后端（主维度必填一项等），失败经 api 报错 toast。

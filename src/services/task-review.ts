@@ -39,7 +39,8 @@ export const taskReviewMethods = {
     if (run.mode !== 'write' && run.mode !== 'read') return false
     const bot = this.store.get('SELECT id, file_policy FROM bots WHERE id = ?', run.bot_id)
     const task = taskRow ?? (run.task_id ? this.store.get('SELECT id, sandbox_override FROM tasks WHERE id = ?', run.task_id) : null)
-    return effectiveSandbox(run, bot, task).mode === 'read-only'
+    // 完全权限总开关打开时生效档恒 danger-full-access，不存在只读交付，豁免自然不触发。
+    return effectiveSandbox(run, bot, task, this.fullAccessAllEnabled()).mode === 'read-only'
   },
 
   // 验收机械闸（DSHBOTS-318/353）：把「验收必须经由子代理」从提示约束升级为机械约束——
