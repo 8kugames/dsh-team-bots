@@ -4,6 +4,20 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.110
+
+### 中文
+
+**审批**
+
+- **完全权限总开关**：总览 bots 页「免审权限」卡顶新增「完全权限」toggle——打开后所有 Bot 与派发任务的生效沙箱统一 danger-full-access，不再收紧只读（含非写运行的 run_type 降档与任务派发覆盖）；派单策略闸不再拦配置只读的 bot。各 Bot 文件策略与派发覆盖原样保留，关闭即恢复原判定；仅工作台 owner 可切换，bot 自批被拒，开关切换落审计。
+
+### English
+
+**Approvals**
+
+- **Full-access master toggle**: a "Full access" switch at the top of the approval-permissions card on the Bots overview page. When on, every bot and dispatched task runs at danger-full-access — read-only tightening no longer applies (including the run-type downgrade of non-write runs and dispatch sandbox overrides), and the dispatch gate no longer rejects read-only bots for write cards. Per-bot file policies and overrides are kept untouched and apply again once the toggle is off. Only the workbench owner can toggle it; bots cannot self-approve, and every switch is audited.
+
 ## v0.3.109
 
 ### 中文
