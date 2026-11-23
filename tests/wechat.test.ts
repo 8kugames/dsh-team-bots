@@ -125,9 +125,9 @@ test('wechat commands /detail /reject 正文里任务号可无空格分隔', asy
 })
 
 test('wechat commands 任务号口径与 service 一致', async () => {
-  const servicePattern = /^([a-z][a-z0-9-]*)-(\d+)$/i
+  const servicePattern = /^([a-z][a-z0-9_-]*)-(\d+)$/i
   assert.equal(TASK_ID_PATTERN.source, servicePattern.source)
-  const samples = ['web-3', 'a1-2', 'web-3-4', 'bad-id', 'web-', '-3', '3-web', 'Web-3']
+  const samples = ['web-3', 'a1-2', 'web-3-4', 'bad-id', 'web-', '-3', '3-web', 'Web-3', 'web_shop-3', 'web-shop-3', 'My_Key-2-1']
   for (const sample of samples) {
     assert.equal(TASK_ID_PATTERN.test(sample), servicePattern.test(sample), `口径不一致: ${sample}`)
   }
@@ -135,6 +135,10 @@ test('wechat commands 任务号口径与 service 一致', async () => {
   assert.equal(TASK_ID_PATTERN.test('web-3'), true)
   assert.equal(TASK_ID_PATTERN.test('a1-2'), true)
   assert.equal(extractTaskId('请看 a1-2 任务'), 'a1-2')
+  // 项目 key 允许下划线和短横线：任务号的 key 段要整体识别，不把 _ 截断
+  assert.deepEqual(TASK_ID_PATTERN.exec('web_shop-2-1')?.slice(1), ['web_shop-2', '1'])
+  assert.equal(extractTaskId('请看 web_shop-2 任务'), 'web_shop-2')
+  assert.equal(extractTaskId('请看 My-Key-3 任务'), 'my-key-3')
   assert.equal(extractTaskId('没有任务号'), null)
 })
 

@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { REVIEWER_BOT_NAME } from '../seed-bots.js'
 import { ensureBotTmpDirs, ensureExternalDir, ensureProjectWorkspace } from '../paths.js'
-import { clampNumber, id, nowIso, parseDisabledSkills, projectKey, slugify, text } from '../util.js'
+import { clampNumber, id, nowIso, parseDisabledSkills, PROJECT_KEY_PATTERN, projectKey, slugify, text } from '../util.js'
 
 
 
@@ -271,7 +271,7 @@ export const projectsMethods = {
     if (!name) throw badRequest('项目名称不能为空')
     let key = projectKey(input.key)
     if (!key) key = `P${Math.floor(Math.random() * 900 + 100)}`
-    if (!/^[A-Z][A-Z0-9]{0,9}$/.test(key)) throw badRequest('项目 Key 必须以字母开头，只能包含大写字母和数字，最多 10 位')
+    if (!PROJECT_KEY_PATTERN.test(key)) throw badRequest('项目 Key 必须以字母开头，只能包含大写字母、数字、下划线和短横线，下划线和短横线只能夹在字母数字之间，最多 10 位')
     if (this.store.get('SELECT id FROM projects WHERE key = ?', key)) throw conflict('项目 Key 已存在')
     const slug = slugify(key)
     if (!slug) throw badRequest('无法从项目 Key 生成工作区目录')

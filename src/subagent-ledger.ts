@@ -21,7 +21,7 @@ export function runningSubagentCount(botId) {
 export function taskLabelOf(args) {
   const source = typeof args?.description === 'string' ? args.description
     : typeof args?.prompt === 'string' ? args.prompt : ''
-  const match = source.match(/\b[A-Z][A-Z0-9]{1,10}-\d{1,6}\b/)
+  const match = source.match(/\b[A-Z][A-Z0-9_-]{1,10}-\d{1,6}\b/)
   if (match) return match[0]
   const trimmed = source.trim()
   return trimmed ? trimmed.slice(0, 60) : null

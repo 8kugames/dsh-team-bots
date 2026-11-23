@@ -240,7 +240,7 @@ export default {
   "以本任务为父任务新建子任务": "Create a subtask with this task as parent",
   "任务": "Tasks",
   "任务总数": "Total tasks",
-  "任务的编号前缀。": "Prefix for task IDs.",
+  "任务的编号前缀：字母开头，可含数字、下划线和短横线。": "Prefix for task IDs: starts with a letter; may contain digits, underscores and hyphens.",
   "任务详情": "Task details",
   "优先级": "Priority",
   "会话内文件操作的沙箱边界，下次运行生效": "Sandbox boundary for in-session file operations; takes effect on the next run",

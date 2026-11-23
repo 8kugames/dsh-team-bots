@@ -43,8 +43,8 @@ const argv = process.argv.slice(2)
 // 期望的收口分支：与发版流水线同口径，收口只在长期分支 dev 上做。
 const DEFAULT_BRANCH = 'dev'
 const DEFAULT_REMOTE = 'origin'
-// 项目卡号形态：字母前缀 + 数字序号，例如 DSHBOTS-273。
-const CARD_PATTERN = /^[A-Z][A-Z0-9]*-\d+$/
+// 项目卡号形态：字母前缀 + 数字序号，例如 DSHBOTS-273；前缀与项目 key 同口径（可用下划线和短横线）。
+const CARD_PATTERN = /^[A-Z][A-Z0-9_-]*-\d+$/
 
 function option(name) {
   const index = argv.indexOf(name)
@@ -192,7 +192,7 @@ function isTracked(file) {
 // 卡号：--card 优先，其次从提交信息里识别；两者都没有即拒绝（提交信息必须带项目卡号）。
 function resolveCard() {
   if (CARD_OPTION) return CARD_OPTION
-  const matched = /\b([A-Z][A-Z0-9]*-\d+)\b/.exec(MESSAGE)
+  const matched = /\b([A-Z][A-Z0-9_-]*-\d+)\b/.exec(MESSAGE)
   return matched ? matched[1] : ''
 }
 

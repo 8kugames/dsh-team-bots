@@ -79,6 +79,33 @@ test('有项目语境建卡：编号落库为项目 KEY-N（项目内自增）',
   } finally { await t.close() }
 })
 
+test('项目 key 允许下划线、短横线和数字：编号 KEY-N 能按 <key>-<序号> 解析回原项目', async () => {
+  const t = await setup()
+  try {
+    const view = await t.service.createProject({ name: 'Key 规则', key: 'web_shop-2', ownerBotId: t.director.id })
+    assert.equal(view.key, 'WEB_SHOP-2', '归一为大写，_ 和 - 保留')
+    assert.equal(view.workspace_relative, '/web-shop-2', '工作区目录仍按 slug 口径把 _ 折成 -')
+    const task = await t.service.createTask({ projectId: view.id, title: '编号解析', postCard: false })
+    assert.equal(task.identifier, 'WEB_SHOP-2-1', '编号为 <key>-<序号>')
+    const resolved = t.service.resolveTaskByIdentifier('web_shop-2-1')
+    assert.equal(resolved.project.id, view.id, '任务号的 key 段要解析回带 _ 和 - 的项目')
+    assert.equal(resolved.task.id, task.id)
+    // 分隔符只能夹在字母数字之间：数字开头、分隔符开头、收尾、相邻都拒绝
+    for (const bad of ['9web', '_web', '-web', 'web_', 'web__shop', 'web_-shop', 'web--shop']) {
+      await assert.rejects(
+        () => t.service.createProject({ name: `坏 key ${bad}`, key: bad, ownerBotId: t.director.id }),
+        /项目 Key 必须以字母开头/,
+        `key=${bad} 应被拒绝`,
+      )
+    }
+    // _ 和 - 在 slug 里都折成 -：与已有项目撞目录时拒绝，不会两个项目共用一个工作区
+    await assert.rejects(
+      () => t.service.createProject({ name: '撞目录', key: 'web-shop-2', ownerBotId: t.director.id }),
+      /项目工作区目录已存在/,
+    )
+  } finally { await t.close() }
+})
+
 test('共享板口径：成员能力清单不再宣告 team_task_create（可读不可新建）', () => {
   const generation: readonly string[] = SUBAGENT_GENERATION_TOOLS
   assert.ok(!generation.includes('team_task_create'), '共享板建卡工具不得再作为成员能力宣告')

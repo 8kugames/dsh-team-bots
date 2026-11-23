@@ -104,6 +104,10 @@ test('/tr 按 key 跨项目路由并回执', async () => {
   assert.ok(reply.includes('已直达【Web】'))
   assert.deepEqual(service.chatted, { key: 'WEB', body: '上线新版官网', fallbackKey: undefined })
 
+  // key 允许下划线和短横线：<key> 取到首个空白/冒号为止，整体大写后路由
+  await handleCommand(service, '/tr web_shop-2 干活', ADMIN_CTX)
+  assert.deepEqual(service.chatted, { key: 'WEB_SHOP-2', body: '干活', fallbackKey: undefined })
+
   // 缺消息给格式提示；key 未命中给可选项目提示
   assert.ok((await handleCommand(service, '/tr web', ADMIN_CTX)).includes('格式：/tr'))
   assert.ok((await handleCommand(service, '/tr nope 干活', ADMIN_CTX)).includes('没有找到项目 NOPE'))

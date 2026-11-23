@@ -16,10 +16,10 @@ const ANSWER_PATTERN = /^(?:答|答复|回答|answer)\s+([A-Za-z0-9]{4,10})(?:\s
 const APPROVAL_PATTERN = /^(?:批|审批|approve)\s+([A-Za-z0-9]{4,10})\s*(允许|拒绝|allow|reject)$/i
 
 /** 正文里的任务号候选（不要求空格分隔），再由 TASK_ID_PATTERN 校验。 */
-const TASK_ID_CANDIDATE = /([a-z][a-z0-9-]*-\d+)/gi
+const TASK_ID_CANDIDATE = /([a-z][a-z0-9_-]*-\d+)/gi
 
 /** /tr 格式：<key> <消息> 或 <key>: <消息>（DSHBOTS-258 容忍冒号写法），key 与项目 key 同口径。 */
-const TR_PATTERN = /^([A-Za-z0-9]{1,10})(?:\s*[:：]\s*|\s+)([\s\S]+)$/
+const TR_PATTERN = /^([A-Za-z][A-Za-z0-9_-]{0,9})(?:\s*[:：]\s*|\s+)([\s\S]+)$/
 
 /** 固定指令的写操作：需要 admin-peer 门（与 答/批 同口径）。 */
 const ADMIN_VERBS = new Set(['reject', 'tr'])

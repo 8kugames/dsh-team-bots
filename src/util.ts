@@ -5,7 +5,10 @@ import { dirname, join } from 'node:path'
 export const nowIso = () => new Date().toISOString()
 
 /** 任务号 <项目key>-<序号>：与 service.resolveTaskByIdentifier 同一口径。 */
-export const TASK_ID_PATTERN = /^([a-z][a-z0-9-]*)-(\d+)$/i
+export const TASK_ID_PATTERN = /^([a-z][a-z0-9_-]*)-(\d+)$/i
+
+/** 项目 key 形态：字母开头，_ 和 - 只能夹在字母数字之间（不相邻、不收尾），最多 10 位。 */
+export const PROJECT_KEY_PATTERN = /^[A-Z](?:[A-Z0-9]|(?:_|-)(?=[A-Z0-9])){0,9}$/
 
 export const id = (prefix) => `${prefix}_${randomUUID().replaceAll('-', '').slice(0, 24)}`
 
@@ -19,7 +22,7 @@ export const slugify = (value) => String(value ?? '')
 export const projectKey = (value) => String(value ?? '')
   .trim()
   .toUpperCase()
-  .replace(/[^A-Z0-9]+/g, '')
+  .replace(/[^A-Z0-9_-]+/g, '')
   .slice(0, 10)
 
 export const text = (value, max = 20_000) => String(value ?? '').trim().slice(0, max)

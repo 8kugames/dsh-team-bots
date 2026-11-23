@@ -55,7 +55,7 @@ function modalNewProject() {
     body: `<form data-form="create-project" id="modal-form">
       <div class="field"><label id="new-project-name-label" for="new-project-name">${t("项目名称")}</label><input class="input" style="width:100%" id="new-project-name" name="name" placeholder="${t("例如：官网重构")}" required maxlength="80" autofocus></div>
       <div class="field-row">
-        <div class="field"><label id="new-project-key-label" for="new-project-key">${t("项目")} Key</label><input class="input mono" style="width:100%" id="new-project-key" name="key" placeholder="WEB" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{0,9}"><div class="hint">${t("任务的编号前缀。")}</div></div>
+        <div class="field"><label id="new-project-key-label" for="new-project-key">${t("项目")} Key</label><input class="input mono" style="width:100%" id="new-project-key" name="key" placeholder="WEB" maxlength="10" pattern="[A-Za-z](?:[A-Za-z0-9]|(?:_|-)(?=[A-Za-z0-9])){0,9}"><div class="hint">${t("任务的编号前缀：字母开头，可含数字、下划线和短横线。")}</div></div>
         <div class="field"><label id="new-project-owner-label" for="new-project-owner">${t("总监")} Bot</label><select class="select" style="width:100%" id="new-project-owner" name="ownerBotId">${bots.map(bot => `<option value="${attr(bot.id)}">${esc(bot.name)} · ${esc(bot.role || t("成员"))}</option>`).join('')}</select></div>
       </div>
       <div class="field"><label id="new-project-description-label" for="new-project-description">${t("项目说明")}</label><textarea class="textarea" id="new-project-description" name="description" placeholder="${t("项目目标、边界和验收标准")}"></textarea></div>
