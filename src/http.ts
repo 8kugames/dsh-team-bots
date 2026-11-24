@@ -44,8 +44,8 @@ const SECURITY = {
 // 注入宿主原生 Web 界面（fallback SPA）的切换入口。原生界面没有指向本插件
 // 的链接，通过宿主的 `webserver/index-inject` 结构化注入机制补一个固定胶囊
 // 入口；与工作台侧栏里指向 /index.html（原生界面在 fallback seat 上的稳定
-// 入口，/ 已被本插件占据）的返回链接构成双向自由切换。本项目自己的 UI
-// 不走宿主 renderIndex，不会看到这个入口。
+// 入口；`/` 归宿主 remote-connection，已登录时由本插件 302 进工作台）的返回
+// 链接构成双向自由切换。本项目自己的 UI 不走宿主 renderIndex，不会看到这个入口。
 export const OFFICIAL_UI_SWITCH_ROWS = [
   {
     kind: 'style',
@@ -216,45 +216,6 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   route('/api/dsh-team/vendor/marked.js', ['GET'], vendorScript(join('marked', 'marked.umd.js')))
   route('/api/dsh-team/vendor/purify.min.js', ['GET'], vendorScript(join('dompurify', 'purify.min.js')))
 
-  // 首页直达工作台：已登录（有效 cookie）302 进 UI；未登录 302 到携带当前
-  // launch token 的 `/`，由宿主 authorizeIndex 完成 token→cookie 兑换（30 天）。
-  // 旧世代的失效 token 书签会被换成当前 token 重试一次（自愈）；Host/Origin
-  // 拒绝（403）原样返回，不参与自动登录。
-  const home = (req, res) => {
-    const secure = ctx.get('webServer')?.protocol === 'https:'
-    const rejection = ctx.connection.requestRejection(req)
-    if (rejection === undefined) {
-      res.writeHead(302, { 'cache-control': 'no-store', location: '/api/dsh-team/ui' })
-      res.end()
-      return
-    }
-    if (rejection !== 401) {
-      res.writeHead(rejection, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('forbidden')
-      return
-    }
-    const host = req.headers.host
-    if (typeof host !== 'string' || host.length === 0) {
-      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('host header required')
-      return
-    }
-    const tokenUrl = ctx.connection.authenticatedUrl(`${secure ? 'https' : 'http'}://${host}/`)
-    const incoming = new URL(req.url ?? '/', tokenUrl).searchParams.get('token')
-    if (incoming === null) {
-      res.writeHead(302, { 'cache-control': 'no-store', location: tokenUrl })
-      res.end()
-      return
-    }
-    if (incoming !== new URL(tokenUrl).searchParams.get('token')) {
-      res.writeHead(302, { 'cache-control': 'no-store', location: '/' })
-      res.end()
-      return
-    }
-    ctx.connection.authorizeIndex(req, res, secure)
-  }
-  disposers.push(ctx.webServer.register({ kind: 'exact', path: '/', handler: home }))
-
   const errorResponse = (error) => {
     const known = error instanceof AppError
     if (!known) logger.error?.('dsh-team: API error: %s', error?.stack ?? error)
@@ -365,6 +326,21 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   // 插件 context 生命周期自动清理。
   ctx.on?.('webserver/index-inject', (table) => {
     table.push(...OFFICIAL_UI_SWITCH_ROWS)
+  })
+
+  // 首页直达工作台。宿主 0.2.3 起由 remote-connection 占用精确路由 `/`
+  // （已登录渲染原生界面，未登录渲染认证页），插件再注册同名路由会让整个插件
+  // 加载失败（webserver 的 (kind, path) 是组合层契约，重复即冲突）。
+  // 这里改挂在 webserver/request waterfall 上：仅当请求通过宿主准入
+  // （connection.admit）且是首页的 GET/HEAD 时 302 进工作台；其余请求——包括
+  // `/?token=` 兑换、扫码登录、未登录认证页——原样 next() 交回宿主。
+  ctx.on?.('webserver/request', async (req, res, next) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next()
+    if (url.pathname !== '/' || url.search !== '') return next()
+    if ('rejection' in ctx.connection.admit(req)) return next()
+    res.writeHead(302, { 'cache-control': 'no-store', location: '/api/dsh-team/ui' })
+    res.end()
   })
 
   logger.info?.('team UI: /api/dsh-team/ui')

@@ -222,9 +222,9 @@ interface DshContext {
   sessionTitle?: { rename: (session: unknown, title: string) => unknown }
   connection: {
     fetch: { register: (entry: unknown) => unknown }
-    requestRejection: (req: unknown) => unknown
-    authenticatedUrl: (url: string) => string
-    authorizeIndex: (req: unknown, res: unknown, secure: boolean) => unknown
+    // 宿主 0.2.3 起由 connection.admit 承担准入判定（旧的 requestRejection /
+    // authenticatedUrl / authorizeIndex 已迁到 host-authentication-token）。
+    admit: (req: unknown) => { peer?: unknown; rejection?: number }
   }
   webServer?: {
     protocol?: string

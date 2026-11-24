@@ -17,16 +17,14 @@ test('official UI switch rows satisfy host injection constraints', () => {
 })
 
 // 假 ctx：只实现 installHttp 触碰到的宿主面。
-function fakeCtx() {
+function fakeCtx({ admitted = true } = {}) {
   const fetchRoutes = []
   const webRoutes = []
   const listeners = new Map()
   const ctx = {
     connection: {
       fetch: { register: (def) => { fetchRoutes.push(def); return () => {} } },
-      requestRejection: () => undefined,
-      authenticatedUrl: (url) => url,
-      authorizeIndex: () => true,
+      admit: () => (admitted ? { peer: { principal: { kind: 'owner' } } } : { rejection: 401 }),
     },
     webServer: {
       register: (route) => { webRoutes.push(route); return () => {} },
@@ -53,22 +51,54 @@ test('installHttp registers switch entry into host index injection', () => {
   assert.deepEqual(table, OFFICIAL_UI_SWITCH_ROWS)
 })
 
-test('installHttp keeps UI routes and authenticated home redirect', async () => {
+// 宿主 0.2.3 起 remote-connection 占用精确路由 `/`，插件再注册同名路由会让
+// 整个插件加载失败。首页直达改为 webserver/request waterfall 拦截。
+async function runRootRequest({ method = 'GET', url = '/', admitted = true } = {}) {
+  const { ctx, listeners } = fakeCtx({ admitted })
+  installHttp(ctx, { localUserId: 'u1' }, { info() {}, warn() {}, error() {} })
+  const handlers = listeners.get('webserver/request') ?? []
+  const request = { method, url, headers: { host: '127.0.0.1:3080' } }
+  const headers: { status?: number; location?: string } = {}
+  let ended = false
+  let nexted = false
+  const res = {
+    writeHead: (status, extra) => { headers.status = status; headers.location = extra?.location },
+    end: () => { ended = true },
+  }
+  const next = () => { nexted = true }
+  for (const handler of handlers) await handler(request, res, next)
+  return { headers, ended, nexted }
+}
+
+test('installHttp keeps UI routes and does not claim the root route', () => {
   const { ctx, fetchRoutes, webRoutes } = fakeCtx()
   installHttp(ctx, { localUserId: 'u1' }, { info() {}, warn() {}, error() {} })
   const paths = fetchRoutes.map((route) => route.path)
   assert.ok(paths.includes('/api/dsh-team/ui'))
   assert.ok(paths.includes('/api/dsh-team/api'))
+  // `/` 归宿主所有：插件既不能注册精确路由，也不能注册同名前缀路由。
+  assert.equal(webRoutes.find((route) => route.path === '/'), undefined)
+})
 
-  const home = webRoutes.find((route) => route.kind === 'exact' && route.path === '/')
-  assert.ok(home, 'home handler registered')
-  const headers: { status?: number; location?: string } = {}
-  let ended = false
-  await home.handler({ url: '/', headers: { host: '127.0.0.1:1' } }, {
-    writeHead: (status, extra) => { headers.status = status; headers.location = extra?.location },
-    end: () => { ended = true },
-  })
+test('root request redirects an admitted owner into the workbench', async () => {
+  const { headers, ended, nexted } = await runRootRequest()
   assert.equal(headers.status, 302)
   assert.equal(headers.location, '/api/dsh-team/ui')
   assert.ok(ended)
+  assert.equal(nexted, false)
+})
+
+test('root request is handed back to the host for token exchange and login', async () => {
+  for (const url of ['/?token=abc', '/?login=qr']) {
+    const { headers, nexted } = await runRootRequest({ url })
+    assert.equal(nexted, true, `${url} 应交回宿主`)
+    assert.equal(headers.status, undefined)
+  }
+})
+
+test('root request is handed back to the host when the caller is not admitted', async () => {
+  const { headers, ended, nexted } = await runRootRequest({ admitted: false })
+  assert.equal(nexted, true)
+  assert.equal(ended, false)
+  assert.equal(headers.status, undefined)
 })
