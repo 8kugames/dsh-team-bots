@@ -30,11 +30,11 @@ profile 里的插件文件是一份快照。改完代码要重新安装，否则
 ## 打开工作台
 
 ```text
-http://<host>:<port>/                     DSH Web 首页，自动登录进团队工作台
+http://<host>:<port>/                     DSH Web 首页，已登录时直接进团队工作台
 http://<host>:<port>/api/dsh-team/ui      团队工作台本身
 ```
 
-首次访问会把当前启动 token 换成 30 天登录 cookie。自动登录意味着能访问该端口的人就是 owner，请只监听本机或可信网络；要对外暴露，前面放一层转发 Host 与 WebSocket 的 HTTPS 反向代理。
+首页归宿主所有：已登录的请求由本插件 302 进工作台；带 `?token=` 的链接和扫码登录由宿主完成 token→cookie 兑换（30 天）与认证页。自动登录意味着能访问该端口的人就是 owner，请只监听本机或可信网络；要对外暴露，前面放一层转发 Host 与 WebSocket 的 HTTPS 反向代理。
 
 ## 工作台能做什么
 
