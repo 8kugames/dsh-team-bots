@@ -332,13 +332,22 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   // （已登录渲染原生界面，未登录渲染认证页），插件再注册同名路由会让整个插件
   // 加载失败（webserver 的 (kind, path) 是组合层契约，重复即冲突）。
   // 这里改挂在 webserver/request waterfall 上：仅当请求通过宿主准入
-  // （connection.admit）且是首页的 GET/HEAD 时 302 进工作台；其余请求——包括
-  // `/?token=` 兑换、扫码登录、未登录认证页——原样 next() 交回宿主。
+  // （webserver/authorize 的 allow 判定）且是首页的 GET/HEAD 时 302 进工作台；
+  // 其余请求——包括 `/?token=` 兑换、扫码登录、未登录认证页——原样 next()
+  // 交回宿主。准入判定走 webserver/authorize 而不是 connection.admit：
+  // 后者要读 connection.authentication，只对注册认证 provider 的插件开放。
   ctx.on?.('webserver/request', async (req, res, next) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (req.method !== 'GET' && req.method !== 'HEAD') return next()
     if (url.pathname !== '/' || url.search !== '') return next()
-    if ('rejection' in ctx.connection.admit(req)) return next()
+    const admission = ctx.bail(ctx.webServer, 'webserver/authorize', {
+      headers: req.headers,
+      method: req.method,
+      url,
+      transport: 'http',
+      socket: req.socket,
+    }, 'required')
+    if (admission?.kind !== 'allow') return next()
     res.writeHead(302, { 'cache-control': 'no-store', location: '/api/dsh-team/ui' })
     res.end()
   })

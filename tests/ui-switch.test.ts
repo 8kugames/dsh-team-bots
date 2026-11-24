@@ -24,11 +24,14 @@ function fakeCtx({ admitted = true } = {}) {
   const ctx = {
     connection: {
       fetch: { register: (def) => { fetchRoutes.push(def); return () => {} } },
-      admit: () => (admitted ? { peer: { principal: { kind: 'owner' } } } : { rejection: 401 }),
     },
     webServer: {
       register: (route) => { webRoutes.push(route); return () => {} },
     },
+    // 宿主 webserver/authorize 事件：准入通过返回 allow，否则 deny。
+    bail: () => (admitted
+      ? { kind: 'allow', peer: { principal: { kind: 'owner' } } }
+      : { kind: 'deny', status: 401 }),
     get: () => ({ protocol: 'http:' }),
     on: (name, cb) => {
       const list = listeners.get(name) ?? []
@@ -101,4 +104,22 @@ test('root request is handed back to the host when the caller is not admitted', 
   assert.equal(nexted, true)
   assert.equal(ended, false)
   assert.equal(headers.status, undefined)
+})
+
+// 准入判定必须走宿主的 webserver/authorize 事件：connection.admit 要读
+// connection.authentication，那个服务只对注册认证 provider 的插件开放。
+test('root request decides admission through the host authorize event', async () => {
+  const { ctx, listeners } = fakeCtx()
+  const bails = []
+  ctx.bail = (...args) => {
+    bails.push(args)
+    return { kind: 'allow', peer: { principal: { kind: 'owner' } } }
+  }
+  installHttp(ctx, { localUserId: 'u1' }, { info() {}, warn() {}, error() {} })
+  const handlers = listeners.get('webserver/request') ?? []
+  const res = { writeHead: () => {}, end: () => {} }
+  await handlers[0]({ method: 'GET', url: '/', headers: { host: '127.0.0.1:3080' } }, res, () => {})
+  assert.equal(bails.length, 1)
+  assert.equal(bails[0][0], ctx.webServer)
+  assert.equal(bails[0][1], 'webserver/authorize')
 })
