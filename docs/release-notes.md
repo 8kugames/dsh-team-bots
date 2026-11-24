@@ -4,7 +4,7 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
-## v0.3.110
+## v0.3.114
 
 ### 中文
 
@@ -12,11 +12,27 @@ This file records the externally visible behaviour changes of every release; the
 
 - **完全权限总开关**：总览 bots 页「免审权限」卡顶新增「完全权限」toggle——打开后所有 Bot 与派发任务的生效沙箱统一 danger-full-access，不再收紧只读（含非写运行的 run_type 降档与任务派发覆盖）；派单策略闸不再拦配置只读的 bot。各 Bot 文件策略与派发覆盖原样保留，关闭即恢复原判定；仅工作台 owner 可切换，bot 自批被拒，开关切换落审计。
 
+**项目**
+
+- **项目 Key 支持下划线和短横线**：Key 仍以字母开头、最多 10 位，`_` 与 `-` 只能夹在字母数字之间（不相邻、不收尾）；任务号 `<key>-<序号>` 的各消费方（微信 /detail /reject /tr、子代理账本标签、finalize 卡号）同步放行，新建项目弹窗的校验提示一并更新。
+
+**界面与通道**
+
+- **首页归属宿主路由**：宿主 0.2.3 起精确路由 `/` 归宿主所有，插件不再注册同名路由（否则整个插件加载失败）。已登录访问首页由插件 302 进团队工作台；未登录认证页、`?token=` 兑换与扫码登录仍由宿主处理。
+
 ### English
 
 **Approvals**
 
 - **Full-access master toggle**: a "Full access" switch at the top of the approval-permissions card on the Bots overview page. When on, every bot and dispatched task runs at danger-full-access — read-only tightening no longer applies (including the run-type downgrade of non-write runs and dispatch sandbox overrides), and the dispatch gate no longer rejects read-only bots for write cards. Per-bot file policies and overrides are kept untouched and apply again once the toggle is off. Only the workbench owner can toggle it; bots cannot self-approve, and every switch is audited.
+
+**Projects**
+
+- **Project keys accept underscores and hyphens**: a key still starts with a letter and is at most 10 characters, while `_` and `-` may now appear between alphanumerics (never adjacent or trailing). Consumers of task identifiers `<key>-<number>` — WeChat /detail, /reject and /tr, subagent ledger labels and finalize card numbers — accept the wider form, and the create-project dialog's validation message was updated to match.
+
+**UI & channels**
+
+- **Home page follows host routing**: since host 0.2.3 the exact route `/` belongs to the host, so the plugin no longer registers it (registering it failed the whole plugin load). Authenticated visits to `/` are redirected by the plugin into the team workbench; the unauthenticated page, `?token=` exchange and QR login stay with the host.
 
 ## v0.3.109
 
