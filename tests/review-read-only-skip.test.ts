@@ -144,7 +144,7 @@ test('写档交付维持强制：照排自动核验、闸门照拦、状态 none
       t.service.reviewFromBot(t.sessionId, { task: `ROS-${task.number}`, decision: 'accept', comment: '看起来没问题' }),
       (error: { status: number; message: string }) => {
         assert.equal(error.status, 400)
-        assert.match(error.message, /本次评审没有子代理账目/)
+        assert.match(error.message, /本次评审没有核验证据/)
         return true
       },
     )

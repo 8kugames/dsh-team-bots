@@ -48,15 +48,15 @@ export const taskReviewMethods = {
   },
 
   // 验收机械闸（DSHBOTS-318/353）：把「验收必须经由子代理」从提示约束升级为机械约束——
-  // owner bot 的 team_review_task 前置校验本评审周期内的子代理账目（run_events 的
-  // subagent_spawned）。周期起点 T=最近一次交付（run_succeeded）或看板流转
-  // （status→in_review）事件的 created_at 取 MAX；账目归属三条认领线：
-  // 本任务的 owner 运行（task_id+bot_id）、调用方会话的任意运行、或本任务上的委派核验
-  // 运行（task_id+trigger_type，DSHBOTS-365：核验承接人可能是成员 reviewer 而非总监，
-  // 其子代理账目挂在自己名下）。两跳正规流程（review_delegate 派子代理 → 新运行只裁决）
-  // 的账目挂在上一跳已结束运行上，按当运行有账查必漏，故按周期查。comment 显式注明
-  // 「兜底验收」放行（对应 router 硬流程第 4 条：子代理失败重试一次仍失败时 director 兜底）。
-  // 仅机器人路径：微信管理员/看板 owner 走 applyReview，不经过本闸。
+  // owner bot 的 team_review_task 前置校验本评审周期内的核验证据，证据认两种形态：
+  // ① 委派核验闭环：本任务上 review_delegate 运行已跑完（承接人可能是成员 reviewer，
+  //    结论由 finishRun 写回任务评论）——核验外包后的正规路径，不要求承接人再派子代理；
+  // ② 子代理账目：run_events 的 subagent_spawned，账目归属三条认领线：本任务的 owner
+  //    运行（task_id+bot_id）、调用方会话的任意运行、或本任务上的委派核验运行。
+  // 周期起点 T=最近一次交付（run_succeeded）或看板流转（status→in_review）事件的
+  // created_at 取 MAX。comment 显式注明「兜底验收」放行（对应 router 硬流程第 4 条：
+  // 子代理失败重试一次仍失败时 director 兜底）。仅机器人路径：微信管理员/看板 owner
+  // 走 applyReview，不经过本闸。
   assertReviewSubagentVerified(sessionId, project, task, comment) {
     if (comment?.includes('兜底验收')) return
     // run_events 住各运行归属的聊天库（Phase 3）：先筛 runs 再逐运行查归属库，量级与旧「当运行」查询相同。
@@ -79,6 +79,17 @@ export const taskReviewMethods = {
       ? this.store.get('SELECT * FROM runs WHERE id = ?', deliveredRunId)
       : null
     if (delivered && this.readOnlyDelivery(delivered, task)) return
+    // 委派核验闭环即证据（DSHBOTS-365 后续）：核验外包给承接人（种子 reviewer 或总监）后，
+    // 只认 subagent_spawned 账目会漏掉「承接人亲自核验」的正规闭环——review_delegate 运行
+    // 跑完即核验完成，结论已由 finishRun 写回任务评论（总监裁决时读的就是它），承接人没有
+    // 义务再派一层子代理。周期内存在已完成的委派核验运行即放行；账目判定留给总监
+    // 亲自核验的路径（本任务 owner 运行 / 调用方会话）。
+    const delegated = this.store.get(
+      `SELECT id FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate'
+         AND status = 'succeeded' AND ended_at IS NOT NULL AND ended_at >= ? LIMIT 1`,
+      task.id, windowStart,
+    )
+    if (delegated) return
     const candidates = this.store.all(
       `SELECT id, project_id, bot_id FROM runs
         WHERE (task_id = ? AND bot_id = ?) OR session_id = ?
@@ -92,8 +103,9 @@ export const taskReviewMethods = {
     if (ledger) return
     // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 正确下一步。
     throw badRequest(
-      '本次评审没有子代理账目（subagent_spawned），验收必须先经子代理核验：'
-      + '先派验收子代理（subagent/subagent_fork）做范围比对/目标测试/红线预测，把结论作为 comment；'
+      '本次评审没有核验证据（周期内既无 subagent_spawned 账目，也无已完成的委派核验运行）：'
+      + '先派验收子代理（subagent/subagent_fork）做范围比对/目标测试/红线预测，'
+      + '或让核验承接人跑完一轮委派核验（task_review_delegate / 交付自动委派），把结论作为 comment；'
       + '如需 director 兜底，在 comment 里注明「兜底验收」。',
     )
   },

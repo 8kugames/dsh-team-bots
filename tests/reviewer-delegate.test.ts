@@ -106,7 +106,7 @@ test('③ 机械闸认领线：reviewer 的核验账目放行总监裁决，无�
     // 负例：评审周期内无任何子代理账目 → 拒绝。
     assert.throws(
       () => t.service.assertReviewSubagentVerified('sess-none', project, task, '结论'),
-      /没有子代理账目/,
+      /没有核验证据/,
     )
     // 正例：reviewer 名下的委派核验运行带 subagent_spawned 账目 → 放行（无需「兜底验收」）。
     t.store.run(

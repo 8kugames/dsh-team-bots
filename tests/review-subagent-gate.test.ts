@@ -14,7 +14,9 @@
 // ⑦ 账挂成员 bot 施工运行（kind='task'）→ 拒；
 // ⑧ 账时间早于最近一次交付锚点（退回重做再交付）→ 拒；
 // ⑨ 非 in_review 状态仍走既有 conflict（闸不改变原状态校验顺序）；
-// ⑩ applyReview 直调（微信管理员/看板路径）不经闸。
+// ⑩ applyReview 直调（微信管理员/看板路径）不经闸；
+// ⑪ 委派核验运行（承接人为成员 reviewer）已跑完、无子代理账目 → 放行：
+//     核验外包后承接人亲自核验即闭环，不强制再派一层子代理。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -168,7 +170,7 @@ test('③ 本周期无账 → badRequest 且文案含「先派验收子代理」
       t.service.reviewFromBot(t.sessionId, { task: 'GATE-1', decision: 'accept', comment: '看起来没问题' }),
       (error: { status: number; message: string }) => {
         assert.equal(error.status, 400, 'badRequest 同款错误链')
-        assert.match(error.message, /本次评审没有子代理账目/)
+        assert.match(error.message, /本次评审没有核验证据/)
         assert.match(error.message, /先派验收子代理（subagent\/subagent_fork）做范围比对\/目标测试\/红线预测/)
         assert.match(error.message, /兜底验收/)
         return true
@@ -205,7 +207,7 @@ test('⑤ 账挂另一任务的运行 → 拒', async () => {
       t.service.reviewFromBot(t.sessionId, { task: 'GATE-1', decision: 'accept', comment: '核验通过' }),
       (error: { status: number; message: string }) => {
         assert.equal(error.status, 400)
-        assert.match(error.message, /本次评审没有子代理账目/)
+        assert.match(error.message, /本次评审没有核验证据/)
         return true
       },
     )
@@ -262,7 +264,7 @@ test('⑧ 账时间早于最近一次交付锚点（退回重做再交付）→ 
       t.service.reviewFromBot(t.sessionId, { task: 'GATE-1', decision: 'accept', comment: '复核通过' }),
       (error: { status: number; message: string }) => {
         assert.equal(error.status, 400)
-        assert.match(error.message, /本次评审没有子代理账目/)
+        assert.match(error.message, /本次评审没有核验证据/)
         return true
       },
     )
@@ -292,6 +294,40 @@ test('⑨ 非 in_review 状态仍走既有 conflict（闸不改变原状态校�
       },
     )
     assert.equal(t.store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, before, '拒绝不翻转任务状态')
+  } finally {
+    await cleanup(t.root, t.service, t.store)
+  }
+})
+
+test('⑪ 委派核验运行（成员 reviewer 承接）已跑完、无子代理账目 → 放行', async () => {
+  const t = await setup()
+  try {
+    const task = await bareTask(t, '外包检查卡', ['src/l.js'])
+    deliverAt(t, task, T0)
+    // 承接人亲自核验：review_delegate 运行跑完（succeeded）但没派子代理——
+    // 核验闭环本身即证据，不能因为没有 subagent_spawned 账目而拦下总监裁决。
+    seedRun(t, { id: 'run-reviewer-own', kind: 'review', taskId: task.id, sessionId: 'sess-reviewer', botId: t.dev.id, status: 'succeeded' })
+    const done = await t.service.reviewFromBot(t.sessionId, { task: 'GATE-1', decision: 'accept', comment: '核验通过：范围一致、目标测试绿' })
+    assert.equal(done.status, 'done')
+  } finally {
+    await cleanup(t.root, t.service, t.store)
+  }
+})
+
+test('⑪b 委派核验运行失败（非 succeeded）不算闭环 → 仍拦', async () => {
+  const t = await setup()
+  try {
+    const task = await bareTask(t, '裁决前卡二', ['src/m.js'])
+    deliverAt(t, task, T0)
+    seedRun(t, { id: 'run-reviewer-fail', kind: 'review', taskId: task.id, sessionId: 'sess-reviewer', botId: t.dev.id, status: 'failed' })
+    await assert.rejects(
+      t.service.reviewFromBot(t.sessionId, { task: 'GATE-1', decision: 'accept', comment: '看起来没问题' }),
+      (error: { status: number; message: string }) => {
+        assert.equal(error.status, 400)
+        assert.match(error.message, /本次评审没有核验证据/)
+        return true
+      },
+    )
   } finally {
     await cleanup(t.root, t.service, t.store)
   }
