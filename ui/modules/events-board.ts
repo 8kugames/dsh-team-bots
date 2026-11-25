@@ -374,6 +374,7 @@ export async function handleBoardAction(action, target) {
       await openTrajectory(target.dataset.runId)
       break
     case 'open-session':
+    case 'open-native-session':
     case 'open-session-catalog':
     case 'session-load-older': {
       const handled = await handleSessionAction(action, target)
