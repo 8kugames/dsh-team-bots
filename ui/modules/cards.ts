@@ -504,11 +504,15 @@ function focusApprovalCard(approval) {
 }
 
 // 轮询后比较 pending 增量：通知开启且页面不可见或失焦时，对新增 pending 审批各弹一次
-// （tag=approval-<id> 防同卡重复弹；换项目时基线重置，新项目从未见过的存量 pending 作为新审批弹出，
-// notifiedApprovals 会话级去重保证每条只弹一次）。页面可见且聚焦时同样记录基线——用户当场看到卡片，不再补弹。
+// （tag=approval-<id> 防同卡重复弹；换项目/换会话时基线重置，新视图从未见过的存量 pending
+// 作为新审批弹出，notifiedApprovals 会话级去重保证每条只弹一次）。页面可见且聚焦时同样记录
+// 基线——用户当场看到卡片，不再补弹。
 function notifyNewApprovals(approvals, { enabled = notifyOn(), hidden = document.hidden, focused = document.hasFocus() } = {}) {
   const pending = (approvals ?? []).filter(item => item?.status === 'pending')
-  const scope = pending.length > 0 ? String(pending[0].project_id ?? '') : null
+  // 基线指纹跟当前视图（项目群聊/单聊），不跟列表内容：单聊视图的列表是项目条目与 solo 条目
+  // 的拼接且按时间倒序，新审批一到 pending[0] 的归属就翻转，用列表当指纹会让基线反复误清、
+  // 已看过的审批被当新审批补弹。视图不变则指纹稳定。
+  const scope = state.chatMode === 'solo' ? `solo:${state.soloBotId ?? ''}` : `project:${state.projectId ?? ''}`
   if (scope !== notifyScope) {
     notifyScope = scope
     knownPendingIds.clear()

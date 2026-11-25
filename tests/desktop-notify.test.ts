@@ -126,7 +126,7 @@ test('页面可见且聚焦时只记基线不补弹；通知关闭时基线照�
   // 通知关闭：新审批照记基线但不弹
   harness.notifyNewApprovals([{ id: 'apr_3', status: 'pending', project_id: 'prj_1', botName: 'Gamma', tool_name: 'Bash' }], { enabled: false, hidden: true, focused: false })
   assert.equal(instances.length, 0)
-  // 换项目：基线重置，新项目从未见过的存量 pending 作为新审批弹出
+  // 换视图后未见过的存量 pending 仍是 fresh（未入过基线）→ 照弹且每条只弹一次
   const other = [{ id: 'apr_9', status: 'pending', project_id: 'prj_2', botName: 'Delta', tool_name: 'Bash' }]
   harness.notifyNewApprovals(other, { hidden: true, focused: false })
   assert.equal(instances.length, 1)
@@ -135,12 +135,46 @@ test('页面可见且聚焦时只记基线不补弹；通知关闭时基线照�
   assert.equal(instances.length, 1, '每条审批只弹一次')
 })
 
+test('单聊视图混合列表：基线不随最新审批的归属翻转（pending[0] 在项目条目与 solo 条目间互换不误清基线），换会话才重置', () => {
+  const instances = []
+  class FakeNotification {
+    static permission = 'granted'
+    static async requestPermission() { return 'granted' }
+    declare options: { tag: string }
+    constructor(title, options) { this.options = options; instances.push(this) }
+    close() {}
+  }
+  const harness = loadBlock({ Notification: FakeNotification, hidden: false, focused: true, stored: 'granted' })
+  // 在场看到混合存量：项目条目在前（单聊视图下 state 的列表是项目与 solo 条目的拼接，按时间倒序）
+  harness.notifyNewApprovals([
+    { id: 'apr_a', status: 'pending', project_id: 'prj_1' },
+    { id: 'apr_s1', status: 'pending', project_id: null },
+  ])
+  assert.equal(instances.length, 0, '在场只记基线')
+  // 新 solo 审批到达且页面已隐藏：pending[0] 翻转为 solo 条目——旧实现把列表内容当视图指纹，
+  // 此刻基线被误清、已看过的 apr_a/apr_s1 会被当新审批补弹；基线跟视图走则只弹新到的一条
+  harness.notifyNewApprovals([
+    { id: 'apr_s2', status: 'pending', project_id: null },
+    { id: 'apr_a', status: 'pending', project_id: 'prj_1' },
+    { id: 'apr_s1', status: 'pending', project_id: null },
+  ], { hidden: true, focused: false })
+  assert.equal(instances.length, 1, '已入基线的不因 pending[0] 翻转补弹')
+  assert.equal(instances[0].options.tag, 'approval-apr_s2')
+  // 换会话（群聊切单聊）：视图指纹变化，基线重置，新视图未见过的存量 pending 照弹
+  harness.state.chatMode = 'solo'
+  harness.state.soloBotId = 'bot_9'
+  harness.notifyNewApprovals([{ id: 'apr_x', status: 'pending', project_id: null }], { hidden: true, focused: false })
+  assert.equal(instances.length, 2, '换会话后未见过的存量 pending 照弹')
+  assert.equal(instances[1].options.tag, 'approval-apr_x')
+})
+
 test('渲染与轮询接线：全局配置开关、点击 case、poll 隐藏静默分支、审批卡 data-approval-id 锚点', () => {
   assert.match(source, /id="desktop-notify-label">\$\{t\('桌面通知'\)\}/)
   assert.match(source, /data-action="toggle-notify"/)
   assert.match(source, /case 'toggle-notify':[\s\S]{0,80}await toggleDesktopNotify\(\)/)
-  // 页面隐藏时静默拉 state 只喂审批增量，不写 state.data、不渲染
-  assert.match(source, /if \(document\.hidden\) \{[\s\S]{0,200}api\('state', \{ projectId: state\.projectId \|\| undefined \}, \{ quiet: true \}\)[\s\S]{0,120}notifyNewApprovals\(data\?\.approvals \?\? \[\]\)/)
+  // 页面隐藏时静默拉 state 只喂审批增量，不写 state.data、不渲染；带 soloBotId 与 loadState 同口径，
+  // 否则单聊审批（project_id 为空）在隐藏期间永远拉不到、通知必丢（DSHBOTS-218）。
+  assert.match(source, /if \(document\.hidden\) \{[\s\S]{0,400}api\('state', \{[\s\S]{0,120}soloBotId: state\.chatMode === 'solo' \? state\.soloBotId : undefined[\s\S]{0,120}\}, \{ quiet: true \}\)[\s\S]{0,200}notifyNewApprovals\(data\?\.approvals \?\? \[\]\)/)
   // 可见路径：render 后喂增量
   assert.match(source, /render\(\)[\s\S]{0,80}notifyNewApprovals\(state\.data\?\.approvals \?\? \[\]\)/)
   // 审批卡带 id 定位锚点（通知点击滚动定位用）

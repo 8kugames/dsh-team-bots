@@ -632,7 +632,8 @@ async function poll() {
     // 不写 state.data、不渲染（避免隐藏时误推已读水位、误重渲染）。
     if (document.hidden) {
       if (!notifyOn()) return
-      const data = await api('state', { projectId: state.projectId || undefined }, { quiet: true })
+      // 带 soloBotId 与 loadState 同口径：单聊审批（DSHBOTS-218）只在带它的 state 响应里下发，漏带即丢
+      const data = await api('state', { projectId: state.projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet: true })
       notifyNewApprovals(data?.approvals ?? [])
       return
     }
