@@ -4,6 +4,38 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.137
+
+### 中文
+
+**会话**
+
+- **会话中心限最近 50 个**：目录只列最近 50 个会话，运行中的会话不受上限约束恒保留。
+- **目录图标不再挤竖排**：会话中心目录行首图标补上尺寸，行内文字不再被挤成竖排。
+
+**界面**
+
+- **调度页任务行单行排布**：任务行改为单行布局，放不下的内容溢出往返滚动播放。
+
+**通知**
+
+- **桌面通知补拉单聊审批**：隐藏页静默拉 state 补齐 soloBotId，单聊审批的桌面通知不再丢失；通知基线指纹改跟会话上下文（project/solo），混合列表里 pending 首条翻转不再误清基线。
+
+### English
+
+**Sessions**
+
+- **Session center capped at 50**: the directory lists the 50 most recent sessions; running sessions are always kept regardless of the cap.
+- **Directory icons no longer squeeze text**: the leading icons in session-center rows got their sizes back, so row text no longer wraps vertically.
+
+**UI**
+
+- **Scheduler rows on one line**: task rows now lay out on a single line, with overflowing content scrolling back and forth.
+
+**Notifications**
+
+- **Desktop notifications pick up solo-chat approvals**: the hidden page silently pulls state to fill in soloBotId, so solo-chat approval notifications are no longer missed. The notification baseline fingerprint now follows the session context (project/solo), so a pending flip in a mixed list no longer wipes the baseline.
+
 ## v0.3.133
 
 ### 中文
