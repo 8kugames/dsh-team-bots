@@ -8,7 +8,7 @@ import { extname, join, sep } from 'node:path'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { assertInside } from '../paths.js'
 import { summarizeForUi, upsertBotMessage } from '../botmsg.js'
-import { id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
+import { findMemberByName, id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
 import { insertMessageImages, messageImageRow, messageImageViews, prepareImagesForStorage } from './message-images.js'
 import { considerVisionProxy } from './vision-proxy.js'
 
@@ -135,7 +135,7 @@ export const chatMethods = {
       const assigneeName = command[1]
       const title = text(command[2].split('\n')[0], 200)
       if (!title) throw badRequest('任务标题不能为空')
-      const assignee = members.find(bot => bot.name === assigneeName)
+      const assignee = findMemberByName(members, assigneeName)
       if (!assignee) throw badRequest(`@${assigneeName} 不是该项目成员`)
       const messageId = this.insertMessage({
         projectId,
@@ -418,7 +418,7 @@ export const chatMethods = {
     if (!toName || typeof toName !== 'string') throw badRequest('缺少收信 Bot 名称')
     if (!requestId || typeof requestId !== 'string') throw badRequest('缺少 request_id（每次逻辑请求一个稳定名字，重发同名不重复执行）')
     const project = this.projectRow(origin.project_id)
-    const target = (this.membersOf(project.id) ?? []).find(bot => bot.name === toName.trim())
+    const target = findMemberByName(this.membersOf(project.id), toName)
     if (!target) throw notFound(`项目 ${project.name} 里没有叫 ${toName} 的成员 Bot`)
     if (target.id === fromBotId) throw badRequest('不能给自己发私信')
     // 私信正文过密钥掩码：私信会进对方模型上下文，明文密钥不该落库。

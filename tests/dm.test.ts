@@ -211,6 +211,31 @@ test('自私信与非成员被拒，目标不可用时私信失败留痕', async
   }
 })
 
+// Bot 名称解析只有一条口径：建档查重按 lower(name)，解析也必须大小写不敏感
+// （私信、/task @、@提及三处曾各自比较，ASCII 名称只差大小写就解析不到）。
+test('成员 Bot 名称解析大小写不敏感：私信 / /task @ / @提及', async () => {
+  const state = await setup()
+  globalThis.DM_ROOT = state.root
+  try {
+    const { store, service, project, builder, originSession } = state
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const sent = service.messageFromBot({ sessionId: originSession, toName: 'DIRECTOR', requestId: 'case-ask', textBody: '在吗' })
+    assert.equal(sent.created, true)
+    assert.equal(store.get('SELECT to_bot_id FROM bot_messages WHERE request_id = ?', 'case-ask').to_bot_id, director.id)
+
+    const created = await service.sendMessage(project.id, '/task @builder 修一下大小写')
+    assert.ok(created.taskId, '/task @builder 应解析到 Builder 并建卡')
+    assert.equal(store.get('SELECT assignee_bot_id FROM tasks WHERE id = ?', created.taskId).assignee_bot_id, builder.id)
+
+    await service.sendMessage(project.id, '@builder 在吗')
+    const last = service.groupChatStore(project.id)
+      .get('SELECT mentions_json FROM messages ORDER BY created_at DESC, rowid DESC LIMIT 1')
+    assert.deepEqual(JSON.parse(last.mentions_json), [builder.id])
+  } finally {
+    await closeQuietly(state.store)
+  }
+})
+
 // DSHBOTS-291 覆盖缺口补测①（D-289 红线臂实测发现 dm 逐条放行无覆盖）：
 // 同一 bot 忙时挂起多条 dm，空闲 drain 后同一 tick 只放行一条（回信契约），余量留队列下一拍。
 test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运行，余量留队列', async () => {

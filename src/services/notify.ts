@@ -7,7 +7,7 @@
 // 走它，句柄不可达或目标无绑定会话时降级为群聊流（insertMessage + chat_run）。
 
 import { badRequest, notFound } from '../errors.js'
-import { id, nowIso, text } from '../util.js'
+import { findMemberByName, id, nowIso, text } from '../util.js'
 
 // ── 防循环三上限（DSHBOTS-267，配置默认值写死常量，KISS）──────────────────
 // 真实事故背书：伙伴回执淹没主对话、委派续跑近百轮重发已推翻目标。
@@ -139,8 +139,7 @@ export const notifyMethods = {
   // 留痕恒定先落（来源 bot、@目标、进群聊流）；投递失败只 warn，转群聊流兜底。
   async notifyMemberFromBot({ project, from, memberName, body }) {
     const name = String(memberName ?? '').trim()
-    const target = this.membersOf(project.id)
-      .find(member => member.name.toLowerCase() === name.toLowerCase())
+    const target = findMemberByName(this.membersOf(project.id), name)
     if (!target) throw notFound(`项目 ${project.name} 里没有叫 ${memberName} 的成员 Bot`)
     if (target.id === from.id) throw badRequest('不能给自己发通知')
     // 暂停/不可用目标不投递（DSHBOTS-262）：通知即唤醒信号，暂停中先恢复再通知。

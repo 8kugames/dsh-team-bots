@@ -6,7 +6,7 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用）。
 
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
-import { nowIso, TASK_ID_PATTERN } from '../util.js'
+import { findMemberByName, nowIso, TASK_ID_PATTERN } from '../util.js'
 import { PRIORITY_BUDGET_MINUTES } from '../config.js'
 import { TASK_PRIORITIES } from './tasks.js'
 import { filterIgnoredWriteScopes, parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
@@ -341,7 +341,7 @@ export const taskDispatchMethods = {
   },
   async assignFromBot(sessionId, input) {
     const { project, actor } = this.ownerContextFor(sessionId)
-    const member = this.membersOf(project.id).find(bot => bot.name.toLowerCase() === String(input.assignee ?? '').toLowerCase())
+    const member = findMemberByName(this.membersOf(project.id), input.assignee)
     if (!member) throw badRequest(`项目中没有 Bot ${input.assignee}`)
     // 派发沙箱覆盖（DSHBOTS-156）：可选 sandbox 只收紧不放大，校验对准承接 bot 的配置档；
     // 缺省 = 跟随 bot 配置（新卡 NULL/重派保留旧值），'inherit' 显式回落 bot 配置（重派清覆盖）。

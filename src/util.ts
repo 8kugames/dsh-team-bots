@@ -90,11 +90,19 @@ export const stripLeakedToolMarkup = (value) => {
   return cleaned.replace(/\n{3,}/g, '\n\n').trim()
 }
 
+// Bot 名称解析的唯一口径：大小写不敏感（建档查重就是按 lower(name) 定的，同名只可能有一个）。
+// 任何「把名字解析成成员 Bot」的地方都走这里，别再各写一份比较式。
+export const findMemberByName = (members, name) => {
+  const target = String(name ?? '').trim().toLowerCase()
+  if (!target) return undefined
+  return [...(members ?? [])].find(bot => String(bot?.name ?? '').toLowerCase() === target)
+}
+
 export const parseMentions = (body, candidates) => {
   const found = []
   const names = [...candidates].sort((a, b) => b.name.length - a.name.length)
   for (const candidate of names) {
-    if (new RegExp(`(^|\\s)@${escapeRegExp(candidate.name)}(?=\\s|$|[，。,.!?：:])`, 'u').test(body)) found.push(candidate)
+    if (new RegExp(`(^|\\s)@${escapeRegExp(candidate.name)}(?=\\s|$|[，。,.!?：:])`, 'iu').test(body)) found.push(candidate)
   }
   return found
 }
