@@ -299,11 +299,11 @@ function dispatchListNote(total) {
 
 // 调度页任务行：编号 + 标题 + 状态 + 项目名；点击跳到该项目的任务页。
 function dispatchTaskRow(task) {
+  // 编号 / 标题 / 项目名排成一条不换行的横排：窄侧栏里三列各自折行会把行撑成两行，
+  // 放不下时交给 .side-row-flow 裁切，由 syncSideRowMarquees 补上往返滚动。
   return `<div class="side-row" data-action="nav" data-view="tasks" data-project-id="${attr(task.project_id ?? '')}" style="cursor:pointer" title="${esc(`${task.identifier ?? ''} · ${task.title ?? ''} · ${task.projectName ?? ''}`)}">
     ${sideRowStatusHtml(task.status)}
-    <strong>${esc(task.identifier ?? '')}</strong>
-    <span class="side-row-title">${esc(task.title ?? '')}</span>
-    <span class="faint">${esc(task.projectName ?? '')}</span>
+    <span class="side-row-flow"><span class="side-row-flow-inner"><strong>${esc(task.identifier ?? '')}</strong><span class="side-row-title">${esc(task.title ?? '')}</span><span class="faint">${esc(task.projectName ?? '')}</span></span></span>
   </div>`
 }
 
@@ -316,6 +316,38 @@ function dispatchRunRow(run) {
     <span class="side-row-title">${esc(run.projectKey == null || run.projectKey === t("单聊") ? t('common.soloChat') : run.projectKey)}</span>
     <span class="run-clock" data-started="${attr(started)}">${duration(started)}</span>
   </div>`
+}
+
+// 调度页任务行的单行滚动播放：量出横排内容比视口宽多少，把这段距离写进行内动画往返平移。
+// 写在行内而非 class 上，是因为行内样式属于 dom-morph 的保留区——2.8s 轮询重渲染时正在滚动的行
+// 不会每拍跳回起点。只在溢出时挂动画；系统开启「减弱动态效果」时不自动播放，改为可横向拖动。
+// 先量后写：所有读数读完再改样式，避免逐行读写交替反复触发重排。
+export function syncSideRowMarquees(root: ParentNode = document) {
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  const rows = [...root.querySelectorAll('.side-row-flow')] as HTMLElement[]
+  const measured = rows.map(flow => {
+    const inner = flow.firstElementChild as HTMLElement | null
+    return { flow, inner, shift: inner ? inner.scrollWidth - flow.clientWidth : 0 }
+  })
+  for (const { flow, inner, shift } of measured) {
+    if (!inner) continue
+    if (flow.clientWidth === 0 || shift <= 2) {
+      if (inner.style.animation) inner.style.removeProperty('animation')
+      if (flow.style.overflowX) flow.style.removeProperty('overflow-x')
+      continue
+    }
+    flow.style.overflowX = still ? 'auto' : ''
+    if (still) {
+      if (inner.style.animation) inner.style.removeProperty('animation')
+      continue
+    }
+    // 约 24px/s 匀速，两端各留停顿；距离越长时长越长，短距离不拖沓。
+    const distance = `${-Math.ceil(shift)}px`
+    const animation = `side-row-marquee ${Math.max(6, Math.ceil(shift / 24) * 2 + 3)}s linear infinite`
+    if (inner.style.animation === animation && inner.style.getPropertyValue('--marquee-shift') === distance) continue
+    inner.style.setProperty('--marquee-shift', distance)
+    inner.style.animation = animation
+  }
 }
 
 // 项目外单聊（已升级为「调度页」）：每个 Bot 一条独立会话，运行目录在 _the_bots/<bot> 下。

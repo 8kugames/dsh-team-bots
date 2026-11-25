@@ -14,7 +14,7 @@ import { renderTasks, renderTerminal, renderBotsOverview, renderMembers, renderS
 import { overlayOpen, markAppRenderPending, renderModalLayer, ensureModalRoot, noteModalScroll, flushAppRender } from './modules/modal-layer.js'
 import { morph } from './modules/dom-morph.js'
 import { openModal, closeModal, openTask, openSkillDetail, openTrajectory, openBot, reloadTaskModal, bindProposalForm, updateEffortOptions, updateFallbackEffortOptions, trapModalFocus, renderDirPicker, closeDirPicker, parseFallbackFields, normalizeTimeBudgetMinutes, modelOptions, effortOptions, fallbackModelOptions, renderPriceCard } from './modules/modal-forms.js'
-import { activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, loadOlderMessages, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote, dispatchTaskRow, dispatchRunRow, renderSoloChat, loadSoloDetail, renderSoloConfig } from './modules/chat.js'
+import { activeTypingRuns, typingRows, chatKey, mergedChatMessages, canLoadOlder, loadOlderButton, loadOlderMessages, renderChatMembersCard, renderChat, DISPATCH_LIST_LIMIT, dispatchListNote, dispatchTaskRow, dispatchRunRow, renderSoloChat, loadSoloDetail, renderSoloConfig, syncSideRowMarquees } from './modules/chat.js'
 import { refreshAction } from './modules/page-shell.js'
 import { handleBoardAction } from './modules/events-board.js'
 import './modules/events-click.js'
@@ -394,6 +394,7 @@ function renderShell() {
 }
 
 function syncChromeHeight() {
+  syncSideRowMarquees(app) // 调度行宽度随面板尺寸变，渲染后与窗口缩放都走这条通道补量（与页头无关，故在早退之前）
   const head = document.querySelector('.main-head') as HTMLElement
   if (!head) return
   const chrome = head.offsetHeight + 48

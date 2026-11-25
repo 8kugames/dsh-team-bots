@@ -222,7 +222,7 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
   }
   const scope = new Function(
     'document', 'renderModal', 'HTMLElement', 'state', 'app', 'renderShell', 'hydrateMessageImageThumbs',
-    'captureViewScroll', 'restoreViewScroll', 'syncChromeHeight', 'syncComposerBox', 'syncTerminalPoll',
+    'captureViewScroll', 'restoreViewScroll', 'syncChromeHeight', 'syncComposerBox', 'syncTerminalPoll', 'syncSideRowMarquees',
     'requestAnimationFrame', 'lastRenderedView', 'morph', 'setAppInert', 'overlayInertState',
     `${fnSrc}\n${renderSrc}\nreturn { render, overlayOpen, flushAppRender, get pending() { return appRenderPending } }`,
   )(
@@ -234,6 +234,7 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
     () => `<div class="shell">${state.data.version}</div>`,
     () => {},
     () => null,
+    () => {},
     () => {},
     () => {},
     () => {},
