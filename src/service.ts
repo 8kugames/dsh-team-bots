@@ -17,6 +17,7 @@ import { ENV_PREFIX, SecretBox, maskSecrets, materializeEnvFile, normalizeSecret
 import { clampNumber, jsonParse, nowIso, parseDisabledSkills, parseMentions, projectKey, redactSecrets, sha256, slugify, TASK_ID_PATTERN, sanitizeFilename, writeIfChanged } from './util.js'
 import { parseWriteScopes, readWriteScopes, writeScopesOverlap } from './services/write-scopes.js'
 import { normalizeFilePolicy } from './services/file-policy.js'
+import { sessionViewMethods } from './services/session-view.js'
 import { defineMethods } from './services/mixin.js'
 import { reviewResult } from './wechat/format.js'
 import { botsMethods } from './services/bots.js'
@@ -142,5 +143,6 @@ defineMethods(TeamService.prototype, [
   approvalsMethods,
   questionsMethods,
   chatStoreMethods,
+  sessionViewMethods,
   coreMethods,
 ])

@@ -37,6 +37,7 @@ type TeamActionName =
   | 'send_message' | 'send_solo_message' | 'get_message_image' | 'create_task' | 'update_task'
   | 'assign_task' | 'transition_task' | 'add_comment' | 'task_detail' | 'task_review_delegate' | 'task_update_scopes'
   | 'retry_run' | 'cancel_run' | 'run_trajectory' | 'answer_attention'
+  | 'session_catalog' | 'session_messages'
   | 'create_memory' | 'update_memory' | 'delete_memory' | 'search_memories' | 'approve_memory' | 'reject_memory'
   | 'create_proposal' | 'decide_proposal' | 'evaluate_proposal' | 'promote_proposal'
   | 'approval_decide' | 'approvals_pending' | 'approval_rules' | 'update_approval_rules' | 'approval_full_access' | 'update_approval_full_access' | 'question_answer' | 'questions_pending'
@@ -57,6 +58,14 @@ interface TeamActionPayload {
   botId?: string
   taskId?: string
   runId?: string
+  /** session_messages / session_catalog：直达会话或按运行归属解析。 */
+  sessionId?: string | null
+  /** session_messages：增量游标（exclusive，事件 seq）；与 beforeSeq 互斥。 */
+  afterSeq?: number
+  /** session_messages：向旧翻页的游标（exclusive，事件 seq）。 */
+  beforeSeq?: number
+  /** session_messages：单页条目上限（默认 200，上限 500）。 */
+  limit?: number
   memoryId?: string
   proposalId?: string
   approvalId?: string

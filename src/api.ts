@@ -11,6 +11,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'add_member', 'remove_member',
   'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail', 'task_review_delegate', 'task_update_scopes',
   'retry_run', 'cancel_run', 'run_trajectory', 'answer_attention',
+  'session_catalog', 'session_messages',
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
   'approval_decide', 'approvals_pending',
@@ -121,6 +122,18 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.cancelRun(required(payload.runId, 'runId'), actor)
     case 'run_trajectory':
       return service.runTrajectory(required(payload.runId, 'runId'))
+    case 'session_catalog':
+      // 会话查看（只读）：插件托管会话目录（任务/控制面/审查），供查看器入口。
+      return service.sessionCatalog(payload.projectId ?? null)
+    case 'session_messages':
+      // 会话查看（只读）：宿主事件日志 → append 消息事件流，游标增量轮询。
+      return service.sessionMessages({
+        sessionId: payload.sessionId ?? null,
+        runId: payload.runId ?? null,
+        afterSeq: payload.afterSeq,
+        beforeSeq: payload.beforeSeq,
+        limit: payload.limit,
+      })
     case 'answer_attention':
       return service.answerAttention(required(payload.runId, 'runId'), required(payload.answer, 'answer'), actor)
     // 终端的安全口径与 Bot 相同：命令以当前用户执行、权限与服务进程一致；
