@@ -151,7 +151,10 @@ export const sessionViewMethods = {
       sessionId = run.session_id
     }
     ensureSubagentSessionSchema(this.store)
-    const query = this.runtime?.ctx?.sessionQuery ?? this.runtime?.ctx?.get?.('sessionQuery')
+    // 服务读取走 ctx.get（无 inject 要求的可选访问口，与 workspaceRegistry/compaction 同款）：
+    // ctx.sessionQuery 属性访问在 cordis 里要求插件 inject 声明，未声明直接抛
+    // "cannot get property without inject"（生产事故 2026-11-25），回退分支永远走不到。
+    const query = this.runtime?.ctx?.get?.('sessionQuery')
     if (!query?.observeSession) {
       throw new AppError('DSH_UNAVAILABLE', '宿主未提供会话读取服务（sessionQuery）', 503)
     }

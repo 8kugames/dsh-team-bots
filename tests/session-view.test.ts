@@ -8,23 +8,24 @@ import { rm } from 'node:fs/promises'
 import { setupTeam } from './helpers/harness.js'
 import { installSubagentLedger } from '../src/subagent-ledger.js'
 
-// 桩运行时：ctx.sessionQuery.observeSession(sessionId) → observations 表里的假 lease。
+// 桩运行时：ctx.get('sessionQuery')（cordis 无 inject 要求的可选服务访问口）→ 桩观察
+// lease。刻意不提供 ctx.sessionQuery 属性——生产事故（2026-11-25）就是属性访问在
+// cordis 里触发 "cannot get property without inject"，服务方法必须走 ctx.get。
 class SessionQueryStubRuntime {
   declare ctx: any
   constructor(observations: Map<string, any>) {
-    this.ctx = {
-      sessionQuery: {
-        observeSession: async (sessionId: string) => {
-          const observation = observations.get(sessionId)
-          if (!observation) {
-            const error = new Error(`session "${sessionId}" not found`) as any
-            error.code = 'SESSION_QUERY_SESSION_NOT_FOUND'
-            throw error
-          }
-          return observation
-        },
+    const sessionQuery = {
+      observeSession: async (sessionId: string) => {
+        const observation = observations.get(sessionId)
+        if (!observation) {
+          const error = new Error(`session "${sessionId}" not found`) as any
+          error.code = 'SESSION_QUERY_SESSION_NOT_FOUND'
+          throw error
+        }
+        return observation
       },
     }
+    this.ctx = { get: (name: string) => (name === 'sessionQuery' ? sessionQuery : undefined) }
   }
   setCompletionHandler() {}
   setMask() {}
