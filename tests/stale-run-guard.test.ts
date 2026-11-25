@@ -148,6 +148,53 @@ test('任务 done 后：tick 不领取其 queued 任务运行，且置 canceled�
   }
 })
 
+test('任务经 updateTask 拖回 backlog：排队运行按 TASK_LEFT_IN_PROGRESS 中止，卡片留在 backlog', async () => {
+  const { root, store, service, director, dev } = await manualSetup()
+  try {
+    const { task } = await createProjectWithTask(service, director, dev)
+    service.dispatchOutbox()
+    const queued = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'queued'", task.id)
+    assert.ok(queued, '前置：任务运行应已排队')
+
+    await service.updateTask(task.id, { status: 'backlog' })
+
+    const after = runRow(store, queued.id)
+    assert.equal(after.status, 'canceled', '离开「进行中」口径应中止排队写运行')
+    assert.equal(after.error_code, 'TASK_LEFT_IN_PROGRESS')
+    assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'backlog')
+  } finally {
+    await cleanup(root, store)
+  }
+})
+
+test('任务退回 backlog 后：tick 不领取其 queued 任务运行，置 canceled（SUPERSEDED）且卡片留在 backlog', async () => {
+  const { root, store, service, runtime, director, dev } = await manualSetup()
+  try {
+    const { task } = await createProjectWithTask(service, director, dev)
+    service.dispatchOutbox()
+    const queued = store.get("SELECT * FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'queued'", task.id)
+    assert.ok(queued, '前置：任务运行应已排队')
+
+    // 用户把卡拖回待办池：排队运行若照旧起跑，调度器就会写出 TRANSITIONS 不允许的 backlog→in_progress。
+    store.run("UPDATE tasks SET status = 'backlog' WHERE id = ?", task.id)
+
+    service.started = true
+    await service.tick()
+
+    const after = runRow(store, queued.id)
+    assert.equal(after.status, 'canceled', 'backlog 卡的排队运行不得留在 queued')
+    assert.equal(after.error_code, 'SUPERSEDED')
+    assert.equal(after.error_message, '任务已退回 backlog，排队运行被清理')
+    assert.equal(runtime.started.filter(started => started.runId === queued.id).length, 0, '不得被领取起跑')
+    assert.equal(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'backlog', '卡片停在 backlog，不被拉成 in_progress')
+    const events = staleEvents(service, queued)
+    assert.equal(events.length, 1, '恰好一条 stale_superseded 留痕')
+    assert.match(events[0].message, /backlog/)
+  } finally {
+    await cleanup(root, store)
+  }
+})
+
 test('任务 canceled 后：同口径不领取、置 canceled（SUPERSEDED + 留痕）', async () => {
   const { root, store, service, runtime, director, dev } = await manualSetup()
   try {

@@ -384,12 +384,12 @@ export const schedulerMethods = {
   // 陈旧排队运行守卫（DSHBOTS-110）：任务已进终态（done/canceled）后残留的 queued 运行不得再被
   // 起跑执行。统一置 canceled + error_code='SUPERSEDED'（管理清理标记，不进任务执行历史），
   // 并按 run_id EXISTS 去重写 stale_superseded 事件，重复触发不重复留痕。
-  cancelQueuedRunAsSuperseded(runId) {
+  cancelQueuedRunAsSuperseded(runId, message = '任务已结束，排队运行被清理') {
     const changed = this.store.run(
       `UPDATE runs SET status = 'canceled', ended_at = ?, cancel_requested = 1,
         error_code = 'SUPERSEDED', error_message = ?
        WHERE id = ? AND status = 'queued'`,
-      nowIso(), '任务已结束，排队运行被清理',
+      nowIso(), message,
       runId,
     )
     if (Number(changed?.changes ?? 0) !== 1) return false
@@ -399,20 +399,26 @@ export const schedulerMethods = {
       runId,
     )
     if (!alreadyNoted) {
-      this.insertRunEvent(runId, 'stale_superseded', '任务已结束，排队运行被清理（SUPERSEDED）')
+      this.insertRunEvent(runId, 'stale_superseded', `${message}（SUPERSEDED）`)
     }
     return true
   },
-  // tick 前置清理：任务已终态（done/canceled）的 queued 任务运行直接置 canceled（SUPERSEDED），
-  // 避免陈旧排队运行被起跑执行。只处理 kind='task' 的运行——非任务运行（chat/dm/审查等）不受影响。
+  // tick 前置清理：任务已终态（done/canceled）或已退回 backlog 的 queued 任务运行直接置
+  // canceled（SUPERSEDED），避免陈旧排队运行被起跑执行。正常路径上，卡片离开「进行中」
+  // 时 updateTask 已中止其写运行；这里兜底绕过 updateTask 的存量行/直写行，保证调度器
+  // 不会写出 TRANSITIONS 不允许的 backlog→in_progress（backlog 是待办池，不是派单态）。
+  // 只处理 kind='task' 的运行——非任务运行（chat/dm/审查等）不受影响。
   cancelStaleQueuedTaskRuns() {
     const rows = this.store.all(
-      `SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
-        WHERE r.status = 'queued' AND r.kind = 'task' AND t.status IN ('done', 'canceled')`,
+      `SELECT r.id, t.status AS task_status FROM runs r JOIN tasks t ON t.id = r.task_id
+        WHERE r.status = 'queued' AND r.kind = 'task' AND t.status IN ('done', 'canceled', 'backlog')`,
     )
     let canceled = 0
     for (const row of rows) {
-      if (this.cancelQueuedRunAsSuperseded(row.id)) canceled += 1
+      const message = row.task_status === 'backlog'
+        ? '任务已退回 backlog，排队运行被清理'
+        : '任务已结束，排队运行被清理'
+      if (this.cancelQueuedRunAsSuperseded(row.id, message)) canceled += 1
     }
     return canceled
   },
@@ -600,13 +606,14 @@ export const schedulerMethods = {
       // 等人机运行契约不变，见 tests/avatar-lanes.test.js），改为把通知/伙伴唤醒触发的 chat
       // 运行（触发消息 sender_type='bot'）降到机器流量档——同车道内用户提问（tier 1）必然
       // 先于它领取，即使提问后到；通知备忘让位于一切人机交互与 urgent/high 任务。
-      // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）的 queued 任务运行不再领取；
+      // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）或退回 backlog 的 queued 任务运行
+      // 不再领取——它们要么已被前置清理作废，要么等下一拍清理，绝不起跑；
       // 只排 kind='task'，非任务运行不受影响。LEFT JOIN 出 NULL 的孤儿任务运行不过滤。
       const candidates = this.store.all(
         `SELECT r.*, t.priority AS task_priority, t.ignored_write_scopes AS task_ignored_scopes
            FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
          WHERE r.status = 'queued'
-           AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled'))
+           AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled', 'backlog'))
           LIMIT 200`,
       )
       // 出队定档移到 JS：分库后 messages 住各聊天库（顶库 messages 已空，

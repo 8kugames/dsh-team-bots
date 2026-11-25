@@ -63,9 +63,10 @@ test('预检②：outbox 投递侧既有终态预检保留（owner_task_run / re
 })
 
 test('兜底③：入队后终态的取消清理路径与「任务已结束，排队运行被清理」文案一行不动', () => {
-  const cancelBody = methodBody(schedulerSource, 'cancelQueuedRunAsSuperseded(runId) {')
-  assert.match(cancelBody, /'任务已结束，排队运行被清理'/, 'UPDATE 取消文案保留')
-  assert.match(cancelBody, /'stale_superseded', '任务已结束，排队运行被清理（SUPERSEDED）'/, 'stale_superseded 事件文案保留')
+  const cancelBody = methodBody(schedulerSource, 'cancelQueuedRunAsSuperseded(runId, message = ')
+  assert.match(cancelBody, /message = '任务已结束，排队运行被清理'/, '终态默认取消文案保留')
+  assert.match(cancelBody, /'stale_superseded'/, 'stale_superseded 事件仍落同一码')
+  assert.match(cancelBody, /\$\{message\}（SUPERSEDED）/, '事件文案随 message 走，不再写死终态措辞')
   const supersedeBody = methodBody(taskRunsSource, 'cancelSupersededQueuedRuns(taskId) {')
   assert.match(supersedeBody, /this\.cancelQueuedRunAsSuperseded\(row\.id\)/, '任务终态流转仍全量清理残留排队运行')
   assert.match(
