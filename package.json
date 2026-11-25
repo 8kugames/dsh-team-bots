@@ -1,6 +1,6 @@
 {
   "name": "dsh-team-bots",
-  "version": "0.3.122",
+  "version": "0.3.123",
   "description": "Project spaces, group chats, task boards, memory and usage for teams of DSH bots",
   "repository": {
     "type": "git",
@@ -70,11 +70,22 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ],
+      "platform": "web"
     }
   },
   "directories": {
     "doc": "docs",
     "test": "tests"
   },
-  "author": ""
+  "author": "",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  }
 }

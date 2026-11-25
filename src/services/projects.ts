@@ -71,12 +71,14 @@ export const projectsMethods = {
 
   // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，或该 bot 有在跑的子代理
   //（子代理不占 runs 行，与总览 bots 页同款判定，DSHBOTS-294）；usage 四项与 cost 为本项目全部 run 的累计。
+  // controlSessionId = 该成员在本项目的控制面绑定会话（kind='bot' 活跃行），供「跳原生界面」入口。
   // run_status 用 bot 全局口径（不限本项目）：failed 根因（模型/AUTH）是 bot 级，单聊 run 的 project_id 为 NULL，
   // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 的 run 部分维持项目口径不动。
   // taskStats（DSHBOTS-65）按本项目任务聚合：done=已完成，open=未完成且未取消（canceled 不算待办），无任务兜底 0/0。
   membersWithUsage(projectId) {
     return this.store.all(
       `SELECT pm.*, pm.member_id AS id, pm.member_role, b.name, b.role AS bot_role, b.provider, b.model, b.effort, b.status,
+         cb.session_id AS control_session_id,
          EXISTS(
            SELECT 1 FROM runs r
            WHERE r.project_id = pm.project_id AND r.bot_id = pm.member_id AND r.status IN ('queued', 'running')
@@ -118,6 +120,7 @@ export const projectsMethods = {
          COALESCE(ts.task_done, 0) AS task_done,
          COALESCE(ts.task_open, 0) AS task_open
        FROM project_members pm JOIN bots b ON b.id = pm.member_id
+       LEFT JOIN session_bindings cb ON cb.bot_id = pm.member_id AND cb.project_id = pm.project_id AND cb.kind = 'bot' AND cb.alias = 0
        LEFT JOIN (
          SELECT bot_id, status, error_code, retry_after_ms,
                 ROW_NUMBER() OVER (
@@ -149,6 +152,7 @@ export const projectsMethods = {
     ).map(row => ({
       ...row,
       busy: Boolean(row.busy) || runningSubagentCount(row.id) > 0,
+      controlSessionId: row.control_session_id ?? null,
       modelRef: row.provider && row.model ? `${row.provider}/${row.model}` : null,
       taskStats: { done: Number(row.task_done ?? 0), open: Number(row.task_open ?? 0) },
     }))

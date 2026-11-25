@@ -116,6 +116,22 @@ export async function handleSessionAction(action, target) {
     case 'open-session':
       await openSessionViewer({ sessionId: target.dataset.sessionId ?? null, runId: target.dataset.runId ?? null })
       return true
+    case 'open-native-session': {
+      const sessionId = target.dataset.sessionId ?? null
+      if (!sessionId && target.dataset.runId) {
+        // 运行入口（任务卡运行行/聊天 chip）只带 runId：先向服务端解析归属会话再跳。
+        try {
+          const data = await api('session_messages', { runId: target.dataset.runId, limit: 1 }, { quiet: true })
+          if (data?.sessionId) jumpToNativeSession(data.sessionId)
+          else toast(t('session.noSession'), 'error')
+        } catch (error: any) {
+          toast(error?.message || t('session.loadFailed'), 'error')
+        }
+      } else if (sessionId) {
+        jumpToNativeSession(sessionId)
+      }
+      return true
+    }
     case 'open-session-catalog':
       await openSessionCatalog(state.projectId ?? null)
       return true
@@ -141,6 +157,15 @@ function runBadge(session) {
   return ''
 }
 
+// 跳转原生界面：原生 SPA 无 URL 会话路由，走 client 半边桥——写待开键（新标签冷启动消费）
+// + BroadcastChannel 广播（已开标签热响应）+ 具名窗口复用同一原生标签。
+export function jumpToNativeSession(sessionId) {
+  if (!sessionId) return
+  try { window.localStorage?.setItem?.('dsh-team-bots:open-session', sessionId) } catch {}
+  try { new BroadcastChannel('dsh-team-bots').postMessage({ type: 'open-session', sessionId }) } catch {}
+  window.open('/index.html', 'dsh-native')
+}
+
 function sessionCatalogRow(session) {
   const label = sessionKindLabel(session)
   const task = session.taskIdentifier
@@ -152,16 +177,19 @@ function sessionCatalogRow(session) {
     : ''
   const meta = [session.lastRunStatus, session.lastRunAt ? timeAgo(session.lastRunAt) : null]
     .filter(Boolean).map(item => esc(item)).join(' · ')
-  return `<button type="button" class="session-catalog-row" data-action="open-session" data-session-id="${attr(session.sessionId)}">
-    ${icon(session.kind === 'subagent' ? 'branch' : 'bot')}
-    <span class="session-catalog-main">
-      <strong>${esc(session.botName)}</strong>
-      <span class="session-catalog-desc"><span class="faint">${esc(label)}</span>${task || subLabel ? `<span class="sep"></span>${task}${subLabel}` : ''}</span>
-      ${meta ? `<span class="session-catalog-meta">${meta}</span>` : ''}
-    </span>
-    ${runBadge(session)}
-    ${session.alias ? `<span class="pill gray">${t('session.alias')}</span>` : ''}
-  </button>`
+  return `<div class="session-catalog-row">
+    <button type="button" class="session-catalog-open" data-action="open-native-session" data-session-id="${attr(session.sessionId)}" title="${attr(t('session.jumpNative'))}">
+      ${icon(session.kind === 'subagent' ? 'branch' : 'bot')}
+      <span class="session-catalog-main">
+        <strong>${esc(session.botName)}</strong>
+        <span class="session-catalog-desc"><span class="faint">${esc(label)}</span>${task || subLabel ? `<span class="sep"></span>${task}${subLabel}` : ''}</span>
+        ${meta ? `<span class="session-catalog-meta">${meta}</span>` : ''}
+      </span>
+      ${runBadge(session)}
+      ${session.alias ? `<span class="pill gray">${t('session.alias')}</span>` : ''}
+    </button>
+    <button type="button" class="btn icon small session-catalog-view" data-action="open-session" data-session-id="${attr(session.sessionId)}" title="${attr(t('session.viewHere'))}" aria-label="${attr(t('session.viewHere'))}">${icon('search')}</button>
+  </div>`
 }
 
 export function modalSessionCatalog(modal) {
@@ -231,7 +259,7 @@ export function modalSession(modal) {
     subtitle,
     badge: badges,
     body,
-    footer: `<button class="btn" data-action="close-modal">${t('关闭')}</button>`,
+    footer: `<button class="btn" data-action="open-native-session" data-session-id="${attr(modal?.sessionId ?? '')}">${icon('external')}${t('session.jumpNative')}</button><button class="btn" data-action="close-modal">${t('关闭')}</button>`,
     size: 'wide',
   })
 }

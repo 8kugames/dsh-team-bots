@@ -630,3 +630,7 @@
 .task-menu-item:hover {
     background: var(--surface-2);
 }
+.member-card-session {
+    flex: 0 0 auto;
+    margin-right: 2px;
+}

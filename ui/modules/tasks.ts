@@ -500,7 +500,7 @@ function renderMembers() {
             <div class="member-card-model" title="${esc(modelLine)}">${esc(modelLine)}</div>
           </div>
           <div class="member-card-foot">
-            <span class="pill ${member.busy ? 'amber' : 'green'} member-card-busy">${member.busy ? t("任务中") : t("空闲中")}</span>
+            ${member.controlSessionId ? `<button class="btn icon small member-card-session" data-action="open-native-session" data-session-id="${attr(member.controlSessionId)}" title="${attr(t('session.jumpControl'))}" aria-label="${attr(t('session.jumpControl'))}">${icon('message')}</button>` : ''}<span class="pill ${member.busy ? 'amber' : 'green'} member-card-busy">${member.busy ? t("任务中") : t("空闲中")}</span>
             <span class="member-card-tasks" title="${t("本项目任务：已完成")} ${taskDone} · ${t("待办")} ${taskOpen}${t("（待办不含已取消）")}">${t("已完成")} ${taskDone} · ${t("待办")} ${taskOpen}</span>
             <span class="member-card-usage" title="${esc(usageDetail)}">${t("合计")} <strong>${formatNumber(tokens)}</strong> tokens</span>
             <span class="member-card-cost"><strong>${formatCost(Number(member.usage_cost ?? 0))}</strong></span>

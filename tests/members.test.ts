@@ -343,3 +343,33 @@ test('在跑子代理计入成员看板 busy：项目口径外（如单聊）的
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('membersWithUsage 带控制面会话 id（跳原生界面入口）', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const director = store.get("SELECT * FROM bots WHERE name = 'director'")
+    const builder = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.' })
+    const project = await service.createProject({
+      name: 'Ctrl Project', key: 'CTRL', ownerBotId: director.id, memberIds: [builder.id],
+    })
+    const ts = new Date().toISOString()
+    // builder 在本项目有控制面绑定；在别的项目另有一条（不该串进来）
+    store.run(
+      'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES (?, ?, ?, ?, NULL, ?, 0)',
+      'ctrl-1', builder.id, project.id, 'bot', ts,
+    )
+    const other = await service.createProject({ name: 'Other', key: 'OTHER2', ownerBotId: director.id })
+    store.run(
+      'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES (?, ?, ?, ?, NULL, ?, 0)',
+      'ctrl-other', builder.id, other.id, 'bot', ts,
+    )
+
+    const members = service.projectView(service.projectRow(project.id)).members
+    assert.equal(members.find(row => row.id === builder.id)?.controlSessionId, 'ctrl-1')
+    // 无绑定成员（director 未建控制面绑定）为 null，不误报
+    assert.equal(members.find(row => row.id === director.id)?.controlSessionId, null)
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

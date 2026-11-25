@@ -522,22 +522,35 @@
 }
 .session-catalog-row {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    text-align: left;
-    padding: 10px 12px;
+    align-items: stretch;
+    gap: 6px;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--surface);
-    cursor: pointer;
 }
 .session-catalog-row:hover {
     border-color: var(--ink-3);
 }
-.session-catalog-row > svg {
+.session-catalog-open {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    padding: 10px 12px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+.session-catalog-open > svg {
     flex: 0 0 auto;
     color: var(--ink-2);
+}
+.session-catalog-view {
+    flex: 0 0 auto;
+    align-self: center;
+    margin-right: 8px;
 }
 .session-catalog-main {
     display: flex;

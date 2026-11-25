@@ -30,5 +30,10 @@ export default {
   "session.toolUnknown": "Tool",
   "session.error": "error",
   // chat stream chip
-  "session.chipMessages": "Conversation",
+  // jump to native UI
+  "session.jumpNative": "Open in native UI",
+  "session.jumpControl": "Control-plane session",
+  "session.chipNative": "Conversation",
+  "session.viewHere": "View here",
+  "session.noSession": "This run has no session yet",
 }

@@ -123,9 +123,9 @@ test('思考过程 chip 渲染在会话与任务 chip 之前，三者合并同�
   assert.ok(fn, '找不到 renderMessage 函数体')
   const nonsys = fn.slice(fn.indexOf('const isUser')).replace(/\/\/[^\n]*/g, '') // 剔除行注释，防止注释文案满足顺序断言
   assert.equal((nonsys.match(/task-chip-line/g) ?? []).length, 1, '非系统消息只应有一个 task-chip-line 容器')
-  assert.ok(nonsys.indexOf("t('message.thinking')") < nonsys.indexOf('session.chipMessages'), '顺序固定：思考过程 → 会话')
-  assert.ok(nonsys.indexOf('session.chipMessages') < nonsys.indexOf('message.taskIdentifier'), '顺序固定：会话 → 任务')
-  assert.match(nonsys, /const chipsLine = trajChip \|\| sessChip \|\| taskChip \? `<div class="task-chip-line">\$\{trajChip\}\$\{sessChip\}\$\{taskChip\}<\/div>` : ''/, '插值顺序锁定 trajChip → sessChip → taskChip')
+  assert.ok(nonsys.indexOf("t('message.thinking')") < nonsys.indexOf('session.chipNative'), '顺序固定：思考过程 → 会话')
+  assert.ok(nonsys.indexOf('session.chipNative') < nonsys.indexOf('message.taskIdentifier'), '顺序固定：会话 → 任务')
+  assert.match(nonsys, /data-action="open-native-session" data-run-id="\$\{attr\(message\.run_id\)\}"/, '会话 chip 跳原生界面（按运行归属）')
   assert.match(css, /\.task-chip-line \{[\s\S]*?gap: 8px/, 'chip 之间留 8px 呼吸距离')
   const chipCss = /\.task-chip \{[\s\S]*?\n\}/.exec(css)?.[0]
   assert.match(chipCss, /line-height: 1\.2/, 'task-chip 行高显式固定')

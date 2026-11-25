@@ -30,5 +30,10 @@ export default {
   "session.toolUnknown": "工具",
   "session.error": "出错",
   // 聊天流 chip
-  "session.chipMessages": "会话",
+  // 跳转原生界面
+  "session.jumpNative": "在原生界面打开",
+  "session.jumpControl": "控制面会话",
+  "session.chipNative": "会话",
+  "session.viewHere": "在此查看",
+  "session.noSession": "该运行还没有归属会话",
 }
