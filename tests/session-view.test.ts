@@ -1,10 +1,12 @@
 // 会话查看域（session-view）守门：宿主事件日志 → 查看器条目的抽取口径
-//（append 面语义、tool/call 配对、增量游标、翻旧页、runId 归属解析、错误映射）。
+//（append 面语义、tool/call 配对、增量游标、翻旧页、runId 归属解析、错误映射）
+// 与子代理会话链（P2）：账本落表、授权追溯、目录并集。
 // 宿主 sessionQuery 用桩观察 lease 复刻（live/prepared 两种来源、Symbol.dispose 契约）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { setupTeam } from './helpers/harness.js'
+import { installSubagentLedger } from '../src/subagent-ledger.js'
 
 // 桩运行时：ctx.sessionQuery.observeSession(sessionId) → observations 表里的假 lease。
 class SessionQueryStubRuntime {
@@ -32,14 +34,37 @@ class SessionQueryStubRuntime {
   async cancelRun() { return true }
 }
 
-function fakeObservation(events, source = 'live') {
+function fakeObservation(events, source = 'live', header: any = {}) {
   return {
     source,
     events,
     cursor: events.length - 1,
-    header: {},
+    header,
     inheritedEventCount: 0,
     [Symbol.dispose]() {},
+  }
+}
+
+// 宿主 cordis 瀑布流语义复刻（与 subagent-ledger.test.ts 同款）：驱动账本落子会话表。
+class FakeCordisCtx {
+  declare hooks: Map<string, any[]>
+  constructor() { this.hooks = new Map() }
+  on(name: string, listener: any) {
+    const list = this.hooks.get(name) ?? []
+    this.hooks.set(name, list)
+    list.push(listener)
+    return () => { const i = list.indexOf(listener); if (i >= 0) list.splice(i, 1) }
+  }
+  emit(name: string, ...args: any[]) {
+    for (const listener of [...(this.hooks.get(name) ?? [])]) listener(...args)
+  }
+  async waterfall(name: string, req: any, inner: any) {
+    const cbs = (this.hooks.get(name) ?? []).slice()
+    const next = () => {
+      const cb = cbs.shift() ?? inner
+      return cb(req, () => next())
+    }
+    return next()
   }
 }
 
@@ -223,6 +248,88 @@ test('sessionCatalog：绑定家谱 + 运行态 + 项目域过滤；宿主无 se
     await assert.rejects(
       () => service.sessionMessages({ sessionId: 'sess-task-4' }),
       (err: any) => err.code === 'DSH_UNAVAILABLE',
+    )
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('子代理会话（P2）：账本落表、目录并集、授权经父绑定链、孙代理可达', async () => {
+  // 父会话 sess-task-6 有绑定；child-1 直挂父；child-2 挂在 child-1（孙代理）。
+  // child-1/child-2 均无绑定行——授权只能走 header.origin + subagent_sessions 链。
+  const observations = new Map([
+    ['sess-task-6', fakeObservation(sampleEvents())],
+    ['child-1', fakeObservation(sampleEvents(), 'live', { origin: 'subagent', parentSession: 'sess-task-6' })],
+    ['child-2', fakeObservation(sampleEvents(), 'live', { origin: 'subagent', parentSession: 'child-1' })],
+    ['child-orphan', fakeObservation(sampleEvents(), 'live', { origin: 'subagent', parentSession: 'nowhere-known' })],
+  ])
+  const { root, store, service, worker, project, bind, run } = await setup(observations)
+  try {
+    bind('sess-task-6')
+    run('run-v6', { sessionId: 'sess-task-6' })
+
+    // 账本落表：start 落行（运行态）、end 回写终态、tools/result 补标签。
+    const ctx = new FakeCordisCtx()
+    const dispose = installSubagentLedger(ctx, store, { info() {}, warn() {}, error() {} })
+    try {
+      ctx.emit('subagent/start', { runId: 'sr-1', id: 'child-1', parentSessionId: 'sess-task-6', provider: 'local', local: true })
+      ctx.emit('subagent/start', { runId: 'sr-2', id: 'child-2', parentSessionId: 'child-1', provider: 'local', local: true })
+      // 目录并集：两个子代理行都在，running=true（end 未回写），标识沿父绑定。
+      const catalog = service.sessionCatalog(null)
+      const child1 = catalog.sessions.find(row => row.sessionId === 'child-1')
+      assert.ok(child1, '子代理行应在目录中')
+      assert.equal(child1.kind, 'subagent')
+      assert.equal(child1.botName, 'Worker')
+      assert.equal(child1.running, true)
+      assert.equal(child1.parentSessionId, 'sess-task-6')
+      assert.ok(catalog.sessions.some(row => row.sessionId === 'child-2'))
+
+      // 直达子代理：授权经 header.parentSession 命中绑定，context 标 subagent。
+      const childView = await service.sessionMessages({ sessionId: 'child-1' })
+      assert.equal(childView.context.kind, 'subagent')
+      assert.equal(childView.context.parentSessionId, 'sess-task-6')
+      assert.equal(childView.context.taskIdentifier, childView.context.taskIdentifier) // 沿父绑定可解析
+      assert.ok(childView.context.taskIdentifier, '任务标识沿父绑定可得')
+
+      // 孙代理：链经 subagent_sessions（child-2 → child-1 → 绑定行）同样可达。
+      const grandchildView = await service.sessionMessages({ sessionId: 'child-2' })
+      assert.equal(grandchildView.entries.length, 3)
+
+      // end 回写终态：running 翻 false，摘要抽取文本块。
+      ctx.emit('subagent/end', {
+        runId: 'sr-1', id: 'child-1', parentSessionId: 'sess-task-6', provider: 'local', local: true,
+        stopReason: 'end_turn', lastAssistantMessage: [{ type: 'text', text: 'done wiring' }],
+      })
+      const afterEnd = service.sessionCatalog(null).sessions.find(row => row.sessionId === 'child-1')
+      assert.equal(afterEnd.running, false)
+      const row = store.get('SELECT summary, stop_reason FROM subagent_sessions WHERE session_id = ?', 'child-1')
+      assert.equal(row.stop_reason, 'end_turn')
+      assert.equal(row.summary, 'done wiring')
+
+      // 派发标签（tools/result 配对时回写）
+      await ctx.waterfall('tools/pre-execute', {
+        name: 'subagent',
+        callId: 'call-1',
+        arguments: { description: 'DSHBOTS-294 子代理账本接线' },
+        agent: { session: { id: 'sess-task-6' } },
+      }, async () => ({ allowed: true }))
+      ctx.emit('tools/result', {
+        name: 'subagent',
+        callId: 'call-1',
+        arguments: {},
+        agent: { session: { id: 'sess-task-6' } },
+      }, { value: { sessionId: 'child-2', summary: 'done' } })
+      const labeled = service.sessionCatalog(null).sessions.find(row => row.sessionId === 'child-2')
+      assert.equal(labeled.subagentLabel, 'DSHBOTS-294')
+    } finally {
+      dispose()
+    }
+
+    // 链不达绑定的子代理 → 404（不做任意会话读取代理）
+    await assert.rejects(
+      () => service.sessionMessages({ sessionId: 'child-orphan' }),
+      (err: any) => err.code === 'NOT_FOUND',
     )
   } finally {
     store.close()

@@ -127,10 +127,12 @@ export async function handleSessionAction(action, target) {
   }
 }
 
-// 绑定行 kind → 展示标签。kind='bot' 按域分控制面/单聊；review 是记忆审查会话。
+// 绑定行 kind → 展示标签。kind='bot' 按域分控制面/单聊；review 是记忆审查会话；
+// subagent 是会话子代理（父会话派生，标签沿父绑定）。
 export function sessionKindLabel(session) {
   if (session.kind === 'task') return t('session.kindTask')
   if (session.kind === 'review') return t('session.kindReview')
+  if (session.kind === 'subagent') return t('session.kindSubagent')
   return session.projectId ? t('session.kindControl') : t('session.kindSolo')
 }
 
@@ -144,13 +146,17 @@ function sessionCatalogRow(session) {
   const task = session.taskIdentifier
     ? `<strong>${esc(session.taskIdentifier)}</strong> <span class="faint">${esc(session.taskTitle ?? '')}</span>`
     : ''
+  // 子代理行：父会话 bot 名 + 子代理标签（派发时的任务号/描述）替代任务标识。
+  const subLabel = session.kind === 'subagent' && session.subagentLabel
+    ? `<strong>${esc(session.subagentLabel)}</strong>`
+    : ''
   const meta = [session.lastRunStatus, session.lastRunAt ? timeAgo(session.lastRunAt) : null]
     .filter(Boolean).map(item => esc(item)).join(' · ')
   return `<button type="button" class="session-catalog-row" data-action="open-session" data-session-id="${attr(session.sessionId)}">
-    ${icon('bot')}
+    ${icon(session.kind === 'subagent' ? 'branch' : 'bot')}
     <span class="session-catalog-main">
       <strong>${esc(session.botName)}</strong>
-      <span class="session-catalog-desc"><span class="faint">${esc(label)}</span>${task ? `<span class="sep"></span>${task}` : ''}</span>
+      <span class="session-catalog-desc"><span class="faint">${esc(label)}</span>${task || subLabel ? `<span class="sep"></span>${task}${subLabel}` : ''}</span>
       ${meta ? `<span class="session-catalog-meta">${meta}</span>` : ''}
     </span>
     ${runBadge(session)}

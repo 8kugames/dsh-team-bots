@@ -19,6 +19,7 @@ export default {
   "session.kindControl": "control-plane session",
   "session.kindSolo": "solo chat session",
   "session.kindReview": "review session",
+  "session.kindSubagent": "subagent session",
   // entry roles and states
   "session.roleUser": "User",
   "session.roleAssistant": "Bot",

@@ -4,11 +4,33 @@
 // 双缝互补：tools 瀑布带 caller agent（父归属权威源，任务号标签在参数里）；
 // subagent/start|end 带 stopReason+lastAssistantMessage（终态摘要源，载荷无父身份，
 // 靠 tools/result 配对或唯一 running task 运行兜底归属）。子代理不占 runs 行（§4.2）。
+// 会话查看（P2）：start/end 顺带把子会话身份落到顶库 subagent_sessions 表——
+// 目录列出子代理会话、查看器按父绑定授权都吃这张表；表住顶库（跨项目目录查询），
+// 不随聊天分库。
 import { id, nowIso } from './util.js'
 
 const SUBAGENT_TOOLS = new Set(['subagent', 'subagent_fork'])
 const SUMMARY_LIMIT = 400
 const STASH_LIMIT = 64
+
+// subagent_sessions 表：幂等建表（WeakSet 记忆，PRAGMA 判表，缺失才建）。
+export function ensureSubagentSessionSchema(store) {
+  if (!store || schemaDone.has(store)) return
+  const tables = store.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subagent_sessions'")
+  if (tables.length === 0) {
+    store.exec(`CREATE TABLE subagent_sessions (
+      session_id TEXT PRIMARY KEY,
+      parent_session_id TEXT NOT NULL,
+      label TEXT,
+      stop_reason TEXT,
+      summary TEXT,
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`)
+  }
+  schemaDone.add(store)
+}
+const schemaDone = new WeakSet()
 
 // bot → 在跑子代理计数（内存态，仅本轮进程内准确）：总览 bots 页的「任务中」判定用。
 const runningByBot = new Map()
@@ -34,6 +56,8 @@ const truncate = (text) => {
 
 // 在插件根 ctx 注册事件监听（根级注册面实测见 tests/subagent-ledger.test.ts）。
 export function installSubagentLedger(ctx, store, logger, chatStores = null) {
+  // 子会话身份表（会话查看 P2）：根 ctx 上的 start/end 即插即落，不依赖账本归属判定。
+  try { ensureSubagentSessionSchema(store) } catch (error: any) { logger?.warn?.('dsh-team: subagent session schema: %s', error?.message ?? error) }
   // callId → 派发时快照（tools/result 按 callId 配对父归属）
   const byCall = new Map()
   // botId → 未消费的标签栈（subagent/end 兜底归属时取最近一次派发的标签）
@@ -134,7 +158,15 @@ export function installSubagentLedger(ctx, store, logger, chatStores = null) {
 
   on('subagent/start', (info) => {
     try {
-      if (info?.id) endsAt(info.id, { started: true })
+      if (info?.id) {
+        endsAt(info.id, { started: true })
+        // 子会话身份落表：parentSessionId 由宿主载荷直接给出（直接创建者，权威源）。
+        store.run(
+          `INSERT OR IGNORE INTO subagent_sessions(session_id, parent_session_id, label, stop_reason, summary, started_at, updated_at)
+           VALUES (?, ?, NULL, NULL, NULL, ?, ?)`,
+          info.id, info.parentSessionId ?? '', nowIso(), nowIso(),
+        )
+      }
     } catch {}
   })
 
@@ -142,6 +174,14 @@ export function installSubagentLedger(ctx, store, logger, chatStores = null) {
     try {
       if (!info?.id) return
       endsAt(info.id, info)
+      // 终态回写：stop 原因 + 末条 assistant 摘要（块里抽文本，超长截断）。
+      const blocks = Array.isArray(info.lastAssistantMessage) ? info.lastAssistantMessage : []
+      const summary = truncate(blocks.map(block => block?.type === 'text' && typeof block.text === 'string' ? block.text : '')
+        .filter(Boolean).join('\n'))
+      store.run(
+        'UPDATE subagent_sessions SET stop_reason = ?, summary = ?, updated_at = ? WHERE session_id = ?',
+        info.stopReason || '-', summary, nowIso(), info.id,
+      )
       const sole = soleRunningTaskRun()
       const pendingCall = sole ? [...byCall.values()].some(entry => entry.botId === sole.bot_id) : false
       if (!sole || pendingCall) return
@@ -175,6 +215,14 @@ export function installSubagentLedger(ctx, store, logger, chatStores = null) {
       const summary = matched?.lastAssistantMessage ?? resultSummary(result?.value ?? result)
       record(entry.runId, 'subagent_result',
         `label=${entry.label ?? '-'} stop=${stop ?? '-'} summary=${truncate(summary ?? '')}`)
+      // 会话查看（P2）：结果载荷里的子会话 id 配上派发标签——目录里能认出这个子代理是谁。
+      const childId = typeof result?.value?.sessionId === 'string' ? result.value.sessionId : null
+      if (childId) {
+        store.run(
+          'UPDATE subagent_sessions SET label = ?, updated_at = ? WHERE session_id = ?',
+          entry.label ?? '', nowIso(), childId,
+        )
+      }
     } catch (error) {
       logger?.warn?.('dsh-team: subagent ledger result: %s', (error as { message?: string })?.message ?? error)
     }

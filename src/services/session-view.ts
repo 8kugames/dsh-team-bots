@@ -13,6 +13,7 @@
 //   轮询只拉新增，翻旧只拉更早，每页默认 200 条。
 
 import { AppError, badRequest, notFound } from '../errors.js'
+import { ensureSubagentSessionSchema } from '../subagent-ledger.js'
 
 // 每条消息的文本/推理/工具结果上限：查看是抽查场景，超长截断足够。
 const TEXT_LIMIT = 8_000
@@ -34,7 +35,10 @@ export const sessionViewMethods = {
   // 会话目录：插件绑定表（session_bindings，含 alias 行——结转后的旧会话仍可查历史）
   // 为家谱，逐行补 bot/项目/任务标识与运行态。projectId 给定时只列该域
   //（项目控制面 + 任务会话 + 审查会话）；solo 域（project_id IS NULL）只在全局目录出现。
+  // 子代理会话（P2）：subagent_sessions 表行并进目录（父绑定补标识），运行态按
+  // stop_reason 是否已回写判定——start 落行、end 回写，表即子代理生命周期账。
   sessionCatalog(projectId = null) {
+    ensureSubagentSessionSchema(this.store)
     const scoped = projectId != null
     const rows = this.store.all(
       `SELECT sb.session_id, sb.kind, sb.alias, sb.bot_id, sb.project_id, sb.task_id,
@@ -49,36 +53,84 @@ export const sessionViewMethods = {
         ORDER BY sb.alias ASC, sb.created_at DESC, sb.rowid DESC`,
       ...(scoped ? [projectId] : []),
     )
-    return {
-      sessions: rows.map(row => {
-        const last = this.store.get(
-          'SELECT status, kind, started_at, ended_at, queued_at FROM runs WHERE session_id = ? ORDER BY COALESCE(ended_at, queued_at) DESC, rowid DESC LIMIT 1',
-          row.session_id,
-        )
-        const running = Boolean(this.store.get(
-          "SELECT 1 AS ok FROM runs WHERE session_id = ? AND status IN ('queued', 'running')",
-          row.session_id,
-        )?.ok,
-        )
-        return {
-          sessionId: row.session_id,
-          kind: row.kind,
-          alias: Boolean(row.alias),
-          botId: row.bot_id,
-          botName: row.bot_name ?? 'Bot',
-          projectId: row.project_id,
-          projectKey: row.project_key ?? null,
-          projectName: row.project_name ?? null,
-          taskId: row.task_id,
-          taskIdentifier: row.project_key && row.task_number ? `${row.project_key}-${row.task_number}` : null,
-          taskTitle: row.task_title ?? null,
-          running,
-          lastRunStatus: last?.status ?? null,
-          lastRunKind: last?.kind ?? null,
-          lastRunAt: last?.ended_at ?? last?.started_at ?? last?.queued_at ?? null,
+    const sessions = rows.map(row => {
+      const last = this.store.get(
+        'SELECT status, kind, started_at, ended_at, queued_at FROM runs WHERE session_id = ? ORDER BY COALESCE(ended_at, queued_at) DESC, rowid DESC LIMIT 1',
+        row.session_id,
+      )
+      const running = Boolean(this.store.get(
+        "SELECT 1 AS ok FROM runs WHERE session_id = ? AND status IN ('queued', 'running')",
+        row.session_id,
+      )?.ok,
+      )
+      return {
+        sessionId: row.session_id,
+        kind: row.kind,
+        alias: Boolean(row.alias),
+        botId: row.bot_id,
+        botName: row.bot_name ?? 'Bot',
+        projectId: row.project_id,
+        projectKey: row.project_key ?? null,
+        projectName: row.project_name ?? null,
+        taskId: row.task_id,
+        taskIdentifier: row.project_key && row.task_number ? `${row.project_key}-${row.task_number}` : null,
+        taskTitle: row.task_title ?? null,
+        running,
+        lastRunStatus: last?.status ?? null,
+        lastRunKind: last?.kind ?? null,
+        lastRunAt: last?.ended_at ?? last?.started_at ?? last?.queued_at ?? null,
+      }
+    })
+    // 子代理行（含孙代理）：父链可能穿过多层子代理才到绑定行，SQL JOIN 表达不了，
+    // 改为全表取行 + JS 沿 subagent_sessions 逐跳追到最近的绑定行祖先（孤儿不进目录）。
+    // 运行态 = end 未回写（stop_reason 仍 NULL，账本终态恒写非空哨兵）。
+    const subRows = this.store.all(
+      'SELECT session_id, parent_session_id, label, stop_reason, started_at FROM subagent_sessions ORDER BY started_at DESC, rowid DESC',
+    )
+    if (subRows.length > 0) {
+      const bindings = new Map<string, any>(this.store.all('SELECT session_id, bot_id, project_id, task_id FROM session_bindings')
+        .map((b: any) => [b.session_id, b] as [string, any]))
+      const parentOf = new Map<string, string>(subRows.map((r: any) => [r.session_id, r.parent_session_id] as [string, string]))
+      const bots = new Map<string, string>(this.store.all('SELECT id, name FROM bots').map((b: any) => [b.id, b.name] as [string, string]))
+      const projects = new Map<string, any>(this.store.all('SELECT id, key, name FROM projects').map((p: any) => [p.id, p] as [string, any]))
+      const tasks = new Map<string, any>(this.store.all('SELECT id, number, title FROM tasks').map((t: any) => [t.id, t] as [string, any]))
+      for (const row of subRows) {
+        let anchor = null
+        let cursor = row.parent_session_id
+        const seen = new Set([row.session_id])
+        for (let hop = 0; hop < 16 && cursor && !seen.has(cursor); hop++) {
+          anchor = bindings.get(cursor) ?? null
+          if (anchor) break
+          seen.add(cursor)
+          cursor = parentOf.get(cursor) ?? null
         }
-      }),
+        if (!anchor) continue
+        if (scoped && anchor.project_id !== projectId) continue
+        const botName = bots.get(anchor.bot_id) ?? 'Bot'
+        const project = anchor.project_id ? projects.get(anchor.project_id) : null
+        const task = anchor.task_id ? tasks.get(anchor.task_id) : null
+        sessions.push({
+          sessionId: row.session_id,
+          kind: 'subagent',
+          alias: false,
+          botId: anchor.bot_id,
+          botName,
+          projectId: anchor.project_id ?? null,
+          projectKey: project?.key ?? null,
+          projectName: project?.name ?? null,
+          taskId: anchor.task_id ?? null,
+          taskIdentifier: project?.key && task?.number ? `${project.key}-${task.number}` : null,
+          taskTitle: task?.title ?? null,
+          subagentLabel: row.label ?? null,
+          parentSessionId: row.parent_session_id,
+          running: row.stop_reason == null,
+          lastRunStatus: null,
+          lastRunKind: 'subagent',
+          lastRunAt: row.started_at ?? null,
+        })
+      }
     }
+    return { sessions }
   },
 
   // 会话消息读取。三选一入口：sessionId 直达 / runId 归属解析；无 afterSeq 时取尾部
@@ -98,10 +150,7 @@ export const sessionViewMethods = {
       if (!run?.session_id) throw notFound('该运行没有归属会话（或尚未启动）')
       sessionId = run.session_id
     }
-    // 授权闸：只读插件绑定表里登记过的会话——宿主可能有用户自己的私人会话，
-    // 插件 API 不做任意会话的读取代理。
-    const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
-    if (!binding) throw notFound('不是本插件管理的会话')
+    ensureSubagentSessionSchema(this.store)
     const query = this.runtime?.ctx?.sessionQuery ?? this.runtime?.ctx?.get?.('sessionQuery')
     if (!query?.observeSession) {
       throw new AppError('DSH_UNAVAILABLE', '宿主未提供会话读取服务（sessionQuery）', 503)
@@ -129,6 +178,27 @@ export const sessionViewMethods = {
     }
     try {
       const events = observation.events ?? []
+      // 授权闸（观察后判）：绑定行直通；无绑定则按子代理链——header.origin='subagent'
+      // 且 parentSession 沿 subagent_sessions 表逐跳追到绑定行为止（孙代理同样可达）。
+      // 宿主可能有用户自己的私人会话，插件 API 不做任意会话的读取代理。
+      let binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
+      let subagentOf = null
+      if (!binding) {
+        const header = observation.header
+        let parent = header?.origin === 'subagent' ? header.parentSession ?? null : null
+        const seen = new Set([sessionId])
+        for (let hop = 0; hop < 16 && parent && !seen.has(parent); hop++) {
+          binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', parent)
+          if (binding) {
+            subagentOf = { childSessionId: sessionId, parentSessionId: parent }
+            break
+          }
+          const row = this.store.get('SELECT parent_session_id AS p FROM subagent_sessions WHERE session_id = ?', parent)
+          seen.add(parent)
+          parent = row?.p ?? null
+        }
+        if (!binding) throw notFound('不是本插件管理的会话')
+      }
       const cursor = Number(observation.cursor ?? events.length - 1)
       // pass 1：tool/call → 工具名配对表（callId → name）。工具结果消息只带 toolCallId，
       // 名字在更早的 tool/call 事件里；从 0 全量扫一遍，O(n) 纯遍历。
@@ -167,18 +237,22 @@ export const sessionViewMethods = {
         // 旧方向还有内容：收满且最早一条不是日志头（近似口径，翻页由 beforeSeq 兜底）。
         hasOlder = entries.length > 0 && entries[0].seq > 0
       }
+      // 子代理会话没有 runs 行：运行态 = end 未回写（stop_reason 仍 NULL，账本终态恒写非空值）。
+      const running = subagentOf
+        ? this.store.get('SELECT stop_reason AS s FROM subagent_sessions WHERE session_id = ?', sessionId)?.s == null
+        : Boolean(this.store.get(
+          "SELECT 1 AS ok FROM runs WHERE session_id = ? AND status IN ('queued', 'running')",
+          sessionId,
+        )?.ok)
       return {
         sessionId,
         live: observation.source === 'live',
-        running: Boolean(this.store.get(
-          "SELECT 1 AS ok FROM runs WHERE session_id = ? AND status IN ('queued', 'running')",
-          sessionId,
-        )?.ok),
+        running,
         cursor,
         entries,
         hasOlder,
         hasMore,
-        context: this.sessionViewContext(binding),
+        context: this.sessionViewContext(binding, subagentOf),
       }
     } finally {
       try { observation?.[Symbol.dispose]?.() } catch {}
@@ -186,7 +260,8 @@ export const sessionViewMethods = {
   },
 
   // 查看器头部上下文：绑定行 → 人类可读标识（bot 名 / 域 / 任务号）。
-  sessionViewContext(binding) {
+  // 子代理会话（subagentOf 非空）：标识沿用父绑定，kind 标 'subagent' 并带父会话 id。
+  sessionViewContext(binding, subagentOf = null) {
     const bot = this.store.get('SELECT name FROM bots WHERE id = ?', binding.bot_id)
     const project = binding.project_id
       ? this.store.get('SELECT key, name FROM projects WHERE id = ?', binding.project_id)
@@ -196,12 +271,13 @@ export const sessionViewMethods = {
       : null
     return {
       botName: bot?.name ?? 'Bot',
-      kind: binding.kind,
+      kind: subagentOf ? 'subagent' : binding.kind,
       alias: Boolean(binding.alias),
       projectKey: project?.key ?? null,
       projectName: project?.name ?? null,
       taskIdentifier: project?.key && task?.number ? `${project.key}-${task.number}` : null,
       taskTitle: task?.title ?? null,
+      parentSessionId: subagentOf?.parentSessionId ?? null,
     }
   },
 

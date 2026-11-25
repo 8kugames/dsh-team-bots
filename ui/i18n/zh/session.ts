@@ -19,6 +19,7 @@ export default {
   "session.kindControl": "控制面会话",
   "session.kindSolo": "单聊会话",
   "session.kindReview": "审查会话",
+  "session.kindSubagent": "子代理会话",
   // 条目角色与状态
   "session.roleUser": "用户",
   "session.roleAssistant": "Bot",
