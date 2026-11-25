@@ -10,6 +10,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { REVIEWER_BOT_NAME } from '../seed-bots.js'
 import { ensureBotTmpDirs, ensureExternalDir, ensureProjectWorkspace } from '../paths.js'
 import { clampNumber, id, nowIso, parseDisabledSkills, PROJECT_KEY_PATTERN, projectKey, slugify, text } from '../util.js'
+import { runningSubagentCount } from '../subagent-ledger.js'
 
 
 
@@ -68,9 +69,10 @@ export const projectsMethods = {
     return { ok: true, readAt: target }
   },
 
-  // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，usage 四项与 cost 为本项目全部 run 的累计。
+  // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，或该 bot 有在跑的子代理
+  //（子代理不占 runs 行，与总览 bots 页同款判定，DSHBOTS-294）；usage 四项与 cost 为本项目全部 run 的累计。
   // run_status 用 bot 全局口径（不限本项目）：failed 根因（模型/AUTH）是 bot 级，单聊 run 的 project_id 为 NULL，
-  // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 维持项目口径不动。
+  // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 的 run 部分维持项目口径不动。
   // taskStats（DSHBOTS-65）按本项目任务聚合：done=已完成，open=未完成且未取消（canceled 不算待办），无任务兜底 0/0。
   membersWithUsage(projectId) {
     return this.store.all(
@@ -146,7 +148,7 @@ export const projectsMethods = {
       projectId,
     ).map(row => ({
       ...row,
-      busy: Boolean(row.busy),
+      busy: Boolean(row.busy) || runningSubagentCount(row.id) > 0,
       modelRef: row.provider && row.model ? `${row.provider}/${row.model}` : null,
       taskStats: { done: Number(row.task_done ?? 0), open: Number(row.task_open ?? 0) },
     }))

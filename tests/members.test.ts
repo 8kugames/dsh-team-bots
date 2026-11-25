@@ -4,6 +4,30 @@ import { rm } from 'node:fs/promises'
 
 import { handleAction } from '../src/api.js'
 import { setupTeam } from './helpers/harness.js'
+import { installSubagentLedger } from '../src/subagent-ledger.js'
+
+// 宿主 cordis 瀑布流语义复刻（与 tests/subagent-ledger.test.ts 同款），用于驱动子代理账本。
+class FakeCordisCtx {
+  declare hooks: Map<string, any[]>
+  constructor() { this.hooks = new Map() }
+  on(name: string, listener: any) {
+    const list = this.hooks.get(name) ?? []
+    this.hooks.set(name, list)
+    list.push(listener)
+    return () => { const i = list.indexOf(listener); if (i >= 0) list.splice(i, 1) }
+  }
+  async waterfall(name: string, req: any, inner: any) {
+    const cbs = (this.hooks.get(name) ?? []).slice()
+    const next = () => {
+      const cb = cbs.shift() ?? inner
+      return cb(req, () => next())
+    }
+    return next()
+  }
+  emit(name: string, ...args: any[]) {
+    for (const listener of [...(this.hooks.get(name) ?? [])]) listener(...args)
+  }
+}
 
 async function setup() {
   return setupTeam({ prefix: 'dsh-members-test-', schedulerIntervalMs: 20 })
@@ -268,6 +292,52 @@ test('update_project 不带 memberIds 时不动成员表；换总监自动补齐
     roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
     assert.equal(roles.length, 3)
     assert.equal(roles.find(row => row.member_id === builder.id)?.member_role, 'owner')
+  } finally {
+    store.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('在跑子代理计入成员看板 busy：项目口径外（如单聊）的子代理也判任务中', async () => {
+  const { root, store, service } = await setup()
+  try {
+    const worker = await service.createBot({ name: 'Worker', role: '开发', instructions: 'Build things.' })
+    const project = await service.createProject({
+      name: 'Subagent Board', key: 'SUBBRD', ownerBotId: worker.id,
+    })
+    // 单聊运行中（project_id NULL）：项目口径 busy=false，run_status=running（bot 全局口径）
+    insertRun(store, { id: 'run-solo', projectId: null, botId: worker.id, status: 'running' })
+    const ts = new Date().toISOString()
+    store.run(
+      "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('ctrl-solo', ?, NULL, 'bot', NULL, ?)",
+      worker.id, ts,
+    )
+    const busyOf = () => service.projectView(service.projectRow(project.id)).members.find(row => row.id === worker.id)?.busy
+    assert.equal(busyOf(), false)
+
+    // 子代理在跑（账本经宿主事件缝计数）→ busy 翻 true
+    const ctx = new FakeCordisCtx()
+    const dispose = installSubagentLedger(ctx, store, { info() {}, warn() {}, error() {} })
+    try {
+      await ctx.waterfall('tools/pre-execute', {
+        name: 'subagent',
+        callId: 'call-1',
+        arguments: { description: '研究看板状态' },
+        agent: { session: { id: 'ctrl-solo' } },
+      }, async () => ({ allowed: true }))
+      assert.equal(busyOf(), true)
+
+      // 子代理收尾（tools/result 配对减计数）→ busy 回 false（单聊 run 仍 running，但项目口径不含）
+      ctx.emit('tools/result', {
+        name: 'subagent',
+        callId: 'call-1',
+        arguments: {},
+        agent: { session: { id: 'ctrl-solo' } },
+      }, { value: { sessionId: 'child-1', summary: 'done' } })
+      assert.equal(busyOf(), false)
+    } finally {
+      dispose()
+    }
   } finally {
     store.close()
     await rm(root, { recursive: true, force: true })
