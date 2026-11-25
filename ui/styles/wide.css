@@ -545,7 +545,15 @@
 }
 .session-catalog-open > svg {
     flex: 0 0 auto;
+    /* icon() 产出的 svg 只有 viewBox、无 width/height 属性：不显式约束尺寸时它按
+       100% 宽高撑满所在 flex 轨道，把整行文字挤成竖排并溢出弹窗右侧。 */
+    width: 18px;
+    height: 18px;
     color: var(--ink-2);
+}
+/* 行内状态牌（运行中/别名）不被压缩：被压窄会退化成竖排字。 */
+.session-catalog-row > .pill {
+    flex: 0 0 auto;
 }
 .session-catalog-view {
     flex: 0 0 auto;
@@ -558,6 +566,14 @@
     gap: 2px;
     min-width: 0;
     flex: 1;
+    overflow: hidden;
+}
+/* bot 名/元信息都是不定长文本：超出即省略，不许撑破卡片。 */
+.session-catalog-main > strong,
+.session-catalog-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .session-catalog-desc {
     display: flex;
