@@ -14,6 +14,7 @@ const SUMMARY_LIMIT = 400
 const STASH_LIMIT = 64
 
 // subagent_sessions 表：幂等建表（WeakSet 记忆，PRAGMA 判表，缺失才建）。
+const schemaDone = new WeakSet()
 export function ensureSubagentSessionSchema(store) {
   if (!store || schemaDone.has(store)) return
   const tables = store.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subagent_sessions'")
@@ -30,7 +31,6 @@ export function ensureSubagentSessionSchema(store) {
   }
   schemaDone.add(store)
 }
-const schemaDone = new WeakSet()
 
 // bot → 在跑子代理计数（内存态，仅本轮进程内准确）：总览 bots 页的「任务中」判定用。
 const runningByBot = new Map()
