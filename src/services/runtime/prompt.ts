@@ -284,6 +284,9 @@ export const promptMethods = {
 # Subagent parallelization
 You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates (\`spawn_teammate\`) to parallelize independent work inside your own task. Split only when the task has two or more independent parts with disjoint write scopes; small or single-file work, do it yourself. Before delivering, merge their results into your report and review their output yourself. Child-agent writes inherit your session sandbox and are not governed by the task write-scope gates — check for conflicts with other members first.` : ''
     const teamRules = ['## How this team works', ...collaborationRules, secretRule, ...sharedRules, ...projectSkillRules].join('\n')
+    // roleLine 是整段里唯一随会话变化的内容（任务会话带任务号与标题）。它排在最后：
+    // 前面全部对同一个 bot + 项目逐字不变，是任务会话之间可以共享的前缀缓存区；
+    // 夹在中间会让它后面一万多字符的静态规则每次都重新计费。
     return [
       '# Team bot identity',
       `You are ${bot.name}, a project bot on the user's team.`,
@@ -295,10 +298,10 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
       `- Key: ${project.key}`,
       `- Workspace: ${displayPath(project.production_dir || join(this.config.workspace, project.slug))}`,
       `- Temp files discipline: write every temporary or intermediate file (scratch scripts, probe outputs, downloaded artifacts) under \`.tmp/bots/${sanitizeTmpBotDirName(bot.name)}/\` inside the workspace; create that directory if it is missing. Never scatter temp files elsewhere in the project.`,
-      roleLine,
       '',
       teamRules,
       memberSubagentGuide,
+      roleLine,
     ].filter(Boolean).join('\n')
   },
 

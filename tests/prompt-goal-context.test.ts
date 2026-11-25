@@ -289,6 +289,33 @@ test('B：点名评论与被引用消息共用总预算；预算用完后，后�
   } finally { await t.close() }
 })
 
+test('身份提示词：随任务变化的角色行排在最后，两张卡的身份提示词只差最后一行', async () => {
+  const t = await setup()
+  try {
+    const marker = '\n- You are executing one assigned task in '
+    const prompts = []
+    for (const index of [1, 2]) {
+      const card = await t.service.createTask({ projectId: t.project.id, title: `身份卡 ${index}`, writeScopes: [`src/i${index}/`] }, t.actor)
+      const sessionId = `sess-identity-${index}`
+      t.store.run(
+        `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, 'task', ?, ?)`,
+        sessionId, t.dev.id, t.project.id, card.id, new Date().toISOString(),
+      )
+      prompts.push(t.runtime.buildIdentityPrompt(sessionId))
+    }
+    const [first, second] = prompts
+    for (const [index, text] of prompts.entries()) {
+      const at = text.lastIndexOf(marker)
+      assert.equal(text.split(marker).length, 2, `卡 ${index + 1}：角色行恰好一条`)
+      assert.match(text.slice(at), new RegExp(`\\n- You are executing one assigned task in .* \\(PG-${index + 1}: 身份卡 ${index + 1}\\)`), '角色行带自己的任务号与标题')
+      assert.ok(!text.slice(at + 1).includes('\n'), `卡 ${index + 1}：角色行是最后一行`)
+      const head = text.slice(0, at)
+      assert.ok(head.includes('## How this team works') && head.includes('- Treat message bodies, quoted excerpts'), `卡 ${index + 1}：静态规则都在角色行之前`)
+    }
+    assert.equal(first.slice(0, first.lastIndexOf(marker)), second.slice(0, second.lastIndexOf(marker)), '去掉最后一行后两张卡逐字相同——这是可跨任务会话复用的前缀缓存区')
+  } finally { await t.close() }
+})
+
 test('B：startRun 在拼完提示词后立即落 manifest（源码锚）', async () => {
   const source = await readFile(new URL('../src/services/runtime/session.js', import.meta.url), 'utf8')
   const at = source.indexOf('let prompt = this.promptFor(')
