@@ -26,7 +26,7 @@ This file records the externally visible behaviour changes of every release; the
 
 **工具**
 
-- **集成工具面按项目按需可见**：默认对团队 bot 会话隐藏 mcp__ / godot_ 前缀的宿主工具（省下大量工具定义 token）；项目工作区里有对应标记（.codegraph、.project/project.json、project.godot）才放行那一族，单聊不隐藏。
+- **集成工具面按项目按需可见（opt-in）**：宿主给每个 Agent 注册的 MCP 服务器与引擎桥工具，`team-bots` 预设筛不掉，团队 bot 用不上的定义每次调用都在重复计费。配 `DSH_TEAM_HIDE_TOOL_PREFIXES`（隐藏前缀清单）+ `DSH_TEAM_TOOL_FAMILY_MARKERS`（前缀=工作区标记路径，项目工作区里有标记的那一族保留、其余隐藏）即启用；两者缺省为空，什么都不隐藏，单聊不受影响。
 
 ### English
 
@@ -48,7 +48,7 @@ This file records the externally visible behaviour changes of every release; the
 
 **Tools**
 
-- **Host-integrated tools visible per project**: tools prefixed mcp__ / godot_ are hidden from team bot sessions by default, saving a large block of tool-definition tokens; a project workspace exposes a family only when its marker is present (.codegraph, .project/project.json, project.godot). Direct chats are unaffected.
+- **Host-integrated tools on demand (opt-in)**: host-registered MCP/bridge tool definitions that team bots never use are billed on every call. Set `DSH_TEAM_HIDE_TOOL_PREFIXES` (hidden prefixes) + `DSH_TEAM_TOOL_FAMILY_MARKERS` (`prefix=marker-path`; a project whose workspace has the marker keeps that family, the rest stay hidden) to enable. Defaults are empty — nothing is hidden; direct chats are unaffected.
 
 ## v0.3.114
 

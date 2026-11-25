@@ -9,7 +9,7 @@ import { resolveConfig } from '../src/config.js'
 import { botToolPolicyFor } from '../src/services/runtime/session.js'
 import { DIRECTOR_ONLY_TOOLS, applyBotToolPolicy } from '../src/tools.js'
 import {
-  DEFAULT_HIDE_TOOL_PREFIXES, hiddenToolNames, parseHideToolPrefixes, parseToolFamilyMarkers, toolPolicyFor,
+  hiddenToolNames, parseHideToolPrefixes, parseToolFamilyMarkers, toolPolicyFor,
 } from '../src/services/runtime/tool-families.js'
 
 test('解析：隐藏前缀清单（空白/逗号/分号分隔或数组）与「前缀=标记」映射（对象或分号分隔文本）', () => {
@@ -20,30 +20,31 @@ test('解析：隐藏前缀清单（空白/逗号/分号分隔或数组）与「
   assert.deepEqual(parseToolFamilyMarkers({ godot_: 'project.godot', bad: 3, '': 'x' }), { godot_: 'project.godot' })
 })
 
-test('配置：默认隐藏全部 MCP 与 godot_，三族各有工作区标记；env/config 文本可覆盖，空串 = 不隐藏', () => {
+test('配置：缺省不隐藏任何工具（各部署的宿主集成面不同，不能写死）；显式配置才启用按需口径', () => {
   const defaults = resolveConfig({})
-  assert.deepEqual(defaults.hideToolPrefixes, [...DEFAULT_HIDE_TOOL_PREFIXES])
-  assert.deepEqual(defaults.toolFamilyMarkers, {
-    'mcp__codegraph__': '.codegraph', 'mcp__taptap-maker__': '.project/project.json', godot_: 'project.godot',
-  })
-  const custom = resolveConfig({ hideToolPrefixes: 'mcp__', toolFamilyMarkers: 'godot_=x.godot' } as any)
-  assert.deepEqual(custom.hideToolPrefixes, ['mcp__'])
+  assert.deepEqual(defaults.hideToolPrefixes, [])
+  assert.deepEqual(defaults.toolFamilyMarkers, {})
+  const custom = resolveConfig({ hideToolPrefixes: 'mcp__,godot_', toolFamilyMarkers: 'godot_=x.godot' } as any)
+  assert.deepEqual(custom.hideToolPrefixes, ['mcp__', 'godot_'])
   assert.deepEqual(custom.toolFamilyMarkers, { godot_: 'x.godot' })
   assert.deepEqual(resolveConfig({ hideToolPrefixes: '' } as any).hideToolPrefixes, [])
 })
 
-test('按项目工作区标记放行：有 project.godot 才放行 godot_，有 .codegraph 才放行 codegraph；没有项目目录不隐藏', async () => {
+test('按项目工作区标记放行：hide 清单里的前缀，工作区有对应标记的那一族放行，其余隐藏', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-tool-families-'))
   try {
-    const config = resolveConfig({})
-    assert.deepEqual(toolPolicyFor(config, root), { hide: [...DEFAULT_HIDE_TOOL_PREFIXES], allow: [] }, '没有标记：全部隐藏')
+    const config = resolveConfig({
+      hideToolPrefixes: 'mcp__,godot_',
+      toolFamilyMarkers: 'mcp__codegraph__=.codegraph;mcp__taptap-maker__=.project/project.json;godot_=project.godot',
+    } as any)
+    assert.deepEqual(toolPolicyFor(config, root), { hide: ['mcp__', 'godot_'], allow: [] }, '没有标记：配置里列的族全部隐藏')
     await writeFile(join(root, 'project.godot'), '[application]')
     assert.deepEqual(toolPolicyFor(config, root).allow, ['godot_'])
     await mkdir(join(root, '.codegraph'))
     await mkdir(join(root, '.project'))
     await writeFile(join(root, '.project', 'project.json'), '{}')
-    assert.deepEqual(toolPolicyFor(config, root).allow, ['mcp__codegraph__', 'mcp__taptap-maker__', 'godot_'], '三族各有标记就都放行')
-    assert.deepEqual(toolPolicyFor(config, join(root, 'missing')), { hide: [...DEFAULT_HIDE_TOOL_PREFIXES], allow: [] }, '项目目录不存在视同没有标记')
+    assert.deepEqual(toolPolicyFor(config, root).allow, ['mcp__codegraph__', 'mcp__taptap-maker__', 'godot_'], '各族各有标记就都放行')
+    assert.deepEqual(toolPolicyFor(config, join(root, 'missing')), { hide: ['mcp__', 'godot_'], allow: [] }, '项目目录不存在视同没有标记')
     assert.deepEqual(toolPolicyFor(config, null), { hide: [], allow: [] }, '单聊没有项目目录：不隐藏')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -55,7 +56,7 @@ test('会话口径：按项目目录（production_dir 优先，其次 workspace/
     await mkdir(join(workspace, 'demo'), { recursive: true })
     await writeFile(join(workspace, 'demo', 'project.godot'), '[application]')
     await mkdir(join(root, 'elsewhere'))
-    const config = { ...resolveConfig({}), workspace }
+    const config = { ...resolveConfig({ hideToolPrefixes: 'godot_', toolFamilyMarkers: 'godot_=project.godot' } as any), workspace }
     assert.deepEqual(botToolPolicyFor(config, { slug: 'demo' }).allow, ['godot_'])
     assert.deepEqual(botToolPolicyFor(config, { slug: 'demo', production_dir: join(root, 'elsewhere') }).allow, [], 'production_dir 优先于 workspace/slug')
     assert.deepEqual(botToolPolicyFor(config, null), { hide: [], allow: [] }, '单聊不隐藏')

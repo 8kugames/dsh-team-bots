@@ -1,20 +1,16 @@
-// 宿主集成工具面的「按需」口径。MCP 服务器、引擎桥这类工具由宿主在根作用域注册，所有 Agent
-// 可见——preset 的插件清单管不到它们，团队 bot 的每次调用因此都带着用不上的工具定义（实测
-// taptap-maker 一家就 62k 字符）。这里按项目工作区的标记文件判定「这个项目用不用这族工具」：
-// 有标记才放行，其余对团队 bot 的会话隐藏。隐藏只作用于工具面（tools.restrict）；宿主注入
-// 系统提示词的 MCP 路由说明不归这里管。
+// 宿主集成工具面（MCP 服务器、引擎桥等）由宿主在根作用域注册，所有 Agent 可见——preset 的
+// 插件清单管不到它们，部署里团队 bot 用不上的工具定义会随每次调用重复计费。选择启用「按需」
+// 口径的部署，在这里按项目工作区的标记文件判定「这个项目用不用这族工具」：有标记才放行，其余
+// 对团队 bot 的会话隐藏。隐藏只作用于工具面（tools.restrict）；宿主注入系统提示词的 MCP 路由
+// 说明不归这里管。
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-// 默认对团队 bot 隐藏的工具名前缀：全部 MCP 服务器 + godot-bridge 这类引擎桥。
-export const DEFAULT_HIDE_TOOL_PREFIXES = ['mcp__', 'godot_']
-// 按需放行：键是工具名前缀，值是工作区相对路径（文件或目录）。项目工作区里有这个路径，
-// 这一族工具才对它的团队 bot 会话可见。
-export const DEFAULT_TOOL_FAMILY_MARKERS = {
-  'mcp__codegraph__': '.codegraph',
-  'mcp__taptap-maker__': '.project/project.json',
-  godot_: 'project.godot',
-}
+// 缺省不隐藏任何工具：各部署的宿主集成面（MCP 服务器、引擎桥）不同，写死清单会把别人的
+// 工具藏掉。要用「按项目按需」口径的部署，通过配置显式给出隐藏前缀与「前缀 = 工作区标记」
+// 映射（示例见 .env.example）；没配 = 工具面与宿主全局一致。
+export const DEFAULT_HIDE_TOOL_PREFIXES: string[] = []
+export const DEFAULT_TOOL_FAMILY_MARKERS: Record<string, string> = {}
 
 export function parseHideToolPrefixes(raw): string[] {
   const list = Array.isArray(raw) ? raw : String(raw ?? '').split(/[\s,;]+/)
