@@ -4,6 +4,52 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.128
+
+### 中文
+
+**任务**
+
+- **任务卡带版本化 Goal 锚点**：Goal 由建卡人或总监显式填写，每次修订升版本，run 只注入当前版本；带 Goal 的卡，总监验收 comment 必须引用 Goal vN 与完成标准编号，否则拒绝并列出缺什么。施工、验收、受阻处置 run 只以任务卡为启动上下文，例外仅限卡片显式引用的消息与点名评论，每次组装落 context_manifest 事件备查；工作台补了 Goal 的填写与编辑入口。
+- **成员看板 busy 同口径**：成员看板的忙碌计数计入在跑子代理，与总览 bots 页一致。
+
+**会话**
+
+- **会话查看器**：新增只读查看域，从宿主事件日志抽取目录与增量游标消息流；工作台提供目录弹窗与只读消息流，运行中会话增量轮询、可翻旧，聊天流里带会话 chip。
+- **子代理会话进查看器**：子代理账本落表，授权沿父绑定链继承，目录按父孙并集展示。
+- **跳转原生会话**：任务运行行、成员卡与目录新增跳原生会话入口，经 client 半边桥接打开；会话目录未就绪时走重试泵反复尝试而非静默失败，跳转 chip 动作接入点击分发器。
+
+**提示词**
+
+- **身份提示词利于缓存**：随任务变化的角色行挪到身份提示词末尾，静态前缀可跨任务会话命中宿主缓存。
+- **任务卡例外段共用 8k 总预算**：点名评论先取，引用消息用剩余预算，放不下的只列 ID 并记入 manifest 的 budget_skipped。
+
+**工具**
+
+- **集成工具面按项目按需可见**：默认对团队 bot 会话隐藏 mcp__ / godot_ 前缀的宿主工具（省下大量工具定义 token）；项目工作区里有对应标记（.codegraph、.project/project.json、project.godot）才放行那一族，单聊不隐藏。
+
+### English
+
+**Tasks**
+
+- **Versioned Goal anchors on task cards**: the goal is written explicitly by the card creator or director, bumps a version on every revision, and runs only ever receive the current version. On cards carrying a Goal, the director's acceptance comment must cite the Goal version and completion-criterion IDs, or the acceptance is rejected with the missing items listed. Build, review and blocked-handling runs start from the task card alone; exceptions are limited to messages the card explicitly references and named comments, and every assembly is recorded as a context_manifest event. The workbench gained goal entry and editing controls.
+- **Member board busy parity**: the member board's busy count now includes running subagents, matching the Bots overview page.
+
+**Sessions**
+
+- **Session viewer**: a new read-only session domain extracts a directory and incremental-cursor message stream from the host event log. The workbench offers a directory dialog and a read-only message stream with incremental polling for running sessions, history paging, and session chips in the chat stream.
+- **Subagent sessions in the viewer**: the subagent ledger renders as a table, authorization follows the parent binding chain, and the directory shows the union of parent and grandchild agents.
+- **Jump to native session**: task run rows, member cards and the directory gain entries that open the native session through a client-side bridge; when the session directory is not ready yet, a retry pump keeps trying instead of failing silently, and the chip action is wired into the click dispatcher.
+
+**Prompts**
+
+- **Cache-friendly identity prompt**: the task-dependent role lines moved to the end of the identity prompt, so the static prefix hits the host prompt cache across task sessions.
+- **Shared 8k budget for card exceptions**: named comments are taken first, referenced messages use the remaining budget, and anything that does not fit is reduced to IDs recorded in the manifest's budget_skipped.
+
+**Tools**
+
+- **Host-integrated tools visible per project**: tools prefixed mcp__ / godot_ are hidden from team bot sessions by default, saving a large block of tool-definition tokens; a project workspace exposes a family only when its marker is present (.codegraph, .project/project.json, project.godot). Direct chats are unaffected.
+
 ## v0.3.114
 
 ### 中文
