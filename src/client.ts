@@ -37,6 +37,18 @@
 		effect?(fn: () => void, tag?: string): unknown
 	}
 
+	// 诊断出口：原生页控制台读不到插件内部状态，这里把最近一次尝试的结果挂到全局，
+	// 便于排查「点了没反应」到底卡在哪一步（服务缺失 / 会话不在目录 / 打开失败）。
+	const debugState = {
+		attempts: [] as Array<{ sessionId: string; at: number; ok: boolean; error?: string }>,
+		serviceAvailable: false,
+	}
+	;(globalThis as unknown as Record<string, unknown>)['__dshTeamBots'] = debugState
+	const record = (sessionId: string, ok: boolean, error?: string): void => {
+		debugState.attempts.push({ sessionId, at: Date.now(), ok, error })
+		if (debugState.attempts.length > 20) debugState.attempts.shift()
+	}
+
 	interface LoaderFacade {
 		__ModuleLoader__?: {
 			load(registration: {
@@ -57,15 +69,20 @@
 		let timer: ReturnType<typeof setTimeout> | null = null
 		const pump = (): void => {
 			timer = null
+			debugState.serviceAvailable = typeof ctx.uiWorkspace?.openSession === 'function'
 			for (const [sessionId, attempts] of queue) {
 				try {
+					if (!debugState.serviceAvailable) throw new Error('uiWorkspace service unavailable')
 					ctx.uiWorkspace?.openSession?.(sessionId)
+					record(sessionId, true)
 					queue.delete(sessionId)
 				} catch (error) {
+					const message = (error as Error)?.message ?? String(error)
+					record(sessionId, false, message)
 					if (attempts + 1 >= RETRY_MAX) {
 						queue.delete(sessionId)
 						// 明确失败：多半是目标会话不在当前界面的会话目录（未连接对应工作区）。
-						console.warn('[dsh-team-bots] 无法在原生界面打开会话', sessionId, (error as Error)?.message ?? error)
+						console.warn('[dsh-team-bots] 无法在原生界面打开会话', sessionId, message)
 					} else {
 						queue.set(sessionId, attempts + 1)
 					}
@@ -119,7 +136,9 @@
 			open(event.newValue)
 		}
 		win.addEventListener?.('storage', onStorage)
-		ctx.effect?.(() => {
+		// 清理逻辑必须是 effect 回调的返回值：cordis 的 effect 回调体立即执行，
+		// 把清理写在体里会在注册瞬间就把重试定时器清掉（只试一次就静默放弃）。
+		ctx.effect?.(() => () => {
 			win.removeEventListener?.('storage', onStorage)
 			if (timer !== null) clearTimeout(timer)
 		}, 'dsh-team-bots: storage bridge')

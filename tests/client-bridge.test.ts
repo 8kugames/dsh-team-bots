@@ -151,6 +151,23 @@ test('热路径：BroadcastChannel 广播即入泵；无关载荷忽略', () => 
   assert.deepEqual(env.ctx.opened, ['session-warm'])
 })
 
+test('effect 清理是返回值而非回调体：注册不会立刻清掉重试定时器', () => {
+  FakeBroadcastChannel.reset()
+  const env = makeEnv()
+  loadBundle(env)
+  // 模拟 cordis：effect 回调体立即执行，其返回值才是清理函数。
+  const cleanups: Array<() => void> = []
+  env.ctx.effect = (fn: () => unknown) => {
+    const cleanup = fn()
+    if (typeof cleanup === 'function') cleanups.push(cleanup as () => void)
+    return () => {}
+  }
+  env.storage.set('dsh-team-bots:open-session', 'session-x')
+  env.registration.factory(() => ({})).apply(env.ctx)
+  // 回调体立即执行过，但定时器必须还在（否则重试泵被自清，只试一次）
+  assert.ok(env.clock.pending() > 0, '重试定时器不应在 effect 注册时被清掉')
+})
+
 test('目录一直不就绪：超限放弃并 console.warn（不静默）', () => {
   FakeBroadcastChannel.reset()
   const env = makeEnv()
