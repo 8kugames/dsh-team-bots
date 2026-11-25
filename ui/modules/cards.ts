@@ -545,10 +545,12 @@ function renderMessage(message) {
   const quoteBtn = state.chatMode === 'group' ? `<button class="msg-quote-btn" data-action="quote-message" data-message-id="${attr(message.id)}" data-sender-name="${attr(message.senderName)}" data-excerpt="${attr(mdPlainSummary(message.body, 120))}" title="${t('message.quoteTitle')}" aria-label="${t('message.quoteLabel')}">${icon('quote')}</button>` : ''
   // hover 复制按钮：群聊/单聊都有，紧邻引用按钮右侧；复制消息原文 message.body（非渲染后 HTML），走统一 copy handler。
   const copyBtn = `<button class="msg-copy-btn" data-action="copy" data-copy="${attr(message.body)}" title="${t('message.copyTitle')}" aria-label="${t('message.copyLabel')}">${icon('copy')}</button>`
-  // 任务/思考过程 chip 合并同一行：固定顺序「思考过程 → 任务」，缺哪个不留空位。
+  // 任务/思考过程/会话 chip 合并同一行：固定顺序「思考过程 → 会话 → 任务」，缺哪个不留空位。
+  // 会话 chip（只读查看器）：按运行归属直达该 run 的宿主会话内容。
   const trajChip = message.run_id && !isUser ? `<button class="task-chip" data-action="open-trajectory" data-run-id="${attr(message.run_id)}">${t('message.thinking')}</button>` : ''
+  const sessChip = message.run_id && !isUser ? `<button class="task-chip" data-action="open-session" data-run-id="${attr(message.run_id)}">${t('session.chipMessages')}</button>` : ''
   const taskChip = message.taskIdentifier ? `<button class="task-chip" data-action="open-task" data-task-id="${attr(message.task_id)}" title="${attr(message.taskTitle ?? '')}"><strong>${esc(message.taskIdentifier)}</strong></button>` : ''
-  const chipsLine = trajChip || taskChip ? `<div class="task-chip-line">${trajChip}${taskChip}</div>` : ''
+  const chipsLine = trajChip || sessChip || taskChip ? `<div class="task-chip-line">${trajChip}${sessChip}${taskChip}</div>` : ''
   // 纯图片消息没有正文：气泡留空不渲染，只留附图块（避免出现一个空框）。
   const bubbleHtml = message.body || quoteBlock ? `<div class="message-bubble">${quoteBlock}${richText(message.body, mdChatScope())}</div>` : ''
   return `<div class="message-row ${isUser ? 'user' : ''}">

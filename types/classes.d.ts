@@ -48,6 +48,7 @@ import { questionsMethods } from '../src/services/questions.js'
 import { coreMethods } from '../src/services/core.js'
 import { chatStoreMethods } from '../src/services/chat-stores.js'
 import { githubSourceMethods } from '../src/services/github-source.js'
+import { sessionViewMethods } from '../src/services/session-view.js'
 import { promptMethods } from '../src/services/runtime/prompt.js'
 import { sessionMethods } from '../src/services/runtime/session.js'
 import { trajectoryMethods } from '../src/services/runtime/trajectory.js'
@@ -64,6 +65,7 @@ type TeamServiceMethods =
   & typeof approvalsMethods & typeof questionsMethods & typeof coreMethods
   & typeof chatStoreMethods
   & typeof githubSourceMethods
+  & typeof sessionViewMethods
 
 type DshRuntimeMethods =
   & typeof promptMethods & typeof sessionMethods

@@ -9,6 +9,7 @@ import enSettings from '../ui/i18n/en/settings.js'
 import enTasks from '../ui/i18n/en/tasks.js'
 import enUsage from '../ui/i18n/en/usage.js'
 import enWechat from '../ui/i18n/en/wechat.js'
+import enSession from '../ui/i18n/en/session.js'
 import zh from '../ui/i18n/zh.js'
 import zhChat from '../ui/i18n/zh/chat.js'
 import zhCommon from '../ui/i18n/zh/common.js'
@@ -17,6 +18,7 @@ import zhSettings from '../ui/i18n/zh/settings.js'
 import zhTasks from '../ui/i18n/zh/tasks.js'
 import zhUsage from '../ui/i18n/zh/usage.js'
 import zhWechat from '../ui/i18n/zh/wechat.js'
+import zhSession from '../ui/i18n/zh/session.js'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { readFile, readdir, stat } from 'node:fs/promises'
@@ -378,8 +380,8 @@ test('ui/i18n 每个切片 ≤800 行（800 行铁律）', () => {
 
 test('聚合入口键集 = 各域切片键集之并，且 zh/en 一致', () => {
   const groups: Array<[string, Record<string, string>, Record<string, string>[]]> = [
-    ['zh', zh, [zhCommon, zhNav, zhChat, zhTasks, zhUsage, zhSettings, zhWechat]],
-    ['en', en, [enCommon, enNav, enChat, enTasks, enUsage, enSettings, enWechat]],
+    ['zh', zh, [zhCommon, zhNav, zhChat, zhTasks, zhUsage, zhSettings, zhWechat, zhSession]],
+    ['en', en, [enCommon, enNav, enChat, enTasks, enUsage, enSettings, enWechat, enSession]],
   ]
   const sets: Record<string, string[]> = {}
   for (const [lang, agg, domains] of groups) {

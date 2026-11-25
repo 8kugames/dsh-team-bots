@@ -7,6 +7,7 @@ import tasks from './en/tasks.js'
 import usage from './en/usage.js'
 import settings from './en/settings.js'
 import wechat from './en/wechat.js'
+import session from './en/session.js'
 
 export default {
   ...common,
@@ -16,4 +17,5 @@ export default {
   ...usage,
   ...settings,
   ...wechat,
+  ...session,
 }

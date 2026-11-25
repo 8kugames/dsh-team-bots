@@ -499,3 +499,70 @@
     line-height: 1.7;
 }
 
+
+/* 会话查看器（session-viewer，只读）：复用 .traj-* 家族，此处只补目录列表与消息流布局。 */
+.sess-stream {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+.sess-stream .btn.small {
+    align-self: center;
+}
+.sess-entry .traj-entry-head {
+    font-weight: 600;
+}
+.sess-assistant .traj-detail {
+    color: var(--ink);
+}
+.session-catalog-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.session-catalog-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    cursor: pointer;
+}
+.session-catalog-row:hover {
+    border-color: var(--ink-3);
+}
+.session-catalog-row > svg {
+    flex: 0 0 auto;
+    color: var(--ink-2);
+}
+.session-catalog-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+.session-catalog-desc {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-small);
+    color: var(--ink-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.session-catalog-desc .sep {
+    width: 1px;
+    height: 10px;
+    background: var(--line);
+    flex: 0 0 auto;
+}
+.session-catalog-meta {
+    font-size: var(--fs-caption);
+    color: var(--ink-3);
+}

@@ -449,3 +449,6 @@
     margin-top: 12px;
 }
 
+.pill.gray {
+    color: var(--ink-3);
+}

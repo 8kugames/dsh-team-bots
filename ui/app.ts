@@ -372,6 +372,7 @@ function renderShell() {
           </div>`}
           <div class="topbar-actions">
             ${primary}
+            <button class="btn icon" data-action="open-session-catalog" title="${t('session.catalogTitle')}" aria-label="${t('session.catalogTitle')}">${icon('message')}</button>
             ${refreshAction()}
           </div>
         </header>`}

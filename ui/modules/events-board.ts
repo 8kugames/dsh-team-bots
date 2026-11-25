@@ -4,6 +4,7 @@ import { activeProject, applyUiScale, applyUiTheme, setColorSchemePreference, to
 import { api, loadState, mergeSettingsDraft } from './api.js'
 import { sendMessage } from './composer.js'
 import { closeModal, openBot, openModal, openTask, openTrajectory } from './modal-forms.js'
+import { handleSessionAction } from './session-viewer.js'
 import { loadOlderMessages, loadSoloDetail } from './chat.js'
 import { taskChildrenKey, taskGroupKey } from './tasks.js'
 import { toggleDesktopNotify } from './cards.js'
@@ -372,6 +373,13 @@ export async function handleBoardAction(action, target) {
     case 'open-trajectory':
       await openTrajectory(target.dataset.runId)
       break
+    case 'open-session':
+    case 'open-session-catalog':
+    case 'session-load-older': {
+      const handled = await handleSessionAction(action, target)
+      if (!handled) return false
+      break
+    }
     case 'edit-bot':
       await openBot(target.dataset.botId)
       break

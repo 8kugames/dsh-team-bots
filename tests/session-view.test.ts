@@ -219,7 +219,7 @@ test('sessionCatalog：绑定家谱 + 运行态 + 项目域过滤；宿主无 se
     assert.equal(scoped.sessions.some(row => row.sessionId === 'sess-task-4'), true)
 
     // 宿主无 sessionQuery（旧宿主/未装）→ DSH_UNAVAILABLE
-    service.runtime = { ctx: {} }
+    ;(service as any).runtime = { ctx: {} }
     await assert.rejects(
       () => service.sessionMessages({ sessionId: 'sess-task-4' }),
       (err: any) => err.code === 'DSH_UNAVAILABLE',
