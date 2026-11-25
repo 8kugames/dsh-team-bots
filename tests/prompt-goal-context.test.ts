@@ -2,7 +2,8 @@
 // A（Goal 锚点）：施工与验收提示词只带当前版本（旧版本正文不进上下文），骨架含写范围与父任务，
 //   没有 Goal 的卡明确标注回退 description；父目标版本快照与父卡当前版本不一致时提示复核。
 // B（尾窗隔离，简化版）：任务卡驱动 run 的提示词不含群聊尾窗；例外只有卡片正文/评论显式引用的
-//   消息 ID（给全文与来源标记）和点名本 bot 的评论（给全文）；解析不了与超上限的引用如实列出；
+//   消息 ID（给全文与来源标记）和点名本 bot 的评论（给全文）；两类共用一份总预算；解析不了、
+//   超上限与超预算的引用如实列出；
 //   每次组装出一份 context_manifest，startRun 落 run_events。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -14,7 +15,8 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import {
-  DIRECTED_COMMENT_MAX_CHARS, REFERENCED_MESSAGE_LIMIT, REFERENCED_MESSAGE_MAX_CHARS, TASK_COMMENT_SCAN_LIMIT,
+  DIRECTED_COMMENT_LIMIT, DIRECTED_COMMENT_MAX_CHARS, EXCEPTION_TOTAL_CHARS, REFERENCED_MESSAGE_LIMIT,
+  REFERENCED_MESSAGE_MAX_CHARS, TASK_COMMENT_SCAN_LIMIT,
 } from '../src/services/runtime/prompt.js'
 
 class HoldingRuntime {
@@ -190,6 +192,7 @@ test('B：群聊尾窗不进任务卡驱动 run；被引用的消息给全文与
     assert.deepEqual(manifest, {
       tail_window: 'off', goal_version: null, write_scopes: 1, parent: false, deliverables: 0, comments: 5,
       directed_comments: [`c_${'cmt_directed_1'.slice(-6)}`], referenced_messages: ['m_222222'], unresolved_refs: ['m_999999'], overflow_refs: [],
+      budget_skipped: [],
     })
     t.runtime.recordContextManifest(t.run)
     t.runtime.recordContextManifest(t.run)
@@ -250,6 +253,39 @@ test('B：引用与点名都有上限，超限的引用列出但不展开；被�
     assert.deepEqual(manifest.unresolved_refs, [])
     assert.deepEqual(manifest.directed_comments, [`c_${'cmt_scan_1'.slice(-6)}`])
     assert.equal(manifest.comments, TASK_COMMENT_SCAN_LIMIT, '扫描窗内的评论条数（窗外那条不计）')
+    assert.deepEqual(manifest.budget_skipped, [], '各自都没超条数与单条上限时，总预算没有约束到任何一条')
+    assert.ok(!prompt.includes('budget reached'), '总预算没被触到时不出现预算说明')
+  } finally { await t.close() }
+})
+
+test('B：点名评论与被引用消息共用总预算；预算用完后，后面的引用只列 ID 不展开', async () => {
+  const t = await setup()
+  try {
+    const body = 'M'.repeat(REFERENCED_MESSAGE_MAX_CHARS + 200)
+    t.insertMessage('msg_budget_300001', `甲 ${body}`)
+    t.insertMessage('msg_budget_300002', `乙 ${body}`)
+    const card = await t.service.createTask({
+      projectId: t.project.id, title: '预算卡', writeScopes: ['src/b/'], description: '见 m_300001 与 m_300002。',
+    }, t.actor)
+    // 点名评论先取：每条截到单条上限 2000，占去 6000；第一条被引用消息只剩 2000，按剩余预算
+    // 截断；第二条预算为 0，不展开。
+    for (let index = 1; index <= DIRECTED_COMMENT_LIMIT; index += 1) {
+      t.insertComment(`cmt_budget_${index}`, card.id, `@Builder ${'D'.repeat(DIRECTED_COMMENT_MAX_CHARS)}`, index)
+    }
+    const prompt = promptOf(t, rowOf(t.store, card.id), { ...t.run, kind: 'task', task_id: card.id })
+    // 只数 50 连以上的填充字符：提示词其余部分的字母 D / M 不计入。
+    const injected = ['D', 'M'].reduce((sum, letter) => sum + (prompt.match(new RegExp(`${letter}{50,}`, 'g')) ?? []).join('').length, 0)
+    // 预算被用满：差额是各段正文开头的短前缀（「@Builder 」×3 与「甲 」），占预算但不参与计数。
+    assert.equal(injected, EXCEPTION_TOTAL_CHARS - DIRECTED_COMMENT_LIMIT * '@Builder '.length - '甲 '.length, '两类例外合计不超过总预算，且确实用到上限')
+    const referenced = section(prompt, '# Referenced messages', '# Time budget')
+    assert.equal(referenced.split('- [m_').length - 1, 1, '只展开了一条被引用消息')
+    assert.match(referenced, /- \[m_300001\] user:u1 at [0-9T:.Z-]+:\n甲 M+…/, '第一条按剩余预算截断并标注省略')
+    assert.match(referenced, /Not expanded \(context budget reached — use team_recall\): m_300002/, '预算用完后的引用列出但不展开')
+    assert.match(referenced, /Context budget reached: later items are truncated — use team_recall for full text\./, '段内说明有截断')
+    const manifest = t.runtime.contextManifests.get(t.run.id)
+    assert.deepEqual(manifest.referenced_messages, ['m_300001'])
+    assert.deepEqual(manifest.budget_skipped, ['m_300002'])
+    assert.equal(manifest.directed_comments.length, DIRECTED_COMMENT_LIMIT)
   } finally { await t.close() }
 })
 
