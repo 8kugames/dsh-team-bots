@@ -74,7 +74,7 @@ export const taskNotifyMethods = {
         senderType: 'system',
         senderId: 'system',
         taskId: task.id,
-        body: `任务 ${identifier} 卡面已变更，请按新卡面修正。`,
+        body: `任务 ${identifier} 卡面已变更${task.goal_statement ? `（Goal v${Number(task.goal_version) || 1}）` : ''}，请按新卡面修正。`,
         mentions: [assigneeId],
       })
     } catch (error: any) {
@@ -89,7 +89,7 @@ export const taskNotifyMethods = {
       try {
         await this.runtime.steer(
           run.session_id,
-          `Task card ${identifier} has just been amended by the owner. Re-read the latest card (title/description/priority/write scopes) and correct the work in progress accordingly; mention the amendment in the delivery report.`,
+          `Task card ${identifier} has just been amended by the owner. Re-read the latest card (title/description/priority/write scopes${task.goal_statement ? `/Goal v${Number(task.goal_version) || 1}` : ''}) and correct the work in progress accordingly; mention the amendment in the delivery report.`,
         )
         this.insertRunEvent(run.id, 'card_changed', `卡面变更修正提示已注入（${identifier}）`)
       } catch (error: any) {

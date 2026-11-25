@@ -11,6 +11,7 @@ import { REVIEWER_BOT_NAME } from '../seed-bots.js'
 import { id, nowIso, text, jsonParse} from '../util.js'
 import { parseWriteScopes, readWriteScopes } from './write-scopes.js'
 import { effectiveSandbox } from './runtime/sandbox-policy.js'
+import { criterionId, parseGoalCitation, readTaskGoal } from './task-goal.js'
 
 export const taskReviewMethods = {
   async reviewFromBot(sessionId, input) {
@@ -19,7 +20,10 @@ export const taskReviewMethods = {
     const task = this.resolveBotTask(project, input.task)
     // 验收机械闸（DSHBOTS-318）只拦真验收动作（in_review 卡）：非待验收状态保持既有
     // 校验顺序，仍由 applyReview 抛 in_review conflict，闸不抢跑。
-    if (task.status === 'in_review') this.assertReviewSubagentVerified(sessionId, project, task, input.comment)
+    if (task.status === 'in_review') {
+      this.assertReviewSubagentVerified(sessionId, project, task, input.comment)
+      this.assertReviewCitesGoal(task, input.decision, input.comment)
+    }
     return this.applyReview(task, project, input.decision, input.comment, actor)
   },
 
@@ -94,6 +98,44 @@ export const taskReviewMethods = {
     )
   },
 
+  // 验收对照 Goal 闸：有 Goal 的卡，结论 comment 必须写明当前版本号；accept 逐条引用全部
+  // 完成标准，return 至少引用一条（未通过的那几条）。机械闸只认格式，不替总监判断标准
+  // 是否真的达成；「兜底验收」只豁免子代理账目，不豁免这里的引用。没有 Goal 的卡不拦。
+  assertReviewCitesGoal(task, decision, comment) {
+    const goal = readTaskGoal(task)
+    if (!goal) return
+    const { version, cited } = parseGoalCitation(comment)
+    const expected = goal.criteria.map((_, index) => criterionId(index))
+    const missing = decision === 'accept'
+      ? expected.filter(id => !cited.includes(id))
+      : (cited.length ? [] : expected)
+    if (version === goal.version && !missing.length) return
+    throw badRequest(
+      `本次验收没有对照当前 Goal（v${goal.version}）：comment 需写明「Goal v${goal.version}」`
+      + (decision === 'accept'
+        ? `，并逐条引用全部完成标准（${expected.join('、')}）`
+        : `，并引用未通过的完成标准（${expected.join('、')} 中至少一条）`)
+      + (version !== null && version !== goal.version ? `；你引用的是 v${version}，卡片当前是 v${goal.version}` : '')
+      + (missing.length ? `；缺少 ${missing.join('、')}` : '')
+      + '。补齐后重试 team_review_task。',
+    )
+  },
+
+  // 验收对照 Goal 留痕（bot 与人工路径共用）：裁决时卡片的 Goal 版本、结论引用的版本，以及
+  // 与本次交付（run_succeeded 记的 goalVersion）是否一致——目标漂移与执行偏差据此分型。
+  recordReviewGoalCheck(task, actor, decision, comment) {
+    const goalVersion = readTaskGoal(task)?.version ?? null
+    const delivered = this.groupChatStore(task.project_id).get(
+      "SELECT data_json FROM task_events WHERE task_id = ? AND type = 'run_succeeded' ORDER BY created_at DESC LIMIT 1",
+      task.id,
+    )
+    const deliveredGoalVersion = delivered ? jsonParse(delivered.data_json, {})?.goalVersion ?? null : null
+    this.addTaskEvent(task.id, 'reviewed', actor, { decision, goalVersion, citedGoalVersion: parseGoalCitation(comment).version })
+    if (deliveredGoalVersion !== goalVersion) {
+      this.addTaskEvent(task.id, 'goal_version_mismatch', actor, { decision, deliveredGoalVersion, goalVersion })
+    }
+  },
+
   /** 验收/退回的共用流程：owner Bot 会话与微信管理员共用。 */
   async applyReview(task, project, decision, comment, actor) {
     const identifier = `${project.key}-${task.number}`
@@ -107,6 +149,7 @@ export const taskReviewMethods = {
       )
     }
     if (decision === 'accept') {
+      this.recordReviewGoalCheck(task, actor, decision, comment)
       await this.updateTask(task.id, { status: 'done' }, actor)
       if (comment) await this.addComment(task.id, comment, actor)
       this.insertMessage({
@@ -122,6 +165,7 @@ export const taskReviewMethods = {
       const reason = text(comment, 20_000)
       if (!reason) throw badRequest('退回任务必须说明原因')
       if (!task.assignee_bot_id) throw conflict(`任务 ${identifier} 没有负责人，无法退回重做`)
+      this.recordReviewGoalCheck(task, actor, decision, comment)
       // 退回重做回到「进行中」：走 updateTask 内的统一触发点（DSHBOTS-100）——
       // 通知负责人并入队重跑，运行触发类型沿用 returned；
       // 总监验收运行仍在进行时触发点会跳过（不重复开工），由其结束时的收尾逻辑补排。

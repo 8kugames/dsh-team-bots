@@ -83,14 +83,23 @@ test('a1) 源码锚：自校段为固定追加段（marker 对 + 关键文案被
   assert.ok(defaultsSrc.includes('Self-checking is always cheaper than rework'), '先自校再报交付的经济口径被钉')
   // 只追加（D-269 手法）：自校段插在卡头 Status 行之后、Description 之前，既有锚点行原样保留。
   // DSHBOTS-345：Status 与自校段之间追加了单行 deliverablesLine（卡面交付物路径声明，非空才注入）。
-  assert.ok(PROMPT_SRC.includes('Status: ${task.status}${deliverablesLine}${deliverySelfcheckBlock}\nDescription:'), '注入点钉在 Status 与 Description 之间，Status/Description 既有行不改写')
+  // 任务卡 Goal 锚点：其后又接了骨架行（写范围 / 父任务）与 Goal 段——同属卡头，仍先于自校段与 Description。
+  assert.ok(
+    PROMPT_SRC.includes('Status: ${task.status}${deliverablesLine}${writeScopesLine}${parentLine}${goalBlock}${deliverySelfcheckBlock}\nDescription:'),
+    '注入点钉在 Status 与 Description 之间，Status/Description 既有行不改写',
+  )
 })
 
 test('a2) 源码锚：D-274 时效段结构原样（Deadline 行 + 时效模板链），自校段不触碰静态前缀三段', () => {
   assert.ok(PROMPT_SRC.includes('Deadline: ${new Date(deadline.deadlineMs).toISOString()} / ${Math.ceil(remainingMs / 60_000)} min remaining.'), 'D-274 剩余时间行原样')
   assert.ok(PROMPT_SRC.includes('this is a wrap-up turn'), 'D-274 耗尽收尾轮文案原样')
   assert.ok(PROMPT_SRC.includes('# Time budget'), '时效段标题锚点原样')
-  assert.ok(PROMPT_SRC.includes('${description}${threads}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}'), '任务模板尾部链（描述→评论→时效→豁免→恢复）原样——自校段不插进 8k 截断度量区')
+  // 尾部链在评论之后多了两个例外段（点名评论全文 / 显式引用的消息）：无例外时为空串，
+  // 「描述后即结尾」的 8k 截断度量口径不变（tests/prompt-budget.test.ts 守门）。
+  assert.ok(
+    PROMPT_SRC.includes('${description}${threads}${directedBlock}${referencedBlock}${timeBudgetBlock}${urgentExemptionBlock}${recoveryNoteBlock}'),
+    '任务模板尾部链（描述→评论→例外段→时效→豁免→恢复）原样——自校段不插进 8k 截断度量区',
+  )
 })
 
 test('a3) 运行态：施工提示词注入自校段；review 提示词不注入（该段属任务运行模板）', async () => {

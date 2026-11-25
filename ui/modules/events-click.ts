@@ -5,6 +5,7 @@ import { api, loadState } from './api.js'
 import { closeAutocomplete, closeImageViewer, ensureComposerImageInput, openInlineImage, openMessageImage, removePendingImage, saveTaskFromForm } from './composer.js'
 import { closeDirPicker, closeModal, openBot, openModal, openSkillDetail, reloadTaskModal, renderDirPicker } from './modal-forms.js'
 import { renderModalLayer } from './modal-layer.js'
+import { parseGoalFields } from './task-goal.js'
 import { exportUsageCsv, switchUsageWindow, usageMode } from './usage.js'
 import { focusApprovalCard, focusQuestionCard, questionDraftSelection, questionSelectOption } from './cards.js'
 import { loadSoloDetail } from './chat.js'
@@ -512,6 +513,38 @@ document.addEventListener('click', async (event) => {
           await api('task_update_scopes', { taskId: target.dataset.taskId, write_scopes: scopes }, { quiet: true })
           await refreshAfterTask(target.dataset.taskId)
           toast(t("写范围已更新"), 'success')
+        } catch (error: any) {
+          toast(error.message || String(error), 'error')
+        }
+        break
+      }
+      case 'edit-goal': {
+        // Goal 编辑态：与写范围同构，只翻 modal 局部标志并同步弹窗层，不整页重建。
+        if (state.modal?.type === 'task') state.modal.editingGoal = true
+        renderModalLayer()
+        break
+      }
+      case 'cancel-goal-edit': {
+        if (state.modal?.type === 'task') state.modal.editingGoal = false
+        renderModalLayer()
+        break
+      }
+      case 'update-goal': {
+        // 保存走 update_task 的 goal 补丁：新版本、通知负责人、内容未变不升版本都在服务端裁决；
+        // 改目标没有「清空」语义，两项全空同样按不完整拦下。校验不过留在编辑态，已填内容不丢。
+        const fields = parseGoalFields(
+          (document.getElementById('task-goal-statement') as HTMLInputElement | null)?.value,
+          (document.getElementById('task-goal-criteria') as HTMLInputElement | null)?.value,
+          { required: true },
+        )
+        if (fields.error) {
+          toast(fields.error, 'error')
+          break
+        }
+        try {
+          await api('update_task', { taskId: target.dataset.taskId, patch: { goal: fields.goal, version: state.modal?.detail?.version } }, { quiet: true })
+          await refreshAfterTask(target.dataset.taskId)
+          toast(t("Goal 已保存"), 'success')
         } catch (error: any) {
           toast(error.message || String(error), 'error')
         }

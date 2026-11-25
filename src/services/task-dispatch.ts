@@ -12,6 +12,7 @@ import { TASK_PRIORITIES } from './tasks.js'
 import { filterIgnoredWriteScopes, parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
 import { resolveSandboxOverride } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
+import { parseGoalInput, readTaskGoal } from './task-goal.js'
 
 // 勘误并卡提示（DSHBOTS-276，P1 派单质量前置）的判定常量：新卡标题含修正类关键词 +
 // 同项目同承接人近 7 天 done 卡写范围有交集，双条件同时命中才在卡面描述尾部追加并卡提示行。
@@ -374,6 +375,14 @@ export const taskDispatchMethods = {
       if (input.description !== undefined) patch.description = input.description
       if (input.priority !== undefined) patch.priority = input.priority
       if (input.deliverables !== undefined) patch.deliverables = input.deliverables
+      // 重派改目标：只传一个字段时另一部分沿用当前 Goal；卡上还没有 Goal 时两个都得给。
+      if (input.goal_statement !== undefined || input.completion_criteria !== undefined) {
+        const current = readTaskGoal(task)
+        patch.goal = parseGoalInput({
+          statement: input.goal_statement ?? current?.statement,
+          criteria: input.completion_criteria ?? current?.criteria,
+        })
+      }
       if (Object.keys(patch).length) await this.updateTask(task.id, patch, actor)
       // 派单预算优先级分档兜底（DSHBOTS-325）重派路：input.priority 已被 updateTask
       // 校验（无效即抛，到不了这里），按改后生效优先级取档；COALESCE 只补存量 NULL
@@ -446,6 +455,10 @@ export const taskDispatchMethods = {
     // 派单预算优先级分档兜底（DSHBOTS-325）建卡路：漏传 time_budget_minutes 时按卡
     // priority 分档落库，不再落全局缺省值；显式值永远优先（②）。
     const explicitBudget = input.time_budget_minutes ?? input.timeBudgetMinutes
+    // 版本化 Goal 锚点：director 显式填写才是 v1；两个字段都没传即本卡没有 Goal。
+    const goal = input.goal_statement !== undefined || input.completion_criteria !== undefined
+      ? parseGoalInput({ statement: input.goal_statement, criteria: input.completion_criteria })
+      : undefined
     const budgetTier = dispatchBudgetTier(input.priority)
     const task = await this.createTask({
       projectId: project.id,
@@ -463,6 +476,7 @@ export const taskDispatchMethods = {
       // 时效要求（新任务 only）：重派已有任务（上面 input.taskId/input.task 分支）不更新该字段。
       // 漏传时按 priority 分档兜底（DSHBOTS-325），档值直接落库。
       timeBudgetMinutes: explicitBudget ?? budgetTier,
+      goal,
       // 紧急豁免共用车道报备（DSHBOTS-126）：urgent 放行同写范围派单时，创建消息注明与哪张在办卡共用车道。
       laneShareTask: urgentExempt && duplicate ? `${project.key}-${duplicate.number}` : null,
       sandboxOverride,

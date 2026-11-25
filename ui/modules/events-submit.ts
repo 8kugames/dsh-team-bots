@@ -2,6 +2,7 @@ import { state } from './state.js'
 import { activeProject, toast } from './util.js'
 import { api, loadState } from './api.js'
 import { closeModal, normalizeTimeBudgetMinutes, openTask, parseFallbackFields, reloadTaskModal } from './modal-forms.js'
+import { parseGoalFields } from './task-goal.js'
 import { saveTaskFromForm } from './composer.js'
 import { validateForm } from './form-validation.js'
 import { loadSoloDetail } from './chat.js'
@@ -111,6 +112,12 @@ document.addEventListener('submit', async (event) => {
       const blockedBy = new FormData(form).getAll('blockedBy').map(String).filter(Boolean)
       // 时效要求（分钟）：选填；空串/0/负数 → null（整键不传），正数取整数分钟。
       const timeBudgetMinutes = normalizeTimeBudgetMinutes(payload.time_budget_minutes)
+      // Goal（选填）：两个字段全空即不设置、整键不传；只填一个不发请求，toast 提示补齐，弹窗保留已填内容。
+      const goalFields = parseGoalFields(payload.goal_statement, payload.completion_criteria)
+      if (goalFields.error) {
+        toast(goalFields.error, 'error')
+        return
+      }
       const task = await api('create_task', {
         projectId: payload.projectId,
         title: payload.title,
@@ -122,6 +129,7 @@ document.addEventListener('submit', async (event) => {
         autoStart: form.querySelector('[name="autoStart"]')?.checked === true,
         // 时效要求（分钟）：选填；空串/0/负数归一为 null 且整键不传（服务端钳 1..10080，NULL 即不注入提示词）。
         ...(timeBudgetMinutes === null ? {} : { time_budget_minutes: timeBudgetMinutes }),
+        ...(goalFields.goal ? { goal: goalFields.goal } : {}),
       })
       closeModal()
       await loadState(state.projectId, { quiet: true })

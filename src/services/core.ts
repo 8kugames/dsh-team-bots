@@ -17,6 +17,7 @@ import { ensureTaskTimesSchema, ensureTaskTerminalTimeBackfill } from './tasks.j
 import { ensureRecoverySchema } from './recovery-schema.js'
 import { ensureRolloverSchema } from './rollover-schema.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
+import { ensureTaskGoalSchema } from './task-goal.js'
 import { ensureWechatTriggerSchema } from './wechat-trigger-schema.js'
 import { ensureExternalTriggerSchema } from './external-trigger-schema.js'
 import { PROMPT_SEGMENT_DEFAULTS, PROMPT_SEGMENT_MAX_CHARS, PROMPT_TRIO_BUDGET, parsePromptOverrides, promptOverridesHash, taskGuidanceTrioLength } from './runtime/prompt.js'
@@ -128,6 +129,8 @@ export const coreMethods = {
       ensureTaskTerminalTimeBackfill(this.store)
       // 派发沙箱覆盖列（DSHBOTS-156）：tasks.sandbox_override，缺省 NULL=跟随 bot 配置档。
       ensureTaskSandboxSchema(this.store)
+      // 任务卡 Goal 锚点四列（目标陈述/完成标准/版本/父目标版本快照），缺省 NULL = 本卡没有 Goal。
+      ensureTaskGoalSchema(this.store)
       // 微信入站 Trigger 留痕表（B4-①/DSHBOTS-328）：幂等迁移，通道未启用也不碍事。
       ensureWechatTriggerSchema(this.store)
       // 外部触发留痕表（B4-②/DSHBOTS-335）：GitHub 源的 (source, external_id) 已见集合。

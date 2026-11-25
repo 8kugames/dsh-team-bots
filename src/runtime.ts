@@ -8,6 +8,8 @@ import { lifecycleMethods } from './services/runtime/lifecycle.js'
 export class DshRuntime {
   // 聊天分库路由器（chat-db-split Phase 1）：{ forRun(run) -> 聊天库 Store }，由 index 注入。
   chatStores: any = null
+  // 任务卡驱动 run 的启动上下文清单（run id → manifest），见 runtime/prompt.ts 的 taskCardContext。
+  contextManifests: Map<string, any> = null
 
   constructor({ ctx, config, store, logger = console as DshLogger, mask = null, chatStores = null }) {
     this.ctx = ctx
@@ -44,6 +46,8 @@ export class DshRuntime {
     // 尾窗增量水位（DSHBOTS-96 P1-1）：session id → 已注入到 messages/solo_messages 的
     // rowid。值随会话线性增长，条目数受会话数约束，不做 LRU。
     this.messageWatermarks = new Map()
+    // 任务卡驱动 run 的启动上下文清单（run id → manifest）：promptFor 暂存，startRun 取走落 run_events。
+    this.contextManifests = new Map()
     this.selecting = Promise.resolve()
     this.completionHandler = null
     this.attached = false

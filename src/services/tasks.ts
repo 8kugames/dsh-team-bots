@@ -17,6 +17,7 @@ import {
 import { taskStage, taskStageLabel } from './task-stage.js'
 import { effectiveTaskTimeBudgetMinutes } from '../config.js'
 import { taskSubtreeIds, taskTreeUsageTotals, taskUsageTotals } from '../usage.js'
+import { ensureTaskGoalSchema, goalRevisionColumns, goalView, parentGoalVersionOf, parseGoalInput, readTaskGoal } from './task-goal.js'
 
 export const TASK_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 
@@ -169,8 +170,11 @@ export const tasksMethods = {
     // 真自引用在公共 API 层面构造不出来，validateTaskRelations 仍显式拒（防直插库与未来 update 复用）。
     const parentTaskId = input.parentTaskId ?? input.parent_task_id ?? null
     const blockedBy = normalizeBlockedByInput(input.blockedBy ?? input.blocked_by)
+    // 版本化 Goal 锚点：建卡人显式填写才是 v1，不从描述生成。
+    const goal = input.goal === undefined || input.goal === null ? null : parseGoalInput(input.goal)
     ensureTaskRelationsSchema(this.store)
     ensureTaskSandboxSchema(this.store)
+    ensureTaskGoalSchema(this.store)
     let number
     this.store.transaction(() => {
       // 派单清洗：ignored 染色 + 一级目录驳回，与建档同事务——有效清单与染色清单
@@ -196,6 +200,12 @@ export const tasksMethods = {
         sandboxOverride, createdAt, createdAt,
         completedAt, canceledAt,
       )
+      if (goal) {
+        this.store.run(
+          'UPDATE tasks SET goal_statement = ?, goal_criteria = ?, goal_version = 1, goal_parent_version = ? WHERE id = ?',
+          goal.statement, JSON.stringify(goal.criteria), parentGoalVersionOf(this.store, { parent_task_id: relations.parentTaskId }), taskId,
+        )
+      }
       for (const label of Array.isArray(input.labels) ? input.labels.slice(0, 12) : []) {
         const clean = text(label, 40).toLowerCase()
         if (clean) this.store.run('INSERT OR IGNORE INTO task_labels(task_id, label) VALUES (?, ?)', taskId, clean)
@@ -206,6 +216,7 @@ export const tasksMethods = {
         }
       }
       this.addTaskEvent(taskId, 'created', actor, { status, assigneeBotId: assigneeId })
+      if (goal) this.addTaskEvent(taskId, 'goal_revised', actor, { field: 'goal', from: null, to: 1, statement: goal.statement, criteria: goal.criteria })
       this.audit(actor, 'task.create', 'task', taskId, { title, assigneeId, status })
     })
     if (input.postCard !== false) {
@@ -342,7 +353,10 @@ export const tasksMethods = {
       task.id,
     )
     const project = this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id)
-    const { write_scopes: rawScopes, ignored_write_scopes: rawIgnoredScopes, deliverables: rawDeliverables, time_budget_minutes: rawTimeBudget, ...rest } = task
+    const {
+      write_scopes: rawScopes, ignored_write_scopes: rawIgnoredScopes, deliverables: rawDeliverables, time_budget_minutes: rawTimeBudget,
+      goal_statement, goal_criteria, goal_version, goal_parent_version, ...rest
+    } = task
     // 阶段按事实推导（task-stage 块）：与 latestRun 同源；attention 取最近运行的待回答提问。
     const attention = runs[0] ? parseAttention(runs[0].attention_json) : null
     const stage = taskStage(task, runs[0] ?? null, attention)
@@ -355,6 +369,8 @@ export const tasksMethods = {
       // 染色写范围（命中 .gitignore）：进卡面展示但不参与并行锁判定。
       ignoredWriteScopes: readWriteScopes(rawIgnoredScopes),
       deliverables: readDeliverables(rawDeliverables),
+      // 版本化 Goal 锚点：null = 本卡没有 Goal（验收回退 description）。
+      goal: goalView(task),
       // 时效要求（分钟）：null=发布方未提；供 UI 展示与提示词注入共用一个口径。
       timeBudgetMinutes: Number.isFinite(rawTimeBudget) ? rawTimeBudget : null,
       attention,
@@ -420,6 +436,7 @@ export const tasksMethods = {
       throw this.staleTaskConflict(task, patch.version)
     }
     const updates: any = {}
+    let goalRevisedFrom
     if (patch.title !== undefined) {
       const title = text(patch.title, 240)
       if (!title) throw badRequest('任务标题不能为空')
@@ -459,6 +476,19 @@ export const tasksMethods = {
     if (patch.deliverables !== undefined) {
       updates.deliverables = JSON.stringify(parseDeliverables(patch.deliverables))
     }
+    // 改目标是一次显式的版本修订：只有 patch 带 goal 才产生新版本，状态、负责人、评论、
+    // 交付物、写作用域的变更都不碰 goal_* 列。
+    if (patch.goal !== undefined) {
+      // 终态卡的 Goal 不再修订（与写范围终态闸同口径）：验收已对照当时版本关单，事后改目标
+      // 只会让「对着哪一版验收的」失去意义。
+      if (task.status === 'done' || task.status === 'canceled') throw conflict('任务已结束，不能修改 Goal')
+      ensureTaskGoalSchema(this.store)
+      const revision = goalRevisionColumns(task, parseGoalInput(patch.goal), parentGoalVersionOf(this.store, task))
+      if (revision) {
+        Object.assign(updates, revision)
+        goalRevisedFrom = readTaskGoal(task)?.version ?? null
+      }
+    }
     // 延期阀（DSHBOTS-274）：update_task 实改 time_budget_minutes 后整卡死线按新预算重算——
     // 记 budget_updated_at 标记新预算生效；派发基准统一为最新派发（DSHBOTS-281 重派即新窗口），
     // 改预算与重派各自独立生效，改后重派拿到「新预算 × 新窗口」。
@@ -497,8 +527,15 @@ export const tasksMethods = {
         ...Object.values(updates), nowIso(), taskId,
       )
       for (const field of Object.keys(updates)) {
+        if (field.startsWith('goal_')) continue
         const type = field === 'status' ? 'status' : field === 'assignee_bot_id' ? 'assigned' : 'updated'
         this.addTaskEvent(taskId, type, actor, { field, from: task[field] ?? null, to: updates[field] })
+      }
+      if (goalRevisedFrom !== undefined) {
+        this.addTaskEvent(taskId, 'goal_revised', actor, {
+          field: 'goal', from: goalRevisedFrom, to: updates.goal_version,
+          statement: updates.goal_statement, criteria: JSON.parse(updates.goal_criteria),
+        })
       }
       if (patch.labels !== undefined && Array.isArray(patch.labels)) {
         this.store.run('DELETE FROM task_labels WHERE task_id = ?', taskId)
@@ -532,13 +569,14 @@ export const tasksMethods = {
     if (updates.status === 'done' && task.status !== 'done') {
       this.notifyTaskDone(this.taskRow(taskId))
     }
-    // 任务卡修正闭环（DSHBOTS-232 ①）：已派单卡的卡面（标题/描述/优先级/写范围）实际变值时
+    // 任务卡修正闭环（DSHBOTS-232 ①）：已派单卡的卡面（标题/描述/优先级/写范围/Goal）实际变值时
     // 通知负责人修正。只认卡面字段——状态/负责人等流转字段各有自己的通知口径，不在此重复；
-    // 值未变的字段（同值重写）不触发。
+    // 值未变的字段（同值重写）不触发。Goal 以版本是否推进为准（只改完成标准时陈述不变）。
     if (task.assignee_bot_id) {
-      const cardChanged = ['title', 'description', 'priority'].some(
-        field => updates[field] !== undefined && updates[field] !== task[field],
-      ) || (updates.write_scopes !== undefined
+      const cardChanged = updates.goal_version !== undefined
+        || ['title', 'description', 'priority'].some(
+          field => updates[field] !== undefined && updates[field] !== task[field],
+        ) || (updates.write_scopes !== undefined
         && JSON.stringify(readWriteScopes(updates.write_scopes)) !== JSON.stringify(readWriteScopes(task.write_scopes)))
       if (cardChanged) await this.notifyTaskCardChanged(this.taskRow(taskId))
     }

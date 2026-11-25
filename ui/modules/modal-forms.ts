@@ -8,7 +8,7 @@ import { currentSkillVersion, skillVersions, taskDeliverablesBlock, taskUsageBlo
 import { ensureComposerImageInput, ensureImageViewer } from './composer.js'
 import { app, refresh, panelAttrs, render, updateRunClocks } from '../app.js'
 import { modalShell, modalLoading, renderModalLayer } from './modal-layer.js'
-import { botQuotaBlock } from './bot-quota.js'
+import { botQuotaBlock } from './bot-quota.js'; import { goalFieldsHtml, taskGoalBlock } from './task-goal.js'
 import { ARTIFACT_IMAGE, FILE_TEXT_EXT, artifactFileUrl, artifactExt } from './file-preview.js'
 
 function modelOptions(provider, model) {
@@ -280,7 +280,7 @@ function modalNewTask() {
     body: `<form data-form="create-task" id="modal-form">
       <input type="hidden" name="projectId" value="${attr(project.id)}">
       <div class="field"><label id="new-task-title-label" for="new-task-title">${t("标题")}</label><input class="input" style="width:100%" id="new-task-title" name="title" required maxlength="240" placeholder="${t("一个可执行、可验收的结果")}" autofocus></div>
-      <div class="field"><label id="new-task-description-label" for="new-task-description">${t("描述")}</label><textarea class="textarea" id="new-task-description" name="description" rows="8" placeholder="${t("背景、范围、约束、验收标准")}"></textarea></div>
+      <div class="field"><label id="new-task-description-label" for="new-task-description">${t("描述")}</label><textarea class="textarea" id="new-task-description" name="description" rows="8" placeholder="${t("背景、范围、约束、验收标准")}"></textarea></div>${goalFieldsHtml('new-task-goal', { hint: t("选填：目标陈述和完成标准都填写才设置 Goal；验收时会对照完成标准逐条核对。") })}
       <div class="field-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
         <div class="field"><label id="new-task-assignee-label" for="new-task-assignee">${t("指派给")}</label><select class="select" style="width:100%" id="new-task-assignee" name="assigneeBotId">${project.members.map(member => `<option value="${attr(member.id)}">${esc(member.name)} · ${esc(member.bot_role || '')}</option>`).join('')}</select></div>
         <div class="field"><label id="new-task-priority-label" for="new-task-priority">${t("优先级")}</label><select class="select" style="width:100%" id="new-task-priority" name="priority"><option value="medium">${t("中")}</option><option value="high">${t("高")}</option><option value="urgent">${t("紧急")}</option><option value="low">${t("低")}</option><option value="none">${t("无")}</option></select></div>
@@ -460,7 +460,7 @@ function modalTask(task) {
           ${editingScopes ? scopesEdit : `${scopesEditable ? `<div class="btn-row" style="margin-bottom:6px"><button class="btn small" type="button" data-action="edit-scopes" data-task-id="${attr(task.id)}">${icon('edit')}${t("编辑")}</button></div>` : ''}${scopesView}
           <div class="hint" style="margin-top:6px">${t("写范围是并行调度依据：同项目内路径互不重叠的任务才会并行。")}</div>`}
         </div>
-        ${taskDeliverablesBlock(task)}${task.timeBudgetMinutes ? `<div class="scope-block">
+        ${taskGoalBlock(task)}${taskDeliverablesBlock(task)}${task.timeBudgetMinutes ? `<div class="scope-block">
           <div class="eyebrow" style="margin-bottom:6px">${t('taskForm.timeBudgetLabel')}</div>
           <div class="note" style="color:var(--ink)">${t('task.timeBudgetValue', { minutes: Number(task.timeBudgetMinutes) })}</div>
           <div class="hint" style="margin-top:6px">${t('task.timeBudgetNote')}</div>

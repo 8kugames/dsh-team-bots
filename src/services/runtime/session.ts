@@ -832,6 +832,8 @@ export const sessionMethods = {
     // sessionKind 入参保留兼容（调用方仍传），控制面收敛后不再参与会话解析。
     const sessionId = await this.ensureSession(bot, project, { run, task, modelOverride })
     let prompt = this.promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId })
+    // 任务卡驱动 run 的上下文清单落 run_events（非任务卡 run 没有暂存，直接返回）。
+    this.recordContextManifest(run)
     // recovery note（DSHBOTS-135）：恢复标记已被上面的首条提示词消费，即刻清零——
     // 恢复提醒只对「重排队后的第一次执行」注入一次，后续运行回到标准提示词。
     if (Number(run.recovery) === 1) {

@@ -240,4 +240,15 @@ export default {
   "加载文件失败：": "Failed to load file: ",
   // Task card context menu (DSHBOTS-367): keyboard cross-column move
   "task.moveMenuLabel": "Move to",
+  // Task Goal (versioned anchor): entry fields in the new-task modal, version display and editing in the task detail modal
+  "目标陈述": "Goal statement",
+  "完成标准（每行一条）": "Completion criteria (one per line)",
+  "这个任务要达成的结果": "The outcome this task must achieve",
+  "选填：目标陈述和完成标准都填写才设置 Goal；验收时会对照完成标准逐条核对。": "Optional: fill in both the goal statement and completion criteria to set a Goal; review checks each criterion one by one.",
+  "设置 Goal 需要同时填写目标陈述和至少一条完成标准": "A Goal needs both a statement and at least one completion criterion",
+  "尚未设置 Goal": "No Goal set yet",
+  "设置 Goal": "Set Goal",
+  "验收时会对照当前版本逐条核对；修改会产生新版本": "Review checks each criterion against the current version; editing creates a new version",
+  "保存后生成新版本并通知负责人；内容未变则不升版本": "Saving creates a new version and notifies the assignee; unchanged content keeps the current version",
+  "Goal 已保存": "Goal saved",
 }

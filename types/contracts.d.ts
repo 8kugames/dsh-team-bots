@@ -121,6 +121,8 @@ interface TeamActionPayload {
   images?: unknown[]
   write_scopes?: unknown
   writeScopes?: unknown
+  /** 任务 Goal（版本化锚点）：create_task 平铺入参；update_task 以 patch.goal 透传同一形态。 */
+  goal?: { statement: string; criteria: string[] }
   evaluation?: unknown
   /** update_approval_rules 的规则数组（DSHBOTS-365）：字段由服务端逐条校验。 */
   rules?: unknown[]

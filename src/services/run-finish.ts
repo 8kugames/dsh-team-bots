@@ -19,6 +19,7 @@ import {
   transientBackoffMs,
 } from './backoff.js'
 import { ensureAttentionSchema, normalizeAttention } from './attention-schema.js'
+import { readTaskGoal } from './task-goal.js'
 import { completeVisionRun, isImageUnsupportedError, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
 import { chatReply } from '../wechat/format.js'
 
@@ -395,7 +396,10 @@ export const runFinishMethods = {
             cleanOutput || '运行完成，但模型未返回文本。',
             endedAt,
           ))
-          this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, { runId, identifier: `${project.key}-${task.number}` })
+          // 交付时的 Goal 版本随事件落账：验收时据此判断这单交付是对着哪一版目标做的。
+          this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, {
+            runId, identifier: `${project.key}-${task.number}`, goalVersion: readTaskGoal(task)?.version ?? null,
+          })
           // 自动核验委派（DSHBOTS-113）：与 in_review 迁移同一事务触发留痕；实际派生由
           // review_delegate_auto outbox 承接（幂等键绑定本次交付运行），守卫冲突的退避重试
           // 与耗尽可见性都在 outbox 侧，任何失败都不回滚本次迁移。

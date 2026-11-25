@@ -80,11 +80,13 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_assign_task',
-    description: 'The regular path to dispatch project work to a bot: create a new task card or re-dispatch/amend an existing one. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); passing title/description/priority alongside `task` amends the card — the assignee is immediately notified to correct course per the new card. Without `task`, creates a new task that starts automatically. A new task whose write scopes exactly match an unfinished task in the same project is rejected as a duplicate dispatch; merge the cards into the existing task instead, or pass force_duplicate to override (audited). Consolidate before dispatch: one requirement goes into one card — amend and re-dispatch the existing card (or add subtask cards with parent_task_id for genuinely independent parts) instead of opening several sibling cards for the same need.',
+    description: 'The regular path to dispatch project work to a bot: create a new task card or re-dispatch/amend an existing one. Only the project owner bot may use this. With `task` it re-dispatches that existing task (retry to the same bot, or hand it to a different bot); passing title/description/priority alongside `task` amends the card — the assignee is immediately notified to correct course per the new card. Without `task`, creates a new task that starts automatically. A new task whose write scopes exactly match an unfinished task in the same project is rejected as a duplicate dispatch; merge the cards into the existing task instead, or pass force_duplicate to override (audited). Consolidate before dispatch: one requirement goes into one card — amend and re-dispatch the existing card (or add subtask cards with parent_task_id for genuinely independent parts) instead of opening several sibling cards for the same need. Give a card a versioned Goal (goal_statement + completion_criteria) whenever the definition of done can be stated: every run is anchored to the current Goal version and your team_review_task comment must cite it.',
     parameters: {
       type: 'object',
       properties: {
         assignee: { type: 'string', description: 'Exact bot name from the project member list' },
+        goal_statement: { type: 'string', description: 'Versioned Goal anchor (new tasks and card amendment on re-dispatch): one or two sentences stating what this card must achieve, written by you — never generated from the description by the system. Each change creates a new Goal version (v1, v2...) that runs are held to and acceptance verdicts must cite' },
+        completion_criteria: { type: 'array', items: { type: 'string' }, description: 'Completion criteria of the Goal, one string per criterion (1-12 items, up to 500 characters each). They are numbered C1..Cn on the card: the assignee reports each one by ID, and your team_review_task comment must cite "Goal vN" plus every criterion ID on accept (at least the failed ones on return). On re-dispatch, passing either field alone revises just that part' },
         title: { type: 'string', description: 'Short actionable task title (new tasks; on re-dispatch it amends the card)' },
         description: { type: 'string', description: 'Self-contained instructions, constraints and acceptance criteria (new tasks; on re-dispatch it amends the card and the assignee is notified to correct course). Name the expected deliverable file paths inside the write scopes, and never instruct the bot to paste file contents into its delivery report — the report references paths, reviewers read the files' },
         priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'], description: 'Task priority (new tasks and card amendment on re-dispatch)' },
@@ -105,9 +107,13 @@ export function installTeamTools(ctx, service) {
       const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
       if (!args.task && !args.title) throw new Error('Creating a new task requires title')
       const task = await service.assignFromBot(sessionId, args)
-      return args.task
-        ? `Re-dispatched ${task.identifier} to ${task.assignee_name ?? args.assignee} (status: ${task.status}).`
-        : `Created ${task.identifier} and assigned it to ${task.assignee_name ?? args.assignee}.`
+      if (!args.task) return `Created ${task.identifier} and assigned it to ${task.assignee_name ?? args.assignee}.`
+      // 改了描述却没动 Goal 时提示一句（只提示不拦）：Goal 不跟着改，版本化就退化成形式。
+      const goalNote = args.description !== undefined
+        && args.goal_statement === undefined && args.completion_criteria === undefined && task.goal
+        ? ` Its Goal is unchanged at v${task.goal.version}; pass goal_statement/completion_criteria as well when the completion criteria should change with the description.`
+        : ''
+      return `Re-dispatched ${task.identifier} to ${task.assignee_name ?? args.assignee} (status: ${task.status}).${goalNote}`
     },
   })
 
@@ -138,7 +144,7 @@ export function installTeamTools(ctx, service) {
       properties: {
         task: { type: 'string', description: 'Task to review, as KEY-N (for example DEMO-3)' },
         decision: { type: 'string', enum: ['accept', 'return'], description: 'accept approves the delivery; return sends it back for rework' },
-        comment: { type: 'string', description: 'Acceptance note, or the required rework reason when returning' },
+        comment: { type: 'string', description: 'Acceptance note, or the required rework reason when returning. When the card has a Goal, the comment must cite "Goal vN" with the card\'s current version and every criterion ID (C1, C2...) on accept, or at least the failed criterion IDs on return; a comment that does not is rejected with the missing items' },
       },
       required: ['task', 'decision'],
       additionalProperties: false,

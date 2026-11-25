@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { maskSecrets } from '../secrets.js'
 import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '../util.js'
+import { criterionId, readTaskGoal } from './task-goal.js'
 
 // 记忆上限（DSHBOTS-339）：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶后新增被拒，
 // 须先整理到 MEMORY_COMPACT_TO 条以内才恢复放行（滞回，避免在阈值附近反复开关）。team 作用域不限。
@@ -106,6 +107,8 @@ export const memoryMethods = {
       ].filter(Boolean).join('\n')
     }
     const task = this.resolveBotTask(project, raw)
+    // 卡面回读带当前 Goal：被要求「重读卡面再裁决」的 bot 必须看得到它要对照的那一版目标。
+    const goal = readTaskGoal(task)
     const comments = this.groupChatStore(task.project_id).all(
       'SELECT author_type, author_id, body, created_at FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 10',
       task.id,
@@ -115,6 +118,7 @@ export const memoryMethods = {
       `assignee: ${task.assignee_bot_id ?? 'unassigned'} | priority: ${task.priority} | review: ${task.review_target}`,
       '',
       task.description || '(no description)',
+      goal ? `\nGoal (current version v${goal.version}):\n${goal.statement}\n${goal.criteria.map((text, index) => `  ${criterionId(index)}. ${text}`).join('\n')}` : '',
       comments.length === 0 ? '' : `\nComments:\n${comments.map(item => `- ${item.author_type}:${item.author_id} (${item.created_at}): ${item.body}`).join('\n')}`,
     ].filter(Boolean).join('\n')
   },
