@@ -83,7 +83,7 @@ export async function openSessionCatalog(projectId = null) {
   try {
     const data = await api('session_catalog', { projectId }, { quiet: true })
     if (state.modal?.type !== 'session-catalog') return
-    state.modal = { type: 'session-catalog', sessions: data?.sessions ?? [], projectId }
+    state.modal = { type: 'session-catalog', sessions: data?.sessions ?? [], total: Number(data?.total ?? 0), projectId }
     renderModalLayer()
   } catch (error: any) {
     closeModal()
@@ -198,9 +198,15 @@ export function modalSessionCatalog(modal) {
   const body = rows.length === 0
     ? `<div class="faint">${t('session.catalogEmpty')}</div>`
     : `<div class="session-catalog-list">${rows.map(sessionCatalogRow).join('')}</div>`
+  // 服务端只回最近一批（运行中的恒保留）：被裁剪时副标题说明「最近 N / 共 M」，
+  // 免得看着像只有 N 个会话。
+  const total = Number(modal?.total ?? rows.length)
+  const subtitle = total > rows.length
+    ? t('session.catalogRecent', { shown: rows.length, total })
+    : `${rows.length} ${t('session.catalogCount')}`
   return modalShell({
     title: t('session.catalogTitle'),
-    subtitle: `${sessions.length} ${t('session.catalogCount')}`,
+    subtitle,
     body,
     footer: `<button class="btn" data-action="close-modal">${t('关闭')}</button>`,
     size: '',

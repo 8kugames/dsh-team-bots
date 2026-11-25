@@ -4,6 +4,7 @@ export default {
   "session.catalogTitle": "Sessions",
   "session.catalogCount": "sessions",
   "session.catalogEmpty": "No sessions yet. Control-plane and task sessions are created automatically once bots start working.",
+  "session.catalogRecent": "Latest ${shown} of ${total}",
   // viewer
   "session.viewerTitle": "Conversation",
   "session.loadFailed": "Failed to read the session",

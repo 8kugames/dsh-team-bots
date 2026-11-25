@@ -23,6 +23,11 @@ const ENTRY_LIMIT_DEFAULT = 200
 const ENTRY_LIMIT_MAX = 500
 const OBSERVE_TIMEOUT_MS = 15_000
 
+// 会话中心只列最近若干个（当前 50 个）：会话数随项目推进无界增长，目录一次性铺开
+// 既难读也拖慢渲染。运行中的会话恒保留（正在跑的会话最该被看见），其余按最近
+// 活动时间倒序补齐到上限。
+const CATALOG_LIMIT = 50
+
 // 消息事件 → 查看器角色。system/developer 是管线事件（系统提示词、工具面变更），
 // 对「看对话」没有价值且体积巨大，不进查看面。
 const SURFACE_ROLES = new Map([
@@ -42,6 +47,7 @@ export const sessionViewMethods = {
     const scoped = projectId != null
     const rows = this.store.all(
       `SELECT sb.session_id, sb.kind, sb.alias, sb.bot_id, sb.project_id, sb.task_id,
+              sb.created_at AS binding_created_at,
               b.name AS bot_name, b.status AS bot_status,
               p.key AS project_key, p.name AS project_name,
               tk.number AS task_number, tk.title AS task_title
@@ -53,7 +59,9 @@ export const sessionViewMethods = {
         ORDER BY sb.alias ASC, sb.created_at DESC, sb.rowid DESC`,
       ...(scoped ? [projectId] : []),
     )
-    const sessions = rows.map(row => {
+    // 目录条目带「最近活动时间」：先按活动时间倒序取最近的一批，再按上限裁剪。
+    const entries: { session: any; recency: number }[] = []
+    for (const row of rows) {
       const last = this.store.get(
         'SELECT status, kind, started_at, ended_at, queued_at FROM runs WHERE session_id = ? ORDER BY COALESCE(ended_at, queued_at) DESC, rowid DESC LIMIT 1',
         row.session_id,
@@ -63,24 +71,28 @@ export const sessionViewMethods = {
         row.session_id,
       )?.ok,
       )
-      return {
-        sessionId: row.session_id,
-        kind: row.kind,
-        alias: Boolean(row.alias),
-        botId: row.bot_id,
-        botName: row.bot_name ?? 'Bot',
-        projectId: row.project_id,
-        projectKey: row.project_key ?? null,
-        projectName: row.project_name ?? null,
-        taskId: row.task_id,
-        taskIdentifier: row.project_key && row.task_number ? `${row.project_key}-${row.task_number}` : null,
-        taskTitle: row.task_title ?? null,
-        running,
-        lastRunStatus: last?.status ?? null,
-        lastRunKind: last?.kind ?? null,
-        lastRunAt: last?.ended_at ?? last?.started_at ?? last?.queued_at ?? null,
-      }
-    })
+      const lastRunAt = last?.ended_at ?? last?.started_at ?? last?.queued_at ?? null
+      entries.push({
+        recency: stamp(lastRunAt) ?? stamp(row.binding_created_at) ?? 0,
+        session: {
+          sessionId: row.session_id,
+          kind: row.kind,
+          alias: Boolean(row.alias),
+          botId: row.bot_id,
+          botName: row.bot_name ?? 'Bot',
+          projectId: row.project_id,
+          projectKey: row.project_key ?? null,
+          projectName: row.project_name ?? null,
+          taskId: row.task_id,
+          taskIdentifier: row.project_key && row.task_number ? `${row.project_key}-${row.task_number}` : null,
+          taskTitle: row.task_title ?? null,
+          running,
+          lastRunStatus: last?.status ?? null,
+          lastRunKind: last?.kind ?? null,
+          lastRunAt,
+        },
+      })
+    }
     // 子代理行（含孙代理）：父链可能穿过多层子代理才到绑定行，SQL JOIN 表达不了，
     // 改为全表取行 + JS 沿 subagent_sessions 逐跳追到最近的绑定行祖先（孤儿不进目录）。
     // 运行态 = end 未回写（stop_reason 仍 NULL，账本终态恒写非空哨兵）。
@@ -109,28 +121,41 @@ export const sessionViewMethods = {
         const botName = bots.get(anchor.bot_id) ?? 'Bot'
         const project = anchor.project_id ? projects.get(anchor.project_id) : null
         const task = anchor.task_id ? tasks.get(anchor.task_id) : null
-        sessions.push({
-          sessionId: row.session_id,
-          kind: 'subagent',
-          alias: false,
-          botId: anchor.bot_id,
-          botName,
-          projectId: anchor.project_id ?? null,
-          projectKey: project?.key ?? null,
-          projectName: project?.name ?? null,
-          taskId: anchor.task_id ?? null,
-          taskIdentifier: project?.key && task?.number ? `${project.key}-${task.number}` : null,
-          taskTitle: task?.title ?? null,
-          subagentLabel: row.label ?? null,
-          parentSessionId: row.parent_session_id,
-          running: row.stop_reason == null,
-          lastRunStatus: null,
-          lastRunKind: 'subagent',
-          lastRunAt: row.started_at ?? null,
+        entries.push({
+          recency: stamp(row.started_at) ?? 0,
+          session: {
+            sessionId: row.session_id,
+            kind: 'subagent',
+            alias: false,
+            botId: anchor.bot_id,
+            botName,
+            projectId: anchor.project_id ?? null,
+            projectKey: project?.key ?? null,
+            projectName: project?.name ?? null,
+            taskId: anchor.task_id ?? null,
+            taskIdentifier: project?.key && task?.number ? `${project.key}-${task.number}` : null,
+            taskTitle: task?.title ?? null,
+            subagentLabel: row.label ?? null,
+            parentSessionId: row.parent_session_id,
+            running: row.stop_reason == null,
+            lastRunStatus: null,
+            lastRunKind: 'subagent',
+            lastRunAt: row.started_at ?? null,
+          },
         })
       }
     }
-    return { sessions }
+    // 裁剪：运行中的会话恒保留，其余按最近活动时间倒序补到上限（总数超上限时
+    // 运行中会话多到装不下，则只留运行中的——它们才是当下的重点）。
+    const running = entries.filter(entry => entry.session.running)
+    const idle = entries.filter(entry => !entry.session.running)
+    const byRecency = (a: { session: any; recency: number }, b: { session: any; recency: number }) => (
+      b.recency - a.recency || (a.session.sessionId < b.session.sessionId ? -1 : 1)
+    )
+    running.sort(byRecency)
+    idle.sort(byRecency)
+    const kept = [...running, ...idle.slice(0, Math.max(0, CATALOG_LIMIT - running.length))]
+    return { sessions: kept.map(entry => entry.session), total: entries.length }
   },
 
   // 会话消息读取。三选一入口：sessionId 直达 / runId 归属解析；无 afterSeq 时取尾部
@@ -338,4 +363,11 @@ export const sessionViewMethods = {
 
 function truncate(value, limit) {
   return value.length > limit ? `${value.slice(0, limit)}…` : value
+}
+
+// 时间戳 → 毫秒（目录按最近活动时间排序用）。解析不出来当没有时间。
+function stamp(value) {
+  if (value == null) return null
+  const time = typeof value === 'number' ? value : Date.parse(String(value))
+  return Number.isFinite(time) ? time : null
 }

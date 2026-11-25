@@ -4,6 +4,7 @@ export default {
   "session.catalogTitle": "会话中心",
   "session.catalogCount": "个会话",
   "session.catalogEmpty": "还没有会话。Bot 开始工作后会自动创建控制面与任务会话。",
+  "session.catalogRecent": "最近 ${shown} 个（共 ${total} 个）",
   // 查看器
   "session.viewerTitle": "会话内容",
   "session.loadFailed": "读取会话内容失败",
