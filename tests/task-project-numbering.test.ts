@@ -106,6 +106,28 @@ test('项目 key 允许下划线、短横线和数字：编号 KEY-N 能按 <key
   } finally { await t.close() }
 })
 
+test('项目 key 自带连字符：Bot 侧按 <key>-<序号> 取卡能解析（team_recall/关单/重派同一入口）', async () => {
+  const t = await setup()
+  try {
+    const view = await t.service.createProject({ name: '纵门古典', key: 'ZONGMEN-GD', ownerBotId: t.director.id })
+    const project = t.store.get('SELECT * FROM projects WHERE id = ?', view.id)
+    const task = await t.service.createTask({ projectId: view.id, title: '带连字符 key 的卡', postCard: false })
+    assert.equal(task.identifier, 'ZONGMEN-GD-1', '编号应为 <key>-<序号>，key 里的 - 不是分隔符')
+    // 全大写、全小写、裸序号都应命中同一张卡
+    for (const ref of ['ZONGMEN-GD-1', 'zongmen-gd-1', '1']) {
+      assert.equal(t.service.resolveBotTask(project, ref).id, task.id, `${ref} 应解析到本卡`)
+    }
+    // 只写 key 的尾巴（摘掉 ZONGMEN-）不是本项目编号，拒绝并给出编号形态引导
+    assert.throws(() => t.service.resolveBotTask(project, 'GD-1'), /找不到任务 GD-1：本项目任务号形如 ZONGMEN-GD-<序号>/)
+    // 端到端：项目会话里的 team_recall 走同一解析入口
+    t.store.run(
+      `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
+       VALUES ('sess-gd', ?, ?, 'bot', NULL, ?)`, t.director.id, view.id, new Date().toISOString(),
+    )
+    assert.match(t.service.recall('sess-gd', 'ZONGMEN-GD-1'), /ZONGMEN-GD-1 \[backlog\] 带连字符 key 的卡/)
+  } finally { await t.close() }
+})
+
 test('共享板口径：成员能力清单不再宣告 team_task_create（可读不可新建）', () => {
   const generation: readonly string[] = SUBAGENT_GENERATION_TOOLS
   assert.ok(!generation.includes('team_task_create'), '共享板建卡工具不得再作为成员能力宣告')

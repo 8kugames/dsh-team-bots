@@ -6,7 +6,7 @@
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用）。
 
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
-import { nowIso } from '../util.js'
+import { nowIso, TASK_ID_PATTERN } from '../util.js'
 import { PRIORITY_BUDGET_MINUTES } from '../config.js'
 import { TASK_PRIORITIES } from './tasks.js'
 import { filterIgnoredWriteScopes, parseWriteScopes, parseWriteScopesFromDescription, readWriteScopes } from './write-scopes.js'
@@ -244,6 +244,9 @@ export const taskDispatchMethods = {
     const task = this.resolveBotTask(project, input.task)
     return this.forceBlockTask(task.id, actor)
   },
+  // 任务号解析只认当前项目：<key>-<序号> 的 key 段要等于本项目 key（不分大小写），
+  // 裸序号也认。key 段口径与 resolveTaskByIdentifier 共用 TASK_ID_PATTERN——
+  // 项目 key 允许 _ 和 -，按「首个连字符」切分会把 ZONGMEN-GD-20 读成 ZONGMEN。
   resolveBotTask(project, ref) {
     const raw = String(ref ?? '').trim()
     if (!raw) throw badRequest('缺少任务编号')
@@ -251,12 +254,14 @@ export const taskDispatchMethods = {
     if (raw.startsWith('task_')) {
       task = this.store.get('SELECT * FROM tasks WHERE id = ? AND project_id = ?', raw, project.id)
     } else {
-      const match = raw.match(/^(?:([A-Za-z][A-Za-z0-9]*)-)?(\d+)$/)
-      if (match && (!match[1] || match[1].toLowerCase() === project.key.toLowerCase())) {
+      const match = TASK_ID_PATTERN.exec(raw)
+      if (match && match[1].toLowerCase() === project.key.toLowerCase()) {
         task = this.store.get('SELECT * FROM tasks WHERE project_id = ? AND number = ?', project.id, Number(match[2]))
+      } else if (/^\d+$/.test(raw)) {
+        task = this.store.get('SELECT * FROM tasks WHERE project_id = ? AND number = ?', project.id, Number(raw))
       }
     }
-    if (!task) throw notFound(`找不到任务 ${raw}`)
+    if (!task) throw notFound(`找不到任务 ${raw}：本项目任务号形如 ${project.key}-<序号>，也可以只写序号`)
     return task
   },
   ownerContextFor(sessionId) {
