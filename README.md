@@ -93,6 +93,8 @@ A per-project terminal runs commands in the project directory. The WeChat channe
 
 Every other variable, its default, and its resolution order (explicit env > value saved in the workspace > code default) live in `src/config.ts`; `.env.example` lists the common ones. Do not put a `.env` file in the repository root — it would leak `DSH_*` into `npm test` and `npm run dev`.
 
+Host integration tools — MCP servers and engine bridges such as `godot-bridge` — are registered by the host for every agent, and the `team-bots` preset cannot filter them out. They are therefore on demand by project: tools whose name starts with a prefix in `DSH_TEAM_HIDE_TOOL_PREFIXES` (default `mcp__,godot_`) are hidden from team-bot sessions unless the project workspace contains the marker path mapped for that family in `DSH_TEAM_TOOL_FAMILY_MARKERS` (default: `.codegraph` → `mcp__codegraph__`, `.project/project.json` → `mcp__taptap-maker__`, `project.godot` → `godot_`). Solo chats are never restricted. Only the tool list changes; prompt text the host adds about MCP servers stays as it is.
+
 `DSH_TEAM_DATA` holds `team.sqlite`, `wechat-channel.sqlite`, `secret.key`, `memory/`, `messages/` and `secrets-runtime/`. Back up `secret.key` together with the data: without it the stored ciphertext cannot be decrypted.
 
 ## Develop

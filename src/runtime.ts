@@ -10,6 +10,8 @@ export class DshRuntime {
   chatStores: any = null
   // 任务卡驱动 run 的启动上下文清单（run id → manifest），见 runtime/prompt.ts 的 taskCardContext。
   contextManifests: Map<string, any> = null
+  // 各 agent 上已对团队 bot 隐藏的宿主集成工具名（见 tools.ts 的 applyBotToolPolicy）。
+  toolDenials: WeakMap<object, Set<string>> = null
 
   constructor({ ctx, config, store, logger = console as DshLogger, mask = null, chatStores = null }) {
     this.ctx = ctx
@@ -48,6 +50,7 @@ export class DshRuntime {
     this.messageWatermarks = new Map()
     // 任务卡驱动 run 的启动上下文清单（run id → manifest）：promptFor 暂存，startRun 取走落 run_events。
     this.contextManifests = new Map()
+    this.toolDenials = new WeakMap()
     this.selecting = Promise.resolve()
     this.completionHandler = null
     this.attached = false

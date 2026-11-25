@@ -188,6 +188,10 @@ interface TeamConfig {
   maxTeammates: number
   routerPreset: string
   workerPreset: string
+  /** 默认对团队 bot 会话隐藏的宿主工具名前缀（MCP 服务器、引擎桥）。 */
+  hideToolPrefixes: string[]
+  /** 按需放行：工具名前缀 → 工作区标记路径；项目工作区里有该路径才放行这一族。 */
+  toolFamilyMarkers: Record<string, string>
   visionProxyProvider: string
   visionProxyModel: string
   memoryReviewProvider: string

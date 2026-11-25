@@ -93,6 +93,8 @@ Bot 要工具审批、要密钥或要人回答时，工作台在聊天里出一�
 
 其余变量的默认值与解析顺序（显式环境变量 > 页面上保存的值 > 代码默认值）都写在 `src/config.ts`，常用项见 `.env.example`。除引导期变量（工作区/数据目录/首次种子）与通道凭据（微信/飞书在各自通道页）外，**全部运行期 `DSH_TEAM_*` 变量都可在工作台「全局配置 → 运行与预算 → 运行参数（环境变量）」卡里直接配置**：保存即生效（进行中的运行与已建会话不追溯），显式环境变量仍最高优先。Agent 预设还支持 **Bot 级覆盖**：Bot 配置弹窗的「Agent 预设」下拉逐个设置，留空跟随全局。不要在仓库根目录放 `.env`，否则 `DSH_*` 会泄进 `npm test` 和 `npm run dev`。
 
+宿主的集成工具（MCP 服务器、`godot-bridge` 这类引擎桥）由宿主给每个 Agent 注册，`team-bots` 预设的插件清单筛不掉它们，所以按项目「按需」可见：工具名以 `DSH_TEAM_HIDE_TOOL_PREFIXES`（默认 `mcp__,godot_`）里某个前缀开头的，对团队 bot 会话隐藏，除非项目工作区里有 `DSH_TEAM_TOOL_FAMILY_MARKERS` 为这一族映射的标记路径（默认：`.codegraph` → `mcp__codegraph__`，`.project/project.json` → `mcp__taptap-maker__`，`project.godot` → `godot_`）。单聊不受限制。变的只是工具清单，宿主注入提示词的 MCP 说明照旧。
+
 `DSH_TEAM_DATA` 下有 `team.sqlite`、`wechat-channel.sqlite`、`secret.key`、`memory/`、`messages/` 与 `secrets-runtime/`。备份时把 `secret.key` 和数据一起带走——没有它，已存的密文解不开。
 
 ## 开发

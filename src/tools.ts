@@ -53,6 +53,8 @@ export function subagentCapabilityEnabledFor(bot, config) {
   return Boolean(config?.agentTeam) && Boolean(bot?.id) && bot.status !== 'removed'
 }
 
+import { hiddenToolNames } from './services/runtime/tool-families.js'
+
 // 工具层兜底（DSHBOTS-238）：成员 bot 隐藏总监专权工具，避免「误调被拒后才知情」；
 // 子代理生成工具由 preset 全局注册，成员 bot 默认可见，无需额外放行。
 // DSHBOTS-247：调用点形状不一——session.ts 的结转/复用路径传 resolveAgent 的
@@ -61,17 +63,46 @@ export function subagentCapabilityEnabledFor(bot, config) {
 // DSHBOTS-359：restrict 必须以方法调用发出——宿主 ToolsService.restrict 首行读 this.ctx，
 // 摘下函数裸调用会让 this===undefined，抛 "reading 'ctx'" 被吞成 warn，策略自 DSHBOTS-238
 // 起从未真正生效（成员 bot 一直可见总监专权工具）。
-export function applyBotToolPolicy(resolved, { isOwner, logger }: { isOwner: boolean; logger?: { warn?: (...args: unknown[]) => void } }) {
-  if (isOwner) return
+// 宿主集成工具面（MCP / 引擎桥）对总监与成员一样按项目按需可见：toolPolicy 来自
+// runtime/botToolPolicyFor，hiddenToolNames 挑出本项目要隐藏的全局工具。会话复用时每个运行
+// 都会再走这里，denied 记下该 agent 上已隐藏的名字，只补新出现的，不反复叠加限制层。
+export function applyBotToolPolicy(
+  resolved,
+  {
+    isOwner, logger, toolPolicy = null, denied = null,
+  }: {
+    isOwner: boolean
+    logger?: { warn?: (...args: unknown[]) => void }
+    toolPolicy?: { hide: readonly string[]; allow: readonly string[] } | null
+    denied?: WeakMap<object, Set<string>> | null
+  },
+) {
   const handle = resolved?.agent ?? resolved
   const tools = handle?.ctx?.tools
   if (typeof tools?.restrict !== 'function') return
+  if (!isOwner) {
+    try {
+      // 方法调用保留接收者（this === tools），与宿主 dsh-subagent 的 childCtx.tools.restrict 同形。
+      tools.restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })
+    } catch (error: any) {
+      // 工具层兜底失败不阻断会话：服务层 ownerContextFor 仍是权威闸门。
+      logger?.warn?.(`dsh-team: 应用成员 bot 工具策略失败：${error?.message ?? error}`)
+    }
+  }
+  if (!toolPolicy?.hide?.length || typeof tools.definitions !== 'function') return
   try {
-    // 方法调用保留接收者（this === tools），与宿主 dsh-subagent 的 childCtx.tools.restrict 同形。
-    tools.restrict({ deny: [...DIRECTOR_ONLY_TOOLS] })
+    const done = denied?.get(handle)
+    const fresh = hiddenToolNames(toolPolicy, tools.definitions().map(item => item.name)).filter(name => !done?.has(name))
+    if (!fresh.length) return
+    tools.restrict({ deny: fresh })
+    if (denied) {
+      const next = done ?? new Set<string>()
+      for (const name of fresh) next.add(name)
+      denied.set(handle, next)
+    }
   } catch (error: any) {
-    // 工具层兜底失败不阻断会话：服务层 ownerContextFor 仍是权威闸门。
-    logger?.warn?.(`dsh-team: 应用成员 bot 工具策略失败：${error?.message ?? error}`)
+    // 只记账不闸门：隐藏失败时工具面退回「全部可见」，不影响会话建立。
+    logger?.warn?.(`dsh-team: 隐藏宿主集成工具失败：${error?.message ?? error}`)
   }
 }
 

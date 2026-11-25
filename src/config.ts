@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { resolveModelPrices } from './pricing.js'
+import { DEFAULT_HIDE_TOOL_PREFIXES, DEFAULT_TOOL_FAMILY_MARKERS, parseHideToolPrefixes, parseToolFamilyMarkers } from './services/runtime/tool-families.js'
 import { SEED_BOTS, SEED_OWNER } from './seed-bots.js'
 
 export function defaultWorkspace() {
@@ -558,6 +559,15 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 会话使用的 agent preset：Router 会话不带写工具时，在这里指向一个受限 preset。
     routerPreset: String(config.routerPreset ?? process.env.DSH_TEAM_ROUTER_PRESET ?? '').trim(),
     workerPreset: String(config.workerPreset ?? process.env.DSH_TEAM_WORKER_PRESET ?? '').trim(),
+    // 宿主集成工具面按需可见（services/runtime/tool-families.ts）：hide 清单里的工具名前缀默认对
+    // 团队 bot 会话隐藏；markers 是「前缀 = 工作区标记路径」清单，项目工作区里有该路径才放行那一族。
+    hideToolPrefixes: parseHideToolPrefixes(
+      config.hideToolPrefixes ?? process.env.DSH_TEAM_HIDE_TOOL_PREFIXES ?? DEFAULT_HIDE_TOOL_PREFIXES,
+    ),
+    toolFamilyMarkers: parseToolFamilyMarkers(
+      config.toolFamilyMarkers ?? process.env.DSH_TEAM_TOOL_FAMILY_MARKERS
+      ?? Object.entries(DEFAULT_TOOL_FAMILY_MARKERS).map(([prefix, marker]) => `${prefix}=${marker}`).join(';'),
+    ),
     // 读图代理（DSHBOTS-112）：Bot 主模型无视觉能力收图时，自动派生 kind='vision' 只读
     // 转写运行所用的代理模型（provider/model）。两个都非空才启用；任一为空 = 不启用，
     // 此时按现状直接报「模型不支持图片」，不做任何派生。

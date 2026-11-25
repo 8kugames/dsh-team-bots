@@ -4,6 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import { AppError } from '../../errors.js'
 import { id } from '../../util.js'
 import { attachSessionToWorkspace, resolveSessionCwd, workspaceGroupTitle } from '../workspace-groups.js'
@@ -11,8 +12,17 @@ import { effectiveRunLimits, effectiveSessionCompactCtxTokens, effectiveSessionC
 import { imageContentPartsForMessage } from '../message-images.js'
 import { restoreDefaultModel } from './model-restore.js'
 import { applyBotToolPolicy } from '../../tools.js'
+import { toolPolicyFor } from './tool-families.js'
 
 export const EFFORT_FALLBACK = (bot) => bot.effort || undefined
+
+// 团队 bot 会话可见的宿主集成工具面（见 runtime/tool-families.ts）：MCP 服务器、引擎桥这类工具
+// 在宿主根作用域注册，preset 清单管不到，按项目工作区（production_dir 优先，其次 workspace/slug）
+// 的标记文件「按需」放行。单聊没有项目，不做隐藏。
+export const botToolPolicyFor = (config, project) => toolPolicyFor(
+  config,
+  project?.production_dir || (project && config?.workspace ? join(config.workspace, project.slug) : null),
+)
 
 // 备用模型覆盖：派生运行在 runs 行里带 model_* 三列，指明这条运行改用备用模型下发。
 // 没有这三列的运行照旧走 Bot 主模型——「运行结束自动回退」就靠这条默认路径实现。
@@ -516,6 +526,8 @@ export const sessionMethods = {
         applyBotToolPolicy(resolved, {
           isOwner: Boolean(project && sessionBot && project.owner_bot_id === sessionBot.id),
           logger: this.logger,
+          toolPolicy: botToolPolicyFor(this.config, project),
+          denied: this.toolDenials,
         })
         await this.selectModel(run.session_id, sessionBot, modelOverride)
         return run.session_id
@@ -547,6 +559,8 @@ export const sessionMethods = {
         applyBotToolPolicy(resolved, {
           isOwner: Boolean(project && sessionBot && project.owner_bot_id === sessionBot.id),
           logger: this.logger,
+          toolPolicy: botToolPolicyFor(this.config, project),
+          denied: this.toolDenials,
         })
         await this.selectModel(affinity.session_id, sessionBot, modelOverride)
         // 任务会话同样在承接流量：跨过压缩窗口且闲时排队总结压缩
@@ -601,7 +615,7 @@ export const sessionMethods = {
       const resolved = await liveAgentFor(this.ctx, existing.session_id)
       if (resolved) {
         this.applyFilePolicy(resolved, bot, run, task)
-        applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+        applyBotToolPolicy(resolved, { isOwner, logger: this.logger, toolPolicy: botToolPolicyFor(this.config, project), denied: this.toolDenials })
         await this.selectModel(existing.session_id, bot, modelOverride)
         this.maybeCompactSession({ bot, project, existing, currentRunId: run?.id })
         return existing.session_id
@@ -626,7 +640,7 @@ export const sessionMethods = {
         }
       }
       this.applyFilePolicy(agent, bot, run, task)
-      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger, toolPolicy: botToolPolicyFor(this.config, project), denied: this.toolDenials })
       this.store.run(
         `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
          VALUES (?, ?, ?, 'task', ?, ?, 0)
@@ -669,7 +683,7 @@ export const sessionMethods = {
       const resolved = served < MEMORY_REVIEW_BINDING_MAX_RUNS ? await liveAgentFor(this.ctx, existing.session_id) : null
       if (resolved) {
         this.applyFilePolicy(resolved, bot, run, null)
-        applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+        applyBotToolPolicy(resolved, { isOwner, logger: this.logger, toolPolicy: botToolPolicyFor(this.config, project), denied: this.toolDenials })
         await this.selectModel(existing.session_id, bot, modelOverride)
         return existing.session_id
       }
@@ -694,7 +708,7 @@ export const sessionMethods = {
         }
       }
       this.applyFilePolicy(agent, bot, run, null)
-      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger, toolPolicy: botToolPolicyFor(this.config, project), denied: this.toolDenials })
       this.store.run(
         `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
          VALUES (?, ?, ?, 'review', NULL, ?, 0)
@@ -739,7 +753,7 @@ export const sessionMethods = {
         rolledOver = this.shouldRolloverSession({ bot, project, existing })
         if (!rolledOver) {
           this.applyFilePolicy(resolved, bot, run, task)
-          applyBotToolPolicy(resolved, { isOwner, logger: this.logger })
+          applyBotToolPolicy(resolved, { isOwner, logger: this.logger, toolPolicy: botToolPolicyFor(this.config, project), denied: this.toolDenials })
           // 存量坏显示名自愈：旧实现 slice(0,8) 把后缀截成字面量 session-，复用分支
           // 遇到该已知坏值时重写为正确后缀；其他值（用户手工命名等）一律不动。
           if (this.ctx.sessionTitle?.get && this.ctx.sessionTitle?.rename) {
@@ -786,7 +800,7 @@ export const sessionMethods = {
         }
       }
       this.applyFilePolicy(agent, bot, run, task)
-      applyBotToolPolicy(agent, { isOwner, logger: this.logger })
+      applyBotToolPolicy(agent, { isOwner, logger: this.logger, toolPolicy: botToolPolicyFor(this.config, project), denied: this.toolDenials })
       this.store.run(
         `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias)
          VALUES (?, ?, ?, 'bot', NULL, ?, 0)
