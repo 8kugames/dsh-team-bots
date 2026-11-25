@@ -156,6 +156,8 @@ test('委派派生 kind=review 运行：read 模式、空写范围、绑总监�
     assert.ok(prompt.includes('「子代理核验：」'), '结论必须以固定前缀落任务评论')
     assert.ok(prompt.includes('建议 accept') && prompt.includes('建议 return'), '结论须给双向建议')
     assert.ok(prompt.includes('Do NOT call team_review_task'), '不得代 owner 裁决')
+    assert.ok(prompt.includes('Split checks without overlap'), '子代理分工不得重叠')
+    assert.match(prompt, /lowercase task key.*4 random lowercase alphanumeric chars/, '子代理命名规则入模板')
     assert.ok(prompt.includes(task.title), '提示词携带任务标题')
   } finally { await t.close() }
 })

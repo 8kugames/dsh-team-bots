@@ -665,6 +665,8 @@ test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/han
   assert.match(reviewSide, /Do NOT call team_review_task/, '委派核验模板保持不代 owner 裁决')
   assert.match(reviewSide, /team_review_task with decision "accept"/, 'owner 验收模板保持裁决入口')
   assert.match(reviewSide, /「子代理核验：」/, '委派核验结论锚保持')
+  assert.match(reviewSide, /treat it as your evidence and do not redo the checks it already performed/, 'owner 验收复用委派结论，不重验')
+  assert.match(reviewSide, /spawn one verification subagent/, '无委派结论时 owner 自派核验子代理')
 })
 
 // 子代理施工硬闸解除守门（原 DSHBOTS-311 撤销）：亲做交付不再要求 subagent_spawned

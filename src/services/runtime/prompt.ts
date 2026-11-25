@@ -706,14 +706,16 @@ ${deadlineLine}`.trimEnd()
         if (run.trigger_type === 'review_delegate') {
           return `${header}
 
-The owner delegated the acceptance verification of this delivered task to you. Verify the delivery report item by item; do not redo the work and do not make the final call:
-- Scope: compare what the delivery report says was changed against the declared write scopes below; flag any out-of-scope change.
-- Deliverables: every declared deliverable path below must exist; read the files directly — the report's prose about them is claims, not evidence.
-- Target tests: run only the test files this task names (for example node --test <files>), not the whole suite — full-suite numbers are the deliverer's responsibility on a clean tree. If the read-only sandbox blocks a check, say so explicitly instead of skipping it.
-- Red verification: design at least one negative check (a change that should make the target tests fail) and state the expected number of red cases; when the sandbox forbids mutating files, give the exact command and the reasoned prediction.
-- Conclusion: a recommendation of 建议 accept or 建议 return with reasons tied to the evidence below.
+The owner delegated the acceptance verification to you; verify the delivery report item by item; do not redo the work or make the final call:
+- Scope: compare the report's stated changes to the declared write scopes below; flag out-of-scope changes.
+- Deliverables: every declared deliverable path below must exist; read the files directly.
+- Target tests: run only the test files this task names (e.g. node --test <files>), not the whole suite; say so if the read-only sandbox blocks a check.
+- Red verification: design one negative check that should fail the target tests and state the expected red-case count; if the sandbox forbids mutating files, give the command and prediction.
+- Conclusion: recommend 建议 accept or 建议 return with reasons tied to the evidence below.
 
-Run the independent checks in parallel using your subagent/subagent_fork tools, then merge their findings into one verdict. Do NOT call team_review_task and do NOT change the task status — the verdict belongs to the owner.
+Run the checks in parallel using your subagent/subagent_fork tools, then merge findings into one verdict. Do NOT call team_review_task or change the task status — the verdict belongs to the owner.
+- Split checks without overlap: give each subagent a disjoint check set; never redo a delegated check — you merge only.
+- Subagent name = lowercase task key (ZONGMEN-GD-25 → zongmen-gd-25) + role + 4 random lowercase alphanumeric chars, max 32 — sessions verify many cards and reworks, so names must be unique.
 
 Your final reply is recorded as a task comment automatically. It MUST start with 「子代理核验：」 and carry the recommendation plus reasons. Reply in the user's language.
 
@@ -727,7 +729,7 @@ ${description}${threads}${directedBlock}${referencedBlock}${timeBudgetBlockFor(t
         }
         return `${header}
 
-As the project owner, review the delivered result below against the task description. Check the delivery report claims when needed (files exist, tests pass); when deliverables are declared below, open the files at those paths instead of trusting the report prose. Then decide:
+As the project owner, review the delivered result below against the task description. If a task comment below already carries a verdict for this delivery starting with 「子代理核验：」, treat it as your evidence and do not redo the checks it already performed — spot-check only on contradiction or before returning; read a truncated comment via team_recall with the comment ID. Without such a verdict, spawn one verification subagent to check scope, deliverables and target tests first; when deliverables are declared below, open the files at those paths instead of trusting the report prose. Then decide:
 - If the work is acceptable, call team_review_task with decision "accept".
 - If it needs rework, call team_review_task with decision "return" and a concrete rework reason in comment.
 Do not redo the task yourself, and do not start parallel work here. Reply in the user's language with a short verdict.
