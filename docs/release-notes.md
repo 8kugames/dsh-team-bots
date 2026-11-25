@@ -4,6 +4,38 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.133
+
+### 中文
+
+**任务**
+
+- **任务号解析允许项目 key 含连字符**：bot 侧的任务号解析此前只认字母数字的 key 段，`ZONGMEN-GD-20` 这类带连字符项目 key 的编号在 team_recall、关单、重派一律报「找不到任务」；现改与工作台同口径的解析规则并补回归测试。
+- **backlog 卡的排队运行不再起跑**：处于 backlog 状态的卡，其排队中的任务运行不再被调度起跑。
+
+**核验**
+
+- **委派核验跑完即闭环**：周期内存在已完成的委派核验运行即视为核验闭环，不再强制承接人另派子代理；账目判定只留给总监亲自核验路径，兜底验收旁路不变。
+
+**Bots**
+
+- **Bot 名称解析统一大小写不敏感**：各处按名称找 bot 的口径统一为大小写不敏感。
+
+### English
+
+**Tasks**
+
+- **Task identifiers accept hyphenated project keys**: the bot-side resolver only accepted alphanumeric key segments, so identifiers like `ZONGMEN-GD-20` failed everywhere (team_recall, closing, re-dispatch) with "task not found"; it now uses the same rule as the workbench, with regression tests.
+- **Queued runs of backlog cards no longer start**: task runs queued on a card in backlog state are no longer picked up by the scheduler.
+
+**Review**
+
+- **Delegated verification closes the loop**: a completed review-delegate run within the cycle now counts as verification closed — the assignee is no longer forced to spawn a subagent of their own. The ledger check applies only to the director's own verification path; the fallback acceptance bypass is unchanged.
+
+**Bots**
+
+- **Bot name resolution is case-insensitive**: every lookup-by-name path now resolves bot names case-insensitively.
+
 ## v0.3.129
 
 ### 中文
