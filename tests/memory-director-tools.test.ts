@@ -5,6 +5,8 @@
 //  ③ cleanup 判定口径：task 口径仅收终态卡（done/canceled）的过程记录，topics 口径点名清理；
 //  ④ 清理审计留痕：一笔 memory.cleanup 审计列出被清条目，逐条 memory_events 留痕；
 //  ⑤ 非 director（成员会话/未绑定会话）三入口一律拒绝——服务层 ownerContextFor 权威闸门。
+//  ⑥ rememberFromBot 同名覆盖：同 scope+topic 的 active 条目原地覆写（revision+1、
+//     created→updated 事件、memory.overwrite 审计），pending/archived 同名不拦新建。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -244,6 +246,44 @@ test('清理审计留痕：memory.cleanup 一笔列出被清条目，逐条 memo
     for (const item of result.cleaned) {
       assert.ok(t.store.get('SELECT id FROM memory_events WHERE memory_id = ? AND action = ?', item.id, 'archived'), `${item.topic} 应有 archived 事件`)
     }
+  } finally {
+    await t.close()
+  }
+})
+
+test('rememberFromBot 同名覆盖：active 同主题原地覆写不叠条，pending/archived 同名仍新建', async () => {
+  const t = await setup()
+  try {
+    const first = t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '同主题', content: '第一版内容' })
+    assert.equal(first.scope_type, 'bot', '新建返回完整行')
+    const second = t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '同主题', content: '第二版内容' })
+
+    const rows = t.store.all("SELECT * FROM memories WHERE topic = '同主题' AND status = 'active'")
+    assert.equal(rows.length, 1, 'active 只剩 1 条，不叠新条')
+    const row = rows[0]
+    assert.equal(row.revision, 2)
+    assert.equal(row.content, '第二版内容')
+    assert.equal(row.source, `session:${t.memberSession}`, 'source 记第二次的会话')
+    assert.equal(second.id, row.id, '覆盖路径返回完整行')
+    assert.equal(second.topic, '同主题')
+    // 事件依次 created → updated（按 rowid 顺序）。
+    const events = t.store.all("SELECT action FROM memory_events WHERE memory_id = ? ORDER BY rowid", row.id)
+    assert.deepEqual(events.map((e: { action: string }) => e.action), ['created', 'updated'])
+    assert.ok(t.store.get("SELECT id FROM audit_log WHERE action = 'memory.overwrite' AND target_id = ?", row.id), '覆盖应审计 memory.overwrite')
+
+    // 主题不同：各自新建，互不覆盖。
+    t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '另一主题', content: 'x' })
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE scope_id = ? AND status = 'active'", t.member.id).n, 2)
+
+    // 同名条目只以 pending/archived 存在时：仍新建一条 active。
+    t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '待审名', content: 'a' })
+    t.store.run("UPDATE memories SET status = 'pending' WHERE topic = '待审名'")
+    t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '待审名', content: 'b' })
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE topic = '待审名' AND status = 'active'").n, 1)
+    t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '归档名', content: 'a' })
+    t.store.run("UPDATE memories SET status = 'archived' WHERE topic = '归档名'")
+    t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '归档名', content: 'b' })
+    assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE topic = '归档名' AND status = 'active'").n, 1)
   } finally {
     await t.close()
   }

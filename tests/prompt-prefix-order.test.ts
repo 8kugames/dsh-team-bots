@@ -289,3 +289,68 @@ test('任务族五分支共享 header 逐字一致：前缀跨模板复用', asy
     assert.match(header, /You are: Builder/, 'header 第三行是身份行')
   } finally { await t.close() }
 })
+
+test('memoryDigest：最近 8 条带内容，其余条目按主题列出且整项截断；审查模板含超量主题规则', async () => {
+  const t = await setup()
+  try {
+    const actor = { type: 'bot' as const, id: t.director.id }
+    const base = Date.now()
+    const seed = (scope: 'bot' | 'project' | 'team', topics: string[], offsetMs = 0) => {
+      const actor = scope === 'bot' ? { type: 'bot' as const, id: t.dev.id } : { type: 'bot' as const, id: t.director.id }
+      const scopeId = scope === 'bot' ? t.dev.id : scope === 'project' ? t.project.id : 'team'
+      topics.forEach((topic, i) => {
+        const memory = t.service.createMemory({ scopeType: scope, scopeId, topic, content: `${topic}的内容`, actor })
+        // updated_at 决定「最近 8 条」的口径，逐条错开写入时间。
+        t.store.run('UPDATE memories SET updated_at = ? WHERE id = ?', new Date(base + offsetMs + i * 60_000).toISOString(), memory.id)
+      })
+    }
+    seed('project', [...Array(12)].map((_, i) => `近${i}`), 3_000_000)
+    const longTopic = (i: number) => `长${i}${'题'.repeat(116)}`
+    seed('bot', [...Array(8)].map((_, i) => `bot近${i}`).concat([...Array(6)].map((_, i) => longTopic(i))), 1_000_000)
+    // team 作用域塞超预算的长主题行（18×~121 字符 > 2k），验证整行丢弃不留半截主题。
+    // 长主题时间戳更早，确保它们落在「其余条目」而不是挤进最近 8 条。
+    seed('team', [...Array(8)].map((_, i) => `team近${i}`))
+    seed('team', [...Array(18)].map((_, i) => longTopic(100 + i)), -10_000_000)
+
+    const digest = t.runtime.memoryDigest(t.dev, t.project)
+    for (const i of [4, 5, 6, 7]) assert.ok(digest.includes(`- 近${i}：`), `最近 8 条应带内容分隔（近${i}）`)
+    assert.ok(digest.includes('Other active topics in project scope: '), '超出 8 条的存量应按主题列出')
+    for (const i of [0, 1, 2, 3]) assert.ok(new RegExp(`近${i}[、\\n]`).test(digest), `其余主题应出现在清单（近${i}）`)
+    // 预算截断：未超预算的 bot 主题行保留，team 作用域的超长主题行整行丢弃，不出现半截主题。
+    assert.ok(digest.includes('Other active topics in bot scope: '), 'bot 主题行应在清单')
+    for (const i of [0, 5]) assert.ok(digest.includes(longTopic(i)), '未超预算的 bot 主题行应完整保留')
+    for (const i of [100, 113]) assert.ok(!digest.includes(longTopic(i)), '超预算的作用域主题行应整行丢弃')
+    assert.ok(!digest.includes('Other active topics in team scope'), '超预算的 team 主题行不出现')
+    assert.ok(digest.includes('长'), '截断不应把保留行削掉')
+
+    // 两种审查提示词都带上「超量主题只做整篇替换时才复用」规则。
+    const now = new Date().toISOString()
+    const groupChat = t.store.get('SELECT * FROM group_chats WHERE project_id = ?', t.project.id)
+    t.service.groupChatStore(t.project.id).run(
+      `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, kind, created_at)
+       VALUES ('msg_digest_chat', ?, ?, 'user', 'u1', '历史消息。', 'text', ?)`,
+      t.project.id, groupChat.id, now,
+    )
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, idempotency_key, output, queued_at, ended_at)
+       VALUES ('run_digest_chat', ?, ?, 'chat', 'write', 'mention', 'msg_digest_chat', 'succeeded', 'ik_digest_chat', '回复正文。', ?, ?)`,
+      t.project.id, t.dev.id, now, now,
+    )
+    const chatPrompt = t.runtime.promptFor({ run: { kind: 'memory_review', trigger_ref: 'run_digest_chat' }, bot: t.dev, project: t.project })
+    const rule = 'Entries beyond the latest eight are listed by topic only: reuse one of those topics only when your content fully replaces what that entry said; if your fact merely adds a detail to it, use a new, specific topic instead.'
+    assert.ok(chatPrompt.includes(rule), '聊天审查模板应含超量主题规则')
+
+    const card = await t.service.createTask(
+      { projectId: t.project.id, title: '主题清单卡', description: 'd', writeScopes: ['src/d/'] }, { type: 'user', id: t.service.localUserId },
+    )
+    t.store.run(
+      `INSERT INTO runs(id, project_id, bot_id, task_id, kind, mode, trigger_type, status, idempotency_key, output, queued_at, ended_at)
+       VALUES ('run_digest_task', ?, ?, ?, 'task', 'write', 'task_started', 'succeeded', 'ik_digest_task', '交付：完成。', ?, ?)`,
+      t.project.id, t.dev.id, card.id, now, now,
+    )
+    const taskPrompt = t.runtime.promptFor({ run: { kind: 'memory_review', trigger_ref: 'run_digest_task' }, bot: t.dev, project: t.project, task: t.store.get('SELECT * FROM tasks WHERE id = ?', card.id) })
+    assert.ok(taskPrompt.includes(rule), '任务审查模板应含超量主题规则')
+  } finally {
+    await t.close()
+  }
+})

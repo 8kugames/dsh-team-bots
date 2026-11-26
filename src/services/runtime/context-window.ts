@@ -19,6 +19,10 @@ export const NOISE_SYSTEM_BODY = /^(已写入.+记忆。|任务 \S+ 验收通过
 export const MEMORY_CONTEXT_LIMIT = 8
 export const MEMORY_CONTEXT_MAX_CHARS = 3_500
 
+// 审查清单的主题清单预算（紧跟 MEMORY_CONTEXT_MAX_CHARS 之后）：memoryDigest 的主题
+// 清单每轮审查都会带上，而存量条数没有上限，不设预算就会随库增长一直膨胀。
+export const MEMORY_DIGEST_TOPIC_CHARS = 2_000
+
 export const contextMethods = {
   // 增量水位尾窗（DSHBOTS-96 P1-1）：每会话维护已注入的 rowid 水位，此后每轮只注入
   // 水位之后的新消息，替代旧的「尾 12 条×240 摘录每轮重烧」。语义：

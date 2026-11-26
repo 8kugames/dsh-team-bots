@@ -575,15 +575,27 @@ export const memoryMethods = {
     const scopeType = ['bot', 'project', 'team'].includes(input.scope) ? input.scope : 'bot'
     if (scopeType === 'project' && !binding.project_id) throw badRequest('单聊会话不在项目中，只能写 bot 或 team 记忆')
     const scopeId = scopeType === 'project' ? binding.project_id : scopeType === 'team' ? 'team' : binding.bot_id
+    const topic = text(input.topic, 120) || '未命名记忆'
+    const actor = { type: 'bot', id: binding.bot_id }
+    // team_remember 契约即同名覆盖：同 scope+topic 已有 active 条目时原地覆写，不再叠重复条。
+    const existing = this.store.get(
+      "SELECT * FROM memories WHERE scope_type = ? AND scope_id = ? AND topic = ? AND status = 'active'",
+      scopeType, scopeId, topic,
+    )
+    if (existing) {
+      // 新建路径的权限在 createMemory 内断言，覆写不经过它，须同款断言补齐。
+      this.assertMemoryWriteScope(scopeType, scopeId, actor)
+      return this.overwriteMemoryFromBot(existing, input.content, `session:${sessionId}`, actor)
+    }
     return this.createMemory({
       scopeType,
       scopeId,
-      topic: input.topic,
+      topic,
       content: input.content,
       source: `session:${sessionId}`,
       confidence: 0.9,
       createdBy: `bot:${binding.bot_id}`,
-      actor: { type: 'bot', id: binding.bot_id },
+      actor,
     })
   },
 
@@ -674,21 +686,28 @@ export const memoryMethods = {
       })
       return { memory: this.memoryView(memory), overwritten: false }
     }
-    const content = redactSecrets(text(input.content, 8000))
+    const memory = this.overwriteMemoryFromBot(existing, input.content, `session:${sessionId}`, actor)
+    return { memory: this.memoryView(memory), overwritten: true }
+  },
+
+  // 同名覆盖写（team_memory_write 与 team_remember 覆写分支共用）：content 先脱敏校验，
+  // 原地 revision+1、事件与审计留痕，返回覆写后的完整行；不改 confidence、不过容量闸（不占新行）。
+  overwriteMemoryFromBot(existing, rawContent, source, actor) {
+    const content = redactSecrets(text(rawContent, 8000))
     if (!content) throw badRequest('记忆内容不能为空')
     this.assertMemoryLength(content)
     const now = nowIso()
     this.store.run(
       'UPDATE memories SET content = ?, source = ?, revision = revision + 1, updated_at = ? WHERE id = ?',
-      content, `session:${sessionId}`, now, existing.id,
+      content, source, now, existing.id,
     )
     this.store.run(
       'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       id('mevt'), existing.id, 'updated', actor.type, actor.id, existing.content, content, now,
     )
-    this.audit(actor, 'memory.overwrite', 'memory', existing.id, { scopeType, scopeId, topic })
+    this.audit(actor, 'memory.overwrite', 'memory', existing.id, { scopeType: existing.scope_type, scopeId: existing.scope_id, topic: existing.topic })
     this.writeMemoryMirror(existing.id)
-    return { memory: this.memoryView(this.store.get('SELECT * FROM memories WHERE id = ?', existing.id)), overwritten: true }
+    return this.store.get('SELECT * FROM memories WHERE id = ?', existing.id)
   },
 
   // 批量清理：按过期口径把 active 记忆终态化（archived，检索即不再回灌）。

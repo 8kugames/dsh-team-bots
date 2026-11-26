@@ -26,6 +26,7 @@ import {
   NOISE_SYSTEM_BODY,
   MEMORY_CONTEXT_LIMIT,
   MEMORY_CONTEXT_MAX_CHARS,
+  MEMORY_DIGEST_TOPIC_CHARS,
   contextMethods,
 } from './context-window.js'
 import { continuityMethods } from './session-continuity.js'
@@ -38,6 +39,7 @@ export {
   NOISE_SYSTEM_BODY,
   MEMORY_CONTEXT_LIMIT,
   MEMORY_CONTEXT_MAX_CHARS,
+  MEMORY_DIGEST_TOPIC_CHARS,
 }
 
 // 系统提示词按会话 id 冻结的 LRU 上限：session_bindings 只增不改，死会话不再求值，
@@ -485,19 +487,32 @@ ${(chatMessage?.body ?? '(no text)').slice(0, 2_000)}`
   },
   // 记忆审查的存量清单：让审查模型看见当前 active 记忆，才能按同主题覆写融合而不是
   // 追加近义条目（completeMemoryReview 的覆写按 topic 精确匹配）。每域取最近 8 条，
-  // content 截 80 字，总预算 2k。
+  // content 截 80 字，总预算 2k；清单之后按域补列其余 active 条目的主题名（只有主题，
+  // 预算 MEMORY_DIGEST_TOPIC_CHARS），否则 8 条之外的存量主题模型看不见，只能另起近义条。
   memoryDigest(bot, project) {
     const scopes = [['bot', bot.id]]
     if (project) scopes.push(['project', project.id], ['team', 'team'])
     const lines = []
+    const topicLines = []
     for (const [type, scopeId] of scopes) {
       const rows = this.store.all(
-        "SELECT topic, content FROM memories WHERE scope_type = ? AND scope_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 8",
+        "SELECT topic, content, updated_at FROM memories WHERE scope_type = ? AND scope_id = ? AND status = 'active' ORDER BY updated_at DESC",
         type, scopeId,
       )
-      for (const row of rows) lines.push(`- ${row.topic}：${row.content.slice(0, 80)}`)
+      const [recent, rest] = [rows.slice(0, 8), rows.slice(8)]
+      for (const row of recent) lines.push(`- ${row.topic}：${row.content.slice(0, 80)}`)
+      if (rest.length) topicLines.push(`Other active topics in ${type} scope: ${rest.map(row => row.topic).join('、')}`)
     }
-    return lines.length ? lines.join('\n').slice(0, 2_000) : '(none)'
+    const digest = lines.length ? lines.join('\n').slice(0, 2_000) : '(none)'
+    if (!topicLines.length) return digest
+    // 主题清单按主题整项截断，不出现半截主题：超预算时从尾部整行丢弃。
+    let topics = topicLines.join('\n')
+    while (topics.length > MEMORY_DIGEST_TOPIC_CHARS) {
+      const lastBreak = topics.lastIndexOf('\n')
+      if (lastBreak <= 0) return digest
+      topics = topics.slice(0, lastBreak)
+    }
+    return `${digest}\n${topics}`
   },
   // 父任务行（任务卡骨架字段）：有父卡才出现。
   parentTaskLineFor(task, project) {
@@ -800,7 +815,7 @@ Rules:
 - When a fact holds only under a version, module, or environment, put the boundary inside content as 「适用：…；不适用：…」. A fact without an explicit boundary gets misapplied later.
 - topic is the retrieval key: a short conceptual label reusable in a different task (e.g. 「node:sqlite API 陷阱」). Never put task ids or 「交付」 into topic.
 - Pick scope by who will use it next: this bot's own habits → "bot"; anyone in this project → "project"; true across all projects → "team".
-- Existing memories are listed below. When a new fact refines one, reuse its exact topic so it overwrites that entry in place; do not output a near-duplicate under a new label.
+- Existing memories are listed below. When a new fact refines one, reuse its exact topic so it overwrites that entry in place; do not output a near-duplicate under a new label. Entries beyond the latest eight are listed by topic only: reuse one of those topics only when your content fully replaces what that entry said; if your fact merely adds a detail to it, use a new, specific topic instead.
 - Never store secrets, tokens, credentials or personal data.
 - Use confidence 0.5-0.7 for inferences and 0.8-1.0 for facts stated explicitly in the output.
 - Return [] when nothing passes the admission test.
@@ -828,7 +843,7 @@ Extract the durable facts worth remembering from this exchange. Reply with a JSO
 Rules:
 - Admission test: write an item only if you can name the concrete mistake a future reply would make without it (an ignored preference, a repeated wrong assumption). Small talk, transient questions and one-off answers fail this test.
 - When a fact is not universal, put the boundary inside content as 「适用：…；不适用：…」 (version, module, environment).
-- topic is a short conceptual label reusable later; when a new fact refines an existing memory listed below, reuse its exact topic so it overwrites that entry instead of duplicating.
+- topic is a short conceptual label reusable later; when a new fact refines an existing memory listed below, reuse its exact topic so it overwrites that entry instead of duplicating. Entries beyond the latest eight are listed by topic only: reuse one of those topics only when your content fully replaces what that entry said; if your fact merely adds a detail to it, use a new, specific topic instead.
 - Never store secrets, tokens, credentials or personal data.
 - Use confidence 0.5-0.7 for inferences and 0.8-1.0 for facts stated explicitly.
 - Return [] when nothing passes the admission test. Chat replies rarely need more than one entry.
