@@ -129,7 +129,7 @@ test('配置页四分组 tab 分页：导航与激活分组一一对应，一次
   stopTimers()
 })
 
-test('配置页分组头保留序号、标题与说明（逐 tab 断言）', async () => {
+test('配置页分组头只保留序号与标题（逐 tab 断言）', async () => {
   const { state, mod } = await renderPage('settings', 'renderGlobal')
   const byTab = { 'g-pref': ['01', '偏好'], 'g-runtime': ['02', '运行与预算'], 'g-prompts': ['03', '团队指令'], 'g-about': ['04', '关于与系统状态'] }
   for (const [tab, [index, title]] of Object.entries(byTab)) {
@@ -137,10 +137,10 @@ test('配置页分组头保留序号、标题与说明（逐 tab 断言）', asy
     const html = mod.renderGlobal()
     assert.match(html, new RegExp(`class="gsec-index mono">${index}</`), `${tab} 缺分组序号 ${index}`)
     assert.ok(html.includes(title), `${tab} 缺分组标题 ${title}`)
-    assert.match(html, /class="gsec-desc"/, '分组应有说明副行')
   }
   state.pageTab = null
   const all = mod.renderGlobal()
+  assert.doesNotMatch(all, /class="gsec-desc"/, '分组说明副行已删：分组内容布局自说明，不再配描述文案')
   assert.doesNotMatch(all, /class="gsec-index mono">05</, '分组 05 不应存在')
   for (const title of ['环境与版本', '接入与计价']) {
     assert.ok(!all.includes(title), `分组标题 ${title} 已迁出`)

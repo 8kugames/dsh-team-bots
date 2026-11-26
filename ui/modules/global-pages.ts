@@ -180,17 +180,17 @@ export function renderChannel() {
   const card = wechatCard()
   const feishu = feishuCard()
   return pageShell(
-    pageHead('CHANNELS', t('viewTitle.channel'), t('channel.desc'), refreshAction()),
+    pageHead('', t('viewTitle.channel'), '', refreshAction()),
     '',
     [
       pageSection({
-        index: '01', id: 'c-wechat', title: t('channel.sectionWechat'), desc: t('channel.sectionWechatDesc'),
+        index: '01', id: 'c-wechat', title: t('channel.sectionWechat'),
         // 停用态也渲染开关卡（DSHBOTS-334）：启停入口常驻，不再依赖服务端注入。
         body: slot('full', card),
       }),
       // 飞书未启用时整段不渲染（不显示死卡）；启用后凭据可在卡内配置（DSHBOTS-334）。
       ...(feishu ? [pageSection({
-        index: '02', id: 'c-feishu', title: t('channel.sectionFeishu'), desc: t('channel.sectionFeishuDesc'),
+        index: '02', id: 'c-feishu', title: t('channel.sectionFeishu'),
         body: slot('full', feishu),
       })] : []),
     ],
@@ -209,21 +209,21 @@ export function renderSecretsPage() {
   ]
   const active = navItems.some(item => item.id === state.pageTab) ? state.pageTab : navItems[0].id
   return pageShell(
-    pageHead('SECRETS', t('viewTitle.secrets'), t('secrets.desc'), refreshAction()),
+    pageHead('', t('viewTitle.secrets'), '', refreshAction()),
     pageNav(navItems, t('secrets.navLabel'), active),
     [
       pageSection({
-        index: '01', id: 's-requests', title: t('secrets.sectionRequests'), desc: t('secrets.sectionRequestsDesc'),
+        index: '01', id: 's-requests', title: t('secrets.sectionRequests'),
         body: slot('full', secretRequestsCard(requests)),
         headExtra: `<span class="meta">${requests.length} ${t("待审")}</span>`,
       }),
       pageSection({
-        index: '02', id: 's-list', title: t('secrets.sectionList'), desc: t('secrets.sectionListDesc'),
+        index: '02', id: 's-list', title: t('secrets.sectionList'),
         body: slot('full', `<div class="card form-card g-card">${secretListCard(secrets)}</div>`),
         headExtra: `<span class="meta">${secrets.length} ${t("条")}</span>`,
       }),
       pageSection({
-        index: '03', id: 's-add', title: t('secrets.sectionAdd'), desc: t('secrets.sectionAddDesc'),
+        index: '03', id: 's-add', title: t('secrets.sectionAdd'),
         body: slot('full', secretAddCard(projects)),
       }),
     ],

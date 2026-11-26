@@ -322,8 +322,7 @@ function usageSection(index, id, title, desc, body, headExtra = '') {
 
 // 页面头：标题跟随顶栏口径，右侧操作区放四档时间窗切换与 CSV 导出。
 // 时间窗切换（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今；汇总、分布明细、CSV 导出同窗口。
-function usagePageHead(usage, scopeText, exportLabel = '') {
-  const windowText = usageWindowText(usage)
+function usagePageHead(usage, exportLabel = '') {
   const actions = `
       <div class="usage-window-row">
         <span class="usage-window">${t('汇总窗口')}</span>
@@ -335,7 +334,7 @@ function usagePageHead(usage, scopeText, exportLabel = '') {
         <button class="btn" data-action="export-usage-csv">${icon('download')}${t('usage.exportCsv')}${exportLabel ? t("（${exportLabel}）", { exportLabel: esc(exportLabel) }) : ''}</button>
         ${usageMode() === 'global' ? refreshAction() : ''}
       </div>`
-  return pageHead('USAGE', usageViewTitle(), t('usage.headDesc', { scope: scopeText, window: windowText, loading: usageWindowLoading ? t('usage.loading') : '' }), actions)
+  return pageHead('', usageViewTitle(), '', actions)
 }
 
 function renderUsage() {

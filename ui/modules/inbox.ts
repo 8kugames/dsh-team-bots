@@ -110,7 +110,7 @@ export function renderInbox() {
   })
   const actions = `${counts.mentions > 0 ? `<button class="btn" data-action="inbox-mark-all-read">${icon('check')}${t('inbox.markAllRead')}</button>` : ''}${refreshAction()}`
   return `<div class="global-page inbox-page">
-    ${pageHead(t('inbox.eyebrow'), t('viewTitle.inbox'), t('inbox.desc'), actions)}
+    ${pageHead(t('inbox.eyebrow'), t('viewTitle.inbox'), '', actions)}
     ${sections.length === 0 ? `<div class="empty-state inbox-empty"><div class="empty-symbol">${icon('inbox')}</div><h3>${t('inbox.emptyTitle')}</h3><p>${t('inbox.emptyBody')}</p></div>` : sections.join('')}
   </div>`
 }

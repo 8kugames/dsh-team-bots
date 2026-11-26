@@ -146,7 +146,6 @@ export default {
   // Inbox: cross-project to-do panel
   "inbox.badgeTitle": "Inbox has ${count} pending items",
   "inbox.eyebrow": "Cross-project to-dos",
-  "inbox.desc": "Approvals, questions and proposals are handled right here. Items the director flagged with @owner in a group chat open back in that chat; mark them read to clear them.",
   "inbox.kind.approvals": "Escalation approvals",
   "inbox.kind.questions": "Questions to answer",
   "inbox.kind.proposals": "Evolution proposals",

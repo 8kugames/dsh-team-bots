@@ -146,7 +146,6 @@ export default {
   // 收件箱：跨项目统一待办面板
   "inbox.badgeTitle": "收件箱有 ${count} 项待处理",
   "inbox.eyebrow": "跨项目待办",
-  "inbox.desc": "需要你处理的审批、提问与提案在这里直接处理；总监在群聊里用 @owner 点名的事项，点开回群聊查看，标为已读后移出。",
   "inbox.kind.approvals": "提权审批",
   "inbox.kind.questions": "待回答提问",
   "inbox.kind.proposals": "进化审批",

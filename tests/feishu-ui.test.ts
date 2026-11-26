@@ -144,7 +144,7 @@ test('③ unbound / conflict：未绑定出凭据表单（secret 密码框），
 
 test('④ i18n：飞书词条 zh/en 齐平、调用点均已注册、无死键', () => {
   const source = readFileSync(join(root, 'ui/modules/global-pages.js'), 'utf8')
-  const keys = ['channel.sectionFeishu', 'channel.sectionFeishuDesc', '连接冲突', 'App Secret', '保存并连接', '凭据已配置', '清除凭据', '服务端注入', '检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。', '机器人 ID', 'App ID']
+  const keys = ['channel.sectionFeishu', '连接冲突', 'App Secret', '保存并连接', '凭据已配置', '清除凭据', '服务端注入', '检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。', '机器人 ID', 'App ID']
   for (const key of keys) {
     assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `zh 缺键：${key}`)
     assert.ok(Object.prototype.hasOwnProperty.call(en, key), `en 缺键：${key}`)

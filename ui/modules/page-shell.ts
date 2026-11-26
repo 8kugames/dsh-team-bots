@@ -5,13 +5,13 @@ import { t } from './i18n.js'
 // 只负责结构：页头（eyebrow + 标题 + 口径 + 操作区）、分组导航、序号分组、12 列槽位网格。
 // 不取数、不绑事件；卡片内容仍由各页自己渲染，保证四页的信息架构与视觉语言一致。
 
-// 页头：左侧 eyebrow/标题/口径，右侧操作区（窗口切换、导出等）。无操作时右侧整块不渲染。
+// 页头：左侧标题/口径（eyebrow 为空不渲染，口径为空不渲染），右侧操作区（窗口切换、导出等）。无操作时右侧整块不渲染。
 export function pageHead(eyebrow, title, desc, actions = '') {
   return `<header class="global-head">
         <div class="global-head-copy">
-          <p class="global-eyebrow">${eyebrow}</p>
+          ${eyebrow ? `<p class="global-eyebrow">${eyebrow}</p>` : ''}
           <h2 class="global-title">${title}</h2>
-          <p class="global-desc">${desc}</p>
+          ${desc ? `<p class="global-desc">${desc}</p>` : ''}
         </div>
         ${actions ? `<div class="global-head-actions">${actions}</div>` : ''}
       </header>`
@@ -32,15 +32,15 @@ export function pageNav(items, label, activeId) {
       </nav>`
 }
 
-// 序号分组：01/02/03 + 标题 + 说明 + 12 列槽位网格；headExtra 放分组级操作（如面板顺序切换）。
+// 序号分组：01/02/03 + 标题 + 说明（desc 为空不渲染）+ 12 列槽位网格；headExtra 放分组级操作（如面板顺序切换）。
 export function pageSection(section) {
-  const { index, id, title, desc, body, headExtra = '' } = section
+  const { index, id, title, desc = '', body, headExtra = '' } = section
   return `<section class="gsec" id="${id}" aria-labelledby="${id}-title">
         <div class="gsec-head">
           <span class="gsec-index mono">${index}</span>
           <div class="gsec-copy">
             <h3 class="gsec-title" id="${id}-title">${title}</h3>
-            <p class="gsec-desc">${desc}</p>
+            ${desc ? `<p class="gsec-desc">${desc}</p>` : ''}
           </div>
           ${headExtra}
         </div>

@@ -4,7 +4,6 @@ export default {
   "toast.wechatConnected": "微信通道已连接",
   // 全局配置页（DSHBOTS-204）
   "channel.sectionWechat": "微信通道",
-  "channel.sectionWechatDesc": "扫码授权后，任务动态会推送到管理员微信。",
   // DSHBOTS-220: ui/modules 文案（原文即键）
   "二维码已生成，请用微信扫码": "二维码已生成，请用微信扫码",
   "已退出微信绑定": "已退出微信绑定",
@@ -26,7 +25,6 @@ export default {
   "微信通道已停用": "微信通道已停用",
   // 飞书通道（DSHBOTS-327/334）：通道页可交互状态卡（凭据在卡内配置，secret 不回显）
   "channel.sectionFeishu": "飞书通道",
-  "channel.sectionFeishuDesc": "配置应用凭据后自动连接，任务动态会推送到管理员飞书。",
   "连接冲突": "连接冲突",
   "检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。": "检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。",
   "机器人 ID": "机器人 ID",

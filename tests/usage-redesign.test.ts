@@ -24,7 +24,7 @@ const VIEWS = ['renderUsageGlobal', 'renderUsageDomain', 'renderUsageSolo']
 test('① 三态共用同一套页面骨架（页头 + 序号分组 + 说明副行）', () => {
   for (const fn of VIEWS) {
     const body = fnBody(fn)
-    assert.match(body, /usagePageHead\(usage,/, `${fn} 应走统一页面头`)
+    assert.match(body, /usagePageHead\(usage[,)]/, `${fn} 应走统一页面头`)
     assert.ok((body.match(/usageSection\(/g) ?? []).length >= 2, `${fn} 至少两个分组`)
     assert.match(body, /t\('usage\.overview'\)/, `${fn} 应有总览分组`)
     assert.match(body, /t\('usage\.distTitle/, `${fn} 应有分布明细分组`)

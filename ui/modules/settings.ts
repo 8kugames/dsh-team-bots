@@ -66,10 +66,10 @@ function renderUsageGlobal() {
     { id: 'u-price', label: t('usage.priceTitle') },
   ]
   return pageShell(
-    usagePageHead(usage, t('usage.headGlobalHint')),
+    usagePageHead(usage),
     usageNav(navItems),
     [
-      usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewGlobalDesc', { window: windowText }),
+      usageSection('01', 'u-overview', t('usage.overview'), '',
         slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeGlobal'), usage)}`)),
       usageSection('02', 'u-distribution', t('usage.distTitle'), t('usage.distGlobalDesc', { dayTitle, window: windowText }),
         usagePanelSlots(panels, order),
@@ -119,7 +119,7 @@ function renderUsageDomain() {
     { id: 'u-distribution', label: t('usage.distTitle') },
   ]
   const sections = [
-    usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewDomainDesc', { window: windowText }),
+    usageSection('01', 'u-overview', t('usage.overview'), '',
       slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeDomain'), usage)}`)),
     usageSection('02', 'u-distribution', t('usage.distTitleDomain'), t('usage.distDomainDesc', { dayTitle, window: windowText }),
       usagePanelSlots(panels, panels.map((_, index) => index))),
@@ -132,7 +132,7 @@ function renderUsageDomain() {
       </div>`),
       `<button class="btn small" data-action="usage-clear-drill">${icon('close')}${t('usage.clearDrill')}</button>`))
   }
-  return pageShell(usagePageHead(usage, t('usage.headDomainHint'), t('usage.scopeDomain')), usageNav(nav), sections, activeTab(nav))
+  return pageShell(usagePageHead(usage, t('usage.scopeDomain')), usageNav(nav), sections, activeTab(nav))
 }
 
 // 单聊「用量」tab：本 bot 汇总 + 本 bot 分模型，内容严格限本 bot。
@@ -158,10 +158,10 @@ function renderUsageSolo() {
     { id: 'u-runs', label: t('usage.runDetailTitle') },
   ]
   return pageShell(
-    usagePageHead(usage, t('usage.headSoloHint'), t('usage.scopeSolo')),
+    usagePageHead(usage, t('usage.scopeSolo')),
     usageNav(navItems),
     [
-      usageSection('01', 'u-overview', t('usage.overview'), t('usage.overviewSoloDesc', { window: windowText }),
+      usageSection('01', 'u-overview', t('usage.overview'), '',
         slot('full', `${overviewNotes}${usageMetricCards(totals, t('usage.scopeSolo'), usage)}`)),
       usageSection('02', 'u-distribution', t('usage.distTitleSolo'), t('usage.distSoloDesc', { dayTitle, window: windowText }),
         usagePanelSlots({ days: usageDayPanel(days), model: usageModelPanel(byModel, t('该 Bot 分模型'), '', currency) }, ['days', 'model'])),
@@ -283,7 +283,7 @@ function renderRuntimeSettingsCard() {
   const envOverridden = rows.filter(row => row.envExplicit).map(row => String(row.env))
   return `
     <div class="card form-card g-card">
-      <div class="card-head"><h3>${t('global.rsCardTitle')}</h3><span class="meta">${t('global.rsCardMeta')}</span></div>
+      <div class="card-head"><h3>${t('global.rsCardTitle')}</h3></div>
       <div class="hint">${t('global.rsHint')}</div>
       ${[...groups.entries()].map(([group, list]) => `
         <div class="card-head" style="margin-top:8px"><h4>${esc(t(RUNTIME_SETTING_GROUP_LABELS[group] ?? 'global.rsGroupOps'))}</h4></div>
@@ -512,11 +512,11 @@ function renderGlobal() {
     { id: 'g-about', label: t('global.groupAbout') },
   ]
   return pageShell(
-    pageHead('GLOBAL CONFIGURATION', t('global.title'), t('global.desc'), refreshAction()),
+    pageHead('', t('global.title'), '', refreshAction()),
     pageNav(navItems, t('global.navLabel'), activeTab(navItems)),
     [
       pageSection({
-        index: '01', id: 'g-pref', title: t('global.groupPref'), desc: t('global.groupPrefDesc'),
+        index: '01', id: 'g-pref', title: t('global.groupPref'),
         body: slot('full', `<div class="card form-card g-card">
               <div class="card-head">
                 <h3>${t('global.cardUi')}</h3>
@@ -538,7 +538,6 @@ function renderGlobal() {
                     <button data-action="set-color-scheme" data-color-scheme="light" aria-pressed="${colorSchemePref === 'light'}">${t('global.colorSchemeLight')}</button>
                     <button data-action="set-color-scheme" data-color-scheme="dark" aria-pressed="${colorSchemePref === 'dark'}">${t('global.colorSchemeDark')}</button>
                   </div>
-                  <div class="hint">${esc(t('global.colorSchemeHint'))}</div>
                 </div>
                 <div class="field">
                   <span class="field-label" id="ui-theme-label">${t('global.theme')}</span>
@@ -563,24 +562,20 @@ function renderGlobal() {
                 </div>
               </div>
               <div class="g-foot">
-                <div class="g-kvs">
-                  <div class="kv"><span>${t('global.scaleRange')}</span><strong>100% – 140%</strong></div>
-                  <div class="kv"><span>${t('global.prefStorage')}</span><strong>${t('global.prefStorageValue')}</strong></div>
-                </div>
                 <div class="btn-row"><button class="btn small primary" type="button" data-action="save-ui-language">${esc(t('settings.uiLanguageSave'))}</button></div>
               </div>
             </div>`),
       }),
       pageSection({
-        index: '02', id: 'g-runtime', title: t('global.groupRuntime'), desc: t('global.groupRuntimeDesc'),
+        index: '02', id: 'g-runtime', title: t('global.groupRuntime'),
         body: `${slot('half', renderRunLimitsCard())}${slot('half', renderOpsCard())}${slot('full', renderRuntimeSettingsCard())}`,
       }),
       pageSection({
-        index: '03', id: 'g-prompts', title: t('global.groupPrompts'), desc: t('global.groupPromptsDesc'),
+        index: '03', id: 'g-prompts', title: t('global.groupPrompts'),
         body: slot('full', renderPromptSegmentsCard()),
       }),
       pageSection({
-        index: '04', id: 'g-about', title: t('global.groupAbout'), desc: t('global.groupAboutDesc'),
+        index: '04', id: 'g-about', title: t('global.groupAbout'),
         body: `${slot('half', dshPathsCard())}${slot('half', dshServiceCard())}`,
       }),
     ],

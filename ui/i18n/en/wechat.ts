@@ -4,7 +4,6 @@ export default {
   "toast.wechatConnected": "WeChat channel connected",
   // Global configuration page (DSHBOTS-204)
   "channel.sectionWechat": "WeChat channel",
-  "channel.sectionWechatDesc": "After scanning to authorize, task updates are pushed to the admin on WeChat.",
   // DSHBOTS-220: ui/modules copy
   "二维码已生成，请用微信扫码": "QR code generated; scan it with WeChat",
   "已退出微信绑定": "WeChat binding removed",
@@ -26,7 +25,6 @@ export default {
   "微信通道已停用": "WeChat channel disabled",
   // Feishu channel (DSHBOTS-327/334): interactive status card (credentials configured in-card; secret never echoed)
   "channel.sectionFeishu": "Feishu channel",
-  "channel.sectionFeishuDesc": "Connects automatically once the app credentials are configured; task updates are pushed to the admin on Feishu.",
   "连接冲突": "Connection conflict",
   "检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。": "Connection conflict: the same App ID is signed in elsewhere (exceed_conn_limit). Sign out the other instance first.",
   "机器人 ID": "Bot ID",
