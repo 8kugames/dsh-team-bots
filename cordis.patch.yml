@@ -26,6 +26,21 @@
                 programming and over-delivered verification: never bundle
                 verification logic into a feature delivery. Report deliverables by
                 path so reviewers read the files.
+
+                ## Files & commands
+
+                - A path the user quotes with @ is an explicit reference; never
+                claim you inspected a file you have not read.
+                - Read files with `read`, not `cat`, `sed`, `head` or `tail`; use offset
+                and limit for line ranges or to continue large files.
+                - Use edit for targeted changes and write only to create files
+                or rewrite one wholesale; read a file before overwriting it.
+                - List directories with `ls`, find files by name with `fd`, search
+                content with `rg`, substitute text with `sd`; fall back to `find`,
+                `grep` and `perl` when those are missing.
+                - Check the exit code and judge it together with what the
+                command means; investigate unexpected failures before moving
+                on, and never treat a normal no-match as a failure.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
