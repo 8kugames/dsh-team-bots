@@ -649,7 +649,7 @@ test('追溯放行：规则保存后重判已 pending 的审批，命中即时 a
     service.config.approvalTimeoutMs = 10_000
 
     // 发起时规则表为空 → 落 pending 卡，宿主侧 Promise 仍挂起。
-    await ctx.waterfall({}, 'tools/pre-execute', { name: 'bash', callId: 'call-retro-1', arguments: { command: 'taptap-maker preview --target-dir /Users/x/.taptap-maker/preview' } }, () => Promise.resolve('ok'))
+    await ctx.waterfall({}, 'tools/pre-execute', { name: 'bash', callId: 'call-retro-1', arguments: { command: 'demo-builder preview --target-dir /Users/x/demo-preview' } }, () => Promise.resolve('ok'))
     let nexted = false
     const outcome = service.handleApprovalRequest(makeReq({ sessionId: 'sess-retro', callId: 'call-retro-1', zh: '需要开真窗口' }).req, () => { nexted = true })
     const pendingRow = store.get("SELECT * FROM approvals WHERE status = 'pending'")
@@ -657,7 +657,7 @@ test('追溯放行：规则保存后重判已 pending 的审批，命中即时 a
     assert.equal(nexted, false)
 
     // owner 补规则（保存动作触发追溯重判）→ pending 卡即时放行，挂起的请求 resolve。
-    await service.updateApprovalRules([{ command: '**taptap-maker preview**' }])
+    await service.updateApprovalRules([{ command: '**demo-builder preview**' }])
     assert.equal(await outcome, 'allowed-once', '挂起中的提权请求应被追溯放行结果唤醒')
     const row = store.get('SELECT * FROM approvals WHERE id = ?', pendingRow.id)
     assert.equal(row.status, 'allowed')

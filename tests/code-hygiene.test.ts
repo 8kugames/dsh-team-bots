@@ -88,7 +88,7 @@ test('scanCodeHygieneFiles：隐藏目录/node_modules/assets/锁文件/非白�
     await put('node_modules/dep.js', lines(900))
     await put('assets/art.js', lines(900))
     await put('.git/hooks.js', lines(900))
-    await put('.codegraph/data.js', lines(900))
+    await put('.cache/data.js', lines(900))
     await put('src/package-lock.json', lines(900))
     await put('src/data.bin', lines(900))
     await put('src/huge.js', 'x'.repeat(2 * 1024 * 1024 + 10))

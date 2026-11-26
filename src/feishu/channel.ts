@@ -8,7 +8,7 @@ const OUTBOX_MAX_ATTEMPTS = 3
 const OUTBOX_BATCH_WINDOW_MS = 1500
 /** 已发送/已废弃出站记录保留 7 天。 */
 const OUTBOX_RETENTION_DAYS = 7
-/** 入站去重 LRU：TTL 10 分钟、上限 1000 条，重连不清空（对齐 cindy 口径）。 */
+/** 入站去重 LRU：TTL 10 分钟、上限 1000 条，重连不清空。 */
 export const INBOUND_DEDUP_TTL_MS = 10 * 60 * 1000
 export const INBOUND_DEDUP_LIMIT = 1000
 /** 群聊非 owner @bot 的礼貌回应冷却：同一发送者 60s 至多一条，不起 turn。 */
@@ -82,7 +82,7 @@ export function parseInboundEvent(payload) {
   }
 }
 
-/** lane 编码（对齐 cindy）：群= g/{chatId}[/{threadId}]（话题挂 root），p2p=发送者 open_id。 */
+/** lane 编码：群= g/{chatId}[/{threadId}]（话题挂 root），p2p=发送者 open_id。 */
 export function laneOf(parsed) {
   if (parsed?.chatType === 'group') {
     return `g/${parsed.chatId}${parsed.rootId ? `/${parsed.rootId}` : ''}`
@@ -553,7 +553,7 @@ export class FeishuChannel {
   }
 
   /**
-   * 入站 LRU 去重闸（对齐 cindy）：键 (appId, message_id)，TTL 10 分钟、上限 1000 条、
+   * 入站 LRU 去重闸：键 (appId, message_id)，TTL 10 分钟、上限 1000 条、
    * 重连不清空（飞书事件可能重投）。命中返回 true；未命中记录后返回 false。
    */
   seenInbound(key) {
@@ -575,7 +575,7 @@ export class FeishuChannel {
   }
 
   /**
-   * 会话门禁分发（对齐 cindy TOFU/群@门禁）：
+   * 会话门禁分发（TOFU/群@门禁）：
    * - p2p：无 owner 时首名发送者 TOFU 成 owner（按 bot-app 持久化）；非 owner 私聊丢弃留痕；
    * - 群聊绝不 TOFU：必须 @本 bot——非 owner @bot 走 60s 冷却礼貌回应（不起 turn），
    *   owner @bot 剥占位符后正常起 turn。

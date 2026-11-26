@@ -3,7 +3,7 @@
 // 跳转靠这一层桥：插件页写 localStorage 待开键 + BroadcastChannel 广播，本半边消费并调
 // ctx.uiWorkspace.openSession(sessionId) 精确打开对应会话。
 //
-// 产物形态（dsh-client-modules 契约，见 godot-bridge 等同类插件）：宿主把本文件原文内联进
+// 产物形态（dsh-client-modules 契约）：宿主把本文件原文内联进
 // classic script 执行，因此本文件不能有 ESM 语法——顶层不得出现 import/export，
 // 必须以 window.__ModuleLoader__.load({id, factory}) 自注册，工厂返回 {inject, apply}。
 // id 必须是包名。tests/client-bridge.test.ts 用 VM 执行构建产物来守这条契约。
