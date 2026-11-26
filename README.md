@@ -68,6 +68,10 @@ Memory entries are written, reviewed, frozen and archived by the owner, and are 
 
 When a bot asks for a tool approval, a secret, or an answer, the workspace shows a card in the chat. The owner approves, denies or answers in place, and the decision is recorded on the card.
 
+### Inbox and `@owner`
+
+Everything that needs you is collected in the **Inbox**, the entry above the group chats in the sidebar: escalation approvals, questions to answer and evolution proposals are handled right there with the same cards used in the chat. When the director writes `@owner` in a group message, it marks something you need to see or decide; the message lands in the inbox automatically, opens back at that message in the chat, and leaves the inbox only when you mark it read — viewing or jumping to it never clears it. New inbox items raise a desktop notification by default; the browser asks for notification permission on your first click. `owner` is a reserved bot name, and only the director may use the mention.
+
 ### Usage and cost
 
 The usage page breaks the numbers down by model, bot and project, exports CSV, and reads model prices from configuration.

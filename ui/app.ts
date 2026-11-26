@@ -5,7 +5,8 @@ import { richText, mdPlainSummary, mdChatScope, mdImageChipTitle } from './modul
 import { api, loadState, markVisibleChatRead } from './modules/api.js'
 import { t, setLanguage } from './modules/i18n.js'
 import { typingLingerRowsHtml, applyOptimisticTyping, pruneTypingLinger } from './modules/typing-linger.js'
-import { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, sidebarUserNeedsView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
+import { renderMessage, renderDirectMessagesCard, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyInbox, ensureNotifyPermission, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio } from './modules/cards.js'
+import { renderInbox, inboxEntryView } from './modules/inbox.js'
 import { renderUsage, usageMode, usageViewTitle, usageTotals } from './modules/usage.js'
 import { renderSettings, renderGlobal, renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './modules/settings.js'
 import { renderChannel, renderSecretsPage } from './modules/global-pages.js'
@@ -21,7 +22,7 @@ import './modules/events-click.js'
 import './modules/events-submit.js'
 import './modules/events-misc.js'
 // 全局一级视图集合：侧栏直达、无项目 tab（usage 的 global 模式另算，见 isGlobal）。
-const GLOBAL_VIEWS = new Set(['global', 'bots-overview', 'channel', 'secrets'])
+const GLOBAL_VIEWS = new Set(['global', 'bots-overview', 'channel', 'secrets', 'inbox'])
 const app = document.getElementById('app') as unknown as Document & { className: string; innerHTML: string }
 const UI_SCALE_KEY = 'dshb:ui-scale'
 const UI_THEME_KEY = 'dshb:ui-theme'
@@ -219,16 +220,12 @@ function renderShell() {
   const inSolo = inSoloContext()
   // 场景分支：单聊上下文无项目域；群聊上下文 = 当前项目。
   const project = inSolo ? null : activeProject()
-  // 跨项目待审（DSHBOTS-102）：state 顶层全局口径，与当前项目解耦。
-  const pendingApprovals = data?.pendingApprovals ?? { count: 0, items: [] }
-  // 跨项目待答提问（DSHBOTS-116）：与审批同口径，顶层全局聚合。
-  const pendingQuestions = data?.pendingQuestions ?? { count: 0, items: [] }
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
-  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。四页页壳页（DSHBOTS-216）冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；无横幅时 main-head 整块不渲染，避免空粘头残影。
+  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。页壳页（DSHBOTS-216）冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；main-head 整块不渲染，避免空粘头残影。
   const isGlobal = GLOBAL_VIEWS.has(state.view) || (state.view === 'usage' && usageMode() === 'global')
   const shellGlobalPage = isGlobal && state.view !== 'bots-overview'
-  const showMainHead = !shellGlobalPage || approvalBannerView(pendingApprovals) !== '' || questionBannerView(pendingQuestions) !== ''
+  const showMainHead = !shellGlobalPage
   // 单聊是独立于项目的 1V1 上下文：对话/配置/技能/记忆/进化/用量共用一套导航。
   const isSolo = state.view === 'chat' && state.chatMode === 'solo'
   const soloBot = inSolo ? botById(state.soloBotId) : null
@@ -275,6 +272,7 @@ function renderShell() {
           <div class="brand-copy"><strong>DSH Team Bots</strong></div>
         </a>
         <div class="tree">
+          ${inboxEntryView()}
           <div class="tree-group">
             <div class="side-label">
               <button class="tree-toggle" data-action="toggle-tree" data-tree="chats" title="${t('tree.chatsTitle')}">${chevron(state.tree.chats)}<span>${t('tree.chats')}</span></button>
@@ -334,7 +332,6 @@ function renderShell() {
           </div>
         </div>
         <div class="sidebar-bottom">
-          ${sidebarUserNeedsView({ approvals: pendingApprovals.count, questions: pendingQuestions.count, proposals: pendingProposals() })}
           <button class="global-config ${state.view === 'bots-overview' ? 'active' : ''}" data-action="nav" data-view="bots-overview">
             ${icon('bot')}<span>${t('sidebar.botsOverview')}</span>
           </button>
@@ -356,8 +353,6 @@ function renderShell() {
       </aside>
       <main class="main">
         ${showMainHead ? `<div class="main-head">
-        ${approvalBannerView(pendingApprovals)}
-        ${questionBannerView(pendingQuestions)}
         ${shellGlobalPage ? '' : `<header class="topbar">
           <div class="topbar-title">
             ${eyebrow ? `<div class="topbar-eyebrow">${eyebrow}</div>` : ''}
@@ -600,6 +595,7 @@ function renderView() {
       case 'global': return renderGlobal()
       case 'channel': return renderChannel()
       case 'secrets': return renderSecretsPage()
+      case 'inbox': return renderInbox()
       case 'solo-config': return renderSoloConfig()
       case 'chat':
       default: return renderChat()
@@ -629,13 +625,13 @@ async function poll() {
   // 目录选择器开着或表单有未保存修改时暂停自动刷新：整页重渲染会吞掉选择器与已选/已填的值。
   if (document.querySelector('.dir-picker:not([hidden])') || document.querySelector('form[data-dirty]')) return
   try {
-    // 页面隐藏时常规轮询照旧暂停；桌面通知开启则静默拉一份 state 专为审批增量，
+    // 页面隐藏时常规轮询照旧暂停；桌面通知开启则静默拉一份 state 专为收件箱增量，
     // 不写 state.data、不渲染（避免隐藏时误推已读水位、误重渲染）。
+    // 收件箱四类聚合都在 state 顶层、与单聊上下文无关，不必带 soloBotId。
     if (document.hidden) {
       if (!notifyOn()) return
-      // 带 soloBotId 与 loadState 同口径：单聊审批（DSHBOTS-218）只在带它的 state 响应里下发，漏带即丢
-      const data = await api('state', { projectId: state.projectId || undefined, soloBotId: state.chatMode === 'solo' ? state.soloBotId : undefined }, { quiet: true })
-      notifyNewApprovals(data?.approvals ?? [])
+      const data = await api('state', { projectId: state.projectId || undefined }, { quiet: true })
+      notifyInbox(data)
       return
     }
     // 版本短路：loadState 在服务端版本未变时原引用返回，数据零变化——跳过整页重渲染
@@ -646,7 +642,7 @@ async function poll() {
     // 渲染闸门（DSHBOTS-123）：composer 静默窗内有输入或 IME 组词中才挡整页重建，
     // 其余输入控件维持原「焦点即挡」；被挡周期的取数已生效，下一周期自动补渲染。
     if (!pollRenderBlockedByFocus(document.activeElement, { composing: state.composerComposing, composerInputAt: state.composerInputAt })) render()
-    notifyNewApprovals(state.data?.approvals ?? [])
+    notifyInbox(state.data)
   } catch {}
 }
 
@@ -691,14 +687,6 @@ window.addEventListener('scroll', event => {
   noteModalScroll()
 }, { capture: true, passive: true })
 
-// 顶部待审明细菜单（DSHBOTS-102）：点击菜单外任意处收起；面板关着时直接返回，不额外渲染。
-document.addEventListener('click', (event) => {
-  if (!state.approvalPanelOpen) return
-  if ((event.target as HTMLElement).closest?.('.approval-banner')) return
-  state.approvalPanelOpen = false
-  render()
-})
-
 // 聊天图片加载失败占位 chip：error 不冒泡，用捕获阶段全局监听；只处理消息气泡/评论里的
 // markdown 图片。chip 只显示文件名（路径查参或 alt 兜底），不复制错误页内容进 DOM。
 window.addEventListener('error', (event) => {
@@ -725,6 +713,11 @@ const observer = new MutationObserver(() => {
   if (state.modal?.type === 'proposal') bindProposalForm()
 })
 observer.observe(ensureModalRoot(), { childList: true, subtree: true })
+
+// 桌面通知默认开启：浏览器要求权限申请由用户手势触发，首次点击或按键时申请一次
+// （用户关过或已表态则不动，见 ensureNotifyPermission）。
+document.addEventListener('click', () => { void ensureNotifyPermission() }, { capture: true })
+document.addEventListener('keydown', () => { void ensureNotifyPermission() }, { capture: true })
 
 // 切回页面立即补一轮轮询（DSHBOTS-123）：隐藏期间常规轮询暂停、state.data 冻结，
 // 返回前台不用干等下一个 2.8s 周期，typing 行与新消息即刻追平。
@@ -771,9 +764,8 @@ setInterval(() => {
     el.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
   }
   // 提问倒计时局部刷新（DSHBOTS-116）：与审批同口径，只改文本与危险色，不整卡重绘。
-  for (const el of document.querySelectorAll('.question-clock[data-expires], .question-menu-time[data-expires]') as NodeListOf<HTMLElement>) {
+  for (const el of document.querySelectorAll('.question-clock[data-expires]') as NodeListOf<HTMLElement>) {
     const remaining = questionRemainingFrom(el.dataset.expires)
-    // 卡片与顶部窄条都用同一「剩余 X 分 Y 秒」口径（提问没有审批那种「自动拒绝」语义）。
     el.textContent = formatQuestionCountdown(remaining)
     el.classList.toggle('urgent', questionUrgent(remaining))
   }

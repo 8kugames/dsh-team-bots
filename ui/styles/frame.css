@@ -272,29 +272,46 @@
     flex-direction: column;
     gap: 4px;
 }
-/* 用户需办气泡（DSHBOTS-339）：侧栏「总览bots」上方，问答/提权审批/进化审批三类
-   需用户干预事项的常驻信号；全 0 不渲染。点击复用顶部窄条展开/进化页导航。 */
-.sidebar-bubbles {
+/* 收件箱入口：侧栏群聊列表上方的常驻按钮，徽标是四类待办之和（0 不出徽标）。 */
+.inbox-entry {
+    width: 100%;
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 4px 2px;
-}
-.sidebar-bubble {
-    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 9px;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    background: var(--star-wash);
-    color: var(--ink);
+    gap: 9px;
+    min-height: 36px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-2);
+    text-align: left;
     font-size: var(--fs-small);
-    box-shadow: var(--shadow-btn);
-    cursor: pointer;
+    position: relative;
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease;
 }
-.sidebar-bubble:hover { border-color: transparent; box-shadow: var(--shadow-btn-hover); }
-.sidebar-bubble .unread-badge { margin-left: 0; }
+.inbox-entry svg {
+    width: 15px;
+    height: 15px;
+    opacity: 0.8;
+}
+.inbox-entry > span:not(.unread-badge) {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.inbox-entry:hover {
+    background: var(--line);
+    color: var(--ink);
+}
+.inbox-entry.active {
+    background: var(--accent-wash);
+    color: var(--ink);
+    font-weight: 500;
+}
 .global-config {
     width: 100%;
     display: flex;

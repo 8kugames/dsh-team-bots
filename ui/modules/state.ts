@@ -5,7 +5,7 @@ const initialView = params.get('view')
 
 export const state = {
   data: null,
-  view: ['chat', 'solo-config', 'tasks', 'bots-overview', 'members', 'skills', 'memory', 'evolution', 'usage', 'terminal', 'settings', 'global'].includes(initialView) ? initialView : 'chat',
+  view: ['chat', 'solo-config', 'tasks', 'bots-overview', 'members', 'skills', 'memory', 'evolution', 'usage', 'terminal', 'settings', 'global', 'inbox'].includes(initialView) ? initialView : 'chat',
   projectId: params.get('project') || null,
   chatMode: 'group',
   soloBotId: null,
@@ -28,14 +28,18 @@ export const state = {
   openPanels: new Set(),
   // 连续系统通知折叠的展开态（B8/DSHBOTS-336）：组键=首条消息 id，跨轮询稳定。
   expandedCollapses: new Set(),
-  // 顶部「待处理审批」条（DSHBOTS-102）：跨项目 pending 聚合；approvalPanelOpen 是明细面板展开态，
-  // approvalDeciding 是正在决策的 approval id 集合（决策中禁用按钮，防重复点击）。
-  approvalPanelOpen: false,
+  // 收件箱里正在决策的 approval id 集合（决策中禁用按钮，防重复点击）。
   approvalDeciding: new Set(),
-  // 顶部「待回答提问」条（DSHBOTS-116）：与审批同构；questionDraft 是卡片内未提交的选择/补充说明，
-  // 整页重渲染据此恢复选中态与输入内容（提交成功后清除）。
-  questionPanelOpen: false,
+  // questionDraft 是提问卡内未提交的选择/补充说明，整页重渲染据此恢复选中态与输入内容（提交成功后清除）。
   questionAnswering: new Set(),
+  // 收件箱 @owner 事项：正在标已读的 message id（按钮禁用防重复提交），与本会话已标已读的 id
+  // （挡住早于标记动作的轮询旧响应把事项盖回收件箱）。
+  ownerMentionReading: new Set(),
+  ownerMentionReadIds: new Set(),
+  // 锚点窗口：从收件箱跳到已不在最近一页里的消息时，按锚点载入的一页替代最新窗口展示；
+  // key 与会话对齐（group:<projectId>），切会话或点「回到最新」即失效。chatFocusId 是跳转后高亮的消息。
+  chatAnchor: null,
+  chatFocusId: null,
   questionDraft: new Map(),
   ac: null,
   busy: 0,

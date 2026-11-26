@@ -401,7 +401,7 @@ test('守卫：question-option 点击对已失效（非 pending）问题不写�
     return match[0].replace(/^export /, '')
   }
   const realApiFns = (state, api) => new Function('state', 'api', 't',
-    ['markVisibleChatRead', 'preserveDecidedApprovals', 'preserveAnsweredQuestions', 'loadState'].map(fnSource).join('\n')
+    ['markVisibleChatRead', 'preserveDecidedApprovals', 'preserveAnsweredQuestions', 'dropReadOwnerMentions', 'loadState'].map(fnSource).join('\n')
       + '\nreturn { loadState, preserveAnsweredQuestions }')(state, api, tStub)
 
   test('竞态锁：提交作答后迟到的旧 pending 轮询不得把「已回答」闪回问题卡', async () => {

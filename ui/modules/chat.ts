@@ -52,14 +52,34 @@ function chatKey() {
   return project ? `group:${project.id}` : null
 }
 
+// 当前会话生效的锚点窗口：从收件箱跳到已不在最近一页里的消息时进入（inbox.js 的 focusOwnerMention）。
+// key 与会话对齐，切会话即失效；点「回到最新」清空。
+function activeChatAnchor() {
+  const key = chatKey()
+  return key && state.chatAnchor?.key === key ? state.chatAnchor : null
+}
+
+// 锚点窗口之后还有多少条没载入：载入时记下的条数 + 载入之后新到的消息（按载入时的最新一条判定）。
+function anchorNewerCount(anchor, latest) {
+  const loaded = anchor.loadedNewest
+  const fresh = loaded
+    ? (latest ?? []).filter(m => m.created_at > loaded.createdAt || (m.created_at === loaded.createdAt && m.id > loaded.id)).length
+    : 0
+  return Number(anchor.newerCount ?? 0) + fresh
+}
+
 // 合并分片桶与轮询消息：older 在前、latest 在后，按 id 去重以轮询侧为准（轮询是活数据）。
+// 锚点窗口生效时以它替代 latest：窗口与最新一页之间可能有未载入的间隔，两者不拼接，
+// 列表底部给出「回到最新」入口。
 function mergedChatMessages(latest) {
+  const anchor = activeChatAnchor()
+  const base = anchor ? anchor.items : (latest ?? [])
   const key = chatKey()
   const bucket = state.chatOlder.key === key ? state.chatOlder : null
-  if (!bucket || !bucket.items.length) return latest ?? []
-  const seen = new Set((latest ?? []).map(m => m.id))
+  if (!bucket || !bucket.items.length) return base
+  const seen = new Set(base.map(m => m.id))
   const older = bucket.items.filter(m => !seen.has(m.id))
-  return [...older, ...(latest ?? [])]
+  return [...older, ...base]
 }
 
 // 未翻过页且首屏已满页时也可能还有更早历史——显示按钮探一页，由 hasMore 收敛。
@@ -117,6 +137,9 @@ async function loadOlderMessages() {
     state.chatOlder.loading = false
     render()
   }
+}
+function anchorBarView(anchor, latest) {
+  return `<div class="chat-anchor-bar"><span>${t('chat.anchorNewer', { count: anchorNewerCount(anchor, latest) })}</span><button class="btn small" data-action="chat-back-to-latest">${icon('arrow')}${t('chat.backToLatest')}</button></div>`
 }
 // chat-pagination:end
 
@@ -200,7 +223,10 @@ function renderChat() {
   if (state.chatMode === 'solo') return renderSoloChat()
   const project = activeProject()
   if (!project) return noProject()
-  const messages = mergedChatMessages(state.data.messages ?? [])
+  const latest = state.data.messages ?? []
+  const messages = mergedChatMessages(latest)
+  // 锚点窗口是静态历史：响应中状态行只属于最新窗口，这里不画。
+  const anchor = activeChatAnchor()
   const owner = botById(project.owner_bot_id)
   const members = project.members ?? []
   // modelRef 本身已是 provider/model（如 deepseek/deepseek-chat），不再单独拼 provider，避免重复。
@@ -233,8 +259,8 @@ function renderChat() {
             <h3>${t('chat.emptyTitle')}</h3>
             <p>${t('chat.emptyBody')}</p>
           </div>` : collapseAutoMessages(messages).map(item => item.collapsed ? collapseRowView(item) : renderMessage(item)).join('')}
-          ${typingRows(state.data.runs, 'chat')}
-          ${typingLingerRowsHtml('chat', state.data.runs)}
+          ${anchor ? anchorBarView(anchor, latest) : `${typingRows(state.data.runs, 'chat')}
+          ${typingLingerRowsHtml('chat', state.data.runs)}`}
         </div>
         ${renderDirectMessagesCard()}
                   <div class="composer">

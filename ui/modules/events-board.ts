@@ -283,6 +283,7 @@ export async function handleBoardAction(action, target) {
     case 'select-project':
       state.projectId = target.dataset.projectId
       state.replyTo = null // 切项目即切群聊，引用不能跨项目
+      state.chatAnchor = null // 从侧栏进群看的是最新消息，不在上一回跳转的锚点窗口里
       state.chatMode = 'group'
       state.view = 'chat'
       // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。

@@ -5,6 +5,7 @@ import { api } from './api.js'
 import { t } from './i18n.js'
 import { isPreviewableText, deliverableFileUrl } from './file-preview.js'
 import { renderApprovalPermissionsCard } from './permissions.js'
+import { proposalCardMarkup } from './proposal-card.js'
 import { refresh, startTerminalPoll, panelAttrs, render, noProject } from '../app.js'
 
 // task-sort:start —— 任务面板排序的纯逻辑（tests/task-sort.test.js 按本标记块抽取断言）。
@@ -684,41 +685,6 @@ function renderEvolution() {
   // 单聊进化 tab 只看该 bot 自己的提案（逐个审批）；项目群聊不再挂进化入口（批量审批在「总览bots」）。
   const scoped = inSoloContext() ? proposals.filter(item => item.bot_id === state.soloBotId) : proposals
   const pending = scoped.filter(item => item.status === 'pending')
-  const proposalDiff = (proposal) => {
-    const payload = proposal.payload ?? {}
-    const bot = proposal.bot_id ? botById(proposal.bot_id) : null
-    const blocks = []
-    if (proposal.kind === 'bot_update' && bot) {
-      const fields = [
-        ['role', bot.role, payload.role],
-        ['instructions', bot.instructions, payload.instructions],
-        ['model', bot.modelRef ?? bot.model, payload.model ? `${payload.provider ?? bot.provider}/${payload.model}` : ''],
-        ['effort', bot.effort, payload.effort]
-      ]
-      for (const [field, before, after] of fields) {
-        if (!after || String(before ?? '') === String(after)) continue
-        blocks.push(`${field}\n- ${before}\n+ ${after}`)
-      }
-    }
-    if (proposal.kind === 'skill') {
-      blocks.push(`skill ${payload.slug ?? payload.name ?? 'new'}\n+ ${payload.content ?? proposalPreview(proposal)}`)
-    }
-    if (!blocks.length) blocks.push(proposalPreview(proposal))
-    return blocks.join('\n\n')
-  }
-  const proposalDiffText = (proposal) => {
-    const diff = proposal?.diff
-    if (diff && typeof diff === 'object') {
-      const blocks = Object.entries(diff as Record<string, { from?: string; to?: string }>).map(([field, change]) => {
-        const from = change?.from ?? ''
-        const to = change?.to ?? ''
-        if (!from && !to) return ''
-        return `${field}\n- ${from}\n+ ${to}`
-      }).filter(Boolean)
-      if (blocks.length) return blocks.join('\n\n')
-    }
-    return proposalDiff(proposal)
-  }
   return `
     <div class="section-head">
       <p>${t("变更需经人工审批后生效。")}</p>
@@ -728,38 +694,7 @@ function renderEvolution() {
       </div>
     </div>
     ${scoped.length === 0 ? `<div class="empty-state"><div class="empty-symbol">${icon('branch')}</div><h3>${t("还没有进化提案")}</h3><p>Bot ${t("可以提交自我改进建议，但无法自行批准。")}</p><button class="btn" data-action="new-proposal" data-kind="bot_update">${icon('plus')}${t("新建提案")}</button></div>` : `<div class="grid" style="gap:16px">
-      ${scoped.map(proposal => {
-        const tone = proposal.status === 'approved' ? 'green' : proposal.status === 'rejected' ? 'red' : ''
-        return `<article class="card proposal-card">
-          <div class="card-head">
-            <div class="proposal-head" style="flex:1;min-width:0">
-              <div class="empty-symbol" style="width:34px;height:34px;border-radius:9px;margin:0">${icon(proposal.kind === 'skill' ? 'spark' : 'branch')}</div>
-              <div class="list-main">
-                <h3>${esc(proposal.title)}</h3>
-                <p>${esc(proposal.rationale)}</p>
-              </div>
-            </div>
-            <span class="pill ${tone}">${esc(PROPOSAL_STATUS[proposal.status] ?? proposal.status)}</span>
-          </div>
-          ${proposal.kind === 'workflow' ? `<div class="note">${t("工作流提案尚未支持执行。")}</div>` : ''}
-          <div class="proposal-body" style="margin-top:0">${esc(proposalPreview(proposal).slice(0, 6000))}</div>
-          <div class="list-meta"><span>${esc(PROPOSAL_KIND[proposal.kind] ?? proposal.kind)}</span>${proposal.botName ? `<span>${esc(proposal.botName)}</span>` : ''}<span>${esc(timeAgo(proposal.created_at))}</span>${proposal.decided_by ? `<span>${t("由")} ${esc(actorLabel(proposal.decided_by))} ${t("决定")}</span>` : ''}${proposal.approvedBy ? `<span>${t("审批人")} ${esc(actorLabel(proposal.approvedBy))}</span>` : ''}${proposal.appliedAt ? `<span>${t("已生效")} ${esc(formatTime(proposal.appliedAt))}</span>` : ''}${proposal.canary ? `<span>${t("灰度")} ${esc(canaryText(proposal.canary))}</span>` : ''}</div>
-          ${proposal.evaluation ? `<div class="list-desc">${t("评估")} · ${esc(evaluationText(proposal.evaluation))}</div>` : ''}
-          ${proposal.status === 'pending' ? `<details class="proposal-diff"${panelAttrs(state, `proposal:${proposal.id}`)}>
-            <summary class="btn small">${icon('chevron', 'chev')}${t("查看差异")}</summary>
-            <div class="proposal-body" style="margin-top:8px">${esc(proposalDiffText(proposal).slice(0, 4000))}</div>
-          </details>
-          <div class="proposal-actions end">
-            <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="pass">${t("评估通过")}</button>
-            <button class="btn small" data-action="evaluate-proposal" data-proposal-id="${attr(proposal.id)}" data-verdict="fail">${t("评估不通过")}</button>
-            <button class="btn ${proposal.id === pending[0]?.id ? 'primary' : ''}" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="approved">${icon('check')}${t("通过并应用")}</button>
-            <button class="btn" data-action="decide-proposal" data-proposal-id="${attr(proposal.id)}" data-decision="rejected">${t("拒绝")}</button>
-          </div>` : ''}
-          ${proposal.status === 'canary' ? `<div class="proposal-actions end">
-            <button class="btn primary" data-action="promote-proposal" data-proposal-id="${attr(proposal.id)}">${icon('check')}${t("转正全量")}</button>
-          </div>` : ''}
-        </article>`
-      }).join('')}
+      ${scoped.map(proposal => proposalCardMarkup(proposal, { primary: proposal.id === pending[0]?.id })).join('')}
     </div>`}
   `
 }

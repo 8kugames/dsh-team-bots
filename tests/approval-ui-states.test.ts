@@ -168,7 +168,7 @@ test('CSS：五态左侧条与底色按规格取既有 token，未新增色值',
   assert.match(css, /\.approval-meta \{[^}]*font-size: var\(--fs-small\)/)
   assert.match(css, /\.approval-chip \{[^}]*font-size: var\(--fs-caption\)/)
   // 审批卡相关段落不得出现字面色值（规格硬约束：只用仓库既有 token）。
-  const section = css.slice(css.indexOf('/* 审批卡片'), css.indexOf('/* 跨项目待审入口'))
+  const section = css.slice(css.indexOf('/* 审批卡片'), css.indexOf('/* 连续系统通知折叠行'))
   assert.ok(section.length > 0, '必须能定位到审批卡 CSS 段')
   assert.doesNotMatch(section, /#[0-9a-f]{3,8}\b/i, '审批卡段不得写死色值')
   assert.doesNotMatch(section, /rgba?\(/i, '审批卡段不得写死 rgba')
@@ -176,9 +176,9 @@ test('CSS：五态左侧条与底色按规格取既有 token，未新增色值',
 
 test('CSS：消息流与通知容器的 img/svg 有尺寸兜底，大图标不占满视口', () => {
   const css = stylesSource
-  // 通知容器（toast、待审横幅）：图标与图片都限宽限高，图片保持比例。
-  assert.match(css, /:is\(#toast-root, \.toast, \.approval-banner\) svg \{[^}]*max-width: 24px;[^}]*max-height: 24px;/, '通知容器 svg 限宽限高')
-  assert.match(css, /:is\(#toast-root, \.toast, \.approval-banner\) img \{[^}]*max-width: 100%;[^}]*max-height: 120px;[^}]*object-fit: contain;/, '通知容器 img 限高 + 保持比例')
+  // 通知容器（toast）：图标与图片都限宽限高，图片保持比例。
+  assert.match(css, /:is\(#toast-root, \.toast\) svg \{[^}]*max-width: 24px;[^}]*max-height: 24px;/, '通知容器 svg 限宽限高')
+  assert.match(css, /:is\(#toast-root, \.toast\) img \{[^}]*max-width: 100%;[^}]*max-height: 120px;[^}]*object-fit: contain;/, '通知容器 img 限高 + 保持比例')
   // 消息流：既有 .message-bubble img 规则只管图片，svg 必须另有限高。
   assert.match(css, /:is\(\.message-bubble, \.comment-body, \.message-system\) svg \{[^}]*max-width: 120px;[^}]*max-height: 120px;/, '消息流 svg 限宽限高')
   // 审批卡：新增的面同样兜底。

@@ -1,9 +1,9 @@
-// tests/sidebar-bubbles.test.ts —— DSHBOTS-339：用户需办气泡 + 顶部条按处理者分流守门。
+// tests/sidebar-bubbles.test.ts —— 用户需办入口按处理者分流守门。
 // owner 口径：①「需要你处理」顶部条撤除——总监处理项（待验收/滞留卡）与运维项（投递失败/
-// 通道异常）不在顶部弹；②用户干预项（问答/提权审批/进化审批）收敛为侧栏「总览bots」上方
-// 气泡，全 0 不渲染（Quiet by default），点击复用顶部审批/提问窄条展开与进化页导航；
+// 通道异常）不在顶部弹；②用户干预项（提权审批/问答/进化审批）与总监 @owner 事项收敛为侧栏
+// 群聊列表上方的常驻「收件箱」入口，点击进收件箱页统一处理，顶部审批/提问窄条随之撤除；
 // ③设置变更历史卡撤除（当前无消费场景，audit 底账照记、只删读模型）。
-// 前端用例沿用仓库先例：源码断言（app.ts/settings.ts 单一来源）。
+// 前端用例沿用仓库先例：源码断言（app.ts/inbox.ts/settings.ts 单一来源）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -14,6 +14,7 @@ const here = fileURLToPath(new URL('..', import.meta.url))
 const appSource = readFileSync(join(here, 'ui', 'app.ts'), 'utf8')
 const cardsSource = readFileSync(join(here, 'ui', 'modules', 'cards.ts'), 'utf8')
 const settingsSource = readFileSync(join(here, 'ui', 'modules', 'settings.ts'), 'utf8')
+const inboxSource = readFileSync(join(here, 'ui', 'modules', 'inbox.ts'), 'utf8')
 const systemSource = readFileSync(join(here, 'src', 'services', 'system.ts'), 'utf8')
 
 test('顶部 needs-attention 条撤除：banner 函数/挂载/显隐条件全链不在', () => {
@@ -22,20 +23,33 @@ test('顶部 needs-attention 条撤除：banner 函数/挂载/显隐条件全链
   assert.doesNotMatch(settingsSource, /attention-banner/, 'settings 页无残留')
 })
 
-test('侧栏气泡：三类用户干预项计数 + 点击复用既有通道 + 总览bots 上方', () => {
-  assert.match(cardsSource, /sidebar\.bubbleApprovals[\s\S]*?toggle-approvals/, '提权审批气泡 → 顶部审批窄条展开')
-  assert.match(cardsSource, /sidebar\.bubbleQuestions[\s\S]*?toggle-questions/, '问答气泡 → 顶部提问窄条展开')
-  assert.match(cardsSource, /sidebar\.bubbleProposals[\s\S]*?data-view="evolution"/, '进化审批气泡 → 进化页')
-  assert.match(cardsSource, /\.filter\(item => item\.count > 0\)/, 'Quiet by default：全 0 不渲染')
-  assert.match(appSource, /sidebarUserNeedsView\(\{ approvals: pendingApprovals\.count, questions: pendingQuestions\.count, proposals: pendingProposals\(\) \}\)/, 'app.ts 挂气泡助手')
-  // 气泡块必须位于「总览bots」按钮之前（同一模板内先渲染）。
-  const bubblesAt = appSource.indexOf('sidebarUserNeedsView')
-  const botsAt = appSource.indexOf('data-view="bots-overview"')
-  assert.ok(bubblesAt > 0 && botsAt > bubblesAt, '气泡在总览bots 上方')
-  // 总监/运维项不再出现在气泡（气泡数组只有三类）。
-  assert.doesNotMatch(cardsSource, /bubble(?:Stale|Reviews|Outbox|Wechat)/, '总监/运维项不进气泡')
-  // 旧提案红点撤除（气泡承担同一信号）。
+test('收件箱入口：群聊列表上方常驻，徽标是四类待办之和，点击进收件箱页', () => {
+  assert.match(inboxSource, /approvals: Number\(data\?\.pendingApprovals\?\.count \?\? 0\)/, '提权审批计数')
+  assert.match(inboxSource, /questions: Number\(data\?\.pendingQuestions\?\.count \?\? 0\)/, '待回答提问计数')
+  assert.match(inboxSource, /proposals: \(data\?\.proposals \?\? \[\]\)\.filter\(item => item\?\.status === 'pending'\)\.length/, '进化审批只计 pending')
+  assert.match(inboxSource, /mentions: Number\(data\?\.pendingOwnerMentions\?\.count \?\? 0\)/, '总监 @owner 计未读')
+  assert.match(inboxSource, /data-action="nav" data-view="inbox"/, '点击进收件箱页')
+  // 入口在群聊列表之前（同一模板内先渲染），且不再随待办数隐现。
+  const entryAt = appSource.indexOf('${inboxEntryView()}')
+  const chatsAt = appSource.indexOf('data-tree="chats"')
+  assert.ok(entryAt > 0 && chatsAt > entryAt, '入口在群聊列表上方')
+  assert.doesNotMatch(inboxSource, /\.filter\(item => item\.count > 0\)/, '常驻：没有待办也保留入口')
+  assert.match(appSource, /case 'inbox': return renderInbox\(\)/, 'render 路由 inbox')
+  assert.match(appSource, /'secrets', 'inbox'\]/, '收件箱是全局一级视图')
+  // 总监/运维项不进收件箱（分组只有四类）。
+  assert.doesNotMatch(inboxSource, /'(stale|reviews|outbox|wechat)'/, '总监/运维项不进收件箱')
+  // 旧提案红点撤除（收件箱徽标承担同一信号）。
   assert.doesNotMatch(appSource, /sidebar\.pendingProposals/, '总览bots 按钮上的旧红点撤除')
+})
+
+test('顶部审批/提问窄条撤除：收件箱是唯一入口，卡片组件保留给收件箱页复用', () => {
+  const clickSource = readFileSync(join(here, 'ui', 'modules', 'events-click.ts'), 'utf8')
+  assert.doesNotMatch(cardsSource, /approvalBannerView|questionBannerView|sidebarUserNeedsView/, 'cards.ts 窄条与气泡函数撤除')
+  assert.doesNotMatch(appSource, /approvalBannerView|questionBannerView|sidebarUserNeedsView|approvalPanelOpen|questionPanelOpen/, 'app.ts 挂载与展开态撤除')
+  assert.doesNotMatch(clickSource, /toggle-approvals|toggle-questions/, '点击分发撤除')
+  assert.match(cardsSource, /export \{ renderMessage, renderDirectMessagesCard, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyInbox, ensureNotifyPermission, approvalCardMarkup, questionCardMarkup,/, '卡片组件导出给收件箱页')
+  assert.match(clickSource, /case 'focus-approval':/, '收件箱里审批卡跳回会话的入口保留')
+  assert.match(clickSource, /case 'focus-question':/, '收件箱里提问卡跳回会话的入口保留')
 })
 
 test('设置变更历史卡撤除：读模型/action/视图全链不在，audit 写入保留', () => {

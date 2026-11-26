@@ -176,7 +176,7 @@ test('UI 接线：标记块存在、渲染/分发/样式接通、顺序正确', 
   }
 
   // ② 渲染接线：两处渲染都换 mergedChatMessages，且按钮行在 chat-messages 内、消息列表前。
-  for (const anchor of ['const messages = mergedChatMessages(state.data.messages ?? [])', 'const messages = mergedChatMessages(solo?.messages ?? [])']) {
+  for (const anchor of ['const messages = mergedChatMessages(latest)', 'const messages = mergedChatMessages(solo?.messages ?? [])']) {
     assert.ok(bare.includes(anchor), `渲染应使用合并视图：${anchor}`)
   }
   const btn = bare.indexOf('canLoadOlder(messages.length) ? loadOlderButton()')

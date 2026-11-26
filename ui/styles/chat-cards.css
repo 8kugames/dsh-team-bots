@@ -103,7 +103,7 @@
 .approval-pill.is-muted::before { background: var(--ink-3); }
 /* 消息流与通知容器的图片/图标尺寸兜底（DSHBOTS-108）：
    正文、审批摘要或宿主通知带进来的大图/大图标不能撑爆视口——限宽限高、图片保持比例。
-   既有 .message-bubble img 规则只管正文图片，这里补齐 svg 与通知容器（toast、待审横幅）。 */
+   既有 .message-bubble img 规则只管正文图片，这里补齐 svg 与通知容器（toast）。 */
 :is(.message-bubble, .comment-body, .message-system) svg {
     max-width: 120px;
     max-height: 120px;
@@ -117,76 +117,15 @@
     max-width: 64px;
     max-height: 64px;
 }
-:is(#toast-root, .toast, .approval-banner) img {
+:is(#toast-root, .toast) img {
     max-width: 100%;
     max-height: 120px;
     object-fit: contain;
 }
-:is(#toast-root, .toast, .approval-banner) svg {
+:is(#toast-root, .toast) svg {
     max-width: 24px;
     max-height: 24px;
 }
-/* 提问窄条（DSHBOTS-116）与审批窄条同形容器，沿用同一套尺寸兜底。 */
-.question-banner img {
-    max-width: 100%;
-    max-height: 120px;
-    object-fit: contain;
-}
-.question-banner svg {
-    max-width: 24px;
-    max-height: 24px;
-}
-/* 跨项目待审入口（DSHBOTS-102）：工作台顶部窄条 + 计数徽标 + 明细菜单。
-   0 待办时整条不渲染（approvalBannerView 返回空串），不占位、不撑高顶栏。 */
-.approval-banner {
-    position: relative;
-    padding: 6px 28px;
-    border-bottom: 1px solid var(--line);
-    background: var(--star-wash);
-}
-.approval-banner-btn {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 10px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--ink);
-    font: 500 var(--fs-small) var(--sans);
-    box-shadow: var(--shadow-btn);
-    cursor: pointer;
-    transition: box-shadow 0.13s ease;
-}
-.approval-banner-btn:hover { box-shadow: var(--shadow-btn-hover); }
-.approval-banner-btn > svg { flex: 0 0 auto; color: var(--star); }
-.approval-banner-text { flex: 0 0 auto; }
-.approval-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
-.approval-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 28px;
-    right: 28px;
-    z-index: 30;
-    max-height: 60vh;
-    overflow-y: auto;
-    /* 滚动区提升为合成层（DSHBOTS-187）：.approval-menu 经 .approval-banner 渲染在
-       .main-head（sticky + backdrop-filter: saturate(140%) blur(12px)）子树内，未合成的
-       纵向滚动走主线程，滚动期间祖先链被反复重录，带滤镜的顶栏表面随之被重算重栅格
-       （与 DSHBOTS-166 的 .modal-body 同机制）。提升后滚动内容在自有层位移，
-       顶栏滤镜不参与滚动期重录。 */
-    will-change: transform;
-    padding: 6px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    background: var(--surface);
-    box-shadow: var(--shadow-3);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-.approval-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
 /* 连续系统通知折叠行（B8/DSHBOTS-336）：Quiet by default——≥3 条连续系统通知折叠为一行，
    展开态按组键存 state.expandedCollapses（跨轮询持久），bot/user 消息不折叠。 */
 .msg-collapse-row {
@@ -215,7 +154,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-/* 来源定位行（DSHBOTS-240）：顶部跨会话审批通知的卡片多一行「来源群聊（项目名/KEY）+ 任务 ID/任务名」，
+/* 来源定位行（DSHBOTS-240）：收件箱里的审批卡多一行「来源群聊（项目名/KEY）+ 任务 ID/任务名」，
    让 owner 不跳转即可判断该批谁。群聊卡片不带这些字段，不渲染该行。 */
 .approval-source {
     display: flex;
@@ -225,7 +164,7 @@
     color: var(--ink-3);
 }
 .approval-source-scope { font-weight: 600; color: var(--ink-2); }
-/* 顶部通知展开态的审批卡（DSHBOTS-240）：与群内审批卡同组件，卡片整体可点跳转到对应会话，
+/* 收件箱里的审批卡（DSHBOTS-240）：与群内审批卡同组件，卡片整体可点跳转到对应会话，
    与卡内「允许一次/拒绝」按钮并存（按钮点击经 data-action 内层命中，不触发跳转）。 */
 .approval-menu-card {
     cursor: pointer;
@@ -362,79 +301,6 @@
     max-width: 64px;
     max-height: 64px;
 }
-/* 跨项目待答入口（DSHBOTS-116）：与审批窄条同构，0 待答时整条不渲染。 */
-.question-banner {
-    position: relative;
-    padding: 6px 28px;
-    border-bottom: 1px solid var(--line);
-    background: var(--accent-wash);
-}
-.question-banner-btn {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 10px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--ink);
-    font: 500 var(--fs-small) var(--sans);
-    box-shadow: var(--shadow-btn);
-    cursor: pointer;
-    transition: box-shadow 0.13s ease;
-}
-.question-banner-btn:hover { box-shadow: var(--shadow-btn-hover); }
-.question-banner-btn > svg { flex: 0 0 auto; color: var(--accent-text); }
-.question-banner-text { flex: 0 0 auto; }
-.question-banner-btn .chev { margin-left: auto; color: var(--ink-3); }
-.question-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 28px;
-    right: 28px;
-    z-index: 30;
-    max-height: 60vh;
-    overflow-y: auto;
-    /* 滚动区提升为合成层（DSHBOTS-187）：.question-menu 经 .question-banner 渲染在
-       .main-head（sticky + backdrop-filter: saturate(140%) blur(12px)）子树内，未合成的
-       纵向滚动走主线程，滚动期间祖先链被反复重录，带滤镜的顶栏表面随之被重算重栅格
-       （与 DSHBOTS-166 的 .modal-body 同机制）。提升后滚动内容在自有层位移，
-       顶栏滤镜不参与滚动期重录。 */
-    will-change: transform;
-    padding: 6px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    background: var(--surface);
-    box-shadow: var(--shadow-3);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-.question-menu-empty { padding: 8px 10px; color: var(--ink-3); font-size: var(--fs-small); }
-.question-menu-item {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    grid-template-areas:
-        "project project time"
-        "line line line"
-        "summary summary summary";
-    gap: 2px 8px;
-    padding: 8px 10px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--ink);
-    text-align: left;
-    cursor: pointer;
-}
-.question-menu-item:hover,
-.question-menu-item:focus-visible { background: var(--surface-2); }
-.question-menu-project { grid-area: project; font-weight: 600; font-size: var(--fs-small); }
-.question-menu-line { grid-area: line; color: var(--ink-2); font-size: var(--fs-small); }
-.question-menu-summary { grid-area: summary; color: var(--ink-3); font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-word; }
-.question-menu-time { grid-area: time; color: var(--accent-text); font: 600 var(--fs-caption) var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.question-menu-time.urgent { color: var(--star); }
 .task-chip-line {
     margin-top: 7px;
     display: flex;
@@ -471,4 +337,101 @@
     font: 500 var(--fs-small) var(--mono);
     line-height: 1.2; /* font 简写会把行高重置为 normal，显式拉齐 */
     color: var(--accent-text);
+}
+/* ---------- 收件箱页（inbox.js） ---------- */
+/* 页壳 .gsec-body 默认是 12 列网格；收件箱分组里是单列堆叠的事项卡。 */
+.inbox-page .gsec-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.inbox-page .gsec-head {
+    align-items: center;
+}
+/* 群聊列里卡片受 82% 列宽约束；收件箱是宽页，卡片铺满分组。 */
+.inbox-page .message-body-wrap {
+    max-width: none;
+}
+/* 提问卡的来源行（卡片自身不带来源）：左项目名，右「查看来源」。 */
+.inbox-item-source {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+}
+.inbox-item-source > span {
+    font-weight: 600;
+    color: var(--ink-2);
+}
+/* @owner 事项行：左侧正文按钮（来源 / 摘要 / 发出人与时间），右侧「标为已读」。 */
+.inbox-mention {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+}
+.inbox-mention-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+.inbox-mention-source {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+    font-weight: 600;
+}
+.inbox-mention-snippet {
+    color: var(--ink);
+    font-size: var(--fs-small);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.inbox-mention-meta {
+    color: var(--ink-3);
+    font-size: var(--fs-caption);
+}
+.inbox-mention:hover {
+    border-color: var(--line);
+}
+.inbox-mention .btn {
+    flex: 0 0 auto;
+}
+.inbox-empty {
+    padding: 48px 24px;
+}
+
+/* ---------- 群聊锚点窗口（收件箱跳到较早的消息） ---------- */
+/* 列表底部的「回到最新」入口，并告知锚点之后还有多少条没载入。 */
+.chat-anchor-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin: 8px 0;
+    color: var(--ink-3);
+    font-size: var(--fs-small);
+}
+/* 跳转命中的消息短暂高亮：inbox.js 的 scheduleChatFocusClear 到点摘掉类名。 */
+.message-row.message-focus > .message-body-wrap {
+    border-radius: 12px;
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    background: var(--accent-wash);
 }

@@ -27,7 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const FILTER_ELEMENTS = [
   { file: 'modal.css', sel: '.modal-backdrop', verdict: 'no-scroll-descendant-unpromoted', note: '后代滚动容器全部经 .modal-body 合成层覆盖（D-166；review.md rev166j：滚动期 .modal-backdrop 已不在 Paint 名单）' },
   { file: 'chat-images.css', sel: '.image-viewer-backdrop', verdict: 'structure-avoided', note: '与 .image-viewer-panel 互为兄弟，滚动容器 .image-viewer-body 在 panel 内（composer.js:451-458 模板）' },
-  { file: 'main.css', sel: '.main-head', verdict: 'no-scroll-descendant-unpromoted', note: '子树 3 个滚动容器 .tabbar/.approval-menu/.question-menu 均已各自提升（D-187）；顶栏自身保持不提升' },
+  { file: 'main.css', sel: '.main-head', verdict: 'no-scroll-descendant-unpromoted', note: '子树 1 个滚动容器 .tabbar 已提升（D-187）；顶栏自身保持不提升' },
   { file: 'global-config.css', sel: '.global-nav', verdict: 'no-scroll-descendant-unpromoted', note: '后代仅 4 个锚链接（settings.js renderGlobal），无滚动容器；自身保持不提升' },
   { file: 'chat-images.css', sel: '.msg-image-tile:hover .msg-image-thumb', verdict: 'leaf', note: 'img 叶子元素，无后代' },
 ]
@@ -49,8 +49,6 @@ const SCROLL_CONTAINERS = [
   { file: 'terminal.css', sel: '.terminal-history', verdict: 'no-filter-ancestor', note: '终端历史，祖先链无 filter' },
   { file: 'cards.css', sel: '.proposal-body', verdict: 'no-filter-ancestor', note: 'tasks.js 页面内容卡内，祖先链无 filter' },
   { file: 'frame.css', sel: '.tree', verdict: 'no-filter-ancestor', note: '.sidebar（sticky 无 filter）内' },
-  { file: 'chat-cards.css', sel: '.approval-menu', verdict: 'promoted', note: 'D-187：经 .approval-banner 渲染在 .main-head（backdrop-filter）子树' },
-  { file: 'chat-cards.css', sel: '.question-menu', verdict: 'promoted', note: 'D-187：经 .question-banner 渲染在 .main-head（backdrop-filter）子树' },
   { file: 'main.css', sel: '.tabbar', verdict: 'promoted', note: 'D-187：.main-head（backdrop-filter）子树内的横向滚动' },
   { file: 'usage.css', sel: '.usage-panel', verdict: 'no-filter-ancestor', note: '用量页卡内横向滚动兜底（d0aea80），页面内容槽位祖先链无 filter' },
 ]
@@ -157,13 +155,13 @@ test('定位轴登记表一致：新增 position:fixed/sticky 选择器必须先
   )
 })
 
-test('命中项保持合成化：提升清单恰好 4 项且规则体含 will-change: transform', async () => {
+test('命中项保持合成化：提升清单恰好 2 项且规则体含 will-change: transform', async () => {
   const rules = await collectRules()
   const byKey = new Map(rules.map((r) => [key(r), r]))
   const promoted = SCROLL_CONTAINERS.filter((e) => e.verdict === 'promoted')
   assert.deepEqual(
     promoted.map(key).sort(),
-    ['chat-cards.css:.approval-menu', 'chat-cards.css:.question-menu', 'main.css:.tabbar', 'modal.css:.modal-body'],
+    ['main.css:.tabbar', 'modal.css:.modal-body'],
     '提升清单只允许显式增删：新增命中按 D-166 口径提升滚动容器后，须同步此清单；移除提升须回到审计结论。',
   )
   for (const e of promoted) {
@@ -194,16 +192,11 @@ test('filter 元素保持不提升：.modal-backdrop/.main-head/.global-nav 不�
   }
 })
 
-test('DOM 锚：banner/tabbar 仍在 .main-head 子树、查看器 backdrop 与滚动体仍互为兄弟', async () => {
+test('DOM 锚：tabbar 仍在 .main-head 子树且不再内插待办窄条、查看器 backdrop 与滚动体仍互为兄弟', async () => {
   const appSrc = await readFile(join(ROOT, 'ui', 'app.js'), 'utf8')
-  // 两个 banner 直接内插 .main-head（app.js 渲染主模板），这是 .approval-menu/.question-menu
-  // 命中组合的结构前提；若横幅迁出 .main-head，须重审两条 promoted 判定。
-  assert.match(
-    appSrc,
-    /<div class="main-head">\s*\$\{approvalBannerView\(/,
-    'approval banner 应仍内插在 .main-head 模板内（.approval-menu 的命中前提）',
-  )
-  assert.match(appSrc, /\$\{questionBannerView\(pendingQuestions\)\}/, 'question banner 内插缺失')
+  // 待办窄条已由收件箱页取代：.main-head 子树里不再有审批/提问下拉（.approval-menu/.question-menu），
+  // 两条 promoted 判定随之撤销；若把滚动下拉重新放回 .main-head，须按 D-166 口径重审并登记。
+  assert.doesNotMatch(appSrc, /approvalBannerView|questionBannerView|approval-menu|question-menu/, '.main-head 子树不得再内插待办窄条')
   assert.match(appSrc, /<div class="tabbar"/, '.tabbar 应仍在 .main-head 模板内（app.js:377）')
   // 图片查看器：backdrop 与 panel 互为兄弟、滚动体在 panel 内——「结构上避开」的结构前提。
   const composerSrc = await readFile(join(ROOT, 'ui', 'modules', 'composer.js'), 'utf8')

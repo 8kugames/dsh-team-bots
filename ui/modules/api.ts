@@ -58,6 +58,8 @@ export async function markVisibleChatRead(data) {
   // 此时 data.messages 属于 data.project，仍用 state.projectId 会把别的项目标成已读。
   const projectId = data?.project?.id ?? state.projectId
   if (!projectId) return
+  // 锚点窗口（收件箱跳到较早的消息）不等于看到了最新消息：不上报，回到最新后再报。
+  if (state.chatAnchor?.key === `group:${projectId}`) return
   const messages = data?.messages ?? []
   let newest = ''
   for (const message of messages) {
@@ -125,6 +127,17 @@ export function preserveAnsweredQuestions(previous, next) {
   return next
 }
 
+// 收件箱已读的轮询竞态保护：标已读请求在途时，早于它的旧响应仍带这条事项，会把刚移出的
+// @owner 条目盖回收件箱。本会话已标已读的 id 一律从聚合里剔除（服务端处理完自然不再下发）。
+export function dropReadOwnerMentions(next, readIds = state.ownerMentionReadIds) {
+  const pending = next?.pendingOwnerMentions
+  if (!pending || !readIds?.size || !Array.isArray(pending.items)) return next
+  const items = pending.items.filter(item => !(item && readIds.has(item.id)))
+  if (items.length === pending.items.length) return next
+  next.pendingOwnerMentions = { ...pending, items, count: Math.max(0, Number(pending.count ?? 0) - (pending.items.length - items.length)) }
+  return next
+}
+
 export async function loadState(projectId = state.projectId, { quiet = false } = {}) {
   // 仅单聊场景携带 soloBotId，避免把单聊口径的 runs/memories 泄漏进群聊视图。
   // since 版本短路：带上上次响应的 version，服务端版本未变时只回十几字节的 unchanged，
@@ -135,7 +148,7 @@ export async function loadState(projectId = state.projectId, { quiet = false } =
     since: state.data?.version ?? undefined,
   }, { quiet })
   if (response?.unchanged) return state.data
-  const data = preserveAnsweredQuestions(state.data, preserveDecidedApprovals(state.data, response))
+  const data = dropReadOwnerMentions(preserveAnsweredQuestions(state.data, preserveDecidedApprovals(state.data, response)))
   state.data = data
   // 已读上报不挡渲染（DSHBOTS-167）：本地水位与徽标在调用瞬间即生效（函数体首段同步执行），
   // 服务端上报即发即走；失败由 markVisibleChatRead 内部回退 markedRead，下一轮轮询自动重报。

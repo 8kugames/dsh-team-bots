@@ -129,7 +129,7 @@ test('state 顶层 pendingApprovals 与项目解耦：A 项目视图也能看到
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('api 层暴露 approvals_pending，供顶部入口跨项目拉取', () => {
+test('api 层暴露 approvals_pending，供收件箱跨项目拉取', () => {
   assert.match(apiSource, /'approvals_pending'/, 'ACTIONS 必须登记新 action')
   assert.match(apiSource, /case 'approvals_pending':\s*return service\.approvalsPending\(\)/)
 })
@@ -150,13 +150,13 @@ test('全局待审计数只计 pending：后端 SQL 与前端徽标口径一致'
   assert.match(approvalsSource, /WHERE a\.status = 'pending'/, '聚合明细只取 pending')
   assert.match(approvalsSource, /COUNT\(\*\) AS count FROM approvals WHERE status = 'pending'/, '计数也只取 pending')
   assert.match(systemSource, /pendingApprovals:\s*this\.approvalsPending\(\)/, 'state 顶层挂全局聚合')
-  assert.match(uiSource, /const pendingApprovals = data\?\.pendingApprovals \?\? \{ count: 0, items: \[\] \}/)
+  assert.match(uiSource, /approvals: Number\(data\?\.pendingApprovals\?\.count \?\? 0\)/, '收件箱徽标取后端 count')
   assert.match(uiSource, /approvalBadgeText\(count\)/, '徽标用 count 而非 items 长度')
 })
 
-test('顶部入口：0 待办不渲染，计数 99+ 封顶', () => {
-  assert.match(uiSource, /function approvalBannerView\(pendingApprovals\)/)
-  assert.match(uiSource, /if \(count <= 0\) return ''/, '0 待办时整条不渲染')
+test('收件箱徽标：0 待办不出徽标，计数 99+ 封顶', () => {
+  assert.match(uiSource, /function inboxBadge\(count\)/)
+  assert.match(uiSource, /return Number\(count\) > 0 \? /, '0 待办时不出徽标')
   assert.equal(ux.approvalBadgeText(0), '0')
   assert.equal(ux.approvalBadgeText(3), '3')
   assert.equal(ux.approvalBadgeText(99), '99')
@@ -185,7 +185,7 @@ test('决策后立即渲染：不等待轮询，失败回滚并提示', () => {
   assert.ok(apiAt > renderAt, '先本地回显，再发请求')
   assert.doesNotMatch(block, /loadState/, '不得依赖 loadState 的 2.8s 轮询才回显')
   assert.match(block, /state\.data\?\.approvals/, '乐观更新项目内审批状态')
-  assert.match(block, /state\.data\?\.pendingApprovals/, '乐观更新顶部徽标')
+  assert.match(block, /state\.data\?\.pendingApprovals/, '乐观更新收件箱里的审批聚合')
   assert.match(block, /toast\(/, '请求失败必须有明确错误提示')
   assert.match(block, /rollback/, '失败必须回滚到决策前状态')
 })
@@ -221,7 +221,7 @@ test('轮询竞态保护：已决审批不被在途旧响应盖回 pending', () 
   assert.ok(match, 'api.js 必须导出 preserveDecidedApprovals')
   const preserve = new Function(`${match[0].replace(/^export /, '')}\nreturn preserveDecidedApprovals`)()
   const decided = { id: 'ap1', status: 'allowed', decided_at: '2026-11-03T00:00:00.000Z' }
-  // 旧响应仍报 pending：保留本地终态，顶部徽标不回升。
+  // 旧响应仍报 pending：保留本地终态，收件箱计数不回升。
   const stale = preserve(
     { approvals: [decided] },
     { approvals: [{ id: 'ap1', status: 'pending', decided_at: null }], pendingApprovals: { count: 1, items: [{ id: 'ap1' }] } },

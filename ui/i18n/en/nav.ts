@@ -32,6 +32,7 @@ export default {
   "viewTitle.terminal": "Terminal · ${name}",
   "viewTitle.terminalDefault": "Project terminal",
   "viewTitle.global": "Global settings",
+  "viewTitle.inbox": "Inbox",
   "viewTitle.channel": "Channels",
   "viewTitle.secrets": "Secrets",
   "viewTitle.projectSettings": "Project settings",
@@ -65,11 +66,9 @@ export default {
   "tree.archivedTitle": "Archived group chats",
   "tree.archived": "Archived",
   "tree.archivedEmpty": "No archived projects.",
+  // Above the group chat list: inbox
+  "sidebar.inbox": "Inbox",
   // Sidebar bottom
-  "sidebar.bubbleApprovals": "Approvals",
-  "sidebar.bubbleQuestions": "Questions",
-  "sidebar.bubbleProposals": "Proposals",
-  "sidebar.bubbleAria": "Items needing your attention",
   "sidebar.botsOverview": "Bots overview",
   "sidebar.pendingProposals": "Proposals awaiting approval",
   "sidebar.usage": "Usage stats",

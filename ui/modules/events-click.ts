@@ -8,11 +8,18 @@ import { renderModalLayer } from './modal-layer.js'
 import { parseGoalFields } from './task-goal.js'
 import { exportUsageCsv, switchUsageWindow, usageMode } from './usage.js'
 import { focusApprovalCard, focusQuestionCard, questionDraftSelection, questionSelectOption } from './cards.js'
+import { focusOwnerMention, markAllOwnerMentionsRead, markOwnerMentionRead } from './inbox.js'
 import { loadSoloDetail } from './chat.js'
 import { searchMemories } from './tasks.js'
 import { ARTIFACT_IMAGE, openFilePreview } from './file-preview.js'
 import { handleBoardAction } from './events-board.js'
 import { refresh, renderKeepingChatScroll, render, beginChatPending, endChatPending } from '../app.js'
+
+// 提问按 id 查表：项目内卡片优先，其次是收件箱的跨项目待答聚合。
+function questionById(questionId) {
+  return (state.data?.questions ?? []).find(entry => entry.id === questionId)
+    ?? (state.data?.pendingQuestions?.items ?? []).find(entry => entry.id === questionId)
+}
 
 async function refreshAfterTask(taskId) {
   await loadState(state.projectId, { quiet: true })
@@ -95,11 +102,6 @@ document.addEventListener('click', async (event) => {
         }
         break
       }
-      case 'toggle-approvals':
-        // 顶部「待处理审批」条：展开/收起跨项目明细。
-        state.approvalPanelOpen = !state.approvalPanelOpen
-        render()
-        break
       case 'toggle-collapse':
         // 连续系统通知折叠行（B8/DSHBOTS-336）：展开态按组键进 state.expandedCollapses（跨轮询持久）。
         {
@@ -112,20 +114,40 @@ document.addEventListener('click', async (event) => {
         }
         break
       case 'focus-approval': {
-        // 点明细跳到对应项目群聊并滚动到该审批卡（复用 focusApprovalCard）。
+        // 收件箱里点审批卡非按钮区：跳到对应会话并滚动到该审批卡（复用 focusApprovalCard）。
         const item = (state.data?.pendingApprovals?.items ?? []).find(entry => entry.id === target.dataset.approvalId)
         if (!item) break
-        state.approvalPanelOpen = false
         focusApprovalCard(item)
         break
       }
+      case 'focus-owner-mention': {
+        // 收件箱 @owner 事项：跳回群聊定位到那条消息（较早的消息按锚点载入）。
+        const item = (state.data?.pendingOwnerMentions?.items ?? []).find(entry => entry.id === target.dataset.messageId)
+        if (item) await focusOwnerMention(item)
+        break
+      }
+      case 'inbox-mark-read': {
+        const item = (state.data?.pendingOwnerMentions?.items ?? []).find(entry => entry.id === target.dataset.messageId)
+        if (item) await markOwnerMentionRead(item)
+        break
+      }
+      case 'inbox-mark-all-read':
+        await markAllOwnerMentionsRead()
+        break
+      case 'chat-back-to-latest':
+        // 离开锚点窗口：它与最新窗口之间的间隔不拼接，分片桶清空后回到底部。
+        state.chatAnchor = null
+        state.chatOlder = { key: null, items: [], hasMore: false, loading: false }
+        state.chatAtBottom = true
+        render()
+        break
       case 'question-option': {
         // 选项切换：只改本地草稿与按钮态，不整页重绘（保住同卡内其它输入框的焦点与内容）。
         const questionId = target.dataset.questionId
         const label = target.dataset.label
         if (!questionId || label === undefined) break
         const draft = state.questionDraft.get(questionId)
-        const question = (state.data?.questions ?? []).find(entry => entry.id === questionId)
+        const question = questionById(questionId)
         const item = question?.questions?.find(entry => entry.id === target.dataset.itemId)
         if (!draft || !item) break
         const selectedOf = questionSelectOption(draft, item, label, target.dataset.multi === '1')
@@ -143,7 +165,7 @@ document.addEventListener('click', async (event) => {
         // 提交回答：本地草稿 + 卡片内补充说明合成宿主 {answers:[{id,selected,custom}]}。
         const questionId = target.dataset.questionId
         if (!questionId || state.questionAnswering.has(questionId)) break
-        const question = (state.data?.questions ?? []).find(entry => entry.id === questionId)
+        const question = questionById(questionId)
         if (!question || question.status !== 'pending') break
         const items = Array.isArray(question.questions) ? question.questions : []
         const draft = state.questionDraft.get(questionId) ?? { selected: new Map(), custom: {} }
@@ -173,8 +195,8 @@ document.addEventListener('click', async (event) => {
         try {
           // 用后端返回的终态覆盖乐观值（answered_at 以后端为准）。
           const updated = await api('question_answer', { questionId, answers }, { quiet: true })
+          // 仅项目内卡片回写项目列表；收件箱里答的跨项目条目已从待答聚合移出，不往当前项目列表里推。
           if (updated && index >= 0) list[index] = updated
-          else if (updated) list.push(updated)
           state.questionDraft.delete(questionId)
         } catch (error: any) {
           // 回滚到提交前状态，避免「界面已答、后端仍 pending」的假成功。
@@ -191,16 +213,10 @@ document.addEventListener('click', async (event) => {
         }
         break
       }
-      case 'toggle-questions':
-        // 顶部「待回答提问」条：展开/收起跨项目明细。
-        state.questionPanelOpen = !state.questionPanelOpen
-        render()
-        break
       case 'focus-question': {
-        // 点明细跳到对应项目群聊并滚动到该提问卡（复用 focusQuestionCard）。
+        // 收件箱里点「查看来源」：跳到对应会话并滚动到该提问卡（复用 focusQuestionCard）。
         const entry = (state.data?.pendingQuestions?.items ?? []).find(item => item.id === target.dataset.questionId)
         if (!entry) break
-        state.questionPanelOpen = false
         focusQuestionCard(entry)
         break
       }
@@ -241,6 +257,7 @@ document.addEventListener('click', async (event) => {
           closeAutocomplete()
         }
         state.replyTo = null // 单聊无引用语义，跨上下文不留引用条
+        state.chatAnchor = null
         state.chatMode = 'solo'
         state.view = 'chat'
         // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。

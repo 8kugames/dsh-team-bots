@@ -32,6 +32,7 @@ export default {
   "viewTitle.terminal": "终端 · ${name}",
   "viewTitle.terminalDefault": "项目终端",
   "viewTitle.global": "全局配置",
+  "viewTitle.inbox": "收件箱",
   "viewTitle.channel": "通道",
   "viewTitle.secrets": "密钥管理",
   "viewTitle.projectSettings": "项目设置",
@@ -65,11 +66,9 @@ export default {
   "tree.archivedTitle": "已归档群聊",
   "tree.archived": "已归档",
   "tree.archivedEmpty": "没有已归档项目。",
+  // 侧栏群聊列表上方：收件箱
+  "sidebar.inbox": "收件箱",
   // 侧栏底部
-  "sidebar.bubbleApprovals": "提权审批",
-  "sidebar.bubbleQuestions": "问答",
-  "sidebar.bubbleProposals": "进化审批",
-  "sidebar.bubbleAria": "需要你处理的事项",
   "sidebar.botsOverview": "总览bots",
   "sidebar.pendingProposals": "有待审批提案",
   "sidebar.usage": "用量统计",

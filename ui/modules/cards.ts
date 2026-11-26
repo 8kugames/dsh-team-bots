@@ -169,7 +169,6 @@ const QUESTION_STATUS = {
 }
 const QUESTION_STATE_ICON = { pending: 'message', answered: 'check', expired: 'close', timeout: 'clock' }
 const QUESTION_URGENT_MS = 15_000
-const questionBadgeText = (count) => (Number(count) > 99 ? '99+' : String(Number(count) || 0))
 function questionExpiresMs(expiresAt) {
   const parsed = Date.parse(expiresAt)
   return Number.isFinite(parsed) ? parsed : 0
@@ -306,41 +305,7 @@ function renderQuestionCard(message) {
 }
 // ===== question-card:end =====
 
-// 跨项目待答入口（DSHBOTS-116）：与审批窄条同构，只计 pending，99+ 封顶。
-function questionBannerSummary(item) {
-  const items = Array.isArray(item.questions) ? item.questions : []
-  const first = items[0]?.question
-  if (!first) return ''
-  return items.length > 1 ? `${first}${t("（共")} ${items.length} ${t("问）")}` : first
-}
-function questionBannerView(pendingQuestions) {
-  const count = Number(pendingQuestions?.count ?? 0)
-  if (count <= 0) return ''
-  const items = pendingQuestions?.items ?? []
-  return `<div class="question-banner">
-          <button class="question-banner-btn" data-action="toggle-questions" aria-expanded="${state.questionPanelOpen ? 'true' : 'false'}">
-            ${icon('message')}<span class="question-banner-text">${t("待回答提问")}</span>
-            <span class="unread-badge">${questionBadgeText(count)}</span>
-            ${icon('chevron', `chev${state.questionPanelOpen ? ' open' : ''}`)}
-          </button>
-          ${state.questionPanelOpen ? `<div class="question-menu" role="menu">
-            ${items.length === 0 ? `<div class="question-menu-empty">${t("暂无明细")}</div>` : items.map(item => `
-              <button class="question-menu-item" role="menuitem" data-action="focus-question" data-question-id="${attr(item.id)}">
-                <span class="question-menu-project">${esc(cardScopeLabel(item))}</span>
-                <span class="question-menu-line">${esc(item.botName || 'Bot')}</span>
-                <span class="question-menu-summary">${esc(questionBannerSummary(item))}</span>
-                <span class="question-menu-time" data-expires="${questionExpiresMs(item.expires_at)}">${esc(formatQuestionCountdown(questionRemainingFrom(questionExpiresMs(item.expires_at), item.remainingMs)))}</span>
-              </button>`).join('')}
-          </div>` : ''}
-        </div>`
-}
-
-// 顶部窄条的来源标签（DSHBOTS-218）：单聊会话没有项目归属，来源列显示「单聊」，不显示项目名。
-function cardScopeLabel(item) {
-  return item.scope === 'solo' ? t("单聊") : (item.projectName || t("（未命名项目）"))
-}
-
-// 点通知：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把提问卡滚动到可视区。
+// 收件箱点「查看来源」：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把提问卡滚动到可视区。
 // 乐观切换（与侧栏 select-project 同构，DSHBOTS-167）：目标视图的 state 组装在大库上要数秒，
 // 没有骨架时点击像死点（用户报「点了跳不过去」）——先收面板出骨架，数据到位再落卡片并滚动。
 function focusQuestionCard(question) {
@@ -377,35 +342,17 @@ function focusQuestionCard(question) {
     })
 }
 
-// 跨项目待审入口（DSHBOTS-102）：工作台顶部一条窄条，只计 pending，99+ 封顶。
-// 展开后直接渲染审批卡（DSHBOTS-240）：与群内审批卡同一组件、同一五态骨架，含「允许一次/拒绝」
-// 按钮，可在通知内直接决策；点卡片非按钮区仍跳到对应会话（与内联按钮并存）。
-function approvalBannerView(pendingApprovals) {
-  const count = Number(pendingApprovals?.count ?? 0)
-  if (count <= 0) return ''
-  const items = pendingApprovals?.items ?? []
-  return `<div class="approval-banner">
-          <button class="approval-banner-btn" data-action="toggle-approvals" aria-expanded="${state.approvalPanelOpen ? 'true' : 'false'}">
-            ${icon('alert')}<span class="approval-banner-text">${t("待处理审批")}</span>
-            <span class="unread-badge">${approvalBadgeText(count)}</span>
-            ${icon('chevron', `chev${state.approvalPanelOpen ? ' open' : ''}`)}
-          </button>
-          ${state.approvalPanelOpen ? `<div class="approval-menu">
-            ${items.length === 0 ? `<div class="approval-menu-empty">${t("暂无明细")}</div>` : items.map(item => `
-              <div class="approval-menu-card" data-action="focus-approval" data-approval-id="${attr(item.id)}">
-                ${approvalCardMarkup(item, state.approvalDeciding?.has(item.id) ?? false, true)}
-              </div>`).join('')}
-          </div>` : ''}
-        </div>`
-}
-
-
-// desktop-notify:start 审批请求桌面通知（DSHBOTS-86，tests/desktop-notify.test.js 抽取此块断言）
+// desktop-notify:start 桌面通知（tests/desktop-notify.test.ts 抽取此块断言）
+// 收件箱四类事项（提权审批 / 待回答提问 / 进化审批 / 总监 @owner）有新到达即弹系统通知。
+// 默认开启：浏览器权限仍是前提，首次用户手势内申请一次；用户在配置页关掉后不再申请。
 const NOTIFY_KEY = 'dshb:desktop-notify'
-// 会话级基线：上一轮见过的 pending 审批 id（判增量）与已弹过通知的审批 id（每条只弹一次）。
-let notifyScope = null
-const knownPendingIds = new Set()
-const notifiedApprovals = new Set()
+// 通知正文上限：通知栏只露得出前一两行，超长截断。
+const NOTIFY_BODY_MAX_CHARS = 120
+// 会话级基线与去重：已入基线的收件箱事项 key，与已弹过通知的 key（每条只弹一次）。
+let inboxBaselineReady = false
+const knownInboxIds = new Set()
+const notifiedInboxIds = new Set()
+let notifyPrompted = false
 
 // file:// 与非 localhost 的 http 页面拿不到 Notification（非安全上下文），统一按不支持降级。
 function notifySupported() {
@@ -424,8 +371,9 @@ function notifyStorePref(value) {
   try { localStorage.setItem(NOTIFY_KEY, value) } catch {}
 }
 
+// 默认开启：用户没在配置页关过即视为开；浏览器权限未授予时开关事实上是关的。
 function notifyOn() {
-  return notifyPermission() === 'granted' && notifyStoredPref() === 'granted'
+  return notifyPermission() === 'granted' && notifyStoredPref() !== 'denied'
 }
 
 // 开关（用户点击手势内）：开 = requestPermission 并把结果持久到 localStorage；关 = 只写 'denied' 记忆，不动浏览器权限。
@@ -440,16 +388,35 @@ async function toggleDesktopNotify() {
   render()
 }
 
+// 首次手势内申请浏览器权限（requestPermission 必须由用户手势触发）：权限未表态且用户没关过才申请，
+// 每个页面生命周期只申请一次；被拒或被用户关掉后不再打扰。
+function notifyPermissionPending() {
+  return notifySupported() && Notification.permission === 'default' && notifyStoredPref() !== 'denied'
+}
+
+async function ensureNotifyPermission() {
+  if (notifyPrompted || !notifyPermissionPending()) return
+  notifyPrompted = true
+  const permission = await Notification.requestPermission()
+  notifyStorePref(permission === 'granted' ? 'granted' : 'denied')
+}
+
 // 开关显示态（全局配置页「界面」卡）：不支持或被浏览器拒绝时置灰，并附一句原因。
 function notifyToggleView() {
   const permission = notifyPermission()
   if (permission === 'unsupported') return { on: false, disabled: true, label: t("不可用"), hint: t("当前环境不支持桌面通知（需 HTTPS 或 localhost）。") }
   if (permission === 'denied') return { on: false, disabled: true, label: t("已被浏览器拒绝"), hint: t("在浏览器站点设置中允许通知后刷新页面。") }
-  if (notifyOn()) return { on: true, disabled: false, label: t("已开启"), hint: t("页面不可见或失焦时弹系统通知，需保持本页开启。") }
-  return { on: false, disabled: false, label: permission === 'granted' ? t("已关闭") : t("未开启"), hint: t("开启后新审批到达时弹系统桌面通知。") }
+  if (notifyOn()) return { on: true, disabled: false, label: t("已开启"), hint: t("收件箱有新事项时弹系统桌面通知，需保持本页开启。") }
+  if (notifyStoredPref() === 'denied') return { on: false, disabled: false, label: t("已关闭"), hint: t("开启后收件箱有新事项时弹系统桌面通知。") }
+  return { on: false, disabled: false, label: t("待授权"), hint: t("默认开启：首次点击页面时浏览器会询问通知权限，允许后生效。") }
 }
 
-// 通知正文与群聊审批卡片同一口径：<bot 名> 请求使用 <工具>：<说明>；超长截断。
+function notifyClip(text) {
+  const value = String(text ?? '')
+  return value.length > NOTIFY_BODY_MAX_CHARS ? `${value.slice(0, NOTIFY_BODY_MAX_CHARS - 1)}…` : value
+}
+
+// 通知正文与群聊审批卡片同一口径：<bot 名> 请求使用 <工具>：<说明>。
 function approvalNotifyBody(approval) {
   const head = `${approval.botName ?? 'Bot'} ${t("请求使用")} ${approval.tool_name ?? t("工具")}`
   const summary = approval.display_reason || approval.reason || ''
@@ -464,10 +431,82 @@ function approvalNotifyBody(approval) {
   const text = source
     ? t("${source}｜${head}：${summary}", { source: source, head: head, summary: summary })
     : (summary ? t("${head}：${summary}", { head: head, summary: summary }) : head)
-  return text.length > 120 ? `${text.slice(0, 119)}…` : text
+  return notifyClip(text)
 }
 
-// 点通知：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把审批卡滚动到可视区。
+// 收件箱四类事项归一成通知条目 { id, tag, title, body }：只取待处理态，审批正文沿用群聊卡同口径。
+function inboxNotifyEntries(data) {
+  const entries = []
+  for (const item of data?.pendingApprovals?.items ?? []) {
+    if (item?.status === 'pending') entries.push({ id: `approval:${item.id}`, tag: `approval-${item.id}`, title: t("DSH 审批请求"), body: approvalNotifyBody(item) })
+  }
+  for (const item of data?.pendingQuestions?.items ?? []) {
+    if (item?.status !== 'pending') continue
+    const first = Array.isArray(item.questions) ? item.questions[0]?.question ?? '' : ''
+    const source = item.projectName || (item.scope === 'solo' ? t("单聊") : '')
+    const name = item.botName ?? 'Bot'
+    entries.push({
+      id: `question:${item.id}`,
+      tag: `question-${item.id}`,
+      title: t("DSH 待回答提问"),
+      body: notifyClip(source ? t("${source}｜${name} 提问：${first}", { source, name, first }) : t("${name} 提问：${first}", { name, first })),
+    })
+  }
+  for (const item of data?.proposals ?? []) {
+    if (item?.status === 'pending') {
+      const title = item.title ?? ''
+      entries.push({
+        id: `proposal:${item.id}`,
+        tag: `proposal-${item.id}`,
+        title: t("DSH 进化审批"),
+        body: notifyClip(item.botName ? t("${name} 提交了提案：${title}", { name: item.botName, title }) : t("提交了提案：${title}", { title })),
+      })
+    }
+  }
+  for (const item of data?.pendingOwnerMentions?.items ?? []) {
+    const source = item.projectKey ? (item.projectName ? `${item.projectName} · ${item.projectKey}` : item.projectKey) : (item.projectName ?? '')
+    const name = item.senderName ?? 'Bot'
+    const snippet = item.snippet ?? ''
+    entries.push({
+      id: `owner:${item.id}`,
+      tag: `owner-${item.id}`,
+      title: t("DSH 总监 @owner"),
+      body: notifyClip(source ? t("${source}｜${name} @owner：${snippet}", { source, name, snippet }) : t("${name} @owner：${snippet}", { name, snippet })),
+    })
+  }
+  return entries
+}
+
+// 收件箱点「查看来源」：聚焦窗口并打开收件箱，事项在那里统一处理或跳到来源。
+function openInboxFromNotify() {
+  state.view = 'inbox'
+  render()
+  void refresh()
+}
+
+// 轮询后比较收件箱增量：通知开启且页面不可见或失焦时，对新到达的事项各弹一次（tag 防同条重复弹，
+// 会话级去重保证每条只弹一次）。首拍只记基线：页面加载时已存在的事项不算新到达。
+// 页面可见且聚焦时同样记录基线——用户当场看得到侧栏徽标，不再补弹。
+function notifyInbox(data, { enabled = notifyOn(), hidden = document.hidden, focused = document.hasFocus() } = {}) {
+  const entries = inboxNotifyEntries(data)
+  const fresh = inboxBaselineReady ? entries.filter(entry => !knownInboxIds.has(entry.id)) : []
+  for (const entry of entries) knownInboxIds.add(entry.id)
+  inboxBaselineReady = true
+  if (!enabled || (!hidden && focused)) return
+  for (const entry of fresh) {
+    if (notifiedInboxIds.has(entry.id)) continue
+    notifiedInboxIds.add(entry.id)
+    try {
+      const notification = new Notification(entry.title, { body: entry.body, tag: entry.tag })
+      notification.onclick = () => { window.focus(); openInboxFromNotify(); notification.close() }
+    } catch (error) {
+      console.warn('[dsh-team] desktop notification failed', entry.tag, error)
+    }
+  }
+}
+// desktop-notify:end
+
+// 收件箱点「查看来源」：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把审批卡滚动到可视区。
 // 乐观切换与 focusQuestionCard 同构：先出骨架给点击即时反馈，数据到位再滚动定位。
 function focusApprovalCard(approval) {
   if (!approval) return
@@ -503,34 +542,6 @@ function focusApprovalCard(approval) {
     })
 }
 
-// 轮询后比较 pending 增量：通知开启且页面不可见或失焦时，对新增 pending 审批各弹一次
-// （tag=approval-<id> 防同卡重复弹；换项目/换会话时基线重置，新视图从未见过的存量 pending
-// 作为新审批弹出，notifiedApprovals 会话级去重保证每条只弹一次）。页面可见且聚焦时同样记录
-// 基线——用户当场看到卡片，不再补弹。
-function notifyNewApprovals(approvals, { enabled = notifyOn(), hidden = document.hidden, focused = document.hasFocus() } = {}) {
-  const pending = (approvals ?? []).filter(item => item?.status === 'pending')
-  // 基线指纹跟当前视图（项目群聊/单聊），不跟列表内容：单聊视图的列表是项目条目与 solo 条目
-  // 的拼接且按时间倒序，新审批一到 pending[0] 的归属就翻转，用列表当指纹会让基线反复误清、
-  // 已看过的审批被当新审批补弹。视图不变则指纹稳定。
-  const scope = state.chatMode === 'solo' ? `solo:${state.soloBotId ?? ''}` : `project:${state.projectId ?? ''}`
-  if (scope !== notifyScope) {
-    notifyScope = scope
-    knownPendingIds.clear()
-  }
-  const fresh = pending.filter(item => !knownPendingIds.has(item.id)).map(item => item.id)
-  for (const item of pending) knownPendingIds.add(item.id)
-  if (!enabled || (!hidden && focused)) return
-  for (const approval of pending) {
-    if (!fresh.includes(approval.id) || notifiedApprovals.has(approval.id)) continue
-    notifiedApprovals.add(approval.id)
-    try {
-      const notification = new Notification(t("DSH 审批请求"), { body: approvalNotifyBody(approval), tag: `approval-${approval.id}` })
-      notification.onclick = () => { window.focus(); focusApprovalCard(approval); notification.close() }
-    } catch {}
-  }
-}
-// desktop-notify:end
-
 function renderMessage(message) {
   if (message.kind === 'approval') return renderApprovalCard(message)
   if (message.kind === 'question') return renderQuestionCard(message)
@@ -557,7 +568,9 @@ function renderMessage(message) {
   const chipsLine = trajChip || sessChip || taskChip ? `<div class="task-chip-line">${trajChip}${sessChip}${taskChip}</div>` : ''
   // 纯图片消息没有正文：气泡留空不渲染，只留附图块（避免出现一个空框）。
   const bubbleHtml = message.body || quoteBlock ? `<div class="message-bubble">${quoteBlock}${richText(message.body, mdChatScope())}</div>` : ''
-  return `<div class="message-row ${isUser ? 'user' : ''}">
+  // data-message-id 是收件箱跳转的定位锚点；message-focus 是跳转后短暂高亮的行。
+  const focused = state.chatFocusId === message.id ? ' message-focus' : ''
+  return `<div class="message-row${isUser ? ' user' : ''}${focused}" data-message-id="${attr(message.id)}">
     ${isUser ? '' : avatar(bot ?? { name: message.senderName, color: 'gray' })}
     <div class="message-body-wrap">
       <div class="message-meta"><strong title="${attr(message.senderName)}">${esc(message.senderName)}</strong><span>${esc(formatTime(message.created_at))}</span>${quoteBtn}${copyBtn}</div>
@@ -598,19 +611,4 @@ function renderDirectMessagesCard() {
 }
 
 
-// 用户需办气泡（DSHBOTS-339）：侧栏「总览bots」上方，问答/提权审批/进化审批三类需用户
-// 干预事项的常驻信号；全 0 返回空串（Quiet by default）。点击复用顶部审批/提问窄条展开
-// 与进化页导航；总监处理项与运维项不在此弹（分属任务板/全局设置页/通道页）。
-export function sidebarUserNeedsView({ approvals, questions, proposals }) {
-  const items = [
-    { count: Number(approvals ?? 0), label: t('sidebar.bubbleApprovals'), markup: 'data-action="toggle-approvals"' },
-    { count: Number(questions ?? 0), label: t('sidebar.bubbleQuestions'), markup: 'data-action="toggle-questions"' },
-    { count: Number(proposals ?? 0), label: t('sidebar.bubbleProposals'), markup: 'data-action="nav" data-view="evolution"' },
-  ].filter(item => item.count > 0)
-  if (items.length === 0) return ''
-  return `<div class="sidebar-bubbles" role="status" aria-label="${t('sidebar.bubbleAria')}">
-          ${items.map(item => `<button class="sidebar-bubble" ${item.markup}><span>${esc(item.label)}</span><span class="unread-badge">${item.count > 99 ? '99+' : item.count}</span></button>`).join('')}
-        </div>`
-}
-
-export { renderMessage, renderDirectMessagesCard, questionBannerView, approvalBannerView, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyNewApprovals, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, formatApprovalRemaining, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio }
+export { renderMessage, renderDirectMessagesCard, toggleDesktopNotify, focusQuestionCard, focusApprovalCard, notifyInbox, ensureNotifyPermission, approvalCardMarkup, questionCardMarkup, approvalBadgeText, questionDraftOf, questionDraftSelection, questionSelectOption, notifyToggleView, notifyOn, approvalUrgent, approvalRemainingFrom, formatApprovalCountdown, approvalProgressRatio, questionRemainingFrom, questionUrgent, formatQuestionCountdown, questionProgressRatio }

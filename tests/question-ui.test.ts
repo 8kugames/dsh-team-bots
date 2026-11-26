@@ -143,7 +143,7 @@ test('renderQuestionCard 以 state.data.questions 为准，查不到退化为纯
   assert.match(ui.renderQuestionCard({ kind: 'question', question_id: 'missing', body: '兜底' }), /message-system/)
 })
 
-test('CSS：提问卡与窄条只用语义 token，无字面颜色', () => {
+test('CSS：提问卡只用语义 token，无字面颜色', () => {
   const block = stylesSource.slice(
     stylesSource.indexOf('.question-card'),
     stylesSource.indexOf('.task-chip-line'),
@@ -151,7 +151,7 @@ test('CSS：提问卡与窄条只用语义 token，无字面颜色', () => {
   assert.ok(block.length > 200, '提问卡 CSS 区块存在')
   assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}\b/, '不得出现字面十六进制颜色')
   assert.doesNotMatch(block, /\brgba?\(/, '不得出现 rgb/rgba 字面颜色')
-  for (const selector of ['.question-card', '.question-option', '.question-custom', '.question-banner']) {
+  for (const selector of ['.question-card', '.question-option', '.question-custom']) {
     assert.ok(block.includes(selector), `${selector} 有样式`)
   }
 })
