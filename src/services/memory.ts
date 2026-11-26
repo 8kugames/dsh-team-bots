@@ -10,8 +10,10 @@ import { maskSecrets } from '../secrets.js'
 import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '../util.js'
 import { criterionId, readTaskGoal } from './task-goal.js'
 
-// 记忆上限（DSHBOTS-339）：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶后新增被拒，
-// 须先整理到 MEMORY_COMPACT_TO 条以内才恢复放行（滞回，避免在阈值附近反复开关）。team 作用域不限。
+// 记忆上限（DSHBOTS-339）：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶先自动轮换，
+// 归档最久未更新的可轮换条目（bot 写的，总监/用户亲手写的除外）腾位放行；可轮换条目耗尽后才
+// 拒写并置滞回标志 memory_full:<scope_type>:<scope_id>，须整理到 MEMORY_COMPACT_TO 条以内才
+// 恢复放行（滞回，避免在阈值附近反复开关）。team 作用域不限。
 export const MEMORY_CAP = 64
 // 恢复线（DSHBOTS-360）：触顶后须整理到 ≤MEMORY_COMPACT_TO 条才恢复新增（滞回带宽度 10 条）。
 // 取 MEMORY_CAP−10：滞回带要宽过单轮最大突发，否则一轮自动沉淀就能把刚整理出的余量再次吃满。
@@ -19,6 +21,9 @@ export const MEMORY_CAP = 64
 // 等于强制腰斩，过苛：
 // 61 条需清 28 条才解锁，恢复线本身成了新的阻塞源。
 export const MEMORY_COMPACT_TO = MEMORY_CAP - 10
+// 触顶拒写文案的固定补充：走到拒写说明可轮换条目已耗尽，剩下的都是人亲手写的。
+export const MEMORY_CAP_REJECT_SUFFIX = '剩余条目均为用户或项目总监明确写入，不参与自动轮换。'
+
 // 单条记忆篇幅上限（owner 补充）：content 不得超过 256 字。
 export const MEMORY_MAX_CHARS = 256
 
@@ -363,16 +368,68 @@ export const memoryMethods = {
     }
     return `${label}记忆已达 ${count}/${MEMORY_CAP} 条上限，新增被拒绝；请先去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗（同主题用 team_memory_write 覆盖写）、融合（合并相近条目），整理到 ≤${MEMORY_COMPACT_TO} 条后再新增。`
   },
+  // ── 记忆容量轮换（DSHBOTS-339）──
+  // 把作用域 active 条数降到 target 以内：归档最久未更新的可轮换条目（ORDER BY updated_at ASC,
+  // created_at ASC）。可轮换判定用正向条件：created_by 是 bot:，且不是「项目域里由项目总监亲手写的
+  // 条目」——总监亲手写在项目域的是约定和禁令，轮换掉会让成员 Bot 之后无人可查；run: 开头是审查
+  // 自动抽取，即使是总监名下的审查产出也不算亲手决定。用户写的条目一律不参与轮换。
+  evictColdMemories(scopeType, scopeId, target, reason) {
+    const need = this.memoryActiveCount(scopeType, scopeId) - target
+    if (need <= 0) return []
+    const clauses = ['scope_type = ?', 'scope_id = ?', "status = 'active'", "created_by LIKE 'bot:%'"]
+    const params: string[] = [scopeType, scopeId]
+    if (scopeType === 'project') {
+      const project = this.store.get('SELECT owner_bot_id FROM projects WHERE id = ?', scopeId)
+      if (project?.owner_bot_id) {
+        clauses.push("NOT (created_by = ? AND source NOT LIKE 'run:%')")
+        params.push(`bot:${project.owner_bot_id}`)
+      }
+    }
+    const rows = this.store.all(
+      `SELECT * FROM memories WHERE ${clauses.join(' AND ')} ORDER BY updated_at ASC, created_at ASC LIMIT ?`,
+      ...params, need,
+    )
+    if (!rows.length) return []
+    const now = nowIso()
+    const evicted: Array<{ id: string, topic: string }> = []
+    this.store.transaction(() => {
+      for (const row of rows) {
+        this.store.run("UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?", now, row.id)
+        this.store.run(
+          'INSERT INTO memory_events(id, memory_id, action, actor_type, actor_id, before_text, after_text, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',
+          id('mevt'), row.id, 'archived', 'system', 'system', row.content, now,
+        )
+        evicted.push({ id: row.id, topic: row.topic })
+      }
+      this.audit({ type: 'system', id: 'system' }, 'memory.evict', 'memory', `${scopeType}:${scopeId}`, { scope: scopeType, reason, evicted })
+    })
+    this.logger.warn?.('dsh-team: 记忆容量轮换 %s:%s 归档 %d 条（reason=%s）', scopeType, scopeId, evicted.length, reason)
+    return evicted
+  },
+
+  // bot/project 作用域 active 行硬顶 MEMORY_CAP；触顶先自动轮换腾位，可轮换条目耗尽后才拒写并置
+  // 滞回标志 memory_full:<scope_type>:<scope_id>，锁定带内的写入先尝试轮换自愈，仍超线才拒；
+  // 整理到 MEMORY_COMPACT_TO 条以内清标志放行。team 作用域不参与计数。
   assertMemoryCapacity(scopeType, scopeId) {
     if (scopeType !== 'bot' && scopeType !== 'project') return
-    const count = this.memoryActiveCount(scopeType, scopeId)
+    let count = this.memoryActiveCount(scopeType, scopeId)
     const flagKey = `memory_full:${scopeType}:${scopeId}`
     if (count >= MEMORY_CAP) {
-      this.store.setSetting(flagKey, '1')
-      throw conflict(this.memoryCapacityMessage(scopeType, scopeId, count))
+      // 只给本次写入腾一个位置，热集尽量保持满的；腾不出（可轮换已耗尽）才拒写。
+      this.evictColdMemories(scopeType, scopeId, MEMORY_CAP - 1, 'cap')
+      count = this.memoryActiveCount(scopeType, scopeId)
+      if (count >= MEMORY_CAP) {
+        this.store.setSetting(flagKey, '1')
+        throw conflict(`${this.memoryCapacityMessage(scopeType, scopeId, count)}${MEMORY_CAP_REJECT_SUFFIX}`)
+      }
     }
     if (this.store.setting(flagKey) === null) return
-    if (count > MEMORY_COMPACT_TO) throw conflict(this.memoryCapacityMessage(scopeType, scopeId, count, true))
+    if (count > MEMORY_COMPACT_TO) {
+      // 锁定带自愈：还有可轮换条目就先降到恢复线，下一次写入不再被锁。
+      this.evictColdMemories(scopeType, scopeId, MEMORY_COMPACT_TO, 'latched')
+      count = this.memoryActiveCount(scopeType, scopeId)
+      if (count > MEMORY_COMPACT_TO) throw conflict(`${this.memoryCapacityMessage(scopeType, scopeId, count, true)}${MEMORY_CAP_REJECT_SUFFIX}`)
+    }
     this.store.run('DELETE FROM settings WHERE key = ?', flagKey)
   },
 
@@ -660,7 +717,7 @@ export const memoryMethods = {
       `SELECT * FROM memories
         WHERE scope_type = ? AND scope_id = ? AND ${statusFilter}
           ${keyword ? 'AND topic LIKE ?' : ''}
-        ORDER BY updated_at DESC LIMIT ?`,
+        ORDER BY (status = 'active') DESC, updated_at DESC LIMIT ?`,
       scopeType, scopeId, ...(keyword ? [like] : []), limitN,
     )
     return rows.map(row => this.memoryView(row))

@@ -317,6 +317,12 @@ test('list 支持 include_archived 列出归档条目，pending 等仍不可见'
 
     const explicitFalse = t.service.memoryListFromBot(t.ownerSession, { scope: 'project', include_archived: false })
     assert.deepEqual(explicitFalse.map((r: { id: string }) => r.id), activeOnly.map((r: { id: string }) => r.id), '显式 false 与缺省等价')
+
+    // 轮换会把 updated_at 刷成当前时间，列表排序须让 active 恒排在 archived 前面。
+    t.store.run("UPDATE memories SET updated_at = ? WHERE topic = '旧归档口径'", new Date(Date.now() + 60_000).toISOString())
+    const reordered = t.service.memoryListFromBot(t.ownerSession, { scope: 'project', include_archived: true })
+    assert.equal(reordered[0].status, 'active', 'active 条目应排在 archived 前面')
+    assert.equal(reordered[reordered.length - 1].topic, '旧归档口径', '归档条目应排在末尾')
   } finally {
     await t.close()
   }

@@ -314,7 +314,7 @@ export function installTeamTools(ctx, service) {
         bot: { type: 'string', description: 'With scope=bot, target that bot (exact bot name or id) instead of yourself — use it to inspect a member bot\'s memories when its scope hits the cap' },
         topic: { type: 'string', description: 'Optional substring filter on the topic label' },
         limit: { type: 'integer', description: 'Max entries to return (1-200, default 50)' },
-        include_archived: { type: 'boolean', description: 'Archived entries no longer enter recall; set true to also list them (e.g. entries archived by a cleanup). Default false' },
+        include_archived: { type: 'boolean', description: 'Archived entries no longer enter recall; set true to also list them (entries archived by a cleanup or rotated out automatically when the scope hit its cap). Default false' },
       },
       additionalProperties: false,
     },

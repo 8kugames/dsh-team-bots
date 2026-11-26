@@ -6,7 +6,9 @@
 // n 锁定带文案如实（DSHBOTS-355，61 条不得谎称已达上限）；o 触顶态文案回归；p 放行/拒绝边界矩阵；
 // q 锁定带覆盖写放行；r 现场序列回归（64→62→61 全链路）；u 审查通用知识准入（覆写/日志 topic 降待审/空产出不沉淀）；
 // s logger %s 插值（根 index.ts createLogger）；
-// t 锁定期内审查拒写 → run_events reviewed 事件带拒因（DSHBOTS-360）。
+// t 锁定期内审查拒写 → run_events reviewed 事件带拒因（DSHBOTS-360）；
+// w 触顶自动轮换放行与保护口径（DSHBOTS-339 轮换）：w1 触顶轮换放行；w2 用户/总监亲手写条目不轮换；
+// w3 全受保护仍拒写并拼固定说明；w4 锁定带自愈；w5 轮换按最近更新时间。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -59,7 +61,7 @@ async function setup() {
     try { store.close() } catch {}
     await rm(root, { recursive: true, force: true })
   }
-  return { root, store, service, director, project, actor, seed, archive, close }
+  return { root, store, service, director, dev: devView, project, actor, seed, archive, close }
 }
 
 test('a) 播满 64 条后第 65 条被拒，文案含作用域、条数与整理指引', async () => {
@@ -708,5 +710,102 @@ test('s) logger %s 插值：warn("%s", x) 完成插值并保留 [dsh-team] 前�
     assert.ok(captured.includes('[dsh-team] 无占位符的普通日志'), `无占位符日志不受影响：${captured}`)
   } finally {
     console.warn = original
+  }
+})
+
+// 触顶自动轮换（DSHBOTS-339 轮换）共用造数：成员 Bot 身份写项目域，updated_at 逐条错开。
+const seedEvictable = (t: any, n: number, offsetMs = 0) => {
+  for (let i = 0; i < n; i++) {
+    const row = t.service.createMemory({
+      scopeType: 'project', scopeId: t.project.id, topic: `可轮换 ${i}`, content: `内容 ${i}`,
+      source: 'run:run_test', createdBy: `bot:${t.dev.id}`, actor: { type: 'bot', id: t.dev.id },
+    })
+    t.store.run('UPDATE memories SET updated_at = ? WHERE id = ?', new Date(Date.UTC(2026, 0, 1) + offsetMs + i * 1000).toISOString(), row.id)
+  }
+}
+
+const evictableStatus = (t: any, topic: string) =>
+  t.store.get('SELECT status FROM memories WHERE topic = ? AND scope_id = ?', topic, t.project.id).status
+
+test('w1) 触顶轮换放行：归档最久未更新的可轮换条目，active 保持 64，留痕齐全', async () => {
+  const t = await setup()
+  try {
+    const flagKey = `memory_full:project:${t.project.id}`
+    seedEvictable(t, MEMORY_CAP)
+    const created = t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '第 65 条', content: '内容', source: 'run:run_test', createdBy: `bot:${t.dev.id}`, actor: { type: 'bot', id: t.dev.id } })
+    assert.ok(created.id, '触顶应自动轮换放行')
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_CAP, 'active 条数应保持 64')
+    assert.equal(evictableStatus(t, '可轮换 0'), 'archived', '最久未更新的可轮换 0 应被归档')
+    assert.equal(evictableStatus(t, '可轮换 1'), 'active', '可轮换 1 应仍在')
+    assert.equal(t.store.setting(flagKey), null, '轮换放行不得置滞回标志')
+    const event = t.store.get("SELECT * FROM memory_events WHERE action = 'archived' AND memory_id = (SELECT id FROM memories WHERE topic = '可轮换 0')")
+    assert.ok(event, '被轮换条目应有 archived 事件')
+    assert.equal(`${event.actor_type}:${event.actor_id}`, 'system:system', '事件 actor 应为 system')
+    const auditRow = t.store.get("SELECT * FROM audit_log WHERE action = 'memory.evict'")
+    assert.ok(auditRow, '应有一笔 memory.evict 审计')
+    assert.ok(String(auditRow.data_json).includes('可轮换 0'), '审计 data_json 应列出被轮换条目')
+  } finally {
+    await t.close()
+  }
+})
+
+test('w2) 用户与总监亲手写的条目不参与轮换', async () => {
+  const t = await setup()
+  try {
+    seedEvictable(t, MEMORY_CAP)
+    t.store.run("UPDATE memories SET created_by = 'user:u1' WHERE topic = '可轮换 0'")
+    t.store.run("UPDATE memories SET created_by = ?, source = 'session:s' WHERE topic = '可轮换 1'", `bot:${t.director.id}`)
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '第 65 条', content: '内容', source: 'run:run_test', createdBy: `bot:${t.dev.id}`, actor: { type: 'bot', id: t.dev.id } })
+    assert.equal(evictableStatus(t, '可轮换 0'), 'active', '用户写的条目不得轮换')
+    assert.equal(evictableStatus(t, '可轮换 1'), 'active', '总监亲手写的条目不得轮换')
+    assert.equal(evictableStatus(t, '可轮换 2'), 'archived', '被归档的应是可轮换 2')
+  } finally {
+    await t.close()
+  }
+})
+
+test('w3) 全是受保护条目时仍然拒写，文案含固定说明且不归档、置滞回标志', async () => {
+  const t = await setup()
+  try {
+    const flagKey = `memory_full:project:${t.project.id}`
+    t.seed('project', t.project.id, MEMORY_CAP)
+    assert.throws(
+      () => t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '第 65 条', content: '内容', actor: t.actor }),
+      (error: any) => error.status === 409 && String(error.message).includes('不参与自动轮换'),
+      '可轮换耗尽后应拒写并拼固定说明',
+    )
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), MEMORY_CAP, '不得归档任何条目')
+    assert.equal(t.store.setting(flagKey), '1', '拒写应置滞回标志')
+  } finally {
+    await t.close()
+  }
+})
+
+test('w4) 锁定带自愈：标志在、55 条时轮换到 54 后放行并清标志', async () => {
+  const t = await setup()
+  try {
+    const flagKey = `memory_full:project:${t.project.id}`
+    seedEvictable(t, 55)
+    t.store.run('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)', flagKey, '1')
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '第 56 条', content: '内容', source: 'run:run_test', createdBy: `bot:${t.dev.id}`, actor: { type: 'bot', id: t.dev.id } })
+    assert.equal(t.service.memoryActiveCount('project', t.project.id), 55, '应先轮换到 54 再写入变 55')
+    assert.equal(evictableStatus(t, '可轮换 0'), 'archived', '被归档的应是可轮换 0')
+    assert.equal(t.store.setting(flagKey), null, '放行后滞回标志应清除')
+  } finally {
+    await t.close()
+  }
+})
+
+test('w5) 轮换按最近更新时间：updated_at 刷新后归档的是此刻最久的可轮换 1', async () => {
+  const t = await setup()
+  try {
+    seedEvictable(t, 55)
+    t.store.run("UPDATE memories SET updated_at = ? WHERE topic = '可轮换 0'", new Date(Date.UTC(2026, 5, 1)).toISOString())
+    t.store.run('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)', `memory_full:project:${t.project.id}`, '1')
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '第 56 条', content: '内容', source: 'run:run_test', createdBy: `bot:${t.dev.id}`, actor: { type: 'bot', id: t.dev.id } })
+    assert.equal(evictableStatus(t, '可轮换 1'), 'archived', '被归档的应是此刻最久的可轮换 1')
+    assert.equal(evictableStatus(t, '可轮换 0'), 'active', '刷新过 updated_at 的可轮换 0 应保留')
+  } finally {
+    await t.close()
   }
 })
