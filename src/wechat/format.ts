@@ -119,7 +119,7 @@ export function noOwner(project) {
   return `项目【${project.name || project.key}】没有可用的总监 Bot，无法直达；可在消息里 @成员名 指定接收人。`
 }
 
-/** 项目外导演通道不可达（DSHBOTS-258）：通道异常，语义与「需要用户选项目」不同。 */
+/** 项目外导演通道不可达：通道异常，语义与「需要用户选项目」不同。 */
 export function noDirector() {
   return '导演通道暂不可用，请稍后再试或到工作台处理。'
 }
@@ -165,7 +165,7 @@ export function wechatToken(rowId) {
 }
 
 /**
- * 提问转发微信（DSHBOTS-215）：群聊提问卡片的微信镜像。
+ * 提问转发微信：群聊提问卡片的微信镜像。
  * 带短 token 与回复格式，管理员的答复经 commands 的「答 <token> …」路由回原问题。
  * 微信出站一律纯文本、不用 emoji（D-211 实机验收驳回口径，重做卡 D-217）。
  */
@@ -183,7 +183,7 @@ export function questionCard(projectName, botName, items, token) {
   return lines.join('\n')
 }
 
-/** 审批转发微信（DSHBOTS-215）：审批卡片的微信镜像，允许/拒绝经「批 <token> …」路由回原审批。 */
+/** 审批转发微信：审批卡片的微信镜像，允许/拒绝经「批 <token> …」路由回原审批。 */
 export function approvalCard(projectName, botName, toolName, reason, token) {
   return [
     `【审批】${botName}（${projectName}）`,

@@ -1,23 +1,23 @@
-// ui/i18n/en/settings.ts —— English copy dictionary: settings domain (DSHBOTS-233)
+// ui/i18n/en/settings.ts —— English copy dictionary: settings domain
 export default {
-  // Global config: UI language (DSHBOTS-162); auto = follow the DSH host setting
+  // Global config: UI language ; auto = follow the DSH host setting
   "settings.uiLanguage": "UI language",
   "settings.uiLanguageAuto": "Auto",
   "settings.uiLanguageZh": "中文",
   "settings.uiLanguageEn": "English",
   "settings.uiLanguageHint": "Auto = follow the DSH host language setting.",
   "settings.uiLanguageSave": "Save language",
-  // Project config: code hygiene (DSHBOTS-172): per-file line limit
+  // Project config: code hygiene : per-file line limit
   "settings.codeHygieneTitle": "Code hygiene",
   "settings.codeHygieneLimit": "Per-file line limit",
   "settings.codeHygieneHint": "Agreed maximum lines per source file (default 800, 0 = disable). After every run, the project workspace is scanned; any file exceeding 110% of the limit triggers a system directive in the group chat asking the director to schedule a split task.",
-  // Global configuration page (DSHBOTS-204)
+  // Global configuration page
   "global.title": "Global configuration",
   "global.navLabel": "Configuration sections",
   "global.groupPref": "Preferences",
   "global.groupRuntime": "Runtime & budget",
   "global.groupAbout": "About & system status",
-  // Team instruction segments (B1/DSHBOTS-324)
+  // Team instruction segments
   "global.groupPrompts": "Team instructions",
   "global.promptSegmentsTitle": "Team instructions",
   "global.promptSegmentsMeta": "Applies to new sessions after saving; running sessions are not interrupted",
@@ -34,7 +34,7 @@ export default {
   "global.promptSegSelfcheckHint": "Delivery reports must carry reproducible verification evidence",
   "global.promptSegmentsHint": "Instruction text ships with releases: when an upgrade changes a default, customized segments get a \"Default updated\" badge — keep your text or switch to the new default.",
   "global.save": "Save",
-  // Approval auto-allow rules (DSHBOTS-365)
+  // Approval auto-allow rules
   "global.approvalPermissionsTitle": "Auto-allow permissions",
   "global.approvalRulesMeta": "${count} rule(s)",
   "global.approvalRulesEmpty": "No rules yet: matching escalations still land in the approval card.",
@@ -445,7 +445,7 @@ export default {
   "项目：": "Project: ",
   "预算": "Budget",
   "高": "High",
-  // DSHBOTS-246: keys added by the full t() literal audit
+  // DSHBOTS-246: keys added by the full t literal audit
   "（当前": " (current ",
   "（可选）": " (optional)",
   "（不做物理删除）。": " (no physical deletion).",

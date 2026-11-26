@@ -20,13 +20,13 @@ export const state = {
   // composer 待发图片：按上下文分键（与草稿同口径），值为 { key, name, mediaType, bytes, data, previewUrl } 数组。
   // 预览走 blob: URL（不进 DOM），base64 只留在 state 里随 send_message 发出。
   pendingImages: {},
-  // 聊天历史分片（DSHBOTS-33）：state 轮询只回最后 200 条，更早的经 messages_page 手动加载后存这里。
+  // 聊天历史分片：state 轮询只回最后 200 条，更早的经 messages_page 手动加载后存这里。
   // key 与当前会话对齐（group:<projectId> / solo:<botId>），切会话即失效重置；items 与轮询结果按 id 去重合并。
   chatOlder: { key: null, items: [], hasMore: false, loading: false },
   // 折叠面板（<details data-panel>）展开态的 key 集合，toggle 时增删；render 全量重建后据此恢复 open 属性。
-  // 任务面板的分组（task-group:<status>）与子任务（task-children:<taskId>）也走这套 key（DSHBOTS-58）。
+  // 任务面板的分组（task-group:<status>）与子任务（task-children:<taskId>）也走这套 key。
   openPanels: new Set(),
-  // 连续系统通知折叠的展开态（B8/DSHBOTS-336）：组键=首条消息 id，跨轮询稳定。
+  // 连续系统通知折叠的展开态：组键=首条消息 id，跨轮询稳定。
   expandedCollapses: new Set(),
   // 收件箱里正在决策的 approval id 集合（决策中禁用按钮，防重复点击）。
   approvalDeciding: new Set(),
@@ -44,14 +44,14 @@ export const state = {
   ac: null,
   busy: 0,
   chatAtBottom: true,
-  // 渲染窗口闸门：render() 全量重建 DOM 期间为 true，此时到达的聊天滚动事件一律忽略（DSHBOTS-72）。
+  // 渲染窗口闸门：render 全量重建 DOM 期间为 true，此时到达的聊天滚动事件一律忽略。
   rendering: false,
-  // 轮询渲染闸门（DSHBOTS-123）：composerInputAt=最近一次 composer 输入事件时间戳，
+  // 轮询渲染闸门：composerInputAt=最近一次 composer 输入事件时间戳，
   // composerComposing=IME 组词中；二者共同决定轮询整页渲染是否为「正在输入」让路。
   composerInputAt: 0,
   composerComposing: false,
   taskFilter: { status: 'all', assignee: 'all', search: '', timeRange: '7d' },
-  // 任务面板组内排序（D-63）：默认完成时间新→旧；六档口径见 TASK_SORTS。
+  // 任务面板组内排序：默认完成时间新→旧；六档口径见 TASK_SORTS。
   taskSort: 'completed_desc',
   // 用量页三态：global=侧栏「用量统计」的全局视图；domain=群聊 NAV 用量 tab（本群）；solo=单聊 NAV 用量 tab（本 bot）。
   usageMode: 'global',
@@ -69,7 +69,7 @@ export const state = {
   tree: { chats: true, bots: true, archived: false },
   // 群聊已读水位：`<projectId>:<最新消息时间>`，用于避免重复上报已读。
   markedRead: null,
-  // 乐观切换（DSHBOTS-167）：点击侧栏后先出视图骨架，数据到位再落真实列表。
+  // 乐观切换：点击侧栏后先出视图骨架，数据到位再落真实列表。
   // 值为目标上下文 { projectId, chatMode, soloBotId, seq }；renderView 在「已加载数据 ≠ 目标上下文」
   // 时出骨架，数据到位自动落回（对 2.8s 轮询自愈，不会卡骨架）。
   // seq 是取数序号：连续点击时先发的旧响应不得清掉后一次的骨架标志。
@@ -82,7 +82,7 @@ export const state = {
   terminalPollTimer: null,
 }
 
-// 枚举表键化：值在访问时经 t() 解析（getter），模块加载不固化语言；状态码保持英文原样。
+// 枚举表键化：值在访问时经 t 解析（getter），模块加载不固化语言；状态码保持英文原样。
 const keyed = (prefix, keys) => {
   const table = {}
   for (const key of keys) {
@@ -93,7 +93,7 @@ const keyed = (prefix, keys) => {
 
 export const STATUS = keyed('status.', ['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled'])
 export const STATUS_ORDER = ['backlog', 'todo', 'in_progress', 'blocked', 'in_review', 'done', 'canceled']
-// 任务分组默认全展开（DSHBOTS-58）：预置循环在 app.js 入口执行（taskGroupKey 定义在
+// 任务分组默认全展开：预置循环在 app.js 入口执行（taskGroupKey 定义在
 // app.js 侧）——这里不许引用 app.js 的局部函数：模块顶层 ReferenceError 会让整张
 // 模块图加载失败，工作台卡在「正在连接团队空间」。
 export const PRIORITY = keyed('priority.', ['urgent', 'high', 'medium', 'low', 'none'])
@@ -104,7 +104,7 @@ export const BOT_STATUS = keyed('botStatus.', ['active', 'paused', 'archived'])
 export const RUN_STATUS = keyed('runStatus.', ['queued', 'running', 'succeeded', 'failed', 'canceled'])
 // 调度页「正在调度」列表用的运行类型名；未知 kind 直接显示原值，不静默吞掉。
 export const RUN_KIND = keyed('runKind.', ['task_run', 'owner_task_run', 'solo_chat_run', 'chat_run', 'dm_run', 'dm_reply', 'memory_review'])
-// 运行状态/种类的渲染标签（与上面枚举同源）：表内有键走 t()，表外原样回落。
+// 运行状态/种类的渲染标签（与上面枚举同源）：表内有键走 t，表外原样回落。
 export function runStatusLabel(status: string) {
   return RUN_STATUS[status] ? t('runStatus.' + status) : status
 }

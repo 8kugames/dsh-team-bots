@@ -7,7 +7,7 @@ import { renderMessageImages } from './composer.js'
 import { refresh, panelAttrs, render, beginChatPending, endChatPending, chatContextPending } from '../app.js'
 
 // ===== approval-card:start 审批卡片（DSHBOTS-32 UI）=====
-// ===== approval-ux:start 审批交互（DSHBOTS-102）=====
+// ===== approval-ux:start 审批交互=====
 // 超时可见：秒级倒计时 + 临期危险色。剩余时间从 expires_at 反推，
 // 1s 定时器只改 .approval-clock 文本，不整卡重绘（2.8s 轮询整卡重绘会打断跳动感）。
 const APPROVAL_URGENT_MS = 15_000
@@ -35,7 +35,7 @@ function approvalExpiresMs(expiresAt) {
 }
 // ===== approval-ux:end =====
 
-// ===== approval-v2:start 审批卡片视觉规格 V2（DSHBOTS-108）=====
+// ===== approval-v2:start 审批卡片视觉规格 V2=====
 // 五态：pending（唯一强调态）/ allowed / rejected / timeout / cancelled。
 // pending 之外四态统一走「已决」排版：无倒计时无按钮、正文降 --ink-2、卡片回中性底；
 // 红色只出现在 rejected 的左侧条与 pill 小点，其余中性。
@@ -89,7 +89,7 @@ function approvalTargetChip(approval, summary) {
   const guessed = approvalPath(summary)
   return guessed ? { text: guessed, title: guessed } : null
 }
-// 来源定位行（DSHBOTS-240）：仅当条目带来源信息时出现——顶部跨会话审批通知需要
+// 来源定位行：仅当条目带来源信息时出现——顶部跨会话审批通知需要
 // 「来源群聊（项目名/KEY）+ 任务 ID + 任务名」定位，让 owner 不跳转即可判断该批谁。
 // 群聊卡片不传 showSource，来源行整段不出现（同会话里项目名冗余，任务信息由群上下文承担）。
 function approvalSourceLine(approval) {
@@ -117,7 +117,7 @@ function approvalCardMarkup(approval, deciding = false, showSource = false) {
   const urgent = approvalUrgent(approval.remainingMs)
   const target = approvalTargetChip(approval, summary)
   const decidedBy = String(approval.decided_by ?? '')
-  // 免审回显（DSHBOTS-365）：auto:rule:* 前缀区分自动/人工放行，decided_by 进 pill title 可溯源。
+  // 免审回显：auto:rule:* 前缀区分自动/人工放行，decided_by 进 pill title 可溯源。
   const autoAllowed = status === 'allowed' && decidedBy.startsWith('auto:')
   const pillTone = status === 'allowed' ? 'is-allowed' : status === 'rejected' ? 'is-rejected' : 'is-muted'
   const pillText = status === 'allowed' && approval.decided_at
@@ -421,7 +421,7 @@ function notifyClip(text) {
 function approvalNotifyBody(approval) {
   const head = `${approval.botName ?? 'Bot'} ${t("请求使用")} ${approval.tool_name ?? t("工具")}`
   const summary = approval.display_reason || approval.reason || ''
-  // 来源定位（DSHBOTS-240）：桌面通知（气泡态）正文前缀带来源群聊（项目名/KEY）+ 任务 ID/任务名，
+  // 来源定位：桌面通知（气泡态）正文前缀带来源群聊（项目名/KEY）+ 任务 ID/任务名，
   // 让 owner 在通知里即可判断该批谁；无来源字段时保持原文案逐字不变。
   const source = [
     approval.projectKey

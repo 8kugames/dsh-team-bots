@@ -15,9 +15,9 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'create_memory', 'update_memory', 'delete_memory', 'search_memories', 'approve_memory', 'reject_memory',
   'create_proposal', 'decide_proposal', 'evaluate_proposal', 'promote_proposal',
   'approval_decide', 'approvals_pending',
-  // 免审规则编辑面（DSHBOTS-365）：读走 state.approvalRules，此处备用直查；写仅 type=user。
+  // 免审规则编辑面：读走 state.approvalRules，此处备用直查；写仅 type=user。
   'approval_rules', 'update_approval_rules',
-  // 完全权限总开关（DSHBOTS-366）：读走 state.approvalFullAccess；写仅 type=user。
+  // 完全权限总开关：读走 state.approvalFullAccess；写仅 type=user。
   'approval_full_access', 'update_approval_full_access',
   'question_answer', 'questions_pending',
   'sync_skills', 'skill_detail', 'toggle_skill', 'set_skill_binding', 'rollback_skill',
@@ -105,7 +105,7 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.createTask({ ...payload, projectId: required(payload.projectId, 'projectId') }, actor)
     case 'update_task':
       return service.updateTask(required(payload.taskId, 'taskId'), payload.patch ?? payload, actor)
-    // 写范围修改（DSHBOTS-151）：owner-only 由服务层守卫（actor.type!=='user' 拒绝），
+    // 写范围修改：owner-only 由服务层守卫（actor.type!=='user' 拒绝），
     // 与 task_review_delegate 同口径；write_scopes/writeScopes 双口径收参（与 createTask 一致）。
     case 'task_update_scopes':
       return service.taskUpdateScopes(required(payload.taskId, 'taskId'), payload.write_scopes ?? payload.writeScopes, actor)
@@ -117,7 +117,7 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.addComment(required(payload.taskId, 'taskId'), required(payload.body, 'body'), actor)
     case 'task_detail':
       return service.taskDetail(required(payload.taskId, 'taskId'))
-    // 验收核验委派（DSHBOTS-107）：owner-only 由服务层守卫（actor.type!=='user' 拒绝）；
+    // 验收核验委派：owner-only 由服务层守卫（actor.type!=='user' 拒绝）；
     // HTTP 入口 actor 恒为本地用户，与终端同一口径。
     case 'task_review_delegate':
       return service.taskReviewDelegate(required(payload.taskId, 'taskId'), actor)
@@ -182,13 +182,13 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       return service.decideApproval(required(payload.approvalId, 'approvalId'), required(payload.decision, 'decision'), actor)
     case 'approvals_pending':
       return service.approvalsPending()
-    // 免审规则（DSHBOTS-365）：bot 写免审规则由服务层守卫拒绝（actor.type!=='user' forbidden），
+    // 免审规则：bot 写免审规则由服务层守卫拒绝（actor.type!=='user' forbidden），
     // 与 task_update_scopes 同口径。
     case 'approval_rules':
       return service.approvalRulesView()
     case 'update_approval_rules':
       return service.updateApprovalRules(payload.rules, actor)
-    // 完全权限总开关（DSHBOTS-366）：服务层守卫 actor.type!=='user' 拒绝 bot 自批。
+    // 完全权限总开关：服务层守卫 actor.type!=='user' 拒绝 bot 自批。
     case 'approval_full_access':
       return { enabled: service.fullAccessAllEnabled() }
     case 'update_approval_full_access':
@@ -232,7 +232,7 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
       // B2/DSHBOTS-325：UI 携带读取时的 settings_revision，不匹配即 409（乐观并发）。
       return service.updateSettings(payload.patch ?? payload, actor, payload.revision)
     case 'update_prompt_segment':
-      // 可编辑提示词段（B1/DSHBOTS-324）：空文本=恢复默认；保存经预算校验并审计。
+      // 可编辑提示词段：空文本=恢复默认；保存经预算校验并审计。
       return service.updatePromptSegment(required(payload.segment, 'segment'), String(payload.text ?? ''), actor)
     case 'export_usage_csv':
       return {
@@ -249,7 +249,7 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
             : service.allChatStores()),
       }
     case 'usage_window':
-      // 用量时间窗快照（DSHBOTS-121）：按需取，不进 state 轮询。
+      // 用量时间窗快照：按需取，不进 state 轮询。
       return service.usageWindow(payload.projectId ?? null, payload.soloBotId ?? null, payload.window ?? '30d')
     case 'outbox':
       return service.outboxView()
@@ -264,26 +264,26 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'wechat_status':
       return service.wechatStatus()
     case 'set_wechat_channel_enabled':
-      // 通道页微信启停开关（DSHBOTS-334）：settings 显式值落库并即时 mount/unmount。
+      // 通道页微信启停开关：settings 显式值落库并即时 mount/unmount。
       return service.setWechatChannelEnabled(Boolean(payload.enabled), actor)
     case 'feishu_status':
-      // 飞书通道状态（DSHBOTS-327）：只读（phase/管理员 ou_id/bot 与 appId），无凭据明文。
+      // 飞书通道状态：只读（phase/管理员 ou_id/bot 与 appId），无凭据明文。
       // UI 主路径走 state 轮询里的 state.feishu，本动作供备用直查。
       return service.feishuStatus()
     case 'save_feishu_credentials':
-      // 通道页保存飞书凭据（DSHBOTS-334）：加密落库 + 触发通道重连；响应只有脱敏视图。
+      // 通道页保存飞书凭据：加密落库 + 触发通道重连；响应只有脱敏视图。
       return service.saveFeishuCredentials({ appId: payload.appId, appSecret: payload.appSecret }, actor)
     case 'clear_feishu_credentials':
-      // 通道页清除飞书凭据（DSHBOTS-334）：删除保存的凭据对并回到未绑定态。
+      // 通道页清除飞书凭据：删除保存的凭据对并回到未绑定态。
       return service.clearFeishuCredentials(actor)
     case 'notify_receipts':
-      // 外发收据流水（A3/DSHBOTS-323）：sent/gone 终态可追责，通道未启用时 available:false。
+      // 外发收据流水：sent/gone 终态可追责，通道未启用时 available:false。
       return service.notifyReceiptsView(Number(payload.limit) || 50)
     case 'wechat_triggers':
-      // 入站触发留痕（B4-①/DSHBOTS-328）：每条入站事件的处置与原因，回答「为什么没触发」。
+      // 入站触发留痕：每条入站事件的处置与原因，回答「为什么没触发」。
       return service.wechatTriggersView(Number(payload.limit) || 50)
     case 'external_triggers':
-      // 外部触发留痕（B4-②/DSHBOTS-335）：GitHub 源候选/过滤/失败流水。
+      // 外部触发留痕：GitHub 源候选/过滤/失败流水。
       return service.externalTriggersView(Number(payload.limit) || 50)
     case 'wechat_login':
       return service.wechatBeginLogin()

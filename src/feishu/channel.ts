@@ -96,10 +96,10 @@ export function stripMentionPlaceholders(text) {
 }
 
 /** 传输层接口：进程内官方 SDK 实现（见 createSdkTransport），测试全 stub。
- *  - botInfo(): 取机器人身份（appId/botId）。
- *  - reply(messageId, text, uuid): 回复一条消息，uuid 即幂等键。
- *  - startEvents({onEvent,onReady,onError}): 起长连接收事件。
- *  - stop(): 断开长连接。 */
+ * - botInfo: 取机器人身份（appId/botId）。
+ * - reply(messageId, text, uuid): 回复一条消息，uuid 即幂等键。
+ * - startEvents({onEvent,onReady,onError}): 起长连接收事件。
+ * - stop: 断开长连接。 */
 export interface FeishuTransport {
   botInfo: () => Promise<{ appId?: string; botId: string; brand?: string }>
   reply: (messageId: string, text: string, uuid: string) => Promise<{ messageId?: string | null }>
@@ -237,7 +237,7 @@ export async function createSdkTransport({ appId, appSecret, log = console as un
  * 架构：传输层=进程内 @larksuiteoapi/node-sdk（WSClient 长连接收事件 +
  * im.v1.message.reply 出站，uuid 幂等），入站模型（LRU 去重/TOFU 认主/群@门禁/
  * lane 编码/generation 门禁）与传输无关，原样保留。
- * 凭据生效优先级（DSHBOTS-334）：通道页保存（secrets 表 SecretBox 加密）> 服务端
+ * 凭据生效优先级：通道页保存（secrets 表 SecretBox 加密）> 服务端
  * 注入（cordis.patch.yml / env）；secret 明文只在内存交给 SDK，日志/状态一律不回显。
  */
 export class FeishuChannel {
@@ -287,9 +287,9 @@ export class FeishuChannel {
   }
 
   /**
-   * 生效凭据（DSHBOTS-334）：通道页保存（secrets 表）> 服务端注入（patch.yml/env）。
-   * 解析收敛在 service.feishuEffectiveCredentials；无 service（单测桩）时回退 config。
-   */
+ * 生效凭据：通道页保存（secrets 表）> 服务端注入（patch.yml/env）。
+ * 解析收敛在 service.feishuEffectiveCredentials；无 service（单测桩）时回退 config。
+ */
   resolveCredentials() {
     const viaService = this.service?.feishuEffectiveCredentials?.()
     if (viaService) return viaService
@@ -316,7 +316,7 @@ export class FeishuChannel {
   async start() {
     if (!this.enabled()) return
     this.store.purgeSentOutbox?.(OUTBOX_RETENTION_DAYS)
-    // 重连前先换新中止器：stop() 已 abort 旧信号，旧连接轮次的事件按旧信号丢弃。
+    // 重连前先换新中止器：stop 已 abort 旧信号，旧连接轮次的事件按旧信号丢弃。
     this.consumeAbort = new AbortController()
     const { appId, appSecret } = this.resolveCredentials()
     if (!appId || !appSecret) {

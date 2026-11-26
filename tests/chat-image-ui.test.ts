@@ -104,7 +104,7 @@ const { ensureComposerImageInput } = new Function(
   'IMAGE_ACCEPT', `${singletonBlock}\nreturn { ensureComposerImageInput }`,
 )(IMAGE_ACCEPT)
 
-// 迷你 DOM：body 子树（单例住处）+ app 子树（render() 全量重建时整体换新）。
+// 迷你 DOM：body 子树（单例住处）+ app 子树（render 全量重建时整体换新）。
 function fakeDoc() {
   const world = { bodyChildren: [], appChildren: [] }
   let created = 0
@@ -134,7 +134,7 @@ test('文件选择跨渲染周期不丢：单例挂 body 只建一次，任意�
   assert.equal(first.multiple, true)
   assert.equal(first.hidden, true)
 
-  // 连续多轮 render() 全量重建（app 子树换新，body 不动）：取到的仍是同一节点。
+  // 连续多轮 render 全量重建（app 子树换新，body 不动）：取到的仍是同一节点。
   for (let i = 0; i < 3; i += 1) {
     doc.rerender()
     assert.equal(ensureComposerImageInput(doc), first, `第 ${i + 1} 轮重建后仍取到同一节点`)

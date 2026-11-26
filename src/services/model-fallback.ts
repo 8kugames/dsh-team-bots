@@ -32,7 +32,7 @@ export const PROVIDER_UNAVAILABLE_CODES = new Set([
 // 额度耗尽不在此列——它没有可等的短窗口，必须换模型。
 const WAITABLE_CODES = new Set(['RATE_LIMIT', 'QUOTA'])
 
-// 可派生备用运行的内部运行种类（DSHBOTS-358）：任务运行 + 总监验收/受阻处理 + 记忆审查。
+// 可派生备用运行的内部运行种类：任务运行 + 总监验收/受阻处理 + 记忆审查。
 // 这些运行都在项目工作台内部流转，重跑不会重复打扰用户，因此与任务运行同口径切备用模型。
 // 聊天类（chat / solo_chat / dm / vision 等）不在此列：自动重跑会重复发消息、打扰用户。
 export const INTERNAL_FALLBACK_KINDS = new Set(['task', 'review', 'handle', 'memory_review'])
@@ -78,7 +78,7 @@ export const modelFallbackMethods = {
   },
 
   // 这条运行链是否已经用过备用模型（每条链只切一次）。
-  // 链按运行种类分桶（DSHBOTS-358）：任务链、验收链、受阻处理链、记忆审查链各自独立——
+  // 链按运行种类分桶：任务链、验收链、受阻处理链、记忆审查链各自独立
   // 施工轮用过备用不代表总监验收轮不能再切，反之亦然。
   fallbackUsedInChain(run) {
     if (run?.model_provider) return true
@@ -103,7 +103,7 @@ export const modelFallbackMethods = {
     const fallback = this.botFallbackModel(bot)
     if (!fallback) return null
     if (!shouldFallbackOn(error)) return null
-    // 只对内部运行派生（DSHBOTS-358）：私信/群聊/单聊自动重跑会重复发消息、打扰用户。
+    // 只对内部运行派生：私信/群聊/单聊自动重跑会重复发消息、打扰用户。
     if (!INTERNAL_FALLBACK_KINDS.has(run.kind)) return null
     const chain = fallbackChainKey(run)
     if (!chain) return null
@@ -128,7 +128,7 @@ export const modelFallbackMethods = {
     const runId = id('run')
     const createdAt = nowIso()
     const attempt = (Number(run.attempt) || 1) + 1
-    // 派生运行沿用原运行的种类与形态（DSHBOTS-358）：验收/受阻处理/记忆审查各自保持
+    // 派生运行沿用原运行的种类与形态：验收/受阻处理/记忆审查各自保持
     // 原有语义与提示词通道，只是换一套模型重跑同一条链。
     const kind = run.kind
     const mode = run.mode ?? (kind === 'task' ? 'write' : 'read')

@@ -50,7 +50,7 @@ export function ensureTaskTimesSchema(store) {
   store.run('INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING', 'tasks_canceled_at', nowIso())
 }
 
-// 终态时间回填（DSHBOTS-69）：只补 status 对应终态列为空的存量行，值取 updated_at；
+// 终态时间回填：只补 status 对应终态列为空的存量行，值取 updated_at；
 // 幂等可重跑。canceled 侧与 tasks_canceled_at 重叠无害（同样只补空行），本迁移重点补 done 侧。
 export function ensureTaskTerminalTimeBackfill(store) {
   if (store.get('SELECT 1 AS ok FROM schema_migrations WHERE name = ?', 'tasks_terminal_time_backfill')) return
@@ -59,7 +59,7 @@ export function ensureTaskTerminalTimeBackfill(store) {
   store.run('INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING', 'tasks_terminal_time_backfill', nowIso())
 }
 
-// 任务级死线 schema（DSHBOTS-274）：tasks.budget_updated_at 记最近一次 time_budget_minutes
+// 任务级死线 schema：tasks.budget_updated_at 记最近一次 time_budget_minutes
 // 实改时刻，标记新预算生效点（死线长度随新预算重算；基准锚点见 taskDeadlineInfo=最新派发）。
 export function ensureTaskDeadlineSchema(store) {
   if (store.get('SELECT 1 AS ok FROM schema_migrations WHERE name = ?', 'tasks_budget_updated_at')) return
@@ -70,7 +70,7 @@ export function ensureTaskDeadlineSchema(store) {
   store.run('INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING', 'tasks_budget_updated_at', nowIso())
 }
 
-// 允许轮数（DSHBOTS-274）：整卡死线 = 派发基准 + time_budget_minutes × TASK_BUDGET_ROUNDS。
+// 允许轮数：整卡死线 = 派发基准 + time_budget_minutes × TASK_BUDGET_ROUNDS。
 export const TASK_BUDGET_ROUNDS = 2
 
 // 任务级死线纯计算（DSHBOTS-274 立卡，DSHBOTS-281 基准升级）：
@@ -117,7 +117,7 @@ export function taskDeadlineInfo(store, task) {
 }
 
 export const tasksMethods = {
-  // 缺省任务预算（DSHBOTS-198）：env > 无进展看门狗（分钟）生效值 > 兜底 20，
+  // 缺省任务预算：env > 无进展看门狗（分钟）生效值 > 兜底 20，
   // 建档补挂与重派补挂共用同一缺省链。
   defaultTaskTimeBudget() {
     return effectiveTaskTimeBudgetMinutes(this.config, key => this.store.setting(key))
@@ -140,7 +140,7 @@ export const tasksMethods = {
     const parsedScopes = input.writeScopes === undefined || input.writeScopes === null
       ? parseWriteScopesFromDescription(input.description)
       : parseWriteScopes(input.writeScopes)
-    // 时效要求（DSHBOTS-125）：发布方可传交付时限（分钟）；钳制到 1..10080（一分钟到一周）：
+    // 时效要求：发布方可传交付时限（分钟）；钳制到 1..10080（一分钟到一周）：
     // 只挡垃圾值，不替发布方做取舍；0/负数视为未提。
     // DSHBOTS-198：产品规则=每卡必有预算——未显式提时按缺省链补挂
     // （env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > 看门狗分钟生效值 > 兜底 20），显式值优先不覆盖。
@@ -148,7 +148,7 @@ export const tasksMethods = {
     const rawTimeBudget = input.timeBudgetMinutes ?? input.time_budget_minutes
     const timeBudgetMinutes = (Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null)
       ?? this.defaultTaskTimeBudget()
-    // 派发沙箱覆盖（DSHBOTS-156/234）：档位解析顺序=卡面显式声明 > bot 配置（inherit 为缺省）。
+    // 派发沙箱覆盖：档位解析顺序=卡面显式声明 > bot 配置（inherit 为缺省）。
     // 'inherit'/空值同义=跟随 bot 配置档（列落 NULL）；列只收合法收紧档，垃圾值拒收。
     // 「只收紧不放大」校验在派发入口 assignFromBot（对准承接 bot 的 file_policy）。
     const rawSandboxOverride = input.sandboxOverride
@@ -162,11 +162,11 @@ export const tasksMethods = {
     const deliverables = parseDeliverables(input.deliverables ?? input.deliverables_paths ?? undefined)
     const taskId = id('task')
     const createdAt = nowIso()
-    // 终态时间在创建时补齐（DSHBOTS-69）：以 done/canceled 建档的任务终态列取同一 createdAt，
+    // 终态时间在创建时补齐：以 done/canceled 建档的任务终态列取同一 createdAt，
     // 非终态两列留 NULL；与 updateTask 的对称维护（进终态写、离开清）同口径。
     const completedAt = status === 'done' ? createdAt : null
     const canceledAt = status === 'canceled' ? createdAt : null
-    // 父子/依赖关系（DSHBOTS-59）：camelCase 与 snake_case 都收；taskId 服务端生成，
+    // 父子/依赖关系：camelCase 与 snake_case 都收；taskId 服务端生成，
     // 真自引用在公共 API 层面构造不出来，validateTaskRelations 仍显式拒（防直插库与未来 update 复用）。
     const parentTaskId = input.parentTaskId ?? input.parent_task_id ?? null
     const blockedBy = normalizeBlockedByInput(input.blockedBy ?? input.blocked_by)
@@ -225,7 +225,7 @@ export const tasksMethods = {
         senderType: 'system',
         senderId: 'system',
         body: `任务 ${project.key}-${number} 已创建${assigneeId ? ` → @${this.botRow(assigneeId).name}` : ''}`
-          // 紧急豁免报备（DSHBOTS-126）：urgent 与在办卡共用车道时在同一条创建消息里注明，不静默并行。
+          // 紧急豁免报备：urgent 与在办卡共用车道时在同一条创建消息里注明，不静默并行。
           + (input.laneShareTask ? `；紧急豁免：与在办卡 ${input.laneShareTask} 共用写范围车道，立即开工` : ''),
         taskId,
       })
@@ -383,13 +383,13 @@ export const tasksMethods = {
       stage,
       stageLabel: taskStageLabel(stage),
       reviewStatus: this.taskReviewStatus(task),
-      // 验收滞留同源视图（DSHBOTS-235）：锚点/阈值/最近判定由 review-watchdog 域统一供出，
+      // 验收滞留同源视图：锚点/阈值/最近判定由 review-watchdog 域统一供出，
       // UI badge 与后端守门同一口径（H3），面板据此展示三档判定与依据。
       reviewIdle: task.status === 'in_review' ? this.reviewIdleView(task) : null,
     }
   },
 
-  // 核验状态（DSHBOTS-113）：none=未核验 / pending=核验中（委派运行在跑或自动委派待投递）/
+  // 核验状态：none=未核验 / pending=核验中（委派运行在跑或自动委派待投递）/
   // done=本次交付已有核验结论 / failed=核验失败（运行失败或自动委派重试耗尽）/
   // skipped=只读档交付按策略跳过核验（readOnlyDelivery 豁免）。
   // 以「最近一次成功的执行运行」（本次交付）为基准，只认其后发起的核验，避免上一轮
@@ -449,7 +449,7 @@ export const tasksMethods = {
     }
     if (patch.assigneeBotId !== undefined) {
       if (patch.assigneeBotId) this.assertDispatchTarget(task.project_id, patch.assigneeBotId)
-      // 共享板无主卡声明闸门（DSHBOTS-270）：无主卡经编辑表单获得 owner，与 assignTask
+      // 共享板无主卡声明闸门：无主卡经编辑表单获得 owner，与 assignTask
       // 领取是同一条「获得 owner 即将进施工」链路，同口径过闸；同一次 patch 里补的
       // write_scopes / 描述「写范围：」行一并纳入判定——补声明后放行。
       if (patch.assigneeBotId && !task.assignee_bot_id) {
@@ -489,7 +489,7 @@ export const tasksMethods = {
         goalRevisedFrom = readTaskGoal(task)?.version ?? null
       }
     }
-    // 延期阀（DSHBOTS-274）：update_task 实改 time_budget_minutes 后整卡死线按新预算重算——
+    // 延期阀：update_task 实改 time_budget_minutes 后整卡死线按新预算重算
     // 记 budget_updated_at 标记新预算生效；派发基准统一为最新派发（DSHBOTS-281 重派即新窗口），
     // 改预算与重派各自独立生效，改后重派拿到「新预算 × 新窗口」。
     if (patch.timeBudgetMinutes !== undefined || patch.time_budget_minutes !== undefined) {
@@ -546,7 +546,7 @@ export const tasksMethods = {
       }
       this.audit(actor, 'task.update', 'task', taskId, updates)
     })
-    // 终态清理（DSHBOTS-110）：任务进入 done/canceled 时先把残留的 queued 运行置 SUPERSEDED，
+    // 终态清理：任务进入 done/canceled 时先把残留的 queued 运行置 SUPERSEDED，
     // 再释放写占用——写占用只清 mode='write' 会漏掉排队的只读运行（审查等），被调度器后续起跑执行。
     if (updates.status && updates.status !== task.status && (updates.status === 'done' || updates.status === 'canceled')) {
       this.cancelSupersededQueuedRuns(taskId)
@@ -557,14 +557,14 @@ export const tasksMethods = {
       await this.releaseTaskWriteLocks(taskId, { fromStatus: task.status, toStatus: updates.status })
     }
     if (updates.status === 'canceled') await this.cancelRunsForTask(taskId)
-    // 进入「进行中」的统一联动（DSHBOTS-100）：任何路径让任务进入「进行中」且有负责人，
+    // 进入「进行中」的统一联动：任何路径让任务进入「进行中」且有负责人，
     // 都要通知负责人并真的开工。单一触发点：所有状态变更都经过 updateTask 这一处，
     // 看板拖拽（transition_task）、编辑表单改状态（update_task）、总监退回重做都从这里过，
     // 同一任务只会发一条消息、只入队一次运行。
     if (updates.status === 'in_progress' && task.status !== 'in_progress') {
       this.notifyTaskStarted(this.taskRow(taskId), { triggerType: options.startTriggerType ?? 'task_started' })
     }
-    // 微信推送收敛（DSHBOTS-182）：只在任务真正完成（→done 转换）时推一条，
+    // 微信推送收敛：只在任务真正完成（→done 转换）时推一条，
     // 全部 done 转换路径都经 updateTask 收口在此；done→done 不构成转换，天然不重复推。
     if (updates.status === 'done' && task.status !== 'done') {
       this.notifyTaskDone(this.taskRow(taskId))
@@ -605,7 +605,7 @@ export const tasksMethods = {
     const { task } = this.resolveTaskByIdentifier(identifier)
     return {
       ...this.taskView(task),
-      // 指派者名（DSHBOTS-257）：/detail 卡片直读 assigneeName，在此按 assignee_bot_id
+      // 指派者名：/detail 卡片直读 assigneeName，在此按 assignee_bot_id
       // 解析（同 task-notify 口径），不进 taskView 列表热路径（每卡一次 bots 查询）。
       assigneeName: task.assignee_bot_id ? this.botRow(task.assignee_bot_id)?.name ?? null : null,
       comments: this.groupChatStore(task.project_id).all(
@@ -625,7 +625,7 @@ export const tasksMethods = {
       'SELECT t.id, t.number, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id WHERE d.task_id = ?',
       taskId,
     )
-    // 任务级 usage 口径（DSHBOTS-212）：usage = 本卡全部运行（成功交付 + 失败重试 + 核验/受阻
+    // 任务级 usage 口径：usage = 本卡全部运行（成功交付 + 失败重试 + 核验/受阻
     // 派生运行）端到端 token/成本，缓存读写分列；usageTotal = 本卡 + 全部后代子卡，
     // 拆分划算判定（C_removed > C_introduced）拿它与同类整卡任务的 usage 对比。
     // 只挂 taskDetail 单卡详情，不进 taskView 列表热路径（每卡一次聚合会放大列表查询）。

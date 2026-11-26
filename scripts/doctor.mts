@@ -127,7 +127,7 @@ function main() {
   console.log(problems === 0
     ? 'ok: all team directories exist and are writable'
     : `${problems} problem(s); see README "故障排查"`)
-  // 退出码分级（A5/DSHBOTS-329）：1=目录/权限、2=host refs（人工配置）、3=两类并存。
+  // 退出码分级：1=目录/权限、2=host refs（人工配置）、3=两类并存。
   process.exit(problems === 0 ? 0 : pathProblems > 0 && refProblems > 0 ? 3 : refProblems > 0 ? 2 : 1)
 }
 

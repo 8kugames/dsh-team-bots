@@ -141,7 +141,7 @@ export async function materializeEnvFile(entries, workspaceDir) {
 }
 
 /**
- * One-time runtime env file (DSHBOTS-106): plaintext secrets never land in a
+ * One-time runtime env file : plaintext secrets never land in a
  * project workspace. Instead an approval writes `<dataDir>/secrets-runtime/
  * <projectId>.env` (dir 0700, file 0600) which is burned on the project's next
  * task-run finish, TTL expiry or secret deletion. Same line format as

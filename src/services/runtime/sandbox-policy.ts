@@ -26,7 +26,7 @@ export function sandboxModeForRun(run, bot, fullAccess = false) {
   return run && run.mode !== 'write' ? 'read-only' : bot?.file_policy
 }
 
-// 生效沙箱档（DSHBOTS-156）：任务派发可选 sandbox 覆盖后的最终口径，run_events 与视图共用。
+// 生效沙箱档：任务派发可选 sandbox 覆盖后的最终口径，run_events 与视图共用。
 // - 非写运行恒 read-only（来源 run_type）：覆盖只作用于写运行，dm_reply 回投任务会话等
 //   读运行不得因任务带覆盖而放宽只读；
 // - 写运行取 tasks.sandbox_override（来源 override），只在不比 bot 配置档更宽时生效
@@ -65,7 +65,7 @@ export const sandboxMethods = {
     const liveSession = agent?.agent?.session ?? agent?.session
     if (!liveSession?.append) return
     try {
-      // 必须走 ctx.get()：宿主服务未在本插件 inject 声明时，直接读 ctx.sandboxPolicy
+      // 必须走 ctx.get：宿主服务未在本插件 inject 声明时，直接读 ctx.sandboxPolicy
       // 会被 cordis 代理抛 "cannot get property \"sandboxPolicy\" without inject"，
       // 导致每次应用权限都失败、静默回落宿主默认档位。
       const policy = this.ctx.get?.('sandboxPolicy')

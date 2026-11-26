@@ -10,7 +10,7 @@ export function defaultWorkspace() {
   return join(homedir(), '.dsh', 'workspace', 'team-bots')
 }
 
-// DSH_TEAM_GITHUB_WATCH 解析：JSON 数组 [{projectKey, repo}]，非法一律 []（B4-②/DSHBOTS-335）。
+// DSH_TEAM_GITHUB_WATCH 解析：JSON 数组 [{projectKey, repo}]，非法一律 []。
 export function parseGithubWatchEnv(raw) {
   if (!raw) return []
   try {
@@ -52,7 +52,7 @@ export type RuntimeSettingDef = {
 // 设置键沿用 settings 表的 snake_case；范围单位为分钟，与页面保存校验一致。
 export const RUN_TIMEOUT_KEY = 'run_timeout_minutes'
 export const STALL_WATCHDOG_KEY = 'stall_watchdog_minutes'
-// 审批等待/提问转接超时（DSHBOTS-309）：分钟整数 [1,60]，默认 10 分钟（原 3 分钟，
+// 审批等待/提问转接超时：分钟整数 [1,60]，默认 10 分钟（原 3 分钟，
 // owner 2026-11-07 拍板上调）；空串/越界/非法回退默认，优先级与运行时效同款。
 export const APPROVAL_TIMEOUT_KEY = 'approval_timeout_minutes'
 export const QUESTION_TIMEOUT_KEY = 'question_timeout_minutes'
@@ -72,7 +72,7 @@ export const RUN_LIMIT_RANGES = {
 // in_review 任务超阈值分钟无新评论且无关联 run 活动 = 验收滞留；0 = 关闭守门。
 export const REVIEW_IDLE_MINUTES_KEY = 'review_idle_minutes'
 export const REVIEW_IDLE_MINUTES_RANGE = [0, 1440]
-// 三档自动收口（DSHBOTS-235）：总开关（默认开，0 = 关闭自动 accept/return，只提醒）
+// 三档自动收口：总开关（默认开，0 = 关闭自动 accept/return，只提醒）
 // 与二次催办倍数（滞留超 阈值×倍数 升级语气再催一次，默认 2）。
 export const REVIEW_AUTO_CLOSE_KEY = 'review_auto_close'
 export const REVIEW_ESCALATE_KEY = 'review_idle_escalate_multiple'
@@ -85,7 +85,7 @@ export const REVIEW_ESCALATE_RANGE = [2, 10]
 export const SESSION_ROLLOVER_TURNS_KEY = 'session_rollover_turns'
 export const SESSION_ROLLOVER_TURNS_RANGE = [0, 10_000]
 
-// 每 N 轮闲时总结压缩（DSHBOTS-286）：轮次口径与结转一致（runs 按 session_id
+// 每 N 轮闲时总结压缩：轮次口径与结转一致（runs 按 session_id
 // COUNT(*)）；跨越 N 的倍数且会话闲时入队 kind='session_compact' 总结运行，
 // 忙时推后、跨窗口合批。压缩 ≠ 结转（留原会话）。0 = 关闭。
 export const SESSION_COMPACT_TURNS_KEY = 'session_compact_turns'
@@ -112,7 +112,7 @@ export const SESSION_ROLLOVER_SUBAGENTS_RANGE = [0, 10_000]
 
 // 保存值必须是范围内的整数；非法或越界按未保存处理（回退默认），不做钳制。
 // 空串/null（未保存）必须先于数值化判空：Number('') 是 0，会把「未保存」误判成
-// 合法值 0（关闭）。用 Number() 而非 parseInt：parseInt('1.5') 会吞小数当 1。
+// 合法值 0（关闭）。用 Number 而非 parseInt：parseInt('1.5') 会吞小数当 1。
 const savedInt = (value, range) => {
   const raw = String(value ?? '').trim()
   if (raw === '') return null
@@ -126,7 +126,7 @@ export const envExplicit = (name) => {
   return raw !== undefined && String(raw).trim() !== ''
 }
 
-// 代码卫生（DSHBOTS-172）：扫描扩展名白名单覆盖。逗号/空格/分号分隔（如 "js,ts,lua"），
+// 代码卫生：扫描扩展名白名单覆盖。逗号/空格/分号分隔（如 "js,ts,lua"），
 // 数组注入（测试）同样接受；空 = 用 services/hygiene.js 的默认白名单。行数上限是项目级
 // 设置（projects.code_hygiene_limit_lines），不经全局配置。
 const parseExtList = (value) => {
@@ -153,7 +153,7 @@ export function effectiveRunLimits(config, getSetting: (key: string) => unknown 
   }
 }
 
-// 审批/提问等待生效值（DSHBOTS-309）：优先级与 effectiveRunLimits 同款——env 显式
+// 审批/提问等待生效值：优先级与 effectiveRunLimits 同款——env 显式
 //（resolveConfig 已烘进 config.*TimeoutMs）> settings 保存分钟数 > 默认 300_000。
 // 消费点（approvals/questions 落库 expires_at 时）每次现算，改值对新条目生效。
 export function effectiveApprovalTimeoutMs(config, getSetting: (key: string) => unknown = () => null) {
@@ -168,7 +168,7 @@ export function effectiveQuestionTimeoutMs(config, getSetting: (key: string) => 
   return !env && saved !== null ? saved * 60_000 : config.questionTimeoutMs
 }
 
-// ── 任务卡缺省时间预算（DSHBOTS-198）────────────────────────────────────────
+// ── 任务卡缺省时间预算────────────────────────────────────────
 // 产品规则：每张任务卡必有预算。缺省链 = env 显式 > 无进展看门狗（分钟）生效值 >
 // 兜底 20（看门狗未配置与配 0 关闭同值，预算不得变 0/无限）。消费点（createTask
 // 建档、assignTask 给存量 NULL 卡补挂）每次现算，改值对之后建档/派发的卡生效。
@@ -184,7 +184,7 @@ export function effectiveTaskTimeBudgetMinutes(config, getSetting: (key: string)
   return stallMinutes > 0 ? stallMinutes : config.taskTimeBudgetMinutes
 }
 
-// 派单预算优先级分档（DSHBOTS-325）：派单路径（assignFromBot 建卡/重派）漏传
+// 派单预算优先级分档：派单路径（assignFromBot 建卡/重派）漏传
 // time_budget_minutes 时的卡级兜底档，按卡 priority 分档落库；显式值永远优先。
 // 与全局缺省链（effectiveTaskTimeBudgetMinutes）分工：本表只管派单路径，不经派单
 // 的直建卡仍走全局链。无效 priority 与 createTask 同口径回退 medium 档。
@@ -194,7 +194,7 @@ export const PRIORITY_BUDGET_MINUTES: Record<string, number> = {
   urgent: 90, high: 90, medium: 60, low: 30, none: 30,
 }
 
-// 会话结转阈值生效值（DSHBOTS-145）：优先级与运行时效一致——env 显式 > settings 表
+// 会话结转阈值生效值：优先级与运行时效一致——env 显式 > settings 表
 // 保存值 > 默认 512（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 会话复用检查，
 // DSHBOTS-289 起为 ensureBotBinding 复用分支）每次现算，改值对下一次会话复用生效。
 export function effectiveSessionRolloverTurns(config, getSetting: (key: string) => unknown = () => null) {
@@ -203,7 +203,7 @@ export function effectiveSessionRolloverTurns(config, getSetting: (key: string) 
   return !env && saved !== null ? saved : config.sessionRolloverTurns
 }
 
-// 闲时压缩窗口生效值（DSHBOTS-286）：优先级与结转一致——env 显式 > settings 表保存值 >
+// 闲时压缩窗口生效值：优先级与结转一致——env 显式 > settings 表保存值 >
 // 默认 64（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 会话复用检查）每次现算。
 export function effectiveSessionCompactTurns(config, getSetting: (key: string) => unknown = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_COMPACT_TURNS')
@@ -232,7 +232,7 @@ export function effectiveSessionRolloverSubagents(config, getSetting: (key: stri
   return !env && saved !== null ? saved : config.sessionRolloverSubagents
 }
 
-// 验收滞留阈值生效值（DSHBOTS-194）：优先级与会话结转一致——env 显式 > 保存值 >
+// 验收滞留阈值生效值：优先级与会话结转一致——env 显式 > 保存值 >
 // 默认 30 分钟；0 = 关闭。消费点（scheduler 验收守门、runLimitsView 透出）每次
 // 现算，改值对下一轮扫描生效；env 标志供 UI 提示「环境变量已覆盖」。
 export function effectiveReviewIdleMinutes(config, getSetting: (key: string) => unknown = () => null) {
@@ -244,19 +244,19 @@ export function effectiveReviewIdleMinutes(config, getSetting: (key: string) => 
   }
 }
 
-// 结转摘要的 settings 键（DSHBOTS-145）：按「bot + 上下文」隔离——同一 bot 的项目会话与
+// 结转摘要的 settings 键：按「bot + 上下文」隔离——同一 bot 的项目会话与
 // 单聊会话各自独立结转，互不串档；单聊（无项目）用 'solo' 占位。
 export const rolloverSummaryKey = (botId, projectId) => `rollover_summary:${botId}:${projectId ?? 'solo'}`
 
-// 结转摘要的待注入目标会话键（DSHBOTS-213）：结转开新会话时记录新会话 id，摘要只允许被
+// 结转摘要的待注入目标会话键：结转开新会话时记录新会话 id，摘要只允许被
 // 该目标会话的提示词消费，防止被其他会话的普通轮次提前清零。
 export const rolloverPendingKey = (botId, projectId) => `rollover_pending:${botId}:${projectId ?? 'solo'}`
 
-// 闲时压缩的窗口标记键（DSHBOTS-286）：按会话隔离，值 = 已被压缩运行覆盖到的轮数
+// 闲时压缩的窗口标记键：按会话隔离，值 = 已被压缩运行覆盖到的轮数
 // （窗口下界）。忙时推后依赖「标记不动」，闲时跨越窗口才入队并推进标记。
 export const sessionCompactMarkerKey = (sessionId) => `session_compact_marker:${sessionId}`
 
-// ── UI 语言（DSHBOTS-162）─────────────────────────────────────────────────
+// ── UI 语言─────────────────────────────────────────────────
 // 全局配置页语言下拉：auto = 跟随 DSH 宿主设定（缺省），zh/en = 显式覆盖。
 // env DSH_TEAM_UI_LANGUAGE 可覆盖页面保存值（不强制）。
 export const UI_LANGUAGE_KEY = 'ui_language'
@@ -283,7 +283,7 @@ export function effectiveUiLanguage(config, getSetting: (key: string) => unknown
   return envValue ?? saved ?? config.uiLanguage
 }
 
-// ── 微信通道开关生效值（DSHBOTS-334）────────────────────────────────────────
+// ── 微信通道开关生效值────────────────────────────────────────
 // 通道页启停开关的 settings 键：'1'/'0' 为显式覆盖；未保存（空）回退服务端
 // 注入默认（cordis.patch.yml / env，保留为初始默认）。消费点：core 挂载决策与
 // services/wechat 的即时 mount/unmount（applyWechatChannelEnabled）。
@@ -295,7 +295,7 @@ export function effectiveWechatEnabled(config, getSetting: (key: string) => unkn
   return Boolean(config.wechat?.enabled)
 }
 
-// ── 飞书凭据生效值（DSHBOTS-334）────────────────────────────────────────────
+// ── 飞书凭据生效值────────────────────────────────────────────
 // 优先级：通道页保存（secrets 表加密的 AppID/Secret 对）> 服务端注入
 // （cordis.patch.yml / env，即 config.feishu）。凭据成对生效：保存对不完整
 // 不得与注入对混拼；两边都没有 = 不生效（通道保持 unbound 不连）。
@@ -469,7 +469,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     wechat: {
       enabled: bool(config.wechatEnabled ?? process.env.DSH_TEAM_WECHAT, false),
     },
-    // 飞书机器人通道（DSHBOTS-333）：默认关闭，DSH_BOTS_FEISHU=1 开启。
+    // 飞书机器人通道：默认关闭，DSH_BOTS_FEISHU=1 开启。
     // 传输层为进程内官方 SDK（@larksuiteoapi/node-sdk）：凭据 AppID/Secret 注入即连。
     // 这里只是「服务端注入」兜底来源（cordis.patch.yml / env）；生效优先级见
     // effectiveFeishuCredentials（DSHBOTS-334：通道页保存的凭据优先）。
@@ -496,18 +496,18 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     maxRunTokens: int(config.maxRunTokens ?? process.env.DSH_TEAM_MAX_RUN_TOKENS, 0, 0, 500_000_000),
     // 0 关闭：运行多久没有任何事件就判定卡住。
     stallTimeoutMs: int(config.stallTimeoutMs ?? process.env.DSH_TEAM_STALL_TIMEOUT_MS, 20 * 60_000, 0, 6 * 60 * 60_000),
-    // 任务卡缺省时间预算（DSHBOTS-198）：env 解析结果或兜底 20；生效缺省链见
+    // 任务卡缺省时间预算：env 解析结果或兜底 20；生效缺省链见
     // effectiveTaskTimeBudgetMinutes（env > 看门狗生效值 > 本兜底）。
     taskTimeBudgetMinutes: int(
       config.taskTimeBudgetMinutes ?? process.env.DSH_TEAM_TASK_TIME_BUDGET_MINUTES,
       TASK_TIME_BUDGET_FALLBACK_MINUTES, 1, 10_080,
     ),
-    // 会话结转阈值（DSHBOTS-145）：0 = 关闭；「轮次」口径 = runs 表按 session_id 的
+    // 会话结转阈值：0 = 关闭；「轮次」口径 = runs 表按 session_id 的
     // COUNT(*)（不限 status——失败运行的提示词同样已进会话历史，count-all 才与真实
     // 增长一致）。生效值可被 settings 表 session_rollover_turns 覆盖（env 显式 > 表值 > 默认，
     // 设置页暂未开放该字段，见 effectiveSessionRolloverTurns）。
     sessionRolloverTurns: int(config.sessionRolloverTurns ?? process.env.DSH_TEAM_SESSION_ROLLOVER_TURNS, 512, 0, 10_000),
-    // 闲时总结压缩窗口（DSHBOTS-286）：默认每 64 轮，0 = 关闭；生效值见
+    // 闲时总结压缩窗口：默认每 64 轮，0 = 关闭；生效值见
     // effectiveSessionCompactTurns（env 显式 > settings 表保存值 > 默认，设置页暂未开放）。
     sessionCompactTurns: int(config.sessionCompactTurns ?? process.env.DSH_TEAM_SESSION_COMPACT_TURNS, 64, 0, 10_000),
     // 上下文体积判据（单轮上下文治理 P2）：压缩下限默认 80k、结转上限默认 150k token，
@@ -517,10 +517,10 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 会话子代理消费上限：默认 128 个（低于宿主上限 200 留摘要往返余量），0 = 关闭；
     // 生效值见 effectiveSessionRolloverSubagents。
     sessionRolloverSubagents: int(config.sessionRolloverSubagents ?? process.env.DSH_TEAM_SESSION_ROLLOVER_SUBAGENTS, 128, 0, 10_000),
-    // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超此分钟数 = 滞留。生效值可被
+    // 验收滞留守门：in_review 卡静置超此分钟数 = 滞留。生效值可被
     // 全局设置 review_idle_minutes 覆盖（effectiveReviewIdleMinutes），0 = 关闭。
     reviewIdleMinutes: int(config.reviewIdleMinutes ?? process.env.DSH_TEAM_REVIEW_IDLE_MINUTES, 30, 0, 1440),
-    // UI 语言（DSHBOTS-162）：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
+    // UI 语言：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
     // 生效值由全局配置页 ui_language 覆盖，解析见 effectiveUiLanguage。
     uiLanguage: normalizeUiLanguage(config.uiLanguage ?? process.env.DSH_TEAM_UI_LANGUAGE ?? 'auto'),
     // 群聊只放结论，完整交付进任务评论。
@@ -528,15 +528,15 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 交付报告体量红线（DSHBOTS-345 复盘）：任务交付报告 ≤ 此字符数，且只引用交付物路径，
     // 禁止把已写入工作区的文件正文复述进报告/聊天——生成侧 output 与复审上下文双省。
     deliveryReportMaxChars: int(config.deliveryReportMaxChars ?? process.env.DSH_TEAM_DELIVERY_REPORT_MAX_CHARS, 2_000, 200, 20_000),
-    // 私信自动归档（DSHBOTS-171）：单聊默认视图只留「每 bot 最近 keep 条 且 days 天内」的
+    // 私信自动归档：单聊默认视图只留「每 bot 最近 keep 条 且 days 天内」的
     // 交集，超出任一阈值即归档（默认视图隐去，数据保留，messagesPage 翻页仍可查回）。
     // 0 = 关闭该维过滤。
     dmArchiveDays: int(config.dmArchiveDays ?? process.env.DSH_TEAM_DM_ARCHIVE_DAYS, 7, 0, 3650),
     dmKeepRecent: int(config.dmKeepRecent ?? process.env.DSH_TEAM_DM_KEEP_RECENT, 100, 0, 10_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。
-    // 默认 5 分钟（DSHBOTS-313 终调：3→10（D-309）→5），settings approval_timeout_minutes 可调。
+    // 默认 5 分钟（DSHBOTS-313 终调：3→10→5），settings approval_timeout_minutes 可调。
     approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 300_000, 5_000, 3_600_000),
-    // 提问转接超时（DSHBOTS-116）：与审批同默认 5 分钟（DSHBOTS-313 同步终调），最短 5s、最长 1 小时。
+    // 提问转接超时：与审批同默认 5 分钟（DSHBOTS-313 同步终调），最短 5s、最长 1 小时。
     questionTimeoutMs: int(config.questionTimeoutMs ?? process.env.DSH_TEAM_QUESTION_TIMEOUT_MS, 300_000, 5_000, 3_600_000),
     // 一次性密钥运行时文件（<dataDir>/secrets-runtime/<projectId>.env）的存活窗口：
     // 批准后生成，项目下一条 task 运行结束或窗口到期先到即焚，再次使用需重新批准。
@@ -549,8 +549,8 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
       512 * 1024, 0, 5 * 1024 * 1024,
     ),
     // 原生 Agent Teams 由 profile 层提供；这里只控制提示词与调度侧的启用状态。
-    // 缺省开启（DSHBOTS-230）：默认部署即注入并行拆分引导；显式传 0/false 可关闭。
-    // GitHub 只读触发源（B4-②/DSHBOTS-335）：env JSON 清单 [{projectKey, repo}]，
+    // 缺省开启：默认部署即注入并行拆分引导；显式传 0/false 可关闭。
+    // GitHub 只读触发源：env JSON 清单 [{projectKey, repo}]，
     // 缺省空 + 轮询 0 分钟 = 全关；非法 JSON 降级空清单（fail-closed）。
     githubWatch: parseGithubWatchEnv(config.githubWatch ?? process.env.DSH_TEAM_GITHUB_WATCH),
     githubPollMinutes: clampGithubPollMinutes(config.githubPollMinutes ?? process.env.DSH_TEAM_GITHUB_POLL_MINUTES),
@@ -569,7 +569,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
       config.toolFamilyMarkers ?? process.env.DSH_TEAM_TOOL_FAMILY_MARKERS
       ?? Object.entries(DEFAULT_TOOL_FAMILY_MARKERS).map(([prefix, marker]) => `${prefix}=${marker}`).join(';'),
     ),
-    // 读图代理（DSHBOTS-112）：Bot 主模型无视觉能力收图时，自动派生 kind='vision' 只读
+    // 读图代理：Bot 主模型无视觉能力收图时，自动派生 kind='vision' 只读
     // 转写运行所用的代理模型（provider/model）。两个都非空才启用；任一为空 = 不启用，
     // 此时按现状直接报「模型不支持图片」，不做任何派生。
     visionProxyProvider: String(config.visionProxyProvider ?? process.env.DSH_TEAM_VISION_PROXY_PROVIDER ?? '').trim(),
@@ -579,7 +579,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 数组，不挑模型能力，配便宜模型可再压审查成本。
     memoryReviewProvider: String(config.memoryReviewProvider ?? process.env.DSH_TEAM_MEMORY_REVIEW_PROVIDER ?? '').trim(),
     memoryReviewModel: String(config.memoryReviewModel ?? process.env.DSH_TEAM_MEMORY_REVIEW_MODEL ?? '').trim(),
-    // 验收自动委派（DSHBOTS-113）：任务交付迁移 in_review 时自动派生子代理核验运行
+    // 验收自动委派：任务交付迁移 in_review 时自动派生子代理核验运行
     // （与手动「子代理核验」按钮同一入口）。总监裁决不受影响：owner_bot 卡在核验运行
     // 结束后再触发总监验收；user 卡核验结论写回评论，裁决仍归工作台 owner。
     autoReviewDelegate: bool(config.autoReviewDelegate ?? process.env.DSH_TEAM_AUTO_REVIEW_DELEGATE, true),
@@ -587,19 +587,19 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 免自动核验委派，验收闸门同口径放宽；写档交付维持强制子代理核验。
     // DSH_TEAM_REVIEW_READ_ONLY_SKIP=0 关闭回到全量强制。
     reviewReadOnlySkip: bool(config.reviewReadOnlySkip ?? process.env.DSH_TEAM_REVIEW_READ_ONLY_SKIP, true),
-    // 代码卫生（DSHBOTS-172）：扫描扩展名白名单覆盖（默认白名单见 services/hygiene.js）。
+    // 代码卫生：扫描扩展名白名单覆盖（默认白名单见 services/hygiene.js）。
     codeHygieneExts: parseExtList(config.codeHygieneExts ?? process.env.DSH_TEAM_CODE_HYGIENE_EXTS),
     schedulerIntervalMs: int(config.schedulerIntervalMs, 1_500, 250, 30_000),
     // 空载降频：周期定时器在无 queued/running 运行、无可领 outbox 且距上次全量拍不足该间隔时，
-    // 只做一次索引计数探测即返回。事件唤醒的 tick() 不受影响，永远全量。
+    // 只做一次索引计数探测即返回。事件唤醒的 tick 不受影响，永远全量。
     schedulerIdleIntervalMs: int(config.schedulerIdleIntervalMs, 15_000, 1_500, 60_000),
     modelCacheMs: int(config.modelCacheMs, 8_000, 0, 120_000),
-    // 用量快照缓存：state() 每轮轮询都跑 30d 全口径聚合（生产库实测约 500ms），
-    // 这里做 TTL 缓存把 state() 拉回几十毫秒。0 = 关闭缓存（每次重算）。
+    // 用量快照缓存：state 每轮轮询都跑 30d 全口径聚合（生产库实测约 500ms），
+    // 这里做 TTL 缓存把 state 拉回几十毫秒。0 = 关闭缓存（每次重算）。
     // 用量页默认最多滞后 30s；明细 / 对账 / 价目写回会立即失效缓存。
     usageSnapshotCacheMs: int(config.usageSnapshotCacheMs ?? process.env.DSH_TEAM_USAGE_SNAPSHOT_CACHE_MS, 30_000, 0, 300_000),
     // 模型目录 stale-while-revalidate：stale 但在该窗口内立即返回旧值并后台刷新，
-    // 避免 catalog 过期时逐 provider 串行 listModels 阻塞 state()。0 = 关闭 SWR（回到旧语义）。
+    // 避免 catalog 过期时逐 provider 串行 listModels 阻塞 state。0 = 关闭 SWR（回到旧语义）。
     catalogStaleMs: int(config.catalogStaleMs ?? process.env.DSH_TEAM_CATALOG_STALE_MS, 300_000, 0, 3_600_000),
     // 终端命令硬超时：默认 120s；测试可注入更短值（下限 500ms）。
     terminalTimeoutMs: int(config.terminalTimeoutMs, 120_000, 500, 600_000),

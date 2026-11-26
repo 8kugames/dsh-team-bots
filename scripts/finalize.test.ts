@@ -9,7 +9,7 @@
 //   ⑥push 幂等拒绝：远端已含本地 HEAD 时拒绝空推送
 //   ⑦重复收口被拒：清单文件已提交时在 commit 步拒绝（防收口卡连开）
 //
-// 临时目录：优先用仓库内 .tmp（项目惯例）；沙箱里 os.tmpdir() 可能 EPERM，此时回退仓库内 .tmp。
+// 临时目录：优先用仓库内 .tmp（项目惯例）；沙箱里 os.tmpdir 可能 EPERM，此时回退仓库内 .tmp。
 // EPERM/EACCES 属环境性假红，按 skip 处理并注明原因；守门是否绿以 AssertionError 计数为 0 为准。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -41,7 +41,7 @@ function isEnvironmentError(error) {
   return code === 'EPERM' || code === 'EACCES' || /EPERM|EACCES/.test(String(error?.message ?? ''))
 }
 
-// 临时目录优先放仓库内 .tmp：受管沙箱里 os.tmpdir() 常是 EPERM，仓库内一定可写。
+// 临时目录优先放仓库内 .tmp：受管沙箱里 os.tmpdir 常是 EPERM，仓库内一定可写。
 function makeTempDir() {
   try {
     const localRoot = join(repoRoot, '.tmp')

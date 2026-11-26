@@ -22,7 +22,7 @@ class StubRuntime { declare ctx: any;
 }
 
 // 宿主 cordis 瀑布流语义复刻（与 tests/approval.test.js 同一份）：监听器按注册先后排队，
-// prepend 插到队首；waterfall 逐个 shift，先到的监听器不调用 next() 就截断后续链路。
+// prepend 插到队首；waterfall 逐个 shift，先到的监听器不调用 next 就截断后续链路。
 class FakeCordisCtx { declare hooks: any; declare services: any;
   constructor() {
     this.hooks = new Map()
@@ -138,7 +138,7 @@ test('命中 bot 会话：落 pending 提问与 kind=question 消息，单选映
 
 // DSHBOTS-190：ask_user_question 收紧为项目总监（owner bot）专属。
 // 非总监 bot 的项目群会话、单聊 bot 会话都要拿到明确拒绝文案（reject 回宿主 ask 工具结果），
-// 不能再 next() 透传——透传等于把提问落回原生界面，收紧形同虚设。
+// 不能再 next 透传——透传等于把提问落回原生界面，收紧形同虚设。
 test('权限收紧：非总监 bot 在项目群发起 ask 被明确拒绝，不落卡不透传', async () => {
   const { root, store, service } = await setup()
   try {

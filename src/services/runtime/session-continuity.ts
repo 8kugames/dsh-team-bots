@@ -4,7 +4,7 @@
 // 因此方法体内的 this 与拆分前完全一致。
 
 export const continuityMethods = {
-  // 结转摘要运行提示词（DSHBOTS-145）：在旧会话上下文里让 bot 自写交接摘要。
+  // 结转摘要运行提示词：在旧会话上下文里让 bot 自写交接摘要。
   // 项目会话与单聊会话都支持（project 可为空）——bot 已在本会话里，历史无需重放。
   rolloverSummaryPrompt({ bot, project }) {
     const header = project
@@ -19,7 +19,7 @@ This conversation has reached its turn limit and will be rolled over to a fresh 
 - Do not repeat the task description or anything already recorded in long-term memory.
 - Do not call any tool and do not write files. Reply with the summary text only.`
   },
-  // 闲时总结压缩运行提示词（DSHBOTS-286）：在原会话上下文里让 bot 自写连续性总结。
+  // 闲时总结压缩运行提示词：在原会话上下文里让 bot 自写连续性总结。
   // 压缩不等于结转：会话不换，总结只为收敛上下文头绪；宿主未暴露历史截断接口，
   // 持久事实应趁此轮落记忆或任务评论（能力边界见 ADR「结转与压缩」）。
   sessionCompactPrompt({ bot, project }) {

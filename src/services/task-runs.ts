@@ -37,7 +37,7 @@ export const taskRunMethods = {
     }
     return runs.length
   },
-  // 终态清理（DSHBOTS-110）：任务流转到 done/canceled 时，把该任务残留的 queued 运行全部置
+  // 终态清理：任务流转到 done/canceled 时，把该任务残留的 queued 运行全部置
   // canceled（SUPERSEDED + stale_superseded 事件），防止调度窗口内漏网的排队运行被起跑执行。
   // 只清 queued：running 的写运行由 releaseTaskWriteLocks 按 TASK_LEFT_IN_PROGRESS 口径处理。
   // 清理任务名下的排队运行（SUPERSEDED 口径）。体内纯同步 store 调用、无 await，
@@ -115,7 +115,7 @@ export const taskRunMethods = {
       'SELECT id, status, provider, fallback_provider, fallback_model, fallback_effort FROM bots WHERE id = ?',
       task.assignee_bot_id,
     )
-    // 暂停/归档的负责人不创建任务运行（DSHBOTS-262）：派发入口已拒绝，这里兜住
+    // 暂停/归档的负责人不创建任务运行：派发入口已拒绝，这里兜住
     // 「入队后负责人被暂停」的 pending task_run 补投——静默丢弃，口径同 chat_run 的 apply 闸门。
     if (!bot || bot.status !== 'active') return null
     const routing = this.quotaRoutingForBot(bot)
@@ -171,7 +171,7 @@ export const taskRunMethods = {
     return runId
   },
   enqueueOwnerTaskRun(task, kind) {
-    // 验收竞态收敛（DSHBOTS-275）：入队前终态预检——任务已 done/canceled 时直接跳过，
+    // 验收竞态收敛：入队前终态预检——任务已 done/canceled 时直接跳过，
     // 不产生 review/handle run 行（GS 实测交付排队与 owner 关单竞态空跑约 1/8）。
     // 以库内最新状态为准（调用方传入的 task 行可能已过期）；入队后才到终态的残留排队运行
     // 仍由 cancelSupersededQueuedRuns「任务已结束，排队运行被清理」兜底清理，语义不变。
@@ -190,7 +190,7 @@ export const taskRunMethods = {
     const runId = id('run')
     const createdAt = nowIso()
     const triggerType = kind === 'review' ? 'review_requested' : 'blocked_handoff'
-    // busy 闸（DSHBOTS-290）：owner 忙时 review/handle 运行同样不落 runs 行（撞
+    // busy 闸：owner 忙时 review/handle 运行同样不落 runs 行（撞
     // one_active_run_per_bot），挂待处理队列空闲建回——与 enqueueTaskRun 同口径。
     // DSHBOTS-300：挂起项提为 hold 闭包，busy 分支与查后插竞态兜底共用。
     // DSHBOTS-358：额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，

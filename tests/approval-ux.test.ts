@@ -103,7 +103,7 @@ test('approvalsPending：跨项目聚合、只计 pending，明细带项目名�
 
 test('state 顶层 pendingApprovals 与项目解耦：A 项目视图也能看到 B 项目待审', async () => {
   const { root, store, service } = await setup()
-  // 断言前要 await state()（会让出事件循环）；setup 的 60ms 审批超时在并行跑满时会先触发，
+  // 断言前要 await state（会让出事件循环）；setup 的 60ms 审批超时在并行跑满时会先触发，
   // 让 pending 聚合归零。单独放宽本用例的等待窗口，收尾显式结算以免留下定时器。
   service.config.approvalTimeoutMs = 5_000
   try {
@@ -178,7 +178,7 @@ test('决策后立即渲染：不等待轮询，失败回滚并提示', () => {
   }
   assert.ok(end > start, 'case 块必须闭合')
   const block = uiSource.slice(start, end)
-  // 立即回显：render() 必须在 await api(...) 之前，且不再依赖 loadState 的下一轮轮询。
+  // 立即回显：render 必须在 await api(...) 之前，且不再依赖 loadState 的下一轮轮询。
   const renderAt = block.indexOf('render()')
   const apiAt = block.indexOf('await api(')
   assert.ok(renderAt >= 0, '决策后必须立即 render()')

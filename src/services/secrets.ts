@@ -99,7 +99,7 @@ export const secretsMethods = {
     })
   },
 
-  // ===== 一次性密钥运行时（DSHBOTS-106） =====
+  // ===== 一次性密钥运行时 =====
   // 明文不再进项目工作区：批准后写 <dataDir>/secrets-runtime/<projectId>.env（目录 0700、文件 0600），
   // 在先到者发生时焚毁：①该项目下一条 task 运行 finishRun（成功/失败都删，见 runs.js）；
   // ②TTL（config.secretsRuntimeTtlMs）到期，sweepSecretsRuntime 巡检；③密钥吊销/删除。

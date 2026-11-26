@@ -32,7 +32,7 @@ test('task-time-range 标记块：窗口常量与纯函数语义', () => {
 
 test('新增枚举「今天」与「近 30 天」：1d 按自然日 00:00 起算，30d 走滚动窗口', () => {
   const code = block('task-time-range')
-  // 「今天」不是 24 小时滚动窗：cutoff 取本地当天 00:00（setHours 归零），与 Date.now() 回溯差区分
+  // 「今天」不是 24 小时滚动窗：cutoff 取本地当天 00:00（setHours 归零），与 Date.now 回溯差区分
   assert.match(code, /const cutoff = timeRange === '1d' \? new Date\(\)\.setHours\(0, 0, 0, 0\) : Date\.now\(\) - \(TASK_TIME_RANGES\[timeRange\] \?\? 0\)/)
   // 近 30 天沿用滚动窗口口径，窗口常量进表
   assert.match(code, /'30d': 30 \* 86_400_000/)

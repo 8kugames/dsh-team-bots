@@ -94,7 +94,7 @@ export class TeamService {
     // state 轮询版本短路缓存（system.state）：单槽存最近一次组装的 key/版本/时间。
     this.stateCache = null
     this.wechat = null
-    // GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产用 spawnSync('gh', ...)，
+    // GitHub 触发源的 gh 执行钩子：生产用 spawnSync('gh', ...)，
     // 测试注入桩替换；未设置时走真实 gh CLI。
     this.githubRunner = null
     // 运行中的终端命令：commandId → { child, buffer, startedAtMs, timedOut, cancelRequested, timer }。
@@ -102,7 +102,7 @@ export class TeamService {
     this.terminalActive = new Map()
   }
 
-  /** 微信管理员指令：按 <key-N> 定位并验收/退回任务。回执排版集中在 wechat/format.js（DSHBOTS-211）。 */
+  /** 微信管理员指令：按 <key-N> 定位并验收/退回任务。回执排版集中在 wechat/format.js。 */
   async wechatReview(identifier, { decision, comment }) {
     await this.initialize()
     if (!['accept', 'return'].includes(decision)) throw badRequest('验收结果只能是 accept 或 return')

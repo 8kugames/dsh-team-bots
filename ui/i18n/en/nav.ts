@@ -1,4 +1,4 @@
-// ui/i18n/en/nav.ts —— English copy dictionary: nav domain (DSHBOTS-233)
+// ui/i18n/en/nav.ts —— English copy dictionary: nav domain
 export default {
   // Main nav tabs (key mapping for NAV/SOLO_NAV; chat differs per mode)
   "nav.chat": "Chat",

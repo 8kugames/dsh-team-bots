@@ -1,9 +1,9 @@
 // DSHBOTS-162 R1 返工守门：保存界面语言后，热切换必须由保存动作自己触发。
 //
 // 卡面第 3 条承诺「保存后下次 state 轮询 syncLanguage 热切换即生效」，实测该承诺不成立：
-// syncLanguage（ui/app.js:50-60）只被 refresh()（:65）与 init()（:647）调用，
-// poll()（:620-642）带回新的 state.language 但不调它，save-ui-language 分支原先也只 loadState。
-// 缺这一行时，保存语言后字典不切换，要等下一次 refresh()/init()（切页或刷新）才生效。
+// syncLanguage（ui/app.js:50-60）只被 refresh（:65）与 init（:647）调用，
+// poll（:620-642）带回新的 state.language 但不调它，save-ui-language 分支原先也只 loadState。
+// 缺这一行时，保存语言后字典不切换，要等下一次 refresh/init（切页或刷新）才生效。
 //
 // 用 tests/question-card-interaction.test.js 的 loadModule 同法求值真实 events-board.js
 // （剥 import 行、去 export 前缀），注入可编程桩驱动真实 handleBoardAction('save-ui-language')，

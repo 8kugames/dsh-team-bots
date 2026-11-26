@@ -1,6 +1,6 @@
 // DSHBOTS-32 群聊审批：宿主 approval/request waterfall 的插件侧应答器。
 // 认领 session_bindings 命中的 bot 会话：绑定到项目的走群聊卡片；绑定为单聊（kind='solo'、
-// project_id 为空）的走单聊卡片（DSHBOTS-218）；其余 next() 透传（人类会话审批继续走 Web UI）。
+// project_id 为空）的走单聊卡片；其余 next 透传（人类会话审批继续走 Web UI）。
 // 决策权仅用户（type=user）持有，bot 一律 forbidden 不能自批；pending 之外拒绝重复应答，动作写审计。
 // DSHBOTS-365 免审白名单：命中规则的提权请求不落待办卡，插件在认领入口即时替 owner 应答
 // allowed-once；approvals 行照落（status='allowed'、decided_by='auto:rule:<id>'）+ 审计事件
@@ -16,7 +16,7 @@ import { botInActiveProject } from './questions.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
 import { APPROVAL_FULL_ACCESS_SETTING } from './runtime/sandbox-policy.js'
 
-// project_id 可空：单聊会话没有项目归属（DSHBOTS-218），卡片锚点改落 solo_messages。
+// project_id 可空：单聊会话没有项目归属，卡片锚点改落 solo_messages。
 const APPROVALS_TABLE_DDL = `
   id TEXT PRIMARY KEY,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
@@ -110,7 +110,7 @@ export function toolTargetOf(arguments_) {
 // pre-execute 目标缓存上限：只记最近若干次调用的目标，防长会话里无界增长。
 const APPROVAL_TARGET_CACHE_LIMIT = 200
 
-// ── 免审规则（DSHBOTS-365）──────────────────────────────────────────────────
+// ── 免审规则──────────────────────────────────────────────────
 // 结构化规则列表：主维度 path_prefix（工作区外目录前缀）/ command（命令首行前缀），
 // 辅维度 bot_id / tool_name / sandbox（目标沙箱档；danger-full-access 可配、默认规则集为空
 // 自然不含）。存储仿 prompt_overrides：settings 键 'approval_auto_rules' 存 JSON 数组，
@@ -121,7 +121,7 @@ export const APPROVAL_RULES_LIMIT = 50
 export const APPROVAL_RULE_SANDBOXES = ['workspace-write', 'danger-full-access']
 
 // 系统临时目录（$TMPDIR）：macOS 是 /var/folders/<user>/<hash>/T，名字不含 temp/tmp，
-// 关键词 glob 覆盖不到——单独一行兜底；Linux 的 tmpdir() 就是 /tmp，已被覆盖就不重复一行。
+// 关键词 glob 覆盖不到——单独一行兜底；Linux 的 tmpdir 就是 /tmp，已被覆盖就不重复一行。
 const OS_TMPDIR = tmpdir().replace(/[/\\]+$/, '')
 
 // 出厂预置默认规则（DSHBOTS-365 增量改口径）：关键词 glob 三条——
@@ -281,7 +281,7 @@ export function migrateApprovalPresetRules(raw) {
   return JSON.stringify([...kept.slice(0, before), ...presets, ...kept.slice(before)])
 }
 
-// 来源定位字段（DSHBOTS-240）：审批行 → 来源群聊（项目名/KEY）+ 任务 ID/标识/标题。
+// 来源定位字段：审批行 → 来源群聊（项目名/KEY）+ 任务 ID/标识/标题。
 // 列表查询用 JOIN 一次取齐（approvalsPending / approvalsForProject / approvalsForBot 共用），
 // 避免逐行 N+1；缺任务时任务字段留空，不猜。
 function approvalSourceFields(row) {
@@ -303,11 +303,11 @@ export const approvalsMethods = {
     this.approvalTargets = new Map()
     if (this.approvalsAttached || !runtime?.ctx?.on) return
     this.approvalsAttached = true
-    // prepend：宿主 approval/request 是「按注册序」的瀑布流——先执行的监听器若不调用 next()，
+    // prepend：宿主 approval/request 是「按注册序」的瀑布流——先执行的监听器若不调用 next，
     // 就截断后面整条链路。web bundle 的 dsh-api-remotes 比本插件先加载，它把请求转给 DSH 原生审批面板，
-    // 面板给出答案后直接 resolve 且不调 next()；插件若排在其后就永远收不到请求，审批请求全落到原生界面
+    // 面板给出答案后直接 resolve 且不调 next；插件若排在其后就永远收不到请求，审批请求全落到原生界面
     // （approvals 表零记录、工作台审批卡片不出现）。插到队首后：命中项目绑定的 bot 会话由插件自己应答，
-    // 未命中的照旧 next() 透传给原生界面。
+    // 未命中的照旧 next 透传给原生界面。
     const off = runtime.ctx.on('approval/request', (req, next) => this.handleApprovalRequest(req, next), { prepend: true })
     // approval/request 事件不带工具参数，目标取数只能从 tools/pre-execute 透传监听来：
     // 宿主先过 pre-execute 网关、gate 返回 ask 才发起审批，此刻 exec 里带着 callId/name/arguments。
@@ -335,7 +335,7 @@ export const approvalsMethods = {
   },
 
   // waterfall 监听器：命中 bot 会话且绑定到项目才认领走群聊卡片；单聊会话（kind='solo'、
-  // project_id 为空）由工作台单聊卡片承接（DSHBOTS-218）；其余（未绑定、bot 间私信）透传。
+  // project_id 为空）由工作台单聊卡片承接；其余（未绑定、bot 间私信）透传。
   async handleApprovalRequest(req, next) {
     const sessionId = req?.agent?.session?.id
     // bindingOfSession 在 DshRuntime 原型上，服务层拿不到 this 绑定，这里直查同款 SQL。
@@ -391,7 +391,7 @@ export const approvalsMethods = {
       return 'allowed-once'
     }
 
-    // 卡片锚点：群聊落 messages（kind=approval），单聊落 solo_messages（DSHBOTS-218）。
+    // 卡片锚点：群聊落 messages（kind=approval），单聊落 solo_messages。
     // 状态渲染时查 approvals 表，消息体只是纯文本兜底，不承载状态。
     const summary = displayReason || reason || '请求执行需要授权的操作'
     const anchorBody = `【审批请求】${bot.name} 请求使用 ${toolName}：${summary}`
@@ -436,7 +436,7 @@ export const approvalsMethods = {
   },
 
   // 统一结算：清定时器、出 pending 表、写终态。hostAnswer 非空才向宿主应答（abort 分支不答）。
-  // 写库容错：结算可能由轮次取消的 abort 监听或超时定时器在插件重载（store.close()）之后
+  // 写库容错：结算可能由轮次取消的 abort 监听或超时定时器在插件重载（store.close）之后
   // 迟到触发——曾在 abort 分发里裸抛 statement has been finalized，把整个 dsh 宿主打成 fatal 退出。
   settleApproval(approvalId, status, hostAnswer, decidedBy) {
     const pending = this.approvalPending?.get(approvalId)
@@ -469,7 +469,7 @@ export const approvalsMethods = {
     return this.approvalView(this.store.get('SELECT * FROM approvals WHERE id = ?', approvalId))
   },
 
-  // 免审规则取数（DSHBOTS-365）：每次现读现解析——无缓存，改规则对下一次提权请求即时生效。
+  // 免审规则取数：每次现读现解析——无缓存，改规则对下一次提权请求即时生效。
   approvalRulesView() {
     return parseApprovalRules(this.store.setting(APPROVAL_RULES_SETTING, ''))
   },
@@ -485,7 +485,7 @@ export const approvalsMethods = {
     return null
   },
 
-  // 免审规则保存（DSHBOTS-365）：独立编辑面（仿 updatePromptSegment 先例），仅 type=user
+  // 免审规则保存：独立编辑面（仿 updatePromptSegment 先例），仅 type=user
   // 可写——bot 写免审规则必须被拒，维持「bot 不能自批」边界。整表替换（UI 全量收集后提交），
   // 逐条校验：主维度至少一项、路径前缀必须是绝对路径、sandbox 档枚举收口、bot 必须存在。
   // 保存即审计；id 复用已有（编辑保 id），新条目发 arul_*。
@@ -584,7 +584,7 @@ export const approvalsMethods = {
   approvalView(row) {
     const bot = this.store.get('SELECT name FROM bots WHERE id = ?', row.bot_id)
     const expiresAt = Date.parse(row.expires_at)
-    // 来源群聊标识（DSHBOTS-312）：approvalView 单行路径（decide 等）也带 project_key/name，
+    // 来源群聊标识：approvalView 单行路径（decide 等）也带 project_key/name，
     // 与列表 JOIN 口径一致——行里已带（列表查询 JOIN 产物）则不重查。
     const source = row.project_key !== undefined ? row : (row.project_id
       ? this.store.get('SELECT key AS project_key, name AS project_name FROM projects WHERE id = ?', row.project_id) ?? {}
@@ -595,14 +595,14 @@ export const approvalsMethods = {
       tool_target_display: row.tool_target ? this.toolTargetDisplay(row.tool_target) : null,
       projectKey: source.project_key ?? null,
       projectName: source.project_name ?? null,
-      // 会话归属（DSHBOTS-218）：单聊审批没有项目，UI 据此显示来源列并决定跳转目标。
+      // 会话归属：单聊审批没有项目，UI 据此显示来源列并决定跳转目标。
       scope: row.project_id ? 'project' : 'solo',
       remainingMs: row.status === 'pending' ? Math.max(0, expiresAt - Date.now()) : 0,
     }
   },
 
   // state 视图的待审批条目：pending 在前（按创建时间倒序），已决的跟在后面供卡片回显结果。
-  // 来源定位字段同 approvalsPending（DSHBOTS-240）：桌面通知与顶部通知共用同一套取数口径。
+  // 来源定位字段同 approvalsPending：桌面通知与顶部通知共用同一套取数口径。
   approvalsForProject(projectId) {
     const rows = this.store.all(
       `SELECT a.*, p.name AS project_name, p.key AS project_key,
@@ -619,7 +619,7 @@ export const approvalsMethods = {
     return rows.map(row => ({ ...this.approvalView(row), ...approvalSourceFields(row) }))
   },
 
-  // 单聊视图的待审批条目（DSHBOTS-218）：口径与 approvalsForProject 一致，按 bot 取项目外条目。
+  // 单聊视图的待审批条目：口径与 approvalsForProject 一致，按 bot 取项目外条目。
   approvalsForBot(botId) {
     const rows = this.store.all(
       `SELECT a.*, p.name AS project_name, p.key AS project_key,
@@ -636,11 +636,11 @@ export const approvalsMethods = {
     return rows.map(row => ({ ...this.approvalView(row), ...approvalSourceFields(row) }))
   },
 
-  // 全局待审视图（DSHBOTS-102）：跨项目聚合 status='pending'，按创建时间倒序。
+  // 全局待审视图：跨项目聚合 status='pending'，按创建时间倒序。
   // count 是全库 pending 总数（徽标口径，已决一律不计），items 最多 50 条供顶部入口列明细。
   // 明细带项目名，用户不在该项目群聊页也能看到「谁、在哪个项目、要什么、还剩多久」。
-  // scope 区分项目群聊 / 单聊（DSHBOTS-218）：顶部入口据此决定点击后跳哪个会话。
-  // 来源定位（DSHBOTS-240）：额外带项目 key 与任务标识/标题——顶部跨会话审批通知要让
+  // scope 区分项目群聊 / 单聊：顶部入口据此决定点击后跳哪个会话。
+  // 来源定位：额外带项目 key 与任务标识/标题——顶部跨会话审批通知要让
   // owner 不跳转就能判断「该批谁」。run_id → runs.task_id → tasks 两次主键连接，缺任务留空。
   approvalsPending(limit = 50) {
     const rows = this.store.all(

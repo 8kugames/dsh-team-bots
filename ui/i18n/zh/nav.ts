@@ -1,4 +1,4 @@
-// ui/i18n/zh/nav.ts —— 中文文案字典：nav 域（DSHBOTS-233）
+// ui/i18n/zh/nav.ts —— 中文文案字典：nav 域
 export default {
   // 主导航 tab（NAV/SOLO_NAV 的 key 映射；两个表的 chat 含义不同，单聊用 nav.soloChat）
   "nav.chat": "群聊",

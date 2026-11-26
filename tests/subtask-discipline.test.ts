@@ -141,7 +141,7 @@ test('注入指令段恒英文守门：纪律/豁免/恢复/时效段无中文�
     )
     // recovery=1 的 urgent 限时卡：纪律/时效/豁免/恢复四段并存，逐段抽块断言。
     // 这些是注入给 bot 的机器可读指令段，用户口径要求恒英文（中文界面下亦然）；
-    // UI 可见文案走 t() 翻译管线，不在此守门范围。
+    // UI 可见文案走 t 翻译管线，不在此守门范围。
     const prompt = runtime.promptFor({
       run: { kind: 'task', recovery: 1 },
       bot: botRow, project: projectRow, task: rowOf(ctx.store, urgentBudgeted.id),

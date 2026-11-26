@@ -11,7 +11,7 @@ import { nowIso } from '../src/util.js'
 // DSHBOTS-110：陈旧 queued 运行守卫。
 // 任务已进终态（done/canceled）后，残留的 queued 运行不得再被 tick 领取执行：
 // ①tick 前置清理 + 候选过滤；②任务流转终态时主动清理（含只读运行，补上写占用只清 mode='write' 的漏网）；
-// ③重复触发不重复留痕。全部走真实 tick()/updateTask() 路径，不直接调私有函数绕过调度。
+// ③重复触发不重复留痕。全部走真实 tick/updateTask 路径，不直接调私有函数绕过调度。
 // 注意：库上有 one_active_run_per_task 部分唯一索引（task_id 非空且 queued/running 唯一），
 // 同一任务同时最多一条活跃运行，故写运行与只读运行分用例构造。
 

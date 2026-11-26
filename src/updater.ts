@@ -83,7 +83,7 @@ export function validTargetVersion(version) {
 // …/@deepseek-ai/dsh/bin/*.js 到包根（2 级）余量充足，又不至于在无关目录树里捡到别的包。
 const HOST_PACKAGE_LEVELS = 6
 
-// dsh 宿主运行时版本探测链（DSHBOTS-146）：宿主进程从不设置 DSH_RUNTIME_VERSION，
+// dsh 宿主运行时版本探测链：宿主进程从不设置 DSH_RUNTIME_VERSION，
 // env-only 读取恒 unknown。三级回退：
 // ① env.DSH_RUNTIME_VERSION（宿主将来可能提供，保留）；
 // ② 从宿主入口脚本（process.argv[1]，如 …/@deepseek-ai/dsh/bin/*.js）逐级向上
@@ -114,7 +114,7 @@ export function detectDshRuntimeVersion(env, argv1) {
 // 依赖树的常见布局（<root>/node_modules/dsh-team-bots → <root>/node_modules/@deepseek-ai/dsh）。
 const PLUGIN_HOST_PACKAGE_LEVELS = 6
 
-// 从插件部署位置尽力探测宿主 dsh 版本（DSHBOTS-253）：插件作为宿主子进程运行时
+// 从插件部署位置尽力探测宿主 dsh 版本：插件作为宿主子进程运行时
 // process.argv[1] 是插件自身入口，detectDshRuntimeVersion 的 argv 链在插件宿主下恒 miss。
 // 这里从插件自身文件位置再探两级：
 // ① createRequire.resolve('@deepseek-ai/dsh/package.json')——插件与宿主同依赖树时命中；
@@ -153,7 +153,7 @@ export function detectHostDshVersionFromPlugin(startDir: string | null = null) {
   return version
 }
 
-// dsh 版本展示值归一（DSHBOTS-253）：探测失败形态（null/undefined/'unknown'/空串/纯空白）
+// dsh 版本展示值归一：探测失败形态（null/undefined/'unknown'/空串/纯空白）
 // 一律归为 ''，UI 据此整行隐藏，不再展示 unknown 占位。
 export function displayDshVersion(version) {
   const value = typeof version === 'string' ? version.trim() : ''

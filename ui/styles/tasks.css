@@ -47,7 +47,7 @@
     font-size: var(--fs-body);
 }
 
-/* Board: Linear 风格分组树（DSHBOTS-58）：按状态分组的可折叠分组 + 紧凑单行任务行 */
+/* Board: Linear 风格分组树：按状态分组的可折叠分组 + 紧凑单行任务行 */
 .board {
     display: flex;
     flex-direction: column;
@@ -103,7 +103,7 @@
     flex-direction: column;
     padding: 2px 0 2px;
 }
-/* 父子层级（DSHBOTS-58）：子任务挂在一级缩进的容器里，容器左侧一条导线连到父行。 */
+/* 父子层级：子任务挂在一级缩进的容器里，容器左侧一条导线连到父行。 */
 .task-children {
     display: flex;
     flex-direction: column;
@@ -129,7 +129,7 @@
     color: var(--ink);
     background: var(--surface-2);
 }
-/* 终态任务卡的驳回按钮（DSHBOTS-141）：与折叠按钮同高的幽灵小按钮，hover 转 danger 提示不可逆。 */
+/* 终态任务卡的驳回按钮：与折叠按钮同高的幽灵小按钮，hover 转 danger 提示不可逆。 */
 .task-reject {
     display: inline-flex;
     align-items: center;
@@ -365,7 +365,7 @@
 .priority-dot.none {
     background: var(--line-2);
 }
-/* 紧凑单行标题：单行省略号，hover 用 title 看全文（DSHBOTS-58）。 */
+/* 紧凑单行标题：单行省略号，hover 用 title 看全文。 */
 .task-card-title {
     font-size: var(--fs-body);
     line-height: 1.4;
@@ -450,7 +450,7 @@
     font: var(--fs-caption) var(--mono);
     font-variant-numeric: tabular-nums;
 }
-/* 终态时间小字（DSHBOTS-44）：done/canceled 卡片脚部的完成/取消时间，仅终态渲染。 */
+/* 终态时间小字：done/canceled 卡片脚部的完成/取消时间，仅终态渲染。 */
 .task-end-time {
     color: var(--ink-3);
     font: var(--fs-caption) var(--mono);
@@ -593,7 +593,7 @@
 }
 
 
-/* 任务卡上下文菜单（DSHBOTS-367）：键盘跨列移动的载体，与遮罩同层但不吃遮罩点击。 */
+/* 任务卡上下文菜单：键盘跨列移动的载体，与遮罩同层但不吃遮罩点击。 */
 #task-menu-root {
     position: fixed;
     inset: 0;

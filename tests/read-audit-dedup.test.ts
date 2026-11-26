@@ -41,7 +41,7 @@ async function setup() {
   execFileSync('git', ['init', '--quiet'], { cwd: dir, stdio: 'ignore' })
   const projectRow = store.get('SELECT * FROM projects WHERE id = ?', project.id)
   const insertRun = (id, extra: { write_scopes?: unknown } = {}) => {
-    // 争用口径 A（DSHBOTS-289）：同 bot 同时至多一条 queued/running——播种前先把该
+    // 争用口径 A：同 bot 同时至多一条 queued/running——播种前先把该
     // bot 的既有运行置终态，跨运行去重用例按「前一条完结后再跑下一条」排队。
     store.run(
       "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE bot_id = ? AND status IN ('queued', 'running')",

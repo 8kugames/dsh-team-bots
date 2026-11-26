@@ -22,7 +22,7 @@ class StubRuntime {
   async validateBotConfig() {}
 }
 
-// 微信块现状全文（DSHBOTS-215/283）——内容零改动的逐字锚。
+// 微信块现状全文——内容零改动的逐字锚。
 const WECHAT_BLOCK = `
 
 # WeChat direct conversation

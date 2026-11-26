@@ -187,7 +187,7 @@ function renderRunLimitsCard() {
   const runValue = savedRun !== '' ? savedRun : String(limits.runTimeoutMinutes ?? 120)
   // 看门狗保存值 '0'（关闭）合法，不能用 || 短路吞掉。
   const stallValue = savedStall !== '' ? savedStall : String(limits.stallTimeoutMinutes ?? 30)
-  // 验收滞留阈值（DSHBOTS-235）：未保存回填生效值；'0'（关闭守门）同样合法不短路。
+  // 验收滞留阈值：未保存回填生效值；'0'（关闭守门）同样合法不短路。
   const reviewIdleValue = savedReviewIdle !== '' ? savedReviewIdle : String(limits.reviewIdleMinutes ?? 30)
   const envNames = [
     limits.runTimeoutEnv ? 'DSH_TEAM_RUN_TIMEOUT_MS' : '',
@@ -197,12 +197,12 @@ function renderRunLimitsCard() {
   const stallText = limits.stallTimeoutMinutes === 0
     ? t('global.stallOff')
     : t('global.stallMinutes', { minutes: limits.stallTimeoutMinutes ?? 30 })
-  // 审批/提问等待（DSHBOTS-309）：默认 10 分钟，settings 可调 [1,60]；未保存回填默认。
+  // 审批/提问等待：默认 10 分钟，settings 可调 [1,60]；未保存回填默认。
   const savedApproval = settings.approval_timeout_minutes ?? ''
   const savedQuestion = settings.question_timeout_minutes ?? ''
   const approvalValue = savedApproval !== '' ? savedApproval : '10'
   const questionValue = savedQuestion !== '' ? savedQuestion : '10'
-  // 验收分档时效（DSHBOTS-364）：'0'（关闭分档、跟随全局）合法，不能 || 短路。
+  // 验收分档时效：'0'（关闭分档、跟随全局）合法，不能 || 短路。
   const savedReviewTimeout = settings.review_timeout_minutes ?? ''
   const reviewTimeoutValue = savedReviewTimeout !== '' ? savedReviewTimeout : String(limits.reviewTimeoutMinutes ?? 0)
   return `
@@ -302,7 +302,7 @@ function renderRuntimeSettingsCard() {
     </div>`
 }
 
-// 团队指令段（B1/DSHBOTS-324）：四段可编辑提示词的查看与编辑。
+// 团队指令段：四段可编辑提示词的查看与编辑。
 // defaultChanged 徽标提示「内置默认已升级」；保存即经后端预算校验（拆卡三段 ≤1200），
 // 改动只对之后启动的会话生效（identity 段随会话冻结，进行中会话不唤醒）。
 const PROMPT_SEGMENT_LABEL_KEYS = {
@@ -340,7 +340,7 @@ function renderPromptSegmentsCard() {
     </div>`
 }
 
-// 设置变更历史（A4/DSHBOTS-330）：audit_log 只读视图的呈现——回答「谁在什么时候改了什么」。
+// 设置变更历史：audit_log 只读视图的呈现——回答「谁在什么时候改了什么」。
 // 只回看不代恢复：历史行是增量 patch，恢复语义 = 按行内值手动重存（revision 闸兜并发）。
 function renderOpsCard() {
   const settings = state.data.settings ?? {}
@@ -394,7 +394,7 @@ function dshPathsCard() {
     </div>`
 }
 
-// 版本行（DSHBOTS-253）：取不到真值（缺失/null/'unknown'/空串/纯空白）时整行不渲染，
+// 版本行：取不到真值（缺失/null/'unknown'/空串/纯空白）时整行不渲染，
 // 不显示 unknown 或空占位；两个「最新版本」行行为不变。
 function versionRow(labelKey, value) {
   const version = typeof value === 'string' ? value.trim() : ''
@@ -500,7 +500,7 @@ function renderGlobal() {
   const data = state.data
   const scale = currentScale()
   // 语言下拉回填保存值；'auto' = 跟随 DSH 宿主 Language 设定（未保存时也按 auto 展示）。
-  // 用 || 而非 ??：settingsView() 对未保存键返回 ''（见 core.js），空串必须回落 auto，否则三选项都不选中。
+  // 用 || 而非 ??：settingsView 对未保存键返回 ''（见 core.js），空串必须回落 auto，否则三选项都不选中。
   const uiLanguage = data.settings?.ui_language || 'auto'
   const notify = notifyToggleView()
   // 明暗偏好读内存态（非服务端设置）：三档跟随/日间/夜间，与调色板正交。

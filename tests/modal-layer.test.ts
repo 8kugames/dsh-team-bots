@@ -175,9 +175,9 @@ test('接线①：index.html 的 #modal-root 在 #app 外、#toast-root 前，re
   assert.ok(appOpen < modalRoot && modalRoot > appClose, 'modal-root 不在 #app 内部')
   const renderSrc = /function render\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(renderSrc, 'ui/app.js 缺少 render()')
-  // 剥掉注释再断言：render() 代码里对 modal-root 零引用（注释里的说明文字不算）
+  // 剥掉注释再断言：render 代码里对 modal-root 零引用（注释里的说明文字不算）
   assert.doesNotMatch(renderSrc.replace(/\/\/[^\n]*/g, ''), /modal-root/, 'render() 只补 #app，永不触碰 #modal-root')
-  // 原位补丁（DSHBOTS-227）：整页重建收进 morph() 兜底，render() 只留一行接线。
+  // 原位补丁：整页重建收进 morph 兜底，render 只留一行接线。
   assert.match(renderSrc, /morph\(app, renderShell\(\)\)/)
 })
 
@@ -199,12 +199,12 @@ test('接线③：closeModal 只经 renderModalLayer 清 modal-root，不走全�
 })
 
 // —— DSHBOTS-98：遮罩闸门（行为级）——
-// modal-layer 块与 render() 在真实代码里互相调用（render() 顶部问 overlayOpen()，
-// 块内 flushAppRender() 调 render()），所以把两者放进同一作用域求值。
+// modal-layer 块与 render 在真实代码里互相调用（render 顶部问 overlayOpen，
+// 块内 flushAppRender 调 render），所以把两者放进同一作用域求值。
 const renderSrc = /function render\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
 assert.ok(renderSrc, 'ui/app.js 缺少 render()')
 
-// 迷你运行时：只实现 render() 与遮罩闸门用到的操作子集。
+// 迷你运行时：只实现 render 与遮罩闸门用到的操作子集。
 // 两个口径分开盯：morphCalls = 这一拍有没有渲染（原位补丁尝试），writes = 有没有整页 innerHTML 重建（闪烁的直接来源）。
 const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
   const app = makeNode()
@@ -242,7 +242,7 @@ const makeOverlayHarness = ({ modal = null, viewerHidden = true } = {}) => {
     cb => { cb(); return 0 },
     null,
     // 原位补丁在此迷你 DOM 上不做解析：记录「这一拍渲染过一次」并直接整页写，
-    // 于是 writes() 计整页重建次数、morphCalls 计渲染次数，两个口径都能盯。
+    // 于是 writes 计整页重建次数、morphCalls 计渲染次数，两个口径都能盯。
     (root, html) => { morphCalls.push(html); root.innerHTML = html },
     () => {},
     () => false,

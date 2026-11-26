@@ -479,7 +479,7 @@ async function openMessageImage(imageId) {
   const nameEl = document.getElementById('image-viewer-name')
   const sizeEl = document.getElementById('image-viewer-size')
   viewer.hidden = false
-  // 查看器也是遮罩：背景 #app 置 inert（DSHBOTS-367）。
+  // 查看器也是遮罩：背景 #app 置 inert。
   setAppInert(overlayInertState())
   body.textContent = t("图片加载中…")
   if (nameEl) nameEl.textContent = ''
@@ -510,7 +510,7 @@ function closeImageViewer() {
   viewer.hidden = true
   // 查看器关闭：背景解锁（弹窗仍开着时保持 inert）。
   setAppInert(overlayInertState())
-  // 遮罩关闭：补上查看器开着期间被跳过的 #app 渲染（DSHBOTS-98）。
+  // 遮罩关闭：补上查看器开着期间被跳过的 #app 渲染。
   flushAppRender()
 }
 
@@ -558,7 +558,7 @@ function composerPanelCap(input) {
   const panel = input.closest('.chat-panel')
   return panel ? composerCap(panel.clientHeight) : COMPOSER_AUTO_MAX_PX
 }
-// composer-flicker（DSHBOTS-153）：renderShell 全量重建出的新 textarea 没有内联高度，
+// composer-flicker：renderShell 全量重建出的新 textarea 没有内联高度，
 // 轮询任务又常落在帧的 rAF 阶段之后，浏览器会先把「rows=2 内在高度」画出去，下一帧 rAF 里
 // applyComposerHeight 才设回目标 px——空输入即每 2.8s 一次约半像素跳变，拖高/多行草稿放大为
 // 数十像素闪一下。记住最近一次应用的 px，chat.js 的 composer 模板直接内联同值（活绑定），
@@ -579,7 +579,7 @@ function syncComposerBox(input) {
   if (button) button.disabled = input.value.trim() === '' && pendingImagesFor().length === 0
 }
 
-// 双发防护（DSHBOTS-165）：⌘Enter 按键重复、双击发送按钮、慢网下重复点击都会在出站未完成时
+// 双发防护：⌘Enter 按键重复、双击发送按钮、慢网下重复点击都会在出站未完成时
 // 再次进入 sendMessage，而旧实现草稿要等 api 成功才清空，同一草稿会被发出两遍。模块级在途
 // 标志收口全部入口（发送按钮 / ⌘Enter / 自动补全回车）：在途时二次触发直接返回，finally 复位。
 let sendInFlight = false
@@ -615,7 +615,7 @@ async function sendMessage() {
     state.chatAtBottom = true
     clearPendingImages()
     render()
-    // DOM 值显式清空（DSHBOTS-244）：morph 复用持焦 textarea 时，syncFormValue 按「聚焦中控件的
+    // DOM 值显式清空：morph 复用持焦 textarea 时，syncFormValue 按「聚焦中控件的
     // 值归用户管」不覆写 .value，state 已清而 DOM 残留；render 的 rAF 里 syncComposerBox 还会把
     // 残值回写复活 state 草稿（失败恢复串随之叠加 "body\nbody"）。render 后取节点收敛唯一出口：
     // 复用路径清掉残留，全量重建路径对新节点幂等。⌘Enter/发送按钮/补全回车三入口同经此处。
@@ -629,7 +629,7 @@ async function sendMessage() {
       result = await api('send_message', { projectId: project.id, body, ...(replyTo ? { replyTo: replyTo.id } : {}), ...(images.length ? { images } : {}) })
     }
     sent = true
-    // 排队气泡乐观渲染（DSHBOTS-150）：发送成功后立刻为被 @ 的目标 bot 立排队行，不等下一拍
+    // 排队气泡乐观渲染：发送成功后立刻为被 @ 的目标 bot 立排队行，不等下一拍
     // 2.8s 轮询——被 @ 的 bot 常常在轮询到达前就答完了，气泡否则肉眼不可见。
     // 目标 bot 取后端回传的 runBots / runBot，与实际派生的运行一致，无需前端解析 @。
     applyOptimisticTyping(result, state.chatMode === 'solo' ? 'solo_chat' : 'chat')
@@ -647,7 +647,7 @@ async function sendMessage() {
       // 记录上下文即可，下一拍 2.8s 轮询会自然补齐数据。
       console.warn('[composer] post-send refresh failed:', { mode: state.chatMode, body: body.slice(0, 80), error })
     } else {
-      // 出站失败：把草稿与待发图片恢复回去供重发；错误 toast 由 api() 非 quiet 调用统一弹出，
+      // 出站失败：把草稿与待发图片恢复回去供重发；错误 toast 由 api 非 quiet 调用统一弹出，
       // 这里不重复。恢复写进出站时的键（慢网窗口内切换会话不串写）；窗口期内新输入的草稿与
       // 新附件保留在其后不被覆盖。
       const typed = state.chatDrafts[key] ?? ''

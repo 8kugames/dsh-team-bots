@@ -32,10 +32,10 @@ export const SUBAGENT_GENERATION_TOOLS = [
 ] as const
 
 // 总监专权工具：服务层 ownerContextFor 已做权威校验，本清单用于工具层兜底与守门测试。
-// team_block_task（DSHBOTS-232）与派单/验收同款总监专属：强制受阻停运行是不可逆控制面操作。
-// team_list_bots / team_add_member / team_create_bot（DSHBOTS-229）是团队编制入口：
+// team_block_task与派单/验收同款总监专属：强制受阻停运行是不可逆控制面操作。
+// team_list_bots / team_add_member / team_create_bot是团队编制入口：
 // 池查询含未入群 bot，加人与建 bot 会改动项目成员或全局 bot 档案。
-// team_memory_list / team_memory_write / team_memory_cleanup（DSHBOTS-239）是记忆管理面：
+// team_memory_list / team_memory_write / team_memory_cleanup是记忆管理面：
 // bot 域记忆由 Bot 自己管理（成员触顶后的合法自救通道），项目/团队域归项目总监，
 // 总监可经 bot 点名代管任意 Bot——权限判定在服务层 resolveMemoryScopeFor。
 export const DIRECTOR_ONLY_TOOLS = [
@@ -55,7 +55,7 @@ export function subagentCapabilityEnabledFor(bot, config) {
 
 import { hiddenToolNames } from './services/runtime/tool-families.js'
 
-// 工具层兜底（DSHBOTS-238）：成员 bot 隐藏总监专权工具，避免「误调被拒后才知情」；
+// 工具层兜底：成员 bot 隐藏总监专权工具，避免「误调被拒后才知情」；
 // 子代理生成工具由 preset 全局注册，成员 bot 默认可见，无需额外放行。
 // DSHBOTS-247：调用点形状不一——session.ts 的结转/复用路径传 resolveAgent 的
 // `{ agent }` 包装，新建会话路径传裸 agent。这里归一为句柄后取 restrict，两种形状都生效；
@@ -301,7 +301,7 @@ export function installTeamTools(ctx, service) {
     },
   })
 
-  // ── 总监记忆管理工具集（DSHBOTS-239）：list / 同名覆盖写 / 批量清理 ──
+  // ── 总监记忆管理工具集：list / 同名覆盖写 / 批量清理 ──
   // 服务层 ownerContextFor 权威鉴权；此处注册形态与 DIRECTOR_ONLY_TOOLS 兜底同源。
 
   ctx.tools.register({

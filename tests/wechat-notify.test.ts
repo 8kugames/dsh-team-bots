@@ -355,7 +355,7 @@ test('D-185 链接建立：作废此前全部待发堆积，链接后新事件�
     const { channel, sent } = connectedChannel(store)
 
     // connect 会起真实轮询：每轮 poll 带 10ms 真实间隔（微任务循环会饿死定时器），
-    // connect 返回后立即 stop()，由 stop abort 本链接的 epoch 让轮询干净退出。
+    // connect 返回后立即 stop，由 stop abort 本链接的 epoch 让轮询干净退出。
     channel.makeTransport = () => ({
       async notifyStart() {},
       async poll() {

@@ -9,7 +9,7 @@ import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import { effectiveSandbox } from '../src/services/runtime/prompt.js'
 
-// 派发沙箱档位缺省规则守门（DSHBOTS-234）：档位解析顺序=卡面显式声明 > bot 配置（inherit 为缺省）。
+// 派发沙箱档位缺省规则守门：档位解析顺序=卡面显式声明 > bot 配置（inherit 为缺省）。
 // ①非只读卡派发（未传 sandbox）→ 运行档位 = 执行 bot 自身配置档（两档都断言），列落 NULL=inherit；
 // ②显式只读卡（sandbox='read-only'）→ 运行档位 = read-only（只收紧，存量覆盖行为不变）；
 // ③起会话把生效档写进宿主 sandbox/mode，run_events 留档——缺省不是 read-only，也不是宿主默认兜底。

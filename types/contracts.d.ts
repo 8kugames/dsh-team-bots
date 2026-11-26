@@ -128,9 +128,9 @@ interface TeamActionPayload {
   /** 任务 Goal（版本化锚点）：create_task 平铺入参；update_task 以 patch.goal 透传同一形态。 */
   goal?: { statement: string; criteria: string[] }
   evaluation?: unknown
-  /** update_approval_rules 的规则数组（DSHBOTS-365）：字段由服务端逐条校验。 */
+  /** update_approval_rules 的规则数组：字段由服务端逐条校验。 */
   rules?: unknown[]
-  /** update_approval_full_access（DSHBOTS-366）：true=所有 bot 与派发任务统一 danger-full-access。 */
+  /** update_approval_full_access：true=所有 bot 与派发任务统一 danger-full-access。 */
   enabled?: boolean
   /** update_settings 的设置键补丁：键集由服务端 settingsView 白名单校验，不受 action 入参白名单约束。 */
   patch?: Record<string, unknown>

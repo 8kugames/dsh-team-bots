@@ -1,4 +1,4 @@
-// src/services/bot-quota.ts —— Bot 额度墙状态域（DSHBOTS-241）
+// src/services/bot-quota.ts —— Bot 额度墙状态域
 // provider 额度墙（已达限额）是 bot 级状态：主 provider 耗尽时，耗尽期内的新任务派发
 // 直接走备用模型（备用 provider 同样耗尽则排队等待），恢复时间过后自动回主模型。
 // 状态按 (bot, provider) 存：主备 provider 是两套额度，互相不能顶替。
@@ -97,7 +97,7 @@ export function quotaRouteFor(bot: any, primary: any, fallback: any) {
   return { mode: 'wait' as const, provider: primary.provider, resetAt: primary.resetAt }
 }
 
-// 更严的一条额度记录（DSHBOTS-358）：耗尽状态优先，其次恢复时间更晚者。
+// 更严的一条额度记录：耗尽状态优先，其次恢复时间更晚者。
 // Bot 换 provider 时用于合并旧键与新键的记录，避免迁移把正在生效的墙抹掉。
 function stricterQuotaRow(a: any, b: any) {
   const aExhausted = quotaRowState(a).exhausted
@@ -234,7 +234,7 @@ export const botQuotaMethods = {
     return quotaRouteFor(bot, primary, fallback)
   },
 
-  // 换 provider 时迁移额度记录（DSHBOTS-358）：额度墙按 (bot, provider) 存，
+  // 换 provider 时迁移额度记录：额度墙按 (bot, provider) 存，
   // Bot 改用别的 provider 后旧键会成孤儿（永远查不到、也永远清不掉）。
   // 迁移口径：目标 provider 无记录 → 直接改键；目标已有记录 → 保留更严的一条（不抹掉
   // 正在生效的墙），删掉旧键。仅 provider 真变才动，并落一条操作日志。

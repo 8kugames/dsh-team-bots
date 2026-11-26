@@ -288,7 +288,7 @@ export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY, p
   return aggregateUsage(store, ['u.run_id = ?'], [runId], budgetCurrency, prices)
 }
 
-// —— 任务级 usage 聚合（DSHBOTS-212）——
+// —— 任务级 usage 聚合
 // 口径：一个任务端到端花多少 token。明细按 task_id 归因（lifecycle 记账随 run 透传；
 // chat-db-split Phase 2 迁移把历史 NULL 行经顶库 runs 一次性回填），调用方传任务
 // 所属项目的聊天库（明细住那里），不再 JOIN runs——聊天库里没有 runs 表。
@@ -326,7 +326,7 @@ export function taskTreeUsageTotals(store, taskId, budgetCurrency = BUDGET_CURRE
   return aggregateUsage(store, [`u.task_id IN ${marks}`], ids, budgetCurrency, prices)
 }
 
-// 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
+// 用量时间窗：今日 / 7 日 / 30 日 / 至今 四档。
 // 口径：今日 = 产品时区（默认 Asia/Shanghai）当日 0 点起；7 日 / 30 日 = 滚动窗口；
 // 至今 = 不设下界。明细 occurred_at 存的是 ISO UTC 字符串，窗口起点先换算成 UTC ISO 再比较。
 export const USAGE_WINDOW_KEYS = ['today', '7d', '30d', 'all']
@@ -412,7 +412,7 @@ export function resolveUsageWindow(key, options = {} as any) {
 }
 
 // 小时桶列（'YYYY-MM-DDTHH'）的日历日表达式：与 dayExpression 同口径，
-// 但要补 ':00:00' 才是 SQLite datetime() 认的完整时刻。
+// 但要补 ':00:00' 才是 SQLite datetime 认的完整时刻。
 function hourDayExpression(column, offsetMinutes) {
   if (offsetMinutes === null || offsetMinutes === undefined) return `substr(${column}, 1, 10)`
   const sign = offsetMinutes < 0 ? '-' : '+'
@@ -439,7 +439,7 @@ function scopeFilters(scope) {
     filters.push('u.project_id = ?')
     params.push(scope.projectId)
   }
-  // 单聊口径（DSHBOTS-9）：该 Bot 的项目外用量，与 view.solo.runs 同口径。
+  // 单聊口径：该 Bot 的项目外用量，与 view.solo.runs 同口径。
   if (scope.soloBotId) {
     filters.push('u.bot_id = ?', "u.project_id = ''")
     params.push(scope.soloBotId)
@@ -716,12 +716,12 @@ function windowSpanDays(store, window) {
 }
 
 // —— 用量快照缓存 ——
-// state() 每 2.8s 轮询一次，每次都跑 30d 全口径聚合（生产库实测约 500ms）。
-// 这里加一层 TTL 缓存：同一组参数在 TTL 内直接复用，把 state() 从 ~750ms 拉回几十毫秒。
+// state 每 2.8s 轮询一次，每次都跑 30d 全口径聚合（生产库实测约 500ms）。
+// 这里加一层 TTL 缓存：同一组参数在 TTL 内直接复用，把 state 从 ~750ms 拉回几十毫秒。
 //
 // 口径：用量页默认最多滞后 30s；明细 / 对账 / 价目任一变更会立即失效缓存。
 // 失效有两条通道，缺一不可：
-//   1) 显式：写回方在改完数据后调 clearUsageSnapshotCache()
+// 1) 显式：写回方在改完数据后调 clearUsageSnapshotCache
 //      （usage-reconcile.js 的 setPrice / reconcileUsage / applyRetention）。
 //   2) 兜底：缓存项带「数据版本」，每次先算版本号，与缓存项不同就直接重算。
 //      版本由三张会被写回的表推导，用于兜住漏挂钩子的路径（含 UPDATE 不改时间戳的情形，
@@ -786,7 +786,7 @@ export function usageSnapshot(store, projectId, days = 30, options = {} as any) 
 function computeUsageSnapshot(store, projectId, days = 30, options = {} as any) {
   const budgetCurrency = String(options.currency ?? BUDGET_CURRENCY).toUpperCase() || BUDGET_CURRENCY
   const soloBotId = options.soloBotId ?? null
-  // 时间窗口径（DSHBOTS-121）：传 window 走四档窗口；不传时沿用旧的「近 N 天」滚动窗口。
+  // 时间窗口径：传 window 走四档窗口；不传时沿用旧的「近 N 天」滚动窗口。
   const window = options.window
     ? resolveUsageWindow(options.window, { now: options.now, timeZone: options.timeZone })
     : null

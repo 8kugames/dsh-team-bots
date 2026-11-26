@@ -36,7 +36,7 @@
 }
 
 
-/* 视觉隐藏但读屏可读（DSHBOTS-367）：表单错误的礼貌播报区挂这个类。 */
+/* 视觉隐藏但读屏可读：表单错误的礼貌播报区挂这个类。 */
 .visually-hidden {
     position: absolute;
     width: 1px;

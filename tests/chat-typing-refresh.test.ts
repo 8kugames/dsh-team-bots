@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 
 // DSHBOTS-123：「正在思考与回复…」不随 2.8s 轮询清除。
-// 根因：poll() 的 `!state.data || state.busy > 0 || isTyping()` 把「焦点在 composer」当成
+// 根因：poll 的 `!state.data || state.busy > 0 || isTyping` 把「焦点在 composer」当成
 // 「正在输入」，取数与渲染一起跳过；sendMessage 尾部回焦 composer、切走再切回焦点恢复，
 // 轮询被无限短路，typing 行与新消息冻结，直到点击（如思考气泡）令 composer 失焦。
 // 修复口径：取数不再被焦点挡；渲染闸门收窄为「composer 静默窗内有输入或 IME 组词中」，
-// 其余输入控件维持原焦点挡渲染语义；render() 重建后恢复 composer 焦点与光标。
+// 其余输入控件维持原焦点挡渲染语义；render 重建后恢复 composer 焦点与光标。
 
 const source = readUiSource()
 
@@ -45,7 +45,7 @@ test('其余输入控件维持原「焦点即挡」语义；无焦点不挡', ()
   assert.equal(pollRenderBlockedByFocus({ tagName: 'BUTTON', id: 'send-message' }, { now }), false)
 })
 
-// —— poll() 接线：真实源码驱动 ——
+// —— poll 接线：真实源码驱动
 const pollSrc = /async function poll\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
 assert.ok(pollSrc, 'ui/app.js 缺少 poll()')
 
@@ -118,7 +118,7 @@ test('composer 输入事件记录时间戳；compositionstart/end 维护组词�
   assert.match(source, /addEventListener\('compositionend'[\s\S]{0,200}composer-input[\s\S]{0,120}state\.composerComposing = false/)
 })
 
-// —— render() 焦点/光标恢复接线 ——
+// —— render 焦点/光标恢复接线
 test('render() 重建前捕获 composer 光标，rAF 收尾恢复焦点与选区', () => {
   assert.match(
     source,

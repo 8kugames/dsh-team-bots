@@ -7,7 +7,7 @@
 // c) review 运行豁免（kind!=='task' 不走死线闸）；
 // d) 施工提示词时效段注入剩余时间（Deadline: ... / N min remaining）与耗尽收尾轮文案；
 //    review 提示词不注入 Deadline 行；
-// e) 重派即新窗口（DSHBOTS-281）：存量老卡重派不改预算不升级（正例）+ 新窗口内预算×2
+// e) 重派即新窗口：存量老卡重派不改预算不升级（正例）+ 新窗口内预算×2
 //    耗尽仍照常拦截（负例）。
 // f) review 运行预算分档（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：review/handle 配了
 //    分档取 min(全局, 分档)（默认 0 = 关闭走全局，settings review_timeout_minutes
@@ -37,7 +37,7 @@ test('a) 死线计算：最新派发 + 预算×轮数；重派即新窗口；无
     Date.parse('2026-11-06T02:20:00.000Z'),
     '死线 = 派发 + time_budget_minutes × TASK_BUDGET_ROUNDS',
   )
-  // 重派即新窗口（DSHBOTS-281）：基准=最新一次派发（05:00 + 10×2 = 05:20），
+  // 重派即新窗口：基准=最新一次派发（05:00 + 10×2 = 05:20），
   // 存量老卡重派自动重置窗口，不沿用首次派发（旧口径曾取首次 → 立即超线）。
   assert.equal(
     taskDeadlineMs({ budgetMinutes: 10, firstDispatchAt: T0, latestDispatchAt: '2026-11-06T05:00:00.000Z' }),
@@ -213,7 +213,7 @@ test('d) 提示词：时效段注入剩余时间；耗尽后收尾轮口径；re
   }
 })
 
-// 重派即新窗口（DSHBOTS-281）：存量老卡重派不改预算不升级（正例）+ 新窗口内预算×2 耗尽仍拦截（负例）。
+// 重派即新窗口：存量老卡重派不改预算不升级（正例）+ 新窗口内预算×2 耗尽仍拦截（负例）。
 test('e) 重派即新窗口：老卡重派不升级（正例）；新窗口真超时仍拦截（负例）', async () => {
   const t = await setup()
   try {

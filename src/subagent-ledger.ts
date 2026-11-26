@@ -84,7 +84,7 @@ export function installSubagentLedger(ctx, store, logger, chatStores = null) {
     return run ? { botId: binding.bot_id, runId: run.id } : null
   }
 
-  // 事件住运行归属聊天库（Phase 3）：只有 runId，先取路由列再走注入的路由器；
+  // 事件住运行归属聊天库：只有 runId，先取路由列再走注入的路由器；
   // 运行行已不在（删除竞态）或未注入路由器时回落顶库留痕，不丢审计线索。
   const record = (runId, type, message) => {
     const run = store.get('SELECT id, project_id, bot_id FROM runs WHERE id = ?', runId)

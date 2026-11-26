@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url'
 const source = readFileSync(fileURLToPath(new URL('../ui/modules/composer.js', import.meta.url)), 'utf8')
 
 // —— DSHBOTS-244：已发消息偶现聊天框草稿残留（乐观清空 DOM 未同步）——
-// 根因：乐观清空只写 state.chatDrafts 后靠 render() 同步 DOM。morph 复用持焦 textarea 时
+// 根因：乐观清空只写 state.chatDrafts 后靠 render 同步 DOM。morph 复用持焦 textarea 时
 // （⌘Enter 发送焦点必在输入框；Safari 点按钮也不转移焦点），dom-morph 的 syncFormValue 按
 // 「聚焦中控件的值归用户管」不覆写 .value——state 已清而 DOM 残留；render 的 rAF 里
 // syncComposerBox（app.ts）再把残值回写复活 state 草稿，失败恢复串随之叠加 "body\nbody"。
 // 全量重建路径新节点从子文本取值 '' 无残留，故缺陷呈偶发。
-// 修复口径：sendMessage 乐观清空段在 render() 后显式清 #composer-input 的 DOM 值，收敛唯一
+// 修复口径：sendMessage 乐观清空段在 render 后显式清 #composer-input 的 DOM 值，收敛唯一
 // 出口；⌘Enter / 发送按钮 / 补全回车三入口同经 sendMessage，一处覆盖。以下断言锁死该行为。
 
 const fnSrc = /async function sendMessage\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]

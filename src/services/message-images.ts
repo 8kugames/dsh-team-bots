@@ -160,7 +160,7 @@ export function messageImageRow(store, imageId) {
   return store.get('SELECT * FROM message_images WHERE id = ?', imageId) ?? null
 }
 
-// ── 大 PNG 转 JPEG（DSHBOTS-109）───────────────────────────────────────────
+// ── 大 PNG 转 JPEG───────────────────────────────────────────
 // PNG 大图 base64 体积大、上传慢、部分模型处理效率低：入库与上传前把超过阈值
 // 的 PNG 归一成 JPEG。gif/webp 不动（动图与透明语义保留）。解码用 sharp——
 // 插件自身不依赖 sharp，优先复用宿主安装树里已有的（dsh-attachment-local 的
@@ -175,7 +175,7 @@ let sharpMissingWarned = false
 // 懒解析 sharp，结果进程内缓存。候选依次为：
 // ① 裸 'sharp'（若宿主环境把它放进了插件可解析范围）；
 // ② 从本文件目录逐级向上找 node_modules/sharp（源码仓开发态）；
-// ③ 从 process.cwd() 逐级向上；
+// ③ 从 process.cwd 逐级向上；
 // ④ 从进程入口（dsh 的 lib/bin.js）逐级向上——生产环境 dsh 全局安装树里
 //    node_modules/sharp（dsh-attachment-local 的传递依赖）就在这条链上。
 function resolveSharp() {
@@ -211,7 +211,7 @@ function resolveSharp() {
 }
 
 // 单张转换：返回新的图片描述对象，失败/不划算返回 null（调用方回退原图）。
-// PNG 的透明通道 JPEG 承载不了，按惯例压平到白底；rotate() 先吃掉 EXIF 方向。
+// PNG 的透明通道 JPEG 承载不了，按惯例压平到白底；rotate 先吃掉 EXIF 方向。
 async function convertPngToJpeg(sharp, data, logger) {
   const buffer = await sharp(Buffer.from(data, 'base64'))
     .rotate()

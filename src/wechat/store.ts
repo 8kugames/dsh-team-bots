@@ -53,7 +53,7 @@ export class WechatStore {
     `)
     await this.migrateOutboxColumns()
     await this.migrateChannelStateColumns()
-    // 幂等收据键（A3/DSHBOTS-323）：同键只允许一行在库（存留期内重复推送被吸收）。
+    // 幂等收据键：同键只允许一行在库（存留期内重复推送被吸收）。
     // 部分唯一索引：无键行（notify 未带 receiptKey 的旧调用形态）不参与约束。
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS outbox_receipt_key_idx ON outbox(receipt_key) WHERE receipt_key IS NOT NULL')
     await this.secureFiles()
@@ -61,9 +61,9 @@ export class WechatStore {
   }
 
   /**
-   * 旧库补列迁移：直达对话（DSHBOTS-208）引入项目绑定列之前的库缺这一列。
-   * 幂等：列已存在则跳过；补列无默认值，旧行语义等价于「未绑定」。
-   */
+ * 旧库补列迁移：直达对话引入项目绑定列之前的库缺这一列。
+ * 幂等：列已存在则跳过；补列无默认值，旧行语义等价于「未绑定」。
+ */
   async migrateChannelStateColumns() {
     const columns = new Set(
       this.db.prepare('PRAGMA table_info(channel_state)').all().map(column => column.name),
@@ -74,10 +74,10 @@ export class WechatStore {
   }
 
   /**
-   * 旧库补列迁移：outbox 引入重试上限（attempts）与废弃标记（gave_up_at）前的库缺这两列；
-   * 幂等收据键（A3/DSHBOTS-323）与最近失败原因（last_error）同批补齐。
-   * 幂等：列已存在则跳过；补列带默认值，旧行语义等价于「未重试过、未废弃、无收据键」。
-   */
+ * 旧库补列迁移：outbox 引入重试上限（attempts）与废弃标记（gave_up_at）前的库缺这两列；
+ * 幂等收据键与最近失败原因（last_error）同批补齐。
+ * 幂等：列已存在则跳过；补列带默认值，旧行语义等价于「未重试过、未废弃、无收据键」。
+ */
   async migrateOutboxColumns() {
     const columns = new Set(
       this.db.prepare('PRAGMA table_info(outbox)').all().map(column => column.name),
@@ -133,7 +133,7 @@ export class WechatStore {
     ).run(String(peerId), nowIso())
   }
 
-  /** 直达对话（DSHBOTS-208）：管理员微信会话当前绑定的项目 key（未绑定为 null）。 */
+  /** 直达对话：管理员微信会话当前绑定的项目 key（未绑定为 null）。 */
   getDirectProjectKey() {
     return this.getState()?.direct_project_key ?? null
   }
@@ -182,10 +182,10 @@ export class WechatStore {
   }
 
   /**
-   * 入队推送（A3/DSHBOTS-323）：带 receiptKey 时做幂等吸收——同键在存留期内只入队一次
-   * （先查后插，单进程无并发入队者；部分唯一索引兜底路径性竞态，竞态冲突由调用方 catch）。
-   * 返回 'enqueued' | 'duplicate' | 'skipped'，调用方据此留痕；不带键的旧形态行为不变。
-   */
+ * 入队推送：带 receiptKey 时做幂等吸收——同键在存留期内只入队一次
+ * （先查后插，单进程无并发入队者；部分唯一索引兜底路径性竞态，竞态冲突由调用方 catch）。
+ * 返回 'enqueued' | 'duplicate' | 'skipped'，调用方据此留痕；不带键的旧形态行为不变。
+ */
   enqueue(text, receiptKey = null) {
     const body = String(text ?? '').trim()
     if (!body) return 'skipped'
@@ -204,7 +204,7 @@ export class WechatStore {
     return 'enqueued'
   }
 
-  /** 按 receipt_key 查收据终态（A3/DSHBOTS-323）：sent（已发送）/ gone（已废弃）/ pending（待发）。 */
+  /** 按 receipt_key 查收据终态：sent（已发送）/ gone（已废弃）/ pending（待发）。 */
   receiptStates(keys) {
     const list = (Array.isArray(keys) ? keys : []).map(key => String(key)).filter(Boolean)
     if (!list.length) return []
@@ -215,7 +215,7 @@ export class WechatStore {
     ).all(...list)
   }
 
-  /** 近期收据流水（A3/DSHBOTS-323）：带键条目按入队倒序，供运维视图追责/回放。 */
+  /** 近期收据流水：带键条目按入队倒序，供运维视图追责/回放。 */
   receipts(limit = 50) {
     return this.db.prepare(
       `SELECT receipt_key, text, sent_at, gave_up_at, attempts, last_error, created_at

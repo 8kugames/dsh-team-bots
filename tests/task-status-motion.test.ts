@@ -114,6 +114,6 @@ test('挂载点：只有「进行中」标签挂 .task-status-live，且所有�
 
 test('「进行中」文案仍由 i18n 提供（动效不改动文案本身）', () => {
   assert.equal(zh['status.in_progress'], '进行中', '中文「进行中」文案缺失')
-  // 标签文案走 statusLabel() → t('status.' + status)，动效没有把文案写死进模板。
+  // 标签文案走 statusLabel → t('status.' + status)，动效没有把文案写死进模板。
   assert.match(app, /sideRowStatusHtml[\s\S]{0,400}esc\(statusLabel\(status\)\)/, '状态标签文案应走 statusLabel（i18n）')
 })

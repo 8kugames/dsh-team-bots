@@ -29,7 +29,7 @@ class StubRuntime { declare ctx: unknown;
   async cancelRun() { return true }
 }
 
-// 与 tests/approval.test.ts 同款：按注册序瀑布流，prepend 插队首，未调 next() 截断链路。
+// 与 tests/approval.test.ts 同款：按注册序瀑布流，prepend 插队首，未调 next 截断链路。
 class FakeCordisCtx { declare hooks: Map<unknown, Array<{ listener: (...args: unknown[]) => unknown }>>;
   constructor() {
     this.hooks = new Map()

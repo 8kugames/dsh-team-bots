@@ -55,9 +55,9 @@ function renderModal() {
   }
 }
 
-// modal-layer:start —— modal 与全量渲染解耦（DSHBOTS-90）
+// modal-layer:start —— modal 与全量渲染解耦
 // 与 ensureComposerImageInput / ensureImageViewer 同一套 body 级常驻模式：#modal-root 在 #app 外，
-// render() 只重建 #app，弹窗层在这里独立同步。同一弹窗刷新（loading→详情、保存/评论后的
+// render 只重建 #app，弹窗层在这里独立同步。同一弹窗刷新（loading→详情、保存/评论后的
 // reloadTaskModal）只换内容：遮罩与 .modal 容器节点保持同一实例，.modal-body 节点原位保留，
 // innerHTML 只替换其内部，弹窗滚动位与正在编辑的输入焦点不被拆掉；内容未变时零 DOM 操作。
 let lastModalHtml = ''
@@ -66,7 +66,7 @@ let lastModalHtml = ''
 function markAppRenderPending() { appRenderPending = true }
 function noteModalScroll() { modalScrollAt = performance.now() }
 
-// 滚动守卫（DSHBOTS-154）：modal-body 滚动进行中（最近 100ms 内有滚动事件，见模块尾的
+// 滚动守卫：modal-body 滚动进行中（最近 100ms 内有滚动事件，见模块尾的
 // 捕获阶段 scroll 监听）不替换正文——原位补丁虽保留节点与 scrollTop，但整段子树重建在
 // 滚动中肉眼可见。延后到滚动停止后补拍；关闭弹窗与首次挂载不延后（见 renderModalLayer 内闸门）。
 let modalScrollAt = -1e9
@@ -82,7 +82,7 @@ function scheduleModalPatch() {
   }, 120)
 }
 
-// overlay-render（DSHBOTS-98）：#modal-root 弹窗与 body 级 #image-viewer 同属半透明遮罩，
+// overlay-render：#modal-root 弹窗与 body 级 #image-viewer 同属半透明遮罩，
 // 遮罩打开期间 #app 的全量重绘肉眼可见（闪烁）。轮询照常取数但跳过重建并记 pending，
 // 遮罩关闭时 flushAppRender 补一次渲染追平最新 state。三个符号留在 modal-layer 块内：
 // 本块会被测试整段抽出求值，render/state 只在 pending=true 的调用路径上被引用。
@@ -114,11 +114,11 @@ function ensureModalRoot(doc = document) {
 function renderModalLayer() {
   const root = ensureModalRoot()
   const html = renderModal()
-  // 遮罩开合即背景可达性的开关（DSHBOTS-367）：#app 置 inert，关闭时还原。
+  // 遮罩开合即背景可达性的开关：#app 置 inert，关闭时还原。
   // typeof 守卫同 updateRunClocks：本块会被测试整段抽出求值，符号不在场时跳过。
   if (typeof setAppInert === 'function') setAppInert(overlayInertState())
   if (html === lastModalHtml) return
-  // 滚动守卫闸门（DSHBOTS-154）：同一弹窗的刷新在 modal-body 滚动进行中延后——延后期间
+  // 滚动守卫闸门：同一弹窗的刷新在 modal-body 滚动进行中延后——延后期间
   // lastModalHtml 不更新，滚动停止后 scheduleModalPatch 重入时仍能识别「内容变了」并补拍。
   // 关闭（html 为空，须立即清层）与首次挂载（root 尚无遮罩，无旧内容可闪）不延后。
   if (html && root.firstElementChild?.classList?.contains('modal-backdrop') && modalScrollRecent()) {
@@ -126,7 +126,7 @@ function renderModalLayer() {
     return
   }
   lastModalHtml = html
-  // 关弹窗转换（有弹窗 → 无弹窗）：清层前补上遮罩期间被跳过的 #app 渲染（DSHBOTS-98）。
+  // 关弹窗转换（有弹窗 → 无弹窗）：清层前补上遮罩期间被跳过的 #app 渲染。
   if (!html) flushAppRender()
   if (!html) {
     root.replaceChildren()
@@ -135,7 +135,7 @@ function renderModalLayer() {
   const prevBackdrop = root.firstElementChild
   if (!prevBackdrop?.classList?.contains('modal-backdrop')) {
     root.innerHTML = html
-    // 秒级时钟占位水化（DSHBOTS-154）：占位符不能等 1s 定时器，挂载即补真实时长。
+    // 秒级时钟占位水化：占位符不能等 1s 定时器，挂载即补真实时长。
     if (typeof updateRunClocks === 'function') updateRunClocks(root)
     return
   }

@@ -68,7 +68,7 @@ export const BINDINGS_DDL = `
 
 // 库与绑定收敛（DSHBOTS-285，ADR §4.1）：活跃绑定收敛为 kind='bot' 控制面绑定，
 // 旧 task/project/dm/solo 四道唯一索引删除；task_id 列保留仅供历史行解析。
-// 会话域三分（DSHBOTS-299）：唯一性放宽为每 (bot, project) 一条——solo 域是
+// 会话域三分：唯一性放宽为每 (bot, project) 一条——solo 域是
 // project_id NULL，SQLite 唯一索引对 NULL 判互异，须 COALESCE 归一后才保住
 // 「每 bot 一条 solo 绑定」；项目维度则恢复多项目 owner bot 的项目间隔离。
 // 新库建表（db.js SCHEMA）与旧库迁移重建共用同一段 DDL，避免两处定义漂移。
@@ -154,7 +154,7 @@ export function runMigrations(db) {
   recordMigration(db, 'runs_merged_messages')
   recordMigration(db, 'session_binding_alias')
   migrateBotQuota(db)
-  // 验收守门索引（DSHBOTS-235）：扫描按 task_id 关联查 task_comments / runs，
+  // 验收守门索引：扫描按 task_id 关联查 task_comments / runs，
   // 旧库无对应索引时每卡全表扫；对新库空转（SCHEMA 已建）。
   db.exec(`
     CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id);
@@ -208,7 +208,7 @@ function migrateRuns(db) {
   addColumn(db, 'runs', 'model_provider', 'TEXT')
   addColumn(db, 'runs', 'model_model', 'TEXT')
   addColumn(db, 'runs', 'model_effort', 'TEXT')
-  // 入站消息合批（DSHBOTS-231）：领取时同通道排队消息被合并进来，存被合并消息的 id 列表（JSON）。
+  // 入站消息合批：领取时同通道排队消息被合并进来，存被合并消息的 id 列表（JSON）。
   addColumn(db, 'runs', 'merged_messages', 'TEXT')
   // 续答运行（DSHBOTS-112 闭环）：转写写回后同消息再排一次 chat/solo_chat，
   // 不下发二进制图（首轮已因主模型无视觉失败），转写正文由提示词近期窗口带入。
@@ -232,7 +232,7 @@ function migrateTasks(db) {
 
 // projects.disabled_skills 存项目内关闭的技能 slug JSON 数组。
 // projects.production_dir 存项目生产目录（bots 的 cwd）；NULL 表示用默认 <工作区>/{slug}。
-// projects.code_hygiene_limit_lines 存单文件行数约定（DSHBOTS-172）；NULL = 默认 800，0 = 关闭。
+// projects.code_hygiene_limit_lines 存单文件行数约定；NULL = 默认 800，0 = 关闭。
 function migrateProjects(db) {
   addColumn(db, 'projects', 'disabled_skills', "TEXT NOT NULL DEFAULT '[]'")
   addColumn(db, 'projects', 'production_dir', 'TEXT')
@@ -298,7 +298,7 @@ function migrateSessionBindings(db) {
   rebuildTable(db, 'session_bindings', `CREATE TABLE session_bindings (${BINDINGS_DDL})`)
 }
 
-// 会话绑定授权别名（DSHBOTS-256）：旧库补 alias 列并把三条部分唯一索引收窄到 alias=0，
+// 会话绑定授权别名：旧库补 alias 列并把三条部分唯一索引收窄到 alias=0，
 // 否则旧绑定行会让新活跃绑定插不进去（旧索引不认 alias，同 bot/项目/车道仍判重）。
 // 仅在首次补列时重建索引；新库建表已带 alias 与收窄索引，已迁移库不重复 drop/create。
 function migrateSessionBindingAlias(db) {
@@ -351,7 +351,7 @@ function migrateSessionBindingBotConvergence(db) {
   recordMigration(db, 'session_binding_bot_convergence')
 }
 
-// 会话域三分（DSHBOTS-299）：one_bot_binding 唯一索引从 UNIQUE(bot_id) 放宽为
+// 会话域三分：one_bot_binding 唯一索引从 UNIQUE(bot_id) 放宽为
 // UNIQUE(bot_id, COALESCE(project_id,'~solo'))——每 (bot, project) 一条控制面绑定，
 // solo 域（project_id NULL）经 COALESCE 归一后仍每 bot 唯一。SQLite 的同名
 // CREATE UNIQUE INDEX IF NOT EXISTS 在旧列集索引已存在时不会重建，必须先 DROP
@@ -370,7 +370,7 @@ function migrateSessionBindingProjectScope(db) {
   recordMigration(db, 'session_binding_project_scope')
 }
 
-// one_active_run_per_bot（同 bot 同时至多一条 queued/running，ADR §2.3）：机制在本卡（DSHBOTS-285）
+// one_active_run_per_bot（同 bot 同时至多一条 queued/running，ADR §2.3）：机制在本卡
 // 完整落地，但激活必须与 §5.2-2 入站路由收敛同车——现行运行时仍是「同 bot 多条 queued 领取时
 // 合批」（scheduler.coalesceQueuedRuns）与四车道并行，先建索引会让 enqueue 家族直接撞唯一约束
 // （实测全量 1540 例红 68，全部为 UNIQUE constraint failed: runs.bot_id）。步骤 2 把合批改为
@@ -477,7 +477,7 @@ function convergeActiveRunsForDomainIndex(db, exemptKinds) {
 // 由 ensureSession 在 bot 自己的运行进行中排入（startRun 路径，当前运行此刻必占串行域），
 // 不豁免时 INSERT OR IGNORE 被 one_active_run_per_bot 部分唯一索引静默吞掉（changes=0 被
 // 当作幂等命中，无行无事件无报错）——生产实测 session_compact 0 次执行、结转摘要 3 次
-// 全落在索引激活（DSHBOTS-288）之前。豁免后执行侧仍按 claimKey（bot 域键）串行领取，
+// 全落在索引激活之前。豁免后执行侧仍按 claimKey（bot 域键）串行领取，
 // 闲时语义由领取顺序保住；botBusy 查询口径不变（治理运行排队/执行中视为忙，消息族
 // 照旧挂待处理队列，不与治理运行互抢）。
 export function exemptGovernanceRunsFromBotSerialization(db) {
@@ -514,7 +514,7 @@ export function columnNotNull(db, table, column) {
   return Boolean(info?.notnull)
 }
 
-// 单聊卡片锚点（DSHBOTS-218）：solo_messages 增加 kind/question_id/approval_id 三列，
+// 单聊卡片锚点：solo_messages 增加 kind/question_id/approval_id 三列，
 // 让单聊会话也能挂提问卡与审批卡（状态仍查 questions/approvals 表）。
 function migrateSoloMessageCards(db) {
   addColumn(db, 'solo_messages', 'kind', "TEXT NOT NULL DEFAULT 'text'")
@@ -526,7 +526,7 @@ function migrateSoloMessageCards(db) {
 // 两个 bot 可能指向同一个工作目录互相覆盖。补一个部分唯一索引把这种状态挡住。
 // 老库里若已有重复目录名，这里不改名：改名等于把 bot 指向另一个工作目录，比缺约束更难收拾，
 // 只告警让使用者自己改名或合并。
-// bot 额度墙状态（DSHBOTS-241）：新库由 SCHEMA 建表，这里只对旧库补建。
+// bot 额度墙状态：新库由 SCHEMA 建表，这里只对旧库补建。
 function migrateBotQuota(db) {
   if (!columnsOf(db, 'bots').includes('fallback_model')) return
   db.exec(`

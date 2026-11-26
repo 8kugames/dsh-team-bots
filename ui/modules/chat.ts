@@ -42,7 +42,7 @@ function typingRows(runs, kind) {
   }).join('')
 }
 
-// chat-pagination:start —— 聊天历史分片加载（DSHBOTS-33）纯逻辑，tests/chat-pagination.test.js 按本标记块抽取断言。
+// chat-pagination:start —— 聊天历史分片加载纯逻辑，tests/chat-pagination.test.js 按本标记块抽取断言。
 // state 轮询只回最后 CHAT_PAGE_SIZE 条；更早的经 messages_page 手动加载，与轮询结果按 id 去重合并展示。
 
 // 当前会话的分片桶 key：与轮询数据的会话一一对应，切会话即失效（loadOlderMessages 里判断重置）。
@@ -83,7 +83,7 @@ function mergedChatMessages(latest) {
 }
 
 // 未翻过页且首屏已满页时也可能还有更早历史——显示按钮探一页，由 hasMore 收敛。
-// 单聊（DSHBOTS-174）：归档窗口过滤后首屏恒小于 CHAT_PAGE_SIZE，旧阈值永不满足；入口改看后端
+// 单聊：归档窗口过滤后首屏恒小于 CHAT_PAGE_SIZE，旧阈值永不满足；入口改看后端
 // archived.hasMore 契约（solo-archive.js），且需 mergedCount>0 作游标锚点（首屏空则无锚可翻）；
 // 旧后端无契约时回退旧阈值。群聊条件不变。
 function canLoadOlder(mergedCount) {
@@ -144,7 +144,7 @@ function anchorBarView(anchor, latest) {
 // chat-pagination:end
 
 // ===== auto-collapse:start =====
-// 连续系统通知折叠（B8/DSHBOTS-336）：≥ COLLAPSE_MIN 条连续 sender_type='system' 消息
+// 连续系统通知折叠：≥ COLLAPSE_MIN 条连续 sender_type='system' 消息
 // 折叠为一行（Quiet by default，与 A1 通信纪律同向——发了的也能被折叠；「N 条系统通知 +
 // 末条摘要」不丢入口）。展开态按组键（首条消息 id，跨轮询稳定）存 state.expandedCollapses，
 // 2.8s 轮询不会重开已展开的组；bot/user 消息不折叠（内容消息无折叠价值）。

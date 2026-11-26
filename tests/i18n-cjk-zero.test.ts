@@ -13,7 +13,7 @@ const en = enDict as Record<string, string>
 // （此前只有 ui/modules 在扫描范围内，app.ts 的硬编码中文与 index.html 的静态文案都漏了）。
 // 口径与 .governance/tasks/DSHBOTS-220/scan-cjk.mjs 一致：剔注释行 → 剔 t('...')/t("...") 包裹 →
 // 剩余含 CJK 的行必须为 0。仅两行正则字面量（字符类里的全角标点）作为数据豁免，见 DATA_ALLOWED。
-// 第二道：ui/modules 里出现的每个 t() 键都必须同时存在于 zh / en 两字典（防「两字典均无键」回流）。
+// 第二道：ui/modules 里出现的每个 t 键都必须同时存在于 zh / en 两字典（防「两字典均无键」回流）。
 
 const dir = fileURLToPath(new URL('../ui/modules/', import.meta.url))
 const files = readdirSync(dir).filter((f) => f.endsWith('.ts')).sort()

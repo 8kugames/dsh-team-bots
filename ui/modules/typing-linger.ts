@@ -3,7 +3,7 @@ import { attr, avatar, botById, duration, esc } from './util.js'
 import { t } from './i18n.js'
 import { runStatusLabel } from '../app.js'
 
-// typing-linger:start —— 排队气泡的乐观渲染与终态驻留（DSHBOTS-150）
+// typing-linger:start —— 排队气泡的乐观渲染与终态驻留
 // 场景：bot 被 @ 触发的 chat 运行从入队到完成常短于 2.8s 轮询周期，气泡肉眼看不见。
 // 两段式：①发送成功后本地立刻为被 @ 的目标 bot 立一条排队气泡（不等下一拍轮询）；
 //         ②真实运行进入终态后气泡再驻留几秒淡出移除，同拍已有真实回复则跳过驻留。
@@ -195,7 +195,7 @@ function typingLingerRows(ledger, kind, runs, scope, now = Date.now()) {
 }
 // typing-linger:end
 
-// 气泡台账（DSHBOTS-150）：模块级短命数据，按 kind+scope+bot 存放，到期即丢弃（不做全局长驻 state）。
+// 气泡台账：模块级短命数据，按 kind+scope+bot 存放，到期即丢弃（不做全局长驻 state）。
 let typingBubbleLedger = new Map()
 
 // 当前会话 scope：群聊按项目、单聊按 bot。台账与运行按 scope 对齐，切会话不串台。
@@ -231,7 +231,7 @@ function typingLingerRowsHtml(kind, runs = state.data?.runs ?? []) {
   }).join('')
 }
 
-// 乐观渲染入口（DSHBOTS-150）：发送成功后为被 @ 的目标 bot 立排队气泡，不等下一拍轮询。
+// 乐观渲染入口：发送成功后为被 @ 的目标 bot 立排队气泡，不等下一拍轮询。
 // 目标 bot 取服务端回传的 runBots / runBot——与后端实际派生的运行完全一致，无需前端解析 @。
 function applyOptimisticTyping(result, kind) {
   const scope = typingScope()

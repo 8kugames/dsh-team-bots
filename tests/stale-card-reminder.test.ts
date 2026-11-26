@@ -48,7 +48,7 @@ test('两状态判定纯逻辑：阈值内/外两向，非目标状态与坏时�
   assert.ok(blocked, 'blocked 49h 应命中')
   assert.equal(blocked.status, 'blocked')
   assert.equal(blocked.threshold, STALE_BLOCKED_HOURS)
-  // 待执行两向（D-295）：tasks 表无 'pending' 态，实际待执行态 = todo（已派未领）与
+  // 待执行两向：tasks 表无 'pending' 态，实际待执行态 = todo（已派未领）与
   // backlog（立卡未派）共用 72h 宽档；71h（内）不命中，73h（外）命中。
   assert.equal(staleCardHit({ status: 'todo', updated_at: isoFromNow(71) }), null, 'todo 71h 未过 72h 宽档阈值')
   const pendingTodo = staleCardHit({ status: 'todo', updated_at: isoFromNow(73) })
@@ -100,7 +100,7 @@ async function setup() {
   service.attachRuntime({ setCompletionHandler() {}, setMask() {}, async catalog() { return [] }, async validateBotConfig() {}, sessionBusy() { return false } })
   await service.initialize()
   service.started = true
-  // 抑制后台 tick（core.js 启动 300ms 首拍 + 各路径按需 void this.tick()）：夹具中途的
+  // 抑制后台 tick（core.js 启动 300ms 首拍 + 各路径按需 void this.tick）：夹具中途的
   // 后台 tick 会先把滞留提醒发掉，与下面的显式扫描断言竞态。扫描点接线（tick →
   // scanStaleCards）由文末源码锚点例钉住，不依赖本夹具的后台拍。
   service.tick = async () => {}

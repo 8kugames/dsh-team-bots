@@ -74,7 +74,7 @@ export const projectsMethods = {
   // controlSessionId = 该成员在本项目的控制面绑定会话（kind='bot' 活跃行），供「跳原生界面」入口。
   // run_status 用 bot 全局口径（不限本项目）：failed 根因（模型/AUTH）是 bot 级，单聊 run 的 project_id 为 NULL，
   // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 的 run 部分维持项目口径不动。
-  // taskStats（DSHBOTS-65）按本项目任务聚合：done=已完成，open=未完成且未取消（canceled 不算待办），无任务兜底 0/0。
+  // taskStats按本项目任务聚合：done=已完成，open=未完成且未取消（canceled 不算待办），无任务兜底 0/0。
   membersWithUsage(projectId) {
     return this.store.all(
       `SELECT pm.*, pm.member_id AS id, pm.member_role, b.name, b.role AS bot_role, b.provider, b.model, b.effort, b.status,
@@ -169,7 +169,7 @@ export const projectsMethods = {
     return bot
   },
 
-  // 成员会话上下文（DSHBOTS-229）：项目群内任意成员 bot 可用；非项目成员、单聊会话一律 forbidden。
+  // 成员会话上下文：项目群内任意成员 bot 可用；非项目成员、单聊会话一律 forbidden。
   // 与 ownerContextFor 同口径，但不要求总监身份。
   memberContextFor(sessionId) {
     const binding = this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
@@ -179,7 +179,7 @@ export const projectsMethods = {
     return { binding, project, bot, actor: { type: 'bot', id: binding.bot_id } }
   },
 
-  // 成员查询工具入口（DSHBOTS-229）：项目群内任意成员可查本项目名单/角色/状态。
+  // 成员查询工具入口：项目群内任意成员可查本项目名单/角色/状态。
   // 数据源是 membersOf（本项目成员表），不触其他项目数据；输出纯文本。
   listMembersFromBot(sessionId) {
     const { project, bot } = this.memberContextFor(sessionId)
@@ -288,7 +288,7 @@ export const projectsMethods = {
     const projectId = id('prj')
     const groupId = id('grp')
     const createdAt = nowIso()
-    // 成员默认（DSHBOTS-365）：不显式指定成员的新群自动带入种子 reviewer——验收核验
+    // 成员默认：不显式指定成员的新群自动带入种子 reviewer——验收核验
     // 优先落到质量评审角色上，总监只裁决。显式 memberIds 是用户裁剪过的名单，不擅自加人；
     // 用户事后移除 reviewer 即回落总监自行核验（spawnReviewDelegate 兜底）。
     const explicitMembers = Array.isArray(input.memberIds)
@@ -359,7 +359,7 @@ export const projectsMethods = {
     }
     if (patch.tokenBudget !== undefined) updates.token_budget = clampNumber(patch.tokenBudget, 0, 1e15, null)
     if (patch.costBudget !== undefined) updates.cost_budget = clampNumber(patch.costBudget, 0, 1e12, null)
-    // 单文件行数约定（DSHBOTS-172）：NULL = 默认 800，0 = 关闭；读取口径见 services/hygiene.js。
+    // 单文件行数约定：NULL = 默认 800，0 = 关闭；读取口径见 services/hygiene.js。
     if (patch.codeHygieneLimitLines !== undefined) updates.code_hygiene_limit_lines = clampNumber(patch.codeHygieneLimitLines, 0, 100_000, null)
     let productionDirChanged = false
     if (patch.productionDir !== undefined) {
@@ -423,7 +423,7 @@ export const projectsMethods = {
       }
       // 再开与归档对称：归档时冻结的项目记忆解回 active，逐条留 memory_events 审计。
       // 已知不对称（接受）：冻结前 active/pending 一并冻为 frozen，再开统一解回 active，pending 记忆直接生效。
-      // 容量闸（DSHBOTS-342）：解回后 active 不得超 MEMORY_CAP，否则整笔再开拒绝（事务回滚，项目保持归档）。
+      // 容量闸：解回后 active 不得超 MEMORY_CAP，否则整笔再开拒绝（事务回滚，项目保持归档）。
       if (updates.status === 'active' && project.status === 'archived') {
         const frozen = this.store.all(
           "SELECT id FROM memories WHERE scope_type = 'project' AND scope_id = ? AND status = 'frozen'",
@@ -520,7 +520,7 @@ export const projectsMethods = {
     if (Number(active?.n) > 0) throw badRequest('项目仍有排队或运行中的 run，不能移除追踪')
     const dir = this.projectWorkDir(project)
     // 群聊正文（messages/message_images/run_trajectory，Phase 1）与任务评论/事件、终端命令
-    // （Phase 3）住项目聊天库：管理数据清完后整库文件删除即完成正文清理，不再逐表 DELETE。
+    // 住项目聊天库：管理数据清完后整库文件删除即完成正文清理，不再逐表 DELETE。
     this.store.transaction(() => {
       const runIds = 'SELECT id FROM runs WHERE project_id = ?'
       const taskIds = 'SELECT id FROM tasks WHERE project_id = ?'
@@ -632,7 +632,7 @@ export const projectsMethods = {
     return this.projectView(this.projectRow(projectId))
   },
 
-  // bots 池视图（DSHBOTS-229）：总监视角列出全部未移除 bot，标注是否已在本项目及成员角色。
+  // bots 池视图：总监视角列出全部未移除 bot，标注是否已在本项目及成员角色。
   // 只暴露 bot 自身档案与本项目成员关系，不透露该 bot 在其他项目的成员关系或数据。
   botsPoolFor(projectId) {
     const project = this.projectRow(projectId)
@@ -659,7 +659,7 @@ export const projectsMethods = {
     }
   },
 
-  // 池查询工具入口（DSHBOTS-229）：仅总监可用（ownerContextFor 权威校验）。
+  // 池查询工具入口：仅总监可用（ownerContextFor 权威校验）。
   listBotsPoolFromBot(sessionId) {
     const { project } = this.ownerContextFor(sessionId)
     const pool = this.botsPoolFor(project.id)
@@ -672,7 +672,7 @@ export const projectsMethods = {
     return [`项目 ${project.key} 的 bots 池（${pool.bots.length}）：`, ...lines].join('\n')
   },
 
-  // 加人申请入口（DSHBOTS-229）：总监按名称邀请 bot 入群，复用 addProjectMember 的校验、审计与入群通知。
+  // 加人申请入口：总监按名称邀请 bot 入群，复用 addProjectMember 的校验、审计与入群通知。
   async addMemberFromBot(sessionId, input) {
     const { project, actor } = this.ownerContextFor(sessionId)
     const name = String(input?.bot ?? input?.name ?? '').trim()

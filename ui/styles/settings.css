@@ -234,8 +234,8 @@
 }
 
 
-/* 表单内联错误（DSHBOTS-367）：错误节点常驻 DOM（隐藏），非法时才显示——
-   视觉态（is-visible）与程序化态（aria-invalid）同一时刻切换。 */
+/* 表单内联错误：错误节点常驻 DOM（隐藏），非法时才显示——
+ 视觉态（is-visible）与程序化态（aria-invalid）同一时刻切换。 */
 .field-error {
     display: none;
     margin-top: 6px;

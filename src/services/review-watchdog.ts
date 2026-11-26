@@ -253,7 +253,7 @@ export function runReviewWatchdog(service) {
         const judgment = judgeCard(service, row)
         const closeEligible = judgment.verdict === 'A' || (judgment.verdict === 'B' && row.assignee_bot_id)
         const actionable = autoCloseEnabled && closeEligible
-        // observe 干跑（B3/DSHBOTS-326）：本会收口的判定只留痕不执行——task_events 记
+        // observe 干跑：本会收口的判定只留痕不执行——task_events 记
         // would 动作与依据，任务详情时间线可回看；卡状态不变、applyReview 不调用。
         const observable = observeMode && closeEligible
         const entry: any = { tier: fireTier, verdict: judgment.verdict, basis: judgment.basis, at: new Date().toISOString() }
@@ -275,7 +275,7 @@ export function runReviewWatchdog(service) {
           // C（或开关关闭/observe 干跑）：仅提醒；滞留达阈值×倍数升级语气二次催办（H2）。
           // observe 模式的 A/B 卡同样走提醒（干跑不能把催办也干掉），另加判定留痕事件。
           // C（或开关关闭）：仅提醒；滞留达阈值×倍数升级语气二次催办（H2）。
-          // 前缀按 locale 落库（DSHBOTS-228）：缺省英文 [SYSTEM ALERT]，中文环境【系统指令】。
+          // 前缀按 locale 落库：缺省英文 [SYSTEM ALERT]，中文环境【系统指令】。
           const alertPrefix = systemAlertLabel(messageLocale(service.config, key => service.store.setting(key), service.runtime?.ctx?.get?.('loader')))
           const body = fireTier === 2
             ? `${alertPrefix}${label} 验收已滞留 ${idleMinutes} 分钟（超过 ${minutes * escalateMultiple} 分钟二次催办），请立即收口（accept/return），否则将按三档规则持续评估自动收口。`

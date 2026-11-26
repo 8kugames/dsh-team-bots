@@ -109,7 +109,7 @@ test('② settings 保存后生效进入自检：优先级高于 patch.yml/env�
     assert.ok(ctx.calls.botInfo >= 1, '应发起身份自检')
     assert.equal(ctx.service.feishuCredentialView().source, 'config', '未保存前来源为 config')
 
-    // 通道页保存（DSHBOTS-334）：secrets 表加密落库 + 保存即触发重连。
+    // 通道页保存：secrets 表加密落库 + 保存即触发重连。
     const before = ctx.calls.botInfo
     const response = await ctx.service.saveFeishuCredentials({ appId: SAVED_APP_ID, appSecret: SECRET })
     assert.equal(ctx.calls.botInfo, before + 1, '保存后重连应重新自检')

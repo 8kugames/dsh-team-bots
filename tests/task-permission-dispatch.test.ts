@@ -9,7 +9,7 @@ import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import { effectiveSandbox, sandboxModeForRun } from '../src/services/runtime/prompt.js'
 
-// 权限分发产品化（DSHBOTS-156）：任务运行的会话沙箱档位跟随 bot 配置，
+// 权限分发产品化：任务运行的会话沙箱档位跟随 bot 配置，
 // 派发可选 sandbox 覆盖（只收紧不放大），生效档落 run_events 可查。
 // 守门三件事：
 // 1) 默认链锁死——task 运行入队恒 mode='write'（enqueue/retry/model-fallback 三个来源），

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
 
-// 引用摘要（DSHBOTS-71）：摘要来自消息原文前 120 字，原文可能带 markdown 记号。
+// 引用摘要：摘要来自消息原文前 120 字，原文可能带 markdown 记号。
 // 这里先做纯逻辑断言（剥记号），再做渲染接线与样式断言（不许撑破气泡）。
 const source = readUiSource()
 const css = await uiStylesSource()

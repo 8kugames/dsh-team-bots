@@ -182,7 +182,7 @@ export const schedulerMethods = {
       return this.enqueueOwnerTaskRun(task, payload.reviewKind ?? 'review')
     }
     if (row.kind === 'review_delegate_auto') {
-      // 自动核验委派（DSHBOTS-113）：与手动按钮同一入口（spawnReviewDelegate）。守卫冲突
+      // 自动核验委派：与手动按钮同一入口（spawnReviewDelegate）。守卫冲突
       // 按退避重派，上限 3 次；耗尽后不再重试，失败保持可见——任务卡「未核验」标记 +
       // 消息 + 审计，owner_bot 卡改由总监验收运行兜底（其自带子代理核验）。
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', payload.taskId)
@@ -233,7 +233,7 @@ export const schedulerMethods = {
     if (row.kind === 'solo_chat_run') {
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
       if (!bot || bot.status !== 'active') return null
-      // payload.origin='wechat'（DSHBOTS-258）：微信通道投的项目外 director 单聊，
+      // payload.origin='wechat'：微信通道投的项目外 director 单聊，
       // solo 运行打 wechat 标记，运行收尾的回复据此推回微信；'feishu' 同款（DSHBOTS-329：
       // 飞书触发运行的回复推回飞书管理员）；普通 UI 单聊保持 mention。
       return this.enqueueSoloChatRun(bot, payload.messageId, {
@@ -381,7 +381,7 @@ export const schedulerMethods = {
     }
   },
 
-  // 陈旧排队运行守卫（DSHBOTS-110）：任务已进终态（done/canceled）后残留的 queued 运行不得再被
+  // 陈旧排队运行守卫：任务已进终态（done/canceled）后残留的 queued 运行不得再被
   // 起跑执行。统一置 canceled + error_code='SUPERSEDED'（管理清理标记，不进任务执行历史），
   // 并按 run_id EXISTS 去重写 stale_superseded 事件，重复触发不重复留痕。
   cancelQueuedRunAsSuperseded(runId, message = '任务已结束，排队运行被清理') {
@@ -454,7 +454,7 @@ export const schedulerMethods = {
     return reminded
   },
 
-  // 任务级死线判定（DSHBOTS-274）：纯同步——领取路径不得为此引入 await 边界，  // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
+  // 任务级死线判定：纯同步——领取路径不得为此引入 await 边界， // 否则 claim 与状态写之间会开窗（tests/members.test.js 站内竞态教训）。
   taskPastDeadline(task) {
     const { deadlineMs } = taskDeadlineInfo(this.store, task)
     return deadlineMs !== null && Date.now() > deadlineMs
@@ -519,7 +519,7 @@ export const schedulerMethods = {
   // schedulerIdleIntervalMs 时，先用一次索引计数探测是否有可做的工作——无 queued/running
   // 运行且无可领 outbox 即本拍直接返回，把空载 tick 从十来次查询压到一次计数。
   // 有工作或窗口到期则照常全量。提醒类扫描（滞留卡/验收守门）与到期重试派生在慢拍粒度
-  // （默认 15s）下运行，阈值均为分钟级，无感；入队路径的事件唤醒 tick() 与测试直调不经此门。
+  // （默认 15s）下运行，阈值均为分钟级，无感；入队路径的事件唤醒 tick 与测试直调不经此门。
   tickIdleGate() {
     // 已停机不再探库：停机后底层库已关闭，这里的读会抛错并变成未处理的 rejection。
     if (this.stopped || !this.started) return null
@@ -543,25 +543,25 @@ export const schedulerMethods = {
     try {
       // tasks 的依赖列由 task-relations 域自管迁移（db.js 不加行），闸门读列前懒迁移一次。
       ensureTaskRelationsSchema(this.store)
-      // 一次性密钥 TTL 巡检（DSHBOTS-106）：内部 15s 节流，首个 tick 顺带全项目旧残留清理。
+      // 一次性密钥 TTL 巡检：内部 15s 节流，首个 tick 顺带全项目旧残留清理。
       this.sweepSecretsRuntime()
       this.runMaintenance()
       this.dispatchOutbox()
       await this.reapStalledRuns()
       this.retryExpiredPlanWaits()
-      // 陈旧排队运行守卫（DSHBOTS-110）：先于候选查询清掉任务已终态的 queued 任务运行。
+      // 陈旧排队运行守卫：先于候选查询清掉任务已终态的 queued 任务运行。
       this.cancelStaleQueuedTaskRuns()
-      // 争用口径 A 收口（DSHBOTS-289）：bot 空闲时把挂起消息建回运行（合批成一条），
+      // 争用口径 A 收口：bot 空闲时把挂起消息建回运行（合批成一条），
       // 建回的 queued 行随本拍候选查询一并领取。
       this.drainPendingMessages()
-      // 验收滞留守门（DSHBOTS-194）：in_review 卡静置超阈值即注入 owner 系统提醒；
+      // 验收滞留守门：in_review 卡静置超阈值即注入 owner 系统提醒；
       // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
       runReviewWatchdog(this)
       // 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：in_review/blocked/
       // 待执行（todo/backlog）超 24h/48h/72h 三档向 owner 只提醒不自动处置；
       // 内部逐卡容错（单卡异常只 warn）。
       this.scanStaleCards()
-      // GitHub 只读触发源（B4-②/DSHBOTS-335）：间隔闸 + 逐源容错，缺省全关零开销。
+      // GitHub 只读触发源：间隔闸 + 逐源容错，缺省全关零开销。
       void pollGithubSources(this).catch(error => {
         this.logger?.warn?.('github source poll failed: %s', error?.message ?? error)
       })
@@ -569,7 +569,7 @@ export const schedulerMethods = {
         // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
         // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。
         // 非任务运行 LEFT JOIN 出的 task_status 为空，按运行自身判定，不受这条闸门影响。
-        // claimKey 串行域 = (bot, 工作区)（DSHBOTS-308）：键只读 bot_id/project_id（均在列面），
+        // claimKey 串行域 = (bot, 工作区)：键只读 bot_id/project_id（均在列面），
         // 在跑侧与候选侧算的是同一 run 行的同一列，串行不失效（承 DSHBOTS-219 口径）。
         `SELECT r.bot_id, r.kind, r.task_id, r.project_id, r.mode, r.write_scopes, r.trigger_type,
                 t.status AS task_status, t.ignored_write_scopes AS task_ignored_scopes
@@ -583,13 +583,13 @@ export const schedulerMethods = {
       const activeWriteScopes = new Map()
       for (const row of activeRows) {
         if (row.mode !== 'write' || !row.project_id) continue
-        // 任务不在「进行中」就不占写槽（DSHBOTS-73）：写占用随任务离开进行中即时释放。
+        // 任务不在「进行中」就不占写槽：写占用随任务离开进行中即时释放。
         if (!runHoldsWriteLock({ kind: row.kind, mode: row.mode, taskStatus: row.task_status })) continue
         const effective = effectiveWriteScopes(row.write_scopes)
         // 全染色运行不进冲突名单：与任何候选（含未声明候选）互不阻塞。
         if (!effective.length && readWriteScopes(row.task_ignored_scopes).length) continue
         const list = activeWriteScopes.get(row.project_id) ?? []
-        // package.json 是版本钩子机械改动，比对前剥掉（DSHBOTS-133），否则全队列判交叠串行。
+        // package.json 是版本钩子机械改动，比对前剥掉，否则全队列判交叠串行。
         list.push(effective)
         activeWriteScopes.set(row.project_id, list)
       }
@@ -606,7 +606,7 @@ export const schedulerMethods = {
       // 等人机运行契约不变，见 tests/avatar-lanes.test.js），改为把通知/伙伴唤醒触发的 chat
       // 运行（触发消息 sender_type='bot'）降到机器流量档——同车道内用户提问（tier 1）必然
       // 先于它领取，即使提问后到；通知备忘让位于一切人机交互与 urgent/high 任务。
-      // 候选过滤（DSHBOTS-110）：任务已终态（done/canceled）或退回 backlog 的 queued 任务运行
+      // 候选过滤：任务已终态（done/canceled）或退回 backlog 的 queued 任务运行
       // 不再领取——它们要么已被前置清理作废，要么等下一拍清理，绝不起跑；
       // 只排 kind='task'，非任务运行不受影响。LEFT JOIN 出 NULL 的孤儿任务运行不过滤。
       const candidates = this.store.all(
@@ -631,7 +631,7 @@ export const schedulerMethods = {
         // 两侧都声明了写范围且路径前缀互不重叠才放行；任一未声明（空集合）按保守串行，
         // 不降低既有安全边界。只读运行不受影响。
         // 单聊运行 project_id 为空，写锁落在各自独立的 _the_bots/<dir>，不占项目锁。
-        // 候选侧同样先剥 package.json（DSHBOTS-133）：存量 queued 运行快照可能带它，
+        // 候选侧同样先剥 package.json：存量 queued 运行快照可能带它，
         // 过滤后任一为空仍按「未声明」保守串行，不降低既有安全边界。
         // 染色例外（命中 .gitignore）：候选只剩染色条目时不参与锁，即使与在跑写运行
         // 写同一文件也放行——染色路径没有写保护价值。
@@ -688,7 +688,7 @@ export const schedulerMethods = {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'BUDGET_EXCEEDED', message: budgetError } })
           continue
         }
-        // 依赖闸门（DSHBOTS-59）：任务带 blocked_by 且任一依赖未 done/canceled 时不出队，
+        // 依赖闸门：任务带 blocked_by 且任一依赖未 done/canceled 时不出队，
         // run 留 queued，依赖完结后下一拍自然放行（依赖满足与否由调度器判断，不进状态流转）。
         // 同一 run 只记一条 task_blocked_dep 事件（EXISTS 去重，防止每拍刷屏）。
         // 只拦 kind='task' 的任务运行：总监 review/handle 等运行不受依赖影响。
@@ -707,7 +707,7 @@ export const schedulerMethods = {
             }
             continue
           }
-          // 任务级死线（DSHBOTS-274）：施工运行（kind='task'）领取前检查整卡死线——
+          // 任务级死线：施工运行（kind='task'）领取前检查整卡死线
           // 死线 = 派发基准 + time_budget_minutes × TASK_BUDGET_ROUNDS（默认 2 轮，
           // 延期阀见 tasks.ts updateTask）。超线即拒绝启动新施工运行并自动升级
           // （评论 + blocked + owner 通知，escalateTaskPastDeadline）；

@@ -23,7 +23,7 @@ class StubRuntime { declare ctx: unknown;
 
 // 宿主 cordis 瀑布流语义复刻（cordis/lib/index.js 的 EventsService.on / dispatch / waterfall）：
 // 监听器按注册先后排队（prepend 插到队首）；waterfall 逐个 shift 监听器，
-// 先到的监听器不调用 next() 就截断后续链路（含最内层兜底）。
+// 先到的监听器不调用 next 就截断后续链路（含最内层兜底）。
 // scope 过滤：宿主 dsh-scope 的 carrier filter 对「未打 scope 标」的 ctx 一律放行，插件 ctx 即属此列。
 class FakeCordisCtx { declare hooks: Map<unknown, Array<{ listener: (...args: unknown[]) => unknown }>>;
   constructor() {
@@ -141,7 +141,7 @@ test('单聊会话的提权请求由工作台单聊卡片承接，不落群聊�
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// 未绑定会话、以及 kind='project' 但 project_id 为空的异常绑定都透传：next() 接管，不落审批。
+// 未绑定会话、以及 kind='project' 但 project_id 为空的异常绑定都透传：next 接管，不落审批。
 // 真正的单聊绑定（kind='solo'）由上一条用例覆盖，走工作台单聊卡片。
 test('未绑定会话与项目型空绑定都透传：next() 接管，不落审批', async () => {
   const { root, store, service } = await setup()
@@ -270,7 +270,7 @@ test('reason 与 displayReason 落库前过密钥掩码', async () => {
 
 test('state 视图带 approvals，审批消息不进 bot 上下文', async () => {
   const { root, store, service } = await setup()
-  // 断言前要 await state()（会让出事件循环）；setup 的 60ms 审批超时在并行跑满时会先触发，
+  // 断言前要 await state（会让出事件循环）；setup 的 60ms 审批超时在并行跑满时会先触发，
   // 让 pending 变 timeout。这是计时口径问题，单独放宽本用例的等待窗口。
   service.config.approvalTimeoutMs = 5_000
   try {
@@ -292,7 +292,7 @@ test('state 视图带 approvals，审批消息不进 bot 上下文', async () =>
 })
 
 // DSHBOTS-61：审批认领必须抢在宿主原生审批面板之前。宿主 dsh-api-remotes（web bundle 比插件先加载）
-// 注册的 approval/request 监听器拿到原生面板的答案后直接 resolve、不调 next()——按 cordis 的注册序
+// 注册的 approval/request 监听器拿到原生面板的答案后直接 resolve、不调 next——按 cordis 的注册序
 // 瀑布流语义，先到的监听器即截断后续链路，插件若排在其后就永远收不到请求（卡片不出现，全落原生界面）。
 test('任务运行会话的审批被插件认领：插件先于原生面板应答，卡片进群聊', async () => {
   const ctx = new FakeCordisCtx()

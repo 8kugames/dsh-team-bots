@@ -66,7 +66,7 @@ function mdCreateRenderer(deps) {
       node.setAttribute('rel', 'noopener noreferrer')
     })
   }
-  // 记忆缓存（DSHBOTS-167）：同一条正文 + 同一个 scope 只解析一次。
+  // 记忆缓存：同一条正文 + 同一个 scope 只解析一次。
   // 整页重建每 2.8s 一次、点击切换再重建，200 条长消息若不缓存，每次都要重跑
   // marked + DOMPurify（实测 3.2KB 单条 ≈6.6ms，200 条可达秒级主线程阻塞）。
   // 有界 LRU：命中即删了重插把最近使用的顶到尾部，超限从最旧端淘汰。
@@ -100,7 +100,7 @@ export function richText(value, scope) {
 }
 
 // quote-summary:start —— 引用摘要纯文本化（tests/quote-ui.test.js 抽取此块断言）。
-// 引用块与引用回复条展示的是「原文前 120 字」，原文可能带 markdown 记号（**、-、`、[]()）。
+// 引用块与引用回复条展示的是「原文前 120 字」，原文可能带 markdown 记号（**、-、`、[]）。
 // 记号原样塞进气泡会既被当字面量显示，又让整条摘要挤成一行、撑破气泡宽度，
 // 所以先把 markdown 记号剥成纯文本，再交给 UI 单行省略。
 function mdPlainSummary(value, max = 120) {

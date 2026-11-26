@@ -8,9 +8,9 @@ const source = readUiSource()
 const modalCss = readFileSync(fileURLToPath(new URL('../ui/styles/modal.css', import.meta.url)), 'utf8')
 
 // —— DSHBOTS-154：任务详情 modal 滚动稳定性 ——
-// 取证结论（CDP 活体）：2.8s 轮询期间 renderModalLayer 根本不被调（render() 的遮罩闸门
+// 取证结论（CDP 活体）：2.8s 轮询期间 renderModalLayer 根本不被调（render 的遮罩闸门
 // 拦截，#app 与 #modal-root 零 DOM 写入）；滚动中唯一的正文重建路径是动作触发的
-// reloadTaskModal，而 modalTask 运行行内嵌的 duration()（running 无 end、按 Date.now() 计）
+// reloadTaskModal，而 modalTask 运行行内嵌的 duration（running 无 end、按 Date.now 计）
 // 每秒必变，使任何动作刷新的字符串比对必然不相等 → 必走正文重建 → 滚动中肉眼可见。
 // 修复口径：①易变时长改稳定占位 + data-started（1s 定时器定点刷新文本，见 updateRunClocks）；
 // ③滚动进行中（100ms 内有滚动事件）延后正文补丁到滚动停止；no-op 路径（html 未变即 return）
@@ -122,7 +122,7 @@ test('runClockSpan：running 运行产出稳定占位（不含时长文本），
   assert.doesNotMatch(ended, /run-clock|data-started/, '终态不占刷新通道')
 })
 
-// —— ① 易变内容移除：modalTask 源码不再内嵌裸 duration() ——
+// —— ① 易变内容移除：modalTask 源码不再内嵌裸 duration
 test('modalTask：运行行时长改走 runClockSpan，模板内不再内嵌 duration()（易变内容出字符串）', () => {
   const modalTaskSrc = /function modalTask\(task\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(modalTaskSrc, 'ui/app.js 缺少 modalTask()')

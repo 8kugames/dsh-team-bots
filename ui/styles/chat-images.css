@@ -80,7 +80,7 @@
     width: 11px;
     height: 11px;
 }
-/* 待发缩略图加载失败占位（DSHBOTS-75）：blob: 被策略拦下或失效时不留破图。 */
+/* 待发缩略图加载失败占位：blob: 被策略拦下或失效时不留破图。 */
 .image-thumb-fallback {
     display: flex;
     flex-direction: column;
@@ -255,7 +255,7 @@
     place-items: center;
     padding: 12px;
     overflow: auto;
-    /* 同 .modal-body：面板滚动不串到底层页面（DSHBOTS-98）。 */
+    /* 同 .modal-body：面板滚动不串到底层页面。 */
     overscroll-behavior: contain;
     color: var(--ink-3);
     font-size: var(--fs-small);

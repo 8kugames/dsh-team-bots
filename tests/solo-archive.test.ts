@@ -32,7 +32,7 @@ async function setup(overrides = {}) {
 const DAY = 86_400_000
 const HOUR = 3_600_000
 const SEC = 1_000
-// 窗口 cutoff 基于真实 Date.now()，种子时间必须相对当前时刻（agoMs 越大越旧）。
+// 窗口 cutoff 基于真实 Date.now，种子时间必须相对当前时刻（agoMs 越大越旧）。
 const ago = ms => new Date(Date.now() - ms).toISOString()
 
 // 聊天分库：solo_messages 落该 bot 的单聊库，种子直写单聊库句柄。

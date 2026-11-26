@@ -17,7 +17,7 @@ const tsFiles = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entr
   return entry.name.endsWith('.ts') ? [full] : []
 })
 
-// 事务回调体提取：this.store.transaction(() => { ... })，花括号配平（上限 8000 字符兜底）。
+// 事务回调体提取：this.store.transaction( => { ... })，花括号配平（上限 8000 字符兜底）。
 function transactionBodies(source) {
   const bodies = []
   const pattern = /this\.store\.transaction\(\s*\(\)\s*=>\s*\{/g

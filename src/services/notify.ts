@@ -1,4 +1,4 @@
-// 通知通道域（DSHBOTS-243）：成员通知与任务提醒。
+// 通知通道域：成员通知与任务提醒。
 // 投递面与留痕分离——宿主会话通道（runtime.steer，即时可达）负责投递，插件 messages
 // 落库（进群聊流 / 任务线程）为准绳；任一通道失败只 warn，不阻塞另一通道。
 // 宿主 send_message 工具是 Agent Team 作用域的（花名册按根会话隔离，每个项目 bot
@@ -20,7 +20,7 @@ export const PARTNER_NOTICE_DAILY_CAP = 5
 
 // ── 滞留阈值兜底（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：四态三档梯度 ──────
 // 只提醒不自动处置：不自动关单、不自动转状态、不重派，验收与解阻由项目总监闭环（DSHBOTS-281 口径）。
-// 三档梯度（D-295）：待执行 72h 宽档 / in_review 24h / blocked 48h。
+// 三档梯度：待执行 72h 宽档 / in_review 24h / blocked 48h。
 export const STALE_PENDING_HOURS = 72
 export const STALE_REVIEW_HOURS = 24
 export const STALE_BLOCKED_HOURS = 48
@@ -58,7 +58,7 @@ export function staleCardNoticeBody({ identifier, status, hours } = {} as any) {
 }
 
 export const notifyMethods = {
-  // 伙伴提醒配额闸（DSHBOTS-267）：放行返回 true；超限静默丢弃（warn 留痕）返回 false。
+  // 伙伴提醒配额闸：放行返回 true；超限静默丢弃（warn 留痕）返回 false。
   // run 归属不到（发起方无活跃运行）时不设限——空闲/人工会话的零星通知无循环风险。
   allowPartnerNotice(runId, targetId) {
     if (!runId || !targetId) return true
@@ -94,7 +94,7 @@ export const notifyMethods = {
     )
   },
 
-  // 滞留提醒投递（DSHBOTS-280）：等价 owner 通知通道——与 D-274 死线升级同款
+  // 滞留提醒投递：等价 owner 通知通道——与 D-274 死线升级同款
   // （insertMessage 系统留痕进任务线程 + mentions 点名项目 owner）。
   // 防重＝同卡每日 ≤1 条，以当日已有同前缀系统留痕为准，超限静默（只 warn 不投递）。
   // 口径说明：D-267 配额闸（allowPartnerNotice）按 run_events type='partner_notice'
@@ -142,7 +142,7 @@ export const notifyMethods = {
     const target = findMemberByName(this.membersOf(project.id), name)
     if (!target) throw notFound(`项目 ${project.name} 里没有叫 ${memberName} 的成员 Bot`)
     if (target.id === from.id) throw badRequest('不能给自己发通知')
-    // 暂停/不可用目标不投递（DSHBOTS-262）：通知即唤醒信号，暂停中先恢复再通知。
+    // 暂停/不可用目标不投递：通知即唤醒信号，暂停中先恢复再通知。
     if (target.status === 'paused') throw badRequest(`Bot ${target.name} 已暂停，先恢复再通知`)
     if (target.status !== 'active') throw badRequest(`Bot ${target.name} 当前不可用（${target.status}）`)
     // DSHBOTS-267 防循环上限：归属发起方当前活跃运行，配额闸不通过即静默丢弃（不落留痕不投递）。
@@ -198,7 +198,7 @@ export const notifyMethods = {
   async notifyTaskFromBot({ project, from, ref, body }) {
     const task = this.resolveBotTask(project, ref)
     const identifier = `${project.key}-${task.number}`
-    // 负责人暂停/不可用时提醒不投递（DSHBOTS-262）：提醒即唤醒信号，暂停中先恢复再提醒。
+    // 负责人暂停/不可用时提醒不投递：提醒即唤醒信号，暂停中先恢复再提醒。
     if (task.assignee_bot_id) {
       const assignee = this.store.get('SELECT name, status FROM bots WHERE id = ?', task.assignee_bot_id)
       if (assignee?.status === 'paused') throw badRequest(`任务 ${identifier} 负责人 ${assignee.name} 已暂停，先恢复再提醒`)

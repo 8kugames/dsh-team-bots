@@ -159,7 +159,7 @@ test('调度视图：运行只取 queued/running，项目外运行标「单聊�
   const { root, store, service, director, dev } = await setup()
   try {
     const alpha = await service.createProject({ name: 'Alpha 项目', key: 'ALPHA', ownerBotId: director.id, memberIds: [dev.id] })
-    // one_active_run_per_bot（DSHBOTS-291）：同 bot 至多一条 queued/running，旧「queued+
+    // one_active_run_per_bot：同 bot 至多一条 queued/running，旧「queued+
     // running+solo 三活同 bot」夹具不再可造——前一条先置终态再播下一条，逐段快照断言。
     const finalize = (runId) =>
       store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), runId)

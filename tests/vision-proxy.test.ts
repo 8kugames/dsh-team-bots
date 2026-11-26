@@ -69,7 +69,7 @@ async function waitFor(predicate, timeout = 3000) {
   throw new Error('timeout waiting for condition')
 }
 
-// 争用口径 A（DSHBOTS-289/290）：one_active_run_per_bot 激活后同 bot 同时至多一条
+// 争用口径 A：one_active_run_per_bot 激活后同 bot 同时至多一条
 // queued/running。sendXxx 的消息运行在 enqueueOutbox 里同步建行，bot 槽随即被占，
 // 而 vision 派生是无 busy 闸的直接 INSERT——忙时撞 UNIQUE 静默返回 null。所以凡
 // 「先发消息再派生/断言 vision」的用例都要先腾槽：占用运行对本套件只是夹具背景，

@@ -32,7 +32,7 @@ function compareTasksByPriority(a, b) {
 function sortTasksByPriority(tasks) {
   return [...(tasks ?? [])].sort(compareTasksByPriority)
 }
-// 组内排序口径（D-63）：排序只发生在状态分组的组内兄弟层，不改分组、不动父子挂载——
+// 组内排序口径：排序只发生在状态分组的组内兄弟层，不改分组、不动父子挂载
 // 应用点在 renderTaskRows 建树前，父子挂载按 parent_task_id 组装，顺序变化不会拆散树。
 // 完成时间排序只有终态任务参与（done→completed_at、canceled→canceled_at，复用 taskTerminalTime）；
 // 非终态与缺时间戳的终态没有时间基准，两个方向都排在末尾，不穿插、不当 0 排最前。
@@ -64,7 +64,7 @@ function sortTasksForPanel(tasks, mode = state.taskSort) {
 }
 // task-sort:end
 
-// task-time-range:start —— 终态时间筛选（DSHBOTS-44）：只作用于终态任务（done/canceled），
+// task-time-range:start —— 终态时间筛选：只作用于终态任务（done/canceled），
 // 按各自终态时间戳（completed_at / canceled_at）与窗口下限比较；非终态任务不受影响照常显示。
 // 终态但缺时间戳（极老数据）在窗口模式下视为窗口外——无法证明在窗口内就不默认放行。
 // 窗口口径：「今天」按自然日当天 00:00 起（非 24 小时滚动窗），其余为自当前时刻回溯的滚动窗口。
@@ -77,7 +77,7 @@ function taskEndsOutsideRange(task, timeRange) {
   const cutoff = timeRange === '1d' ? new Date().setHours(0, 0, 0, 0) : Date.now() - (TASK_TIME_RANGES[timeRange] ?? 0)
   return !(Number.isFinite(endedAt) && endedAt >= cutoff)
 }
-// 终态时间戳取值口径（DSHBOTS-62）：done → completed_at，canceled → canceled_at；非终态没有终态时间。
+// 终态时间戳取值口径：done → completed_at，canceled → canceled_at；非终态没有终态时间。
 // 缺终态时间戳的终态任务没有可比的时间基准（老数据，或直接以终态状态建的任务），
 // 这类任务不参与时间筛选、始终可见——按窗口外处理会把整个「已完成」分组静默清空
 // （库里 1 条 done、面板 0 条的成因）。筛选入口用 taskTerminalTime 做这道门。
@@ -94,7 +94,7 @@ function filteredTasks() {
   return sortTasksByPriority((state.data?.tasks ?? []).filter(task => {
     if (filter.status !== 'all' && task.status !== filter.status) return false
     if (filter.assignee !== 'all' && task.assignee_bot_id !== filter.assignee) return false
-    // 时间筛选只对「有终态时间戳」的终态任务生效（DSHBOTS-62）：缺时间戳的终态任务没有时间基准，
+    // 时间筛选只对「有终态时间戳」的终态任务生效：缺时间戳的终态任务没有时间基准，
     // 参与筛选会被整组清空（库里 done、面板「已完成」0 条的成因）；其余状态照常显示（D-34 口径）。
     if (taskTerminalTime(task) && taskEndsOutsideRange(task, filter.timeRange)) return false
     if (filter.search) {
@@ -111,7 +111,7 @@ function renderTasks() {
   const tasks = filteredTasks()
   const members = project.members ?? []
   const filtering = Boolean(state.taskFilter.search) || state.taskFilter.status !== 'all' || state.taskFilter.assignee !== 'all' || state.taskFilter.timeRange !== 'all'
-  // 头部计数口径（DSHBOTS-62）：与各分组计数同源，取「各组计数之和」——
+  // 头部计数口径：与各分组计数同源，取「各组计数之和」
   // 头部数字必须等于面板上真正看到的行数之和，不能各算各的（口径不一致就会出现头部与分组对不上）。
   // 与项目总数（设置页「任务总数」同源）的差额单独提示，不混进主计数。
   const groupCounts = STATUS_ORDER.map(status => tasks.filter(task => task.status === status).length)
@@ -197,7 +197,7 @@ function taskPriorityIcon(task) {
 // 运行徽标文案来自后端 taskStage 纯函数查表的 stageLabel，不再从 latestRun.status 拼映射。
 // 终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：状态点、运行文案、计时与 running 高亮全部隐藏，
 // 已完成/已取消任务上挂着的遗留运行不再误导看板。
-// 验收滞留 badge（DSHBOTS-194/235）：in_review 卡静置超阈值亮「滞留 Xm」，超 阈值×倍数 转红。
+// 验收滞留 badge：in_review 卡静置超阈值亮「滞留 Xm」，超 阈值×倍数 转红。
 // 锚点与升级线取后端 task.reviewIdle 同源数据（含最新评论与 run 活动，H3 两端口径统一）；
 // 阈值与后端守门同源（runLimits.reviewIdleMinutes，0=关闭）；滞留判定两端同式：
 // 静置毫秒严格大于阈值。badge 内联三档判定档位（A/B/C），title 携带判定依据。
@@ -230,16 +230,16 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
   const tags = []
   if (task.status === 'in_review') {
     tags.push(task.review_target === 'owner_bot' ? t('task.reviewOwner') : t('task.reviewYou'))
-    // 核验可见性（DSHBOTS-113）：自动/手动核验的状态标记——未核验/失败亮出，防止静默漏审。
+    // 核验可见性：自动/手动核验的状态标记——未核验/失败亮出，防止静默漏审。
     if (task.reviewStatus === 'pending') tags.push(t('task.reviewPending'))
     else if (task.reviewStatus === 'skipped') tags.push(t('task.reviewSkipped'))
     else if (task.reviewStatus !== 'done') tags.push(t('task.reviewUnverified'))
   }
   for (const label of task.labels ?? []) tags.push(label)
   const isRunning = stage.stage === 'working' && !stage.action
-  // 终态时间小字（DSHBOTS-44）：done 取 completed_at、canceled 取 canceled_at，缺列或非终态不显示。
+  // 终态时间小字：done 取 completed_at、canceled 取 canceled_at，缺列或非终态不显示。
   const endAt = task.status === 'done' ? task.completed_at : task.status === 'canceled' ? task.canceled_at : null
-  // 依赖徽标（DSHBOTS-58）：depsSatisfied=false 即被未完成的任务挡住；blockedByNames 只列未满足项。
+  // 依赖徽标：depsSatisfied=false 即被未完成的任务挡住；blockedByNames 只列未满足项。
   const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
   const depsBlocked = task.depsSatisfied === false && blockedNames.length > 0
   const depsTitle = `${t("被")} ${blockedNames.length} ${t("个任务阻塞：")}${blockedNames.join(t("、"))}`
@@ -609,7 +609,7 @@ async function searchMemories() {
 
 function renderMemory() {
   const project = pageProject()
-  // 记忆随上下文收敛（DSHBOTS-5）：群聊=当前项目 scope、单聊=该 bot scope，服务端已按上下文过滤，
+  // 记忆随上下文收敛：群聊=当前项目 scope、单聊=该 bot scope，服务端已按上下文过滤，
   // 客户端不再有作用域筛选与「团队记忆」概念。
   const memories = state.data?.memories ?? []
   const pending = pendingMemoryCount()
@@ -700,7 +700,7 @@ function renderEvolution() {
 }
 
 
-// 任务级用量块（DSHBOTS-214）：taskDetail 的 usage.{own,total,subtaskCount}，本卡与含子任务并列，缓存读写分列。
+// 任务级用量块：taskDetail 的 usage.{own,total,subtaskCount}，本卡与含子任务并列，缓存读写分列。
 export function taskUsageBlock(usage) {
   if (!usage) return ''
   const subtasks = Number(usage.subtaskCount) > 0 ? `<div class="kv"><span>${t("含子任务")}</span><strong>${formatNumber(usage.total.totalTokens)} tok · ${usage.total.calls} ${t("次")} · ${formatCost(usage.total.cost)}</strong></div>` : ''
@@ -712,7 +712,7 @@ export function taskUsageBlock(usage) {
 }
 
 // 交付产物块（DSHBOTS-345 复盘）：卡面声明的交付文件路径，核验按路径直接读文件；未声明不渲染。
-// 文本型 chip 可点开应用内预览（DSHBOTS-347），其余保持纯文字。
+// 文本型 chip 可点开应用内预览，其余保持纯文字。
 export function taskDeliverablesBlock(task) {
   const deliverables = Array.isArray(task?.deliverables) ? task.deliverables.filter(item => typeof item === 'string' && item) : []
   if (!deliverables.length) return ''

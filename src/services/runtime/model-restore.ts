@@ -7,8 +7,8 @@
 // 服务实例上的 AsyncLocalStorage（executing）标记事务：只要调用点还留在某个
 // HMR 事务的异步上下文里，就直接 reject「HMR transactions cannot be nested」。
 //
-// 逃逸口径（DSHBOTS-175）：
-// ① executing 存在且 getStore() 为真 → executing.exit(fn)。exit 的实现就是
+// 逃逸口径：
+// ① executing 存在且 getStore 为真 → executing.exit(fn)。exit 的实现就是
 //    run(undefined, fn)，把回调及其全部 async 延续的 store 置为 undefined，
 //    runExclusive 因此看到干净上下文正常执行；逃逸只作用于回调内部，回调返回
 //    后调用方的事务上下文原样保留。

@@ -1,4 +1,4 @@
-// src/services/task-sandbox-schema.js —— 派发沙箱覆盖列（DSHBOTS-156）：独立迁移。
+// src/services/task-sandbox-schema.js —— 派发沙箱覆盖列：独立迁移。
 //
 // 背景：team_assign_task 的可选 sandbox 参数可把任务运行的会话沙箱档位从承接 bot 的
 // 配置档收紧（只收紧不放大；入参解析与校验见 src/services/file-policy.js 的

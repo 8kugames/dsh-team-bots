@@ -50,7 +50,7 @@ test('本卡只动审批卡：提问卡已随 D-190 对齐整行化（不再是 
 })
 
 // DSHBOTS-312 来源群聊 chip（源码锚）：审批卡头部 tools 行带 [KEY] 群名 chip（复用
-// .approval-chip mono），单聊向显示「单聊」——与通知头（D-240）同口径。
+// .approval-chip mono），单聊向显示「单聊」——与通知头同口径。
 test('审批卡头部来源 chip：群聊 [KEY] 群名 / 单聊标注（源码锚）', async () => {
   const { readFileSync } = await import('node:fs')
   const { fileURLToPath } = await import('node:url')

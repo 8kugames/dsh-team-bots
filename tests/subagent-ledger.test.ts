@@ -14,7 +14,7 @@ import { openDatabase } from '../src/db.js'
 import { installSubagentLedger, taskLabelOf } from '../src/subagent-ledger.js'
 
 // 宿主 cordis 瀑布流语义复刻（与 tests/questions.test.ts 同款）：监听器按注册先后排队，
-// waterfall 逐个 shift，先到的监听器不调用 next() 就截断后续链路。
+// waterfall 逐个 shift，先到的监听器不调用 next 就截断后续链路。
 class FakeCordisCtx {
   declare hooks: Map<string, any[]>
   constructor() { this.hooks = new Map() }

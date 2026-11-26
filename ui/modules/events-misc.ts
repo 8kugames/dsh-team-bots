@@ -40,7 +40,7 @@ document.addEventListener('input', (event) => {
   if (el.id === 'terminal-cmd-input') {
     state.terminalDraft = el.value
   }
-  // 提问卡补充说明（DSHBOTS-116）：只写草稿不重绘，避免整页重建吞掉输入焦点与未提交内容。
+  // 提问卡补充说明：只写草稿不重绘，避免整页重建吞掉输入焦点与未提交内容。
   if (el.classList?.contains('question-custom')) {
     const questionId = el.dataset.questionId
     const itemId = el.dataset.itemId
@@ -48,7 +48,7 @@ document.addEventListener('input', (event) => {
   }
 })
 
-// IME 组词标记（DSHBOTS-123）：组词期间 composition 事件不总是伴随常规 input 节奏，
+// IME 组词标记：组词期间 composition 事件不总是伴随常规 input 节奏，
 // 单独记 composerComposing，让轮询渲染闸门在组词全程让路；compositionend 后回到静默窗判定。
 document.addEventListener('compositionstart', (event) => {
   if ((event.target as HTMLElement)?.id === 'composer-input') state.composerComposing = true
@@ -100,7 +100,7 @@ document.addEventListener('keydown', (event) => {
     trapModalFocus(event)
     return
   }
-  // 通用键盘激活（DSHBOTS-367）：任务卡（article）与侧栏行（div）不是原生可激活元素，
+  // 通用键盘激活：任务卡（article）与侧栏行（div）不是原生可激活元素，
   // Enter/Space 由这里代为派发 click；原生按钮/链接不在此重复触发。
   const { carrier, chain } = activationCarrier(event.target)
   if (activationDecision({ key: event.key, carrierTag: carrier?.tagName, chainTags: chain, repeat: event.repeat })) {
@@ -197,7 +197,7 @@ document.addEventListener('click', (event) => {
   applyAutocomplete(state.ac.items[Number(el.dataset.acIdx)])
 })
 
-// 粘贴分发（DSHBOTS-70）：document 级委托——#composer-input 在 renderShell 里被 2.8s 轮询重建，
+// 粘贴分发：document 级委托——#composer-input 在 renderShell 里被 2.8s 轮询重建，
 // 监听挂节点会随节点一起被换掉（D-64 同类根因）。target 不是 composer 就完全放行，纯文本粘贴行为不变。
 document.addEventListener('paste', (event) => {
   const input = event.target as HTMLInputElement
@@ -220,7 +220,7 @@ document.addEventListener('paste', (event) => {
   }
 })
 
-// 待发缩略图兜底（DSHBOTS-75）：捕获阶段接资源 error，破图当场换成「图标 + 文件名」占位。
+// 待发缩略图兜底：捕获阶段接资源 error，破图当场换成「图标 + 文件名」占位。
 // 不用内联 onerror——CSP script-src 'self' 会把内联处理器一起拦掉。
 document.addEventListener('error', (event) => {
   const target = event.target
@@ -244,7 +244,7 @@ document.addEventListener('change', (event) => {
     state.taskFilter[el.dataset.taskFilter] = el.value
     render()
   }
-  // 任务排序（D-63）：组内重排，不动分组与父子层级。
+  // 任务排序：组内重排，不动分组与父子层级。
   if (el.matches('[data-task-sort]')) {
     state.taskSort = el.value
     render()
@@ -263,7 +263,7 @@ document.addEventListener('change', (event) => {
 document.addEventListener('scroll', (event) => {
   const el = event.target as HTMLElement
   if (!el?.classList?.contains('chat-messages')) return
-  // 判定口径抽成纯函数 nextChatAtBottom：渲染窗口内与已脱离文档的节点保持原值（DSHBOTS-72）。
+  // 判定口径抽成纯函数 nextChatAtBottom：渲染窗口内与已脱离文档的节点保持原值。
   state.chatAtBottom = nextChatAtBottom({
     rendering: state.rendering,
     connected: el.isConnected,

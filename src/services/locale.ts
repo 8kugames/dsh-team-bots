@@ -104,7 +104,7 @@ export async function resolveDshUiLanguage({ loader = null, dshHome = null, prof
   return 'auto'
 }
 
-// 页面生效值 → UI 语言的收敛（DSHBOTS-162）：
+// 页面生效值 → UI 语言的收敛：
 // 'zh'/'en' 显式生效直接采用；'auto'（含未设定/非法）一律交回 DSH 宿主解析链
 // （loader → patch 文件 → 'auto' 交浏览器 navigator）。
 export async function resolveUiLanguage({ loader = null, dshHome = null, profile = '', uiLanguage = 'auto' } = {}) {
@@ -113,7 +113,7 @@ export async function resolveUiLanguage({ loader = null, dshHome = null, profile
   return resolveDshUiLanguage({ loader, dshHome, profile })
 }
 
-// ── 出站系统消息的系统告警前缀（DSHBOTS-228）─────────────────────────────────
+// ── 出站系统消息的系统告警前缀─────────────────────────────────
 // 用户拍板：前缀缺省英文 SYSTEM ALERT（注意拼写 ALERT），中文环境显示【系统指令】。
 // zh* → 【系统指令】；其余（en/未知/未设定）→ [SYSTEM ALERT] （缺省英文）。
 export function systemAlertLabel(locale) {

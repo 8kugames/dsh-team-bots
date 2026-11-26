@@ -1,7 +1,7 @@
 // tests/avatar.test.js —— DSHBOTS-221 守门：头像数据生成与渲染收敛。
 // ① initials：英文取首二字母大写、CJK 取首字单字（修复两字竖排撑破头像块）；
 // ② identicon：同 seed 同图（确定性）、5x5 镜像对称、坐标界内；
-// ③ avatar()：有 avatar_seed 渲染像素块 SVG、无 seed 回落文字头像（唯一渲染出口）；
+// ③ avatar：有 avatar_seed 渲染像素块 SVG、无 seed 回落文字头像（唯一渲染出口）；
 // ④ 服务层：updateBot 落库 avatarSeed（roll 持久）、空值关闭、非法种子拒绝、旧库迁移补列；
 // ⑤ 入口存在性：bot 配置弹窗与 solo 配置页都有 roll 按钮（源码级轻锁）。
 import { test } from 'node:test'

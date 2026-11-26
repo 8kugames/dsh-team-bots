@@ -18,7 +18,7 @@ export function applyUiTheme(value) {
   return theme
 }
 
-// color-scheme:start —— 深/浅色判定唯一出口（DSHBOTS-349/351）。
+// color-scheme:start —— 深/浅色判定唯一出口。
 // 宿主深色不走媒体查询（WebView 的 prefers-color-scheme 失真恒报 light），而是给
 // 同源祖先文档 body 打 data-ds-dark-theme：嵌入态自直接父逐层上溯到 window.top，
 // 任一祖先带属性才判 dark；祖先链全程无属性、跨源访问异常与独立态一律回落系统
@@ -78,7 +78,7 @@ export const esc = (value) => String(value ?? '')
   .replaceAll('"', '&quot;').replaceAll("'", '&#39;')
 export const attr = esc
 export const pathCode = value => `<code>${esc(value).split('/').join('/<wbr>')}</code>`
-// 工作区路径的显示缩写（DSHBOTS-186）：/Users/{用户} 或 /home/{用户} 前缀替换为 '~'，
+// 工作区路径的显示缩写：/Users/{用户} 或 /home/{用户} 前缀替换为 '~'，
 // 其余前缀原样返回、空值归空串。仅用于展示位；复制（data-copy）、title 与请求载荷仍走完整路径。
 export const tildePath = value => {
   const text = String(value ?? '')
@@ -114,7 +114,7 @@ export const inSoloContext = () => state.chatMode === 'solo' || state.view === '
 export const pageProject = () => (inSoloContext() ? null : activeProject())
 export const activeBots = () => (state.data?.bots ?? []).filter(bot => bot.status === 'active')
 
-// format-tokens:start —— tokens/调用量展示的唯一格式化出口：k/m/b 标准进位，档内 <10 两位小数、≥10 一位小数（DSHBOTS-114），tests/token-format.test.js 按本标记块抽取断言。
+// format-tokens:start —— tokens/调用量展示的唯一格式化出口：k/m/b 标准进位，档内 <10 两位小数、≥10 一位小数，tests/token-format.test.js 按本标记块抽取断言。
 export function formatNumber(value) {
   const n = Number(value ?? 0)
   if (!Number.isFinite(n)) return '0'
@@ -203,7 +203,7 @@ export function runDot(status) {
   return `<span class="run-dot ${attr(status ?? '')}" title="${attr(RUN_STATUS[status] ?? t("未运行"))}"></span>`
 }
 
-// sandbox-pill:start —— 生效沙箱档位的轻量标签（DSHBOTS-157）。
+// sandbox-pill:start —— 生效沙箱档位的轻量标签。
 // 只复用既有 pill token（绿/琥珀/紫），零新增色值；档位色只回答「这次运行能不能写」，
 // 不承载告警语义——read-only 是只读运行的常态，不做成红色。
 const SANDBOX_TONE = {

@@ -590,14 +590,14 @@ export class Store {
     this.db.exec(sql)
   }
 
-  // 数据变更计数：本连接自打开以来的累计行变更数（total_changes()，O(1) 读取）。
+  // 数据变更计数：本连接自打开以来的累计行变更数（total_changes，O(1) 读取）。
   // 用作 state 轮询的版本基底——任何 INSERT/UPDATE/DELETE 都会推进它，读操作不影响。
-  // 注意用函数形式：node:sqlite 的 prepare('PRAGMA …').get() 不返回行。
+  // 注意用函数形式：node:sqlite 的 prepare('PRAGMA …').get 不返回行。
   changes() {
     return Number(this.db.prepare('SELECT total_changes() AS n').get()?.n ?? 0)
   }
 
-  // 事务纪律（B7/DSHBOTS-332）：回调内只做本库写——宿主副作用（起会话/steer/微信推送/
+  // 事务纪律：回调内只做本库写——宿主副作用（起会话/steer/微信推送/
   // tick）一律放在事务提交之后执行，回滚不产生幽灵消息/幽灵会话；outbox 的「先落库后
   // 同栈投递」在事务内也只发生 runs/outbox 行写入（投递的宿主动作由提交后的 tick/领取
   // 路径执行）。tests/after-commit.test.ts 以源码扫描守门。

@@ -140,10 +140,10 @@ export class WechatChannel {
     }
   }
 
-  /** UI 触发扫码登录；返回二维码内容，后续进度经 status() 暴露。
-   * 注意：begin 与 wait 必须走同一个 transport 实例——vendor 的授权状态机
-   * 把 challenge 记在实例内部的 active Map 上，换实例 wait 必然 AUTH_EXPIRED。
-   */
+  /** UI 触发扫码登录；返回二维码内容，后续进度经 status 暴露。
+ * 注意：begin 与 wait 必须走同一个 transport 实例——vendor 的授权状态机
+ * 把 challenge 记在实例内部的 active Map 上，换实例 wait 必然 AUTH_EXPIRED。
+ */
   async beginLogin() {
     if (!this.enabled()) throw new Error('微信通道未启用（DSH_TEAM_WECHAT=1）')
     if (this.phase === 'connected' || this.phase === 'reconnecting') throw new Error('微信通道已登录，如需换号请先退出')
@@ -328,7 +328,7 @@ export class WechatChannel {
     let ok = true
     for (const message of messages) {
       if (!message.text) {
-        // Trigger 留痕（B4-①/DSHBOTS-328）：无正文事件（图片/系统条目）也进观测面。
+        // Trigger 留痕：无正文事件（图片/系统条目）也进观测面。
         this.recordTrigger(message, 'filtered', 'no-text')
         continue
       }
@@ -349,10 +349,10 @@ export class WechatChannel {
   }
 
   /**
-   * 入站 Trigger 留痕（B4-①/DSHBOTS-328）：每条入站事件的处置（handled/filtered/rejected/
-   * duplicate + route + reason）经 service.recordWechatTrigger 落插件库，稳定 id = wechat:<nativeId>。
-   * 只观测不改变路由语义；service 不在场（测试桩）时静默跳过。
-   */
+ * 入站 Trigger 留痕：每条入站事件的处置（handled/filtered/rejected/
+ * duplicate + route + reason）经 service.recordWechatTrigger 落插件库，稳定 id = wechat:<nativeId>。
+ * 只观测不改变路由语义；service 不在场（测试桩）时静默跳过。
+ */
   recordTrigger(message, disposition, route, reason = null) {
     try {
       this.service?.recordWechatTrigger?.({
@@ -509,12 +509,12 @@ export class WechatChannel {
     if (this.phase === 'connected' && this.transport) this.scheduleOutboxFlush()
   }
 
-  /** 按 receipt_key 查收据终态（A3/DSHBOTS-323）：sent/gone/pending，供插件运维视图同源读取。 */
+  /** 按 receipt_key 查收据终态：sent/gone/pending，供插件运维视图同源读取。 */
   receiptStates(keys) {
     return this.store?.receiptStates?.(keys) ?? []
   }
 
-  /** 近期带键收据流水（A3/DSHBOTS-323）。 */
+  /** 近期带键收据流水。 */
   receipts(limit = 50) {
     return this.store?.receipts?.(limit) ?? []
   }

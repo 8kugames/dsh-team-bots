@@ -1,4 +1,4 @@
-// ui/modules/form-validation.ts —— 集中式表单内联校验（DSHBOTS-367）。
+// ui/modules/form-validation.ts —— 集中式表单内联校验。
 // 口径：视觉状态用原生 :user-invalid，程序化状态用 aria-invalid + aria-describedby，
 // 两者同一时刻切换——错误文案只在字段确实非法时挂进 aria-describedby，
 // 文案走应用内词典（随界面语言），不依赖浏览器原生气泡。

@@ -20,11 +20,11 @@ export function normalizeFilePolicy(value) {
   return value
 }
 
-// 派发沙箱覆盖可选值（DSHBOTS-156）：只收收紧档。danger-full-access 不在其中——
+// 派发沙箱覆盖可选值：只收收紧档。danger-full-access 不在其中
 // 覆盖不得把任务运行放大到比 bot 配置档更宽，完全访问只能来自 bot 配置本身。
 export const SANDBOX_OVERRIDES = ['read-only', 'workspace-write']
 
-// 解析派发入参 sandbox（DSHBOTS-156）：缺省/'inherit' → null（跟随 bot 配置档）；
+// 解析派发入参 sandbox：缺省/'inherit' → null（跟随 bot 配置档）；
 // 档位值必须在允许集内，且不得比 bot 配置档更宽（只收紧不放大，fail closed——
 // bot 配置档本身不合法时无法证明覆盖没有放宽，直接拒绝）。
 // 运行侧还有同口径兜底：effectiveSandbox 只在不比 bot 配置宽时采用覆盖

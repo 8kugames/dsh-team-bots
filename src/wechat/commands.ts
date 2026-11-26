@@ -6,13 +6,13 @@ import {
   taskDetail, trHelp, unknownCommand,
 } from './format.js'
 
-// 信赖边界（B6/DSHBOTS-327）：微信文本只是数据——本文件只解析下方显式白名单指令
+// 信赖边界：微信文本只是数据——本文件只解析下方显式白名单指令
 // （批/答/tr/bots/状态等固定模式），未命中指令的文本一律按群消息路由为数据；
 // 写操作指令（reject/tr 与 答/批）必须过 admin-peer 门。自然语言不被解释成命令。
-/** 微信答复路由：答 <token> <选项或文字>（DSHBOTS-215）。token 为提问/审批 id 末 6 位。 */
+/** 微信答复路由：答 <token> <选项或文字>。token 为提问/审批 id 末 6 位。 */
 const ANSWER_PATTERN = /^(?:答|答复|回答|answer)\s+([A-Za-z0-9]{4,10})(?:\s+([\s\S]*))?$/i
 
-/** 微信审批路由：批 <token> 允许|拒绝（DSHBOTS-215）。 */
+/** 微信审批路由：批 <token> 允许|拒绝。 */
 const APPROVAL_PATTERN = /^(?:批|审批|approve)\s+([A-Za-z0-9]{4,10})\s*(允许|拒绝|allow|reject)$/i
 
 /** 正文里的任务号候选（不要求空格分隔），再由 TASK_ID_PATTERN 校验。 */
@@ -34,7 +34,7 @@ export class WechatBusinessError extends Error {
 }
 
 /**
- * 项目外 director 通道首触回执（DSHBOTS-258）。文案本地放：format.js 不在本卡写范围，
+ * 项目外 director 通道首触回执。文案本地放：format.js 不在本卡写范围，
  * 且只有这一处新文案，不强行迁移。
  */
 function directorReceipt(bot) {
@@ -44,7 +44,7 @@ function directorReceipt(bot) {
 /**
  * 把管理员消息解析为指令并执行（DSHBOTS-249 前缀固定指令集）。
  * 拦截顺序：①以 / 开头的固定指令（D-249，/tr 是唯一显式转发进项目的通道）；
- * ②答/批 <token> 前缀（DSHBOTS-215）；③其余一切自由文本直达项目外 director
+ * ②答/批 <token> 前缀；③其余一切自由文本直达项目外 director
  * 专属工作区（DSHBOTS-258 三次收紧：不再有 <key>: 派单转发与绑定项目路由，用户不直接进群）。
  * 旧触发式指令（帮助/状态/验收/驳回/详情/q）已全部收编进 / 前缀指令集——触发词
  * 与无前缀对话路径冲突（任何中文首词都可能被当成指令拦截），本卡一并收口移除。
@@ -57,7 +57,7 @@ function directorReceipt(bot) {
 export async function handleCommand(service, rawText, ctx = null) {
   const body = String(rawText ?? '').trim()
   if (!body) {
-    // Trigger 分类回填（B4-①/DSHBOTS-328）：ctx.trigger 由通道侧读取留痕，不改变返回契约。
+    // Trigger 分类回填：ctx.trigger 由通道侧读取留痕，不改变返回契约。
     if (ctx) ctx.trigger = { kind: 'chat', verb: null }
     return helpText()
   }
@@ -95,7 +95,7 @@ export async function handleCommand(service, rawText, ctx = null) {
     return chat.firstContact ? directorReceipt(chat.director) : ''
   }
   if (chat?.error === 'no_director') {
-    // 导演通道异常（DSHBOTS-258）：独立出口，不触发选项目提示链。
+    // 导演通道异常：独立出口，不触发选项目提示链。
     return noDirector()
   }
   if (!chat || chat.error === 'no_target') {
@@ -116,9 +116,9 @@ function normalizeCommandPrefix(body) {
 }
 
 /**
- * / 前缀固定指令集（DSHBOTS-249）。只读指令对群成员开放；写操作（ADMIN_VERBS）
+ * / 前缀固定指令集。只读指令对群成员开放；写操作（ADMIN_VERBS）
  * 走 admin 门（与 答/批 同口径，分档依据见 handleCommand 注释）。
- * 需要的 service 方法：stateView() / wechatProjectBots(key) /
+ * 需要的 service 方法：stateView / wechatProjectBots(key) /
  * taskViewByIdentifier(identifier) / wechatReview(identifier, {decision, comment}) /
  * wechatChat(key, message)（同 D-208 直达）。
  */
@@ -127,7 +127,7 @@ async function handleFixedCommand(service, body, ctx) {
   if (!slash) return unknownCommand()
   const verb = slash[1].toLowerCase()
   const rest = String(slash[2] ?? '').trim()
-  // Trigger 分类回填（B4-①/DSHBOTS-328）：固定指令带 verb，写操作门仍由 ADMIN_VERBS 把守。
+  // Trigger 分类回填：固定指令带 verb，写操作门仍由 ADMIN_VERBS 把守。
   if (ctx) ctx.trigger = { kind: 'fixed', verb }
 
   // 写操作权限门（fail-closed）：未显式 isAdmin=true 一律拒绝（只读指令不设门）。

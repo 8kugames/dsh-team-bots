@@ -1,13 +1,13 @@
 // 任务通知域：任务生命周期事件的对外通知锚点。
-// 微信推送收敛（DSHBOTS-182）：通道只在「创建成功」与「真正完成（→done 转换）」
+// 微信推送收敛：通道只在「创建成功」与「真正完成（→done 转换）」
 // 各推一条（创建→完成闭环），交付（in_review/待验收）节点不推。幂等不靠通知键，
 // 靠锚定一次性事件本身：创建是单次 INSERT；done 是受 TRANSITIONS 守卫的状态转换
 // （done→done 不构成转换）。通道未启用时静默（无可用通道即 no-op）；
 // DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
 // 通知失败不能把已落库的变更打挂。
-// notifyTaskStarted（DSHBOTS-100）是群内开工通知+运行入队（非微信推送），
+// notifyTaskStarted是群内开工通知+运行入队（非微信推送），
 // 与两个微信锚点同属任务通知域，一并落在本文件。
-// 微信推送文案排版集中在 src/wechat/format.js（DSHBOTS-211）。
+// 微信推送文案排版集中在 src/wechat/format.js。
 
 import { taskCreated, taskDone } from '../wechat/format.js'
 import { jsonParse, nowIso } from '../util.js'
@@ -25,7 +25,7 @@ export const taskNotifyMethods = {
       task.id,
     )
     if (active) return null
-    // 负责人 bot 行缺失（数据异常）或已暂停/归档（DSHBOTS-262）时整体跳过：通知与开工
+    // 负责人 bot 行缺失（数据异常）或已暂停/归档时整体跳过：通知与开工
     // 都指不到人——看板拖拽/表单改状态是派发链路的隐形入口，暂停中不该被唤醒
     // （enqueueTaskRun 对 pending task_run 补投兜底同口径）；也不能让通知失败反过来
     // 把已经落库的状态变更顶掉。
@@ -98,8 +98,8 @@ export const taskNotifyMethods = {
     }
     return { taskId: task.id, steered: Boolean(run) }
   },
-  // 任务完成通知（DSHBOTS-182）：锚定 →done 转换，触发点在 updateTask。
-  // 幂等收据键（A3/DSHBOTS-323）：task-done:<task.id>——同卡重复推送在通道存留期内被吸收。
+  // 任务完成通知：锚定 →done 转换，触发点在 updateTask。
+  // 幂等收据键：task-done:<task.id>——同卡重复推送在通道存留期内被吸收。
   // DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
   notifyTaskDone(task) {
     const project = this.projectRow(task.project_id)
@@ -112,7 +112,7 @@ export const taskNotifyMethods = {
   },
   // 任务创建通知（DSHBOTS-182 增补）：锚定创建成功（单次 INSERT），触发点在 createTask。
   // 文案含 KEY-N/标题/派给谁；无负责人时如实注明「暂未指派」。
-  // 幂等收据键（A3/DSHBOTS-323）：task-created:<task.id>。
+  // 幂等收据键：task-created:<task.id>。
   // DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
   notifyTaskCreated(task) {
     const project = this.projectRow(task.project_id)

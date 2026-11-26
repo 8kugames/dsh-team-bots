@@ -46,7 +46,7 @@ async function harness() {
     `INSERT INTO project_members(project_id, member_type, member_id, member_role, joined_at)
      VALUES ('p1', 'bot', 'b2', 'member', ?)`, now,
   )
-  // 控制面绑定按现行口径 kind='bot'（D-285）：owner/member 带项目维度，solo 是 project_id NULL。
+  // 控制面绑定按现行口径 kind='bot'：owner/member 带项目维度，solo 是 project_id NULL。
   store.run(
     `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at)
      VALUES ('sess-owner', 'b1', 'p1', 'bot', NULL, ?)`, now,

@@ -77,9 +77,9 @@ type DshRuntimeMethods =
 
 /**
  * node:sqlite 的 DatabaseSync 按项目实际调用面自绘。
- * 若直接标注为 @types/node 的 DatabaseSync，prepare().get/all() 会返回
+ * 若直接标注为 @types/node 的 DatabaseSync，prepare.get/all 会返回
  * Record<string, SQLOutputValue>，把 bigint/Uint8Array 传导到数百处
- * store.get()/store.all() 调用点并连锁报错；本项目所有行都按任意行对象消费，
+ * store.get/store.all 调用点并连锁报错；本项目所有行都按任意行对象消费，
  * 因此行结果维持 any（与类型擦除前的推断一致），避免对调用点产生任何新约束。
  */
 interface SqlDatabase {
@@ -270,7 +270,7 @@ declare module '../src/service.js' {
     started: boolean
     /** 停机标志：插件卸载后实例完全静默（库已关闭，任何再触发的写库都是错的）。 */
     stopped: boolean
-    /** 启动期首拍定时器句柄（stop() 清理）。 */
+    /** 启动期首拍定时器句柄（stop 清理）。 */
     bootTimer: ReturnType<typeof setTimeout> | null
     ready: Promise<unknown> | null
     rate: Record<string, unknown>
@@ -288,10 +288,10 @@ declare module '../src/service.js' {
     /** SecretBox 缓存（services/secrets.js ensureSecretBox）。 */
     _secretBox: unknown
     _secretEntries: { name: string; value: string; scope: string; projectId: string | null }[] | null
-    /** GitHub 触发源的 gh 执行钩子（B4-②/DSHBOTS-335）：生产 null=真实 gh CLI，测试注入桩。 */
+    /** GitHub 触发源的 gh 执行钩子：生产 null=真实 gh CLI，测试注入桩。 */
     githubRunner: ((args: string[]) => Promise<string> | string) | null
     terminalActive: Map<string, unknown>
-    /** index.js 里 service.initialize().then(...).catch(...) 的启动 Promise。 */
+    /** index.js 里 service.initialize.then(...).catch(...) 的启动 Promise。 */
     boot: Promise<unknown> | null
   }
 }

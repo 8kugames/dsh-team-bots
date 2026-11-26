@@ -28,7 +28,7 @@ test('交付产物默认收起：与「查看输出」同一折叠口径', () =>
   assert.ok(!/artifact-list"><div class="eyebrow"[^>]*>交付产物</.test(source), '不再以常驻 eyebrow 展开展示交付产物')
 })
 
-// —— 沙箱档位标签（DSHBOTS-157）——
+// —— 沙箱档位标签
 // runView 已透出 sandboxMode（生效档：非 write 运行恒 read-only；写运行取派发收紧覆盖或 bot 文件策略）。
 // 任务详情的运行记录里渲成轻量标签；档位为空不渲。只复用既有 pill token，零新增色值。
 const sandboxBlock = /\/\/ sandbox-pill:start[\s\S]*?\/\/ sandbox-pill:end/.exec(source)?.[0]

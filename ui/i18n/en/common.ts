@@ -1,4 +1,4 @@
-// ui/i18n/en/common.ts —— English copy dictionary: common domain (DSHBOTS-233)
+// ui/i18n/en/common.ts —— English copy dictionary: common domain
 export default {
   // Boot / connection
   "boot.connecting": "Connecting to the team workspace",
@@ -168,11 +168,11 @@ export default {
   "解除额度耗尽": "Clear quota exhaustion",
   "立即恢复该 Bot 的派发？不等额度恢复时间。": "Resume this bot's dispatch now? This ignores the recorded quota reset time.",
   "额度耗尽已解除": "Quota exhaustion cleared",
-  // DSHBOTS-246: keys added by the full t() literal audit
+  // DSHBOTS-246: keys added by the full t literal audit
   "主模型": "Primary model",
   "：": ": ",
   "）": ")",
-  // Form inline validation (DSHBOTS-367)
+  // Form inline validation
   "form.thisField": "This field",
   "form.errorRequired": "${label} is required",
   "form.errorTypeMismatch": "${label} has an invalid format",

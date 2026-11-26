@@ -371,7 +371,7 @@ test('one_bot_binding 每 (bot,project) 一条：同 bot 跨项目独立，同�
   const { root, store } = await soloSetup()
   try {
     const now = new Date().toISOString()
-    // 播种确定性锚：director 由 initialize() 种子创建，无既有 kind='bot' 绑定
+    // 播种确定性锚：director 由 initialize 种子创建，无既有 kind='bot' 绑定
     const director = store.get("SELECT id FROM bots WHERE name = 'director'")
     for (const key of ['ALPHA', 'BETA']) {
       store.run(

@@ -1,6 +1,6 @@
 // src/services/task-relations.js —— 任务父子关系与依赖阻塞：独立迁移 + 校验 + 调度闸门查询。
 //
-// 口径（DSHBOTS-59）：
+// 口径：
 // - tasks.parent_task_id：同项目内引用另一任务（跨项目/自引用拒绝）。v1 只做归属记录与渲染锚点，
 //   父完成不自动级联关子（明确不做自动传播）。
 // - tasks.blocked_by：JSON 数组存依赖任务 id。任一依赖状态非 done/canceled 时，调度器不领取该任务

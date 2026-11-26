@@ -1,6 +1,6 @@
-// tests/i18n.test.js —— DSHBOTS-120 Phase 1：locale 读取链、t() 行为与注入接线。
+// tests/i18n.test.js —— DSHBOTS-120 Phase 1：locale 读取链、t 行为与注入接线。
 // 三层：①src/services/locale.js 纯函数 + 三级兜底（临时 dshHome，不碰真实 ~/.dsh）；
-// ②ui/modules/i18n.js 的 t() 插值/回退；③http.js / index.html / system.js / app.js 注入接线守门。
+// ②ui/modules/i18n.js 的 t 插值/回退；③http.js / index.html / system.js / app.js 注入接线守门。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
@@ -58,7 +58,7 @@ test('localePreferenceFromPatchYml：命中 locale 条目的 preference', () => 
   assert.equal(localePreferenceFromPatchYml(''), null)
 })
 
-// —— ③ loader 直读：entries() 优先、fiber.config 活值优先于 options 原始值 ——
+// —— ③ loader 直读：entries 优先、fiber.config 活值优先于 options 原始值
 test('localePreferenceFromLoader：fiber 活配置优先，store 兜底，无条目 null', () => {
   const entry = {
     options: { id: 'locale', name: '@deepseek-ai/dsh-client-locale', config: { preference: 'zh' } },
@@ -67,7 +67,7 @@ test('localePreferenceFromLoader：fiber 活配置优先，store 兜底，无条
   assert.equal(localePreferenceFromLoader({ entries: () => [entry] }), 'en')
   const optionsOnly = { options: { id: 'locale', config: { preference: 'zh' } } }
   assert.equal(localePreferenceFromLoader({ entries: () => [optionsOnly] }), 'zh')
-  // store 形态（Dict extends Map）：values() 迭代同样命中；按包名兜底命中。
+  // store 形态（Dict extends Map）：values 迭代同样命中；按包名兜底命中。
   const byName = { options: { id: 'x', name: '@deepseek-ai/dsh-client-locale', config: { preference: 'en' } } }
   assert.equal(localePreferenceFromLoader({ store: new Map([['x', byName]]) }), 'en')
   assert.equal(localePreferenceFromLoader({ entries: () => [{ options: { id: 'other' } }] }), null)
@@ -98,7 +98,7 @@ test('resolveDshUiLanguage：loader 优先、文件兜底、缺省 auto、非法
   }
 })
 
-// —— ⑤ t()：插值、双语切换、缺 key 回退 ——
+// —— ⑤ t：插值、双语切换、缺 key 回退
 test('t()：${name} 插值与中英切换', () => {
   setLanguage('zh')
   assert.equal(getLanguage(), 'zh')
@@ -185,7 +185,7 @@ test('字典完整性：zh/en key 一一对应且 ≥150 项，zh 值非空', ()
   }
 })
 
-// —— ⑧ 字典占位守门（DSHBOTS-147）：t() 只替换 ${\w+}，占位写成别的形态（如 @{name}）永远原样渲染 ——
+// —— ⑧ 字典占位守门：t 只替换 ${\w+}，占位写成别的形态（如 @{name}）永远原样渲染
 test('字典守门：全字典不得出现 @{ 占位形态（t() 不认，会原样渲染成字面量）', () => {
   // 源文件层面：连注释里也不许再出现 @{，避免错误形态被复制。
   for (const rel of ['ui/i18n/zh.js', 'ui/i18n/en.js']) {

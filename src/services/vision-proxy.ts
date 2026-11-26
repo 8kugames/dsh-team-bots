@@ -1,4 +1,4 @@
-// src/services/vision-proxy.js —— 读图代理域（DSHBOTS-112）
+// src/services/vision-proxy.js —— 读图代理域
 // Bot 主模型无视觉能力却收到带图消息时，自动派生 kind='vision'、mode='read' 的
 // 只读转写运行：用配置的代理模型（visionProxyProvider/visionProxyModel）把图片
 // 转写成中文结构化文本，以「[图片转写] …」system 消息写回原消息所在会话，并给同
@@ -11,7 +11,7 @@
 
 import { id, nowIso } from '../util.js'
 
-// 宿主无视觉报错口径：dsh-api-session-controller prompt() 对 inputModalities 定义且
+// 宿主无视觉报错口径：dsh-api-session-controller prompt 对 inputModalities 定义且
 // 不含 image 的模型抛 `Model "X" does not support image input.`（reason
 // MODEL_DOES_NOT_SUPPORT_IMAGES）；pi-ai 传输层另有 `... does not support image input for ...`。
 // 两种串 + 错误码统一在这里判定。
@@ -30,7 +30,7 @@ export function visionProxyTarget(config) {
   return provider && model ? { provider, model, ref: `${provider}/${model}` } : null
 }
 
-// 主模型是否确定无视觉：与宿主 prompt() 同一数据源（ctx.llm.resolveModelInfo 的
+// 主模型是否确定无视觉：与宿主 prompt 同一数据源（ctx.llm.resolveModelInfo 的
 // inputModalities）同一判定——能力表未定义（undefined）时宿主放行，这里也返回
 // false（此时图片由宿主降级为占位文本，不触发派生）。解析失败同样返回 false，
 // 宁可少派生也不误派生。

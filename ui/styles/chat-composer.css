@@ -1,4 +1,4 @@
-/* 聊天历史分片加载按钮（DSHBOTS-33）：贴在 chat-messages 顶部，幽灵按钮风格弱化存在感。 */
+/* 聊天历史分片加载按钮：贴在 chat-messages 顶部，幽灵按钮风格弱化存在感。 */
 .load-older {
     align-self: center;
     margin: 8px 0;

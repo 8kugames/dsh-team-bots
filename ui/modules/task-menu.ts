@@ -1,4 +1,4 @@
-// ui/modules/task-menu.ts —— 任务卡上下文菜单（DSHBOTS-367）：键盘跨列移动的通路。
+// ui/modules/task-menu.ts —— 任务卡上下文菜单：键盘跨列移动的通路。
 // 入口：卡片聚焦后按菜单键（ContextMenu）/ Shift+F10，或触屏长按（contextmenu 事件）。
 // 菜单列出目标列，选中即 transition_task——与鼠标拖拽落列走同一后端动作。
 import { STATUS_ORDER } from './state.js'

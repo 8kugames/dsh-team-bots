@@ -2,8 +2,8 @@
 // 宿主进程从不设置 DSH_RUNTIME_VERSION（全宿主 grep 零命中），env-only 读取恒 unknown。
 // 探测链三级回退：env → process.argv[1] 向上最多 6 级找宿主 package.json → 'unknown'。
 // 纯函数注入 env/argv1，全部用临时目录，不依赖真实宿主。
-// 数据流终点两例（查到链路终点纪律）：dshUpdateInfo().current 与
-// capabilityInfo()（state().dsh.version 的数据源，即「DSH 服务」卡「dsh 当前版本」一行）。
+// 数据流终点两例（查到链路终点纪律）：dshUpdateInfo.current 与
+// capabilityInfo（state.dsh.version 的数据源，即「DSH 服务」卡「dsh 当前版本」一行）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'

@@ -3,7 +3,7 @@
 // 新会话首轮提示词注入摘要一次且清零后不重复注入、0=关闭、task 亲和不结转、dm 落控制面单绑定、
 // 摘要运行路由回旧会话、finishRun 成功落库/失败留痕、单聊（无项目）结转、
 // 支撑索引迁移幂等、executeRun→摘要提示词→finishRun→下次复用开新会话的完整链路、
-// 消费闸（DSHBOTS-213）：非结转顶替会话的普通轮次不得消费摘要，阈值再触发直接结转不重排。
+// 消费闸：非结转顶替会话的普通轮次不得消费摘要，阈值再触发直接结转不重排。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -67,7 +67,7 @@ const captureHost = (sink) => {
   }
 }
 
-// 与 index 同款注入聊天库路由器（Phase 3）：run_events 等正文按运行归属取库。
+// 与 index 同款注入聊天库路由器：run_events 等正文按运行归属取库。
 const newRuntime = (ctxHost, { config, store, service }) =>
   new DshRuntime({ ctx: ctxHost, config, store, logger, chatStores: { forRun: (run) => service.runChatStore(run) } })
 
@@ -241,7 +241,7 @@ test('P2 体积上限：轮数未到但会话上下文超上限同样触发摘�
 })
 
 // 播种会话累计消费的子代理数：账本口径 = 会话名下运行的 subagent_spawned run_events。
-// 事件住运行归属聊天库（Phase 3）：经 service.insertRunEvent 落到路由库。
+// 事件住运行归属聊天库：经 service.insertRunEvent 落到路由库。
 const seedSubagents = (service, { sessionId, count, offset = 0 }) => {
   const runIds = service.store.all('SELECT id FROM runs WHERE session_id = ?', sessionId).map(row => row.id)
   for (let i = 0; i < count; i += 1) {
@@ -348,7 +348,7 @@ test('结转别名不跨 bot/项目：未绑定或其他项目的 session 不得
   const ctx = await setup()
   try {
     const { director, dev, project } = await primeProject(ctx.service, ctx.store)
-    // 单绑定模型（DSHBOTS-289）：同 bot 只有一条 kind='bot' 活跃绑定，跨项目场景改用
+    // 单绑定模型：同 bot 只有一条 kind='bot' 活跃绑定，跨项目场景改用
     // 两个成员 bot 各占一个项目，结转后各自旧会话仍只能解析回自己的 bot/项目。
     const dev2 = await ctx.service.createBot({ name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
     const project2 = await ctx.service.createProject({ name: 'Rollover 其他项目', key: 'RLV2', ownerBotId: director.id, memberIds: [dev2.id] })
@@ -472,7 +472,7 @@ test('finishRun 收尾：成功落 settings 并留 ready 痕，失败留 failed 
   const ctx = await setup()
   try {
     const { director, dev, project } = await primeProject(ctx.service, ctx.store)
-    // 单绑定模型（DSHBOTS-289）：同 bot 只有一条 kind='bot' 活跃绑定，两个摘要运行分属
+    // 单绑定模型：同 bot 只有一条 kind='bot' 活跃绑定，两个摘要运行分属
     // 两个成员 bot 各自的项目控制面会话，success/failed 两分支互不共用 bot 名额。
     const dev2 = await ctx.service.createBot({ name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
     const project2 = await ctx.service.createProject({ name: 'Rollover 2', key: 'RL2', ownerBotId: director.id, memberIds: [dev2.id] })

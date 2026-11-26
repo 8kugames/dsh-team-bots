@@ -1,4 +1,4 @@
-// ui/i18n/zh/common.ts —— 中文文案字典：common 域（DSHBOTS-233）
+// ui/i18n/zh/common.ts —— 中文文案字典：common 域
 export default {
   // 启动 / 连接
   "boot.connecting": "正在连接团队空间",
@@ -168,11 +168,11 @@ export default {
   "解除额度耗尽": "解除额度耗尽",
   "立即恢复该 Bot 的派发？不等额度恢复时间。": "立即恢复该 Bot 的派发？不等额度恢复时间。",
   "额度耗尽已解除": "额度耗尽已解除",
-  // DSHBOTS-246：全量 t() 实参清点补齐（原文即键）
+  // DSHBOTS-246：全量 t 实参清点补齐（原文即键）
   "主模型": "主模型",
   "：": "：",
   "）": "）",
-  // 表单内联校验（DSHBOTS-367）
+  // 表单内联校验
   "form.thisField": "该字段",
   "form.errorRequired": "${label}不能为空",
   "form.errorTypeMismatch": "${label}格式不正确",

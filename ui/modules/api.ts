@@ -34,7 +34,7 @@ export async function api(action, payload = {}, { quiet = false } = {}) {
 }
 
 // ===== settings-merge:start =====
-// 设置草稿三方合并（B2/DSHBOTS-325）：base=发送时服务端值、patch=用户提交值、
+// 设置草稿三方合并：base=发送时服务端值、patch=用户提交值、
 // serverNow=409 后重取的服务端值。用户没改的字段不参与；对方没改的字段保留用户草稿
 // （贴回表单，编辑不丢）；双方都改的字段以服务端为准，字段名进 conflicts 供提示复核。
 export function mergeSettingsDraft(base, patch, serverNow) {
@@ -83,7 +83,7 @@ export async function markVisibleChatRead(data) {
   }
 }
 
-// 轮询竞态保护（DSHBOTS-102）：本地已决的审批不被早于决策的 pending 响应盖回。
+// 轮询竞态保护：本地已决的审批不被早于决策的 pending 响应盖回。
 // 根因是 2.8s 轮询的在途旧响应会在乐观回显之后到达，把 state.data 整体盖回 pending，
 // 表现为点「允许一次」后卡片闪回。以本地 decided_at 为「已决」标记：同 id 的旧响应仍是
 // pending 时保留本地终态；旧响应已是终态（如 timeout）则以服务端为准。
@@ -106,7 +106,7 @@ export function preserveDecidedApprovals(previous, next) {
   return next
 }
 
-// 轮询竞态保护（DSHBOTS-116）：本地已答的提问不被早于提交的 pending 响应盖回，与审批同口径。
+// 轮询竞态保护：本地已答的提问不被早于提交的 pending 响应盖回，与审批同口径。
 // 以本地 answered_at 为「已答」标记：同 id 的旧响应仍是 pending 时保留本地终态；旧响应已是终态则以服务端为准。
 export function preserveAnsweredQuestions(previous, next) {
   const answered = new Map()
@@ -150,7 +150,7 @@ export async function loadState(projectId = state.projectId, { quiet = false } =
   if (response?.unchanged) return state.data
   const data = dropReadOwnerMentions(preserveAnsweredQuestions(state.data, preserveDecidedApprovals(state.data, response)))
   state.data = data
-  // 已读上报不挡渲染（DSHBOTS-167）：本地水位与徽标在调用瞬间即生效（函数体首段同步执行），
+  // 已读上报不挡渲染：本地水位与徽标在调用瞬间即生效（函数体首段同步执行），
   // 服务端上报即发即走；失败由 markVisibleChatRead 内部回退 markedRead，下一轮轮询自动重报。
   void markVisibleChatRead(data).catch(() => {})
   if (!state.projectId || !data.projects.some(project => project.id === state.projectId)) {

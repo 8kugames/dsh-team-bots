@@ -1,4 +1,4 @@
-// src/services/external-trigger-schema.js —— 外部触发留痕表（B4-②/DSHBOTS-335）。
+// src/services/external-trigger-schema.js —— 外部触发留痕表。
 // 与 wechat_inbound（B4-①，通道自有形态）并列的外部来源观测面：GitHub 触发按
 // (source, external_id) 主键落痕——表即「已见集合」，未见过的事件才产生候选通知。
 // 每个读入面各自留痕、互不混表；未来如需统一收口再作专项卡。observe 口径：外部

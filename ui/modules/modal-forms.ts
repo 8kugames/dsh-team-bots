@@ -100,7 +100,7 @@ function modalRemoveTracking() {
   })
 }
 
-// 已归档 Bot 的移除追踪两步确认弹窗（DSHBOTS-193）：与项目侧同构。Bot 侧为软移除——数据与
+// 已归档 Bot 的移除追踪两步确认弹窗：与项目侧同构。Bot 侧为软移除——数据与
 // 工作区目录全部保留、仅停止追踪，故无 purge 复选框；第二步复用 #remove-tracking-name/
 // #remove-tracking-submit 两个 id 让 events-misc 输入门禁免改生效，且不含 form：执行按钮走
 // data-action 而非表单提交，不与项目侧 remove-tracking 表单链冲突。
@@ -247,7 +247,7 @@ function modalBot(detail) {
   })
 }
 
-// 任务关系选项（DSHBOTS-58）：父任务与依赖任务都只从本项目已有任务里选——
+// 任务关系选项：父任务与依赖任务都只从本项目已有任务里选
 // 后端只接受同项目内引用，跨项目与自引用会被直接拒绝，列表因此不给别的项目的任务。
 // selectedId（D-63 派生子任务）：给指定任务打 selected，让预填的父任务在下拉里真正选中显示，
 // 而不是值带了、显示还停在「无（顶层任务）」。
@@ -256,7 +256,7 @@ function taskRelationOptions(selectedId = '') {
   return tasks.map(task => `<option value="${attr(task.id)}"${task.id === selectedId ? ' selected' : ''}>${esc(task.identifier)} · ${esc(task.title)}</option>`).join('')
 }
 
-// time-budget:start —— 「时效要求（分钟）」表单值归一（DSHBOTS-129）
+// time-budget:start —— 「时效要求（分钟）」表单值归一
 // 空串 / 0 / 负数 / 非数字 → null（视为未提时效，提交时整键不传，服务端按 NULL 处理）；
 // 正数向下取整到整数分钟（服务端再钳到 1..10080）。
 function normalizeTimeBudgetMinutes(raw) {
@@ -271,7 +271,7 @@ function normalizeTimeBudgetMinutes(raw) {
 function modalNewTask() {
   const project = activeProject()
   if (!project) return ''
-  // 派生子任务入口（D-63）带 parentTaskId 预填；常规新建不带。
+  // 派生子任务入口带 parentTaskId 预填；常规新建不带。
   const preselectedParent = state.modal?.parentTaskId ?? ''
   return modalShell({
     title: t("新建任务"),
@@ -323,7 +323,7 @@ function modalSkill(detail) {
 }
 
 // 已完成写运行的交付产物：默认收起（与「查看输出」同一折叠口径），展开后图片内联预览，
-// 文本型文件应用内预览（DSHBOTS-347），其余文件列路径与扩展名徽标、新窗口打开。
+// 文本型文件应用内预览，其余文件列路径与扩展名徽标、新窗口打开。
 function runArtifacts(state, run) {
   const list = Array.isArray(run.artifacts) ? run.artifacts : []
   if (run.status !== 'succeeded' || list.length === 0) return ''
@@ -397,7 +397,7 @@ function modalTrajectory(detail, runId) {
   })
 }
 
-// 运行行时长（DSHBOTS-154）：running 运行的 duration 无 end、按 Date.now() 计，每秒都变。
+// 运行行时长：running 运行的 duration 无 end、按 Date.now 计，每秒都变。
 // 直接嵌进 modal html 会让 reloadTaskModal 的字符串比对必然不相等 → 正文整段重建（滚动中
 // 肉眼可见）。改为稳定占位 + data-started，挂载后由 updateRunClocks 定点刷新文本——与消息流
 // typing 行同一通道（区别：那边随 #app 全量重建渲染、初值可以直接是 duration，这里必须稳定）。
@@ -413,17 +413,17 @@ function modalTask(task) {
   const project = activeProject()
   const activeRun = (task.runs ?? []).find(run => ['queued', 'running'].includes(run.status))
   const latestFailed = (task.runs ?? []).find(run => ['failed', 'canceled'].includes(run.status))
-  // 终态时间小字（DSHBOTS-44）：与任务卡同口径——done 取 completed_at、canceled 取 canceled_at，缺列不造占位。
+  // 终态时间小字：与任务卡同口径——done 取 completed_at、canceled 取 canceled_at，缺列不造占位。
   // 终态下 stageLabel 为 null（DSHBOTS-42 口径），badge 槽正好空出，用「完成于/取消于 + 时间」补位。
   const endAt = task.status === 'done' ? task.completed_at : task.status === 'canceled' ? task.canceled_at : null
-  // 任务关系（DSHBOTS-58）：父任务取本项目任务表里的那条，依赖只列未满足项（blockedByNames）。
+  // 任务关系：父任务取本项目任务表里的那条，依赖只列未满足项（blockedByNames）。
   const parentTask = (state.data?.tasks ?? []).find(item => item.id === (task.parent_task_id ?? task.parentTaskId ?? null)) ?? null
   const blockedNames = Array.isArray(task.blockedByNames) ? task.blockedByNames : []
-  // 写范围（DSHBOTS-124）+染色条目（命中 .gitignore）：前者是并行调度依据（互不重叠才并行），
+  // 写范围+染色条目（命中 .gitignore）：前者是并行调度依据（互不重叠才并行），
   // 后者进卡展示但不参与并行锁（同文件也并行）；未声明（两者皆空）保守串行。
   const writeScopes = Array.isArray(task.writeScopes) ? task.writeScopes.filter(item => typeof item === 'string' && item) : []
   const ignoredScopes = Array.isArray(task.ignoredWriteScopes) ? task.ignoredWriteScopes.filter(item => typeof item === 'string' && item) : []
-  // 编辑态（DSHBOTS-155）只读/编辑两态切换；终态卡不进编辑态（与 taskUpdateScopes 终态拒改同口径）。
+  // 编辑态只读/编辑两态切换；终态卡不进编辑态（与 taskUpdateScopes 终态拒改同口径）。
   const editingScopes = state.modal?.type === 'task' && state.modal?.detail?.id === task.id && state.modal.editingScopes === true
   const scopesEditable = !['done', 'canceled'].includes(task.status)
   const chip = (scope: string, ignored: boolean) => `<span class="approval-chip mono${ignored ? ' scope-chip-ignored' : ''}" title="${attr(ignored ? `${t("命中 .gitignore，不参与并行锁")}: ${scope}` : scope)}">${esc(scope)}</span>`
@@ -438,7 +438,7 @@ function modalTask(task) {
           </div>`
   return modalShell({
     title: `${task.identifier} · ${task.title}`,
-    // 任务阶段徽标走 taskStage 查表口径（DSHBOTS-42）：ended → stageLabel 为 null → 不显示。
+    // 任务阶段徽标走 taskStage 查表口径：ended → stageLabel 为 null → 不显示。
     badge: task.stageLabel ? esc(stageLabelText(task.stageLabel)) : endAt ? esc(`${task.status === 'done' ? t("完成于") : t("取消于")} ${formatTime(endAt)}`) : '',
     size: 'task',
     body: `<div class="task-detail-grid">
@@ -502,7 +502,7 @@ function modalTask(task) {
 }
 
 function modalMemory(memory) {
-  // 写作入口随上下文收敛（DSHBOTS-5）：群聊只写当前项目记忆，单聊只写该 bot 记忆，不再可选 Bot 列表。
+  // 写作入口随上下文收敛：群聊只写当前项目记忆，单聊只写该 bot 记忆，不再可选 Bot 列表。
   const project = pageProject()
   const soloBot = inSoloContext() ? botById(state.soloBotId) : null
   const scope = soloBot
@@ -692,7 +692,7 @@ function trapModalFocus(event) {
   return false
 }
 
-// modal 开合只同步 #modal-root，不走 render() 全量重建（DSHBOTS-90）：
+// modal 开合只同步 #modal-root，不走 render 全量重建：
 // 开弹窗不再重建背后整页，关弹窗不再拆掉重排后的列表——滚动位与列表状态原样保留。
 function openModal(modal) {
   state.modal = modal

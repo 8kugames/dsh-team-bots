@@ -1,4 +1,4 @@
-// ui/i18n/zh/chat.ts —— 中文文案字典：chat 域（DSHBOTS-233）
+// ui/i18n/zh/chat.ts —— 中文文案字典：chat 域
 export default {
   // 群聊视图
   "chat.groupTitle": "群聊",
@@ -138,7 +138,7 @@ export default {
   "还没有选择": "还没有选择",
   "选择 · Enter 或 Tab 插入 · Esc 关闭": "选择 · Enter 或 Tab 插入 · Esc 关闭",
   "问）": "问）",
-  // DSHBOTS-246：全量 t() 实参清点补齐（原文即键）
+  // DSHBOTS-246：全量 t 实参清点补齐（原文即键）
   "（无说明）": "（无说明）",
   "（未选择）": "（未选择）",
   "（共": "（共",

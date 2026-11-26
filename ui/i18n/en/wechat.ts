@@ -1,8 +1,8 @@
-// ui/i18n/en/wechat.ts —— English copy dictionary: wechat domain (DSHBOTS-233)
+// ui/i18n/en/wechat.ts —— English copy dictionary: wechat domain
 export default {
   // High-frequency toasts
   "toast.wechatConnected": "WeChat channel connected",
-  // Global configuration page (DSHBOTS-204)
+  // Global configuration page
   "channel.sectionWechat": "WeChat channel",
   // DSHBOTS-220: ui/modules copy
   "二维码已生成，请用微信扫码": "QR code generated; scan it with WeChat",
@@ -16,14 +16,14 @@ export default {
   "请输入微信验证码": "Enter the WeChat verification code",
   "退出绑定后需要重新扫码才能恢复推送。确认退出？": "After unbinding, you must scan the QR code again to restore push. Unbind now?",
   "验证码已提交": "Verification code submitted",
-  // WeChat channel enable toggle (DSHBOTS-334)
+  // WeChat channel enable toggle
   "通道已停用，启用后可扫码绑定管理员微信接收推送。": "Channel disabled; enable it to bind the admin's WeChat and receive pushes.",
   "启用通道": "Enable channel",
   "停用通道": "Disable channel",
   "停用后微信通道立即断开且不再推送。确认停用？": "Disabling disconnects the WeChat channel immediately and stops pushes. Disable now?",
   "微信通道已启用": "WeChat channel enabled",
   "微信通道已停用": "WeChat channel disabled",
-  // Feishu channel (DSHBOTS-327/334): interactive status card (credentials configured in-card; secret never echoed)
+  // Feishu channel : interactive status card (credentials configured in-card; secret never echoed)
   "channel.sectionFeishu": "Feishu channel",
   "连接冲突": "Connection conflict",
   "检测到连接冲突：同一 App ID 在多处登录（exceed_conn_limit），请先退出其他实例。": "Connection conflict: the same App ID is signed in elsewhere (exceed_conn_limit). Sign out the other instance first.",

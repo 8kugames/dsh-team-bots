@@ -217,7 +217,7 @@ export const chatMethods = {
     for (const bot of targets) {
       this.enqueueOutbox({
         kind: 'chat_run',
-        // origin（'wechat'/'feishu'）：标记消息来自通道直达（DSHBOTS-208/329），运行结束
+        // origin（'wechat'/'feishu'）：标记消息来自通道直达，运行结束
         // 把 bot 回复推回该通道管理员；普通 UI 群聊消息不传，保持 'mention' 不推。
         payload: { projectId: project.id, botId: bot.id, messageId, origin },
         projectId: project.id,
@@ -349,7 +349,7 @@ export const chatMethods = {
   },
 
   // ===== 单聊：项目外与单个 Bot 的一对一会话，工作目录 _the_bots/<solo_dir> =====
-  // kind/questionId/approvalId 是卡片锚点（DSHBOTS-218）：单聊里发起的提问/审批在会话流里
+  // kind/questionId/approvalId 是卡片锚点：单聊里发起的提问/审批在会话流里
   // 落一条 system 卡片消息，卡片状态渲染时查 questions/approvals 表，与群聊同口径。
   insertSoloMessage({ botId, senderType, senderId, body, runId = null, images = [], createdAt = nowIso(), kind = 'text', questionId = null, approvalId = null }) {
     const messageId = id('msg')
@@ -392,7 +392,7 @@ export const chatMethods = {
     this.audit(actor, 'chat.solo_clear', 'bot', bot.id, { cleared: count })
     return count
   },
-  // options.origin（DSHBOTS-258/329）：'wechat'/'feishu' 表示消息来自对应通道
+  // options.origin：'wechat'/'feishu' 表示消息来自对应通道
   // （项目外 director 专属工作区），随 solo_chat_run 载荷传递，scheduler 据此把 solo
   // 运行打成同名 trigger_type，运行收尾的回复才会推回该通道；普通 UI 单聊不传，保持
   // 'mention' 不推。

@@ -13,7 +13,7 @@ document.addEventListener('submit', async (event) => {
   const form = (event.target as any).closest('form[data-form]')
   if (!form) return
   event.preventDefault()
-  // 表单内联校验（DSHBOTS-367）：非法字段就地报错并把焦点交给第一个非法字段，
+  // 表单内联校验：非法字段就地报错并把焦点交给第一个非法字段，
   // 校验不过就不进后端。原生约束校验的即时错误由 form-validation 模块接管。
   if (!validateForm(form)) return
   const type = form.dataset.form
@@ -108,7 +108,7 @@ document.addEventListener('submit', async (event) => {
       return
     }
     if (type === 'create-task') {
-      // 父任务与依赖任务（DSHBOTS-58）：多选字段用 getAll 取全部选中项；空值即不建关系。
+      // 父任务与依赖任务：多选字段用 getAll 取全部选中项；空值即不建关系。
       const blockedBy = new FormData(form).getAll('blockedBy').map(String).filter(Boolean)
       // 时效要求（分钟）：选填；空串/0/负数 → null（整键不传），正数取整数分钟。
       const timeBudgetMinutes = normalizeTimeBudgetMinutes(payload.time_budget_minutes)
@@ -298,7 +298,7 @@ document.addEventListener('submit', async (event) => {
   } catch (error: any) {
     toast(error.message || String(error), 'error')
   } finally {
-    // 成功路径常已 closeModal()/refresh() 把按钮换成新节点，这里恢复的是旧引用，
+    // 成功路径常已 closeModal/refresh 把按钮换成新节点，这里恢复的是旧引用，
     // 对已脱离文档的节点写属性无副作用；失败路径按钮还在，必须收回忙态让用户能重试。
     if (submitter) {
       submitter.removeAttribute('aria-busy')

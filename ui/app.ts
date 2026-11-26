@@ -28,7 +28,7 @@ const UI_SCALE_KEY = 'dshb:ui-scale'
 const UI_THEME_KEY = 'dshb:ui-theme'
 const UI_COLOR_SCHEME_KEY = 'dshb:ui-color-scheme'
 
-// 任务分组默认全展开（DSHBOTS-58）：把各分组的展开态 key 预置进 state.openPanels，
+// 任务分组默认全展开：把各分组的展开态 key 预置进 state.openPanels，
 // 与 <details data-panel> 同一套通道（key 形如 task-group:<status>），折叠即从集合里删掉。
 for (const status of STATUS_ORDER) state.openPanels.add(taskGroupKey(status))
 
@@ -45,7 +45,7 @@ state.colorSchemePref = readPref(UI_COLOR_SCHEME_KEY)
 initColorScheme()
 state.theme = applyUiTheme(readPref(UI_THEME_KEY))
 
-// UI 语言跟随 DSH 宿主 Language 设定（DSHBOTS-120）：服务端把解析结果（zh/en/auto）
+// UI 语言跟随 DSH 宿主 Language 设定：服务端把解析结果（zh/en/auto）
 // 注入 <html data-dsh-language>，模块加载即设定语言并替换静态 boot 文案（CSP 禁内联
 // 脚本，故在 JS 里替换而非 index.html 内联）。
 setLanguage(document.documentElement.dataset.dshLanguage || 'auto')
@@ -56,7 +56,7 @@ setLanguage(document.documentElement.dataset.dshLanguage || 'auto')
   if (skipLink) skipLink.textContent = t('a11y.skipToContent')
 }
 
-// state.language（服务端 state() 顶层同源透传）与上次不一致时热切换：换字典 + 轻提示，
+// state.language（服务端 state 顶层同源透传）与上次不一致时热切换：换字典 + 轻提示，
 // 下次 render 生效；首载只对齐不提示。渲染走原位补丁，文案随字典换，滚动与弹窗不受影响。
 function syncLanguage() {
   const language = state.data?.language
@@ -74,7 +74,7 @@ async function refresh({ quiet = false } = {}) {
   try {
     await loadState(state.projectId, { quiet })
     syncLanguage()
-    // 遮罩开着时 render() 内部跳过整页重建并记 pending（DSHBOTS-98），遮罩关闭后补渲染。
+    // 遮罩开着时 render 内部跳过整页重建并记 pending，遮罩关闭后补渲染。
     render()
   } catch (error) {
     if (!state.data) bootError(error)
@@ -200,7 +200,7 @@ function tabDot(view) {
   return false
 }
 
-// STATUS 的渲染标签：表内有键走 t()，表外原样回落（保持旧 ?? 兜底语义；
+// STATUS 的渲染标签：表内有键走 t，表外原样回落（保持旧 ?? 兜底语义；
 // runStatus/runKind 同口径的 runStatusLabel/runKindLabel 已下沉 modules/state.js）。
 function statusLabel(status) {
   return STATUS[status] ? t('status.' + status) : status
@@ -222,7 +222,7 @@ function renderShell() {
   const project = inSolo ? null : activeProject()
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
-  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。页壳页（DSHBOTS-216）冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；main-head 整块不渲染，避免空粘头残影。
+  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。页壳页冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；main-head 整块不渲染，避免空粘头残影。
   const isGlobal = GLOBAL_VIEWS.has(state.view) || (state.view === 'usage' && usageMode() === 'global')
   const shellGlobalPage = isGlobal && state.view !== 'bots-overview'
   const showMainHead = !shellGlobalPage
@@ -396,7 +396,7 @@ function syncChromeHeight() {
   document.documentElement.style.setProperty('--chrome-h', `${chrome}px`)
 }
 
-// 引用交互专用重渲染：render() 自身已在非贴底时保持消息列表滚动位置（见 render 内 chat-scroll-restore），
+// 引用交互专用重渲染：render 自身已在非贴底时保持消息列表滚动位置（见 render 内 chat-scroll-restore），
 // 这里只需在渲染后聚焦输入框，方便接着打字。
 function renderKeepingChatScroll() {
   render()
@@ -425,13 +425,13 @@ function applyPanelToggle(state, key, open) {
 }
 // panel-state:end
 
-// details 开标签公共片段：稳定 key（data-panel，供 toggle 事件定位）+ 依展开态恢复的 open；依赖 attr()，故在纯逻辑标记块之外。
+// details 开标签公共片段：稳定 key（data-panel，供 toggle 事件定位）+ 依展开态恢复的 open；依赖 attr，故在纯逻辑标记块之外。
 function panelAttrs(state, key) {
   return ` data-panel="${attr(key)}"${panelOpenAttr(state, key)}`
 }
 
 // board-scroll-restore —— 视图滚动位：纵向在 window 层（.main 撑高页面、body 无 overflow），
-// 任务看板 .board 另有横向滚动，侧栏 .tree 自身纵向滚动。原位补丁（DSHBOTS-227）下三处都随节点
+// 任务看板 .board 另有横向滚动，侧栏 .tree 自身纵向滚动。原位补丁下三处都随节点
 // 活着，这里的「重建前记下、重建后恢复」只在回退全量重建时兜底；窗口滚动仅在前后两次同视图时恢复。
 // 聊天视图维持既有 savedChatScroll / chatAtBottom 逻辑不动。
 let lastRenderedView = null
@@ -472,7 +472,7 @@ function nextChatAtBottom({ rendering, connected, current, scrollHeight, scrollT
 
 function render() {
   if (!state.data) return
-  // 遮罩闸门（DSHBOTS-98）：弹窗与图片查看器都是半透明遮罩，遮罩开着时整页重建会从
+  // 遮罩闸门：弹窗与图片查看器都是半透明遮罩，遮罩开着时整页重建会从
   // 遮罩下透出来（持续闪烁）。此处只记 pending 跳过重建，遮罩关闭时 flushAppRender
   // 补一次渲染，追平遮罩期间取到的新 state。
   if (overlayOpen()) {
@@ -481,7 +481,7 @@ function render() {
   }
   state.ac = null
   if (app.className) app.className = ''
-  // composer 持焦时的光标快照（DSHBOTS-123）：回退全量重建时 #composer-input 会被拆走，先记选区与
+  // composer 持焦时的光标快照：回退全量重建时 #composer-input 会被拆走，先记选区与
   // 滚动，rAF 收尾恢复；原位补丁路径下节点根本没动，这份恢复是空转。
   const activeBeforeRebuild = document.activeElement as HTMLInputElement
   const composerCaret = activeBeforeRebuild?.id === 'composer-input' ? {
@@ -491,7 +491,7 @@ function render() {
     scrollTop: activeBeforeRebuild.scrollTop ?? 0,
   } : null
   // chat-scroll:view-enter —— 切进聊天视图时确定性贴底：不依赖历史残值。
-  // 用户上翻历史后切到别的页面再切回来，一律回到最新一条（DSHBOTS-72）。
+  // 用户上翻历史后切到别的页面再切回来，一律回到最新一条。
   if (state.view === 'chat' && lastRenderedView !== 'chat') state.chatAtBottom = true
   // chat-scroll:render-gate —— 重建 DOM 的窗口内忽略聊天滚动事件：旧 .chat-messages 被拆走时可能补发
   // 一次 scroll 事件，若在此窗口送达会把「重建」误判成「用户上翻」。窗口在 rAF 收尾复位。
@@ -499,7 +499,7 @@ function render() {
   // chat-scroll-restore:mark —— 非贴底时先记下消息列表滚动位置，重建后原位恢复。
   const savedChatScroll = document.querySelector('.chat-messages')?.scrollTop ?? null
   const savedViewScroll = captureViewScroll(lastRenderedView === state.view)
-  // 原位补丁（DSHBOTS-227）：按身份键复用节点、只写变了的属性与文本，动画相位/焦点/滚动位随节点活下来；补不动才整页重建。
+  // 原位补丁：按身份键复用节点、只写变了的属性与文本，动画相位/焦点/滚动位随节点活下来；补不动才整页重建。
   morph(app, renderShell())
   // 附图缩略图：模板嵌缓存命中者，未命中的在此异步补齐（会话级缓存去重，见 hydrateMessageImageThumbs）。
   hydrateMessageImageThumbs(app)
@@ -509,7 +509,7 @@ function render() {
   }
   restoreViewScroll(savedViewScroll)
   lastRenderedView = state.view
-  // modal 层与 #app 解耦（DSHBOTS-90）：render() 只重建 #app，永不写 #modal-root；
+  // modal 层与 #app 解耦：render 只重建 #app，永不写 #modal-root；
   // 这里仅按需同步弹窗层（state.modal 被别处直改或置空时兜底，内容未变则零 DOM 操作）。
   renderModalLayer()
   requestAnimationFrame(() => {
@@ -519,7 +519,7 @@ function render() {
         // 全量重建会丢 composer 的内联高度与发送按钮态，先恢复，再处理贴底滚动。
         const composerInput = document.getElementById('composer-input')
         if (composerInput) syncComposerBox(composerInput)
-        // 光标续接（DSHBOTS-123）：重建前持焦且已记快照时，把焦点与选区无损放回 composer。
+        // 光标续接：重建前持焦且已记快照时，把焦点与选区无损放回 composer。
         if (composerCaret && composerInput) {
           composerInput.focus()
           try { (composerInput as HTMLInputElement).setSelectionRange(composerCaret.start, composerCaret.end, composerCaret.direction) } catch {}
@@ -540,7 +540,7 @@ function render() {
   syncTerminalPoll()
 }
 
-// 乐观切换（DSHBOTS-167）：目标上下文与已加载数据是否还错开。错开 = 骨架还在等数据。
+// 乐观切换：目标上下文与已加载数据是否还错开。错开 = 骨架还在等数据。
 // 用数据本身判定而非定时器，所以中途到达的轮询响应也能把骨架顶掉，不会卡住。
 function chatContextPending() {
   const pending = state.chatPending
@@ -551,7 +551,7 @@ function chatContextPending() {
   return pending.projectId !== dataProject || wantSolo !== dataSolo
 }
 
-// 开始一次乐观取数：登记目标上下文并领一个序号（DSHBOTS-167）。
+// 开始一次乐观取数：登记目标上下文并领一个序号。
 function beginChatPending(pending) {
   const seq = (state.chatRequestSeq += 1)
   state.chatPending = { ...pending, seq }
@@ -571,7 +571,7 @@ function endChatPending(seq) {
 }
 
 // 切换中的占位视图：不读消息列表、不做 markdown 解析，只给轻量骨架，
-// 让点击立即有反馈（DSHBOTS-167）。
+// 让点击立即有反馈。
 function chatPendingView() {
   return `<div class="empty-state">
     <div class="empty-symbol">${icon('message')}</div>
@@ -618,8 +618,8 @@ function formPayload(form) {
 
 
 async function poll() {
-  // 遮罩打开时照常取数（数据不丢），整页重建由 render() 内部的遮罩闸门跳过（DSHBOTS-98）。
-  // 焦点不再挡取数（DSHBOTS-123）：焦点常驻 composer 时若连 fetch 都跳过，运行结束后
+  // 遮罩打开时照常取数（数据不丢），整页重建由 render 内部的遮罩闸门跳过。
+  // 焦点不再挡取数：焦点常驻 composer 时若连 fetch 都跳过，运行结束后
   // 「正在思考与回复…」与新消息会一直冻结，直到点击页面令 composer 失焦。焦点只在下方渲染半边设闸。
   if (!state.data || state.busy > 0) return
   // 目录选择器开着或表单有未保存修改时暂停自动刷新：整页重渲染会吞掉选择器与已选/已填的值。
@@ -639,7 +639,7 @@ async function poll() {
     const previousData = state.data
     await loadState(state.projectId, { quiet: true })
     if (state.data === previousData) return
-    // 渲染闸门（DSHBOTS-123）：composer 静默窗内有输入或 IME 组词中才挡整页重建，
+    // 渲染闸门：composer 静默窗内有输入或 IME 组词中才挡整页重建，
     // 其余输入控件维持原「焦点即挡」；被挡周期的取数已生效，下一周期自动补渲染。
     if (!pollRenderBlockedByFocus(document.activeElement, { composing: state.composerComposing, composerInputAt: state.composerInputAt })) render()
     notifyInbox(state.data)
@@ -669,7 +669,7 @@ window.addEventListener('resize', () => {
   if (composerInput) applyComposerHeight(composerInput)
 })
 
-// 遮罩打开时锁住底层滚动（DSHBOTS-98）：半透明+模糊的遮罩下，底层容器一旦滚动，底页整片
+// 遮罩打开时锁住底层滚动：半透明+模糊的遮罩下，底层容器一旦滚动，底页整片
 // 移动（backdrop-filter 每帧重算），视觉上就是「全屏闪烁」。落在遮罩上的滚轮一律吞掉；
 // 弹窗/查看器面板自身的滚动区放行，配合 CSS 的 overscroll-behavior: contain 防滚动串联。
 window.addEventListener('wheel', event => {
@@ -680,7 +680,7 @@ window.addEventListener('wheel', event => {
   event.preventDefault()
 }, { passive: false })
 
-// modal 滚动守卫信号源（DSHBOTS-154）：scroll 不冒泡但走捕获可及，window 捕获阶段记
+// modal 滚动守卫信号源：scroll 不冒泡但走捕获可及，window 捕获阶段记
 // modal-body 滚动时间戳，renderModalLayer 据此在滚动进行中延后正文补丁（见 modal-layer 块）。
 window.addEventListener('scroll', event => {
   const target = event.target
@@ -710,7 +710,7 @@ window.addEventListener('error', (event) => {
 }, true)
 
 // proposal 表单随弹窗层落进 #modal-root：改盯弹窗层的子树变化（含原位内容更新），
-// #app 的全量重建不再牵动弹窗，也就不再需要靠 app 重建来重绑表单（DSHBOTS-90）。
+// #app 的全量重建不再牵动弹窗，也就不再需要靠 app 重建来重绑表单。
 const observer = new MutationObserver(() => {
   if (state.modal?.type === 'proposal') bindProposalForm()
 })
@@ -721,7 +721,7 @@ observer.observe(ensureModalRoot(), { childList: true, subtree: true })
 document.addEventListener('click', () => { void ensureNotifyPermission() }, { capture: true })
 document.addEventListener('keydown', () => { void ensureNotifyPermission() }, { capture: true })
 
-// 切回页面立即补一轮轮询（DSHBOTS-123）：隐藏期间常规轮询暂停、state.data 冻结，
+// 切回页面立即补一轮轮询：隐藏期间常规轮询暂停、state.data 冻结，
 // 返回前台不用干等下一个 2.8s 周期，typing 行与新消息即刻追平。
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void poll()
@@ -731,7 +731,7 @@ document.addEventListener('visibilitychange', () => {
 // 运行行（runClockSpan 产出的占位）同一通道——只改 textContent，不重建节点。renderModalLayer
 // 挂载/补丁后同步调用一次，占位符不会等满 1s 才补上真实时长。
 function updateRunClocks(root = document) {
-  const overlay = overlayOpen() // 遮罩打开时底页在模糊后不可见：底页时钟跳过（DSHBOTS-210），只刷弹窗层
+  const overlay = overlayOpen() // 遮罩打开时底页在模糊后不可见：底页时钟跳过，只刷弹窗层
   for (const el of root.querySelectorAll('.run-clock[data-started]') as NodeListOf<HTMLElement>) {
     if (overlay && !el.closest('#modal-root')) continue
     const next = duration(el.dataset.started); if (el.textContent !== next) el.textContent = next // DSHBOTS-255 等值守卫：值相同也写会替换文本节点
@@ -741,22 +741,22 @@ function updateRunClocks(root = document) {
 setInterval(() => { void poll() }, 2800)
 setInterval(() => {
   updateRunClocks()
-  // 遮罩打开时底页整体冻结（DSHBOTS-210）：下述刷新只写 #app，而 #app 是 backdrop-filter 的输入。
+  // 遮罩打开时底页整体冻结：下述刷新只写 #app，而 #app 是 backdrop-filter 的输入。
   if (overlayOpen()) return
-  // 终态气泡到期摘除与淡出刷新（DSHBOTS-150）：只动气泡节点，不整页重建（不打断输入中的草稿）。
+  // 终态气泡到期摘除与淡出刷新：只动气泡节点，不整页重建（不打断输入中的草稿）。
   pruneTypingLinger()
-  // 审批倒计时局部刷新（DSHBOTS-102）：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
+  // 审批倒计时局部刷新：只改文本与危险色，不整卡重绘（2.8s 轮询会打断跳动感）。
   // 群聊卡片与顶部通知卡片共用同一张审批卡组件，都挂 .approval-clock。
   for (const el of document.querySelectorAll('.approval-clock[data-expires]') as NodeListOf<HTMLElement>) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
     el.textContent = formatApprovalCountdown(remaining)
     el.classList.toggle('urgent', approvalUrgent(remaining))
   }
-  // 卡片倒计时外层：图标随临期转黄（DSHBOTS-108）。
+  // 卡片倒计时外层：图标随临期转黄。
   for (const el of document.querySelectorAll('.approval-countdown[data-expires]') as NodeListOf<HTMLElement>) {
     el.classList.toggle('urgent', approvalUrgent(approvalRemainingFrom(el.dataset.expires)))
   }
-  // 卡片进度条：剩余越多条越长，临期变短并转黄（DSHBOTS-108）。
+  // 卡片进度条：剩余越多条越长，临期变短并转黄。
   for (const el of document.querySelectorAll('.approval-progress[data-expires]') as NodeListOf<HTMLElement>) {
     const remaining = approvalRemainingFrom(el.dataset.expires)
     const ratio = approvalProgressRatio(remaining, el.dataset.window)
@@ -765,7 +765,7 @@ setInterval(() => {
     el.classList.toggle('urgent', approvalUrgent(remaining))
     el.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
   }
-  // 提问倒计时局部刷新（DSHBOTS-116）：与审批同口径，只改文本与危险色，不整卡重绘。
+  // 提问倒计时局部刷新：与审批同口径，只改文本与危险色，不整卡重绘。
   for (const el of document.querySelectorAll('.question-clock[data-expires]') as NodeListOf<HTMLElement>) {
     const remaining = questionRemainingFrom(el.dataset.expires)
     el.textContent = formatQuestionCountdown(remaining)

@@ -24,7 +24,7 @@
     align-items: flex-start;
     gap: 8px;
     color: var(--ink-2);
-    /* 提示是旁注不是警报：左端一条 --star 竖线 + 淡洗底，不再用整圈描边抢主卡的视觉重量（DSHBOTS-74）。 */
+    /* 提示是旁注不是警报：左端一条 --star 竖线 + 淡洗底，不再用整圈描边抢主卡的视觉重量。 */
     border: 0;
     border-left: 2px solid var(--star);
     background: var(--star-wash);
@@ -33,7 +33,7 @@
     font-size: var(--fs-small);
     line-height: 1.6;
 }
-/* 图标必须显式定尺寸：SVG 无 width/height 属性时在弹性行里会撑成整屏宽（DSHBOTS-66）。 */
+/* 图标必须显式定尺寸：SVG 无 width/height 属性时在弹性行里会撑成整屏宽。 */
 .terminal-warn-icon {
     width: 16px;
     height: 16px;
@@ -121,7 +121,7 @@
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    /* 机身条与标题栏同色：深色井被两条浅带夹住，井才读成凹陷的屏幕而不是一块浮板（DSHBOTS-74）。 */
+    /* 机身条与标题栏同色：深色井被两条浅带夹住，井才读成凹陷的屏幕而不是一块浮板。 */
     background: var(--surface-2);
     border-top: 1px solid var(--line);
 }
@@ -157,7 +157,7 @@
 .terminal-kbd {
     font: 500 var(--fs-caption) var(--mono);
     color: var(--ink-3);
-    /* 机身条已是 --surface-2，键位提示改用 --surface-3 才浮得出来（DSHBOTS-74）。 */
+    /* 机身条已是 --surface-2，键位提示改用 --surface-3 才浮得出来。 */
     background: var(--surface-3);
     border: 1px solid var(--line);
     border-bottom-width: 2px;
@@ -210,14 +210,14 @@
     line-height: 1.7;
     color: var(--console-ink);
     background: var(--console-bg);
-    /* 井沿：1px 内描边把深色井从机身里切出来；暗色主题下机身条更浅，井才真正读成凹陷面（DSHBOTS-74）。 */
+    /* 井沿：1px 内描边把深色井从机身里切出来；暗色主题下机身条更浅，井才真正读成凹陷面。 */
     box-shadow:
         inset 0 0 0 1px var(--console-line),
         inset 0 1px 3px rgba(0, 0, 0, 0.28);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     tab-size: 4;
-    /* 细滚动条：井内滚动不喧宾夺主，hover 才显形（DSHBOTS-74）。 */
+    /* 细滚动条：井内滚动不喧宾夺主，hover 才显形。 */
     scrollbar-width: thin;
     scrollbar-color: var(--console-line) transparent;
 }
@@ -238,7 +238,7 @@
     background: var(--console-ink-2);
     background-clip: padding-box;
 }
-/* 空态：独立于 pre 的说明层，图标显式定尺寸，避免 SVG 在弹性容器里被撑开（DSHBOTS-66）。 */
+/* 空态：独立于 pre 的说明层，图标显式定尺寸，避免 SVG 在弹性容器里被撑开。 */
 .terminal-output-empty {
     position: absolute;
     inset: 0;
@@ -265,7 +265,7 @@
 }
 
 /* history: a log list, one row per command, separated by hairlines */
-/* 历史卡是终端卡的附属仪表：投影更浅、标题条沿用机身的 --surface-2（DSHBOTS-74）。 */
+/* 历史卡是终端卡的附属仪表：投影更浅、标题条沿用机身的 --surface-2。 */
 .terminal-history-card {
     padding: 0;
     overflow: hidden;
@@ -281,7 +281,7 @@
     background: var(--surface-2);
     border-bottom: 1px solid var(--line);
 }
-/* 计数标签压在 --surface-2 标题条上，要用 --surface-3 才看得见（DSHBOTS-74）。 */
+/* 计数标签压在 --surface-2 标题条上，要用 --surface-3 才看得见。 */
 .terminal-history-head .tag {
     background: var(--surface-3);
 }
@@ -309,14 +309,14 @@
     background: var(--ink-3);
     background-clip: padding-box;
 }
-/* 空列表：与普通卡片空态同一口径，不再靠行内样式撑开（DSHBOTS-74）。 */
+/* 空列表：与普通卡片空态同一口径，不再靠行内样式撑开。 */
 .terminal-history-empty {
     padding: 16px 14px;
     color: var(--ink-3);
     font-size: var(--fs-small);
 }
 .terminal-history-item {
-    /* 窄列里命令是主角：状态徽标占左列，命令与元信息上下两行（DSHBOTS-66）。 */
+    /* 窄列里命令是主角：状态徽标占左列，命令与元信息上下两行。 */
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
@@ -361,7 +361,7 @@
     justify-self: start;
     font-size: var(--fs-caption);
 }
-/* 层级：命令是行内主角（--ink），元信息退到 --ink-3（DSHBOTS-74）。 */
+/* 层级：命令是行内主角（--ink），元信息退到 --ink-3。 */
 .terminal-history-cmd {
     grid-column: 2;
     grid-row: 1;
@@ -387,7 +387,7 @@
     flex-wrap: wrap;
 }
 
-/* 窄屏：右列整块落到终端卡下方，避免被挤成竖排一字一行（DSHBOTS-66）。 */
+/* 窄屏：右列整块落到终端卡下方，避免被挤成竖排一字一行。 */
 @media (max-width: 980px) {
     .terminal-page {
         grid-template-columns: minmax(0, 1fr);

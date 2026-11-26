@@ -11,7 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 /**
  * 飞书通道的独立持久化：bot 身份（botId/appId/brand）、管理员 ou_id、
  * 回复锚点与待发件箱。与主库（team 工作台）分离。
- * 凭据模型（DSHBOTS-333）：app secret 由配置注入（进程内 SDK 使用），
+ * 凭据模型：app secret 由配置注入（进程内 SDK 使用），
  * 本库只存 bot 身份标识，secret 不进库不进日志。
  */
 export class FeishuStore {

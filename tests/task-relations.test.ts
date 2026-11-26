@@ -32,7 +32,7 @@ class HoldingRuntime {
   async cancelRun() { return true }
 }
 
-// schedulerIntervalMs 拉满 30s（resolveConfig 上限）：定时 tick 不掺和，时序只由显式 await service.tick() 驱动。
+// schedulerIntervalMs 拉满 30s（resolveConfig 上限）：定时 tick 不掺和，时序只由显式 await service.tick 驱动。
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-task-relations-'))
   const workspace = join(root, 'workspace')
@@ -92,7 +92,7 @@ async function closeQuietly(store, timeout = 2000) {
   } catch {}
 }
 
-// run_events 住运行归属聊天库（Phase 3）：经项目群聊库读取。
+// run_events 住运行归属聊天库：经项目群聊库读取。
 const blockedEvents = (service, project, runId) =>
   service.groupChatStore(project.id).all("SELECT * FROM run_events WHERE run_id = ? AND type = 'task_blocked_dep'", runId)
 

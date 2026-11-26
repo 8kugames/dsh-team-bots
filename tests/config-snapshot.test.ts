@@ -1,5 +1,5 @@
 // tests/config-snapshot.test.ts —— C2/DSHBOTS-334：在途 run 配置版本快照守门。
-// 任务运行独占会话（D-308），startRun 时记 run_event 'config_snapshot'（bot 角色版本 +
+// 任务运行独占会话，startRun 时记 run_event 'config_snapshot'（bot 角色版本 +
 // 实际下发模型 + 可编辑提示词段覆盖正文），回答「这张卡按哪版规则跑的」；只记账不闸门。
 // 守门四向：①任务运行记快照（bot_revision/模型/段覆盖在场）；②消息族运行不记（控制面
 // 冻结会话 D-91 下「当时 settings」反而误导）；③覆盖变更后下一张卡快照随之变化；

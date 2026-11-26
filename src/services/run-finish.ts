@@ -23,7 +23,7 @@ import { readTaskGoal } from './task-goal.js'
 import { completeVisionRun, isImageUnsupportedError, maybeSpawnVisionAfterFailure } from './vision-proxy.js'
 import { chatReply } from '../wechat/format.js'
 
-// ── 失败终态白名单分类（DSHBOTS-267）──────────────────────────────────────
+// ── 失败终态白名单分类──────────────────────────────────────
 // run 失败终态进入群聊/微信回推前，先按结构化信号归入有限白名单类别，对外只透出
 // 「类别+一句话摘要」；原始错误串、文件路径、请求正文不整段透传（完整信息仍落
 // runs.error_message 与 run_events，供 owner 查询）。分类信号复用 D-266 的
@@ -65,7 +65,7 @@ export function classifyFailure(error) {
 
 
 export const runFinishMethods = {
-  // 自动核验委派（DSHBOTS-113）：交付迁移 in_review 的同一事务内调用。开关关闭或
+  // 自动核验委派：交付迁移 in_review 的同一事务内调用。开关关闭或
   // 迁移未生效（任务已终态）时静默跳过；项目无可用总监属结构性前提缺失，审计留痕后
   // 跳过（不进重试队列）。满足条件则排 review_delegate_auto outbox（立即投递一次），
   // 后续守卫冲突的退避重试与耗尽可见性由 outbox 侧统一负责。返回是否已排队。
@@ -260,7 +260,7 @@ export const runFinishMethods = {
       return
     }
     if (run.kind === 'rollover_summary') {
-      // 结转摘要（DSHBOTS-145）：成功且有正文 → 落 settings（键按 bot + 上下文），
+      // 结转摘要：成功且有正文 → 落 settings（键按 bot + 上下文），
       // 下一次会话复用时据此开新会话并注入；失败/空产出 → 只留痕，旧会话继续用，
       // 阈值仍在，后续每次复用都会重试补排（active 检查保证不重复排队）。
       if (status === 'succeeded' && cleanOutput) {
@@ -277,7 +277,7 @@ export const runFinishMethods = {
       return
     }
     if (run.kind === 'session_compact') {
-      // 闲时总结压缩（DSHBOTS-286）：成功留痕即可——压缩 ≠ 结转，会话不换、不写
+      // 闲时总结压缩：成功留痕即可——压缩 ≠ 结转，会话不换、不写
       // rollover 槽；总结正文留在运行产出里，窗口标记已在入队时推进，失败由下一窗口再补。
       this.insertRunEvent(
         runId,
@@ -328,7 +328,7 @@ export const runFinishMethods = {
           runId,
         })
       } else if (run.task_id) {
-        // 委派核验运行（DSHBOTS-107）成功时，结论以任务评论写回（复用 addComment 通道：
+        // 委派核验运行成功时，结论以任务评论写回（复用 addComment 通道：
         // 评论+事件+审计一次落全）。不改任务状态、不代为裁决——accept/return 仍归 owner。
         if (run.trigger_type === 'review_delegate' && status === 'succeeded' && cleanOutput) {
           await this.addComment(run.task_id, cleanOutput, { type: 'bot', id: bot.id })
@@ -357,7 +357,7 @@ export const runFinishMethods = {
           })
           void this.tick()
         }
-        // 串联两跳（DSHBOTS-113）：委派核验运行结束后，owner_bot 卡的裁决运行在此触发——
+        // 串联两跳：委派核验运行结束后，owner_bot 卡的裁决运行在此触发
         // 总监在尾窗读到上面写回的核验结论后 team_review_task 裁决。核验运行失败也照常触发：
         // 总监的验收运行自带子代理核验，核验跳失败不丢裁决。user 卡不裁决，维持人工验收。
         // 核验运行自身带提问时同样不排：先答话，避免裁决运行顶掉「等待你回答」阶段。
@@ -387,7 +387,7 @@ export const runFinishMethods = {
         const ownerReview = (task.review_target ?? 'user') === 'owner_bot'
         let autoReviewQueued = false
         // 子代理施工硬闸已解除（原 DSHBOTS-311）：交付不再要求子代理施工账目，
-        // 施工方式由 bot 自选（亲做或派「bot 名+任务号」子代理），账本（D-294）仍照记。
+        // 施工方式由 bot 自选（亲做或派「bot 名+任务号」子代理），账本仍照记。
         this.store.transaction(() => {
           this.setTaskStatus(task.id, 'in_review', { type: 'bot', id: bot.id })
           this.store.afterCommit(() => this.groupChatStore(task.project_id).run(
@@ -400,7 +400,7 @@ export const runFinishMethods = {
           this.addTaskEvent(task.id, 'run_succeeded', { type: 'bot', id: bot.id }, {
             runId, identifier: `${project.key}-${task.number}`, goalVersion: readTaskGoal(task)?.version ?? null,
           })
-          // 自动核验委派（DSHBOTS-113）：与 in_review 迁移同一事务触发留痕；实际派生由
+          // 自动核验委派：与 in_review 迁移同一事务触发留痕；实际派生由
           // review_delegate_auto outbox 承接（幂等键绑定本次交付运行），守卫冲突的退避重试
           // 与耗尽可见性都在 outbox 侧，任何失败都不回滚本次迁移。
           autoReviewQueued = this.queueAutoReviewDelegate(task, project, run, Boolean(attentionJson))
@@ -416,7 +416,7 @@ export const runFinishMethods = {
           taskId: task.id,
           runId,
         })
-        // 微信推送不锚交付节点（DSHBOTS-182）：只在任务真正完成（→done 转换）时推一条，
+        // 微信推送不锚交付节点：只在任务真正完成（→done 转换）时推一条，
         // 统一落点见 tasks.js 的 notifyTaskDone；交付后的群消息与验收指令不受影响。
         this.enqueueOutbox({
           kind: 'memory_review',
@@ -590,10 +590,10 @@ export const runFinishMethods = {
     if (run.project_id && this.rate[run.project_id]) delete this.rate[run.project_id]
   },
 
-  // 通道直达对话回程（DSHBOTS-208/258/329）：trigger_type='wechat'/'feishu' 的运行
+  // 通道直达对话回程：trigger_type='wechat'/'feishu' 的运行
   // （项目群聊直达、项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）
   // 推回来源通道管理员，出站走通道既有合批/重试治理；只推通道触发的运行，工作台群聊回复不受影响。
-  // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply（DSHBOTS-211）。
+  // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply。
   // DSHBOTS-326：出站经 channelNotify 扇出到各已启用通道（微信/飞书），单通道失败只留痕不阻断另一通道。
   // DSHBOTS-329：飞书触发运行同款回程——推回飞书管理员，目标会话由飞书通道的
   // store.reply_message_id 锚点决定（卡②入站时落锚，见 src/feishu/channel.ts 的 saveReplyMessageId）。
@@ -603,7 +603,7 @@ export const runFinishMethods = {
     this.channelNotify?.(chatReply(bot?.name ?? 'Bot', body, failed))
   },
 
-  // ── Bot 群聊回复 mention 唤醒（DSHBOTS-252）────────────────────────────
+  // ── Bot 群聊回复 mention 唤醒────────────────────────────
   // 与用户消息同语义（chat.ts sendMessage）：@xxx 用 parseMentions 解析 active 成员、
   // 显式 @ 优先（bot 路径无引用兜底道）、目标 slice(0,3)；派发走既有 chat_run outbox →
   // enqueueChatRun，串行车道经 DSHBOTS-289 收敛为 claimKey=bot:<bot>（bot 级串行），

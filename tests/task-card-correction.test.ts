@@ -1,4 +1,4 @@
-// 任务卡修正闭环（DSHBOTS-232）：
+// 任务卡修正闭环：
 // ① 已派单卡卡面变更（标题/描述/优先级/写范围）→ 群内系统消息点名负责人修正，
 //    负责人名下有活跃运行时再向其会话注入修正提示（steer + run 事件 card_changed）；
 //    值未变/未派单/纯状态流转不触发。总监经 team_assign_task 重派带 title/description/priority 改卡同口径。

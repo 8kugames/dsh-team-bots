@@ -64,7 +64,7 @@ export const OFFICIAL_UI_SWITCH_ROWS = [
   },
 ]
 
-// ui/styles.css 组件域拆分（DSHBOTS-160）：5626 行巨石按 Section 域拆到 ui/styles/*.css，
+// ui/styles.css 组件域拆分：5626 行巨石按 Section 域拆到 ui/styles/*.css，
 // 每文件 <800 行。本表是拼接顺序的唯一真源（线上 installHttp 与 scripts/dev-server.mjs
 // 共用同一 readUiStyles），顺序即层叠语义——base 的变量声明在最前、wide 的媒体覆盖在
 // 后，不得重排。
@@ -120,7 +120,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
 
   const page = async () => {
     const html = await readFile(join(UI, 'index.html'), 'utf8')
-    // {{language}}（DSHBOTS-120）：服务端解析 DSH 宿主语言设定注入 <html data-dsh-language>，
+    // {{language}}：服务端解析 DSH 宿主语言设定注入 <html data-dsh-language>，
     // 客户端据此选 i18n 字典包（'auto' = 宿主未显式设定，交给浏览器语言）。
     // DSHBOTS-162：页面保存值 zh/en 优先于宿主解析，'auto' 才回落宿主链。
     const language = await resolveUiLanguage({
@@ -134,17 +134,17 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
       .replaceAll('{{language}}', language), 'text/html; charset=utf-8')
   }
   const script = async () => response(await readFile(join(UI, 'app.js'), 'utf8'), 'text/javascript; charset=utf-8')
-  // ES module 切片（DSHBOTS-15）：app.js 的 import 依赖逐文件注册（bridge 路由为精确路径）。
+  // ES module 切片：app.js 的 import 依赖逐文件注册（bridge 路由为精确路径）。
   // 不变量：ui 侧每个被 import 的切片都要有一条精确路由，漏一条 = 浏览器模块图断裂 =
   // app.js 永不执行 = 工作台卡在「正在连接团队空间」。覆盖锁见 tests/ui-module-routes.test.js。
   const moduleScript = (name) => async () => response(
     await readFile(join(UI, 'modules', name)), 'text/javascript; charset=utf-8',
   )
-  // i18n 字典切片（DSHBOTS-120）：ui/i18n/ 下的语言包，同样逐文件精确注册。
+  // i18n 字典切片：ui/i18n/ 下的语言包，同样逐文件精确注册。
   const i18nDict = (name) => async () => response(
     await readFile(join(UI, 'i18n', name)), 'text/javascript; charset=utf-8',
   )
-  // styles 汇总直出（DSHBOTS-160）：路由、MIME、缓存语义与拆分前完全一致，
+  // styles 汇总直出：路由、MIME、缓存语义与拆分前完全一致，
   // 仅读取口径改为 readUiStyles 按 UI_STYLE_PARTS 拼接。
   const styles = async () => response(await readUiStyles(), 'text/css; charset=utf-8')
   const font = (weight) => async () => response(
@@ -315,7 +315,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
       if (!relPath) throw new AppError('BAD_REQUEST', '缺少参数 path', 400)
       if (!projectId === !soloBotId) throw new AppError('BAD_REQUEST', 'projectId 与 soloBotId 必须二选一', 400)
       const { absolutePath, size, contentType } = service.chatFile({ projectId, soloBotId, path: relPath })
-      // 图片 10MB、文本 2MB（DSHBOTS-347）：文本弹层有前端截断，上限收紧防大文件拖垮请求。
+      // 图片 10MB、文本 2MB：文本弹层有前端截断，上限收紧防大文件拖垮请求。
       const textFile = !contentType.startsWith('image/')
       const maxBytes = textFile ? MAX_CHAT_TEXT_BYTES : MAX_CHAT_IMAGE_BYTES
       const sizeLabel = textFile ? '文本文件超过 2MB 上限' : '图片超过 10MB 上限'
@@ -339,7 +339,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   // 加载失败（webserver 的 (kind, path) 是组合层契约，重复即冲突）。
   // 这里改挂在 webserver/request waterfall 上：仅当请求通过宿主准入
   // （webserver/authorize 的 allow 判定）且是首页的 GET/HEAD 时 302 进工作台；
-  // 其余请求——包括 `/?token=` 兑换、扫码登录、未登录认证页——原样 next()
+  // 其余请求——包括 `/?token=` 兑换、扫码登录、未登录认证页——原样 next
   // 交回宿主。准入判定走 webserver/authorize 而不是 connection.admit：
   // 后者要读 connection.authentication，只对注册认证 provider 的插件开放。
   ctx.on?.('webserver/request', async (req, res, next) => {

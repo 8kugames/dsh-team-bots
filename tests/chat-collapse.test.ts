@@ -93,7 +93,7 @@ test('接线锚：renderChat 走折叠序列、toggle 分支在场、state/i18n 
 })
 
 test('样式锚：折叠行 chevron 有显式 width/height 尺寸约束', () => {
-  // icon() 产出的 svg 只带 viewBox、无 width/height 属性，CSS 不约束时按 replaced element
+  // icon 产出的 svg 只带 viewBox、无 width/height 属性，CSS 不约束时按 replaced element
   // 默认尺寸渲染（约 300×150），会把群聊折叠行撑破——此处锚住尺寸约束不失配。
   const match = chatCardsCss.match(/\.msg-collapse-row\s*>\s*svg\s*\{([^}]*)\}/)
   assert.ok(match, '.msg-collapse-row > svg 规则必须存在')

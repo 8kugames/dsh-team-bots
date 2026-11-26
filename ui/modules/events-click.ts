@@ -103,7 +103,7 @@ document.addEventListener('click', async (event) => {
         break
       }
       case 'toggle-collapse':
-        // 连续系统通知折叠行（B8/DSHBOTS-336）：展开态按组键进 state.expandedCollapses（跨轮询持久）。
+        // 连续系统通知折叠行：展开态按组键进 state.expandedCollapses（跨轮询持久）。
         {
           const key = target.dataset.group
           if (key) {
@@ -260,7 +260,7 @@ document.addEventListener('click', async (event) => {
         state.chatAnchor = null
         state.chatMode = 'solo'
         state.view = 'chat'
-        // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
+        // 乐观切换：先出骨架让点击立即有反馈，再异步取数落真实列表。
         const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: 'solo', soloBotId: botId })
         render()
         try {
@@ -417,7 +417,7 @@ document.addEventListener('click', async (event) => {
         state.modal.purge = (document.getElementById('remove-tracking-purge') as HTMLInputElement | null)?.checked === true
         state.modal.step = 2
         // 弹窗层只认 renderModalLayer 直调：modal 打开期间整页渲染被 D-98 遮罩闸门
-        // 拦截（app.js 只记 pending 不碰 #modal-root），误走整页路径会让翻页零响应（DSHBOTS-192）。
+        // 拦截（app.js 只记 pending 不碰 #modal-root），误走整页路径会让翻页零响应。
         renderModalLayer()
         break
       }
@@ -465,7 +465,7 @@ document.addEventListener('click', async (event) => {
         break
       }
       case 'reject-task': {
-        // 驳回（DSHBOTS-141）：终态任务退回 backlog，走 transition_task 通道，与看板拖拽同口径；
+        // 驳回：终态任务退回 backlog，走 transition_task 通道，与看板拖拽同口径；
         // 后端在离开终态且仍有活跃运行时会拒绝，错误文案直接透出。
         const taskId = target.dataset.taskId
         const task = (state.data?.tasks ?? []).find(item => item.id === taskId)
@@ -480,7 +480,7 @@ document.addEventListener('click', async (event) => {
         break
       }
       case 'review-delegate': {
-        // 验收核验委派（DSHBOTS-107）：核验运行由后端派生，结论评论落任务；裁决仍走拖卡/验收。
+        // 验收核验委派：核验运行由后端派生，结论评论落任务；裁决仍走拖卡/验收。
         const taskId = target.dataset.taskId
         await api('task_review_delegate', { taskId })
         await refreshAfterTask(taskId)
@@ -512,7 +512,7 @@ document.addEventListener('click', async (event) => {
         break
       }
       case 'edit-scopes': {
-        // 写范围编辑态（DSHBOTS-155）：只翻 modal 局部标志并同步弹窗层，不整页重建。
+        // 写范围编辑态：只翻 modal 局部标志并同步弹窗层，不整页重建。
         if (state.modal?.type === 'task') state.modal.editingScopes = true
         renderModalLayer()
         break
@@ -523,7 +523,7 @@ document.addEventListener('click', async (event) => {
         break
       }
       case 'update-scopes': {
-        // 保存走 task_update_scopes（DSHBOTS-151/155）：归一、终态/running 拒改、queued 快照同步都在
+        // 保存走 task_update_scopes：归一、终态/running 拒改、queued 快照同步都在
         // 服务端裁决，失败文案（如「先等运行结束或取消」）原样透传给用户。
         const scopes = ((document.getElementById('task-write-scopes') as HTMLInputElement | null)?.value ?? '').split(/[,，、\s]+/).filter(Boolean)
         try {

@@ -47,7 +47,7 @@ function insertRunningRun(store, { id, projectId, botId, taskId, modelProvider =
   )
 }
 
-// one_active_run_per_bot（DSHBOTS-289）：同 bot 同时至多一条 queued/running。夹具连播
+// one_active_run_per_bot：同 bot 同时至多一条 queued/running。夹具连播
 // 多条撞墙样本前，先把上一轮派生运行（备用接手/记忆审查等）置终态释放 bot。
 function releaseBot(store, botId) {
   store.run(

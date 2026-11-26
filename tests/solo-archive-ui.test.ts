@@ -40,7 +40,7 @@ async function setup(overrides = {}) {
 
 const SEC = 1_000
 const DAY = 86_400_000
-// 窗口 cutoff 基于真实 Date.now()，种子时间相对当前时刻（agoMs 越大越旧）。
+// 窗口 cutoff 基于真实 Date.now，种子时间相对当前时刻（agoMs 越大越旧）。
 const ago = ms => new Date(Date.now() - ms).toISOString()
 
 function seedSolo(store, botId, id, agoMs) {

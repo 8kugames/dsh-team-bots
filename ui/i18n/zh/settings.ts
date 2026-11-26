@@ -1,23 +1,23 @@
-// ui/i18n/zh/settings.ts —— 中文文案字典：settings 域（DSHBOTS-233）
+// ui/i18n/zh/settings.ts —— 中文文案字典：settings 域
 export default {
-  // 全局配置：UI 语言（DSHBOTS-162）；auto = 跟随 DSH 宿主设定
+  // 全局配置：UI 语言；auto = 跟随 DSH 宿主设定
   "settings.uiLanguage": "界面语言",
   "settings.uiLanguageAuto": "自动",
   "settings.uiLanguageZh": "中文",
   "settings.uiLanguageEn": "English",
   "settings.uiLanguageHint": "自动 = 跟随 DSH 宿主 Language 设定。",
   "settings.uiLanguageSave": "保存界面语言",
-  // 项目配置：代码卫生（DSHBOTS-172）：单文件行数约定
+  // 项目配置：代码卫生：单文件行数约定
   "settings.codeHygieneTitle": "代码卫生",
   "settings.codeHygieneLimit": "单文件行数上限",
   "settings.codeHygieneHint": "约定每个源码文件的最大行数（默认 800，0 = 关闭检查）。每轮运行结束扫描项目工作区，文件超过上限的 110% 即在群聊发系统指令，要求项目总监安排拆分卡。",
-  // 全局配置页（DSHBOTS-204）
+  // 全局配置页
   "global.title": "全局配置",
   "global.navLabel": "配置分组导航",
   "global.groupPref": "偏好",
   "global.groupRuntime": "运行与预算",
   "global.groupAbout": "关于与系统状态",
-  // 团队指令段（B1/DSHBOTS-324）
+  // 团队指令段
   "global.groupPrompts": "团队指令",
   "global.promptSegmentsTitle": "团队指令",
   "global.promptSegmentsMeta": "保存后新会话生效，进行中会话不中断",
@@ -34,7 +34,7 @@ export default {
   "global.promptSegSelfcheckHint": "交付报告必须自带可复现验证证据",
   "global.promptSegmentsHint": "指令正文随发版升级：升级改动默认文本后，自定义段会标「默认内容已更新」，可保留现有文本或恢复新默认。",
   "global.save": "保存",
-  // 审批免审规则（DSHBOTS-365）
+  // 审批免审规则
   "global.approvalPermissionsTitle": "免审权限",
   "global.approvalRulesMeta": "${count} 条",
   "global.approvalRulesEmpty": "还没有免审规则：命中的提权请求仍会落审批卡。",
@@ -444,7 +444,7 @@ export default {
   "项目：": "项目：",
   "预算": "预算",
   "高": "高",
-  // DSHBOTS-246：全量 t() 实参清点补齐（原文即键）
+  // DSHBOTS-246：全量 t 实参清点补齐（原文即键）
   "（当前": "（当前",
   "（可选）": "（可选）",
   "（不做物理删除）。": "（不做物理删除）。",

@@ -96,10 +96,10 @@
 
     --code-bg: rgba(51, 54, 76, 0.05);
     /* Relief material: light lands NW, shadow falls SE. --shadow-2/3 stay
-       directional drop shadows — they are for floating layers only (modals,
-       menus, toasts), which hover above the material instead of extruding.
-       The var() refs inside resolve at use time, so schemes retune the whole
-       system by redefining only --relief-hi / --relief-lo. */
+ directional drop shadows — they are for floating layers only (modals,
+ menus, toasts), which hover above the material instead of extruding.
+ The var refs inside resolve at use time, so schemes retune the whole
+ system by redefining only --relief-hi / --relief-lo. */
     --relief-hi: rgba(255, 255, 255, 0.9);
     --relief-lo: rgba(51, 54, 76, 0.16);
     --shadow-1: -2px -2px 5px var(--relief-hi), 2px 3px 6px var(--relief-lo);
@@ -129,10 +129,10 @@
     /* legacy aliases used by inline styles in app.js */
 }
 
-/* 深色由 :root[data-color-scheme="dark"] 承载（DSHBOTS-349）：宿主深色不走媒体查询
-   （其 WebView 的 prefers-color-scheme 失真恒报 light），而是给同源父文档 body 打
-   data-ds-dark-theme——util.ts resolveColorScheme() 据此同步本属性，嵌入态实时
-   跟随宿主深浅，独立态与跨源异常回落系统媒体查询。 */
+/* 深色由 :root[data-color-scheme="dark"] 承载：宿主深色不走媒体查询
+ （其 WebView 的 prefers-color-scheme 失真恒报 light），而是给同源父文档 body 打
+ data-ds-dark-theme——util.ts resolveColorScheme 据此同步本属性，嵌入态实时
+ 跟随宿主深浅，独立态与跨源异常回落系统媒体查询。 */
 :root[data-color-scheme="dark"] {
     color-scheme: dark;
         --bg: #101219;

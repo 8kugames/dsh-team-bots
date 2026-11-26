@@ -455,7 +455,7 @@ test('/clear empties group chat history without touching tasks or memories', asy
   }
 })
 
-// ── 派单链路声明写范围（DSHBOTS-26）：assignFromBot → createTask → enqueueTaskRun 快照 ──
+// ── 派单链路声明写范围：assignFromBot → createTask → enqueueTaskRun 快照 ──
 
 function taskRunScopes(store, taskId) {
   return store.get("SELECT write_scopes FROM runs WHERE task_id = ? AND kind = 'task'", taskId)?.write_scopes

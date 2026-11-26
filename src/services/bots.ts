@@ -17,13 +17,13 @@ export const botNamePattern = /^[\p{L}\p{N}_-]{1,24}$/u
 // owner 留给总监的 @owner 虚拟标记；与名称查重同口径，大小写不敏感。
 const isReservedBotName = (name) => RESERVED_BOT_NAMES.includes(name.toLowerCase())
 
-// 像素块头像种子（DSHBOTS-221）：客户端 roll 生成的随机短串，落库驱动同 seed 同图渲染。
+// 像素块头像种子：客户端 roll 生成的随机短串，落库驱动同 seed 同图渲染。
 export const avatarSeedPattern = /^[\w-]{1,64}$/
 
 // solo_dir 唯一冲突时事务内重生成候选的 INSERT 尝试上限。
 const SOLO_DIR_INSERT_ATTEMPTS = 5
 
-// 版本历史滚动保留（DSHBOTS-336）：表内每个 bot 只留最近 REVISION_KEEP 版，
+// 版本历史滚动保留：表内每个 bot 只留最近 REVISION_KEEP 版，
 // 超额最旧行归档进 <dataDir>/archives/bot-revisions/<botId>.jsonl 后删除。
 export const REVISION_KEEP = 10
 
@@ -122,7 +122,7 @@ export const botsMethods = {
     return this.botView(this.botRow(botId))
   },
 
-  // 建 bot 申请入口（DSHBOTS-229）：总监代团队申请新 bot，复用 createBot 的名称/唯一/模型校验与审计。
+  // 建 bot 申请入口：总监代团队申请新 bot，复用 createBot 的名称/唯一/模型校验与审计。
   // 不绕过任何既有校验；新 bot 不自动入项目，需另走 addProjectMember。
   async createBotFromBot(sessionId, input) {
     const { actor } = this.ownerContextFor(sessionId)
@@ -180,7 +180,7 @@ export const botsMethods = {
     }
   },
 
-  // 版本历史滚动保留（DSHBOTS-336）：查出窗口外（最近 REVISION_KEEP 版以外）的最旧行，
+  // 版本历史滚动保留：查出窗口外（最近 REVISION_KEEP 版以外）的最旧行，
   // 先整行追加进 <dataDir>/archives/bot-revisions/<botId>.jsonl（每行一个 JSON 对象），
   // 再删除并审计留痕一条。追加失败直接抛，DELETE 不会执行——先入档后删除，数据不丢。
   // 调用方负责事务包裹：updateBot 在事务内插行后调用；启动收敛在独立事务里逐 bot 调用。
@@ -275,7 +275,7 @@ export const botsMethods = {
     if (fallbackProvider !== bot.fallback_provider) changes.fallback_provider = fallbackProvider
     if (fallbackModel !== bot.fallback_model) changes.fallback_model = fallbackModel
     if (fallbackEffort !== bot.fallback_effort) changes.fallback_effort = fallbackEffort
-    // 版本快照只覆盖角色+指令（DSHBOTS-51）：模型类字段（主/备 provider·model·effort）修改即生效，
+    // 版本快照只覆盖角色+指令：模型类字段（主/备 provider·model·effort）修改即生效，
     // 仅落库+审计、不进版本历史；表里的 provider/model/effort 列只为存量行保留，新行不再写入。
     // 快照与最新版本行逐字段比对（无版本行的存量 bot 以当前 bot 行为基线）；
     const effectiveRole = changes.role !== undefined ? changes.role : bot.role
@@ -319,7 +319,7 @@ export const botsMethods = {
           `${actor.type}:${actor.id}`, nowIso(),
         )
         this.store.run('UPDATE bots SET current_revision = ? WHERE id = ?', version, botId)
-        // 滚动保留（DSHBOTS-336）：插行后立即收敛窗口，超额最旧行先入档再删。
+        // 滚动保留：插行后立即收敛窗口，超额最旧行先入档再删。
         this.archiveExcessBotRevisions(botId, actor)
       }
       // 同内容重复保存（含回滚到当前内容）是 no-op：不插版本行、不 bump，审计带 unchanged 标记留痕。
@@ -330,7 +330,7 @@ export const botsMethods = {
   async archiveBot(botId, actor = this.actor()) {
     return this.updateBot(botId, { status: 'archived' }, actor)
   },
-  // 移除追踪（DSHBOTS-193）：已归档 Bot 的软移除——bots.status 落 removed 终态，
+  // 移除追踪：已归档 Bot 的软移除——bots.status 落 removed 终态，
   // 工作台列表不再展示；运行记录、单聊消息、版本、记忆与单聊工作区目录全部保留。
   async removeBotTracking(botId, input = {} as any, actor = this.actor()) {
     const bot = this.botRow(botId)
@@ -350,7 +350,7 @@ export const botsMethods = {
   async rollbackBot(botId, revisionId, actor = this.actor()) {
     const revision = this.store.get('SELECT * FROM bot_revisions WHERE id = ? AND bot_id = ?', revisionId, botId)
     if (!revision) throw notFound('Bot 版本不存在')
-    // 只还原角色/指令（DSHBOTS-51）：revision 行里的模型字段是快照当时的配置，不随版本回滚。
+    // 只还原角色/指令：revision 行里的模型字段是快照当时的配置，不随版本回滚。
     return this.updateBot(botId, {
       role: revision.role,
       instructions: revision.instructions,

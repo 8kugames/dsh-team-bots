@@ -11,7 +11,7 @@ const modalCss = readFileSync(fileURLToPath(new URL('../ui/styles/modal.css', im
 // 取证结论（本地预览服务 + headless Chrome CDP Tracing，真 GPU，与部署逐字节同源的 ui 产物）：
 // ① 滚动窗口内 DOM 变更只有 run-clock 文本 1 次/秒（textContent 赋值每次产生 2 条 childList
 //    记录）；#app 与 #modal-root 结构零变更——轮询 tick（2.8s）在遮罩开着时不写任何 DOM
-//    （render() 的 overlayOpen 闸门 → markAppRenderPending 早退），renderModalLayer 在被动
+// （render 的 overlayOpen 闸门 → markAppRenderPending 早退），renderModalLayer 在被动
 //    滚动期间不被调用，modalScrollRecent 守卫与闪烁无关；弹窗无整块重建、无入场动画重播。
 // ② 滚动 6 个滚轮 tick 的 UpdateLayoutTree = 33 次，把底页动画全部关掉后塌缩到 2 次——
 //    滚动期的主线程样式/布局 churn 来自 #app 里看板运行卡的 swim/sheen 等无穷动画：它们在

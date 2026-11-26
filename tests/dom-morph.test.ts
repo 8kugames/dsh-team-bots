@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 
-// 原位补丁（DSHBOTS-227）：轮询不再整页拆节点，于是下拉弹层不被关、输入框不被重建、
+// 原位补丁：轮询不再整页拆节点，于是下拉弹层不被关、输入框不被重建、
 // 看板动画不重启。这里守两条纯逻辑：身份键与子节点合并计划、属性/值同步策略。
 const source = readUiSource()
 

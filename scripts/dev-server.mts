@@ -15,7 +15,7 @@ import { readUiStyles } from '../src/http.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PORT = Number(process.env.PORT || 4317)
-// 静态切片（DSHBOTS-127）：路径与 MIME 与线上 src/http.js 对齐。
+// 静态切片：路径与 MIME 与线上 src/http.js 对齐。
 // i18n 字典是 ES 模块图的一环（ui/modules/i18n.js 相对导入 ../i18n/<lang>.js →
 // /api/dsh-team/i18n/<lang>.js），缺这条路由时 app.js 模块图 404 加载失败，
 // 预览页会一直卡在 boot screen「正在连接团队空间」（线上有这些路由，故只在预览复现）。
@@ -95,7 +95,7 @@ async function main() {
           .replaceAll('{{language}}', 'auto'))
       }
       if (req.method === 'GET' && url.pathname === '/api/dsh-team/styles.css') {
-        // 与线上同口径（DSHBOTS-160）：走 src/http.js 的 readUiStyles 汇总，双侧永不漂移。
+        // 与线上同口径：走 src/http.js 的 readUiStyles 汇总，双侧永不漂移。
         return send(res, 200, 'text/css; charset=utf-8', await readUiStyles())
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/dsh-team/fonts/')) {

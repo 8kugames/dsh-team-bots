@@ -2,7 +2,7 @@
 // 根因：工作台深色唯一依赖 prefers-color-scheme 媒体查询，而宿主 WebView 媒体查询
 // 失真（恒报 light）；宿主自身深色靠给同源父文档 body 打 data-ds-dark-theme 属性驱动。
 // 修法：深色 token 改由 :root[data-color-scheme="dark"] 承载（删媒体查询包裹），
-// util.ts resolveColorScheme() 嵌入态读父文档 body 属性（双向跟随）、独立态与跨源
+// util.ts resolveColorScheme 嵌入态读父文档 body 属性（双向跟随）、独立态与跨源
 // 异常回落系统媒体查询；MutationObserver + matchMedia change 实时跟随宿主切换。
 // DSHBOTS-351：浅色模式下群聊页发黑——嵌入态只读直接 parent 且绝对压过媒体查询，
 // 单层信号失真即整页误判 dark。改为祖先链遍历：自直接父逐层上溯到 window.top，

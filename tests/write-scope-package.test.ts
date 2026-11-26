@@ -16,7 +16,7 @@ import {
 // 不纳入写范围锁。这里锁两件事：
 //   ① 闸门侧：比对前双侧剥掉 package.json（存量 queued 运行快照也带它，靠闸门过滤兜住）；
 //   ② 声明侧：parseWriteScopes 出口剥掉，新任务从源头不带。
-// 走真实 tick() 出队路径，构造方式参照 tests/parallel-scheduling.test.js。
+// 走真实 tick 出队路径，构造方式参照 tests/parallel-scheduling.test.js。
 
 // 手动完成的 runtime：startRun 后运行保持 running，直到测试显式调用 complete。
 class ManualRuntime {

@@ -23,7 +23,7 @@ const COALESCE_MAX_MESSAGES_DEFAULT = 5
 const COALESCE_WINDOW_MS_DEFAULT = 30_000
 
 /**
- * origin→trigger_type 映射（DSHBOTS-329）：通道来源的直达运行打来源通道标记
+ * origin→trigger_type 映射：通道来源的直达运行打来源通道标记
  * （'wechat' 微信 / 'feishu' 飞书），运行收尾据此把回复推回该通道管理员；
  * 普通 UI 消息（origin 空）与未映射的值都落 'mention'，不推任何通道。
  */
@@ -31,7 +31,7 @@ export function originTriggerType(origin) {
   return origin === 'wechat' || origin === 'feishu' ? origin : 'mention'
 }
 
-// ── 只读运行工作区审计归因（DSHBOTS-94）─────────────────────────────────
+// ── 只读运行工作区审计归因─────────────────────────────────
 // 指纹行形如 " M dir/file"（前两字符状态位 + 空格 + 路径）；重命名 "R  old -> new"
 // 的新旧路径都算被触碰。带引号的 quoted 路径不解析（与产物清单同一口径，跳过）。
 export function porcelainTouchedPaths(output) {
@@ -403,7 +403,7 @@ export const runsMethods = {
   deliverBotReply(message) {
     const caller = this.store.get('SELECT * FROM bots WHERE id = ?', message.from_bot_id)
     if (!caller || caller.status !== 'active') return null
-    // 控制面收敛（DSHBOTS-289/299）：回信目标按收敛顺序解析——来源任务未终态时按 runs 归属
+    // 控制面收敛：回信目标按收敛顺序解析——来源任务未终态时按 runs 归属
     // 亲和回原任务会话（steer/排运行都指向它），否则落发送方在 (bot, project) 维度的
     // kind='bot' 控制面绑定（project_id IS 兼容项目外私信的 NULL）。
     const originTask = message.origin_kind === 'task' && message.origin_task_id
@@ -465,7 +465,7 @@ export const runsMethods = {
     this.insertRunEvent(runId, 'queued', '私信回信排队投递给发送方会话')
     return runId
   },
-  // triggerType（DSHBOTS-258）：'wechat' 表示消息来自微信通道（项目外 director 专属工作区），
+  // triggerType：'wechat' 表示消息来自微信通道（项目外 director 专属工作区），
   // 与群聊直达（enqueueChatRun 的 origin 口径）同语义——运行收尾据此把 solo 回复推回微信管理员。
   enqueueSoloChatRun(bot, messageId, { triggerType = 'mention' } = {}) {
     const existing = this.store.get(
@@ -475,7 +475,7 @@ export const runsMethods = {
     )
     if (existing) return existing.id
     // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
-    // solo_chat 运行 project_id 恒 NULL → 域恒 '~solo'（DSHBOTS-308）。
+    // solo_chat 运行 project_id 恒 NULL → 域恒 '~solo'。
     if (this.botBusy(bot.id, '~solo')) {
       this.holdPendingMessage(bot.id, '~solo', { kind: 'solo_chat', messageId, triggerType, queuedAt: nowIso() })
       return null
@@ -515,14 +515,14 @@ export const runsMethods = {
     )
     if (existing) return existing.id
     // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列，空闲后由 drainPendingMessages 合批建回。
-    // 域=chat 所属项目（DSHBOTS-308）。
+    // 域=chat 所属项目。
     if (this.botBusy(bot.id, project.id)) {
       this.holdPendingMessage(bot.id, project.id, { kind: 'chat', messageId, projectId: project.id, origin, queuedAt: nowIso() })
       return null
     }
     const runId = id('run')
     const createdAt = nowIso()
-    // 通道直达（DSHBOTS-208/329）：trigger_type 记来源通道（'wechat'/'feishu'），
+    // 通道直达：trigger_type 记来源通道（'wechat'/'feishu'），
     // 运行收尾据此把 bot 回复推回该通道管理员；普通群聊消息保持 'mention' 不推。
     const triggerType = originTriggerType(origin)
     try {
@@ -643,11 +643,11 @@ export const runsMethods = {
     const run = this.runRow(runId)
     const bot = this.store.get('SELECT * FROM bots WHERE id = ?', run.bot_id)
     const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
-    // 配置版本快照（C2/DSHBOTS-334）：任务运行独占会话（D-308），本运行的治理配置即
+    // 配置版本快照：任务运行独占会话，本运行的治理配置即
     // 派发时刻的生效值——bot 角色版本（bots.current_revision）+ 可编辑提示词段覆盖正文
     // （缺省段记 null，默认文本随发版可追溯）+ 实际下发模型（runs 行三列，D-25）。
     // 回答「这张卡按哪版规则跑的」；只记账不闸门（ADR §3：变更不撤销在途，恢复前复核
-    // 由派发链闸门承担）。只对 kind='task' 记：消息族运行共用控制面冻结会话（D-91），
+    // 由派发链闸门承担）。只对 kind='task' 记：消息族运行共用控制面冻结会话，
     // 生效文本是冻结时的旧值，快照「当时 settings」反而误导。
     if (run.kind === 'task') {
       const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
@@ -670,7 +670,7 @@ export const runsMethods = {
         : (run.kind === 'solo_chat' || (run.kind === 'vision' && !run.project_id)) && run.trigger_ref
           ? this.runChatStore(run).get('SELECT * FROM solo_messages WHERE id = ?', run.trigger_ref)
           : null
-      // 合批消息（DSHBOTS-231）：领取时合并进来的同通道排队消息，与触发消息同一轮注入。
+      // 合批消息：领取时合并进来的同通道排队消息，与触发消息同一轮注入。
       const extraMessages = this.mergedMessagesFor(run)
       if (run.mode === 'read') this.fingerprints.set(runId, this.workspaceFingerprint(project))
       const sessionKind = this.sessionKindFor(run)
@@ -727,7 +727,7 @@ if (run.kind === 'dm_reply') {
     return this.store.get('SELECT * FROM tasks WHERE id = ?', taskId) ?? null
   },
 
-  // 合批消息（DSHBOTS-231）：本运行领取时合并进来的同通道排队消息。
+  // 合批消息：本运行领取时合并进来的同通道排队消息。
   // 按 merged_messages 记录的消息 id 顺序取回；消息已被删除的条目跳过，不阻塞本次运行。
   // 两张消息表的列不完全一致（solo_messages 没有 reply_to_id），按运行类别选列。
   mergedMessagesFor(run) {
@@ -915,7 +915,7 @@ if (run.kind === 'dm_reply') {
     const task = run.task_id ? this.store.get('SELECT number, title, sandbox_override FROM tasks WHERE id = ?', run.task_id) : undefined
     const project = run.project_id ? this.store.get('SELECT key FROM projects WHERE id = ?', run.project_id) : undefined
     // recovery 是重启恢复的内部瞬态标记（置位→注入→清零），不属于 API 视图，随 attention_json 一并剥出。
-    // merged_messages 是合批消息 id 列表（DSHBOTS-231），同样剥出原始 JSON，只给解析后的 id。
+    // merged_messages 是合批消息 id 列表，同样剥出原始 JSON，只给解析后的 id。
     const { write_scopes: rawScopes, attention_json: attentionJson, merged_messages: mergedRaw, recovery: _recovery, ...rest } = run
     const fallbackRef = bot?.fallback_provider && bot?.fallback_model ? `${bot.fallback_provider}/${bot.fallback_model}` : null
     const usedRef = run.model_provider && run.model_model ? `${run.model_provider}/${run.model_model}` : null
@@ -929,8 +929,8 @@ if (run.kind === 'dm_reply') {
       taskIdentifier: task ? `${project?.key ?? 'T'}-${task.number}` : null,
       taskTitle: task?.title ?? null,
       writeScopes: readWriteScopes(rawScopes),
-      // 生效沙箱档（DSHBOTS-156）：非 write 运行恒 read-only，任务写运行取派发覆盖（只收紧）或 bot 配置档；
-      // 完全权限总开关（DSHBOTS-366）打开时统一 danger-full-access，口径仍唯一走 effectiveSandbox。
+      // 生效沙箱档：非 write 运行恒 read-only，任务写运行取派发覆盖（只收紧）或 bot 配置档；
+      // 完全权限总开关打开时统一 danger-full-access，口径仍唯一走 effectiveSandbox。
       sandboxMode: effectiveSandbox(run, bot, task, this.fullAccessAllEnabled()).mode ?? null,
       // 备用模型标记：configured=配了备用，applied=这条运行走了备用，
       // degraded=主模型不可用且配了备用但这条没走（自动切换只对任务运行生效）。
@@ -944,7 +944,7 @@ if (run.kind === 'dm_reply') {
     }
   },
 
-  // 回答结构化提问（DSHBOTS-43）：仅负责人（owner）可调。
+  // 回答结构化提问：仅负责人（owner）可调。
   // 回答作为一条 @该 bot 的群聊消息投回原会话（复用既有 chat 投递通道，触发 chat_run），
   // 单聊运行走 solo 通道；同时清空 attention_json 并记 run_events 'attention_answered'。
   async answerAttention(runId, answer, actor = this.actor()) {

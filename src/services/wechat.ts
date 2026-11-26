@@ -23,7 +23,7 @@ export function wechatQrSvg(url) {
   return qr.createSvgTag({ cellSize: 4, margin: 2 })
 }
 
-/** 项目外导演通道的正文来源标记（DSHBOTS-258）：让 director 一眼看出该消息来自微信管理员。 */
+/** 项目外导演通道的正文来源标记：让 director 一眼看出该消息来自微信管理员。 */
 const WECHAT_SOLO_SOURCE_MARK = '[微信管理员] '
 
 /** channel.js 的状态守卫文案全集（未启用/已登录等，抛的都是裸 Error）。 */
@@ -52,16 +52,16 @@ function toChannelError(service, action, error) {
 
 export const wechatMethods = {
 
-  /** 微信通道生效开关（DSHBOTS-334）：通道页 settings 显式值 > patch.yml/env 默认。 */
+  /** 微信通道生效开关：通道页 settings 显式值 > patch.yml/env 默认。 */
   wechatChannelEnabled() {
     return effectiveWechatEnabled(this.config, key => this.store.setting(key))
   },
 
   /**
-   * 通道页启停开关（DSHBOTS-334）：settings 落 '1'/'0' + 审计 + 即时对齐挂载态。
-   * 停用即停推（this.wechat 置 null，channelNotify 不再扇出到微信）；启用按既有
-   * 绑定凭据恢复连接（绑定持久在 wechat-channel.sqlite，stop 不清凭据）。
-   */
+ * 通道页启停开关：settings 落 '1'/'0' + 审计 + 即时对齐挂载态。
+ * 停用即停推（this.wechat 置 null，channelNotify 不再扇出到微信）；启用按既有
+ * 绑定凭据恢复连接（绑定持久在 wechat-channel.sqlite，stop 不清凭据）。
+ */
   async setWechatChannelEnabled(enabled, actor = this.actor()) {
     this.store.setSetting('wechat_channel_enabled', enabled ? '1' : '0')
     this.audit(actor, 'settings.update', 'settings', 'wechat_channel', { enabled: Boolean(enabled) })
@@ -88,7 +88,7 @@ export const wechatMethods = {
     this._wechatStore ??= await new WechatStore(this.config.wechatDbPath).open()
     const channel = new WechatChannel({
       store: this._wechatStore,
-      // 挂载决策已由生效开关做出，通道内 enabled() 门禁按挂载口径放行。
+      // 挂载决策已由生效开关做出，通道内 enabled 门禁按挂载口径放行。
       config: { ...this.config, wechat: { ...this.config.wechat, enabled: true } },
       log: this.logger,
     })
@@ -138,12 +138,12 @@ export const wechatMethods = {
   },
 
   /**
-   * 项目外导演通道的目标解析（DSHBOTS-258）：微信自由文本的默认且唯一去向是 director
-   * bot 的专属工作区单聊。解析规则：active bot 里 name='director'（大小写不敏感）优先于
-   * role='director'/'总监'；同级多个按 created_at、id 取最旧，保证确定性。不过滤 solo_dir：
-   * 目录一律读 bots.solo_dir 既有链路，为空时按 soloPromptFor 现有兜底路径处理，不写死目录。
-   * 0 命中返回 null（异常状态防御，走次级回退避免消息黑洞）。
-   */
+ * 项目外导演通道的目标解析：微信自由文本的默认且唯一去向是 director
+ * bot 的专属工作区单聊。解析规则：active bot 里 name='director'（大小写不敏感）优先于
+ * role='director'/'总监'；同级多个按 created_at、id 取最旧，保证确定性。不过滤 solo_dir：
+ * 目录一律读 bots.solo_dir 既有链路，为空时按 soloPromptFor 现有兜底路径处理，不写死目录。
+ * 0 命中返回 null（异常状态防御，走次级回退避免消息黑洞）。
+ */
   wechatDirectorBot() {
     const rows = this.store.all(
       `SELECT * FROM bots
@@ -154,11 +154,11 @@ export const wechatMethods = {
   },
 
   /**
-   * 项目外导演通道投递（DSHBOTS-258）：消息落 director 的 solo_messages 并触发
-   * solo_chat 运行，不进任何项目群聊。身份用微信 admin 的 peer id（不以 localUserId
-   * 冒充工作台用户）；正文前缀 [微信管理员] 让 director 能看出消息来自微信通道。
-   * firstContact：该管理员此前没在这个专属工作区说过话（首触回执依据，见 commands）。
-   */
+ * 项目外导演通道投递：消息落 director 的 solo_messages 并触发
+ * solo_chat 运行，不进任何项目群聊。身份用微信 admin 的 peer id（不以 localUserId
+ * 冒充工作台用户）；正文前缀 [微信管理员] 让 director 能看出消息来自微信通道。
+ * firstContact：该管理员此前没在这个专属工作区说过话（首触回执依据，见 commands）。
+ */
   async wechatDirectorChat(director, body) {
     const adminPeerId = this.wechat?.status?.()?.adminPeerId ?? null
     const actor = { type: 'user', id: adminPeerId ?? 'user:wechat' }
@@ -222,9 +222,9 @@ export const wechatMethods = {
   },
 
   /**
-   * 微信 /bots 指令（DSHBOTS-249）：按项目 key 列当前项目机器人清单。
-   * 数据源与工作台项目成员表同源（membersOf），只读；key 未命中返回空表。
-   */
+ * 微信 /bots 指令：按项目 key 列当前项目机器人清单。
+ * 数据源与工作台项目成员表同源（membersOf），只读；key 未命中返回空表。
+ */
   wechatProjectBots(key) {
     const project = this.store.get(
       "SELECT * FROM projects WHERE key = ? COLLATE NOCASE AND status = 'active'",
@@ -241,9 +241,9 @@ export const wechatMethods = {
   // DSHBOTS-326：转发面从「微信单通道」扩为「各已启用通道」（微信/飞书），单通道失败不阻断另一通道。
 
   /** 提问转发各已启用通道（只推文本；token 取问题 id 末 6 位）。
-   *  幂等收据键（A3/DSHBOTS-323）：question:<row.id>——同条目重复转发在各通道存留期内被吸收
-   *  （各通道 outbox 库彼此独立，同键在两套库里各自幂等，互不干扰）。
-   *  DSHBOTS-326：出站经 channelNotify 扇出到微信与飞书，单通道失败不阻断另一通道。 */
+ * 幂等收据键：question:<row.id>——同条目重复转发在各通道存留期内被吸收
+ * （各通道 outbox 库彼此独立，同键在两套库里各自幂等，互不干扰）。
+ * DSHBOTS-326：出站经 channelNotify 扇出到微信与飞书，单通道失败不阻断另一通道。 */
   wechatQuestion(project, row, items) {
     const token = wechatToken(row.id)
     const projectName = project.name || project.key
@@ -260,8 +260,8 @@ export const wechatMethods = {
   },
 
   /** 审批转发各已启用通道（只推文本；token 取审批 id 末 6 位）。
-   *  幂等收据键（A3/DSHBOTS-323）：approval:<row.id>（各通道 outbox 库内各自幂等）。
-   *  DSHBOTS-326：出站经 channelNotify 扇出，单通道失败只留痕不阻断另一通道。 */
+ * 幂等收据键：approval:<row.id>（各通道 outbox 库内各自幂等）。
+ * DSHBOTS-326：出站经 channelNotify 扇出，单通道失败只留痕不阻断另一通道。 */
   wechatApproval(project, row) {
     const token = wechatToken(row.id)
     const projectName = project.name || project.key
@@ -277,12 +277,12 @@ export const wechatMethods = {
   },
 
   /**
-   * 外发收据视图（A3/DSHBOTS-323）：近 N 条带键推送的终态流水，可追责/可回放。
-   * 真值唯一来源是通道出站库（wechat-channel.sqlite，随备份走）：sent=sent_at 在、
-   * gone=gave_up_at 在（last_error 带废弃原因）、pending=两者皆无。
-   * 通道未启用返回 available:false——「为什么没收到」在该态由通道页与 needsAttention 解释，
-   * 不在插件库建第二张收据表（反双真值）。
-   */
+ * 外发收据视图：近 N 条带键推送的终态流水，可追责/可回放。
+ * 真值唯一来源是通道出站库（wechat-channel.sqlite，随备份走）：sent=sent_at 在、
+ * gone=gave_up_at 在（last_error 带废弃原因）、pending=两者皆无。
+ * 通道未启用返回 available:false——「为什么没收到」在该态由通道页与 needsAttention 解释，
+ * 不在插件库建第二张收据表（反双真值）。
+ */
   notifyReceiptsView(limit = 50) {
     if (!this.wechat || typeof this.wechat.receipts !== 'function') {
       return { available: false, reason: 'wechat-disabled', items: [] }
@@ -300,11 +300,11 @@ export const wechatMethods = {
   },
 
   /**
-   * 入站 Trigger 留痕（B4-①/DSHBOTS-328）：通道每条入站事件的处置记录——handled/
-   * filtered/rejected + route + reason，回答「这条微信为什么没有触发」。稳定 id 去重
-   * （native 主键），滚动封顶在 wechat-trigger-schema。读入（Trigger）与写出（notify
-   * 收据）两侧各自留痕、互不混表。
-   */
+ * 入站 Trigger 留痕：通道每条入站事件的处置记录——handled/
+ * filtered/rejected + route + reason，回答「这条微信为什么没有触发」。稳定 id 去重
+ * （native 主键），滚动封顶在 wechat-trigger-schema。读入（Trigger）与写出（notify
+ * 收据）两侧各自留痕、互不混表。
+ */
   recordWechatTrigger({ nativeId, peerId, text, disposition, route = null, reason = null }) {
     if (!nativeId) return 'skipped'
     return recordWechatTriggerRow(this.store, {
@@ -354,9 +354,9 @@ export const wechatMethods = {
   },
 
   /**
-   * 微信答复路由（DSHBOTS-215）：把管理员的「答 <token> <内容>」落成对应提问的宿主应答。
-   * 来源标识为 user:wechat，与工作台作答（user:<actorId>）区分，审计单独记 question.answer_wechat。
-   */
+ * 微信答复路由：把管理员的「答 <token> <内容>」落成对应提问的宿主应答。
+ * 来源标识为 user:wechat，与工作台作答（user:<actorId>）区分，审计单独记 question.answer_wechat。
+ */
   async wechatAnswerQuestion(token, body, fallbackKey = null) {
     const row = this.pendingWechatRow('questions', token, fallbackKey)
     if (!row) return answerFailed(token, '没有匹配的待答提问（可能已作答或已过期）')
@@ -372,7 +372,7 @@ export const wechatMethods = {
     return answerReceipt(wechatToken(row.id), parsed.summary)
   },
 
-  /** 微信审批路由（DSHBOTS-215）：把「批 <token> 允许|拒绝」落成对应审批的宿主应答。 */
+  /** 微信审批路由：把「批 <token> 允许|拒绝」落成对应审批的宿主应答。 */
   async wechatDecideApproval(token, decision, fallbackKey = null) {
     const row = this.pendingWechatRow('approvals', token, fallbackKey)
     if (!row) return answerFailed(token, '没有匹配的待审批请求（可能已处理或已过期）')

@@ -1,5 +1,5 @@
 // tests/lifecycle-slim.test.js —— DSHBOTS-96 P2+P3：生命周期消息压缩、Open tasks 瘦身、
-// 短状态通知不进尾窗（P3-1）、密钥长理由围栏化（P3-2）。
+// 短状态通知不进尾窗、密钥长理由围栏化。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'

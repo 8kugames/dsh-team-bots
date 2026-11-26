@@ -1,4 +1,4 @@
-// ui/i18n/en/chat.ts —— English copy dictionary: chat domain (DSHBOTS-233)
+// ui/i18n/en/chat.ts —— English copy dictionary: chat domain
 export default {
   // Group chat view
   "chat.groupTitle": "Group chat",
@@ -138,7 +138,7 @@ export default {
   "还没有选择": "None selected yet",
   "选择 · Enter 或 Tab 插入 · Esc 关闭": "Select · Enter or Tab to insert · Esc to close",
   "问）": " questions)",
-  // DSHBOTS-246: keys added by the full t() literal audit
+  // DSHBOTS-246: keys added by the full t literal audit
   "（无说明）": "(no description)",
   "（未选择）": "(not selected)",
   "（共": " (",

@@ -1,4 +1,4 @@
-// src/services/wechat-trigger-schema.js —— 微信入站 Trigger 留痕表（B4-①/DSHBOTS-328）。
+// src/services/wechat-trigger-schema.js —— 微信入站 Trigger 留痕表。
 // 吸收原型 sources 层「不收的消息仍进系统并记 reason」的口径：微信是当前唯一外部入口，
 // 每条入站事件按稳定 id 留痕（disposition：handled/filtered/rejected/duplicate + route +
 // reason），面板与巡检可回答「这条消息为什么没有触发」。不做整套 Source 抽象（报告 B4

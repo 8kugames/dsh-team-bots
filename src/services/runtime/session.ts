@@ -30,7 +30,7 @@ export const modelOverrideFor = (run) => (run?.model_provider && run?.model_mode
   ? { provider: run.model_provider, model: run.model_model, effort: run.model_effort || undefined }
   : null)
 
-// 运行时效上限（DSHBOTS-131）：任务派生运行（runs.task_id 非空）若任务声明了时效要求，
+// 运行时效上限：任务派生运行（runs.task_id 非空）若任务声明了时效要求，
 // 其超时上限取 min(全局 runTimeoutMs, 时效分钟数)；无时效、非任务运行沿用全局值。
 // DSHBOTS-302 预算分档：review/handle（owner_task 运行族）在全局上限内再收紧到 review
 // 分档（0 = 关闭分档，默认；DSHBOTS-364）——验收长尾不再被硬上限误杀，真挂死由无进展
@@ -94,8 +94,8 @@ export const sessionMethods = {
     if (!sessionId) return undefined
     return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', sessionId)
   },
-  // 会话绑定退役（DSHBOTS-256）：旧绑定不删，降级为 alias=1 授权别名。
-  // 结转（DSHBOTS-145）或宿主失效替换后，仍以旧 session id 运行的宿主 agent
+  // 会话绑定退役：旧绑定不删，降级为 alias=1 授权别名。
+  // 结转或宿主失效替换后，仍以旧 session id 运行的宿主 agent
   // 调用 team_* 工具时，ownerContextFor/memberContextFor 仍按同 bot/项目解析到授权；
   // 别名行不参与活跃绑定唯一约束，新会话绑定照常建立。
   retireBinding(sessionId) {
@@ -107,7 +107,7 @@ export const sessionMethods = {
     if (!force) {
       if (age < this.config.modelCacheMs) return this.modelsCache.value
       // stale-while-revalidate：目录已过期但仍在 stale 窗口内时，先用旧值应答、后台刷新。
-      // 否则每次 state() 轮询撞上过期都会去逐 provider 串行 listModels（真实网络调用），
+      // 否则每次 state 轮询撞上过期都会去逐 provider 串行 listModels（真实网络调用），
       // 那是点击路径上秒级波动的主因。
       const staleMs = this.config.catalogStaleMs
       if (staleMs > 0 && age < this.config.modelCacheMs + staleMs) {
@@ -118,7 +118,7 @@ export const sessionMethods = {
     return this.refreshCatalog()
   },
   async refreshCatalog() {
-    // 并发去重：多个 state() 同时撞上过期时只跑一次刷新。
+    // 并发去重：多个 state 同时撞上过期时只跑一次刷新。
     if (this.modelsRefreshing) return this.modelsRefreshing
     this.modelsRefreshing = (async () => {
       const value = []
@@ -322,7 +322,7 @@ export const sessionMethods = {
   // - 子代理判据：DSH 宿主对单会话子代理派生有上限（口径 200），累计消费达阈值（默认
   //   128 留摘要往返余量，0 = 关闭）同样触发——派满后会话再也无法派子代理，核验/并行
   //   加速被阻塞且无自动恢复；
-  // - 幂等（DSHBOTS-286）：alias 行永不触发结转——本判定只在活跃绑定上被调用
+  // - 幂等：alias 行永不触发结转——本判定只在活跃绑定上被调用
   //   （唯一调用点 ensureSession 以 !existing.alias 前置短路保证）；已结转的旧会话
   //   即使轮数继续增长（承接未终态任务流量），也只参与闲时压缩，不再二次结转；
   // - 摘要就绪（settings 有值）→ 立即结转；
@@ -345,7 +345,7 @@ export const sessionMethods = {
     if (!active) this.enqueueRolloverSummary({ bot, project, sessionId: existing.session_id })
     return false
   },
-  // 补排结转摘要运行（DSHBOTS-145）：只读运行，复用旧会话（runs.session_id 指明），
+  // 补排结转摘要运行：只读运行，复用旧会话（runs.session_id 指明），
   // 让 bot 在旧上下文里自写交接摘要（进行中任务 / 关键决定 / 未决问题）。
   // 幂等双保险：调用前查 trigger_ref 上的 active 运行；INSERT OR IGNORE 兜住同一
   // idempotency_key 的并发插入，避免唯一约束抛错把当前这条对话运行带崩。
@@ -393,9 +393,9 @@ export const sessionMethods = {
     if (!task?.id) return undefined
     // 终态任务的会话不再需要亲和：done/canceled 与调度器候选过滤同口径。
     if (task.status === 'done' || task.status === 'canceled') return undefined
-    // 验收期话语权在总监（DSHBOTS-306）：in_review 期间卡线程消息（验收指令/评论直通/
+    // 验收期话语权在总监：in_review 期间卡线程消息（验收指令/评论直通/
     // dm_reply 回投等经此亲和的流量）改判项目 owner bot 的控制面绑定——否则按 assignee
-    // 亲和落承接 bot 会话，验收动作 team_review_task 又仅 owner bot 可调（D-190），指令
+    // 亲和落承接 bot 会话，验收动作 team_review_task 又仅 owner bot 可调，指令
     // 路由与动作权限错位、每卡都要绕一步。本分支优先于下方 runs 归属亲和（含 D-286 结转
     // 后的 alias 旧会话）：验收期短暂，按当前 owner 会话走；退回 todo 即恢复 assignee 亲和。
     if (task.status === 'in_review') {
@@ -420,7 +420,7 @@ export const sessionMethods = {
     if (!row?.sid) return undefined
     return this.store.get('SELECT * FROM session_bindings WHERE session_id = ?', row.sid)
   },
-  // 入队闲时总结压缩运行（DSHBOTS-286）：复用旧会话（runs.session_id 指明）的只读运行，
+  // 入队闲时总结压缩运行：复用旧会话（runs.session_id 指明）的只读运行，
   // 让 bot 在原上下文里自写连续性总结。压缩 ≠ 结转：不 alias 化绑定、不写 rollover_pending，
   // 总结完成后留原会话。幂等键带窗口号：同窗口并发/重复触发由唯一约束兜住。
   enqueueSessionCompact({ bot, project, sessionId, window }) {
@@ -472,7 +472,7 @@ export const sessionMethods = {
       return { folded: false, reason: error?.code ?? 'error', message: String(error?.message ?? error) }
     }
   },
-  // 闲时压缩判定（DSHBOTS-286）：会话复用时检查轮次是否跨过新的压缩窗口。
+  // 闲时压缩判定：会话复用时检查轮次是否跨过新的压缩窗口。
   // - 窗口 N 轮（session_compact_turns，0 = 关闭），轮次口径与结转一致；
   // - 体积下限（单轮上下文治理 P2，session_compact_ctx_tokens 默认 80k、0 = 关闭）：
   //   窗口跨过且体积达下限才排——瘦会话（低频短轮）压缩是无用功，胖会话照常按窗口
@@ -501,7 +501,7 @@ export const sessionMethods = {
     this.store.setSetting(sessionCompactMarkerKey(sessionId), String(window * every))
   },
   // 会话策略归属（2026-11-15「recall 拦截循环」事故）：复用分支的工具面/文件面/模型必须
-  // 跟「会话绑定行的 bot」走，而不是当前运行方 bot。in_review 亲和（DSHBOTS-306）会把
+  // 跟「会话绑定行的 bot」走，而不是当前运行方 bot。in_review 亲和会把
   // 成员运行送进项目 owner 的控制面会话：若按运行方套成员策略，applyBotToolPolicy 的
   // 总监专权 deny（宿主 restriction 粘滞、兜底路径丢弃 disposer）会挂在整个 owner 会话上，
   // owner 后续轮次丢 team_assign_task/team_review_task——模型层表现为 unknown tool 连发
@@ -513,7 +513,7 @@ export const sessionMethods = {
     return this.store.get('SELECT * FROM bots WHERE id = ?', botId) ?? fallbackBot
   },
   async ensureSession(bot, project, { run, task, modelOverride } = {} as any) {
-    // 结转摘要运行（DSHBOTS-145）与闲时压缩运行（DSHBOTS-286）：必须回到原会话执行，
+    // 结转摘要运行与闲时压缩运行：必须回到原会话执行，
     // 且不能参与阈值判定——否则这两类运行自己又会触发结转/压缩；solo 摘要运行也没有
     // 项目上下文，不查项目。
     if ((run?.kind === 'rollover_summary' || run?.kind === 'session_compact') && run.session_id) {
@@ -747,7 +747,7 @@ export const sessionMethods = {
     if (existing) {
       const resolved = await liveAgentFor(this.ctx, existing.session_id)
       if (resolved) {
-        // 结转（DSHBOTS-145）：控制面会话长期承接全量流量，照旧阈值判定——摘要就绪即
+        // 结转：控制面会话长期承接全量流量，照旧阈值判定——摘要就绪即
         // alias 化落到下方重建路径，摘要由新会话首轮提示词注入；未就绪补排摘要运行，
         // 本轮继续复用。alias 行不可能走到这里（查询条件 alias=0），幂等由查询保证。
         rolledOver = this.shouldRolloverSession({ bot, project, existing })
@@ -767,12 +767,12 @@ export const sessionMethods = {
             }
           }
           await this.selectModel(existing.session_id, bot, modelOverride)
-          // 闲时压缩（DSHBOTS-286）：复用即「仍在承接流量」，跨过窗口且闲时排队总结压缩。
+          // 闲时压缩：复用即「仍在承接流量」，跨过窗口且闲时排队总结压缩。
           this.maybeCompactSession({ bot, project, existing, currentRunId: run?.id })
           return existing.session_id
         }
       }
-      // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名（DSHBOTS-256）。
+      // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名。
       this.retireBinding(existing.session_id)
     }
     // DSHBOTS-299：建行去重键同样带 project 维度——同 bot 在 A 项目与 solo 域并发首建
@@ -792,7 +792,7 @@ export const sessionMethods = {
       if (this.ctx.sessionTitle?.rename) {
         const liveSession = agent?.agent?.session ?? agent?.session
         if (liveSession) {
-          // 会话列表显示名（DSHBOTS-315）：bot 级会话后缀取 8 位 uuid 前缀——
+          // 会话列表显示名：bot 级会话后缀取 8 位 uuid 前缀
           // 「控制面」在中文语境是生造词，用户看不懂（英文 controller 无妨）。
           // 宿主会话 id 形如 session-<uuid>：先剥 session- 前缀再取 8 位，
           // 否则 slice(0,8) 取到的是字面量 "session-"（显示名变成「xx · session-」）。
@@ -810,7 +810,7 @@ export const sessionMethods = {
         project?.id ?? null,
         new Date().toISOString(),
       )
-      // 结转消费闸（DSHBOTS-213）：新会话成为摘要的唯一注入目标——否则旧会话在摘要就绪
+      // 结转消费闸：新会话成为摘要的唯一注入目标——否则旧会话在摘要就绪
       // 前后被非结转路径顶替（如宿主重启失效）时，替身会话的普通轮次会把摘要提前消费掉。
       if (rolledOver) this.store.setSetting(rolloverPendingKey(bot.id, project?.id ?? null), sessionId)
       await this.selectModel(sessionId, bot, modelOverride)
@@ -848,7 +848,7 @@ export const sessionMethods = {
     let prompt = this.promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId })
     // 任务卡驱动 run 的上下文清单落 run_events（非任务卡 run 没有暂存，直接返回）。
     this.recordContextManifest(run)
-    // recovery note（DSHBOTS-135）：恢复标记已被上面的首条提示词消费，即刻清零——
+    // recovery note：恢复标记已被上面的首条提示词消费，即刻清零
     // 恢复提醒只对「重排队后的第一次执行」注入一次，后续运行回到标准提示词。
     if (Number(run.recovery) === 1) {
       this.store.run('UPDATE runs SET recovery = 0 WHERE id = ?', run.id)
@@ -860,7 +860,7 @@ export const sessionMethods = {
       projectId: project?.id ?? null,
       // 聊天分库（chat-db-split Phase 1）：本运行的正文库（轨迹记账/附图读取用）。
       chatStore: this.chatStoreForRun(run),
-      // 任务归因（DSHBOTS-212）：记账时透传到 usage_events.task_id；
+      // 任务归因：记账时透传到 usage_events.task_id；
       // 非任务运行为 null，沿用既有「无任务归因」口径。
       taskId: run.task_id ?? null,
       started: false,
@@ -880,8 +880,8 @@ export const sessionMethods = {
     this.pending.set(sessionId, pending)
     this.pendingByRun.set(run.id, pending)
     // 运行时效在启动瞬间定格：之后页面改值只影响后续启动的运行，进行中不追溯。
-    // 任务时效要求（DSHBOTS-131）在全局上限内再收紧：到期未完成即超时中止。
-    // review/handle 再走分档收紧（DSHBOTS-302）：min(全局, review_timeout_minutes)。
+    // 任务时效要求在全局上限内再收紧：到期未完成即超时中止。
+    // review/handle 再走分档收紧：min(全局, review_timeout_minutes)。
     const limits = effectiveRunLimits(this.config, key => this.store.setting(key))
     pending.runTimeoutMs = runTimeoutMsForTaskRun({
       run,

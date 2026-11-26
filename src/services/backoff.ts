@@ -1,4 +1,4 @@
-// src/services/backoff.js —— 上游限流退避域（DSHBOTS-38）
+// src/services/backoff.js —— 上游限流退避域
 // provider 限流（424 rate_limit_error 等）常不返回 Retry-After 头，直接重打会把网关打停。
 // 这里按指数退避合成等待时间：1 分钟起步、每次翻倍、30 分钟封顶；确定性无 jitter，便于断言。
 // 合成值只写进 runs.retry_after_ms，复用 plan_wait 等待与到期派生既有机制，不新建并行重试通道。
@@ -6,7 +6,7 @@
 // 视为「等得起的限流」的错误码：缺 Retry-After 时按指数退避合成。
 export const RATE_LIMIT_CODES = new Set(['RATE_LIMIT', 'QUOTA', 'ACCOUNT_QUOTA'])
 
-// ── 额度耗尽（DSHBOTS-99）──────────────────────────────────────────────────
+// ── 额度耗尽──────────────────────────────────────────────────
 // 「达到限额」与「瞬时限流」是两类失败：前者额度窗口用尽，重打多少次都一样，
 // 只能换模型；后者是网关节流，短时间内会自己恢复，退避后重打即可。
 // 额度耗尽一律不做指数退避，改走「切备用模型 → 主备都限额才受阻」。
@@ -91,7 +91,7 @@ export function needsSynthesizedBackoff(error) {
   return isRateLimitError(error) && !(Number(error?.retryAfterMs) > 0)
 }
 
-// ── 网络瞬态失败（DSHBOTS-266）──────────────────────────────────────────────
+// ── 网络瞬态失败──────────────────────────────────────────────
 // provider 网络抖动（连接重置/超时/5xx 等）是过性失败：退避后重打大概率自愈，
 // 直接常规失败转 blocked 等 owner 手动重试是误伤。判定只接住限流/额度分类漏掉的
 // 过性错误——优先级：额度耗尽 > 限流码 > 瞬态（429 仍走限流路径吃服务端 retry_after）。

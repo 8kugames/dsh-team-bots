@@ -9,7 +9,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 
 // DSHBOTS-30：把同项目写并行的闸门行为锁进套件。
-// 走真实 tick() 出队路径（入队 → tick → 数同时 running 的任务运行），
+// 走真实 tick 出队路径（入队 → tick → 数同时 running 的任务运行），
 // 不直接调私有函数绕过出队逻辑；写范围重叠/未声明的语义细节由
 // tests/write-scopes.test.js 在纯函数层覆盖，这里只锁集成行为。
 // DSHBOTS-290：one_active_run_per_bot 下同 bot 至多一条活跃运行，写闸门的

@@ -1,4 +1,4 @@
-// DSHBOTS-148：右侧「活跃任务」栏「进行中」状态标签在摆动（DSHBOTS-122）之上
+// DSHBOTS-148：右侧「活跃任务」栏「进行中」状态标签在摆动之上
 // 再叠一层流光——周期性扫过的高光带（shimmer sheen）。
 // 实现口径：覆盖层用 ::after + linear-gradient（透明→高光→透明）+ translateX 扫过，
 // 只动 transform 不触发布局重排；高光色由既有 token 用 color-mix 合成，零新增色值；

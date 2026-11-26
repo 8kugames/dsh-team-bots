@@ -6,7 +6,7 @@ import { readUiSource } from './helpers/ui-sources.js'
 
 // DSHBOTS-5 工作台信息架构改造：读源码断言（与 terminal-ui.test.js 同模式）。
 const source = readUiSource()
-// NAV/SOLO_NAV 已拆到 modules/state.js（DSHBOTS-15），从模块源码读取。
+// NAV/SOLO_NAV 已拆到 modules/state.js，从模块源码读取。
 const stateSource = readFileSync(fileURLToPath(new URL('../ui/modules/state.js', import.meta.url)), 'utf8')
 
 const NAV = /const NAV = \[([\s\S]*?)\n\]/.exec(stateSource)?.[1] ?? ''

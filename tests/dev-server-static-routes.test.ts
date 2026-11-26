@@ -1,10 +1,10 @@
-// 本地预览静态切片与线上路由对齐（DSHBOTS-127）。
+// 本地预览静态切片与线上路由对齐。
 // 背景（DSHBOTS-124 预览复现）：scripts/dev-server.mjs 不提供 /api/dsh-team/i18n/*
 // 与 /api/dsh-team/vendor/*，而 ui/modules/i18n.js 以相对路径 import '../i18n/<lang>.js'
 // → 浏览器解析成 /api/dsh-team/i18n/<lang>.js，404 让整个 app.js 模块图加载失败，
 // 页面停在 boot screen「正在连接团队空间」。线上 src/http.js 有这些路由，故只在预览复现。
 // 本文件锁三件事：预览静态切片表的内容、它与线上路由不漂移、静态路由 MIME 不漂移。
-// MIME 守门（DSHBOTS-139）：JS 切片 Content-Type 必须精确等于
+// MIME 守门：JS 切片 Content-Type 必须精确等于
 // 'text/javascript; charset=utf-8'——ES 模块按 Content-Type 判定可执行性，
 // 改 MIME 或漏 charset 会让浏览器拒绝执行模块图，页面回退到模块加载失败。
 import test from 'node:test'
@@ -76,11 +76,11 @@ test('JS 路由 Content-Type 精确等于 JS MIME（app.js/modules/静态切片�
 
 test('{{language}} 占位替换路由替换后仍保持精确 MIME（预览与线上同口径）', async () => {
   const dev = await readFile(join(root, 'scripts/dev-server.mjs'), 'utf8')
-  // 预览页面分支：占位替换链挂在 send() 的 body 上，Content-Type 不得随改动漂移。
+  // 预览页面分支：占位替换链挂在 send 的 body 上，Content-Type 不得随改动漂移。
   const devPage = dev.match(/send\(res, 200, '([^']+)', html[\s\S]{0,150}?replaceAll\('\{\{language\}\}', 'auto'\)/)
   assert.ok(devPage, 'scripts/dev-server.mjs 页面分支未找到 {{language}} 替换链')
   assert.equal(devPage[1], HTML_MIME, `dev-server 页面分支 Content-Type 必须精确等于 ${HTML_MIME}`)
-  // 线上 page()：同一替换链，MIME 必须与预览一致。
+  // 线上 page：同一替换链，MIME 必须与预览一致。
   const http = await readFile(join(root, 'src/http.js'), 'utf8')
   const httpPage = http.match(/replaceAll\('\{\{language\}\}', language\), '([^']+)'\)/)
   assert.ok(httpPage, 'src/http.js page() 未找到 {{language}} 替换链')

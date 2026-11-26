@@ -9,7 +9,7 @@ import { TeamService } from '../src/service.js'
 import { recordUsage, usageSnapshot } from '../src/usage.js'
 import { exportUsageCsv, setPrice } from '../src/usage-reconcile.js'
 
-// 用量成本追认（DSHBOTS-115）：入库时没命中价目的历史明细，在价目配齐后按当前价目
+// 用量成本追认：入库时没命中价目的历史明细，在价目配齐后按当前价目
 // 回溯补算——聚合结果即全量，「成本为部分值」随之消失；已计价明细仍用入库算死的成本。
 
 async function withStore(fn) {
@@ -286,7 +286,7 @@ test('CSV 导出与用量页同口径：追认后成本列有值、币种随价�
   })
 })
 
-// 端到端：用量页读的就是 service.state() 的 usage，这里按用户实际操作
+// 端到端：用量页读的就是 service.state 的 usage，这里按用户实际操作
 // （先有历史未计价调用，再在配置里补价格）验证提示消失、成本变全量。
 test('端到端：配置价格后用量页提示消失、成本变全量', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-reprice-e2e-'))

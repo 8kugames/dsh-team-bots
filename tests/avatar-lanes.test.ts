@@ -1,4 +1,4 @@
-// tests/avatar-lanes.test.js —— 争用口径 A（DSHBOTS-289/290）后的串行守门。
+// tests/avatar-lanes.test.js —— 争用口径 A后的串行守门。
 // DSHBOTS-308：串行域收窄为 (bot, 工作区)，domain = project_id ?? '~solo'——
 // 同 bot 同工作区互斥：忙时入站消息不落 runs 行，挂 settings 键 bot_pending_msgs:<bot>:<domain>，
 // 空闲后 drainPendingMessages 合批建回；同一 bot 跨工作区并行（键不同即不互斥），跨 bot 并行不受限。
@@ -91,7 +91,7 @@ test('claimKey 键位守门（新语义）：每类运行收敛到 (bot, 工作�
     const handleTask = await service.createTask({ projectId: project.id, title: '受阻任务', assigneeBotId: dev.id })
     const key = (run) => service.claimKey(run)
 
-    // 串行域 = (bot, 工作区)（DSHBOTS-308）：chat/review/handle/memory_review/vision/
+    // 串行域 = (bot, 工作区)：chat/review/handle/memory_review/vision/
     // solo_chat/dm 全部收敛到 bot:<bot_id>:<域>；施工运行（kind='task'）豁免 bot 串行域
     // （单 bot 多任务并行），串行键按任务维度 task:<task_id>（one_active_run_per_task 同口径）。
     for (const seeded of [

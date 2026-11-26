@@ -52,7 +52,7 @@ test('前端接线锁：展示位走 tildePath，data-copy/title/copyPath 保留
 
   const settings = read('ui/modules/settings.js')
   // D-186 卡面口径的「当前生效」行仍在 settings.js；DSH 路径卡的「工作区」行随关于内容
-  // 回迁 settings.js（DSHBOTS-200），缩写与完整路径复制语义不变。DSHBOTS-357 补齐 DSH 路径卡
+  // 回迁 settings.js，缩写与完整路径复制语义不变。DSHBOTS-357 补齐 DSH 路径卡
   // 其余三行（dshHome/skillRoot/dataDir）与「管理数据」行：六个 pathCode 展示位全部缩写。
   assert.equal(count(settings, 'pathCode(tildePath('), 6, 'settings.js 六处路径展示位缩写（当前生效 + DSH 路径卡四行 + 管理数据）')
   assert.ok(settings.includes('copyPath(project.workspace_path)'), '当前生效的复制必须保留完整路径')

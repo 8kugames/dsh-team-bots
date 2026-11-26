@@ -98,7 +98,7 @@ test('回填迁移：done 空行补 completed_at=updated_at，已有值不动，
        VALUES ('task_kept_done', ?, 998, '已有值', 'done', 'user', 'u', ?, ?, '1999-01-01T00:00:00.000Z')`,
       project.id, stamp, stamp,
     )
-    // initialize() 已登记过迁移名：先抹掉，模拟迁移前的库再跑。
+    // initialize 已登记过迁移名：先抹掉，模拟迁移前的库再跑。
     store.run("DELETE FROM schema_migrations WHERE name = 'tasks_terminal_time_backfill'")
 
     ensureTaskTerminalTimeBackfill(store)

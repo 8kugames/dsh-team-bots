@@ -51,7 +51,7 @@
 .avatar.gray {
     --av: var(--c-gray);
 }
-/* 像素块头像（DSHBOTS-221）：identicon SVG 占头像块内 72%，颜色继承 var(--av)。 */
+/* 像素块头像：identicon SVG 占头像块内 72%，颜色继承 var(--av)。 */
 .avatar .identicon {
     width: 72%;
     height: 72%;

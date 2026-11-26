@@ -24,7 +24,7 @@ function approvalRuleChips(rule: Record<string, string>) {
 
 function renderApprovalPermissionsCard() {
   const rules = (state.data?.approvalRules ?? []) as Array<Record<string, string>>
-  // 完全权限总开关（DSHBOTS-366）：卡顶独立开关行，开关态随 state.approvalFullAccess 下发。
+  // 完全权限总开关：卡顶独立开关行，开关态随 state.approvalFullAccess 下发。
   const fullAccess = Boolean(state.data?.approvalFullAccess)
   return `
     <section class="perm-section">

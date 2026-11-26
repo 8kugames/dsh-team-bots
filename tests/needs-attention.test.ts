@@ -1,5 +1,5 @@
 // tests/needs-attention.test.ts —— A2+B9/DSHBOTS-322：needs-attention 聚合守门。
-// health() 与 state 同源消费 needsAttentionView：待审/待答/待验收/滞留卡计数 + 系统问题
+// health 与 state 同源消费 needsAttentionView：待审/待答/待验收/滞留卡计数 + 系统问题
 // 条目（outbox 投递耗尽、微信通道异常）。反双真值：只读聚合，不改状态真值。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -79,7 +79,7 @@ test('needsAttentionView 汇总四类需要人计数与系统问题条目', asyn
     const wechatIssue = view.issues.find(issue => issue.kind === 'wechat_channel')
     assert.equal(wechatIssue.phase, 'needs_reauth')
 
-    // health() 与聚合同源（外部巡检口径）。
+    // health 与聚合同源（外部巡检口径）。
     const health = await service.health()
     assert.deepEqual(health.needsAttention, view)
   } finally {

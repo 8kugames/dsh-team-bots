@@ -1,4 +1,4 @@
-// ui/i18n/en/tasks.ts —— English copy dictionary: tasks domain (DSHBOTS-233)
+// ui/i18n/en/tasks.ts —— English copy dictionary: tasks domain
 export default {
   // Task statuses (STATUS table mapping)
   "status.backlog": "Backlog",
@@ -31,11 +31,11 @@ export default {
   "dm.replied": "Replied",
   "dm.failed": "Failed",
   "dm.repliedAt": "Replied at ${time}",
-  // Task time budget (DSHBOTS-129)
+  // Task time budget
   "taskForm.timeBudgetLabel": "Time budget (minutes, optional)",
   "task.timeBudgetValue": "${minutes} min",
   "task.timeBudgetNote": "Hard limit: the run is aborted on expiry; the shorter of this budget and the global run timeout applies",
-  // Task rejection (DSHBOTS-141): terminal tasks back to backlog
+  // Task rejection : terminal tasks back to backlog
   "task.rejectAction": "Reject",
   "task.rejectTitle": "Move a done/canceled task back to the backlog; terminal timestamps are cleared",
   "task.rejectConfirm": "Move \"${title}\" back to the backlog?",
@@ -186,7 +186,7 @@ export default {
   "移出项目": "from the project",
   "空闲中": "Idle",
   "系统设置已保存": "System settings saved",
-  // Settings conflict 3-way merge (B2/DSHBOTS-325)
+  // Settings conflict 3-way merge
   "配置已被他人修改，以下字段双方都改过、以最新保存为准，请复核：": "Settings were changed by someone else; these fields were edited on both sides and keep the latest saved values, please review: ",
   "配置已被他人修改：你的改动未与对方冲突，已合并回表单，请重新保存": "Settings were changed by someone else; your edits do not conflict and were merged back into the form, please save again",
   "配置已被他人修改，本次没有待保存的改动": "Settings were changed by someone else; there was nothing pending to save",
@@ -227,7 +227,7 @@ export default {
   "项目级密钥必须选择项目": "Project-level keys require a project",
   "项目设置已保存": "Project settings saved",
   "（": " (",
-  // DSHBOTS-246: keys added by the full t() literal audit
+  // DSHBOTS-246: keys added by the full t literal audit
   "（待办不含已取消）": " (todo excludes canceled)",
   "，按": "; ",
   // DSHBOTS-345: deliverables declaration on the task card
@@ -238,7 +238,7 @@ export default {
   "文件较大，已截断，仅显示开头部分。": "Large file; showing a truncated head only.",
   "新窗口打开": "Open in new window",
   "加载文件失败：": "Failed to load file: ",
-  // Task card context menu (DSHBOTS-367): keyboard cross-column move
+  // Task card context menu : keyboard cross-column move
   "task.moveMenuLabel": "Move to",
   // Task Goal (versioned anchor): entry fields in the new-task modal, version display and editing in the task detail modal
   "目标陈述": "Goal statement",

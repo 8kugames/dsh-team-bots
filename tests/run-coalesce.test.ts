@@ -203,7 +203,7 @@ test('跨项目/跨 kind 不合批（DSHBOTS-308 域化）：跨工作区消息�
     const betaRunId = t.service.enqueueChatRun(beta, t.dev, m2)
     const soloId = t.service.insertSoloMessage({ botId: t.dev.id, senderType: 'user', senderId: 'u1', body: '单聊消息' })
     const soloRunId = t.service.enqueueSoloChatRun(t.dev, soloId)
-    // 串行域=(bot,工作区)（DSHBOTS-308）：跨工作区不被本工作区占道阻塞——两条直接建行，
+    // 串行域=(bot,工作区)：跨工作区不被本工作区占道阻塞——两条直接建行，
     // 不落本 bot 的挂起队列（本域队列为空）。
     assert.ok(betaRunId, '跨工作区消息不受本工作区占道阻塞，直接建行')
     assert.ok(soloRunId, '单聊域独立，不受群聊域占道阻塞')
@@ -359,7 +359,7 @@ test('跨项目同 kind 不合批（回归·DSHBOTS-308 域化）：同域挂起
     const mBeta = say(t.service, beta.id, 'BET 第一条')
     assert.equal(t.service.enqueueChatRun(t.project, t.dev, mCoa), null, '同域忙时 COA 消息挂起')
     const betaRunId = t.service.enqueueChatRun(beta, t.dev, mBeta)
-    // 跨域并行（DSHBOTS-308）：BET 消息不因 COA 域占道而挂起，直接建行。
+    // 跨域并行：BET 消息不因 COA 域占道而挂起，直接建行。
     assert.ok(betaRunId, '跨域消息直接建行，不挂起')
     assert.deepEqual(heldItems(t).map(item => item.messageId), [mCoa], '只有同域 COA 消息挂起')
     assert.equal(t.store.get('SELECT project_id FROM runs WHERE id = ?', betaRunId).project_id, beta.id, 'BET 运行落 BET 域')

@@ -42,11 +42,11 @@ export function parseWriteScopes(input) {
     if (!scopes.includes(path)) scopes.push(path)
   }
   // package.json 由版本钩子机械改动（.githooks/pre-commit 每次提交 bump patch 位），
-  // 不纳入写范围锁（DSHBOTS-133）：声明出口直接剥掉，新任务从源头不带它。
+  // 不纳入写范围锁：声明出口直接剥掉，新任务从源头不带它。
   return scopes.filter(scope => scope !== 'package.json')
 }
 
-// 派单清洗（DSHBOTS-168）第一步：对已归一的写范围清单按项目工作目录跑 git check-ignore，
+// 派单清洗第一步：对已归一的写范围清单按项目工作目录跑 git check-ignore，
 // 机械剔除命中忽略规则的条目——被 .gitignore 整体忽略的路径没有写保护价值，留着只会
 // 制造假声明。口径与 captureRunArtifacts 一致：--no-index 纯按规则匹配（已跟踪但被
 // ignore 的路径同样命中）、退出码 0/1 均正常；目录不存在、非 git 仓库、git 不可用或
@@ -151,7 +151,7 @@ export function writeScopesOverlap(a, b) {
   return left.some(x => right.some(y => writeScopePathsOverlap(x, y)))
 }
 
-// 写范围锁豁免（DSHBOTS-133）：package.json 是版本钩子的机械改动（pre-commit 每次提交
+// 写范围锁豁免：package.json 是版本钩子的机械改动（pre-commit 每次提交
 // bump patch 位），任何任务都会碰它，纳入写范围会让同项目所有写运行两两判交叠、全队列串行。
 // 闸门比对前用它过滤双侧：只剥路径恰为 'package.json' 的条目，scripts/、src/ 等不受影响。
 // 入参口径与 readWriteScopes 一致（数组或库里快照），过滤后为空即按「未声明」保守串行。

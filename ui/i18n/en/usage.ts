@@ -1,6 +1,6 @@
-// ui/i18n/en/usage.ts —— English copy dictionary: usage domain (DSHBOTS-233)
+// ui/i18n/en/usage.ts —— English copy dictionary: usage domain
 export default {
-  // Usage page (DSHBOTS-204): source-assertion tests lock some Chinese copy literals, so those entries key on the source text itself; display goes through t() so language switching follows.
+  // Usage page : source-assertion tests lock some Chinese copy literals, so those entries key on the source text itself; display goes through t so language switching follows.
   "汇总窗口": "Summary window",
   "总 tokens（${scope}）": "Total tokens (${scope})",
   "调用次数（${scope}）": "Calls (${scope})",

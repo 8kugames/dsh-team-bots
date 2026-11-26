@@ -670,7 +670,7 @@ test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/han
 })
 
 // 子代理施工硬闸解除守门（原 DSHBOTS-311 撤销）：亲做交付不再要求 subagent_spawned
-// 账目——无账目照转 in_review，治强制子代理造成的施工堵塞；子代理账本（D-294）仍照记。
+// 账目——无账目照转 in_review，治强制子代理造成的施工堵塞；子代理账本仍照记。
 test('硬闸解除：无子代理账目亲做交付照转 in_review', async () => {
   const t = await setup()
   try {
@@ -709,7 +709,7 @@ test('硬闸解除源码锚：交付链无闸痕迹，提示词无强制每卡�
 })
 
 // DSHBOTS-306 验收期亲和改判 owner：任务 in_review 后卡线程消息按 assignee 任务亲和
-// （D-286）落承接 bot 会话，而验收动作 team_review_task 仅 owner bot 可调（D-190）——
+// 落承接 bot 会话，而验收动作 team_review_task 仅 owner bot 可调
 // 指令路由与动作权限错位，每卡绕一步。守门四向：①in_review 亲和改判项目 owner bot 的
 // 控制面绑定（优先于 runs 归属/结转亲和）；②in_progress 维持 assignee 亲和（含结转后
 // alias 旧会话，D-286 不回归）；③done 无亲和不变；④退回 todo 恢复 assignee 亲和。

@@ -47,7 +47,7 @@ export const proposalsMethods = {
     }
     if (kind === 'skill' && !input.payload?.content) throw badRequest('技能提案必须包含内容')
     const payload = input.payload ?? {}
-    // 融合稿闸门（DSHBOTS-271）：bot_update 带 instructions 时按当前原稿校验保留率；skill 提案不经过此闸门。
+    // 融合稿闸门：bot_update 带 instructions 时按当前原稿校验保留率；skill 提案不经过此闸门。
     if (kind === 'bot_update' && payload.instructions !== undefined) {
       assertMergeDraft(this.botRow(input.botId).instructions, payload.instructions)
     }
@@ -79,7 +79,7 @@ export const proposalsMethods = {
       const before = bot[field] ?? null
       if (String(before ?? '') === String(payload[field] ?? '')) continue
       const entry: { from: unknown; to: unknown; firstInstructions?: boolean } = { from: before, to: payload[field] }
-      // 首次立指令留痕（DSHBOTS-271）：原 instructions 为空时融合闸门放行，diff 标记首立。
+      // 首次立指令留痕：原 instructions 为空时融合闸门放行，diff 标记首立。
       if (field === 'instructions' && !String(before ?? '').trim()) entry.firstInstructions = true
       diff[field] = entry
     }
@@ -165,7 +165,7 @@ export const proposalsMethods = {
   },
   async applyProposal(proposal, payload, canary, actor) {
     if (proposal.kind === 'bot_update') {
-      // 应用侧复核（DSHBOTS-271）：审批落地前按 bots.instructions 当前值重跑同一闸门——
+      // 应用侧复核：审批落地前按 bots.instructions 当前值重跑同一闸门
       // 创建提案后原指令可能已被 updateBot 直改通道改写，此处防过期的融合稿或绕过创建路径的纯替换稿落地。
       if (payload.instructions !== undefined) {
         assertMergeDraft(this.botRow(proposal.bot_id).instructions, payload.instructions)

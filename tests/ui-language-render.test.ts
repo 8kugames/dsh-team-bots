@@ -1,6 +1,6 @@
-// 全局配置页「界面语言」下拉的真实渲染守门（DSHBOTS-162）。
+// 全局配置页「界面语言」下拉的真实渲染守门。
 // tests/ui-language.test.js 覆盖解析优先级与保存链路；本文件补上「UI 真的渲染出来」这层：
-// 用最小 DOM 桩真实导入 ui/modules/settings.js 并调用 renderGlobal()，断言下拉存在、
+// 用最小 DOM 桩真实导入 ui/modules/settings.js 并调用 renderGlobal，断言下拉存在、
 // 三选项齐全、按保存值选中，且 label/hint/按钮随当前语言换字典（i18n 键真实生效）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -20,8 +20,8 @@ function stopTimers() {
   intervalIds.clear()
 }
 
-// settings.js 的模块图会拉起 app.js（顶层 void init() + 若干 window/document 监听），
-// node 下给最小桩即可：init() 内部自 catch，桩不满足时走 bootError 兜底，不影响 renderGlobal()。
+// settings.js 的模块图会拉起 app.js（顶层 void init + 若干 window/document 监听），
+// node 下给最小桩即可：init 内部自 catch，桩不满足时走 bootError 兜底，不影响 renderGlobal。
 function stubDom() {
   const fakeEl = () => ({
     style: {}, dataset: {}, children: [], childNodes: [],
@@ -87,7 +87,7 @@ test('全局配置页渲染界面语言下拉：三选项 + 按保存值选中 +
   const { state } = await import(pathToFileURL(join(root, 'ui/modules/state.js')).href)
   const settings = await import(pathToFileURL(join(root, 'ui/modules/settings.js')).href)
   const { setLanguage } = await import(pathToFileURL(join(root, 'ui/modules/i18n.js')).href)
-  // app.js 的 void init() 在导入期异步跑过并可能把 state.data 置空，故导入后再铺数据。
+  // app.js 的 void init 在导入期异步跑过并可能把 state.data 置空，故导入后再铺数据。
   state.view = 'global'
   state.projectId = null
   state.data = {
@@ -107,7 +107,7 @@ test('全局配置页渲染界面语言下拉：三选项 + 按保存值选中 +
   assert.match(html, /value="en" selected/, '保存值为 en 时 en 选项应选中')
   assert.match(html, /data-action="save-ui-language"/, '应有保存按钮走 save-ui-language')
 
-  // i18n 真实生效：切到 en 后同一份 renderGlobal() 输出换字典。
+  // i18n 真实生效：切到 en 后同一份 renderGlobal 输出换字典。
   setLanguage('en')
   const htmlEn = settings.renderGlobal()
   assert.match(htmlEn, /UI language/, '英文 label')

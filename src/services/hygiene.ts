@@ -1,4 +1,4 @@
-// src/services/hygiene.js —— 代码卫生域（DSHBOTS-172）
+// src/services/hygiene.js —— 代码卫生域
 // 单文件行数约定：项目设置 code_hygiene_limit_lines（NULL = 默认 800，0 = 关闭）。
 // 每轮运行结束（run-finish 钩子）扫描项目工作区内的文本源码文件，超过约定上限
 // 110% 即向项目群发一条系统告警消息（前缀按 locale：缺省 [SYSTEM ALERT]，中文环境
@@ -139,7 +139,7 @@ export const hygieneMethods = {
       if (toAlert.length > 0) {
         const listed = toAlert.slice(0, CODE_HYGIENE_LIST_MAX)
         const more = toAlert.length - listed.length
-        // 前缀按 locale 落库（DSHBOTS-228）：缺省英文 [SYSTEM ALERT]，中文环境【系统指令】。
+        // 前缀按 locale 落库：缺省英文 [SYSTEM ALERT]，中文环境【系统指令】。
         const alertPrefix = systemAlertLabel(messageLocale(this.config, key => this.store.setting(key), this.runtime?.ctx?.get?.('loader')))
         const body = [
           `${alertPrefix}代码卫生告警：${toAlert.length} 个文件超过单文件行数约定（约定上限 ${limit} 行，判定线 ${threshold} 行 = ${Math.round(CODE_HYGIENE_OVER_RATIO * 100)}%）。`,

@@ -125,7 +125,7 @@ test('② /tr <key>: 显式直达项目群聊（管理员身份插群 + wechat �
     assert.equal(run.project_id, projectId, '直达运行落项目域')
     assert.equal(run.bot_id, director.id, '无 @ 兜底定向 owner bot')
     assert.equal(run.trigger_type, 'wechat', '微信直达运行打 wechat 标记（回程推送依据）')
-    // 争用口径 A（DSHBOTS-289/308）：同 bot 同域至多一条活跃运行——首条置终态腾出
+    // 争用口径 A：同 bot 同域至多一条活跃运行——首条置终态腾出
     // (director, JHY) 域槽，第二条 /tr 才能再建行。
     store.run(
       "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?",

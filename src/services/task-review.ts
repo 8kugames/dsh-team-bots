@@ -18,7 +18,7 @@ export const taskReviewMethods = {
     const { project, actor } = this.ownerContextFor(sessionId)
     if (!['accept', 'return'].includes(input.decision)) throw badRequest('验收结果只能是 accept 或 return')
     const task = this.resolveBotTask(project, input.task)
-    // 验收机械闸（DSHBOTS-318）只拦真验收动作（in_review 卡）：非待验收状态保持既有
+    // 验收机械闸只拦真验收动作（in_review 卡）：非待验收状态保持既有
     // 校验顺序，仍由 applyReview 抛 in_review conflict，闸不抢跑。
     if (task.status === 'in_review') {
       this.assertReviewSubagentVerified(sessionId, project, task, input.comment)
@@ -47,7 +47,7 @@ export const taskReviewMethods = {
     return effectiveSandbox(run, bot, task, this.fullAccessAllEnabled()).mode === 'read-only'
   },
 
-  // 验收机械闸（DSHBOTS-318/353）：把「验收必须经由子代理」从提示约束升级为机械约束——
+  // 验收机械闸：把「验收必须经由子代理」从提示约束升级为机械约束
   // owner bot 的 team_review_task 前置校验本评审周期内的核验证据，证据认两种形态：
   // ① 委派核验闭环：本任务上 review_delegate 运行已跑完（承接人可能是成员 reviewer，
   //    结论由 finishRun 写回任务评论）——核验外包后的正规路径，不要求承接人再派子代理；
@@ -59,7 +59,7 @@ export const taskReviewMethods = {
   // 走 applyReview，不经过本闸。
   assertReviewSubagentVerified(sessionId, project, task, comment) {
     if (comment?.includes('兜底验收')) return
-    // run_events 住各运行归属的聊天库（Phase 3）：先筛 runs 再逐运行查归属库，量级与旧「当运行」查询相同。
+    // run_events 住各运行归属的聊天库：先筛 runs 再逐运行查归属库，量级与旧「当运行」查询相同。
     const windowStart = this.groupChatStore(task.project_id).get(
       `SELECT MAX(created_at) AS t FROM task_events WHERE task_id = ?
         AND (type = 'run_succeeded' OR (type = 'status' AND json_extract(data_json, '$.to') = 'in_review'))`,
@@ -178,7 +178,7 @@ export const taskReviewMethods = {
       if (!reason) throw badRequest('退回任务必须说明原因')
       if (!task.assignee_bot_id) throw conflict(`任务 ${identifier} 没有负责人，无法退回重做`)
       this.recordReviewGoalCheck(task, actor, decision, comment)
-      // 退回重做回到「进行中」：走 updateTask 内的统一触发点（DSHBOTS-100）——
+      // 退回重做回到「进行中」：走 updateTask 内的统一触发点
       // 通知负责人并入队重跑，运行触发类型沿用 returned；
       // 总监验收运行仍在进行时触发点会跳过（不重复开工），由其结束时的收尾逻辑补排。
       await this.updateTask(task.id, { status: 'in_progress' }, actor, { startTriggerType: 'returned' })
@@ -208,7 +208,7 @@ export const taskReviewMethods = {
     return this.runView(this.runRow(runId))
   },
 
-  // 写范围修改（DSHBOTS-151）：owner-only 编辑任务的写范围声明，并把排队中的写运行快照一并刷新——
+  // 写范围修改：owner-only 编辑任务的写范围声明，并把排队中的写运行快照一并刷新
   // 调度闸门消费的是入队时的运行快照（enqueueTaskRun），只改任务表不改快照对下一拍调度无效。
   // running 写运行拒改：其快照正被闸门与执行中的会话消费，强改会制造「声明与执行不符」。
   async taskUpdateScopes(taskId, writeScopesInput, actor = this.actor()) {
@@ -260,7 +260,7 @@ export const taskReviewMethods = {
     )
   },
 
-  // 核验委派共享入口（DSHBOTS-113）：手动按钮（taskReviewDelegate）与交付后自动委派
+  // 核验委派共享入口：手动按钮（taskReviewDelegate）与交付后自动委派
   // （review_delegate_auto outbox）走同一实现，守卫（待验收状态 / 可用总监 / one_active
   // 幂等复看）与运行形态（kind='review', mode='read', trigger='review_delegate'）完全一致。
   // 返回 { runId, reused }；不满足守卫时抛 conflict，由调用方决定阻塞还是留痕重试。
@@ -272,7 +272,7 @@ export const taskReviewMethods = {
       ? this.store.get("SELECT * FROM bots WHERE id = ? AND status = 'active'", project.owner_bot_id)
       : null
     if (!owner) throw conflict(`项目 ${project.name} 没有可用的总监 Bot，无法委派核验`)
-    // 核验承接人：优先成员 reviewer（DSHBOTS-365），无则总监兜底。
+    // 核验承接人：优先成员 reviewer，无则总监兜底。
     const verifier = this.reviewDelegateBotFor(project) ?? owner
     const active = this.store.get(
       "SELECT id, trigger_type FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
@@ -290,7 +290,7 @@ export const taskReviewMethods = {
     const routeProvider = routing.mode === 'fallback' ? routing.provider : null
     const routeModel = routing.mode === 'fallback' ? routing.model : null
     const routeEffort = routing.mode === 'fallback' ? routing.effort : null
-    // busy 闸（DSHBOTS-290）：承接人忙时不落 runs 行（撞 one_active_run_per_bot），挂待
+    // busy 闸：承接人忙时不落 runs 行（撞 one_active_run_per_bot），挂待
     // 处理队列空闲建回（insertHeldMessageRun 的 owner_task 分支）；返回 deferred 让
     // 手动入口与 outbox 自动入口都能感知「已挂起」而非失败。
     const hold = () => this.holdPendingMessage(verifier.id, project.id, {
@@ -342,7 +342,7 @@ export const taskReviewMethods = {
     return { runId, reused: false }
   },
 
-  // 自动委派开关（DSHBOTS-113）：默认开，DSH_TEAM_AUTO_REVIEW_DELEGATE=0 关闭回到纯手动。
+  // 自动委派开关：默认开，DSH_TEAM_AUTO_REVIEW_DELEGATE=0 关闭回到纯手动。
   autoReviewDelegateEnabled() {
     return bool(this.config.autoReviewDelegate, true)
   },

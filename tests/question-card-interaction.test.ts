@@ -153,7 +153,7 @@ function loadModule(source, stubs) {
     querySelectorAll: () => [],
   }
   const globals = {
-    // DSHBOTS-220：源码已 t() 化，求值沙箱需注入 t（测试只关心链路，文案回键本身即可）
+    // DSHBOTS-220：源码已 t 化，求值沙箱需注入 t（测试只关心链路，文案回键本身即可）
     t: (key) => key,
     document: documentStub,
     window: { addEventListener: noop, confirm: () => false, open: noop, prompt: () => null },

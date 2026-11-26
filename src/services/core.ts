@@ -49,7 +49,7 @@ export const coreMethods = {
       // 密钥与数据库对不上就在启动时暴露，别等到第一次写密文才炸。
       this.ensureSecretBox()
       await this.ensureSoloWorkspaces()
-      // 版本历史存量收敛（DSHBOTS-336）：每个 bot 的超额行同口径先入档再删；
+      // 版本历史存量收敛：每个 bot 的超额行同口径先入档再删；
       // 已收敛的库查不出超额行，空转零写入。单个 bot 失败只告警，下次启动重试。
       for (const bot of this.store.all('SELECT id FROM bots')) {
         try {
@@ -63,7 +63,7 @@ export const coreMethods = {
          ON CONFLICT(id) DO NOTHING`,
         this.localUserId, 'Owner', nowIso(),
       )
-      // 存量收敛（DSHBOTS-341）：旧库本地用户显示名是默认哨兵 'You'，一次性改为 'Owner'；
+      // 存量收敛：旧库本地用户显示名是默认哨兵 'You'，一次性改为 'Owner'；
       // 只认哨兵值，用户自定义名不覆盖；已收敛的库匹配不到行，幂等零副作用。
       this.store.run(
         `UPDATE users SET name = 'Owner' WHERE id = ? AND name = 'You'`,
@@ -104,7 +104,7 @@ export const coreMethods = {
       this.ensureSettings()
       // 恢复标记列由恢复域自管迁移（db.js 不加行）；列必须先在，下面的置位 UPDATE 才能写。
       ensureRecoverySchema(this.store)
-      // 结转支撑索引（DSHBOTS-145）由结转域自管迁移（db.js 不加索引）。
+      // 结转支撑索引由结转域自管迁移（db.js 不加索引）。
       ensureRolloverSchema(this.store)
       const interrupted = this.store.all("SELECT id FROM runs WHERE status = 'running'")
       this.store.run(
@@ -125,15 +125,15 @@ export const coreMethods = {
       ensureMessageImagesSchema(this.store)
       // 任务取消时间列由任务域自管迁移：加 canceled_at 并回填老数据（db.js 不加行）。
       ensureTaskTimesSchema(this.store)
-      // 终态时间历史空行回填（DSHBOTS-69）：done/canceled 存量行缺终态列的补 updated_at。
+      // 终态时间历史空行回填：done/canceled 存量行缺终态列的补 updated_at。
       ensureTaskTerminalTimeBackfill(this.store)
-      // 派发沙箱覆盖列（DSHBOTS-156）：tasks.sandbox_override，缺省 NULL=跟随 bot 配置档。
+      // 派发沙箱覆盖列：tasks.sandbox_override，缺省 NULL=跟随 bot 配置档。
       ensureTaskSandboxSchema(this.store)
       // 任务卡 Goal 锚点四列（目标陈述/完成标准/版本/父目标版本快照），缺省 NULL = 本卡没有 Goal。
       ensureTaskGoalSchema(this.store)
-      // 微信入站 Trigger 留痕表（B4-①/DSHBOTS-328）：幂等迁移，通道未启用也不碍事。
+      // 微信入站 Trigger 留痕表：幂等迁移，通道未启用也不碍事。
       ensureWechatTriggerSchema(this.store)
-      // 外部触发留痕表（B4-②/DSHBOTS-335）：GitHub 源的 (source, external_id) 已见集合。
+      // 外部触发留痕表：GitHub 源的 (source, external_id) 已见集合。
       ensureExternalTriggerSchema(this.store)
       // 聊天分库 Phase 1（docs/plans/chat-db-split.md）：messages/solo_messages/
       // message_images/run_trajectory 一次性迁入各聊天库；账本闸保证只跑一次，
@@ -149,7 +149,7 @@ export const coreMethods = {
           nowIso(),
         )
       }
-      // 挂载决策按生效开关（DSHBOTS-334）：通道页 settings 显式值 > patch.yml/env 默认。
+      // 挂载决策按生效开关：通道页 settings 显式值 > patch.yml/env 默认。
       if (this.wechatChannelEnabled()) {
         // 微信通道是可选集成，其 vendor 依赖按需加载：缺失或损坏时只降级该通道，
         // 不应让整个插件加载失败、工作台路由全部不可用。
@@ -214,7 +214,7 @@ export const coreMethods = {
   budgetCurrency() {
     return String(this.store.setting('budget_currency', 'CNY') || 'CNY').toUpperCase()
   },
-  // 设置页乐观并发令牌（B2/DSHBOTS-325）：updateSettings 每次成功保存 +1，
+  // 设置页乐观并发令牌：updateSettings 每次成功保存 +1，
   // UI 保存时携带读取时的值，不匹配即 conflict 409（多标签/多人同时改不静默互覆）。
   // 只覆盖 settingsView 键域；prompt_overrides 是独立编辑面，不混入本令牌。
   settingsRevision() {
@@ -242,7 +242,7 @@ export const coreMethods = {
   // 生效值与保存值分开：inputs 回填保存值，卡头显示生效值。
   runLimitsView() {
     const limits = effectiveRunLimits(this.config, key => this.store.setting(key))
-    // 验收滞留阈值（DSHBOTS-194）随行透出：任务卡滞留 badge 据此着色，与后端守门同源。
+    // 验收滞留阈值随行透出：任务卡滞留 badge 据此着色，与后端守门同源。
     const { minutes: reviewIdleMinutes } = effectiveReviewIdleMinutes(this.config, key => this.store.setting(key))
     return {
       runTimeoutMinutes: Math.round(limits.runTimeoutMs / 60_000),
@@ -250,13 +250,13 @@ export const coreMethods = {
       runTimeoutEnv: limits.runTimeoutEnv,
       stallTimeoutEnv: limits.stallTimeoutEnv,
       reviewIdleMinutes,
-      // 验收分档时效（DSHBOTS-364）：默认 0 = 关闭分档、跟随全局；设置页随行回显。
+      // 验收分档时效：默认 0 = 关闭分档、跟随全局；设置页随行回显。
       reviewTimeoutMinutes: effectiveReviewTimeoutMinutes(key => this.store.setting(key)),
       reviewTimeoutEnv: envExplicit('DSH_TEAM_REVIEW_TIMEOUT_MINUTES'),
     }
   },
   updateSettings(patch, actor = this.actor(), expectedRevision = undefined) {
-    // 乐观并发（B2/DSHBOTS-325）：UI 带上读取时的 revision，不一致即 409——后保存者
+    // 乐观并发：UI 带上读取时的 revision，不一致即 409——后保存者
     // 不静默覆盖先保存者的改动。不带 revision 的旧调用形态保持原行为（兼容脚本/旧 UI）。
     if (expectedRevision !== undefined && expectedRevision !== null && String(expectedRevision) !== '') {
       if (Number(expectedRevision) !== this.settingsRevision()) {
@@ -294,7 +294,7 @@ export const coreMethods = {
       }
       values[key] = String(num)
     }
-    // 验收滞留守门三键（DSHBOTS-194/235）：阈值 0–1440（0 = 关闭）；自动收口 0/1；
+    // 验收滞留守门三键：阈值 0–1440（0 = 关闭）；自动收口 0/1；
     // 二次催办倍数 2–10。空串 = 清除保存值回退默认，与运行时效同口径。
     {
       const [idleMin, idleMax] = REVIEW_IDLE_MINUTES_RANGE
@@ -308,7 +308,7 @@ export const coreMethods = {
       }
     }
     if (values[REVIEW_AUTO_CLOSE_KEY] !== undefined && values[REVIEW_AUTO_CLOSE_KEY] !== '') {
-      // 三态（B3/DSHBOTS-326）：0 关闭 / observe 干跑（判定留痕不收口）/ 1 开启。
+      // 三态：0 关闭 / observe 干跑（判定留痕不收口）/ 1 开启。
       if (!['0', '1', 'observe'].includes(values[REVIEW_AUTO_CLOSE_KEY])) {
         throw badRequest(`${REVIEW_AUTO_CLOSE_KEY} 必须是 0、observe 或 1`)
       }
@@ -324,7 +324,7 @@ export const coreMethods = {
         values[key] = String(num)
       }
     }
-    // UI 语言（DSHBOTS-162）：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
+    // UI 语言：auto = 跟随 DSH 宿主（缺省），zh/en = 显式覆盖。
     // 非法输入 badRequest，不静默钳制（与运行时效同口径）；外部写入的非法值由
     // effectiveUiLanguage 收敛回 'auto'。
     if (values[UI_LANGUAGE_KEY] !== undefined) {
@@ -342,7 +342,7 @@ export const coreMethods = {
     }
     this.store.transaction(() => {
       for (const [key, value] of Object.entries(values)) this.store.setSetting(key, value)
-      // 乐观并发令牌随保存推进（B2/DSHBOTS-325）：settings_revision 不是 settingsView 键，
+      // 乐观并发令牌随保存推进：settings_revision 不是 settingsView 键，
       // 不可经 patch 直接写，只在这里单调递增。
       this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
       // A4/DSHBOTS-330 修复：此前本行是六参误用（audit 只收五参），values 被静默丢弃、
@@ -365,7 +365,7 @@ export const coreMethods = {
     return { rows: runtimeSettingsRows(this.baseConfig ?? this.config, key => this.store.setting(key)) }
   },
 
-  // 可编辑提示词段（B1/DSHBOTS-324）：只读视图。defaultChanged = 覆盖保存时的内置默认
+  // 可编辑提示词段：只读视图。defaultChanged = 覆盖保存时的内置默认
   // 指纹与当前默认不一致（升级改了默认文本），UI 据此给「保留我的文本 / 恢复新默认」取舍。
   promptSegmentsView() {
     const overrides = parsePromptOverrides(this.store.setting('prompt_overrides', ''))
@@ -388,7 +388,7 @@ export const coreMethods = {
 
   // 保存/恢复一个提示词段：空文本或与默认一致 = 恢复默认（删覆盖）；有覆盖走预算校验
   // （拆卡三段 ≤1200 与 tests/prompt-budget 同口径）+ 2000 字上限。保存即审计。
-  // 不唤醒任何会话：identity 段随会话冻结（D-91），改动只对新会话生效。
+  // 不唤醒任何会话：identity 段随会话冻结，改动只对新会话生效。
   updatePromptSegment(segment, text, actor = this.actor()) {
     if (!Object.hasOwn(PROMPT_SEGMENT_DEFAULTS, segment)) throw badRequest(`未知提示词段：${segment}`)
     const clean = String(text ?? '').replace(/\r\n/g, '\n').trim()
@@ -427,7 +427,7 @@ export const coreMethods = {
     if (this.started || this.stopped) return
     this.started = true
     // 周期拍走空载门：空闲时降频为一次索引计数，有工作立即恢复全量拍；
-    // 事件唤醒（各入队路径的 void this.tick()）不经此门。
+    // 事件唤醒（各入队路径的 void this.tick）不经此门。
     this.timer = setInterval(() => void this.tickIdleGate(), this.config.schedulerIntervalMs)
     this.timer.unref?.()
     // 延迟首拍单独留句柄：停机时必须摘除，否则它会在库关闭后触发一轮。
@@ -453,14 +453,14 @@ export const coreMethods = {
     void this.feishu?.stop()
   },
   /**
-   * 出站通道分发助手（DSHBOTS-326）：出站事件统一从这里扇出到各已启用通道——
-   * 微信与飞书各推一份，不再出现「某事件只到微信不到飞书」。逐通道 try/catch：
-   * 单通道失败只 warn 留痕，不阻断其他通道（一路通道坏了不该让另一路收不到）。
-   * 通道在位即已启用（挂载由 config 开关决定），通道自身的连接/绑定态门禁在各自
-   * notify 内部（未连上时只落盘不外发）。同一 receiptKey 在各通道 outbox 内各自
-   * 幂等——两套 outbox 是彼此独立的库与唯一索引，键空间互不干扰。
-   * 返回逐通道结果 [{channel, ok, error}]，供调用方判断是否至少推成功一路。
-   */
+ * 出站通道分发助手：出站事件统一从这里扇出到各已启用通道——
+ * 微信与飞书各推一份，不再出现「某事件只到微信不到飞书」。逐通道 try/catch：
+ * 单通道失败只 warn 留痕，不阻断其他通道（一路通道坏了不该让另一路收不到）。
+ * 通道在位即已启用（挂载由 config 开关决定），通道自身的连接/绑定态门禁在各自
+ * notify 内部（未连上时只落盘不外发）。同一 receiptKey 在各通道 outbox 内各自
+ * 幂等——两套 outbox 是彼此独立的库与唯一索引，键空间互不干扰。
+ * 返回逐通道结果 [{channel, ok, error}]，供调用方判断是否至少推成功一路。
+ */
   channelNotify(text, opts: any = {}) {
     const targets = [
       { name: 'wechat', channel: this.wechat },

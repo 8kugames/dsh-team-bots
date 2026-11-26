@@ -1,6 +1,6 @@
 // src/services/rollover-schema.js —— 会话结转支撑索引（runs_session_idx）：独立迁移。
 //
-// 背景：会话结转（DSHBOTS-145）在每次会话复用时按 session_id 统计 runs 轮次（COUNT(*)），
+// 背景：会话结转在每次会话复用时按 session_id 统计 runs 轮次（COUNT(*)），
 // 无索引时全表扫描；runs 表随运行只增不减（留存默认关闭），统计必须走索引。
 // 迁移独立成文件的原因同 src/services/recovery-schema.js：db.js / db-migrations.js 的
 // 表结构常量按房规不塞新索引，结转域自管。手法同款：schema_migrations 幂等守卫 +

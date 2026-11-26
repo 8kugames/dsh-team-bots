@@ -18,7 +18,7 @@ function stopTimers() {
   intervalIds.clear()
 }
 
-// 与 tests/ui-language-render.test.js 同款最小 DOM 桩：app.js 顶层 void init()
+// 与 tests/ui-language-render.test.js 同款最小 DOM 桩：app.js 顶层 void init
 // 会拉起定时器与 window/document 监听，桩不满足时走 bootError 兜底，不影响渲染函数。
 function stubDom() {
   const fakeEl = () => ({
@@ -80,7 +80,7 @@ function stubDom() {
   }
 }
 
-// 与原版守门同款时序约束：模块 import（会触发 app.js 顶层 void init() 排队 fetch 桩）
+// 与原版守门同款时序约束：模块 import（会触发 app.js 顶层 void init 排队 fetch 桩）
 // 必须全部完成后再同步设置 fixture 并同步调用渲染——中间隔任何 await 边界，
 // init 里的 loadState 就会把 state.data 覆盖为桩响应（null）。
 async function renderPage(module, fn, data?, pageTab?) {

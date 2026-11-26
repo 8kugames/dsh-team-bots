@@ -10,12 +10,12 @@ import { maskSecrets } from '../secrets.js'
 import { id, jsonParse, nowIso, redactSecrets, text, sanitizeFilename } from '../util.js'
 import { criterionId, readTaskGoal } from './task-goal.js'
 
-// 记忆上限（DSHBOTS-339）：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶先自动轮换，
+// 记忆上限：bot/project 作用域 active 记忆硬顶 MEMORY_CAP 条；触顶先自动轮换，
 // 归档最久未更新的可轮换条目（bot 写的，总监/用户亲手写的除外）腾位放行；可轮换条目耗尽后才
 // 拒写并置滞回标志 memory_full:<scope_type>:<scope_id>，须整理到 MEMORY_COMPACT_TO 条以内才
 // 恢复放行（滞回，避免在阈值附近反复开关）。team 作用域不限。
 export const MEMORY_CAP = 64
-// 恢复线（DSHBOTS-360）：触顶后须整理到 ≤MEMORY_COMPACT_TO 条才恢复新增（滞回带宽度 10 条）。
+// 恢复线：触顶后须整理到 ≤MEMORY_COMPACT_TO 条才恢复新增（滞回带宽度 10 条）。
 // 取 MEMORY_CAP−10：滞回带要宽过单轮最大突发，否则一轮自动沉淀就能把刚整理出的余量再次吃满。
 // 10 条恰好覆盖记忆审查单轮最大突发（parseMemoryReview ≤10 条）。早期取 33（≈CAP/2）
 // 等于强制腰斩，过苛：
@@ -217,7 +217,7 @@ export const memoryMethods = {
     let applied = 0
     let updated = 0
     let deduped = 0
-    // 拒写留痕（DSHBOTS-360）：审查写入被拒时把拒因带内化——写进 run_events，
+    // 拒写留痕：审查写入被拒时把拒因带内化——写进 run_events，
     // 不再只丢一条系统日志（run_events 只说「写入 0 条」而无人知道为什么，锁定期会无限期无人处理）。
     let rejected = 0
     let capacityRejected = 0
@@ -349,7 +349,7 @@ export const memoryMethods = {
     return Boolean(row)
   },
 
-  // ── 记忆上限治理（DSHBOTS-339）──
+  // ── 记忆上限治理──
   // bot/project 作用域 active 行硬顶 MEMORY_CAP；触顶后新增被拒并置滞回标志
   // memory_full:<scope_type>:<scope_id>，整理到 MEMORY_COMPACT_TO 条以内才清标志放行。
   // team 作用域不参与计数。计数走 memories_scope_idx(scope_type, scope_id, status)。
@@ -368,7 +368,7 @@ export const memoryMethods = {
     }
     return `${label}记忆已达 ${count}/${MEMORY_CAP} 条上限，新增被拒绝；请先去废弃（team_memory_cleanup 清理已闭环任务或过时主题）、去冗（同主题用 team_memory_write 覆盖写）、融合（合并相近条目），整理到 ≤${MEMORY_COMPACT_TO} 条后再新增。`
   },
-  // ── 记忆容量轮换（DSHBOTS-339）──
+  // ── 记忆容量轮换──
   // 把作用域 active 条数降到 target 以内：归档最久未更新的可轮换条目（ORDER BY updated_at ASC,
   // created_at ASC）。可轮换判定用正向条件：created_by 是 bot:，且不是「项目域里由项目总监亲手写的
   // 条目」——总监亲手写在项目域的是约定和禁令，轮换掉会让成员 Bot 之后无人可查；run: 开头是审查
@@ -434,7 +434,7 @@ export const memoryMethods = {
     this.store.run('DELETE FROM settings WHERE key = ?', flagKey)
   },
 
-  // 项目再开容量闸（DSHBOTS-342）：归档把 active+pending 一并冻为 frozen，再开统一解回 active，
+  // 项目再开容量闸：归档把 active+pending 一并冻为 frozen，再开统一解回 active，
   // 冻结条数若已超 MEMORY_CAP，解回即破顶。此时整笔再开拒绝（项目保持归档），
   // 先按 memoryCapacityMessage 指引整理（归档态可逐条 deleteMemory）再重开。
   assertProjectReopenCapacity(scopeId, wouldBeActive) {
@@ -600,7 +600,7 @@ export const memoryMethods = {
   async updateMemory(memoryId, patch) {
     const memory = this.store.get('SELECT * FROM memories WHERE id = ?', memoryId)
     if (!memory) throw notFound('记忆不存在')
-    // 篇幅闸只约束本次实际变更的 content：存量超长条目仅改 topic 时不得被误拦（DSHBOTS-342）。
+    // 篇幅闸只约束本次实际变更的 content：存量超长条目仅改 topic 时不得被误拦。
     const contentChanged = patch.content != null
     const content = contentChanged ? redactSecrets(text(patch.content, 8000)) : memory.content
     if (contentChanged) this.assertMemoryLength(content)
@@ -657,7 +657,7 @@ export const memoryMethods = {
     })
   },
 
-  // ── 总监记忆管理（DSHBOTS-239）：list / 同名覆盖写 / 批量清理 ──
+  // ── 总监记忆管理：list / 同名覆盖写 / 批量清理 ──
   // 三入口共用 ownerContextFor 权威鉴权（仅项目总监，单聊/成员拒绝）；
   // 不改宿主 team_remember 语义，插件层独立封装。
 

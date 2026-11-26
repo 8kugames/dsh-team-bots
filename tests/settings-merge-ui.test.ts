@@ -1,7 +1,7 @@
 // tests/settings-merge-ui.test.ts —— B2/DSHBOTS-325：设置三方合并 UI 守门。
 // 前端用例沿用仓库先例：标记块 new Function 执行真实源码。守门三点：
 // ① mergeSettingsDraft 纯函数三向（未改字段不参与/对方未动保留草稿/双改以服务端为准）；
-// ② api() 客户端错误带 code/status（CONFLICT/409 可按类别接管）；
+// ② api 客户端错误带 code/status（CONFLICT/409 可按类别接管）；
 // ③ 保存链路接线（saveSettingsWithMerge 带 revision、冲突分支调用合并、三处保存走同一助手）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

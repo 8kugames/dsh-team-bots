@@ -30,7 +30,7 @@ class HoldingRuntime { declare started: any[]; declare canceled: any[];
 }
 
 // schedulerIntervalMs 拉满 30s（resolveConfig 上限）：测试期内定时 tick 不掺和，
-// 运行开工只由联动逻辑里的显式 this.tick() 驱动，断言时序确定。
+// 运行开工只由联动逻辑里的显式 this.tick 驱动，断言时序确定。
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-board-drag-'))
   const workspace = join(root, 'workspace')

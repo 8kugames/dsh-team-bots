@@ -135,7 +135,7 @@ function installDomStubs() {
 
 test('每个 ui/modules/*.js 可被真实 ESM 求值（顶层零 app.js 局部符号）', async () => {
   installDomStubs()
-  // app.js 顶层 void init() 会挂定时器；测试进程内禁用，避免悬挂。
+  // app.js 顶层 void init 会挂定时器；测试进程内禁用，避免悬挂。
   const realSetInterval = globalThis.setInterval
   const realSetTimeout = globalThis.setTimeout
   globalThis.setInterval = (() => 0) as unknown as typeof setInterval
@@ -305,7 +305,7 @@ test('styles 路由双端口径一致：共用 readUiStyles、MIME 精确、入�
   const http = await readFile(join(ROOT, 'src/http.js'), 'utf8')
   const dev = await readFile(join(ROOT, 'scripts/dev-server.mjs'), 'utf8')
   const html = await readFile(join(ROOT, 'ui/index.html'), 'utf8')
-  // 线上 styles() 与预览分支都必须走 readUiStyles 汇总（不是各读各的文件）。
+  // 线上 styles 与预览分支都必须走 readUiStyles 汇总（不是各读各的文件）。
   assert.match(
     http,
     /const styles = async \(\) => response\(await readUiStyles\(\), 'text\/css; charset=utf-8'\)/,
@@ -318,7 +318,7 @@ test('styles 路由双端口径一致：共用 readUiStyles、MIME 精确、入�
   const links = html.match(/styles\.css/g) ?? []
   assert.equal(links.length, 1, 'index.html 应只有一处 styles.css 引用')
   assert.match(html, /<link rel="stylesheet" href="\/api\/dsh-team\/styles\.css\?v=\{\{assetVersion\}\}">/)
-  // 缓存语义不变：走 response() 默认 no-store（与拆分前一致）。
+  // 缓存语义不变：走 response 默认 no-store（与拆分前一致）。
   assert.match(http, /'cache-control': 'no-store'/)
 })
 

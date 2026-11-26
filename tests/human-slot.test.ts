@@ -44,7 +44,7 @@ async function manualSetup({ maxConcurrentRuns }: { maxConcurrentRuns?: number }
   service.started = false // 测试手动驱动 tick
   const director = store.get('SELECT * FROM bots WHERE id = (SELECT id FROM bots ORDER BY created_at LIMIT 1)')
   const dev = await service.createBot({ name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
-  // 串行域 = (bot, 工作区)（DSHBOTS-308）：占槽任务与借槽人消息必须分属不同 bot——
+  // 串行域 = (bot, 工作区)：占槽任务与借槽人消息必须分属不同 bot
   // 同 bot 同工作区的第二条人消息会被串行挂起、观测不到保底槽行为。
   const dev2 = await service.createBot({ name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a' })
   const project = await service.createProject({ name: 'HumanSlot', key: 'HSLOT', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })

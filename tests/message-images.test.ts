@@ -298,7 +298,7 @@ test('新会话首条 prompt 带图片分片', async () => {
     })
 
     const bot = store.get('SELECT * FROM bots WHERE id = ?', director.id)
-    // 争用口径 A（DSHBOTS-289）：sendMessage 已同步给 director 排上 chat 运行，等
+    // 争用口径 A：sendMessage 已同步给 director 排上 chat 运行，等
     // FakeRuntime 自动收尾腾出 bot 槽，再播种本用例的 runs 行（同 bot 第二条活跃
     // 行会撞 one_active_run_per_bot）。
     const drainDeadline = Date.now() + 2000

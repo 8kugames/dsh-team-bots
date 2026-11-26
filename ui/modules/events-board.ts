@@ -11,7 +11,7 @@ import { toggleDesktopNotify } from './cards.js'
 import { usageMode } from './usage.js'
 import { UI_SCALE_KEY, UI_THEME_KEY, UI_COLOR_SCHEME_KEY, syncLanguage, refresh, startWechatPoll, stopWechatPoll, bootError, render, chatContextPending, beginChatPending, endChatPending, init } from '../app.js'
 
-// 设置保存 + 409 冲突三方合并（B2/DSHBOTS-325）：key→inputId 映射驱动 patch 采集。
+// 设置保存 + 409 冲突三方合并：key→inputId 映射驱动 patch 采集。
 // 冲突时静默接管 api 错误：重取最新设置后，对方未动字段的用户草稿贴回表单（编辑不丢），
 // 双改字段以服务端为准并点名提示复核；无用户改动即纯刷新提示。
 async function saveSettingsWithMerge(inputIds, successToast) {
@@ -54,7 +54,7 @@ export async function handleBoardAction(action, target) {
       // 带 data-project-id 的导航：从调度页的任务行跳到该项目的任务页（顺带切回群聊上下文）。
       const navProjectId = target.dataset.projectId
       state.view = target.dataset.view || 'chat'
-      // 用量页三态（DSHBOTS-56）：侧栏入口=全局视图（与上下文零耦合）；群聊 tab=本群；单聊 tab=本 bot。
+      // 用量页三态：侧栏入口=全局视图（与上下文零耦合）；群聊 tab=本群；单聊 tab=本 bot。
       // 口径由入口决定，不再按当前上下文收敛。
       if (state.view === 'usage') {
         state.usageMode = target.dataset.usageMode === 'solo' || target.dataset.usageMode === 'domain'
@@ -83,7 +83,7 @@ export async function handleBoardAction(action, target) {
       break
     }
     case 'toggle-task-group': {
-      // 分组折叠（DSHBOTS-58）：展开态记在 state.openPanels（key: task-group:<status>），默认全展开。
+      // 分组折叠：展开态记在 state.openPanels（key: task-group:<status>），默认全展开。
       const status = target.dataset.status
       if (!status) break
       const key = taskGroupKey(status)
@@ -93,7 +93,7 @@ export async function handleBoardAction(action, target) {
       break
     }
     case 'toggle-task-children': {
-      // 子任务折叠（DSHBOTS-58）：展开态记在 state.openPanels（key: task-children:<taskId>），默认收起。
+      // 子任务折叠：展开态记在 state.openPanels（key: task-children:<taskId>），默认收起。
       const taskId = target.dataset.taskId
       if (!taskId) break
       const key = taskChildrenKey(taskId)
@@ -146,7 +146,7 @@ export async function handleBoardAction(action, target) {
       )
       break
     }
-    // 界面语言（DSHBOTS-162）：保存后 loadState 拿回新的 state.language，
+    // 界面语言：保存后 loadState 拿回新的 state.language，
     // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
     case 'save-ui-language': {
       const value = (document.getElementById('settings-ui-language') as HTMLInputElement | null)?.value ?? 'auto'
@@ -155,7 +155,7 @@ export async function handleBoardAction(action, target) {
       if (Number.isFinite(Number(state.data?.settingsRevision))) languagePayload.revision = state.data?.settingsRevision
       await api('update_settings', languagePayload)
       await loadState(state.projectId)
-      // poll() 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
+      // poll 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
       syncLanguage()
       toast(t('toast.uiLanguageSaved'), 'success')
       break
@@ -187,7 +187,7 @@ export async function handleBoardAction(action, target) {
       )
       break
     }
-    // 团队指令段（B1/DSHBOTS-324）：保存/恢复默认；预算校验在后端，失败经 api 报错 toast。
+    // 团队指令段：保存/恢复默认；预算校验在后端，失败经 api 报错 toast。
     case 'save-prompt-segment': {
       const segment = target.dataset.segment
       const text = (document.getElementById(`prompt-seg-${segment}`) as HTMLTextAreaElement | null)?.value ?? ''
@@ -202,7 +202,7 @@ export async function handleBoardAction(action, target) {
       toast(t("已恢复默认指令"), 'success')
       break
     }
-    // 完全权限总开关（DSHBOTS-366）：切换存 settings，下一次会话/运行即生效；
+    // 完全权限总开关：切换存 settings，下一次会话/运行即生效；
     // loadState 后手动 render（since=新版本轮询会 unchanged 短路，与免审规则删除同款）。
     case 'toggle-full-access': {
       const next = target.dataset.next === '1'
@@ -214,7 +214,7 @@ export async function handleBoardAction(action, target) {
         : t("完全权限已关闭：恢复按各 Bot 配置档与派发覆盖判定"), 'success')
       break
     }
-    // 审批免审规则（DSHBOTS-365）：服务端权威整表替换。新增/编辑拉起 approval-rule 弹窗
+    // 审批免审规则：服务端权威整表替换。新增/编辑拉起 approval-rule 弹窗
     // （表单提交走 events-submit 的 save-approval-rule）；删除 = 从 state 规则表去行后整表提交。
     // 校验在后端（主维度必填一项等），失败经 api 报错 toast。
     case 'approval-rule-new':
@@ -286,7 +286,7 @@ export async function handleBoardAction(action, target) {
       state.chatAnchor = null // 从侧栏进群看的是最新消息，不在上一回跳转的锚点窗口里
       state.chatMode = 'group'
       state.view = 'chat'
-      // 乐观切换（DSHBOTS-167）：先出骨架让点击立即有反馈，再异步取数落真实列表。
+      // 乐观切换：先出骨架让点击立即有反馈，再异步取数落真实列表。
       const pendingSeq = beginChatPending({ projectId: state.projectId, chatMode: 'group', soloBotId: null })
       render()
       try {
@@ -319,7 +319,7 @@ export async function handleBoardAction(action, target) {
       openModal({ type: 'new-task' })
       break
     }
-    // 派生子任务（D-63）：从任务详情 footer 进入，复用新建任务表单并预填 parentTaskId；
+    // 派生子任务：从任务详情 footer 进入，复用新建任务表单并预填 parentTaskId；
     // 任何任务都可派生（子任务同样可以作为父任务），不加额外限制。
     case 'derive-subtask': {
       if (!activeProject()) {

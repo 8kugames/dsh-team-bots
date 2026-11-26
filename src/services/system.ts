@@ -17,7 +17,7 @@ import { nowIso } from '../util.js'
 import { staleCardHit } from './notify.js'
 
 // 插件自身版本：进程启动时从部署副本 package.json 定格，即当前生效版本。
-// health() 与「DSH 服务」卡展示同源（DSHBOTS-143）。
+// health 与「DSH 服务」卡展示同源。
 const PLUGIN_VERSION = String(createRequire(import.meta.url)('../../package.json').version ?? 'unknown')
 
 // 单聊默认视图在关闭条数维（dmKeepRecent=0）时的回退上限，保持 state 历史口径：
@@ -25,7 +25,7 @@ const PLUGIN_VERSION = String(createRequire(import.meta.url)('../../package.json
 const SOLO_VIEW_FALLBACK_LIMIT = 200
 
 /**
- * 私信默认视图的归档窗口取数（DSHBOTS-171）。
+ * 私信默认视图的归档窗口取数。
  *
  * 窗口模式（无游标，state 默认视图）：只保留「每 bot 最近 keep 条 且 created_at
  * 不早于 days 天前」的交集，超出任一阈值即归档。归档不是删除——翻页模式仍可查回。
@@ -68,7 +68,7 @@ const systemMethodsBase = {
   stateVersion() {
     // 视图作用域版本（perf 实测修复）：旧口径用全库 total_changes，任何后台写入
     // （usage_events/run_trajectory/普通 outbox 投递等高频表）都会打穿 since 短路，
-    // 活跃运行期间每拍 2.8s 轮询都全量组装并回传 1~2MB。这里改为只对 state() 实读
+    // 活跃运行期间每拍 2.8s 轮询都全量组装并回传 1~2MB。这里改为只对 state 实读
     // 的表取「行数 + 最新变更时刻」签名：与本视图无关的写入不再失效短路。
     // 漏表的最坏后果由既有 60s 兜底上限覆盖（到期强制重组装一次）。
     // 任一表/列不存在（老库、懒建表未建）时整体回退旧口径，宁可多传不可 500。
@@ -141,7 +141,7 @@ const systemMethodsBase = {
         (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'in_review' AND t.review_target = 'owner_bot') AS owner_review_tasks
       FROM projects p ORDER BY CASE p.status WHEN 'active' THEN 0 ELSE 1 END, p.updated_at DESC
     `)
-    // removed = 已移除追踪（DSHBOTS-193）：数据保留但不进工作台列表（侧栏/邀请/总览统一口径）。
+    // removed = 已移除追踪：数据保留但不进工作台列表（侧栏/邀请/总览统一口径）。
     const bots = this.store.all("SELECT * FROM bots WHERE status <> 'removed' ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at")
     const unreadCounts = this.unreadChatCounts()
     let project = projectId ? this.store.get('SELECT * FROM projects WHERE id = ?', projectId) : undefined
@@ -179,29 +179,29 @@ const systemMethodsBase = {
       skillBindings: this.skillBindings(project?.id ?? null),
       proposals: this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item)),
       revisions: {},
-      // 用量快照默认按 30 日窗口（DSHBOTS-121）：与页面默认档一致，其余三档按需单独取。
+      // 用量快照默认按 30 日窗口：与页面默认档一致，其余三档按需单独取。
       usage: usageSnapshot(this.store, project?.id, 30, { currency: this.budgetCurrency(), soloBotId: soloBotId ?? null, window: '30d', cacheTtlMs: this.config.usageSnapshotCacheMs }),
       settings: this.settingsView(),
-      // 设置页乐观并发令牌（B2/DSHBOTS-325）：UI 保存时随 patch 回传，不匹配即 409。
+      // 设置页乐观并发令牌：UI 保存时随 patch 回传，不匹配即 409。
       settingsRevision: this.settingsRevision(),
-      // 可编辑提示词段（B1/DSHBOTS-324）：全局配置页「团队指令」分组唯一真值。
+      // 可编辑提示词段：全局配置页「团队指令」分组唯一真值。
       promptSegments: this.promptSegmentsView(),
-      // 审批免审规则（DSHBOTS-365）：总览 bots 页「免审权限」卡唯一真值，规则量小随行下发。
+      // 审批免审规则：总览 bots 页「免审权限」卡唯一真值，规则量小随行下发。
       approvalRules: this.approvalRulesView(),
-      // 完全权限总开关（DSHBOTS-366）：同卡 toggle 的唯一真值，随行下发。
+      // 完全权限总开关：同卡 toggle 的唯一真值，随行下发。
       approvalFullAccess: this.fullAccessAllEnabled(),
       runLimits: this.runLimitsView(),
       // Bot 配置页 preset 下拉数据源：宿主可用清单 + 默认值；无宿主服务时 null（UI 退化）。
       agentPresets: await (this.runtime?.agentPresetsRoster?.() ?? null),
       // 运行参数目录（全局设置「运行参数」卡）：全部 DSH_TEAM_* 运行期变量的可配置视图。
       runtimeSettings: this.runtimeSettingsView(),
-      // 侧栏状态行全局口径（DSHBOTS-77）：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
+      // 侧栏状态行全局口径：全库活跃运行（含 queued），不随群聊/单聊上下文收敛。
       activeRuns: Number(this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running')")?.count ?? 0),
-      // 侧栏状态行任务口径（DSHBOTS-105）：全库任务 in_progress 计数；activeRuns 保留给其余消费方。
+      // 侧栏状态行任务口径：全库任务 in_progress 计数；activeRuns 保留给其余消费方。
       activeTasks: Number(this.store.get("SELECT COUNT(*) AS count FROM tasks WHERE status = 'in_progress'")?.count ?? 0),
-      // 跨项目待审聚合（DSHBOTS-102）：与项目解耦，用户不在该项目的群聊页也能看到待处理审批。
+      // 跨项目待审聚合：与项目解耦，用户不在该项目的群聊页也能看到待处理审批。
       pendingApprovals: this.approvalsPending(),
-      // 跨项目待答聚合（DSHBOTS-116）：同口径，提问卡片出现在群聊，顶部入口给全局可见性。
+      // 跨项目待答聚合：同口径，提问卡片出现在群聊，顶部入口给全局可见性。
       pendingQuestions: this.questionsPending(),
       // 收件箱 @owner 待办聚合：总监群消息里的 @owner 事项，跨项目只列未读。
       pendingOwnerMentions: this.ownerMentionsPending(),
@@ -219,13 +219,13 @@ const systemMethodsBase = {
         profile: process.env.DSH_PROFILE ?? 'team-bots',
         home: this.config.dshHome,
         ...capabilityInfo,
-        // 当前版本尽力取真值（DSHBOTS-253）：capability 链（env→argv）取不到时，从插件
+        // 当前版本尽力取真值：capability 链（env→argv）取不到时，从插件
         // 部署位置再探宿主包；仍拿不到为 ''，UI 据此整行隐藏「dsh 当前版本」。
         version: displayDshVersion(capabilityInfo.version) || detectHostDshVersionFromPlugin(),
       },
-      // 本插件（dsh-team-bots）部署生效版：与 health().version 同源。
+      // 本插件（dsh-team-bots）部署生效版：与 health.version 同源。
       pluginVersion: PLUGIN_VERSION,
-      // UI 语言（DSHBOTS-120）：与 http.js page() 的 {{language}} 注入同源
+      // UI 语言：与 http.js page 的 {{language}} 注入同源
       // （页面保存值 zh/en > loader 直读 → patch 文件 → 'auto' 交浏览器）；
       // state 轮询据此热切换字典包。
       language,
@@ -249,7 +249,7 @@ const systemMethodsBase = {
       view.messages = messages.map(message => this.messageView(message))
       // 待审批条目随群聊数据下发：卡片状态渲染时以这张表为准，消息行只是锚点。
       view.approvals = this.approvalsForProject(project.id)
-      // 提问条目同理（DSHBOTS-116）：消息行只带 question_id，卡片状态以这张表为准。
+      // 提问条目同理：消息行只带 question_id，卡片状态以这张表为准。
       view.questions = this.questionsForProject(project.id)
       view.tasks = this.store.all(
         `SELECT t.*, b.name AS assignee_name FROM tasks t LEFT JOIN bots b ON b.id = t.assignee_bot_id
@@ -262,7 +262,7 @@ const systemMethodsBase = {
         'SELECT * FROM runs WHERE project_id = ? ORDER BY queued_at DESC LIMIT 60',
         project.id,
       ).map(run => this.runView(run))
-      // 记忆随上下文收敛（DSHBOTS-5）：群聊只看当前项目 scope，不再并集成员 bot 与团队记忆。
+      // 记忆随上下文收敛：群聊只看当前项目 scope，不再并集成员 bot 与团队记忆。
       view.memories = this.store.all(
         `SELECT * FROM memories WHERE status = 'active' AND scope_type = 'project' AND scope_id = ?
          ORDER BY updated_at DESC LIMIT 100`,
@@ -284,12 +284,12 @@ const systemMethodsBase = {
     view.secrets = this.listSecrets()
     view.secretRequests = this.listSecretRequests()
     if (soloBotId) {
-      // 移除追踪（DSHBOTS-193）后的 Bot 不再可达：他端移除、本端未导航的残留 soloBotId
+      // 移除追踪后的 Bot 不再可达：他端移除、本端未导航的残留 soloBotId
       // 不回灌 solo 视图，与列表过滤同一口径。
       const soloBotRow = this.store.get('SELECT * FROM bots WHERE id = ?', soloBotId)
       const soloBot = soloBotRow?.status === 'removed' ? null : soloBotRow
       if (soloBot) {
-        // 归档契约（DSHBOTS-174）：默认视图（归档窗口交集，或两维全关时的 200 条回退上限）隐去的
+        // 归档契约：默认视图（归档窗口交集，或两维全关时的 200 条回退上限）隐去的
         // 更早消息数。被隐去的都严格早于窗口最旧一条，UI 据此点亮「加载更早」入口，经 messagesPage
         // 游标必可翻回；无隐去时 count=0 / hasMore=false，入口不出现。
         const soloWindow = soloVisibleMessages(this.soloChatStore(soloBot.id), soloBot.id, {
@@ -298,13 +298,13 @@ const systemMethodsBase = {
         })
         const soloTotal = Number(this.soloChatStore(soloBot.id).get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', soloBot.id)?.count ?? 0)
         const archivedCount = Math.max(0, soloTotal - soloWindow.length)
-        // 单聊卡片条目（DSHBOTS-218）：提问/审批在单聊会话里发起时落 solo_messages 卡片锚点，
+        // 单聊卡片条目：提问/审批在单聊会话里发起时落 solo_messages 卡片锚点，
         // 状态查 questions/approvals 表（project_id 为空的那批）。
         const soloQuestions = this.questionsForBot(soloBot.id)
         const soloApprovals = this.approvalsForBot(soloBot.id)
         view.solo = {
           bot: this.botView(soloBot),
-          // 默认视图走归档窗口（DSHBOTS-171）：只留「最近 dmKeepRecent 条 且 dmArchiveDays
+          // 默认视图走归档窗口：只留「最近 dmKeepRecent 条 且 dmArchiveDays
           // 天内」交集，超出即隐去；被归档消息经 messagesPage 游标翻页仍可查回。
           messages: soloWindow.map(message => this.soloMessageView(message)),
           archived: { count: archivedCount, hasMore: archivedCount > 0 },
@@ -356,9 +356,9 @@ const systemMethodsBase = {
   },
 
   /**
-   * 用量时间窗快照（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档按需取数。
-   * 不把四档都塞进 state——state 每次轮询都要带，四份快照会把响应体积翻四倍。
-   */
+ * 用量时间窗快照：今日 / 7 日 / 30 日 / 至今 四档按需取数。
+ * 不把四档都塞进 state——state 每次轮询都要带，四份快照会把响应体积翻四倍。
+ */
   async usageWindow(projectId = null, soloBotId = null, window = '30d') {
     await this.initialize()
     let project = projectId
@@ -373,10 +373,10 @@ const systemMethodsBase = {
   },
 
   /**
-   * bot 调度视图（DSHBOTS-28）：该 bot 名下任务与活跃运行的跨项目汇总。
-   * 只统计 active 项目（已归档项目的任务不再出现在调度页）。
-   * 在办 = in_progress/blocked/in_review，按最近更新排序；待办 = todo/backlog，按优先级权重再按位置排序。
-   */
+ * bot 调度视图：该 bot 名下任务与活跃运行的跨项目汇总。
+ * 只统计 active 项目（已归档项目的任务不再出现在调度页）。
+ * 在办 = in_progress/blocked/in_review，按最近更新排序；待办 = todo/backlog，按优先级权重再按位置排序。
+ */
   botDispatchView(botId) {
     const taskRows = (statuses, order) => this.store.all(
       `SELECT t.*, p.key AS project_key, p.name AS project_name
@@ -424,11 +424,11 @@ const systemMethodsBase = {
   },
 
   /**
-   * 聊天历史游标分页（DSHBOTS-33）：state 只回最后 200 条，更早的历史用本接口手动加载。
-   * 游标 = 当前最旧一条消息的 created_at + id（id 兜底同毫秒排序，避免漏/重）。
-   * 群聊按 project_id、单聊按 bot_id 两路；limit 默认与上限均为 200。
-   * 返回 { messages: 升序数组, hasMore: 是否还有更早一页 }。
-   */
+ * 聊天历史游标分页：state 只回最后 200 条，更早的历史用本接口手动加载。
+ * 游标 = 当前最旧一条消息的 created_at + id（id 兜底同毫秒排序，避免漏/重）。
+ * 群聊按 project_id、单聊按 bot_id 两路；limit 默认与上限均为 200。
+ * 返回 { messages: 升序数组, hasMore: 是否还有更早一页 }。
+ */
   messagesPage({ projectId = null, soloBotId = null, beforeCreatedAt = null, beforeId = null, limit = null, anchorId = null }) {
     const isGroup = Boolean(projectId)
     const isSolo = Boolean(soloBotId)
@@ -440,7 +440,7 @@ const systemMethodsBase = {
       return this.messagesPageAtAnchor(projectId, String(anchorId), pageSize)
     }
     if (!beforeCreatedAt || !beforeId) throw badRequest('缺少游标：beforeCreatedAt 与 beforeId 必须同时提供')
-    // 单聊分页与默认视图同源取数（DSHBOTS-171）：翻页不过归档窗口，被归档的更早消息
+    // 单聊分页与默认视图同源取数：翻页不过归档窗口，被归档的更早消息
     // 仍可见——「归档」只是默认视图隐去，不是删除。群聊保持原口径，不受私信归档影响。
     if (isSolo) {
       const page = soloVisibleMessages(this.soloChatStore(soloBotId), soloBotId, { beforeCreatedAt, beforeId, limit: pageSize })
@@ -509,9 +509,9 @@ const systemMethodsBase = {
     return this.runtime?.catalog(force) ?? []
   },
   async dshUpdateInfo() {
-    // 探测链（DSHBOTS-146）：env → argv[1] 向上找宿主 package.json → unknown。
+    // 探测链：env → argv[1] 向上找宿主 package.json → unknown。
     // argv 链 miss 时（插件作为宿主子进程，argv[1] 指不到宿主包）从插件部署位置再探
-    // 宿主包（DSHBOTS-253）；仍拿不到保持 'unknown'，updateAvailable 的 unknown 语义不变。
+    // 宿主包；仍拿不到保持 'unknown'，updateAvailable 的 unknown 语义不变。
     const detected = detectDshRuntimeVersion(process.env, process.argv[1])
     const current = detected !== 'unknown' ? detected : detectHostDshVersionFromPlugin() || 'unknown'
     let latest
@@ -577,13 +577,13 @@ const systemMethodsBase = {
       projects: this.store.get('SELECT COUNT(*) AS count FROM projects')?.count ?? 0,
       queued: this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status = 'queued'")?.count ?? 0,
       running: this.store.get("SELECT COUNT(*) AS count FROM runs WHERE status = 'running'")?.count ?? 0,
-      // needs-attention 聚合（A2/DSHBOTS-322）：外部巡检与 UI 顶部收口同源。
+      // needs-attention 聚合：外部巡检与 UI 顶部收口同源。
       needsAttention: this.needsAttentionView(),
     }
   },
 
   // needs-attention 聚合（A2/DSHBOTS-322，吸收 superagent 原型 overview「三问」+ B9 系统问题口径）：
-  // 把散在各域的「需要人」事项收进一个只读聚合，供 health()（外部巡检）与 state（UI 顶部收口）
+  // 把散在各域的「需要人」事项收进一个只读聚合，供 health（外部巡检）与 state（UI 顶部收口）
   // 同源消费。反双真值：只做 COUNT 与既有谓词的复算，不改任何状态真值——待审/待答谓词与
   // approvalsPending/questionsPending 同式，滞留判定复用 notify.js 的 staleCardHit 纯函数
   // （与 scheduler 扫描同一口径），投递失败取 outboxCounts 的 failed 终态。

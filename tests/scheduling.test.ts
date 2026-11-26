@@ -116,7 +116,7 @@ test('同项目写运行串行，跨项目与只读运行可并行', async () =>
     const first = await service.createTask({ projectId: alpha.id, title: 'A1', assigneeBotId: dev.id, autoStart: true })
     // A2 与 A1 同 bot 同项目：one_active_run_per_bot 下 A2 挂待处理队列（不落 runs 行），A1 结束后建回。
     const second = await service.createTask({ projectId: alpha.id, title: 'A2', assigneeBotId: dev.id, autoStart: true })
-    // 跨项目并行需要异 bot 车道（DSHBOTS-290）：B1 走 dev2。
+    // 跨项目并行需要异 bot 车道：B1 走 dev2。
     await service.createTask({ projectId: beta.id, title: 'B1', assigneeBotId: dev2.id, autoStart: true })
 
     service.started = true

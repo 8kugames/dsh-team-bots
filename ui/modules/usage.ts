@@ -7,7 +7,7 @@ import { renderUsageGlobal, renderUsageDomain, renderUsageSolo } from './setting
 import { pageHead, pageSection, refreshAction } from './page-shell.js'
 import { render } from '../app.js'
 
-// 用量时间窗（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今 四档。
+// 用量时间窗：今日 / 7 日 / 30 日 / 至今 四档。
 // 窗口状态放在模块里（不进全局 state）：只影响用量页，切换后按需向后端取该窗口快照。
 let usageWindowKey = '30d'
 let usageWindowCache = null
@@ -93,7 +93,7 @@ function formatAmount(value) {
   return n.toFixed(2)
 }
 
-// 用量页成本口径（DSHBOTS-81）：预算币种用符号式（¥42.64），其余币种进副行，
+// 用量页成本口径：预算币种用符号式（¥42.64），其余币种进副行，
 // 同页不再混排「CNY 42.64」与「¥0.11」两种写法；小数位规则与全站 formatCost 一致。
 function usageCurrency(usage) {
   return String(usage?.currency ?? 'CNY').toUpperCase() || 'CNY'
@@ -136,7 +136,7 @@ async function exportUsageCsv() {
   const usage = usageSnapshot()
   const project = pageProject()
   const payload: Record<string, unknown> = { days: usage.days ?? 30, window: usageWindowKey }
-  // 导出口径跟随当前页面口径（DSHBOTS-56）：
+  // 导出口径跟随当前页面口径：
   // global=全局明细（不带任何过滤）；domain=本群明细；solo=该 Bot 的项目外明细。
   const mode = usageMode()
   if (mode === 'domain' && project) payload.projectId = project.id
@@ -156,7 +156,7 @@ async function exportUsageCsv() {
   toast(t('usage.exported'), 'success')
 }
 
-// 用量页三态（DSHBOTS-56）：侧栏入口=全局视图（与群聊/单聊上下文零耦合）；
+// 用量页三态：侧栏入口=全局视图（与群聊/单聊上下文零耦合）；
 // 群聊 NAV 的「用量」tab=本群口径；单聊 NAV 的「用量」tab=本 bot 口径。
 function usageMode() {
   return state.usageMode === 'domain' || state.usageMode === 'solo' ? state.usageMode : 'global'
@@ -321,7 +321,7 @@ function usageSection(index, id, title, desc, body, headExtra = '') {
 }
 
 // 页面头：标题跟随顶栏口径，右侧操作区放四档时间窗切换与 CSV 导出。
-// 时间窗切换（DSHBOTS-121）：今日 / 7 日 / 30 日 / 至今；汇总、分布明细、CSV 导出同窗口。
+// 时间窗切换：今日 / 7 日 / 30 日 / 至今；汇总、分布明细、CSV 导出同窗口。
 function usagePageHead(usage, exportLabel = '') {
   const actions = `
       <div class="usage-window-row">
@@ -346,7 +346,7 @@ function renderUsage() {
 // 全局视图：只用全局口径数据，与当前群聊/单聊上下文零耦合。
 // 四个维度（趋势 / 分模型 / 分 Bot / 分项目）始终同时展示，口径切换只调展示顺序。
 
-// 时间窗切换入口（DSHBOTS-121）：按需向后端取该窗口快照，不把四档都塞进 state 轮询。
+// 时间窗切换入口：按需向后端取该窗口快照，不把四档都塞进 state 轮询。
 export async function switchUsageWindow(key) {
   if (!key || key === usageWindowKey) return
   const previousKey = usageWindowKey

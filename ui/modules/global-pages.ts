@@ -185,10 +185,10 @@ export function renderChannel() {
     [
       pageSection({
         index: '01', id: 'c-wechat', title: t('channel.sectionWechat'),
-        // 停用态也渲染开关卡（DSHBOTS-334）：启停入口常驻，不再依赖服务端注入。
+        // 停用态也渲染开关卡：启停入口常驻，不再依赖服务端注入。
         body: slot('full', card),
       }),
-      // 飞书未启用时整段不渲染（不显示死卡）；启用后凭据可在卡内配置（DSHBOTS-334）。
+      // 飞书未启用时整段不渲染（不显示死卡）；启用后凭据可在卡内配置。
       ...(feishu ? [pageSection({
         index: '02', id: 'c-feishu', title: t('channel.sectionFeishu'),
         body: slot('full', feishu),
@@ -231,7 +231,7 @@ export function renderSecretsPage() {
   )
 }
 
-// 飞书凭据交互（DSHBOTS-334）：卡模块内自注册监听（同 events-board 委托先例，不经
+// 飞书凭据交互：卡模块内自注册监听（同 events-board 委托先例，不经
 // events-submit/events-click 的通用 switch）。app/api 走动态 import 的命名空间调用——
 // 本模块被单测直接加载时不必拉起整个应用模块图（app.js 含启动副作用）。
 document.addEventListener('submit', async (event) => {
@@ -267,7 +267,7 @@ document.addEventListener('click', async (event) => {
   }
 })
 
-// 微信通道启停开关（DSHBOTS-334）：切换即调 set_wechat_channel_enabled（服务端
+// 微信通道启停开关：切换即调 set_wechat_channel_enabled（服务端
 // 即时 mount/unmount），停用前确认。
 document.addEventListener('click', async (event) => {
   const target = (event.target as any).closest?.('[data-action="wechat-toggle"]')

@@ -1,7 +1,7 @@
 // DSHBOTS-192 交互行为锁：已归档项目「移除追踪」两步确认弹窗的完整链路。
-// 根因复盘：step1→step2 / step2→step1 翻页 case 直改 state.modal 后曾误调 render()，
+// 根因复盘：step1→step2 / step2→step1 翻页 case 直改 state.modal 后曾误调 render，
 // 而 app.js 的 D-98 遮罩闸门在弹窗打开时 early-return（只记 pending，永不触碰 #modal-root），
-// 弹窗层只认 renderModalLayer() 直调（modal-layer.js 的解耦契约，同文件 edit-scopes 先例）——
+// 弹窗层只认 renderModalLayer 直调（modal-layer.js 的解耦契约，同文件 edit-scopes 先例）
 // 结果点「继续 / 上一步」零响应。本文件从 ui/modules/events-click.js、events-submit.js 提取
 // 真实监听器，从 modal-layer.js / modal-forms.js 提取真实 modalShell/modalRemoveTracking，
 // 用最小 DOM shim 驱动真实 click/submit 链路并锁定接线，锚点全部语义化（非复制实现）。
@@ -333,8 +333,8 @@ test('guard 锁：非 remove-tracking 弹窗下点 step2 按钮不翻页不碰�
 test('入口与服务端接线锁：settings 入口按钮 + events-click case 直调 renderModalLayer + src/api.js 端点', async () => {
   // settings.js 项目状态卡的入口按钮（已归档分支）。
   assert.match(settingsSource, /data-action="remove-tracking-open"/, 'settings.js 已归档分支保留移除追踪入口')
-  // case 接线：两个翻页 case 的块体内必须直调 renderModalLayer 且不得调裸 render()
-  // （D-98 遮罩闸门下 render() 对弹窗层无效——D-192 根因锚；块体=case 起到同缩进下一 case 止）。
+  // case 接线：两个翻页 case 的块体内必须直调 renderModalLayer 且不得调裸 render
+  // （D-98 遮罩闸门下 render 对弹窗层无效——D-192 根因锚；块体=case 起到同缩进下一 case 止）。
   const caseBlock = (name) => {
     const m = clickSource.match(new RegExp(`case '${name}': \\{([\\s\\S]*?)\\n      case `))
     assert.ok(m, `events-click.js 必须存在 case '${name}'`)

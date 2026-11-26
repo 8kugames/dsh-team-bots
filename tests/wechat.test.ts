@@ -237,7 +237,7 @@ test('wechat channel 只有 admin_peer_id 能执行管理指令，「绑定」�
     assert.equal(sent.length, before, '非管理员消息不应触发任何回复')
     assert.equal(store.getState().admin_peer_id, 'p-admin')
 
-    // 「绑定」口令已移除：管理员发「绑定」按自由文本走 director 专属工作区（DSHBOTS-258），
+    // 「绑定」口令已移除：管理员发「绑定」按自由文本走 director 专属工作区，
     // 不再回写 direct_project_key 绑定。
     await channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c3', text: '绑定' }, channel.transport)
     assert.ok(sent.at(-1).text.includes('已直达【director】专属工作区'), '「绑定」按自由文本走 director 通道')
@@ -639,7 +639,7 @@ test('wechat commands 自由文本直达 director：绑定/单项目不再影响
   assert.ok(guide.includes('还没有选定直达的项目'))
   assert.ok(guide.includes('  a') && guide.includes('  b'), '引导里带项目清单')
 
-  // 导演通道异常（DSHBOTS-258）：独立 no_director 文案，不走选项目提示链
+  // 导演通道异常：独立 no_director 文案，不走选项目提示链
   const noDirector = { stateView: () => ({ projects: [] }), async wechatChat() { return { error: 'no_director' } } }
   const broken = await handleCommand(noDirector, '随便聊聊')
   assert.ok(broken.includes('导演通道暂不可用'))

@@ -46,7 +46,7 @@ test('i18n 调用点守门：ui 内 t() 纯字面量实参必须已注册（DSHB
   assert.deepEqual(missing, [], `t() 实参缺键（英文环境会回退中文）：\n${missing.join('\n')}`)
 })
 
-// DSHBOTS-300：动态键守门。字面量之外的键（keyed() 表、t('前缀' + x)、t(`前缀${x}`)）
+// DSHBOTS-300：动态键守门。字面量之外的键（keyed 表、t('前缀' + x)、t(`前缀${x}`)）
 // 上面的用例看不见，缺键同样会让英文界面回退中文，故逐族核对。
 const KEYED = /\bkeyed\(\s*(['"`])([\w.]*)\1\s*,\s*\[([^\]]*)\]/g
 const CONCAT = /\bt\(\s*(['"`])([A-Za-z][\w.]*)\1\s*\+/g
@@ -93,7 +93,7 @@ test('动态键守门：拼接式与模板式 t() 的键族必须在词典里存
         problems.push(`${file.slice(UI.length + 1)}:${line} 模板前缀 ${JSON.stringify(prefix)} 在词典里没有任何键`)
         continue
       }
-      // 全动态模板（`${prefix}${key}`）：必须由同文件的 keyed() 表兜底，否则键无从校验。
+      // 全动态模板（`${prefix}${key}`）：必须由同文件的 keyed 表兜底，否则键无从校验。
       if (hasKeyed) continue
       const line = source.slice(0, match.index).split('\n').length
       problems.push(`${file.slice(UI.length + 1)}:${line} 全动态模板 ${JSON.stringify(template)} 背后没有 keyed() 表`)

@@ -1,6 +1,6 @@
 // DSHBOTS-116 群聊提问：宿主 user-questions/request waterfall 的插件侧应答器。
 // 认领 session_bindings 命中的 bot 会话：绑定到项目的走群聊卡片；绑定为单聊（kind='solo'、
-// project_id 为空）的走单聊卡片（DSHBOTS-218）；其余 next() 透传（人类会话提问继续走原生界面）。
+// project_id 为空）的走单聊卡片；其余 next 透传（人类会话提问继续走原生界面）。
 // 应答权仅用户（type=user）持有，bot 一律 forbidden 不能自答；pending 之外拒绝重复应答，动作写审计。
 // DSHBOTS-177：宿主 timed 前台等待到期（ASK_TIMED_OUT abort）不杀卡——条目保持可答至插件
 // questionTimeoutMs 窗口，窗口内迟到作答经宿主 userQuestions.answer 回投原 agent；其余 abort 立即失效。
@@ -10,7 +10,7 @@ import { flattenWhitespace, id, jsonParse, nowIso, text as textValue } from '../
 import { effectiveQuestionTimeoutMs } from '../config.js'
 import { columnNotNull, rebuildTable } from '../db-migrations.js'
 
-// project_id 可空：单聊会话没有项目归属（DSHBOTS-218），卡片锚点改落 solo_messages。
+// project_id 可空：单聊会话没有项目归属，卡片锚点改落 solo_messages。
 const QUESTIONS_TABLE_DDL = `
   id TEXT PRIMARY KEY,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
@@ -122,10 +122,10 @@ export const questionsMethods = {
     this.questionPending = new Map()
     if (this.questionsAttached || !runtime?.ctx?.on) return
     this.questionsAttached = true
-    // prepend：宿主 user-questions/request 是「按注册序」的瀑布流——先执行的监听器若不调用 next()，
+    // prepend：宿主 user-questions/request 是「按注册序」的瀑布流——先执行的监听器若不调用 next，
     // 就截断后面整条链路。web bundle 的 dsh-client-ui-user-questions 把请求交给 DSH 原生提问面板，
-    // 面板给出答案后直接 resolve 且不调 next()；插件若排在其后就永远收不到请求，提问全落到原生界面。
-    // 插到队首后：命中项目绑定的 bot 会话由插件自己应答，未命中的照旧 next() 透传给原生界面。
+    // 面板给出答案后直接 resolve 且不调 next；插件若排在其后就永远收不到请求，提问全落到原生界面。
+    // 插到队首后：命中项目绑定的 bot 会话由插件自己应答，未命中的照旧 next 透传给原生界面。
     const off = runtime.ctx.on('user-questions/request', (req, next) => this.handleQuestionRequest(req, next), { prepend: true })
     runtime.ctx.effect?.(() => () => {
       off?.()
@@ -201,7 +201,7 @@ export const questionsMethods = {
       sessionId, callId, count: masked.length,
     })
 
-    // 卡片锚点：群聊落 messages（kind=question），单聊落 solo_messages（DSHBOTS-218）。
+    // 卡片锚点：群聊落 messages（kind=question），单聊落 solo_messages。
     // 状态渲染时查 questions 表，消息体只是纯文本兜底，不承载状态。
     const anchorBody = `【提问】${bot.name} 发起提问（${masked.length} 个问题）`
     if (isSolo) {
@@ -354,7 +354,7 @@ export const questionsMethods = {
       questions: jsonParse(row.questions, []).map(cleanQuestionItem),
       answer: cleanAnswerPayload(jsonParse(row.answer, null)),
       botName: bot?.name ?? 'Bot',
-      // 会话归属（DSHBOTS-218）：单聊提问没有项目，UI 据此显示来源列并决定跳转目标。
+      // 会话归属：单聊提问没有项目，UI 据此显示来源列并决定跳转目标。
       scope: row.project_id ? 'project' : 'solo',
       remainingMs: row.status === 'pending'
         ? Math.max(0, (Number.isFinite(expiresAt) ? expiresAt : Date.parse(row.created_at) + effectiveQuestionTimeoutMs(this.config, key => this.store.setting(key))) - Date.now())
@@ -372,7 +372,7 @@ export const questionsMethods = {
     return rows.map(row => this.questionView(row))
   },
 
-  // 单聊视图的提问条目（DSHBOTS-218）：口径与 questionsForProject 一致，按 bot 取项目外条目。
+  // 单聊视图的提问条目：口径与 questionsForProject 一致，按 bot 取项目外条目。
   questionsForBot(botId) {
     const rows = this.store.all(
       `SELECT * FROM questions WHERE project_id IS NULL AND bot_id = ?
@@ -384,7 +384,7 @@ export const questionsMethods = {
 
   // 全局待答视图：跨项目聚合 status='pending'，按创建时间倒序。
   // count 是全库 pending 总数（徽标口径，已决一律不计），items 最多 50 条供顶部入口列明细。
-  // scope 区分项目群聊 / 单聊（DSHBOTS-218）：顶部入口据此决定点击后跳哪个会话。
+  // scope 区分项目群聊 / 单聊：顶部入口据此决定点击后跳哪个会话。
   questionsPending(limit = 50) {
     const rows = this.store.all(
       `SELECT q.*, p.name AS project_name FROM questions q LEFT JOIN projects p ON p.id = q.project_id

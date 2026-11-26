@@ -1,4 +1,4 @@
-// src/services/github-source.js —— GitHub 只读触发源（B4-②/DSHBOTS-335）。
+// src/services/github-source.js —— GitHub 只读触发源。
 // 吸收原型 sources 层的读入面（Trigger 翻译 + scope + 留痕），按报告 B4 分步结论只做
 // 一个来源且不整套搬 Source 抽象。observe 口径（报告 B3 + B4）：GitHub issue 只产生
 // 「候选通知 + 留痕」，绝不直接建卡/派单——权威链仍是 director 派单，人评估后才立卡。

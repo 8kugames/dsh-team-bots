@@ -1,12 +1,12 @@
 // tests/memory-cap.test.ts —— DSHBOTS-339/342/360 守门：bot/project 作用域 64 条硬顶与滞回放行。
 // a 触顶拦截文案；b 滞回 55 拒/54 放行；c 作用域独立（team 不限）；d 64 顶下覆盖写与编辑；
 // e approve 触顶拒；f 触顶后审查降级；g 篇幅上限与审查截断；
-// h 项目再开容量闸（DSHBOTS-342）；i UTF-16 口径（星面字符算 2 码元）；j bot 触顶+滞回标志置/清；
+// h 项目再开容量闸；i UTF-16 口径（星面字符算 2 码元）；j bot 触顶+滞回标志置/清；
 // k approve 滞回中间带（55–63 持续拒）；l memoryWriteFromBot 新建路径满顶拒；m 超长存量 topic-only 编辑放行。
 // n 锁定带文案如实（DSHBOTS-355，61 条不得谎称已达上限）；o 触顶态文案回归；p 放行/拒绝边界矩阵；
 // q 锁定带覆盖写放行；r 现场序列回归（64→62→61 全链路）；u 审查通用知识准入（覆写/日志 topic 降待审/空产出不沉淀）；
 // s logger %s 插值（根 index.ts createLogger）；
-// t 锁定期内审查拒写 → run_events reviewed 事件带拒因（DSHBOTS-360）；
+// t 锁定期内审查拒写 → run_events reviewed 事件带拒因；
 // w 触顶自动轮换放行与保护口径（DSHBOTS-339 轮换）：w1 触顶轮换放行；w2 用户/总监亲手写条目不轮换；
 // w3 全受保护仍拒写并拼固定说明；w4 锁定带自愈；w5 轮换按最近更新时间。
 import { test } from 'node:test'

@@ -106,7 +106,7 @@ test('select-project：取数失败或项目回退时补渲染，骨架不留存
   )
 })
 
-// —— 骨架状态机真跑（DSHBOTS-167）：把纯函数从源码抽出来执行，而不是只做正则匹配 ——
+// —— 骨架状态机真跑：把纯函数从源码抽出来执行，而不是只做正则匹配
 const grabFn = (name) => {
   const start = source.indexOf(`function ${name}(`)
   assert.ok(start >= 0, `缺少 ${name}`)
