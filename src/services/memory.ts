@@ -403,7 +403,8 @@ export const memoryMethods = {
       }
       this.audit({ type: 'system', id: 'system' }, 'memory.evict', 'memory', `${scopeType}:${scopeId}`, { scope: scopeType, reason, evicted })
     })
-    this.logger.warn?.('dsh-team: 记忆容量轮换 %s:%s 归档 %d 条（reason=%s）', scopeType, scopeId, evicted.length, reason)
+    // 轮换是容量到顶后的常态而非异常（稳态下每写一条轮换一条），走 info，不占警告通道。
+    this.logger.info?.('dsh-team: 记忆容量轮换 %s:%s 归档 %d 条（reason=%s）', scopeType, scopeId, evicted.length, reason)
     return evicted
   },
 
