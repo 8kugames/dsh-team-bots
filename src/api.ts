@@ -6,7 +6,7 @@ const ACTIONS: Set<TeamActionName> = new Set([
   'create_bot', 'update_bot', 'archive_bot', 'rollback_bot', 'remove_bot_tracking',
   'release_bot_quota',
   'create_project', 'update_project', 'archive_project', 'reopen_project', 'remove_project_tracking', 'browse_dirs',
-  'mark_chat_read',
+  'mark_chat_read', 'inbox_mark_read', 'inbox_mark_all_read',
   'task_projection_drift',
   'add_member', 'remove_member',
   'send_message', 'send_solo_message', 'get_message_image', 'create_task', 'update_task', 'assign_task', 'transition_task', 'add_comment', 'task_detail', 'task_review_delegate', 'task_update_scopes',
@@ -82,6 +82,11 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'mark_chat_read':
       // IM 式已读：水位只推到用户看到的那条消息，之后新到的仍算未读。
       return service.markChatRead(required(payload.projectId, 'projectId'), payload.readAt ?? '')
+    case 'inbox_mark_read':
+      // 收件箱 @owner 事项标已读（手动移出收件箱）；服务层守卫 actor.type!=='user'。
+      return service.markOwnerMentionRead(required(payload.projectId, 'projectId'), required(payload.messageId, 'messageId'), actor)
+    case 'inbox_mark_all_read':
+      return service.markAllOwnerMentionsRead(actor)
     case 'task_projection_drift':
       // 账本一致性巡检（只读诊断）：从权威事件流重放任务状态对照投影，漂移即报。
       if (actor.type !== 'user') throw forbidden('仅工作台用户可执行账本巡检')

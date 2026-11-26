@@ -6,7 +6,7 @@
 import { createRequire } from 'node:module'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { AppError, badRequest, conflict, hotUpgradeUnsupported } from '../errors.js'
+import { AppError, badRequest, conflict, hotUpgradeUnsupported, notFound } from '../errors.js'
 import { usageSnapshot } from '../usage.js'
 import { latestDshVersion, latestTeamBotsVersion, compareVersions, validTargetVersion, detectDshRuntimeVersion, detectHostDshVersionFromPlugin, displayDshVersion } from '../updater.js'
 import { skillSnapshot } from '../skills.js'
@@ -203,6 +203,8 @@ const systemMethodsBase = {
       pendingApprovals: this.approvalsPending(),
       // 跨项目待答聚合（DSHBOTS-116）：同口径，提问卡片出现在群聊，顶部入口给全局可见性。
       pendingQuestions: this.questionsPending(),
+      // 收件箱 @owner 待办聚合：总监群消息里的 @owner 事项，跨项目只列未读。
+      pendingOwnerMentions: this.ownerMentionsPending(),
       paths: {
         dshHome: this.config.dshHome,
         workspace: this.config.workspace,
@@ -427,12 +429,17 @@ const systemMethodsBase = {
    * 群聊按 project_id、单聊按 bot_id 两路；limit 默认与上限均为 200。
    * 返回 { messages: 升序数组, hasMore: 是否还有更早一页 }。
    */
-  messagesPage({ projectId = null, soloBotId = null, beforeCreatedAt = null, beforeId = null, limit = null }) {
+  messagesPage({ projectId = null, soloBotId = null, beforeCreatedAt = null, beforeId = null, limit = null, anchorId = null }) {
     const isGroup = Boolean(projectId)
     const isSolo = Boolean(soloBotId)
     if (isGroup === isSolo) throw badRequest('projectId 与 soloBotId 必须二选一')
-    if (!beforeCreatedAt || !beforeId) throw badRequest('缺少游标：beforeCreatedAt 与 beforeId 必须同时提供')
     const pageSize = Math.max(1, Math.min(200, Number.isFinite(Number(limit)) && limit ? Math.trunc(Number(limit)) : 200))
+    // 锚点模式（收件箱跳转到较早的 @owner 消息）：取截至锚点的最近一页，与游标分页互斥。
+    if (anchorId) {
+      if (!isGroup) throw badRequest('锚点取数仅支持群聊')
+      return this.messagesPageAtAnchor(projectId, String(anchorId), pageSize)
+    }
+    if (!beforeCreatedAt || !beforeId) throw badRequest('缺少游标：beforeCreatedAt 与 beforeId 必须同时提供')
     // 单聊分页与默认视图同源取数（DSHBOTS-171）：翻页不过归档窗口，被归档的更早消息
     // 仍可见——「归档」只是默认视图隐去，不是删除。群聊保持原口径，不受私信归档影响。
     if (isSolo) {
@@ -456,6 +463,31 @@ const systemMethodsBase = {
     return {
       messages: page.map(row => this.messageView(row)),
       hasMore,
+    }
+  },
+
+  // 锚点取数：与游标分页同一 (created_at, id) 序，结果最后一条就是锚点消息。
+  // hasMore 指锚点之前是否还有更早消息；newerCount 是锚点之后尚未载入的消息数，供「回到最新」提示。
+  messagesPageAtAnchor(projectId, anchorId, pageSize) {
+    const chatStore = this.groupChatStore(projectId)
+    const anchor = chatStore.get('SELECT id, created_at FROM messages WHERE id = ? AND project_id = ?', anchorId, projectId)
+    if (!anchor) throw notFound('消息不存在')
+    const rows = chatStore.all(
+      `SELECT * FROM messages
+       WHERE project_id = ? AND (created_at < ? OR (created_at = ? AND id <= ?))
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+      projectId, anchor.created_at, anchor.created_at, anchor.id, pageSize + 1,
+    )
+    const newerCount = Number(chatStore.get(
+      `SELECT COUNT(*) AS count FROM messages
+       WHERE project_id = ? AND (created_at > ? OR (created_at = ? AND id > ?))`,
+      projectId, anchor.created_at, anchor.created_at, anchor.id,
+    )?.count ?? 0)
+    return {
+      messages: rows.slice(0, pageSize).reverse().map(row => this.messageView(row)),
+      hasMore: rows.length > pageSize,
+      newerCount,
     }
   },
 

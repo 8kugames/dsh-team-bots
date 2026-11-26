@@ -7,13 +7,15 @@ import { join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { badRequest, conflict, notFound } from '../errors.js'
 import { botWorkspaceDir, botsHome, SLUG_MAX } from '../paths.js'
-import { id, nowIso, slugify, text } from '../util.js'
+import { RESERVED_BOT_NAMES, id, nowIso, slugify, text } from '../util.js'
 import { normalizeFilePolicy } from './file-policy.js'
 import { runningSubagentCount } from '../subagent-ledger.js'
 
 export const COLORS = ['blue', 'teal', 'violet', 'amber', 'coral', 'pink', 'green', 'gray']
 
 export const botNamePattern = /^[\p{L}\p{N}_-]{1,24}$/u
+// owner 留给总监的 @owner 虚拟标记；与名称查重同口径，大小写不敏感。
+const isReservedBotName = (name) => RESERVED_BOT_NAMES.includes(name.toLowerCase())
 
 // 像素块头像种子（DSHBOTS-221）：客户端 roll 生成的随机短串，落库驱动同 seed 同图渲染。
 export const avatarSeedPattern = /^[\w-]{1,64}$/
@@ -37,6 +39,7 @@ export const botsMethods = {
   async createBot(input, actor = this.actor()) {
     const name = text(input.name, 40).replace(/\s+/g, '')
     if (!botNamePattern.test(name)) throw badRequest('Bot 名称只允许中文、字母、数字、下划线、连字符，最多 24 个字符')
+    if (isReservedBotName(name)) throw conflict('Bot 名称 owner 是总监 @owner 标记的保留名，请换一个名称')
     if (this.store.get('SELECT id FROM bots WHERE lower(name) = lower(?)', name)) throw conflict('Bot 名称已存在')
     const provider = input.provider ? text(input.provider, 80) : null
     const model = input.model ? text(input.model, 160) : null
@@ -219,6 +222,7 @@ export const botsMethods = {
     if (patch.name !== undefined) {
       const name = text(patch.name, 40).replace(/\s+/g, '')
       if (!botNamePattern.test(name)) throw badRequest('Bot 名称格式无效')
+      if (isReservedBotName(name)) throw conflict('Bot 名称 owner 是总监 @owner 标记的保留名，请换一个名称')
       const duplicate = this.store.get('SELECT id FROM bots WHERE lower(name) = lower(?) AND id <> ?', name, botId)
       if (duplicate) throw conflict('Bot 名称已存在')
       changes.name = name

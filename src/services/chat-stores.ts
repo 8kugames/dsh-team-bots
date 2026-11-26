@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS messages_project_idx ON messages(project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS messages_task_idx ON messages(task_id, created_at);
 
+-- 收件箱的 @owner 事项：总监群消息写出 @owner 即登记一行，手动标已读写 read_at。
+-- 随消息级联删除：/clear 清群后事项自然消失，不留悬空行。
+CREATE TABLE IF NOT EXISTS owner_mentions (
+  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  read_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS solo_messages (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL,

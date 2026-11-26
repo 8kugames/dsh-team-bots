@@ -8,7 +8,7 @@ import { extname, join, sep } from 'node:path'
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
 import { assertInside } from '../paths.js'
 import { summarizeForUi, upsertBotMessage } from '../botmsg.js'
-import { findMemberByName, id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
+import { findMemberByName, hasOwnerMention, id, jsonParse, nowIso, parseMentions, stripLeakedToolMarkup, text } from '../util.js'
 import { insertMessageImages, messageImageRow, messageImageViews, prepareImagesForStorage } from './message-images.js'
 import { considerVisionProxy } from './vision-proxy.js'
 
@@ -20,6 +20,9 @@ export const commandClearPattern = /^\/clear$/u
 
 // 交付摘要按行边界截断时，至少要留下预算的一半，否则只剩标题行等于没摘要。
 const CHAT_SUMMARY_MIN_KEPT_RATIO = 0.5
+
+// 收件箱 @owner 条目的正文摘要：折叠空白后截断，完整正文到群聊里看。
+const OWNER_MENTION_SNIPPET_CHARS = 200
 
 export const chatMethods = {
   insertMessage({ projectId, senderType, senderId, body, mentions = [], taskId = null, runId = null, replyToId = null, images = [], createdAt = nowIso() }) {
@@ -42,6 +45,19 @@ export const chatMethods = {
     // 图片另存 message_images：正文列保持纯文本，base64 不进 messages.body。
     if (images.length > 0) {
       insertMessageImages(chatStore, { messageId, images, projectId })
+    }
+    // @owner 标记（收件箱）：总监在群聊里写出 @owner 即登记一条待 owner 知悉或决策的事项。
+    // 只认总监（projects.owner_bot_id）发的 bot 消息，成员 Bot 或用户写 @owner 只是普通文本。
+    if (senderType === 'bot' && hasOwnerMention(maskedBody)) {
+      const directorId = this.store.get('SELECT owner_bot_id FROM projects WHERE id = ?', projectId)?.owner_bot_id
+      if (directorId && directorId === senderId) {
+        try {
+          chatStore.run('INSERT INTO owner_mentions(message_id, read_at) VALUES (?, NULL)', messageId)
+        } catch (error: any) {
+          // 消息已落库：登记失败只丢收件箱入口，不回滚群聊消息。
+          this.logger?.warn?.('dsh-team: @owner 收件箱登记失败 %s: %s', messageId, error?.message ?? error)
+        }
+      }
     }
     return messageId
   },
@@ -257,6 +273,59 @@ export const chatMethods = {
     chatStore.run('DELETE FROM messages WHERE project_id = ?', project.id)
     this.audit(actor, 'chat.clear', 'project', project.id, { cleared: count })
     return count
+  },
+
+  // 收件箱的 @owner 待办（跨项目聚合）：未读行按消息时间倒序，count 是全库未读总数（徽标口径），
+  // items 最多 limit 条。只列进行中的项目，归档项目的事项隐藏。
+  // 消息正文住各项目聊天库，逐库取未读行再合并排序；行数只随总监的 @owner 消息增长，量级很小。
+  ownerMentionsPending(limit = 50) {
+    const items = []
+    for (const project of this.store.all("SELECT id, name, key FROM projects WHERE status = 'active'")) {
+      const rows = this.groupChatStore(project.id).all(
+        `SELECT m.id, m.sender_id, m.body, m.task_id, m.created_at
+           FROM owner_mentions om JOIN messages m ON m.id = om.message_id
+          WHERE om.read_at IS NULL
+          ORDER BY m.created_at DESC, m.id DESC`,
+      )
+      for (const row of rows) {
+        const task = row.task_id ? this.store.get('SELECT number, title FROM tasks WHERE id = ?', row.task_id) : undefined
+        items.push({
+          id: row.id,
+          project_id: project.id,
+          projectName: project.name,
+          projectKey: project.key,
+          sender_id: row.sender_id,
+          senderName: this.senderNameOf('bot', row.sender_id),
+          snippet: String(row.body ?? '').replace(/\s+/g, ' ').trim().slice(0, OWNER_MENTION_SNIPPET_CHARS),
+          created_at: row.created_at,
+          taskIdentifier: task ? `${project.key}-${task.number}` : null,
+          taskTitle: task?.title ?? null,
+        })
+      }
+    }
+    items.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+    return { count: items.length, items: items.slice(0, limit) }
+  },
+
+  // 收件箱标已读：手动标记是 @owner 事项离开收件箱的唯一途径，跳转查看与群聊已读水位都不改变它。
+  // 只对未读行生效；事项不存在或已读按不存在处理。
+  markOwnerMentionRead(projectId, messageId, actor = this.actor()) {
+    if (actor?.type !== 'user') throw forbidden('仅项目负责人可操作收件箱')
+    const changed = this.groupChatStore(projectId)
+      .run('UPDATE owner_mentions SET read_at = ? WHERE message_id = ? AND read_at IS NULL', nowIso(), String(messageId ?? ''))
+    if (!Number(changed.changes)) throw notFound('收件箱事项不存在或已读')
+    return { messageId, read: true }
+  },
+
+  // 全部标已读：逐项目聊天库清未读行，返回改动的行数（归档项目一并清掉，它们本就不展示）。
+  markAllOwnerMentionsRead(actor = this.actor()) {
+    if (actor?.type !== 'user') throw forbidden('仅项目负责人可操作收件箱')
+    const readAt = nowIso()
+    let count = 0
+    for (const project of this.store.all('SELECT id FROM projects')) {
+      count += Number(this.groupChatStore(project.id).run('UPDATE owner_mentions SET read_at = ? WHERE read_at IS NULL', readAt).changes)
+    }
+    return { count }
   },
   async rememberCommand(projectId, body, actor) {
     const matched = commandRememberPattern.exec(body)

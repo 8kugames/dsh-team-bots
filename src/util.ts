@@ -107,6 +107,16 @@ export const parseMentions = (body, candidates) => {
   return found
 }
 
+// @owner 虚拟标记（收件箱）：仅项目总监可用，出现即表示需要 owner 知悉或决策。
+// 前缀放宽到标点：中文句子里标记常紧跟在逗号后面（「任务已完成，@owner 请验收」），不像英文必有空格。
+// 后缀限定非字母/数字/下划线：@owners、@owner2 这类更长写法不算标记；邮箱式 x@owner 也不算。
+export const OWNER_MENTION_PATTERN = /(^|[^\p{L}\p{N}_@])@owner(?![\p{L}\p{N}_])/iu
+
+export const hasOwnerMention = (body) => OWNER_MENTION_PATTERN.test(String(body ?? ''))
+
+// owner 留给 @owner 虚拟标记：被真实 Bot 占用后 @owner 会同时命中并唤醒那个 Bot。
+export const RESERVED_BOT_NAMES = ['owner']
+
 export const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // projects.disabled_skills 是 JSON 字符串数组；坏数据一律安全降级为空数组。
