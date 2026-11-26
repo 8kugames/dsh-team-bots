@@ -9,6 +9,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { DshRuntime } from '../src/runtime.js'
 import { handleAction } from '../src/api.js'
+import { normalizeImageInputs } from '../src/services/message-images.js'
 
 // 1x1 PNG 的字节片段（不做魔数校验，只验证白名单与体积口径）。
 const PNG_BASE64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64')
@@ -151,6 +152,44 @@ test('图片校验：超 5MB / 第 5 张 / 非白名单 MIME / 非法 base64 一
     // 校验失败不留任何行。
     assert.equal(Number(service.groupChatStore(project.id).get('SELECT COUNT(*) AS n FROM message_images')?.n ?? 0), 0)
   } finally {
+    await closeQuietly(store)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('base64 严格判定：字母表外字符、补位位置与数量', () => {
+  // 合法串另需长度是 4 的倍数，由 normalizeImageData 的第二条卡住。
+  const cases = [
+    ['AAAA', true], ['AAA=', true], ['AA==', true],
+    ['', false], ['=', false], ['==', false], ['====', false], ['A===', false],
+    ['AA=A', false], ['A=AA', false], ['=AAA', false], ['AAAA=', false],
+    ['AA A=', false], ['AA-A=', false], ['AA_A=', false], ['中文==', false], ['AAAA\nAAAA', false],
+  ]
+  for (const [data, valid] of cases) {
+    const attempt = () => normalizeImageInputs([{ mediaType: 'image/png', data }])
+    if (valid) assert.doesNotThrow(attempt, JSON.stringify(data))
+    else assert.throws(attempt, (error: RejectError) => error.code === 'BAD_REQUEST', JSON.stringify(data))
+  }
+})
+
+test('大图校验不经过正则：MB 级 base64 不抛栈溢出，照常落库', async () => {
+  const { root, store, service, project } = await setup()
+  // 宿主里带量词的 base64 正则在 MB 级输入上抛过 RangeError: Maximum call stack size exceeded；
+  // 这里让一切跑在百万字符级输入上的 RegExp#test 抛同样的错，断言发送链路不依赖它。
+  const originalTest = RegExp.prototype.test
+  RegExp.prototype.test = function (string) {
+    if (String(string).length > 1_000_000) throw new RangeError('Maximum call stack size exceeded')
+    return originalTest.call(this, string)
+  }
+  try {
+    const big = Buffer.alloc(4 * 1024 * 1024, 0xff).toString('base64')
+    const result = await service.sendMessage(project.id, '大图', actor(), null, [{ mediaType: 'image/jpeg', data: big }])
+    const rows = service.groupChatStore(project.id).all('SELECT bytes, data FROM message_images WHERE message_id = ?', result.messageId)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].bytes, 4 * 1024 * 1024)
+    assert.equal(rows[0].data, big)
+  } finally {
+    RegExp.prototype.test = originalTest
     await closeQuietly(store)
     await rm(root, { recursive: true, force: true })
   }

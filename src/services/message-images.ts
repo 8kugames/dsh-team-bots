@@ -49,7 +49,22 @@ export function ensureMessageImagesSchema(store) {
 
 // base64 严格判定：Node 的 Buffer.from 对脏字符是宽容的，这里先按字符集与长度卡住，
 // 免得非法串被静默解码成残缺字节再进库。
-const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/
+// 判定不走正则：带量词的正则在宿主里对 MB 级 base64 抛过
+// RangeError: Maximum call stack size exceeded，整条消息发不出去；逐字符扫描没有栈的问题。
+function isStrictBase64(data) {
+  let end = data.length
+  // 结尾的补位「=」最多两个，且不能占满整串。
+  if (end > 0 && data[end - 1] === '=') end -= 1
+  if (end > 0 && data[end - 1] === '=') end -= 1
+  if (end === 0) return false
+  for (let i = 0; i < end; i++) {
+    const code = data.charCodeAt(i)
+    const isBase64Char = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+      || (code >= 48 && code <= 57) || code === 43 || code === 47
+    if (!isBase64Char) return false
+  }
+  return true
+}
 
 function normalizeImageData(raw) {
   let data = String(raw ?? '').trim()
@@ -60,7 +75,7 @@ function normalizeImageData(raw) {
     data = data.slice(comma + 1).trim()
   }
   if (!data) throw badRequest('图片数据为空')
-  if (!BASE64_PATTERN.test(data) || data.length % 4 !== 0) throw badRequest('图片数据不是合法的 base64')
+  if (!isStrictBase64(data) || data.length % 4 !== 0) throw badRequest('图片数据不是合法的 base64')
   const bytes = Buffer.from(data, 'base64').length
   if (bytes === 0) throw badRequest('图片数据为空')
   if (bytes > MAX_IMAGE_BYTES) throw badRequest(`单张图片不能超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB`)
