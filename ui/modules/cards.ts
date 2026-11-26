@@ -399,6 +399,7 @@ async function ensureNotifyPermission() {
   notifyPrompted = true
   const permission = await Notification.requestPermission()
   notifyStorePref(permission === 'granted' ? 'granted' : 'denied')
+  render()
 }
 
 // 开关显示态（全局配置页「界面」卡）：不支持或被浏览器拒绝时置灰，并附一句原因。
@@ -406,7 +407,7 @@ function notifyToggleView() {
   const permission = notifyPermission()
   if (permission === 'unsupported') return { on: false, disabled: true, label: t("不可用"), hint: t("当前环境不支持桌面通知（需 HTTPS 或 localhost）。") }
   if (permission === 'denied') return { on: false, disabled: true, label: t("已被浏览器拒绝"), hint: t("在浏览器站点设置中允许通知后刷新页面。") }
-  if (notifyOn()) return { on: true, disabled: false, label: t("已开启"), hint: t("收件箱有新事项时弹系统桌面通知，需保持本页开启。") }
+  if (notifyOn()) return { on: true, disabled: false, label: t("已开启"), hint: t("收件箱有新事项时弹系统桌面通知；正看着它所在的页面时不重复提醒。需保持本页开启。") }
   if (notifyStoredPref() === 'denied') return { on: false, disabled: false, label: t("已关闭"), hint: t("开启后收件箱有新事项时弹系统桌面通知。") }
   return { on: false, disabled: false, label: t("待授权"), hint: t("默认开启：首次点击页面时浏览器会询问通知权限，允许后生效。") }
 }
@@ -434,11 +435,13 @@ function approvalNotifyBody(approval) {
   return notifyClip(text)
 }
 
-// 收件箱四类事项归一成通知条目 { id, tag, title, body }：只取待处理态，审批正文沿用群聊卡同口径。
+// 收件箱四类事项归一成通知条目 { id, tag, title, body, kind, projectId, scope, botId }：只取待处理态，
+// 审批正文沿用群聊卡同口径；落点字段供 inboxItemOnScreen 判断这条事项此刻是否就在用户眼前。
 function inboxNotifyEntries(data) {
   const entries = []
+  const where = item => ({ projectId: item.project_id ?? null, scope: item.project_id ? 'project' : 'solo', botId: item.bot_id ?? null })
   for (const item of data?.pendingApprovals?.items ?? []) {
-    if (item?.status === 'pending') entries.push({ id: `approval:${item.id}`, tag: `approval-${item.id}`, title: t("DSH 审批请求"), body: approvalNotifyBody(item) })
+    if (item?.status === 'pending') entries.push({ id: `approval:${item.id}`, tag: `approval-${item.id}`, title: t("DSH 审批请求"), body: approvalNotifyBody(item), kind: 'approval', ...where(item) })
   }
   for (const item of data?.pendingQuestions?.items ?? []) {
     if (item?.status !== 'pending') continue
@@ -448,6 +451,8 @@ function inboxNotifyEntries(data) {
     entries.push({
       id: `question:${item.id}`,
       tag: `question-${item.id}`,
+      kind: 'question',
+      ...where(item),
       title: t("DSH 待回答提问"),
       body: notifyClip(source ? t("${source}｜${name} 提问：${first}", { source, name, first }) : t("${name} 提问：${first}", { name, first })),
     })
@@ -458,6 +463,9 @@ function inboxNotifyEntries(data) {
       entries.push({
         id: `proposal:${item.id}`,
         tag: `proposal-${item.id}`,
+        kind: 'proposal',
+        projectId: item.project_id ?? null,
+        botId: item.bot_id ?? null,
         title: t("DSH 进化审批"),
         body: notifyClip(item.botName ? t("${name} 提交了提案：${title}", { name: item.botName, title }) : t("提交了提案：${title}", { title })),
       })
@@ -470,6 +478,8 @@ function inboxNotifyEntries(data) {
     entries.push({
       id: `owner:${item.id}`,
       tag: `owner-${item.id}`,
+      kind: 'owner',
+      projectId: item.project_id ?? null,
       title: t("DSH 总监 @owner"),
       body: notifyClip(source ? t("${source}｜${name} @owner：${snippet}", { source, name, snippet }) : t("${name} @owner：${snippet}", { name, snippet })),
     })
@@ -484,18 +494,34 @@ function openInboxFromNotify() {
   void refresh()
 }
 
-// 轮询后比较收件箱增量：通知开启且页面不可见或失焦时，对新到达的事项各弹一次（tag 防同条重复弹，
-// 会话级去重保证每条只弹一次）。首拍只记基线：页面加载时已存在的事项不算新到达。
-// 页面可见且聚焦时同样记录基线——用户当场看得到侧栏徽标，不再补弹。
+// 新事项此刻是否就在用户眼前——看得到就不弹。收件箱页全都看得到；群聊页看得到本项目群聊里的审批、
+// 提问与 @owner；单聊页看得到与这个 bot 会话里的审批、提问；进化页看得到提案（单聊进化只列该 bot 的）。
+// 别的项目、任务页、设置页、开着弹窗、窗口失焦、标签页在后台，都算看不见。
+function inboxItemOnScreen(entry, { hidden = document.hidden, focused = document.hasFocus() } = {}) {
+  if (hidden || !focused || state.modal) return false
+  const solo = state.chatMode === 'solo'
+  if (state.view === 'inbox') return true
+  if (state.view === 'chat') {
+    if (solo) return entry.scope === 'solo' && Boolean(state.soloBotId) && entry.botId === state.soloBotId
+    return Boolean(state.projectId) && entry.projectId === state.projectId
+  }
+  if (state.view === 'evolution') return entry.kind === 'proposal' && (!solo || entry.botId === state.soloBotId)
+  return false
+}
+
+// 取数后比较收件箱增量：通知开启时，新到达且用户此刻看不见的事项各弹一次（tag 防同条重复弹，
+// 会话级去重保证每条只弹一次）。首拍只记基线：页面加载时已存在的事项不算新到达——init 载入即喂第一拍，
+// 之后到达的第一条就能被认出来（早先基线拖到第一次轮询才记，把第一条新事项一并吞进基线）。
 function notifyInbox(data, { enabled = notifyOn(), hidden = document.hidden, focused = document.hasFocus() } = {}) {
   const entries = inboxNotifyEntries(data)
   const fresh = inboxBaselineReady ? entries.filter(entry => !knownInboxIds.has(entry.id)) : []
   for (const entry of entries) knownInboxIds.add(entry.id)
   inboxBaselineReady = true
-  if (!enabled || (!hidden && focused)) return
+  if (!enabled) return
   for (const entry of fresh) {
     if (notifiedInboxIds.has(entry.id)) continue
     notifiedInboxIds.add(entry.id)
+    if (inboxItemOnScreen(entry, { hidden, focused })) continue
     try {
       const notification = new Notification(entry.title, { body: entry.body, tag: entry.tag })
       notification.onclick = () => { window.focus(); openInboxFromNotify(); notification.close() }

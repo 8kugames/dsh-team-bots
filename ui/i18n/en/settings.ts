@@ -202,7 +202,7 @@ export default {
   "已被浏览器拒绝": "Blocked by the browser",
   "在浏览器站点设置中允许通知后刷新页面。": "Allow notifications in the browser site settings and reload the page.",
   "已开启": "On",
-  "收件箱有新事项时弹系统桌面通知，需保持本页开启。": "System desktop notifications appear when new inbox items arrive; keep this page open.",
+  "收件箱有新事项时弹系统桌面通知；正看着它所在的页面时不重复提醒。需保持本页开启。": "System desktop notifications appear when new inbox items arrive, except while you are looking at the page that shows them; keep this page open.",
   "已关闭": "Off",
   "待授权": "Permission pending",
   "开启后收件箱有新事项时弹系统桌面通知。": "Once enabled, system desktop notifications appear when new inbox items arrive.",

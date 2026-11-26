@@ -17,7 +17,7 @@ function loadBlock({ Notification = undefined, hidden = true, focused = false, s
   }
   const document = { hidden, hasFocus: () => focused }
   const window = { focus: () => { calls.focus += 1 } }
-  const state = { projectId: null, chatMode: 'group', view: 'chat' }
+  const state = { projectId: 'prj_1', chatMode: 'group', soloBotId: null, view: 'chat', modal: null }
   const refresh = () => { calls.refreshes += 1; return Promise.resolve() }
   const render = () => { calls.renders += 1 }
   const exported = new Function('Notification', 'document', 'window', 'localStorage', 'state', 'refresh', 'render',
@@ -86,6 +86,7 @@ test('默认开启：权限未表态时开关显示待授权，首次手势内�
   assert.equal(made.requested, 1, '首次手势内申请一次')
   assert.equal(harness.store['dshb:desktop-notify'], 'granted')
   assert.equal(harness.notifyOn(), true)
+  assert.ok(harness.calls.renders >= 1, '权限落定后重渲染：设置页上的「待授权」要即时变成「已开启」')
   await harness.ensureNotifyPermission()
   assert.equal(made.requested, 1, '每个页面生命周期只申请一次')
   view = harness.notifyToggleView()
@@ -193,22 +194,93 @@ test('四类事项的通知标题与正文：带来源定位，超长截断', ()
   assert.equal(entries[3].body.length, 120, '正文截到 120 字符')
 })
 
-test('页面可见且聚焦时只记基线不补弹；通知关闭时基线照记；隐藏后新到达的事项照弹且每条只弹一次', () => {
+// 往数据里追加一条待办（收件箱口径：聚合 count 随之 +1）。
+const withApproval = (data, approval) => ({ ...data, pendingApprovals: { count: data.pendingApprovals.count + 1, items: [...data.pendingApprovals.items, approval] } })
+const withMention = (data, mention) => ({ ...data, pendingOwnerMentions: { count: data.pendingOwnerMentions.count + 1, items: [...data.pendingOwnerMentions.items, mention] } })
+const withProposal = (data, proposal) => ({ ...data, proposals: [...data.proposals, proposal] })
+
+test('页面可见但失焦（窗口露在背后）：载入后的第一条新事项就弹，不被吞进基线', () => {
+  const { FakeNotification, made } = fakeNotification('granted')
+  const harness = loadBlock({ Notification: FakeNotification, hidden: false, focused: false })
+  harness.notifyInbox(inboxData)
+  assert.equal(made.instances.length, 0, '首拍只记基线')
+  harness.notifyInbox(withApproval(inboxData, { id: 'apr_first', status: 'pending', project_id: 'prj_1', botName: 'Alpha', tool_name: 'Bash', display_reason: '第一条' }))
+  assert.deepEqual(made.instances.map(note => note.options.tag), ['approval-apr_first'])
+})
+
+test('看得到就不弹：页面可见且聚焦时，正看着的事项只记基线；别的项目、任务页、开着弹窗里的新事项照弹', () => {
   const { FakeNotification, made } = fakeNotification('granted')
   const harness = loadBlock({ Notification: FakeNotification, hidden: false, focused: true })
+  let data = inboxData
+  harness.notifyInbox(data)
+  assert.equal(made.instances.length, 0, '首拍只记基线')
+  // 本项目群聊页：本项目的新审批与总监 @owner 就在眼前，不弹。
+  data = withApproval(data, { id: 'apr_same', status: 'pending', project_id: 'prj_1', botName: 'Alpha', tool_name: 'Bash' })
+  data = withMention(data, { id: 'msg_same', project_id: 'prj_1', projectName: '项目甲', senderName: 'director', snippet: '@owner 本项目的提醒' })
+  harness.notifyInbox(data)
+  assert.equal(made.instances.length, 0, '本项目群聊页上看得到的新事项不弹')
+  // 别的项目的新事项在这个页面上看不见：弹。
+  data = withApproval(data, { id: 'apr_other', status: 'pending', project_id: 'prj_9', botName: 'Beta', tool_name: 'Bash' })
+  data = withMention(data, { id: 'msg_other', project_id: 'prj_9', projectName: '项目乙', senderName: 'director', snippet: '@owner 别的项目的提醒' })
+  harness.notifyInbox(data)
+  assert.deepEqual(made.instances.map(note => note.options.tag), ['approval-apr_other', 'owner-msg_other'], '别的项目的审批与 @owner 照弹')
+  // 收件箱页：什么都看得到。
+  harness.state.view = 'inbox'
+  data = withApproval(data, { id: 'apr_inbox', status: 'pending', project_id: 'prj_1', botName: 'Alpha', tool_name: 'Bash' })
+  harness.notifyInbox(data)
+  assert.equal(made.instances.length, 2, '收件箱页上的新事项不弹')
+  // 任务页：看不见。
+  harness.state.view = 'tasks'
+  data = withApproval(data, { id: 'apr_tasks', status: 'pending', project_id: 'prj_1', botName: 'Alpha', tool_name: 'Bash' })
+  harness.notifyInbox(data)
+  assert.equal(made.instances.length, 3, '任务页上的新事项照弹')
+  // 开着弹窗时群聊被遮住：看不见。
+  harness.state.view = 'chat'
+  harness.state.modal = { type: 'task' }
+  data = withApproval(data, { id: 'apr_modal', status: 'pending', project_id: 'prj_1', botName: 'Alpha', tool_name: 'Bash' })
+  harness.notifyInbox(data)
+  assert.equal(made.instances.length, 4, '弹窗遮住群聊时照弹')
+  // 当场看到的那几条已记入基线：之后切走也不补弹。
+  harness.state.modal = null
+  harness.notifyInbox(data, { hidden: true, focused: false })
+  assert.equal(made.instances.length, 4, '看得到时记基线，切走后不补弹')
+})
+
+test('单聊与进化页的「看得到」口径：单聊只认与该 bot 会话里的审批/提问，进化页只认提案', () => {
+  const { FakeNotification, made } = fakeNotification('granted')
+  const harness = loadBlock({ Notification: FakeNotification, hidden: false, focused: true })
+  harness.state.chatMode = 'solo'
+  harness.state.soloBotId = 'b1'
+  let data = inboxData
+  harness.notifyInbox(data)
+  const tags = () => made.instances.map(note => note.options.tag)
+  data = withApproval(data, { id: 'apr_solo_b1', status: 'pending', bot_id: 'b1', botName: 'Alpha', tool_name: 'Bash' })
+  harness.notifyInbox(data)
+  assert.deepEqual(tags(), [], '与当前 bot 单聊里的审批就在眼前')
+  data = withApproval(data, { id: 'apr_solo_b2', status: 'pending', bot_id: 'b2', botName: 'Beta', tool_name: 'Bash' })
+  data = withApproval(data, { id: 'apr_prj', status: 'pending', project_id: 'prj_1', bot_id: 'b1', botName: 'Alpha', tool_name: 'Bash' })
+  harness.notifyInbox(data)
+  assert.deepEqual(tags(), ['approval-apr_solo_b2', 'approval-apr_prj'], '别的 bot 的单聊审批、项目群聊的审批都看不见')
+  harness.state.view = 'evolution'
+  data = withProposal(data, { id: 'pp_b1', status: 'pending', bot_id: 'b1', title: '该 bot 的提案' })
+  data = withProposal(data, { id: 'pp_b2', status: 'pending', bot_id: 'b2', title: '别的 bot 的提案' })
+  harness.notifyInbox(data)
+  assert.deepEqual(tags(), ['approval-apr_solo_b2', 'approval-apr_prj', 'proposal-pp_b2'], '单聊进化页只列该 bot 的提案')
+})
+
+test('通知关闭时基线照记；隐藏后新到达的事项照弹且每条只弹一次', () => {
+  const { FakeNotification, made } = fakeNotification('granted')
+  const harness = loadBlock({ Notification: FakeNotification, hidden: true, focused: false })
   harness.notifyInbox(inboxData)
-  assert.equal(made.instances.length, 0, '在场看得到侧栏徽标，不弹')
-  harness.notifyInbox(inboxData, { hidden: true, focused: false })
-  assert.equal(made.instances.length, 0, '已入基线，隐藏后也不补弹')
-  const fresh = { ...inboxData, pendingOwnerMentions: { count: 2, items: [...inboxData.pendingOwnerMentions.items, { id: 'msg_2', projectName: '项目乙', senderName: 'director', snippet: '@owner 请决策' }] } }
+  assert.equal(made.instances.length, 0, '首拍只记基线')
+  const fresh = withMention(inboxData, { id: 'msg_2', projectName: '项目乙', senderName: 'director', snippet: '@owner 请决策' })
   harness.notifyInbox(fresh, { enabled: false, hidden: true, focused: false })
   assert.equal(made.instances.length, 0, '通知关闭：新事项照记基线但不弹')
   harness.notifyInbox(fresh, { hidden: true, focused: false })
   assert.equal(made.instances.length, 0, '关闭期间已入基线的事项不补弹')
-  const again = { ...fresh, pendingOwnerMentions: { count: 3, items: [...fresh.pendingOwnerMentions.items, { id: 'msg_3', projectName: '项目乙', senderName: 'director', snippet: '@owner 再决策一次' }] } }
+  const again = withMention(fresh, { id: 'msg_3', projectName: '项目乙', senderName: 'director', snippet: '@owner 再决策一次' })
   harness.notifyInbox(again, { hidden: true, focused: false })
-  assert.equal(made.instances.length, 1)
-  assert.equal(made.instances[0].options.tag, 'owner-msg_3')
+  assert.deepEqual(made.instances.map(note => note.options.tag), ['owner-msg_3'])
   harness.notifyInbox(again, { hidden: true, focused: false })
   assert.equal(made.instances.length, 1, '每条事项只弹一次')
 })
@@ -222,8 +294,9 @@ test('渲染与轮询接线：全局配置开关、点击 case、首次手势申
   assert.match(source, /document\.addEventListener\('keydown', \(\) => \{ void ensureNotifyPermission\(\) \}, \{ capture: true \}\)/)
   // 页面隐藏时静默拉 state 只喂收件箱增量，不写 state.data、不渲染；四类聚合都在 state 顶层，不必带 soloBotId。
   assert.match(source, /if \(document\.hidden\) \{[\s\S]{0,400}api\('state', \{ projectId: state\.projectId \|\| undefined \}, \{ quiet: true \}\)[\s\S]{0,120}notifyInbox\(data\)/)
-  // 可见路径：render 后喂增量
+  // 可见路径：render 后喂增量；载入即喂第一拍（只记基线），之后到达的第一条新事项才认得出来。
   assert.match(source, /render\(\)[\s\S]{0,80}notifyInbox\(state\.data\)/)
+  assert.match(source, /notifyInbox\(state\.data\)\s*if \(state\.view === 'solo-config'\) void loadSoloDetail\(\)/, 'init 载入后立即喂收件箱第一拍')
   // 审批卡带 id 定位锚点（收件箱跳回会话滚动定位用）
   assert.match(source, /approval-card" data-approval-status="\$\{attr\(approval\.status\)\}" data-approval-id="\$\{attr\(approval\.id\)\}"/)
 })

@@ -652,6 +652,8 @@ async function init() {
     syncLanguage()
     if (!state.projectId) state.projectId = state.data.project?.id ?? null
     render()
+    // 载入即喂收件箱第一拍（只记基线）：之后到达的第一条新事项才认得出来。
+    notifyInbox(state.data)
     if (state.view === 'solo-config') void loadSoloDetail()
     if (state.modal?.type === 'proposal') bindProposalForm()
   } catch (error) {

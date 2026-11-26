@@ -70,7 +70,7 @@ When a bot asks for a tool approval, a secret, or an answer, the workspace shows
 
 ### Inbox and `@owner`
 
-Everything that needs you is collected in the **Inbox**, the entry above the group chats in the sidebar: escalation approvals, questions to answer and evolution proposals are handled right there with the same cards used in the chat. When the director writes `@owner` in a group message, it marks something you need to see or decide; the message lands in the inbox automatically, opens back at that message in the chat, and leaves the inbox only when you mark it read — viewing or jumping to it never clears it. New inbox items raise a desktop notification by default; the browser asks for notification permission on your first click. `owner` is a reserved bot name, and only the director may use the mention.
+Everything that needs you is collected in the **Inbox**, the entry above the group chats in the sidebar: escalation approvals, questions to answer and evolution proposals are handled right there with the same cards used in the chat. When the director writes `@owner` in a group message, it marks something you need to see or decide; the message lands in the inbox automatically, opens back at that message in the chat, and leaves the inbox only when you mark it read — viewing or jumping to it never clears it. New inbox items raise a desktop notification by default, except while you are looking at the page that shows them; the browser asks for notification permission on your first click. `owner` is a reserved bot name, and only the director may use the mention.
 
 ### Usage and cost
 
