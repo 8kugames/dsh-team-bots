@@ -306,7 +306,7 @@ export function installTeamTools(ctx, service) {
 
   ctx.tools.register({
     name: 'team_memory_list',
-    description: 'List existing long-term memories in one scope (bot / project / team) for hygiene inspection: entries with short id, topic, updated time and a content preview, optionally filtered by topic substring. Every bot manages its own bot scope; project and team scopes are director-only.',
+    description: 'List existing long-term memories in one scope (bot / project / team) for hygiene inspection: entries with short id, topic, updated time and a content preview, optionally filtered by topic substring. Every bot manages its own bot scope; project and team scopes are director-only. By default only active entries are listed; archived entries no longer enter recall and are shown only with include_archived=true.',
     parameters: {
       type: 'object',
       properties: {
@@ -314,6 +314,7 @@ export function installTeamTools(ctx, service) {
         bot: { type: 'string', description: 'With scope=bot, target that bot (exact bot name or id) instead of yourself — use it to inspect a member bot\'s memories when its scope hits the cap' },
         topic: { type: 'string', description: 'Optional substring filter on the topic label' },
         limit: { type: 'integer', description: 'Max entries to return (1-200, default 50)' },
+        include_archived: { type: 'boolean', description: 'Archived entries no longer enter recall; set true to also list them (e.g. entries archived by a cleanup). Default false' },
       },
       additionalProperties: false,
     },
@@ -321,9 +322,9 @@ export function installTeamTools(ctx, service) {
     async execute(args, exec) {
       const sessionId = exec?.agent?.id ?? exec?.agent?.session?.id
       const rows = service.memoryListFromBot(sessionId, args)
-      if (!rows.length) return 'No active memories in this scope.'
+      if (!rows.length) return args.include_archived ? 'No memories in this scope.' : 'No active memories in this scope.'
       return rows
-        .map(row => `- [${row.id.slice(-6)}] ${row.topic} (${row.scope_type}, updated ${row.updated_at})\n  ${String(row.content).replace(/\s+/g, ' ').slice(0, 240)}`)
+        .map(row => `- [${row.id.slice(-6)}] ${row.topic} (${row.scope_type}${row.status === 'archived' ? ', archived' : ''}, updated ${row.updated_at})\n  ${String(row.content).replace(/\s+/g, ' ').slice(0, 240)}`)
         .join('\n')
     },
   })

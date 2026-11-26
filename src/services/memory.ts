@@ -648,14 +648,17 @@ export const memoryMethods = {
     return { scopeType, scopeId }
   },
 
-  memoryListFromBot(sessionId, input: { scope?: string, bot?: string, topic?: string, limit?: number } = {}) {
+  memoryListFromBot(sessionId, input: { scope?: string, bot?: string, topic?: string, limit?: number, include_archived?: boolean } = {}) {
     const { scopeType, scopeId } = this.resolveMemoryScopeFor(sessionId, { scope: 'project', ...input })
     const keyword = text(input.topic, 200).trim()
     const limitN = Math.min(200, Math.max(1, Number(input.limit) || 50))
     const like = `%${keyword}%`
+    // 归档条目默认不出召回，但保留可查入口：显式 include_archived 才列出 active+archived
+    //（pending/frozen/rejected 等中间态仍然不可见）。
+    const statusFilter = input.include_archived ? "status IN ('active', 'archived')" : "status = 'active'"
     const rows = this.store.all(
       `SELECT * FROM memories
-        WHERE scope_type = ? AND scope_id = ? AND status = 'active'
+        WHERE scope_type = ? AND scope_id = ? AND ${statusFilter}
           ${keyword ? 'AND topic LIKE ?' : ''}
         ORDER BY updated_at DESC LIMIT ?`,
       scopeType, scopeId, ...(keyword ? [like] : []), limitN,

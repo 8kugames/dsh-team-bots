@@ -7,6 +7,7 @@
 //  ⑤ 非 director（成员会话/未绑定会话）三入口一律拒绝——服务层 ownerContextFor 权威闸门。
 //  ⑥ rememberFromBot 同名覆盖：同 scope+topic 的 active 条目原地覆写（revision+1、
 //     created→updated 事件、memory.overwrite 审计），pending/archived 同名不拦新建。
+//  ⑦ list 的 include_archived：显式开启才列出归档条目，pending 等仍不可见，topic 过滤同样生效。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -284,6 +285,38 @@ test('rememberFromBot 同名覆盖：active 同主题原地覆写不叠条，pen
     t.store.run("UPDATE memories SET status = 'archived' WHERE topic = '归档名'")
     t.service.rememberFromBot(t.memberSession, { scope: 'bot', topic: '归档名', content: 'b' })
     assert.equal(t.store.get("SELECT COUNT(*) AS n FROM memories WHERE topic = '归档名' AND status = 'active'").n, 1)
+  } finally {
+    await t.close()
+  }
+})
+
+test('list 支持 include_archived 列出归档条目，pending 等仍不可见', async () => {
+  const t = await setup()
+  try {
+    const actor = { type: 'bot' as const, id: t.director.id }
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '活跃口径一', content: 'a', actor })
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '活跃口径二', content: 'b', actor })
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '旧归档口径', content: '旧', actor })
+    t.service.createMemory({ scopeType: 'project', scopeId: t.project.id, topic: '待审口径', content: '待', actor, status: 'pending' })
+    t.store.run("UPDATE memories SET status = 'archived' WHERE topic = '旧归档口径'")
+
+    const activeOnly = t.service.memoryListFromBot(t.ownerSession, { scope: 'project' })
+    assert.equal(activeOnly.length, 2, '不带 include_archived 只列 2 条 active')
+    assert.ok(activeOnly.every((r: { status: string }) => r.status === 'active'))
+
+    const withArchived = t.service.memoryListFromBot(t.ownerSession, { scope: 'project', include_archived: true })
+    assert.equal(withArchived.length, 3, 'include_archived 列出 active+archived，不含 pending')
+    const archived = withArchived.find((r: { topic: string }) => r.topic === '旧归档口径')
+    assert.ok(archived, '应包含归档条目')
+    assert.equal(archived.status, 'archived')
+    assert.ok(!withArchived.some((r: { topic: string }) => r.topic === '待审口径'), 'pending 不应出现')
+
+    const filtered = t.service.memoryListFromBot(t.ownerSession, { scope: 'project', topic: '归档', include_archived: true })
+    assert.equal(filtered.length, 1, 'topic 子串过滤对归档条目同样生效')
+    assert.equal(filtered[0].topic, '旧归档口径')
+
+    const explicitFalse = t.service.memoryListFromBot(t.ownerSession, { scope: 'project', include_archived: false })
+    assert.deepEqual(explicitFalse.map((r: { id: string }) => r.id), activeOnly.map((r: { id: string }) => r.id), '显式 false 与缺省等价')
   } finally {
     await t.close()
   }
