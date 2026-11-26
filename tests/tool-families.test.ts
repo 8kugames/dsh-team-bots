@@ -49,6 +49,20 @@ test('按项目工作区标记放行：hide 清单里的前缀，工作区有对
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
+test('只配标记映射：登记了标记的前缀自己就是按需族，工作区有标记才放行，没登记的工具面与单聊不受影响', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-tool-families-markers-'))
+  try {
+    const config = resolveConfig({ toolFamilyMarkers: 'mcp__catalog__=catalog.json;engine_=engine.cfg;broken=' } as any)
+    assert.deepEqual(config.hideToolPrefixes, [], '没有另配 hide')
+    assert.deepEqual(toolPolicyFor(config, root), { hide: ['mcp__catalog__', 'engine_'], allow: [] }, '登记的两族默认隐藏，缺标记路径的条目不算一族')
+    await writeFile(join(root, 'engine.cfg'), '')
+    assert.deepEqual(toolPolicyFor(config, root), { hide: ['mcp__catalog__', 'engine_'], allow: ['engine_'] }, '有标记的那一族放行')
+    const names = ['mcp__catalog__search', 'engine_run', 'mcp__other__tool', 'bash']
+    assert.deepEqual(hiddenToolNames(toolPolicyFor(config, root), names), ['mcp__catalog__search'], '没登记的族与普通工具照常可见')
+    assert.deepEqual(toolPolicyFor(config, null), { hide: [], allow: [] }, '单聊不隐藏')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('会话口径：按项目目录（production_dir 优先，其次 workspace/slug）判定，单聊返回空口径', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-tool-families-rt-'))
   try {

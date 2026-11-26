@@ -7,8 +7,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 // 缺省不隐藏任何工具：各部署的宿主集成面（MCP 服务器、引擎桥）不同，写死清单会把别人的
-// 工具藏掉。要用「按项目按需」口径的部署，通过配置显式给出隐藏前缀与「前缀 = 工作区标记」
-// 映射（示例见 .env.example）；没配 = 工具面与宿主全局一致。
+// 工具藏掉。要用「按项目按需」口径的部署，通过配置显式给出「前缀 = 工作区标记」映射
+// （示例见 .env.example）：登记了标记的前缀就是按需族，hideToolPrefixes 留空时由它充当隐藏
+// 清单；hideToolPrefixes 只用来追加不设放行标记的无条件隐藏。没配 = 工具面与宿主全局一致。
 export const DEFAULT_HIDE_TOOL_PREFIXES: string[] = []
 export const DEFAULT_TOOL_FAMILY_MARKERS: Record<string, string> = {}
 
@@ -36,15 +37,17 @@ export function parseToolFamilyMarkers(raw): Record<string, string> {
 }
 
 // 本项目会话的工具面口径：hide 里的前缀默认隐藏，allow 里的前缀（工作区有标记的那几族）放行。
-// 没有项目目录（单聊）或 hide 为空时什么都不隐藏。
+// hide 没配时，登记了标记的前缀自己就是按需族：配一份映射即启用，不必两处对齐。
+// 没有项目目录（单聊）或两者都为空时什么都不隐藏。
 export function toolPolicyFor(config, projectDir): { hide: string[]; allow: string[] } {
+  const onDemand = Object.entries(parseToolFamilyMarkers(config?.toolFamilyMarkers ?? DEFAULT_TOOL_FAMILY_MARKERS))
+    .filter(([prefix, marker]) => prefix && marker)
   const hide = parseHideToolPrefixes(config?.hideToolPrefixes ?? DEFAULT_HIDE_TOOL_PREFIXES)
-  if (!hide.length || !projectDir) return { hide: [], allow: [] }
-  const markers = parseToolFamilyMarkers(config?.toolFamilyMarkers ?? DEFAULT_TOOL_FAMILY_MARKERS)
-  const allow = Object.entries(markers)
-    .filter(([prefix, marker]) => prefix && marker && existsSync(join(projectDir, marker)))
+  if (!projectDir || (!hide.length && !onDemand.length)) return { hide: [], allow: [] }
+  const allow = onDemand
+    .filter(([, marker]) => existsSync(join(projectDir, marker)))
     .map(([prefix]) => prefix)
-  return { hide, allow }
+  return { hide: hide.length ? hide : onDemand.map(([prefix]) => prefix), allow }
 }
 
 export function hiddenToolNames(policy: { hide: readonly string[]; allow: readonly string[] }, names: readonly string[]): string[] {

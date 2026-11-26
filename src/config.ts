@@ -561,6 +561,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     workerPreset: String(config.workerPreset ?? process.env.DSH_TEAM_WORKER_PRESET ?? '').trim(),
     // 宿主集成工具面按需可见（services/runtime/tool-families.ts）：hide 清单里的工具名前缀默认对
     // 团队 bot 会话隐藏；markers 是「前缀 = 工作区标记路径」清单，项目工作区里有该路径才放行那一族。
+    // hide 留空时由 markers 登记的前缀充当 hide：只配 markers 即启用按需，不必两处对齐。
     hideToolPrefixes: parseHideToolPrefixes(
       config.hideToolPrefixes ?? process.env.DSH_TEAM_HIDE_TOOL_PREFIXES ?? DEFAULT_HIDE_TOOL_PREFIXES,
     ),
