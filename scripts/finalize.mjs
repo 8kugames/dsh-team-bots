@@ -13,9 +13,8 @@
 //                  （沙箱 EPERM/EACCES 属环境性假红，不计入红）
 //   ⑤ commit    —— 按 --files 清单分批提交（提交信息带项目卡号），逐笔校验落盘
 //   ⑥ push      —— 推远端（--push）；空推送按幂等口径拒绝，避免重复收口
-//   ⑦ build-remote —— 可选 --build-remote：调用既有远端构建入口（TapTap 项目的
-//                  maker_build_current_directory CLI 等价物 = taptap-maker build）；
-//                  无此配置则跳过并提示，不算失败
+//   ⑦ build-remote —— 可选 --build-remote：按仓库根 .finalize.json 的 buildRemote 配置
+//                  调用远端构建入口；无此配置则跳过并提示，不算失败
 //
 // 工作树口径说明：本工具要提交卡面清单里的文件，所以「工作树清洁」= 未声明的改动为零，
 //   即脏文件集合与暂存区集合都必须是 --files 清单的子集；清单外的改动一律拒绝
@@ -450,8 +449,7 @@ function push() {
 
 // 步骤 ⑦：远端构建（可选）。
 // 配置来源：仓库根 .finalize.json 的 buildRemote（{"command":"...","args":[...]} 或数组）；
-// 没有配置时按 TapTap 项目约定探测 .project/project.json + taptap-maker CLI；
-// 两者都没有就跳过并提示（不算失败）。
+// 没有配置就跳过并提示（不算失败）。
 function readBuildRemoteConfig() {
   const configPath = join(ROOT, '.finalize.json')
   if (!existsSync(configPath)) return null
@@ -478,16 +476,12 @@ function readBuildRemoteConfig() {
 }
 
 function buildRemote() {
-  let plan = readBuildRemoteConfig()
-  if (!plan && existsSync(join(ROOT, '.project', 'project.json'))) {
-    // TapTap Maker 项目：maker_build_current_directory 的 CLI 等价物。
-    plan = { command: 'taptap-maker', args: ['build', '--target-dir', ROOT, '--json'] }
-  }
+  const plan = readBuildRemoteConfig()
   if (!plan) {
     return {
       skipped: true,
       reason: '未配置远端构建入口，已跳过远端构建',
-      hint: '如需远端构建：在仓库根写 .finalize.json（{"buildRemote":{"command":"taptap-maker","args":["build","--target-dir","<项目路径>","--json"]}}），或改用 --build-remote 在 TapTap Maker 项目中执行。',
+      hint: '如需远端构建：在仓库根写 .finalize.json，用 buildRemote 配置构建命令，例如 {"buildRemote":{"command":"<命令>","args":["<参数>"]}}。',
     }
   }
   const result = run(plan.command, plan.args)

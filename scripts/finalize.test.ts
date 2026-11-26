@@ -416,6 +416,25 @@ test('可选远端构建：无配置时跳过并提示，不算失败', (t) => {
   }
 })
 
+test('远端构建只认 .finalize.json：仓库里有 .project/project.json 也不探测、不跑厂商命令', (t) => {
+  const repo = setup(t)
+  if (!repo) return
+  const { work } = repo
+  try {
+    mkdirSync(join(work, '.project'))
+    writeFileSync(join(work, '.project', 'project.json'), '{}\n')
+    writeFileSync(join(work, 'a.txt'), 'a\n')
+    const run = runFinalize(work, ['--files', '.project/project.json,a.txt', '--message', `feat(fixture): 交付（${CARD}）`, '--build-remote'])
+    const result = parseResult(run)
+    assert.ok(result, 'stdout 应输出结构化 JSON')
+    assert.equal(result.ok, true, `无 .finalize.json 时应按未配置跳过：${result.error ?? ''}`)
+    assert.equal(result.summary.buildRemote?.skipped, true)
+    assert.match(result.summary.buildRemote?.reason ?? '', /未配置/)
+  } finally {
+    rmSync(repo.base, { recursive: true, force: true })
+  }
+})
+
 test('收口工具随仓库分发：调用方式与参数齐备', (t) => {
   const repo = setup(t)
   if (!repo) return
