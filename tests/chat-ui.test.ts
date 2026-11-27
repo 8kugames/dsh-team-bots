@@ -34,9 +34,7 @@ test('草稿接线：两个 composer 读 currentDraft，input 写回 map，发�
   assert.equal((source.match(/\$\{esc\(currentDraft\(state\)\)\}/g) ?? []).length, 2, '群聊与单聊 composer 都应回填 currentDraft(state)')
   assert.equal((source.match(/currentDraft\(state\)\.trim\(\) \|\| pendingImagesFor\(\)\.length/g) ?? []).length, 2, '群聊与单聊发送键在有草稿或有待发图片时都可点')
   assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = input\.value/)
-  // [修剪] 代码形状断言
   // sendMessage 出站前捕获当前键（失败恢复要写回同一键），清空草稿写的也是这个 key。
-  // [修剪] 代码形状断言
   assert.match(source, /state\.chatDrafts\[key\] = ''/)
   assert.ok(!source.includes('state.draft'), '旧的单值 state.draft 应已全部移除')
   const soloBotCase = /case 'solo-bot': \{[\s\S]*?case 'copy':/.exec(source)?.[0]
@@ -71,10 +69,6 @@ test('composerHeightFor：拖高后不回缩、内容超出可长高、两者封
 
 test('拖柄接线：pointerdown 拖动 + 双击恢复 + 窗口 resize 重夹取', () => {
   assert.match(source, /pointerdown[\s\S]*?\.composer-resizer/)
-  // [修剪] 代码形状断言
-  // [修剪] 代码形状断言 '拖动下限=当前内容自动高度')
-  // [修剪] 代码形状断言 '双击恢复自动高度')
-  // [修剪] 代码形状断言
   assert.match(source, /function applyComposerHeight\(input\)/)
 })
 
@@ -86,24 +80,12 @@ test('拖柄样式：ns-resize 热区 + 主题变量配色，CSS 不再设 170px
   assert.ok(!/max-height: 170px/.test(composerTextarea ?? ''), 'textarea 的 CSS 封顶应交给 JS 面板 61.8% 规则')
 })
 
-// —— 轮询滚动保位 ——
-test('render()：重建 DOM 前记录 .chat-messages scrollTop，非贴底原位恢复，贴底仍自动落底', () => {
-  // [修剪] 代码形状断言
-  // [修剪] 代码形状断言
-  // [修剪] 代码形状断言 '贴底时新消息仍自动贴底')
-})
-
-test('render()：重建后恢复 composer 内联高度与发送按钮态', () => {
-  // [修剪] 代码形状断言
-})
-
 // —— 回归护栏：引用交互与 renderKeepingChatScroll 保留 ——
 test('引用交互不回归：renderKeepingChatScroll 保留并仍聚焦输入框', () => {
   assert.match(source, /function renderKeepingChatScroll\(\) \{\s*\n\s*render\(\)\s*\n\s*document\.getElementById\('composer-input'\)\?\.focus\(\)/)
   assert.match(source, /renderKeepingChatScroll\(\)/)
   assert.match(source, /case 'cancel-reply':/)
   assert.match(source, /data-action="quote-message"/)
-  // [修剪] 代码形状断言 '切换上下文仍清引用条')
 })
 
 // —— 复制按钮 / chip 同行顺序 / 成员两行式 ——
@@ -137,7 +119,6 @@ test('成员卡片结构存在，模型行有可读兜底', () => {
   assert.match(source, /<span class="member-name-line"><strong>/, '第一行：名字 + 角色标签')
   assert.match(source, /class="member-role"/)
   assert.match(source, /class="member-model"/)
-  // [修剪] 代码形状断言 '模型行只显示 modelRef（已含 provider），缺任一项显示「未配置模型」')
   assert.ok(!/bot\.provider && modelRef \?/.test(source), '模型行不再单独拼 provider，避免与 modelRef 内的 provider 重复')
   assert.match(source, /function memberRunDot\(member\)/, '状态点判定收敛到 memberRunDot')
   assert.match(source, /function runDotHtml\(dot\)[\s\S]*?<span class="run-dot \$\{dot\.cls\}" data-status="\$\{dot\.status\}" title="\$\{esc\(dot\.text\)\}" aria-label="\$\{esc\(dot\.text\)\}"><\/span>/, '状态点带 data-status 与 title/aria-label 无障碍属性')

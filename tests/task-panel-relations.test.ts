@@ -13,14 +13,6 @@ function block(selector) {
   return re.exec(css)?.[1] ?? ''
 }
 
-test('分组内按 parent_task_id 组树：父任务同组可见才挂成子级', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-})
-
 test('子任务缩进一级：容器左缩进并带一条层级导线', () => {
   const children = block('.task-children')
   assert.ok(children, '找不到 .task-children 样式块')
@@ -31,8 +23,6 @@ test('子任务缩进一级：容器左缩进并带一条层级导线', () => {
 })
 
 test('父行可折叠子行：展开态记在 state.openPanels（key: task-children:<id>）', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   assert.match(source, /data-action="toggle-task-children"/, '父行有子任务折叠按钮')
   assert.match(source, /case 'toggle-task-children'/, '点击事件处理折叠')
   assert.match(
@@ -43,8 +33,6 @@ test('父行可折叠子行：展开态记在 state.openPanels（key: task-child
 })
 
 test('依赖徽标：depsSatisfied=false 时行尾显示「被 N 个任务阻塞」，title 列未满足项', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   assert.match(source, /class="task-deps-badge" title="\$\{attr\(depsTitle\)\}"/, '徽标带 title')
   assert.match(source, /const depsTitle = \`\$\{t\("被"\)\} \$\{blockedNames\.length\} \$\{t\("个任务阻塞："\)\}\$\{blockedNames\.join\(t\("、"\)\)\}\`/, 'title 列出未满足的依赖编号')
   assert.match(source, />\$\{icon\('alert'\)\}\$\{t\("被"\)\} \$\{blockedNames\.length\} \$\{t\("个任务阻塞"\)\}</, '徽标文案是被 N 个任务阻塞')
@@ -58,15 +46,6 @@ test('新建任务表单：可选父任务与依赖任务', () => {
   assert.match(source, /<option value="">\$\{t\("无（顶层任务）"\)\}<\/option>/, '父任务默认不选')
   assert.match(source, /id="new-task-blocked" name="blockedBy" multiple/, '依赖任务是多选')
   // 派生子任务：taskRelationOptions 增加 selectedId 参数（预填父任务时给对应 option 打 selected），选项来源不变。
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-})
-
-test('提交把父任务与依赖任务交给 create_task', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 })
 
 test('分组头计数不受层级影响', () => {
@@ -74,7 +53,6 @@ test('分组头计数不受层级影响', () => {
 })
 
 test('任务详情里也能看到父任务与被阻塞项', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   assert.match(source, /\$\{t\("父任务："\)\}\$\{esc\(parentTask\.identifier\)\} · \$\{esc\(parentTask\.title\)\}/, '详情显示父任务编号与标题')
   assert.match(source, /\$\{t\("被"\)\} \$\{blockedNames\.length\} \$\{t\("个任务阻塞："\)\}\$\{esc\(blockedNames\.join\(t\("、"\)\)\)\}/, '详情显示被阻塞项')
 })

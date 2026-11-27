@@ -29,23 +29,12 @@ test('② 三块列表卡与空态文案齐备：在办 / 待办 / 正在调度'
   assert.match(source, /t\('solo\.noDispatching'\)/, '调度运行空态文案')
 })
 
-test('③ 列表数据取自 dispatch 段，且按 bot 隔离不串台', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-})
-
 test('④ 任务行点击跳到该项目的任务页，nav 动作支持带 projectId', () => {
   assert.match(source, /data-action="nav" data-view="tasks" data-project-id="\$\{attr\(task\.project_id/)
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 })
 
 test('⑤ 运行行复用 run-clock 与 duration，且调度视图不新增定时器', () => {
   assert.match(source, /class="run-clock" data-started="\$\{attr\(started\)\}">\$\{duration\(started\)\}/, '运行时长复用 run-clock/duration')
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   const dispatchBlock = source.slice(source.indexOf('function dispatchTaskRow'), source.indexOf('function renderSoloChat'))
   assert.ok(dispatchBlock.length > 0, '应能定位到调度列表渲染区块')
   assert.doesNotMatch(dispatchBlock, /setInterval|setTimeout/, '调度列表不得新增定时器（沿用 2.8s poll）')

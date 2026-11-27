@@ -28,7 +28,6 @@ const hiddenByTimeRange = (task, timeRange) =>
   Boolean(taskTerminalTime(task) && taskEndsOutsideRange(task, timeRange))
 
 test('任务面板按状态分组渲染，每组一个 section', () => {
-  // [修剪] 代码形状断言 '按状态分组渲染')
   assert.match(source, /<section class="column task-group/, '分组用 section 承载')
   assert.match(source, /class="board board-list"/, '看板容器标记为列表形态')
 })
@@ -39,9 +38,6 @@ test('分组仍带 data-drop-status：拖拽换状态的通道不变', () => {
 })
 
 test('组头可折叠：展开态记在 state.openPanels（key: task-group:<status>）', () => {
-  // [修剪] 代码形状断言 'panel key 形如 task-group:<status>')
-  // [修剪] 代码形状断言 '分组默认全展开')
-  // [修剪] 代码形状断言 '渲染读取展开态')
   assert.match(source, /data-action="toggle-task-group"/, '组头有折叠按钮')
   assert.match(source, /case 'toggle-task-group'/, '点击事件处理折叠')
   assert.match(
@@ -96,8 +92,6 @@ test('样式：看板纵向排列，分组是块级', () => {
 
 test('已完成组收 done 任务：终态缺时间戳不被时间窗清空（P1-1）', () => {
   // done 是分组之一，分组按 status 取任务——done 任务按定义落「已完成」组
-  // [修剪] 代码形状断言 'done 在分组顺序里')
-  // [修剪] 代码形状断言 '分组按 status 取任务')
   // 时间筛选入口先看有没有终态时间基准：缺时间戳的终态任务不参与筛选、始终可见
   assert.match(
     source,
@@ -132,12 +126,9 @@ test('头部任务计数 = 各分组计数之和（P1-1）', () => {
     /const groupCounts = STATUS_ORDER\.map\(status => tasks\.filter\(task => task\.status === status\)\.length\)/,
     '分组计数与分组渲染同源',
   )
-  // [修剪] 代码形状断言 '头部计数取各组之和')
   assert.match(source, /<span class="tag">\$\{t\('task\.countBadge', \{ count: shownCount \}\)\}<\/span>/, '头部标签用各组之和')
   assert.doesNotMatch(source, /<span class="tag">\$\{tasks\.length\} 个任务<\/span>/, '头部不再用未分组的原始条数')
   // 与项目总数（设置页同源）的差额单独提示，不混进主计数
-  // [修剪] 代码形状断言 '项目总数取设置页同源口径')
-  // [修剪] 代码形状断言 '差额 = 项目总数 - 显示数')
   assert.match(source, /项目共 \$\{totalCount\} 个 · 隐藏 \$\{hiddenCount\} 个/, '差额以提示形式给出')
   // 行为：各组计数之和恒等于显示条数
   const tasks = [{ status: 'backlog' }, { status: 'todo' }, { status: 'todo' }, { status: 'done' }]
@@ -148,7 +139,6 @@ test('头部任务计数 = 各分组计数之和（P1-1）', () => {
 
 test('空分组只留一行组头，不渲染组体占位（P1-4）', () => {
   assert.doesNotMatch(source, /board-empty/, '空组的「拖到这里」占位去掉')
-  // [修剪] 代码形状断言 '空组组体为空')
   assert.match(source, /\$\{expanded && body \? `<div class="task-group-body"/, '空组不渲染组体容器')
   // 拖放通道不受影响：组 section 仍带 data-drop-status，空组仍是拖放目标
   assert.match(source, /<section class="column task-group[^"]*" data-drop-status="\$\{status\}">/, '空组仍是拖放目标')
@@ -170,13 +160,12 @@ const sortTasks = [
   { id: 'c', number: 3, created_at: '2026-11-02T00:00:00.000Z', status: 'canceled', canceled_at: '2026-11-04T00:00:00.000Z' },
 ]
 
-test('排序选择器存在且写 state.taskSort（D-63）', () => {
+test('排序选择器存在且写 state.taskSort', () => {
   assert.match(source, /taskSort: 'completed_desc',/, 'state 默认 completed_desc')
   assert.match(source, /<select class="select" data-task-sort aria-label="\$\{t\("任务排序"\)\}"/, '工具栏有排序选择器')
-  // [修剪] 代码形状断言 'change 分支写 state 后重渲染')
 })
 
-test('默认排序=完成时间 新→旧（DSHBOTS-76）', () => {
+test('默认排序=完成时间 新→旧', () => {
   // 默认值单一事实源在 ui/modules/state.js（上一测试的源码断言已锁字面量）；
   // 这里锁行为：不传 mode 时走 state.taskSort 默认档，无完成时间基准的任务排末尾不穿插。
   assert.deepEqual(sortTasksForPanel(sortTasks).map(task => task.id), ['c', 'a', 'b'], '不传 mode 默认按完成时间新→旧')
@@ -192,7 +181,6 @@ test('六种排序值齐全', () => {
 })
 
 test('组内排序不破坏分组与父子树：排序在 renderTaskRows 建树前、分组在渲染上游', () => {
-  // [修剪] 代码形状断言 '分组仍按 status 切片')
   assert.match(
     source,
     /const sorted = sortTasksForPanel\(tasks\)\s*\n\s*const visible = new Set\(sorted\.map\(task => task\.id\)\)/,
@@ -215,7 +203,7 @@ test('组内排序不破坏分组与父子树：排序在 renderTaskRows 建树�
   assert.ok(ids.includes('p1') && ids.includes('c1') && ids.includes('p2'), '父与子都在组内')
 })
 
-test('完成时间排序：非终态与缺时间戳终态排末尾不穿插（D-63）', () => {
+test('完成时间排序：非终态与缺时间戳终态排末尾不穿插', () => {
   const withNoStamp = [
     ...sortTasks,
     { id: 'd', number: 4, created_at: '2026-11-05T00:00:00.000Z', status: 'done' }, // 终态但缺 completed_at
@@ -226,7 +214,7 @@ test('完成时间排序：非终态与缺时间戳终态排末尾不穿插（D-
   assert.deepEqual(asc, ['a', 'c', 'b', 'd'], 'asc：有时间的终态按旧→新在前，非终态/缺时间戳仍按原序殿后')
 })
 
-test('创建时间与优先级排序口径（D-63）', () => {
+test('创建时间与优先级排序口径', () => {
   assert.deepEqual(sortTasksForPanel(sortTasks, 'created_desc').map(task => task.id), ['b', 'c', 'a'], '创建时间新→旧')
   assert.deepEqual(sortTasksForPanel(sortTasks, 'created_asc').map(task => task.id), ['a', 'c', 'b'], '创建时间旧→新')
   const byPriority = [

@@ -9,16 +9,11 @@ const source = readUiSource()
 const css = await uiStylesSource()
 
 test('① 侧栏树尾「已归档」抽屉：默认收起 + 计数徽标', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   assert.match(source, /data-action="toggle-tree" data-tree="archived"/, '抽屉应有 toggle-tree 通用分发')
   assert.match(source, /<span class="tree-count">\$\{archivedChats\.length\}<\/span>/, '抽屉头应有计数徽标')
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 })
 
 test('② 抽屉条目：群聊组只列 active，归档项收进抽屉并带操作', () => {
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   // 抽屉条目只负责选中，「再开 / 移除追踪」在项目设置的「项目状态」卡内。
   assert.doesNotMatch(source, /tree-item-actions/, '抽屉条目不再挂逐项操作按钮')
   assert.doesNotMatch(source, /class="tree-act/, '抽屉不再渲染 tree-act 小按钮')
@@ -28,16 +23,12 @@ test('③ 移除追踪两层确认：后果弹窗 + 复选框默认不勾 + 输�
   assert.match(source, /case 'remove-tracking': return modalRemoveTracking\(\)/, 'renderModal 应分发 remove-tracking')
   assert.match(source, /<input type="checkbox" id="remove-tracking-purge">/, '复选框不带 checked，默认不勾')
   assert.match(source, /id="remove-tracking-name" name="confirmName"/, '第二步应输入项目名 confirmName')
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   assert.match(source, /id="remove-tracking-submit" disabled>/, '执行按钮初始禁用')
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 })
 
 test('④ 再开与归档按钮：接线 + 警告色右对齐', () => {
   assert.match(source, /case 'reopen-project': \{/, 'action 分发应有 reopen-project')
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   assert.match(source, /class="btn small danger" type="button" data-action="archive-project"/, '设置页归档按钮应为 danger 警告色')
-// [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
   // 「项目状态」卡内按状态分流：进行中给归档，已归档给再开 + 移除追踪。
   assert.match(source, /data-action="remove-tracking-open" data-project-id="\$\{attr\(project\.id\)\}" data-project-name="\$\{attr\(project\.name\)\}"/, '已归档项目的「移除追踪」应在项目状态卡内')
   assert.match(source, /data-action="reopen-project" data-project-id="\$\{attr\(project\.id\)\}">\$\{t\("项目再开"\)}</, '已归档项目的「项目再开」应在项目状态卡内')

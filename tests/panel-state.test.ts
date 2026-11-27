@@ -59,13 +59,6 @@ test('渲染接线：五类折叠 details 都经 panelAttrs 带 data-panel，Bot
   assert.match(source, /openPanels: new Set\(\)/)
 })
 
-test('toggle 事件委托：document 捕获阶段监听并写入 applyPanelToggle', () => {
-  // [修剪] 代码形状断言
-  // [修剪] 代码形状断言
-})
-
 test('轨迹 modal 把 runId 透传到面板 key，条目 key 含索引保持多条目唯一', () => {
-  // [修剪] 代码形状断言
   assert.match(source, /modalTrajectory\(modal\.detail, modal\.runId\)/)
-  // [修剪] 代码形状断言
 })

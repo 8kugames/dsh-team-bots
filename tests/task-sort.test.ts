@@ -89,13 +89,11 @@ test('看板接线：filteredTasks 走排序，看板分组沿用该顺序', () 
   assert.match(source, /return sortTasksByPriority\(\(state\.data\?\.tasks \?\? \[\]\)\.filter/)
   // 分组内顺序直接来自 filteredTasks 的结果，不另行排序
   // （按状态分组渲染，列内容由 renderTaskGroup 输出）
-  // [修剪] 代码形状断言
   // 组内行由 renderTaskRows 输出（按 parent_task_id 组树，顺序仍取分组过滤结果）
   assert.match(source, /renderTaskRows\(tasks\)/)
   assert.match(source, /renderTaskCard\(task, \{ depth, childCount: children\.length, expanded \}\)/)
   // 卡片上的优先级也走归一化，不显示空白
   // （优先级渲染为图标：taskPriorityIcon 内 taskPriorityKey 归一 + PRIORITY 取中文标签）
   assert.match(source, /function taskPriorityIcon\(task\)/)
-  // [修剪] 代码形状断言
   assert.match(source, /PRIORITY\[key\] \?\? key/)
 })

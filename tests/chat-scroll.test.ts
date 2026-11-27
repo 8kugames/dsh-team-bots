@@ -66,7 +66,6 @@ test('render() 重建 DOM 前打开渲染闸门，rAF 收尾复位', () => {
 })
 
 test('滚动监听改用纯函数判定，并把渲染态与连接态传进去', () => {
-  // [修剪] 代码形状断言 '滚动监听应调用纯函数')
   assert.match(source, /rendering: state\.rendering,/, '纯函数应收到渲染窗口标志')
   assert.match(source, /connected: el\.isConnected,/, '纯函数应收到节点连接态')
   assert.match(source, /current: state\.chatAtBottom,/, '纯函数应收到原值')
@@ -81,7 +80,6 @@ test('切进聊天视图时确定性贴底，不依赖历史残值', () => {
 })
 
 test('不许回归：上翻阅读仍不被 2.8s 轮询拽回底部', () => {
-  // [修剪] 代码形状断言 '阅读位恢复分支应保留')
   assert.match(
     source,
     /if \(messages && state\.chatAtBottom\) messages\.scrollTop = messages\.scrollHeight/,
