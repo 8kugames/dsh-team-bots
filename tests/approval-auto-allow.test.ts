@@ -1,7 +1,7 @@
-// DSHBOTS-365：提权按规则免审——路径/命令 glob 规则命中即不落待办卡，
+// 提权按规则免审的守门测试——路径/命令 glob 规则命中即不落待办卡，
 // 插件即时替 owner 应答 allowed-once 并留痕（approvals 行 allowed + decided_by=auto:rule:*，
 // 审计事件 approval.auto_allow）。未命中走原卡流程逐字不变；bot 写规则被拒；danger 档可配。
-// 增量：出厂预置关键词 glob 三条（**/temp/**、**/.tmp/**、**/tmp/**，任意沙箱档，仅键为 null 时播种）；
+// 出厂预置关键词 glob 三条（**/temp/**、**/.tmp/**、**/tmp/**，任意沙箱档，仅键为 null 时播种）；
 // 存量预置行（绝对前缀枚举）启动时迁移为新 glob，owner 自建行不动。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -392,7 +392,7 @@ test('updateApprovalRules：bot actor 被拒（不能自批），user 可写并�
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// ===== 出厂预置默认规则（DSHBOTS-365 增量）=====
+// ===== 出厂预置默认规则 =====
 
 test('全新库 initialize 播种关键词 glob 默认规则（系统 tmpdir 未被覆盖时多一行），重复执行幂等', async () => {
   const { root, store, service } = await setup()

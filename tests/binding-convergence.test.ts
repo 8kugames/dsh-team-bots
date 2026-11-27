@@ -1,6 +1,6 @@
-// DSHBOTS-285（ADR §5.2-1）库与绑定收敛守门：
+// 库与绑定收敛守门（ADR §5.2-1）：
 // ①新库索引面：one_bot_binding 存在、旧三车道索引已删；one_active_run_per_bot 已随
-//   runMigrations 接线 activateBotRunSerialization（§5.2-2 已合），新库开库即建；
+//   runMigrations 接线 activateBotRunSerialization（§5.2-2），新库开库即建；
 // ②one_bot_binding 约束：同 bot 恰一条 kind='bot' 活跃绑定，alias 行不受限；
 // ③one_active_run_per_bot 约束：同 bot 至多一条 queued/running，终态释放后可再入队；
 // ④存量迁移：旧四道活跃行 alias 化、project 会话转 kind='bot' 复用、幂等重跑不变；
@@ -199,10 +199,9 @@ test('存量运行串行化：同 bot 多条 queued 只留最早一条，其余 
   assert.ok(indexNames(store).includes('one_active_run_per_bot'), '串行化后索引应建成')
 })
 
-// ZONGM-140 三会话事故复盘①：串行化收口是一次性存量迁移，账本已记录时重开库（宿主
-// 重启即触发）不得再收口——修复前生产表现是每次重启把同 bot 较新的 queued/running 运行
-// （含已被最终索引豁免的 task/治理运行）误杀成 BOT_SERIALIZATION canceled（ZONGM-140
-// 首发运行入队 15 秒被杀、DSHBOTS-368 两次被杀、11-13 两条治理运行被杀）。
+// 串行化收口是一次性存量迁移：账本已记录后重开库（宿主重启即触发）不得再收口——
+// 再收口会把同 bot 较新的 queued/running 运行（含已被最终索引豁免的 task/治理运行）
+// 误杀成 BOT_SERIALIZATION canceled。
 test('串行化收口账本闸：已记录后重开库不再取消活跃运行（重启安全）', async (t) => {
   const ctx = await setup()
   t.after(() => cleanup(ctx))
@@ -217,9 +216,8 @@ test('串行化收口账本闸：已记录后重开库不再取消活跃运行�
   addSeedTask('task-old', 1)
   addSeedTask('task-new', 2)
   const at = (ms) => new Date(Date.parse('2026-11-06T00:00:00Z') + ms).toISOString()
-  // setup 开库已走完迁移链（账本已记录）。种出「同 bot 多条活跃 task 运行并存」形状
-  // （ZONGM-139 running + ZONGM-140 queued 同 bot 的生产事故形状）：task 运行被最终
-  // 索引豁免可合法并存，但 chat 类会撞索引，故种 task 类并各带互异 task_id。
+  // setup 开库已走完迁移链（账本已记录）。种出「同 bot 多条活跃 task 运行并存」形状：
+  // task 运行被最终索引豁免可合法并存，但 chat 类会撞索引，故种 task 类并各带互异 task_id。
   store.run('DROP INDEX IF EXISTS one_active_run_per_bot')
   addTaskRun(store, { id: 'run-old', botId: 'bot-a', projectId: 'proj-ser', taskId: 'task-old', queuedAt: at(0) })
   addTaskRun(store, { id: 'run-new', botId: 'bot-a', projectId: 'proj-ser', taskId: 'task-new', queuedAt: at(1_000) })
@@ -252,7 +250,7 @@ test('ensureBotBinding：无绑定 bot 运行期新建控制面会话，重复�
     sessionCreates: new Map(),
     selectModel: async () => {},
     defaultAgentPreset: async () => ({}),
-    // DSHBOTS-289 后 ensureBotBinding 自带策略面；本测只钉建行/复用，全部空实现。
+    // ensureBotBinding 自带策略面；本测只钉建行/复用，全部空实现。
     applyFilePolicy() {},
     shouldRolloverSession: () => false,
     maybeCompactSession() {},
@@ -277,7 +275,7 @@ test('ensureBotBinding：无绑定 bot 运行期新建控制面会话，重复�
   )
 })
 
-// ── V1 四路合并（DSHBOTS-296，ADR §6 V1 终验）──────────────────────────
+// ── V1 四路合并（ADR §6 V1 终验）──────────────────────────
 // 同一 bot 相继触发任务派发/群聊/私信/单聊四条入站路，断言收敛不变量：
 // alias=0 绑定恰 1 行 kind='bot'，四类运行全部落同一条控制面会话。
 // startRun 只镜像真实现的会话面（ensureSession 解析 + runs.session_id 写回，
@@ -401,7 +399,7 @@ test('V1 四路合并（DSHBOTS-299 三分域）：任务/群聊/私信落 (bot,
   }
   assert.equal(JSON.parse(store.setting(`bot_pending_msgs:${dev.id}`) ?? '[]').length, 0, '挂起队列应清空')
 
-  // V1 核心断言（DSHBOTS-299 会话域三分 + 任务专属会话）：alias=0 绑定中 kind='bot'
+  // V1 核心断言（会话域三分 + 任务专属会话）：alias=0 绑定中 kind='bot'
   // 恰 2 行——项目域 (bot,project) 承接 chat/dm，solo 域 (bot,NULL) 承接 solo_chat；
   // task 运行另开「bot 名+任务号」专属会话（kind='task' 绑定行，单 bot 多任务并行）。
   const activeBindings = store.all("SELECT * FROM session_bindings WHERE bot_id = ? AND alias = 0", dev.id)

@@ -1,4 +1,4 @@
-// tests/prompt-budget.test.ts —— DSHBOTS-254：提示词体量预算守门。
+// 提示词体量预算守门。
 // ① 静态前缀：三段拆卡指引合并去重后合计 ≤1200 字符，旧三标题各至多出现一次，
 //    整段静态前缀（header → # Assigned task 之前）不超阈值（防静默回胖）；
 // ② 任务分支长描述复用 review/handle 的 8k 截断口径（带盲区标记）；
@@ -40,7 +40,7 @@ async function setup() {
   const project = store.get('SELECT * FROM projects WHERE id = ?', projectView.id)
   const runtime = new DshRuntime({
     ctx: null, config, store, logger: { info() {}, warn() {}, error() {} },
-    // Phase 3：与 index 同款注入聊天库路由器，评论等正文读取走项目聊天库。
+    // 与 index 同款注入聊天库路由器，评论等正文读取走项目聊天库。
     chatStores: { forRun: (run: any) => (service as any).runChatStore(run) },
   })
   const close = async () => {
@@ -79,8 +79,8 @@ test('静态前缀预算：三段拆卡指引合计 ≤1200，旧三标题各至
     for (const text of sections) assert.ok(text.length > 0, '三段都应在场（agentTeam 开启）')
 
     // 整段静态前缀（到 # Assigned task 之前）不超阈值：防后续段落静默回胖。
-    // 1900→2000（DSHBOTS-345 复盘）：交付报告体量红线 + 禁贴文件正文两条固定规则
-    // 显式评审入库；实际值 ~1983，余量与旧阈值同紧度。
+    // 阈值 2000 字符：交付报告体量红线 + 禁贴文件正文两条固定规则
+    // 显式评审入库；实际值 ~1983，余量偏紧。
     const prefix = prompt.slice(0, at('# Assigned task'))
     assert.ok(prefix.length <= 2_000, `静态前缀应 ≤2000 字符（实测 ${prefix.length}）`)
   } finally { await t.close() }

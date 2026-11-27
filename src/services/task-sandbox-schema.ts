@@ -4,10 +4,10 @@
 // 配置档收紧（只收紧不放大；入参解析与校验见 src/services/file-policy.js 的
 // resolveSandboxOverride，对准承接 bot 的 file_policy）。生效口径见
 // src/services/runtime/prompt.js 的 effectiveSandbox：任务写运行取 tasks.sandbox_override，
-// 缺省回落 bot.file_policy（不传参数时行为与迁移前完全一致）。
+// 缺省回落 bot.file_policy（不传参数时行为不变）。
 //
-// 迁移独立成文件的原因与 recovery-schema 相同：db.js 贴 800 行红线，迁移不写进 db.js。
-// 手法同款：schema_migrations 幂等守卫 + PRAGMA 判列 + ALTER TABLE。
+// 迁移独立成文件的原因：db.js 贴 800 行红线，迁移不写进 db.js。
+// 手法：schema_migrations 幂等守卫 + PRAGMA 判列 + ALTER TABLE。
 
 import { nowIso } from '../util.js'
 

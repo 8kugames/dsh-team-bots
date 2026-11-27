@@ -6,7 +6,7 @@ import { t } from './i18n.js'
 import { renderMessageImages } from './composer.js'
 import { refresh, panelAttrs, render, beginChatPending, endChatPending, chatContextPending } from '../app.js'
 
-// ===== approval-card:start 审批卡片（DSHBOTS-32 UI）=====
+// ===== approval-card:start 审批卡片 =====
 // ===== approval-ux:start 审批交互=====
 // 超时可见：秒级倒计时 + 临期危险色。剩余时间从 expires_at 反推，
 // 1s 定时器只改 .approval-clock 文本，不整卡重绘（2.8s 轮询整卡重绘会打断跳动感）。
@@ -158,7 +158,7 @@ function renderApprovalCard(message) {
 }
 // ===== approval-card:end =====
 
-// ===== question-card:start 提问卡片（DSHBOTS-116 UI）=====
+// ===== question-card:start 提问卡片 =====
 // 四态：pending（唯一强调态，可作答）/ answered / expired / timeout。
 // 与审批卡片同骨架：pending 有倒计时 + 进度条 + 作答区，已决态只留状态 pill 与答案摘要。
 const QUESTION_STATUS = {

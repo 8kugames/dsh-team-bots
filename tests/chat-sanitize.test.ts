@@ -179,7 +179,7 @@ test('⑤整段工具调用残片被识别、收尾选文本时丢弃并回退�
   assert.equal(isToolMarkupFragment(RUN_OUTPUT_FRAGMENT), true)
   // 该轮只有残片：按「模型未返回文本」处理（返回空串）。
   assert.equal(selectDeliverableText([RUN_OUTPUT_FRAGMENT]), '')
-  // 回退到此前的正常 text block。
+  // 回退到前一个正常 text block。
   const prose = '第一轮交付说明：改动落在 src/api.js 与 tests/chat-pagination.test.js。'
   assert.equal(selectDeliverableText([prose, RUN_OUTPUT_FRAGMENT]), prose)
   // 无标记的普通文本永不误判，空串不算残片。

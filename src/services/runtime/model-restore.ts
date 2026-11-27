@@ -15,9 +15,8 @@
 // ② executing 存在且 store 为空 → 直接调用，当前上下文本就干净。
 // ③ 拿不到 hmr/executing → 兜底走模块级 restoreScope.runInAsyncScope，用模块
 //    评估期捕获的上下文把恢复切出污染的调用链。
-// 不再使用「撞嵌套就重捕 scope」的自愈：AsyncResource 在已被污染的调用链里创建
-// 只会捕获到同样污染的上下文，重试只会反复撞同一面墙，还会把模块级原本干净
-// 的 restoreScope 覆盖成污染的，永久破坏退路。
+// 不得在已被污染的调用链里创建 AsyncResource：捕获到的仍是同样污染的上下文，
+// 还会把模块级原本干净的 restoreScope 覆盖成污染的，永久破坏退路。
 //
 // 超时护栏：宿主 runExclusive 是排队执行（this.operations.then(...)），逃逸后的
 // 恢复排在宿主事务队列尾。若外层事务恰好等待本次恢复，恢复永远不返回，
@@ -221,7 +220,7 @@ export async function restoreDefaultModel(defaults, before, hooks = {} as any) {
       if (error instanceof RestoreTimeoutError) {
         // 调用排在宿主事务队列尾且迟迟不落地：重试只会再排一次队，直接收口。
         // 超时只是「没等到」，真实失败原因挂到 cause 上保留。
-        // 用 instanceof 而不是鸭子类型判别：宿主业务错误若带 timedOut 字段，不能
+        // 护栏超时只认 instanceof 命中：宿主业务错误若带 timedOut 字段，不能
         // 被当成护栏超时（那会跳过重试并丢掉真实原因）。
         lastError = new RestoreTimeoutError(budgetMs, realError)
         timedOut = true

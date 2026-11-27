@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 
-// DSHBOTS-70：粘贴截图与文件路径（纯前端口径——不扫目录、不加服务端接口、不读文件系统）。
+// 粘贴截图与文件路径的守门测试（纯前端口径——不扫目录、不加服务端接口、不读文件系统）。
 // 锁定四件事：①parseFileUriList 只从剪贴板文本还原 file:// 绝对路径（uri-list 语法 + text/plain 兜底）；
 // ②insertTextAtCursor 按光标 splice 插入并补派 input 事件（防 2.8s 轮询用旧草稿回滚）；
 // ③paste 分发走 document 级委托且只认领 #composer-input（纯文本粘贴行为不变）；

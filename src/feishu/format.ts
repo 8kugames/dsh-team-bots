@@ -1,4 +1,4 @@
-// src/feishu/format.ts —— 飞书出站消息排版层（markdown 文本，DSHBOTS-323 卡①）
+// 飞书出站消息排版层（markdown 文本）。
 // 角色对齐 src/wechat/format.ts：通道全部回程/回执文案在此集中格式化。
 // 飞书原生支持 markdown：出站一律走交互卡片的富文本（markdown）组件——卡片里单个 \n 即换行，
 // 纯文本消息的 \n 是段落间距（版面松）；加粗、列表、分割线也都原生渲染。

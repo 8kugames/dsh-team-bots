@@ -1,10 +1,10 @@
-// DSHBOTS-349：宿主深色模式下团队工作台停留浅色（黑底嵌浅色圆角面板，不一体）。
+// 宿主深色模式下团队工作台停留浅色（黑底嵌浅色圆角面板，不一体）。
 // 根因：工作台深色唯一依赖 prefers-color-scheme 媒体查询，而宿主 WebView 媒体查询
 // 失真（恒报 light）；宿主自身深色靠给同源父文档 body 打 data-ds-dark-theme 属性驱动。
 // 修法：深色 token 改由 :root[data-color-scheme="dark"] 承载（删媒体查询包裹），
 // util.ts resolveColorScheme 嵌入态读父文档 body 属性（双向跟随）、独立态与跨源
 // 异常回落系统媒体查询；MutationObserver + matchMedia change 实时跟随宿主切换。
-// DSHBOTS-351：浅色模式下群聊页发黑——嵌入态只读直接 parent 且绝对压过媒体查询，
+// 浅色模式下群聊页发黑——嵌入态只读直接 parent 且绝对压过媒体查询，
 // 单层信号失真即整页误判 dark。改为祖先链遍历：自直接父逐层上溯到 window.top，
 // 任一祖先带属性才判 dark；全程无属性（含顶层）/跨源异常/独立态一律回落媒体查询
 // （废止「宿主浅强压系统深」的绝对优先），观察器随之覆盖祖先链各层 body。
@@ -58,7 +58,7 @@ test('深色 token 由 :root[data-color-scheme="dark"] 承载，媒体查询包�
 })
 
 test('暗色卡片高光随属性选择器走，不再寄生媒体查询', () => {
-  // 浮雕材质（b162c1c）：卡片边缘即阴影，暗色只重定义 --relief-hi / --shadow-card，
+  // 浮雕材质：卡片边缘即阴影，暗色只重定义 --relief-hi / --shadow-card，
   // 不再给 .card 单写暗色内高光；深色也不得退回媒体查询承载。
   assert.match(bare, /\.card \{[^}]*box-shadow: var\(--shadow-card\)/, '卡片用主题浮雕阴影')
   const darkIndex = bare.indexOf(':root[data-color-scheme="dark"] {')

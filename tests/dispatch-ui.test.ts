@@ -1,4 +1,4 @@
-// DSHBOTS-28：bot 单聊页升级为「调度页」的 UI 断言。
+// bot 单聊页「调度页」的 UI 断言。
 // 沿用读源码断言的先例（tests/typing-status.test.js 风格）：ui/app.js 是浏览器 IIFE，
 // 单测里跑不起来，就锁住关键文案、结构与数据接线。
 import { test } from 'node:test'
@@ -53,8 +53,8 @@ test('⑤ 运行行复用 run-clock 与 duration，且调度视图不新增定�
 })
 
 test('⑥ 子智能体卡如实描述内置能力，不造假数据', () => {
-  // DSHBOTS-120 起文案进字典：接线在 app.js（t 调用），实质内容锁在 zh/en 字典值里。
-  // DSHBOTS-233 词表按域拆分后，字典值经聚合入口导入，不再从 zh.js 文件文本断言。
+  // 文案进字典：接线在 app.js（t 调用），实质内容锁在 zh/en 字典值里。
+  // 词表按域拆分，字典值经聚合入口导入，断言不再取 zh.js 文件文本。
   assert.ok(
     zhDict['solo.subagentsBody'].includes('subagent / subagent_fork / workflow'),
     '中文字典应如实描述已内置的子智能体工具',
@@ -69,8 +69,8 @@ test('⑥ 子智能体卡如实描述内置能力，不造假数据', () => {
   assert.doesNotMatch(source, /依赖 DSHBOTS-27/, '不得再出现依赖号占位文案')
 })
 
-// DSHBOTS-147 问题②（docs/review/review-redundancy.md R-1）：调度对象卡头的「配置」按钮与
-// chat-head 就近入口、顶部 tab 同屏三处重复，按审查结论删卡头按钮（③），留 tab（①）与 chat-head（②）。
+// 调度对象卡头的「配置」按钮与 chat-head 就近入口、顶部 tab 同屏三处重复，
+// 卡头只留标题，配置入口只留 tab 与 chat-head 两处（docs/review/review-redundancy.md）。
 test('⑦ 调度对象卡头不再放「配置」按钮，chat-head 就近入口保留', () => {
   const block = source.slice(source.indexOf('function renderSoloChat'), source.indexOf('async function loadSoloDetail'))
   assert.ok(block.length > 0, '应能定位到 renderSoloChat 渲染块')

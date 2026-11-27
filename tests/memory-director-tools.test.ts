@@ -1,4 +1,4 @@
-// tests/memory-director-tools.test.ts —— DSHBOTS-239 守门：总监记忆管理工具集。
+// 总监记忆管理工具集的守门测试。
 // 锁定五件事：
 //  ① list 按作用域枚举现存记忆、支持主题子串过滤；
 //  ② remember 同名覆盖：同 scope+topic 原地更新（revision+1、事件与审计留痕），不叠新条；

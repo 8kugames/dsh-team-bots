@@ -30,7 +30,7 @@ function collectImportedSlices() {
         urlPath: `modules/${name}`,
         source: readFileSync(join(MODULES_DIR, name), 'utf8'),
       })),
-    // DSHBOTS-233：词表按域拆分后，i18n 聚合入口相对导入域切片，同样纳入覆盖锁。
+    // 词表按域拆分后，i18n 聚合入口相对导入域切片，同样纳入覆盖锁。
     ...readdirSync(I18N_DIR)
       .filter((name) => name.endsWith('.js'))
       .sort()

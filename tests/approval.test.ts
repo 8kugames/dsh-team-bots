@@ -1,4 +1,4 @@
-// DSHBOTS-32：宿主 approval/request 瀑布 → 群聊审批条目 → 按钮作答。
+// 宿主 approval/request 瀑布 → 群聊审批条目 → 按钮作答。
 // 认领/透传、owner 鉴权、作答映射、超时/abort/重启清理、密钥掩码、上下文隔离。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -117,8 +117,8 @@ test('命中 bot 会话：落 pending 审批与 kind=approval 消息，allow 返
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-218：单聊会话（kind='solo'、project_id 为空）由工作台单聊卡片承接——单聊里 bot 就是
-// 对话方，没有群聊可发，无需项目语境，也不再透传原生界面。
+// 单聊会话（kind='solo'、project_id 为空）由工作台单聊卡片承接——单聊里 bot 就是
+// 对话方，没有群聊可发，无需项目语境，也不透传原生界面。
 test('单聊会话的提权请求由工作台单聊卡片承接，不落群聊、不透传', async () => {
   const { root, store, service } = await setup()
   try {
@@ -291,7 +291,7 @@ test('state 视图带 approvals，审批消息不进 bot 上下文', async () =>
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-61：审批认领必须抢在宿主原生审批面板之前。宿主 dsh-api-remotes（web bundle 比插件先加载）
+// 审批认领必须抢在宿主原生审批面板之前。宿主 dsh-api-remotes（web bundle 比插件先加载）
 // 注册的 approval/request 监听器拿到原生面板的答案后直接 resolve、不调 next——按 cordis 的注册序
 // 瀑布流语义，先到的监听器即截断后续链路，插件若排在其后就永远收不到请求（卡片不出现，全落原生界面）。
 test('任务运行会话的审批被插件认领：插件先于原生面板应答，卡片进群聊', async () => {

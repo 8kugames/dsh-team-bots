@@ -1,7 +1,7 @@
 // src/services/bots.js —— Bot 管理域
 // Bot 建档、档案更新、归档回滚与视图；单聊工作区目录的落位。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 因此方法体内的 this 仍指向 TeamService 实例。
 
 import { join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
@@ -301,7 +301,7 @@ export const botsMethods = {
       fields.push('provider = ?', 'model = ?', 'effort = ?', 'updated_at = ?')
       values.push(provider, model, effort, nowIso())
       this.store.run(`UPDATE bots SET ${fields.join(', ')} WHERE id = ?`, ...values, botId)
-      // DSHBOTS-358：provider 真变时迁移该 bot 的额度记录——额度墙按 (bot, provider) 存，
+      // provider 真变时迁移该 bot 的额度记录——额度墙按 (bot, provider) 存，
       // 改 provider 后旧键会成孤儿。迁移保留更严的一条，不抹掉正在生效的墙。
       if (provider !== bot.provider) {
         this.migrateBotQuotaProvider(botId, bot.provider, provider, actor)

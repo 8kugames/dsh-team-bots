@@ -1,4 +1,4 @@
-// DSHBOTS-282 展示层路径 home 前缀转 ~：displayPath 纯函数行为 + prompt.ts 展示点源码锚。
+// 展示层路径 home 前缀转 ~：displayPath 纯函数行为 + prompt.ts 展示点源码锚。
 // 原则守门：displayPath 只进提示词/文本输出层，真实路径解析/读写一律消费原始绝对路径。
 import test from 'node:test'
 import assert from 'node:assert/strict'

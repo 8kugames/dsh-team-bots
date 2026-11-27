@@ -1,7 +1,7 @@
 // src/services/proposals.js —— 提案与技能域
 // Bot 提案的评估、决策、灰度与晋升，技能绑定与回滚。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 因此方法体内的 this 仍指向 TeamService 实例。
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -10,9 +10,9 @@ import { publishSkill, rollbackSkill, skillSnapshot, stageSkill, syncSkills } fr
 import { scanProjectSkills } from '../project-skills.js'
 import { id, jsonParse, nowIso, parseDisabledSkills, sha256, slugify, text } from '../util.js'
 
-// DSHBOTS-271 融合稿闸门：进化 bot_update 的 instructions 必须是「原指令+新增内容」的融合稿，
+// 融合稿闸门：进化 bot_update 的 instructions 必须是「原指令+新增内容」的融合稿，
 // 纯替换稿会把原提示词整体顶掉。保留率 = 原 instructions 的非空行（trim 后）在提案稿
-// 行集合中的保留占比；低于阈值即拒绝（原因+替代指引，D-269 口径）。
+// 行集合中的保留占比；低于阈值即拒绝（原因+替代指引）。
 // 原 instructions 为空（首次立指令）没有可保留内容，保留率恒为 1，直接放行并在 diff 留痕。
 export const MERGE_KEEP_RATIO = 0.6
 export const MERGE_DRAFT_GUIDANCE = '进化指令必须是原指令+新增内容的融合稿：保留原有指令全文再写改动，不是全新替换稿也不是增量补丁'

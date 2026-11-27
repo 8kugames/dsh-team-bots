@@ -233,10 +233,10 @@ export async function createSdkTransport({ appId, appSecret, log = console as un
 }
 
 /**
- * 飞书机器人通道宿主（DSHBOTS-333：传输层换进程内官方 SDK）。
+ * 飞书机器人通道宿主。
  * 架构：传输层=进程内 @larksuiteoapi/node-sdk（WSClient 长连接收事件 +
  * im.v1.message.reply 出站，uuid 幂等），入站模型（LRU 去重/TOFU 认主/群@门禁/
- * lane 编码/generation 门禁）与传输无关，原样保留。
+ * lane 编码/generation 门禁）与传输无关。
  * 凭据生效优先级：通道页保存（secrets 表 SecretBox 加密）> 服务端
  * 注入（cordis.patch.yml / env）；secret 明文只在内存交给 SDK，日志/状态一律不回显。
  */
@@ -275,9 +275,9 @@ export class FeishuChannel {
   }
 
   /**
-   * phase 迁移（DSHBOTS-334 日志去噪）：置相位并返回是否发生变化（相位或错误文案
-   * 任一变动）。调用方只在变化时打日志——宿主 HMR 反复重载/重连轮次里同一状态
-   * 不再刷屏；重新进入（如 ready→unbound）仍会各打一次。
+   * phase 迁移：置相位并返回是否发生变化（相位或错误文案任一变动）。
+   * 调用方只在变化时打日志——宿主 HMR 反复重载/重连轮次里同一状态不刷屏；
+   * 重新进入（如 ready→unbound）仍会各打一次。
    */
   setPhase(phase, error = this.error) {
     const changed = this.phase !== phase || this.error !== error
@@ -300,7 +300,7 @@ export class FeishuChannel {
   }
 
   /**
-   * 重绑（凭据变更后，DSHBOTS-334）：断开旧传输，按当前生效凭据重走启动自检。
+   * 重绑（凭据变更后）：断开旧传输，按当前生效凭据重走启动自检。
    * 生产路径 this.transport=null 强制按新凭据重建 SDK 传输；测试注入桩保留复用。
    */
   async rebind() {
@@ -680,7 +680,7 @@ export class FeishuChannel {
   }
 
   /**
-   * 入站 Trigger 留痕（对齐微信 B4-① 观测面）：每条入站事件的处置经
+   * 入站 Trigger 留痕（对齐微信通道观测面）：每条入站事件的处置经
    * service.recordFeishuTrigger 落库，稳定 id=feishu:<messageId>（channel='feishu'），
    * peer_id 记 lane 编码。service 不在场（测试桩）时静默跳过。
    */

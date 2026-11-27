@@ -193,7 +193,7 @@ function taskPriorityIcon(task) {
   return `<span class="task-priority ${key}" title="${t('task.priorityTitle', { label: text })}" aria-label="${t('task.priorityTitle', { label: text })}">${icon('priority')}</span>`
 }
 
-// task-card:start —— 任务行（DSHBOTS-58，参照 Linear）：紧凑单行 —— 状态图标 + 优先级图标 + 编号 + 标题 + 右簇（标签/依赖/运行态/终态时间/头像）。
+// task-card:start —— 任务行：紧凑单行 —— 状态图标 + 优先级图标 + 编号 + 标题 + 右簇（标签/依赖/运行态/终态时间/头像）。
 // 运行徽标文案来自后端 taskStage 纯函数查表的 stageLabel，不从 latestRun.status 拼映射。
 // 终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：状态点、运行文案、计时与 running 高亮全部隐藏，
 // 以免已完成/已取消任务上挂着的遗留运行误导看板。

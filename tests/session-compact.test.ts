@@ -1,4 +1,4 @@
-// DSHBOTS-286：512 轮结转 + 每 64 轮闲时总结压缩（忙时推后/合批）。
+// 512 轮结转 + 每 64 轮闲时总结压缩（忙时推后/合批）的守门测试。
 // 覆盖：默认值（512/64）与生效链、64 轮边界闲时触发、幂等不重排、忙时推后跨窗口合批、
 // 压缩≠结转（不 alias 化/不新建/不排 rollover）、compact=0 关闭、压缩运行路由回原会话
 // 与提示词/收尾留痕、结转后任务亲和路由（未终态任务落旧会话/新任务落活跃控制面绑定）、
@@ -37,7 +37,7 @@ async function setup({ rolloverTurns = 999, compactTurns = 4, compactCtxTokens =
     workspace, dataDir, skillRoot: join(workspace, '.agents'),
     modelCacheMs: 0, schedulerIntervalMs: 30_000,
     sessionRolloverTurns: rolloverTurns, sessionCompactTurns: compactTurns,
-    // P2 体积判据默认关闭：既有用例守窗口语义（不播种 usage_events），体积门由专门用例覆盖。
+    // 体积判据默认关闭：既有用例守窗口语义（不播种 usage_events），体积门由专门用例覆盖。
     sessionCompactCtxTokens: compactCtxTokens, sessionRolloverCtxTokens: rolloverCtxTokens,
   })
   const store = openDatabase(config.dbPath)
@@ -80,7 +80,7 @@ async function primeProject(service: any, store: any) {
   return { director, dev, project }
 }
 
-// 种子绑定默认即 bot 的 kind='bot' 控制面绑定（DSHBOTS-289 收敛后唯一活跃车道）。
+// 种子绑定默认即 bot 的 kind='bot' 控制面绑定（唯一活跃车道）。
 const bindSession = (store: any, { botId, projectId, sessionId, kind = 'bot', taskId = null }) => {
   store.run(
     'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -103,7 +103,7 @@ const seedRuns = (store: any, { projectId, botId, sessionId, count, kind = 'chat
 const compactRuns = (store: any) => store.all("SELECT * FROM runs WHERE kind = 'session_compact'")
 const rolloverRuns = (store: any) => store.all("SELECT * FROM runs WHERE kind = 'rollover_summary'")
 
-// 播种会话当前上下文规模（P2）：给该会话最近一条运行挂一次模型调用记账，
+// 播种会话当前上下文规模：给该会话最近一条运行挂一次模型调用记账，
 // input+cache_read 之和即 sessionContextTokens 取到的「当前上下文」。
 const seedUsage = (store: any, { sessionId, ctx: tokens, occurredAt }: { sessionId: string; ctx: number; occurredAt: string }) => {
   const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY rowid DESC LIMIT 1', sessionId)
@@ -182,8 +182,7 @@ test('运行中触发（生产断点回归）：bot 自己的运行进行中跨�
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: 4 })
     // 生产形态：调度器已领取当前运行（running、session_id 尚未写回——startRun 在 ensureSession
     // 之后才回填），maybeCompactSession 按会话查忙看不见它，但它的 (bot, project) 占着串行域。
-    // 修复前：INSERT OR IGNORE 撞 one_active_run_per_bot 被静默吞掉，标记照常推进、运行永不落库
-    // （live 库实测 4 个会话标记推进到 64/128/320，session_compact 运行 0 条）。
+    // 缺陷形态：INSERT OR IGNORE 撞 one_active_run_per_bot 被静默吞掉，标记照常推进、运行永不落库。
     ctx.store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
        VALUES ('run_current', ?, ?, 'chat', 'read', 'mention', 'running', 1, 'chat:cur:1', ?)`,

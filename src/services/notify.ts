@@ -202,7 +202,7 @@ export const notifyMethods = {
       if (assignee?.status === 'paused') throw badRequest(`任务 ${identifier} 负责人 ${assignee.name} 已暂停，先恢复再提醒`)
       if (!assignee || assignee.status !== 'active') throw badRequest(`任务 ${identifier} 负责人当前不可用`)
     }
-    // DSHBOTS-267 单跟进者在途幂等：每张任务同时只允许一个跟进提醒在途。
+    // 单跟进者在途幂等：每张任务同时只允许一个跟进提醒在途。
     // 在途判定=最近一条任务提醒落库后，该任务没有启动过新运行（提醒尚未被任何运行消费）；
     // 重复提醒静默吸收（不落新留痕、不注入、不计新），warn 留痕。
     const lastNotice = this.groupChatStore(task.project_id).get(

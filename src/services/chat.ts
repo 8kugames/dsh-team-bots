@@ -1,7 +1,7 @@
 // src/services/chat.js —— 群聊与单聊消息域
 // 群聊/单聊消息写入、视图、slash 指令与 Bot 回复落库。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 因此方法体内的 this 仍指向 TeamService 实例。
 
 import { realpathSync, statSync } from 'node:fs'
 import { extname, join, sep } from 'node:path'
@@ -35,7 +35,7 @@ export const chatMethods = {
     if (senderType === 'bot' && !cleanedBody) return null
     // 群消息持久化前过密钥掩码：密文值不进转录，模型下一轮只会看到 $<NAME> 标签（NAME 与一次性 env 文件里的变量名一致）。
     const maskedBody = this.maskSecretValues(cleanedBody)
-    // 聊天分库（chat-db-split Phase 1）：群聊消息正文住该项目自己的聊天库。
+    // 群聊消息正文住该项目自己的聊天库。
     const chatStore = this.groupChatStore(projectId)
     chatStore.run(
       `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, task_id, run_id, reply_to_id, kind, question_id, approval_id, created_at)
@@ -72,7 +72,7 @@ export const chatMethods = {
   // 引用视图：excerpt 取原消息正文前 120 字。入库正文已过 maskSecretValues，这里不再掩码；
   // bot 历史消息读取时再过一遍标记清洗（幂等），历史上已落库的残片不再显示成乱码。
   // 目标行已被删（/clear 或级联）时 reply_to 置 null，引用悬空不炸视图。
-  // 被引消息与触发消息同项目（chat-db-split Phase 1：同库），projectId 由调用方随行带入。
+  // 被引消息与触发消息同项目（同库），projectId 由调用方随行带入。
   replyView(replyToId, projectId = null) {
     if (!replyToId) return null
     const row = (projectId ? this.groupChatStore(projectId) : this.store)
@@ -89,7 +89,7 @@ export const chatMethods = {
     const senderName = this.senderNameOf(row.sender_type, row.sender_id)
     const task = row.task_id ? this.store.get('SELECT number, title, project_id FROM tasks WHERE id = ?', row.task_id) : undefined
     const project = task ? this.store.get('SELECT key FROM projects WHERE id = ?', task.project_id) : undefined
-    // 消息正文与附图住聊天库（chat-db-split Phase 1）；任务/项目仍是顶库控制面数据。
+    // 消息正文与附图住聊天库；任务/项目仍是顶库控制面数据。
     const chatStore = this.groupChatStore(row.project_id)
     return {
       ...row,
@@ -105,7 +105,7 @@ export const chatMethods = {
   },
   // 按 id 取聊天图片（含 base64）：前端渲染 <img src="data:..."> 用。
   // 鉴权：仅工作台本地用户可取；bot 一律拒绝（图片是用户上传内容，不是 bot 的可读范围）。
-  // 图片随消息分住各聊天库（chat-db-split Phase 1）：按库扫一遍找行，库数是个位数、主键查。
+  // 图片随消息分住各聊天库：按库扫一遍找行，库数是个位数、主键查。
   messageImage(imageId, actor = this.actor()) {
     if (actor?.type !== 'user') throw forbidden('仅工作台用户可读取聊天图片')
     let row = null
@@ -224,13 +224,13 @@ export const chatMethods = {
         sourceId: messageId,
         idempotencyKey: `chat:${messageId}:${bot.id}`,
       })
-      // DSHBOTS-112 读图代理：带图消息投递后即评估是否派生转写运行（fire-and-forget，
-      // 不阻塞发送；判据与派生见 vision-proxy.js）。附图住聊天库（chat-db-split Phase 1）。
+      // 读图代理：带图消息投递后即评估是否派生转写运行（fire-and-forget，
+      // 不阻塞发送；判据与派生见 vision-proxy.js）。附图住聊天库。
       void considerVisionProxy(this, { bot, message: { id: messageId, project_id: project.id }, messageStore: this.groupChatStore(project.id) })
     }
     void this.tick()
     // 环境接单的回传：runBots 带总监供 UI 立思考气泡；真实运行由 1 秒后的接单入列。
-    // 保持与旧版一致的单一返回形态（条件展开会改变推断并破坏调用方类型）。
+    // 返回保持单一形态：条件展开会改变类型推断、破坏调用方类型。
     return {
       messageId,
       runBots: ambientDirectorClaim ? [project.owner_bot_id] : targets.map(bot => bot.id),
@@ -264,7 +264,7 @@ export const chatMethods = {
   // /clear：清空本群全部聊天记录。任务、记忆等不受影响；操作进审计。
   clearChatHistory(projectId, actor = this.actor()) {
     const project = this.projectRow(projectId)
-    // 聊天正文住项目聊天库（chat-db-split Phase 1）：清记录即清该库两张正文表。
+    // 聊天正文住项目聊天库：清记录即清该库两张正文表。
     const chatStore = this.groupChatStore(project.id)
     const count = Number(chatStore.get('SELECT COUNT(*) AS count FROM messages WHERE project_id = ?', project.id)?.count ?? 0)
     // 附图行随消息一起清：FK 级联已覆盖，这里再显式删一次，
@@ -358,7 +358,7 @@ export const chatMethods = {
     if (senderType === 'bot' && !cleanedBody) return null
     // 单聊同样过密钥掩码：单聊正文会进模型上下文，明文密钥不该落库。
     const maskedBody = this.maskSecretValues(cleanedBody)
-    // 聊天分库（chat-db-split Phase 1）：单聊正文住该 bot 自己的聊天库。
+    // 单聊正文住该 bot 自己的聊天库。
     const chatStore = this.soloChatStore(botId)
     chatStore.run(
       `INSERT INTO solo_messages(id, bot_id, sender_type, sender_id, body, run_id, kind, question_id, approval_id, created_at)
@@ -384,7 +384,7 @@ export const chatMethods = {
   },
   clearSoloHistory(botId, actor = this.actor()) {
     const bot = this.botRow(botId)
-    // 单聊正文住该 bot 聊天库（chat-db-split Phase 1）。
+    // 单聊正文住该 bot 聊天库。
     const chatStore = this.soloChatStore(bot.id)
     const count = Number(chatStore.get('SELECT COUNT(*) AS count FROM solo_messages WHERE bot_id = ?', bot.id)?.count ?? 0)
     chatStore.run('DELETE FROM message_images WHERE bot_id = ?', bot.id)
@@ -447,7 +447,7 @@ export const chatMethods = {
       sourceId: messageId,
       idempotencyKey: `solo_chat:${messageId}`,
     })
-    // DSHBOTS-112 读图代理：单聊带图消息同样评估派生（fire-and-forget，见 vision-proxy.js）。
+    // 读图代理：单聊带图消息同样评估派生（fire-and-forget，见 vision-proxy.js）。
     void considerVisionProxy(this, { bot, message: { id: messageId }, messageStore: this.soloChatStore(bot.id) })
     void this.tick()
     return { messageId, runBot: bot.id }
@@ -455,7 +455,7 @@ export const chatMethods = {
 
   // 群聊只放结论：保留 markdown 块结构、按上限截断。
   // 换行不能压成空格——标题与列表靠行首判定，整段压成一行后行首的 "#" 会变成整行的
-  // ATX 标题标记，群聊里整条报告渲染成一个 h1（一整块大号粗体，ZONGM-165 交付消息实测）。
+  // ATX 标题标记，群聊里整条报告渲染成一个 h1（一整块大号粗体）。
   chatSummary(output, maxChars = this.config.chatReplyMaxChars) {
     const clean = String(output ?? '')
       .replace(/\r\n?/g, '\n')

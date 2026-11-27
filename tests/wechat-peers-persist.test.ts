@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { WechatStore } from '../src/wechat/store.js'
 import { WechatChannel } from '../src/wechat/channel.js'
 
-// DSHBOTS-191：微信会话凭证（contextToken/clientId）持久化。
+// 微信会话凭证（contextToken/clientId）持久化的守门测试。
 // 重启/重连后 channel 从库读回凭证，无需对方先发消息即可主动发送；
 // 入站消息同步刷新落库；7 天过期上限，过期回落「等对方发来消息」的既有可恢复路径。
 
@@ -16,7 +16,7 @@ const SERVICE_STUB = () => ({
   stateView() {
     return { projects: [] }
   },
-  // D-249 后「帮助」按自由文本直达：桩补一个静默成功的 wechatChat 即可走通入站路径。
+  // 「帮助」按自由文本直达：桩补一个静默成功的 wechatChat 即可走通入站路径。
   async wechatChat() {
     return { project: { key: 'web', name: 'Web' }, messageId: 'm1' }
   },

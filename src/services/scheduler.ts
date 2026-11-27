@@ -29,7 +29,7 @@ function isHumanRun(run) {
   return HUMAN_RUN_KINDS.has(run.kind)
 }
 
-// write-lock-scope:start —— 写占用判定纯函数（DSHBOTS-73，tests/write-lock-state.test.js 断言此块）。
+// write-lock-scope:start —— 写占用判定纯函数（tests/write-lock-state.test.js 断言此块）。
 // 用户口径：写范围占用只看「进行中」的任务——任务一旦离开「进行中」就立刻解除占用/锁定。
 // 入参：运行自身的 kind/mode + 它所属任务的当前状态 taskStatus；返回该运行是否占住项目的写槽。
 //   - 只读运行（mode ≠ 'write'）不占写槽。

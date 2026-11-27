@@ -1,9 +1,9 @@
 // src/services/runtime/prompt.ts —— 提示词构造域
 // 按运行类型拼装系统提示词、单聊提示词与引用行。
 // 本文件只放方法体，方法挂到 DshRuntime 原型上（见 src/runtime.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
-// 沙箱档位、语境窗与会话连续性三域外移同级模块（sandbox-policy/context-window/
-// session-continuity），本文件 re-export 保持原导出面，方法经 promptMethods 展开挂回原型。
+// 因此方法体内的 this 仍指向 DshRuntime 实例。
+// 沙箱档位、语境窗与会话连续性三域位于同级模块（sandbox-policy/context-window/
+// session-continuity），本文件 re-export 保持导出面，方法经 promptMethods 展开挂回原型。
 //
 // 段序原则：运行提示词一律「静态指令段前置、随卡/随消息变化的字段后置」。
 // 前缀缓存按最长公共前缀匹配，静态段放在变化段之后会让跨卡派发在描述处分叉、
@@ -46,27 +46,22 @@ export {
 // 靠上限淘汰防会话累积泄漏。
 export const PROMPT_FREEZE_LIMIT = 256
 
-// 通信纪律（吸收 superagent 原型 prompts/team/communication.md，DSHBOTS-321 A1）：
-// 默认沉默、只在需人时外发——三个触发条件（结果就绪 / 需要决策 / 确实做不完），
+// 通信纪律：默认沉默、只在需人时外发——三个触发条件（结果就绪 / 需要决策 / 确实做不完），
 // 进度叙述与重试噪声不算里程碑；一次只问一个具体问题；发送前去冗不裁句（保完整自然句子）。
 // 只注入项目会话身份段的 owner/member 变体：任务会话的交付纪律由 deliverySelfcheckBlock
 // 承担，单聊是用户主动问的直接应答面，两者都不注入本段。
-// 系统通知模板侧（任务生命周期消息/滞留提醒/防循环闸）已由 D-95 P2-1、D-267、D-280、
-// D-228 落地压缩，本卡净增量即此提示词纪律。
 export const COMMUNICATION_RULES = [
   '- Speak only when someone must act or decide: a deliverable is ready for review, a decision is required, or the work is truly stuck. Progress narration, retry chatter and intermediate tool output are not milestones — do not post them.',
   '- When a decision is needed, ask one concrete question at a time, with just enough context to answer it.',
   '- Before sending, reread the draft and cut redundant information whose removal changes nothing for the reader; keep the remaining sentences complete and natural — brevity limits how much you say, not how you say it.',
 ]
 
-// 可编辑提示词段（B1/DSHBOTS-324，吸收原型 src/app/prompts.ts 分段模型）：团队可改四段正文，
-// 覆盖存 settings 'prompt_overrides' JSON（text + base_hash 保存时的内置默认指纹）；
-// 升级后默认变了 → promptSegmentsView 标 defaultChanged，面板给「保留我的文本 / 恢复新默认」
-// 取舍（defaultChanged 解决的是「升级冲掉定制」，与 proposals.ts MERGE_KEEP_RATIO 的
-// 「防替换稿顶掉原指令」是两回事）。会话冻结语义不变：改文本只对新会话生效。
+// 可编辑提示词段：团队可改四段正文，覆盖存 settings 'prompt_overrides' JSON（text + base_hash 保存时的内置默认指纹）；
+// 升级后默认变了 → promptSegmentsView 标 defaultChanged，面板给「保留我的文本 / 恢复新默认」。
+// 会话冻结语义不变：改文本只对新会话生效。
 // 预算红线（ADR §5.1 #14）：subtask/splitting 与不可编辑的 parallel 段合计 ≤1200、
 // 整静态前缀 ≤1900（tests/prompt-budget），updatePromptSegment 保存时同口径校验。
-// 工具描述与固定通知仍留在代码，不可被本机制改写（对齐原型 docs/004-prompts 优先级）。
+// 工具描述与固定通知仍留在代码，不可被本机制改写。
 export const PROMPT_SEGMENT_DEFAULTS = {
   communication: COMMUNICATION_RULES.map(line => line.replace(/^- /, '')).join('\n'),
   subtask: 'Before closing: if this task cannot be finished in one run or new closing conditions emerge, file subtasks via team_assign_task with parent_task_id and report in the group — no verbal-only follow-ups. Subtasks are product-grade (general capability, full tests, real persistence), no throwaway patches. Do not split what one run can finish. List every subtask KEY-N in the closing report.',
@@ -106,7 +101,7 @@ export function promptOverridesHash(text) {
   return createHash('sha256').update(String(text ?? '')).digest('hex').slice(0, 16)
 }
 
-// 并行段正文（不可编辑，B1 三段预算的第三段）：promptFor 与保存校验共用同一份文本。
+// 并行段正文（不可编辑，三段预算的第三段）：promptFor 与保存校验共用同一份文本。
 export function parallelMergeBody(maxTeammates) {
   return `Parallelize independent parts via teammates (at most ${maxTeammates}) or the child agents above; keep every part on project KEY-N cards, never on the host shared task board (task-N). Before delivering: list_agents, wait_agent until idle, merge results; resolve conflicting edits yourself.`
 }
@@ -132,9 +127,9 @@ export function taskGuidanceTrioLength(overrides, config) {
 
 const sessionIdOf = context => context?.agent?.id ?? context?.session?.id ?? context?.sessionId
 
-// 任务描述截断（DSHBOTS-113 事故 m_33bddb；DSHBOTS-254 起任务分支与 review/handle 同口径）：
-// 全文拼进提示词可能顶爆 400 上下文，超过 8K 字符即截断并注明，消费方只基于可见部分
-// 下结论并声明盲区；标题/状态/写范围/任务评论在截断点之外恒在场。
+// 任务描述截断（任务分支与 review/handle 同口径）：全文拼进提示词可能顶爆 400 上下文，
+// 超过 8K 字符即截断并注明，消费方只基于可见部分下结论并声明盲区；
+// 标题/状态/写范围/任务评论在截断点之外恒在场。
 function truncateTaskDescription(raw) {
   const text = raw || '(no description)'
   return text.length > 8_000
@@ -147,7 +142,7 @@ export const promptMethods = {
   ...contextMethods,
   ...continuityMethods,
 
-  // 系统提示词会话级冻结（D-85 方案 B）：首次求值后按会话 id 缓存字节，同会话此后逐字节
+  // 系统提示词会话级冻结：首次求值后按会话 id 缓存字节，同会话此后逐字节
   // 稳定，前缀缓存不被本插件作废；密钥、技能绑定、项目技能扫描等求值也随之压缩到每会话
   // 一次。空结果不冻结（会话建立早期绑定未落库时返回 ''，等首次非空结果再定格）。
   // 易变的记忆块不走这里，见 memoryContextFor。
@@ -279,7 +274,7 @@ export const promptMethods = {
             '- When executing a task, do the work, verify it, then return a concise result with changed paths and any risks.',
             ...promptSegmentRules(this.promptSegmentText('communication')),
           ]
-    // DSHBOTS-238：成员 bot 子代理并行指引（静态段，前缀缓存区）。
+    // 成员 bot 子代理并行指引（静态段，前缀缓存区）。
     // 「生成子代理/组建临时团队」能力由宿主 preset 全局注册（subagent / subagent_fork /
     // spawn_teammate 等），成员 bot 默认可见；本段只补「何时拆、怎么汇总」的使用口径。
     // agentTeam 关闭时不注入，与运行提示词的 # Parallel work 段同一门控。
@@ -308,7 +303,7 @@ You can spawn child agents (\`subagent\` / \`subagent_fork\`) or named teammates
     ].filter(Boolean).join('\n')
   },
 
-  // 记忆块（D-85 方案 A）：不进系统区（那会每步重烧全前缀缓存），改注册为宿主
+  // 记忆块：不进系统区（那会每步重烧全前缀缓存），改注册为宿主
   // systemPrompt.context 的动态贡献——宿主把它渲染成历史尾部的用户快照，文本变化时
   // 才追加新快照，前缀缓存不动，进行中会话仍能看到新落库的记忆。因此本方法不做会话
   // 冻结：宿主每步重求值是有意为之，只有一条小查询。
@@ -404,11 +399,11 @@ ${lines}`
 # Handoff summary from the previous session
 ${summary}`
   },
-  // 通道直达语境块（solo 分支，DSHBOTS-331）：通道来源的单聊运行（微信/飞书直达落
+  // 通道直达语境块（solo 分支）：通道来源的单聊运行（微信/飞书直达落
   // director 专属工作区 solo 会话，run.trigger_type='wechat'/'feishu'）同样需要通道语境。
   // 与群聊分支同款结构：多轮连续、渲染口径按通道各写、ask_user_question。
   // 差异在派活口径：solo 没有项目上下文，群聊块里「在项目会话里建卡」的表述不成立，
-  // 故按 owner 拍板改为——通道来源运行允许 director 用 team_assign_task 跨进项目真建卡，
+  // 本块允许 director 用 team_assign_task 跨进项目真建卡，
   // 正文带 [项目 KEY] 时定向该项目，无 KEY 时先追问落哪个项目再建卡。
   soloChannelBlock(triggerType) {
     if (triggerType === 'wechat') return `
@@ -437,7 +432,7 @@ This message is from the project owner on Feishu — a real multi-turn conversat
       excludeId: chatMessage?.id,
       store: this.chatStoreForRun(run ?? { project_id: null, bot_id: bot.id }),
     })
-    // P3-1：单聊同款，无信息量 system 短状态不进尾窗。
+    // 无信息量 system 短状态不进尾窗（与群聊分支同款）。
     const mergedIds = new Set((extraMessages ?? []).map(item => item.id))
     const visible = recent.filter(item => !mergedIds.has(item.id) && !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
     const context = visible.map((item) => {
@@ -447,7 +442,7 @@ This message is from the project owner on Feishu — a real multi-turn conversat
     const recentBlock = context
       ? `${incremental ? 'New messages since your last turn (ids are for team_recall):' : 'Recent conversation (truncated, ids are for team_recall):'}\n${context}`
       : (incremental ? 'No new messages since your last turn.' : 'No recent conversation.')
-    // DSHBOTS-331：通道来源的 solo 运行（微信/飞书直达）按 owner 拍板放开建卡派单——
+    // 通道来源的 solo 运行（微信/飞书直达）放开建卡派单——
     // 单聊的「无项目禁 team_assign_task」禁令只对普通 UI 单聊（trigger_type='mention'）保留。
     const channelName = run?.trigger_type === 'wechat' ? 'WeChat' : (run?.trigger_type === 'feishu' ? 'Feishu' : '')
     const noProjectClause = channelName
@@ -703,11 +698,10 @@ The effective timeout is the smaller of this budget and the global run timeout (
 ${deadlineLine}`.trimEnd()
     }
     if ((run.kind === 'review' || run.kind === 'handle') && task) {
-      // 超长防护（DSHBOTS-113 事故 m_33bddb；DSHBOTS-140 扩到 owner review/handle）：
-      // 任务派生分支共用 truncateTaskDescription 的同一截断点与盲区口径（任务分支见 DSHBOTS-254）。
+      // 超长防护：任务派生分支与施工分支共用 truncateTaskDescription 的同一截断点与盲区口径。
       const writeScopes = readWriteScopes(task.write_scopes)
       const declaredScopes = writeScopes.length ? writeScopes.join(', ') : '(none declared)'
-      // 交付物声明（DSHBOTS-345 复盘）：核验按路径直接读文件，交付报告只作声明清单。
+      // 交付物声明：核验按路径直接读文件，交付报告只作声明清单。
       const declaredDeliverables = readDeliverables(task.deliverables)
       const deliverablesScopesLine = declaredDeliverables.length ? declaredDeliverables.join(', ') : '(none declared)'
       const description = truncateTaskDescription(task.description)
@@ -717,7 +711,7 @@ ${deadlineLine}`.trimEnd()
       // 受阻处置不做验收裁决，Goal 段只作背景，不带引用要求。
       const goalBlock = this.goalBlockFor(task, project, { reviewing: run.kind === 'review' })
       if (run.kind === 'review') {
-        // 委派核验模板（DSHBOTS-107 review-verification）：核验工作由子代理并行完成，
+        // 委派核验模板：核验工作由子代理并行完成，
         // 结论以「子代理核验：」开头落任务评论（finishRun 自动写回），不代负责人裁决。
         if (run.trigger_type === 'review_delegate') {
           return `${header}
@@ -858,27 +852,26 @@ ${(sourceRun ? (this.chatStoreForRun(sourceRun).get('SELECT output FROM run_payl
     }
     if (task) {
       // 超长防护：任务分支与 review/handle 同口径复用 truncateTaskDescription
-      // （8k 截断 + 盲区标记），建卡上限 40k 的长卡不再整段进提示词。
+      // （8k 截断 + 盲区标记），建卡上限 40k 的长卡不会整段进提示词。
       const description = truncateTaskDescription(task.description)
       // 时效要求：time_budget_minutes 未传或为 NULL 则完全不注入，提示词与无时效任务一致。
       // 任务级死线：施工分支传入整卡死线，时效段追加剩余时间或收尾轮口径。
       const timeBudgetBlock = timeBudgetBlockFor(task, taskDeadlineInfo(this.store, task))
-      // 紧急豁免：urgent 任务卡追加豁免指令（用户口径 m08196-2）
+      // 紧急豁免：urgent 任务卡追加豁免指令。
       // 无视车道排队立即开工；非 urgent 完全不注入，保持既有车道纪律。
       const urgentExemptionBlock = task.priority === 'urgent' ? `
 
 # Urgent exemption
 This task is urgent and exempt from lane queuing discipline: start immediately, without waiting for other tasks' file lanes to clear. If in-flight edits to the same files exist in the workspace, first run git status to record the scene, then commit only this card's files by exact pathspec — never add/checkout/stash others' changes.` : ''
-      // 子任务拆解纪律（DSHBOTS-132；DSHBOTS-254 与提速拆分/并行段语义去重，三段合计
-      // ≤1200 字符，tests/prompt-budget.test.ts 守门）：主项做不完或出现新收口条件就
-      // 立产品级子卡。所有任务卡无条件注入，与时效段、紧急豁免段
-      // 互不干扰：本段不读 priority/time_budget，后两者不读本段。
-      // B1/DSHBOTS-324：正文可被 settings 'prompt_overrides' 覆盖（标题与段序不动）。
+      // 子任务拆解纪律（三段合计 ≤1200 字符，tests/prompt-budget.test.ts 守门）：
+      // 主项做不完或出现新收口条件就立产品级子卡。所有任务卡无条件注入，
+      // 与时效段、紧急豁免段互不干扰：本段不读 priority/time_budget，后两者不读本段。
+      // 正文可被 settings 'prompt_overrides' 覆盖（标题与段序不动）。
       const subtaskDisciplineBlock = `
 
 # Subtask discipline
 ${this.promptSegmentText('subtask')}`
-      // 提速拆分引导（DSHBOTS-212；DSHBOTS-254 去重收口）：
+      // 提速拆分引导：
       // 拆分判据（2+ 独立部分 + 写范围不相交 + 拆后合并成本更低）+ 角色现实（无派单权限
       // 就在交付报告里提拆分方案）。静态段（不随卡变化）：与纪律段同为全局前缀，置于
       // # Assigned task 之前，护住前缀缓存。
@@ -886,26 +879,25 @@ ${this.promptSegmentText('subtask')}`
 
 # Splitting for speed
 ${this.promptSegmentText('splitting')}`
-      // delivery-selfcheck:start —— 交付前自校段（DSHBOTS-276，P1 派单质量前置）：治 GS 实测
-      // 34% 补丁/返工卡——交付报告缺自跑验证证据。所有任务卡无条件注入，置于卡头
-      // Status 与 Description 之间（D-269 只追加手法）：不动既有锚点前缀与 D-274 时效段
+      // delivery-selfcheck:start —— 交付前自校段：交付报告缺自跑验证证据。
+      // 所有任务卡无条件注入，置于卡头 Status 与 Description 之间：不动既有锚点前缀与时效段
       // （tests/prompt-budget ≤1900 静态前缀、8k 截断「描述后即结尾」、tests/prompt-prefix-order
-      // 段序三守门实测后选定此位）。
+      // 段序三守门都钉着此位）。
       const deliverySelfcheckBlock = `
 
 # Delivery self-check
 ${this.promptSegmentText('selfcheck')}`
       // delivery-selfcheck:end
-      // recovery note：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒，
-      // 对齐 superagent 原型语义——核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
+      // recovery note：宿主重启重排队的运行（core.js 置 recovery=1）追加恢复提醒——
+      // 核实现状再续做、不重复外部动作。startRun 注入后即刻清零，
       // 本段只在重排队后的第一次执行出现。与时效段、豁免段、纪律段互不干扰。
       const recoveryNoteBlock = Number(run?.recovery) === 1 ? `
 
 # Recovery note
 The previous run was interrupted by a host restart. Check the workspace and git status first to verify the current state, then resume from where it stopped; do not repeat external actions already performed (commits/publishes/messages).` : ''
-      // agentTeam 门控（DSHBOTS-254 收口）：单卡内并行的执行口径——队友/子代理、
+      // agentTeam 门控：单卡内并行的执行口径——队友/子代理、
       // 部件落项目 KEY-N 卡、交付前 wait_agent 汇总。拆分判据不在此重复（见上方提速拆分段）。
-      // 子代理化解除（DSHBOTS-311 硬闸撤销）：亲做与派子代理均可，派时命名 bot 名+任务号。
+      // 亲做与派子代理均可，派时命名 bot 名+任务号。
       const parallel = this.config.agentTeam ? `
 
 # Child agents by task number
@@ -914,7 +906,7 @@ Execute each card yourself, or hand it to a dedicated child agent (subagent/suba
 
 # Parallel work inside this task
 ${parallelMergeBody(this.config.maxTeammates)}` : ''
-      // 交付物路径声明（DSHBOTS-345 复盘）：卡面声明的交付文件，核验按路径直接读文件。
+      // 交付物路径声明：卡面声明的交付文件，核验按路径直接读文件。
       // 单行注入在 Status 与自检段之间：不新增段落、不动「描述后即结尾」截断口径。
       const deliverablesLine = readDeliverables(task.deliverables).length
         ? `\nDeliverables (file paths): ${readDeliverables(task.deliverables).join(', ')}`
@@ -947,7 +939,7 @@ ${description}${threads}${directedBlock}${referencedBlock}${timeBudgetBlock}${ur
       excludeId: chatMessage?.id,
       store: this.chatStoreForRun(run),
     })
-    // P3-1：无信息量 system 短状态不进尾窗；合批消息已在专门段落呈现，同样不进尾窗（不双份）。
+    // 无信息量 system 短状态不进尾窗；合批消息已在专门段落呈现，同样不进尾窗（不双份）。
     const mergedIds = new Set((extraMessages ?? []).map(item => item.id))
     const visible = recent.filter(item => !mergedIds.has(item.id) && !(item.sender_type === 'system' && NOISE_SYSTEM_BODY.test(item.body)))
     // 分级注入（吸收 dsh-agent-team 直接信号/背景折叠理念）：@本 bot 的消息与人的消息
@@ -975,10 +967,10 @@ ${description}${threads}${directedBlock}${referencedBlock}${timeBudgetBlock}${ur
       : openTasks.map(item => `- ${project.key}-${item.number} [${item.status}] ${item.title}`).join('\n')
     // 引用回复上下文：本次消息带 reply_to 时，明确告知 bot 用户在回哪条消息（含 m_ 短 id 供 team_recall 取全文）。
     const quoteLine = this.quotedLineFor(chatMessage, this.chatStoreForRun(run))
-    // 通道直达语境块（DSHBOTS-215 微信 / DSHBOTS-330 飞书）：按 trigger_type 分流。
+    // 通道直达语境块（微信 / 飞书）：按 trigger_type 分流。
     // 两版同结构：多轮连续对话（项目会话复用），不要每条当新指令；派活意图要真建卡/派单；
     // 需要用户决策时用 ask_user_question（会转发到对应通道，回复回到本轮）。
-    // 渲染口径按通道各写：微信不渲染 Markdown（DSHBOTS-283，禁 * # 原样字符）；
+    // 渲染口径按通道各写：微信不渲染 Markdown（禁 * # 原样字符）；
     // 飞书出站走 messages-reply --markdown（src/feishu/format.ts），原生 Markdown，不套微信条款。
     const wechatBlock = run.trigger_type === 'wechat' ? `
 
@@ -988,14 +980,14 @@ This message is from the project owner on WeChat — a real multi-turn conversat
 
 # Feishu direct conversation
 This message is from the project owner on Feishu — a real multi-turn conversation, not a one-off command. The project session is shared, so keep continuity across turns instead of restarting context each time. If the owner asks you to get work done, actually create and assign the task (team_assign_task — cards carry the project KEY-N number; do not create project-less task-N cards on the host shared board) instead of only acknowledging it. If you need the owner to decide something, use ask_user_question: it is forwarded to their Feishu chat and their reply comes back to you. Feishu renders Markdown natively: headings, bold and - lists are fine, and * or # are allowed. Your final reply is pushed back into the Feishu thread when the run finishes.` : ''
-    // DSHBOTS-272 用户提问锚点：触发消息是人发的（sender_type='user'）才注入；通知降级与
-    // bot @mention 唤醒触发的运行（sender_type='bot'）不注入——事故根因之一是通知内容与用户
-    // 提问同窗时无优先级指示，bot 回了条轻备忘就算处理完。
+    // 用户提问锚点：触发消息是人发的（sender_type='user'）才注入；通知降级与
+    // bot @mention 唤醒触发的运行（sender_type='bot'）不注入——否则通知内容与用户提问同窗时
+    // 无优先级指示，bot 回了条轻备忘就算处理完。
     const ownerQuestionBlock = chatMessage?.sender_type === 'user' ? `
 
 # Owner question priority
 This message is from the project owner — answer it directly in this reply. Background notifications in context must not substitute for the answer; handle them only after (or skip to next turn).` : ''
-    // DSHBOTS-283 回复分级（电报体修正）：字数帽只限内容量、不限句子结构；长文仅在内容
+    // 回复分级：字数帽只限内容量、不限句子结构；长文仅在内容
     // 天然分节时加小标题，标题下正文始终是自然完整句子——不强制固定标题骨架，防电报体/翻译腔。
     return `${header}
 
@@ -1011,7 +1003,7 @@ ${taskList}`
   },
 
   // 合批消息段：领取时合并进来的同通道排队消息，与触发消息同一轮注入。
-  // 无合批消息时返回空串，单条消息的提示词格式与原来完全一致（既有锚点测试不受影响）。
+  // 无合批消息时返回空串，单条消息的提示词格式不受本段影响。
   mergedMessagesBlock(extraMessages) {
     if (!extraMessages?.length) return ''
     const lines = extraMessages.map(item => {
@@ -1023,7 +1015,7 @@ ${taskList}`
   },
 
   // 引用行：正文控制在 200 字内；bot 发送者查名字，其余回退 sender_type:sender_id 展示。
-  // chatStore（chat-db-split Phase 1）：被引消息与触发消息同库；缺省回落顶库。
+  // chatStore：被引消息与触发消息同库；缺省回落顶库。
   quotedLineFor(chatMessage, chatStore = null) {
     if (!chatMessage?.reply_to_id) return ''
     const readFrom = chatStore ?? this.store

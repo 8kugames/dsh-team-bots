@@ -1,4 +1,4 @@
-// tests/file-preview.test.ts —— DSHBOTS-347：文本型文件链接应用内预览。
+// 文本型文件链接应用内预览。
 // ① 纯逻辑：白名单 / 截断 / chip URL 生成（markdown.test.js 式标记块抽取求值）；
 // ② 源码锚：modal-forms.js 文本分支出 preview-file 按钮且非白名单仍 <a target=_blank>；
 //    tasks.js chips 挂 data-url；chat.js 白名单含 .md/.json 且拒 .svg/.zip/.env；

@@ -125,6 +125,6 @@ export default {
   "usage.distTitleDomain": "本群分布明细",
   "usage.distTitleSolo": "该 Bot 分布明细",
   "price.modelSeparator": "、",
-  // DSHBOTS-220: ui/modules 文案（原文即键）
+  // ui/modules 文案（原文即键）
   "（${exportLabel}）": "（${exportLabel}）",
 }

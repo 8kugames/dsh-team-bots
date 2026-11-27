@@ -155,7 +155,7 @@ export function duration(start, end?) {
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
 }
-// avatar:start —— 头像取字与渲染的唯一出口（DSHBOTS-221 收敛点，散点内联一律改调这里）。
+// avatar:start —— 头像取字与渲染的唯一出口（散点内联一律改调这里）。
 // initials：英文名取首二字母大写；非英文（CJK 等）取首字——单字居中不换行，修复两字竖排撑破头像块。
 export function initials(name) {
   const text = String(name ?? '?').trim()

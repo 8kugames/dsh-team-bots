@@ -1,7 +1,7 @@
 // src/services/wechat.js —— 微信通道域
 // 微信扫码登录与状态查询。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 因此方法体内的 this 仍指向 TeamService 实例。
 
 import { createRequire } from 'node:module'
 import { effectiveWechatEnabled } from '../config.js'
@@ -178,7 +178,7 @@ export const wechatMethods = {
   },
 
   /**
-   * 微信直达对话（DSHBOTS-208 起，258/299 演进后现为二值路由）：
+   * 微信直达对话（二值路由）：
    * 自由文本（key 为空）一律落 director 专属工作区 solo 会话（用户↔director 直接
    * 通信，solo_chat 运行 trigger_type='wechat'，回复经 run-finish 推回微信管理员）；
    * /tr <key> 显式转发（key 非空）直达指定项目群聊——消息以微信管理员身份（admin
@@ -196,7 +196,7 @@ export const wechatMethods = {
       )
       if (!project) return null
     } else {
-      // DSHBOTS-258 绝对口径：自由文本永远走 director 专属工作区，用户不直接进群。
+      // 自由文本一律走 director 专属工作区，用户不直接进群。
       const director = this.wechatDirectorBot()
       if (director) return this.wechatDirectorChat(director, String(body ?? ''))
       return { error: 'no_director' }
@@ -234,16 +234,16 @@ export const wechatMethods = {
     return this.membersOf(project.id)
   },
 
-  // ===== DSHBOTS-215：微信问答回路 =====
+  // ===== 微信问答回路 =====
   // 群聊提问/审批转发外部通道：只推纯文本镜像，状态仍由工作台卡片与群消息承载；
   // 管理员在微信的答复经 commands 的「答/批 <token> …」路由回原条目（见 wechatAnswerQuestion /
   // wechatDecideApproval）。转发失败只告警，不阻塞提问主流程。
-  // DSHBOTS-326：转发面从「微信单通道」扩为「各已启用通道」（微信/飞书），单通道失败不阻断另一通道。
+  // 转发面是各已启用通道（微信/飞书），单通道失败不阻断另一通道。
 
   /** 提问转发各已启用通道（只推文本；token 取问题 id 末 6 位）。
  * 幂等收据键：question:<row.id>——同条目重复转发在各通道存留期内被吸收
  * （各通道 outbox 库彼此独立，同键在两套库里各自幂等，互不干扰）。
- * DSHBOTS-326：出站经 channelNotify 扇出到微信与飞书，单通道失败不阻断另一通道。 */
+ * 出站经 channelNotify 扇出到微信与飞书，单通道失败不阻断另一通道。 */
   wechatQuestion(project, row, items) {
     const token = wechatToken(row.id)
     const projectName = project.name || project.key
@@ -261,7 +261,7 @@ export const wechatMethods = {
 
   /** 审批转发各已启用通道（只推文本；token 取审批 id 末 6 位）。
  * 幂等收据键：approval:<row.id>（各通道 outbox 库内各自幂等）。
- * DSHBOTS-326：出站经 channelNotify 扇出，单通道失败只留痕不阻断另一通道。 */
+ * 出站经 channelNotify 扇出，单通道失败只留痕不阻断另一通道。 */
   wechatApproval(project, row) {
     const token = wechatToken(row.id)
     const projectName = project.name || project.key
