@@ -1,7 +1,7 @@
-// src/services/runtime/sandbox-policy.js —— 沙箱档位域
+// 沙箱档位域
 // 沙箱档位常量、运行类型收紧、生效档判定与文件策略应用。
 // 本文件只放方法体，方法挂到 DshRuntime 原型上（见 src/runtime.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 方法体内的 this 即宿主实例。
 
 import { id, nowIso } from '../../util.js'
 
@@ -9,7 +9,7 @@ import { id, nowIso } from '../../util.js'
 export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access']
 
 // 完全权限总开关（总览 bots 页「免审权限」卡）：settings 键存 '1'/'0'。'1' 时所有
-// bot 与派发任务的生效沙箱统一 danger-full-access，不再收紧只读（含非写运行的
+// bot 与派发任务的生效沙箱统一 danger-full-access，不收紧只读（含非写运行的
 // run_type 降档与任务派发覆盖）；各 bot 配置档与覆盖值原样保留，关掉即恢复原判定。
 export const APPROVAL_FULL_ACCESS_SETTING = 'approval_full_access'
 
@@ -20,7 +20,7 @@ export function fullAccessEnabledOf(store) {
 // 沙箱档位按运行类型收紧：一切非写运行（mode!=='write'，如 dm/dm_reply/chat/review 等）
 // 物理降只读，越权写入由宿主沙箱层拒绝；写运行沿用 bot.file_policy；
 // 无运行上下文（run 为空）时同样保持 bot.file_policy。
-// 完全权限总开关打开时（fullAccess=true）统一 danger-full-access，不再降只读。
+// 完全权限总开关打开时（fullAccess=true）统一 danger-full-access，不降只读。
 export function sandboxModeForRun(run, bot, fullAccess = false) {
   if (fullAccess) return 'danger-full-access'
   return run && run.mode !== 'write' ? 'read-only' : bot?.file_policy
@@ -51,8 +51,8 @@ export const sandboxMethods = {
   // setSandboxMode(session, mode)，即 session.append('sandbox/mode', { mode })（插件不依赖
   // 宿主包），事件 log-only、replay 持久、下次受限调用生效。已是目标档位就不重复追加；
   // 失败只告警不阻断会话（沙箱回落宿主默认）。
-  // DSHBOTS-156：带运行上下文时把生效档与来源落 run_events（type='sandbox_mode'）——
-  // run_events 是运行时间线，复用会话的每条运行也各自留档，与 sandbox/mode 追加的去重无关。
+  // 带运行上下文时把生效档与来源落 run_events（type='sandbox_mode'）：run_events 是运行时间线，
+  // 复用会话的每条运行也各自留档，与 sandbox/mode 追加的去重无关。
   applyFilePolicy(agent, bot, run?, task?) {
     const { mode, source } = effectiveSandbox(run, bot, task, fullAccessEnabledOf(this.store))
     if (!SANDBOX_MODES.includes(mode)) return

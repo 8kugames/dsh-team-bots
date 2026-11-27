@@ -1,7 +1,7 @@
-// src/services/runtime/lifecycle.js —— 事件绑定与超时取消域
+// 事件绑定与超时取消域
 // 宿主事件订阅、子会话归属、用量记账、超时与取消。
 // 本文件只放方法体，方法挂到 DshRuntime 原型上（见 src/runtime.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 方法体内的 this 即宿主实例。
 
 import { randomUUID } from 'node:crypto'
 import { recordUsage } from '../../usage.js'
@@ -108,7 +108,7 @@ export const lifecycleMethods = {
         interpolate: false,
         text: context => this.systemPromptFor(context),
       })
-      // 记忆块走宿主 runtime-context 通道（D-85 方案 A）：渲染为历史尾部 user 快照，
+      // 记忆块走宿主 runtime-context 通道：渲染为历史尾部 user 快照，
       // 文本变化才追加，前缀缓存不动；interpolate:false 防记忆文本里的 {{ }} 被变量插值。
       const disposeMemory = systemPrompt.context
         ? systemPrompt.context({
@@ -301,7 +301,7 @@ export const lifecycleMethods = {
     if (!sessionId) return
     try {
       // 公开 Remote 契约：内部走 agent.cancel({kind:'user'},{keepInbox:true})，
-      // 不再直持内部 agent 对象，也不会清空待处理收件箱。
+      // 不直持内部 agent 对象，也不清空待处理收件箱。
       await this.ctx.sessionController.cancel({ sessionId })
     } catch (error) {
       this.logger.warn?.('dsh-team: cancel session %s failed: %s', sessionId, error)
@@ -319,7 +319,7 @@ export const lifecycleMethods = {
   },
 
   // 向运行中的会话追加一条人类输入：优先中途 steer，失败则退回排队投递。
-  // images 可选：宿主的 PromptContentPart 支持 image 分片，不传时行为与从前完全一致。
+  // images 可选：宿主的 PromptContentPart 支持 image 分片，不传时行为不变。
   async steer(sessionId, body, images = []) {
     if (!sessionId || !this.ctx?.sessionController) return false
     // 中途注入的图片同样做大 PNG → JPEG 归一（无 sharp/转码失败回退原图，不阻塞投递）。

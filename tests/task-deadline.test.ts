@@ -1,4 +1,4 @@
-// tests/task-deadline.test.ts —— DSHBOTS-274 任务级死线守门（DSHBOTS-281 基准升级）。
+// 任务级死线守门。
 // 根因：time_budget_minutes 只经 runTimeoutMsForTaskRun 约束单运行，卡的多轮运行
 // （交付→退回→再交付）各自重置预算，整卡累计耗时无上限。守门五类：
 // a) 死线计算与重派重算（taskDeadlineMs 纯函数：最新派发基准/重派即新窗口/无预算无派发不约束）；
@@ -9,7 +9,7 @@
 //    review 提示词不注入 Deadline 行；
 // e) 重派即新窗口：存量老卡重派不改预算不升级（正例）+ 新窗口内预算×2
 //    耗尽仍照常拦截（负例）。
-// f) review 运行预算分档（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：review/handle 配了
+// f) review 运行预算分档：review/handle 配了
 //    分档取 min(全局, 分档)（默认 0 = 关闭走全局，settings review_timeout_minutes
 //    [0,60]，env 显式最高）；chat/dm/solo 沿用全局。
 
@@ -99,7 +99,7 @@ async function cleanup(root, store) {
 }
 
 // 建一张带预算与负责人的卡，派一轮施工运行并把派发时刻回拨到超线（预算×2 窗口之外）。
-// D-281 基准=最新派发：升级条件是「最新派发本身超线」，调用方须把本次测试的派发同样回拨。
+// 基准=最新派发：升级条件是「最新派发本身超线」，调用方须把本次测试的派发同样回拨。
 async function overdueTask(t, { budget = 5, backdateMs = 60 * 60_000 } = {}) {
   const created = await t.service.createTask({
     projectId: t.project.id, title: '死线卡', assigneeBotId: t.dev.id,
@@ -128,7 +128,7 @@ test('b) 超线拒绝启动新 task 运行 + 升级：canceled TASK_DEADLINE + �
   try {
     const { taskId, past } = await overdueTask(t)
     const run2 = t.service.enqueueTaskRun(t.service.taskRow(taskId), 'task_started', { type: 'user', id: 'u1' })
-    // 最新派发也回拨超线：D-281 基准=最新 queued_at，只回拨首轮派发不再构成升级条件。
+    // 最新派发也回拨超线：基准=最新 queued_at，只回拨首轮派发不构成升级条件。
     t.store.run('UPDATE runs SET queued_at = ? WHERE id = ?', past, run2)
     t.service.started = true
     await t.service.tick()
@@ -244,7 +244,7 @@ test('e) 重派即新窗口：老卡重派不升级（正例）；新窗口真�
   }
 })
 
-// 源码级钉住（D-269 手法）：死线闸必须挂在 kind='task' 领取分支内（review 豁免的结构保证）。
+// 源码级钉住：死线闸必须挂在 kind='task' 领取分支内（review 豁免的结构保证）。
 const SCHEDULER_SRC = readFileSync(fileURLToPath(new URL('../src/services/scheduler.ts', import.meta.url)), 'utf8')
 test('源码锚：死线闸在 kind=\'task\' 领取分支内，升级路径与文案被钉住', () => {
   const gate = SCHEDULER_SRC.indexOf("if (run.kind === 'task' && run.task_id)")
@@ -253,7 +253,7 @@ test('源码锚：死线闸在 kind=\'task\' 领取分支内，升级路径与�
   assert.ok(SCHEDULER_SRC.includes('TASK_DEADLINE'), '拒绝原因码 TASK_DEADLINE 被钉')
 })
 
-// f) review 运行预算分档（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：review/handle
+// f) review 运行预算分档：review/handle
 // （owner_task 运行族）可配单独特效上限——生效时上限取 min(全局, review 分档)；分档
 // 生效链与 effectiveRunLimits 同款（env 显式 > settings review_timeout_minutes
 // [0,60]，0 = 关闭 > 默认 0 关闭）；默认关闭后验收沿用全局时效，真挂死由无进展看门狗
@@ -270,7 +270,7 @@ test('f) review 预算分档：默认关闭走全局 / settings 覆盖 8 与关�
   assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '-1' : null)), 0, '负数回退默认')
   assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? '61' : null)), 0, '高于 60 回退默认')
   assert.equal(effectiveReviewTimeoutMinutes(key => (key === 'review_timeout_minutes' ? 'abc' : null)), 0, '非整数回退默认')
-  // 分档计算：默认关闭（全局 30 → 30，不再砍到 10）；配了分档 8 时 handle 同款收紧。
+  // 分档计算：默认关闭（全局 30 → 30）；配了分档 8 时 handle 同款收紧。
   assert.equal(runTimeoutMsForTaskRun({ run: reviewRun, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(effectiveReviewTimeoutMinutes(() => null)) }), min(30), '默认关闭分档，review 沿用全局')
   assert.equal(runTimeoutMsForTaskRun({ run: handleRun, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(8) }), min(8), 'handle 同款分档')
   // 全局更小取全局：分档 10、全局 5 → 5。
@@ -279,7 +279,7 @@ test('f) review 预算分档：默认关闭走全局 / settings 覆盖 8 与关�
   for (const kind of ['chat', 'dm', 'dm_reply', 'solo_chat']) {
     assert.equal(runTimeoutMsForTaskRun({ run: { kind }, task: null, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(10) }), min(30), `${kind} 沿用全局`)
   }
-  // task 时效取 min 逻辑不变（DSHBOTS-131 原口径）。
+  // task 时效取 min 逻辑不变。
   assert.equal(runTimeoutMsForTaskRun({ run: { kind: 'task', task_id: 't2' }, task: { time_budget_minutes: 15 }, globalRunTimeoutMs: min(30), reviewTimeoutMs: min(10) }), min(15), 'task 时效取 min 不变')
   // env 显式最高优先（含钳位）：进程内改 env 后恢复，防污染同文件其他用例。
   const savedEnv = process.env.DSH_TEAM_REVIEW_TIMEOUT_MINUTES

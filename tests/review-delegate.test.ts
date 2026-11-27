@@ -1,4 +1,4 @@
-// tests/review-delegate.test.js —— DSHBOTS-107：验收核验委派产品化护栏。
+// 验收核验委派产品化的守门测试。
 // owner 一键把 in_review 任务的核验委派给总监 Bot 的子代理：派生 kind='review' 运行
 // （trigger_type='review_delegate'、read 模式、空写范围），提示词含 subagent 并行指示，
 // 结论以「子代理核验：」开头写回任务评论；裁决权仍归 owner。
@@ -195,7 +195,7 @@ test('全链路：交付转待验收后委派，结论评论写回任务', async
     })
     await t.service.taskReviewDelegate(task.id, t.actor)
     await waitFor(() => {
-      // Phase 3：task_comments 住任务所属项目的聊天库。
+      // task_comments 住任务所属项目的聊天库。
       const comment = t.service.groupChatStore(task.project_id).get(
         "SELECT * FROM task_comments WHERE task_id = ? AND author_type = 'bot' AND body LIKE '子代理核验：%'",
         task.id,

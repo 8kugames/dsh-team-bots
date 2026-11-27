@@ -1,4 +1,4 @@
-// DSHBOTS-141：已完成/已取消任务支持「驳回」退回 backlog。
+// 已完成/已取消任务「驳回」退回 backlog 的守门测试。
 // 钉住三条行为 + 一条 UI 接线：
 //   ①done→backlog 成功，completed_at 清空（canceled_at 本就为空）；
 //   ②canceled→backlog 成功，canceled_at 清空（completed_at 本就为空）；

@@ -6,7 +6,7 @@ import { trajectoryMethods } from './services/runtime/trajectory.js'
 import { lifecycleMethods } from './services/runtime/lifecycle.js'
 
 export class DshRuntime {
-  // 聊天分库路由器（chat-db-split Phase 1）：{ forRun(run) -> 聊天库 Store }，由 index 注入。
+  // 聊天分库路由器：{ forRun(run) -> 聊天库 Store }，由 index 注入。
   chatStores: any = null
   // 任务卡驱动 run 的启动上下文清单（run id → manifest），见 runtime/prompt.ts 的 taskCardContext。
   contextManifests: Map<string, any> = null
@@ -32,8 +32,8 @@ export class DshRuntime {
     })
     this.store = store
     this.logger = logger
-    // 聊天分库路由（chat-db-split Phase 1）：service 注入 { forRun(run) -> 聊天库 Store }。
-    // 未注入（独立构造/测试桩）时一律回落顶库，行为与分库前一致。
+    // 聊天分库路由：service 注入 { forRun(run) -> 聊天库 Store }。
+    // 未注入（独立构造/测试桩）时一律回落顶库。
     this.chatStores = chatStores
     // 密钥掩码钩子：service 层注入，轨迹等落库内容在写入前先脱敏。
     this.mask = typeof mask === 'function' ? mask : null
@@ -45,7 +45,7 @@ export class DshRuntime {
     this.modelsCache = { at: 0, value: [] }
     // system 区会话级冻结缓存（方案 B）：session id -> 定格的身份提示词字节。
     this.promptFreeze = new Map()
-    // 尾窗增量水位（DSHBOTS-96 P1-1）：session id → 已注入到 messages/solo_messages 的
+    // 尾窗增量水位：session id → 已注入到 messages/solo_messages 的
     // rowid。值随会话线性增长，条目数受会话数约束，不做 LRU。
     this.messageWatermarks = new Map()
     // 任务卡驱动 run 的启动上下文清单（run id → manifest）：promptFor 暂存，startRun 取走落 run_events。
@@ -65,8 +65,8 @@ export class DshRuntime {
     this.mask = typeof fn === 'function' ? fn : null
   }
 
-  // 聊天分库路由（chat-db-split Phase 1）：按运行归属取正文库（群聊库/单聊库）。
-  // 未注入解析器（测试桩/独立构造）时回落顶库，行为与分库前一致。
+  // 聊天分库路由：按运行归属取正文库（群聊库/单聊库）。
+  // 未注入解析器（测试桩/独立构造）时回落顶库。
   chatStoreForRun(run) {
     return this.chatStores?.forRun?.(run) ?? this.store
   }

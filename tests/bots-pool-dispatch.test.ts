@@ -1,4 +1,4 @@
-// tests/bots-pool-dispatch.test.ts —— DSHBOTS-229 ③ 守门：director 的 bots 池调度能力。
+// director 的 bots 池调度能力守门。
 // 锁定四件事：
 //  ① 池查询含未入群的 bot，仅总监可用，且不泄露其他项目数据；
 //  ② 加人申请复用 addProjectMember（校验、审计、入群通知与失败语义不变）；

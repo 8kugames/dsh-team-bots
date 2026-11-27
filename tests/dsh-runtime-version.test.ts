@@ -1,4 +1,4 @@
-// DSHBOTS-146：dsh 宿主运行时版本探测链。
+// dsh 宿主运行时版本探测链守门测试。
 // 宿主进程从不设置 DSH_RUNTIME_VERSION（全宿主 grep 零命中），env-only 读取恒 unknown。
 // 探测链三级回退：env → process.argv[1] 向上最多 6 级找宿主 package.json → 'unknown'。
 // 纯函数注入 env/argv1，全部用临时目录，不依赖真实宿主。

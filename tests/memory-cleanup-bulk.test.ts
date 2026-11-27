@@ -1,4 +1,4 @@
-// tests/memory-cleanup-bulk.test.ts —— DSHBOTS-344 守门：team_memory_cleanup 的 before 批量判据。
+// team_memory_cleanup 的 before 批量判据守门测试。
 // ① 切割线两侧恰好分流（严格早于才归档，等于/晚于保留），作用域不越界；
 // ② memory.cleanup 审计清单数正确、逐条 memory_events 留痕；
 // ③ before 缺省（且无 topics/task）被拒、非法时间戳被拒；

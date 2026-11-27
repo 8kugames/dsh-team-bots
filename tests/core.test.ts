@@ -154,7 +154,7 @@ test('project, group task assignment and completion form a closed loop', async (
     const first = await service.sendMessage(project.id, '/task @Builder Build the demo page')
     assert.ok(first.taskId)
     await waitFor(() => service.store.get("SELECT status FROM tasks WHERE id = ?", first.taskId)?.status === 'in_review')
-    // 自动核验委派（DSHBOTS-113 默认开）：交付报告之外再落一条核验结论评论。
+    // 自动核验委派（默认开）：交付报告之外再落一条核验结论评论。
     await waitFor(() => Number(service.groupChatStore(project.id).get(
       "SELECT COUNT(*) AS n FROM task_comments WHERE task_id = ?", first.taskId,
     )?.n ?? 0) >= 2)
@@ -262,7 +262,7 @@ test('owner-dispatched delivery routes review to the owner bot, not the user', a
     assert.ok(service.groupChatStore(project.id).all('SELECT body FROM messages WHERE project_id = ?', project.id)
       .some(message => message.body.includes('待总监验收')))
     // 总监验收通过 → done
-    // DSHBOTS-318 验收机械闸：无 subagent_spawned 账目的直调验收须显式兜底。
+    // 验收机械闸：无 subagent_spawned 账目的直调验收须显式兜底。
     const done = await service.reviewFromBot(sessionId, { task: 'OWN-1', decision: 'accept', comment: '兜底验收' })
     assert.equal(done.status, 'done')
     const after = await service.state(project.id)
@@ -413,7 +413,7 @@ test('skill proposal approval publishes into shared skill pool', async () => {
       kind: 'skill', projectId: project.id, title: 'Add deploy skill', rationale: 'Repeated deploy work',
       payload: { slug: 'deploy-check', name: 'Deploy check', description: 'Check deployment', version: '1.0.0', content: '# Deploy check\n\nRun smoke tests.' },
     }, actor)
-    // 评估缺失可直接批准（DSHBOTS-224：评估不再是审批前置条件），批准后技能入共享池。
+    // 评估缺失可直接批准（评估不是审批前置条件），批准后技能入共享池。
     const approved = await service.decideProposal(proposal.id, 'approved', actor)
     assert.equal(approved.status, 'approved')
     const state = await service.state(project.id)

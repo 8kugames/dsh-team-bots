@@ -1,4 +1,4 @@
-// tests/review-observe.test.ts —— B3/DSHBOTS-326：observe 干跑档守门。
+// observe 干跑档的守门测试。
 // review_auto_close 三态：'0' 关 / 'observe' 干跑（判定 + task_events 留痕，不收口，
 // 提醒照常）/ '1' 开。干跑是自动化安全上线路径：人回看观察记录确认无误后再切开。
 // canary = 小范围生效，observe = 完全不生效，两档语义不同。

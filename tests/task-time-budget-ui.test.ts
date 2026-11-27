@@ -1,6 +1,6 @@
-// DSHBOTS-129 新建任务表单「时效要求（分钟）」输入框 + 任务详情「时效」行——读源码断言。
-// 约定沿用 tests/task-scope-display.test.js：ui/app.js 是浏览器脚本，按源码断言；
-// 先剔行注释再断言，防止「断言写进注释里」的假锁。归一纯函数用 time-budget 标记块抽取后裸执行。
+// 新建任务表单「时效要求（分钟）」输入框 + 任务详情「时效」行——读源码断言。
+// ui/app.js 是浏览器脚本，按源码断言；先剔行注释再断言，防止「断言写进注释里」的假锁。
+// 归一纯函数用 time-budget 标记块抽取后裸执行。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
@@ -35,7 +35,7 @@ test('新建任务表单含「时效要求（分钟，选填）」可选数字�
   assert.match(body, /min="1"/, '下限 1 分钟')
   assert.match(body, /max="10080"/, '上限 10080 分钟（一周），与服务端钳制一致')
   assert.match(body, /t\('taskForm\.timeBudgetLabel'\)/, '标签走 i18n，不写死中文')
-  // 选填语义只在标签里说一次，输入框不再挂重复 placeholder（DSHBOTS-264 精校）。
+  // 选填语义只在标签里说一次，输入框不挂重复 placeholder。
   assert.doesNotMatch(body, /id="new-task-time-budget"[^>]*placeholder/, '时效输入框不得再挂重复 placeholder')
   // 选填：不得带 required，否则留空无法提交（留空 = 不设时效）。
   assert.doesNotMatch(body, /id="new-task-time-budget"[^>]*required/, '该输入框是选填，不得标 required')
@@ -45,7 +45,7 @@ test('新建任务表单含「时效要求（分钟，选填）」可选数字�
     /<div class="field-row" style="grid-template-columns:repeat\(auto-fit,minmax\(180px,1fr\)\)">[\s\S]*?id="new-task-time-budget"/,
     '时效字段所在行用自适应三列版式（窄屏自动折行，不留空位）',
   )
-  // 「选填」语义并入标签，字典不再单列 placeholder。
+  // 「选填」语义并入标签，字典不单列 placeholder。
   assert.equal(zh['taskForm.timeBudgetLabel'], '时效要求（分钟，选填）', '中文标签自带选填口径')
   assert.equal(zh['taskForm.timeBudgetPlaceholder'], undefined, '冗余 placeholder 键应已移除')
 })

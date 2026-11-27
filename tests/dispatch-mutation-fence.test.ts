@@ -1,10 +1,9 @@
-// tests/dispatch-mutation-fence.test.ts —— 变更栅栏（吸收 dsh-agent-team mutation-fence
-// 理念，落在本项目形态）：team_assign_task 改卡可选带 expected_version（bot 最后看到的
+// 变更栅栏：team_assign_task 改卡可选带 expected_version（bot 最后看到的
 // 卡 version），不匹配即拒且拒绝附带最近变更事实（task_changes 摘要），写者可就地重新
 // 裁决；不带参数保持 last-write-wins。updateTask 的既有 CAS 同享该事实文案面。
 // ① 改卡带过时 expected_version → 拒，文案含错过的事实（交付/改字段），卡面未被覆写；
 // ② 改卡带当前 expected_version → 放行，改卡生效；
-// ③ 不带 expected_version → 并发改动后仍放行（既有行为不变）；
+// ③ 不带 expected_version → 并发改动后仍放行；
 // ④ updateTask 直调带过时 version → 同一事实文案面。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

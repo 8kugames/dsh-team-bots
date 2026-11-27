@@ -1,10 +1,10 @@
-// tests/task-project-numbering.test.ts —— DSHBOTS-237 守门：建卡强制项目编号（KEY-N），
-// 禁止把任务卡建到宿主共享板（task-N 无项目编号卡）。锁四件事：
+// 建卡强制项目编号（KEY-N）守门：禁止把任务卡建到宿主共享板（task-N 无项目编号卡）。
+// 锁四件事：
 //  ① 无项目语境建卡 → createTask 直接报错引导「请指定项目」，不落库；
 //  ② 有项目语境建卡 → 编号落库为「项目 KEY-N」（项目内自增 number + identifier）；
-//  ③ 共享板兼容口径 = 可读不可新建：成员能力清单不再宣告 team_task_create，
+//  ③ 共享板兼容口径 = 可读不可新建：成员能力清单不宣告 team_task_create，
 //     list/get/update（读与流转）保留；
-//  ④ 教学面守门：插件源码（工具声明 + 运行提示词）不再引导 bots 用共享板建卡。
+//  ④ 教学面守门：插件源码（工具声明 + 运行提示词）不引导 bots 用共享板建卡。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'

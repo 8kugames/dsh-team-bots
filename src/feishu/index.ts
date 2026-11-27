@@ -1,4 +1,4 @@
-// src/feishu/index.ts —— 飞书通道公共出口（DSHBOTS-333：传输层换进程内官方 SDK）
+// 飞书通道公共出口（传输层走进程内官方 SDK）
 export {
   FeishuChannel,
   FeishuError,

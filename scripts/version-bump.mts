@@ -50,7 +50,7 @@ if (branch !== 'main' && branch !== 'dev') {
   process.exit(0)
 }
 
-// 手工改过版本号（工作区版本与暂存区不一致）时尊重人工决定，不再自动加一。
+// 手工改过版本号（工作区版本与暂存区不一致）时尊重人工决定，不自动加一。
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const staged = stagedVersion()
 if (staged !== undefined && staged !== manifest.version) {

@@ -1,7 +1,5 @@
-// 验收滞留守门 + 三档收口规则引擎（DSHBOTS-194 检测/提醒 → DSHBOTS-235 程序化收口）。
-// 背景：D-191/192 曾因「核验已闭环但 owner 未收口」滞留待验收面板被用户点名；D-194 只做
-// 检测+提醒，收口靠模型自觉。本守门把收口做成规则引擎：scheduler 每轮 tick 调
-// runReviewWatchdog，阈值每轮现算、逐卡容错（单卡失败不拖垮整轮扫描）。
+// 验收滞留守门 + 三档收口规则引擎：scheduler 每轮 tick 调 runReviewWatchdog，
+// 阈值每轮现算、逐卡容错（单卡失败不拖垮整轮扫描）。
 //
 // 三档判定（证据链不全一律落到 C 只提醒，自动 accept 是强动作）：
 //   A 可验证交付：交付报告（最近一次成功 task 运行的 output）含 commit，且该 commit
@@ -9,7 +7,7 @@
 //   B 交付方无响应：最近一次 task 运行已中止/死亡（failed/canceled）且此后无进展 → 自动 return；
 //     失败 run 之后出现更新的「建议 accept」核验结论时降级 C 仅提醒（时序上较新的合格证据
 //     不被自动退回盖过，但也绝不因此自动 accept）；
-//   C 不可判定：仅系统提醒（owner_bot 卡同时排总监验收运行，H1），滞留达 2×阈值二次催办升级语气（H2）。
+//   C 不可判定：仅提醒（owner_bot 卡同时排总监验收运行），滞留达 2×阈值时二次催办升级语气。
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -59,7 +57,7 @@ const strictlyAfter = (later, earlier) => {
 //   latestTaskRun / latestTaskRunAt：该卡最近一次 task 运行及其活动时间（SUPERSEDED 清理
 //   标记除外）；report：最近一次成功 task 运行的 output（交付报告）；reviewConclusion /
 //   reviewConcludedAt：最近一次成功核验委派运行的结论及其结束时间（以「子代理核验：」开头、
-//   含「建议 accept/return」，用户拍板：核验结论+证据链是自动收口的合法证据源）；
+//   含「建议 accept/return」，核验结论+证据链是自动收口的合法证据源）；
 //   verifyCommitOnDev：sha → 是否已在 dev 上（null = 无法验证）。
 //   A 的两条证据链：①交付报告 commit 已验证在 dev + 测试绿；②子代理核验结论明确建议 accept。
 export function classifyDelivery({ report = '', latestTaskRun = null, latestTaskRunAt = null, reviewConclusion = '', reviewConcludedAt = null, verifyCommitOnDev = null }) {
@@ -117,7 +115,7 @@ export function effectiveReviewEscalateMultiple(getSetting) {
   return Number.isFinite(raw) && raw >= min && raw <= max ? raw : min
 }
 
-// 自动收口三态（B3/DSHBOTS-326 observe 干跑档）：'0' 关（只提醒，不判定留痕）、
+// 自动收口三态：'0' 关（只提醒，不判定留痕）、
 // 'observe' 干跑（判定 + task_events 留痕，不收口——新自动化的安全上线路径：人回看
 // 观察记录确认无误后再切开）、'1' 开（判定 + 程序化收口）。canary=小范围生效，
 // observe=完全不生效，两档语义不同。
@@ -149,11 +147,11 @@ const judgeCard = (service, row) => {
      ORDER BY ended_at DESC LIMIT 1`,
     row.id,
   )
-  // Phase 3：output 住运行归属聊天库的 run_payload（顶库 runs 已瘦身）。
+  // output 住运行归属聊天库的 run_payload（顶库 runs 已瘦身）。
   const delivery = deliveryRun
     ? service.runChatStore(deliveryRun).get('SELECT output FROM run_payload WHERE run_id = ?', deliveryRun.id)
     : null
-  // 子代理核验结论（DSHBOTS-235 用户拍板）：最近一次成功核验委派运行的 output（含结束时间，
+  // 子代理核验结论：最近一次成功核验委派运行的 output（含结束时间，
   // 供 B 压 A 时序降级比较「建议 accept」是否晚于失败 run）。
   const reviewRun = service.store.get(
     `SELECT id, project_id, bot_id, ended_at FROM runs WHERE task_id = ? AND trigger_type = 'review_delegate' AND status = 'succeeded'
@@ -202,7 +200,7 @@ const autoClose = (service, row, judgment, tier) => {
 
 // 扫一轮全部 in_review 卡（归档项目不扫）：滞留者按三档判定收口/提醒。
 // 返回 { skipped?: 'disabled', alerted, escalated, recovered, error? }；
-// 逐卡 try/catch，单卡异常只 warn 不抛，且每卡处理完即落去重表（H5）。
+// 逐卡 try/catch，单卡异常只 warn 不抛，且每卡处理完即落去重表。
 export function runReviewWatchdog(service) {
   try {
     const { minutes } = effectiveReviewIdleMinutes(service.config, key => service.store.setting(key))
@@ -218,7 +216,7 @@ export function runReviewWatchdog(service) {
       FROM tasks t JOIN projects p ON p.id = t.project_id
       WHERE t.status = 'in_review' AND p.status = 'active'
     `)
-    // 评论锚点住各项目聊天库（chat-db-split Phase 3）：逐卡按 project_id 取，行字段形状不变。
+    // 评论锚点住各项目聊天库：逐卡按 project_id 取，行字段形状不变。
     for (const row of rows) {
       row.last_comment_at = service.groupChatStore(row.project_id).get(
         'SELECT MAX(created_at) AS v FROM task_comments WHERE task_id = ?', row.id,
@@ -230,7 +228,7 @@ export function runReviewWatchdog(service) {
     const recovered = Object.keys(map).filter(id => !inReviewIds.has(id))
     for (const id of recovered) delete map[id]
     const persist = () => service.store.setSetting(REVIEW_IDLE_ALERTED_KEY, JSON.stringify(map))
-    // 回收即落库（H5）：卡离开 in_review 的摘除不依赖后续是否有卡触发提醒。
+    // 回收即落库：卡离开 in_review 的摘除不依赖后续是否有卡触发提醒。
     if (recovered.length > 0) persist()
     if (minutes <= 0) {
       return { skipped: 'disabled', alerted: [], escalated: [], recovered, observed: [] }
@@ -242,7 +240,7 @@ export function runReviewWatchdog(service) {
         const anchorMs = latestAnchorMs(row)
         if (anchorMs === null) continue
         const idleMs = Date.now() - anchorMs
-        // 两端口径同源（H3）：后端与 UI badge 都用「静置毫秒严格大于阈值」判滞留。
+        // 两端口径同源：后端与 UI badge 都用「静置毫秒严格大于阈值」判滞留。
         const tier = idleMs > minutes * escalateMultiple * 60_000 ? 2 : idleMs > minutes * 60_000 ? 1 : 0
         if (tier === 0) continue
         const prevTier = alertedTier(map[row.id])
@@ -272,16 +270,15 @@ export function runReviewWatchdog(service) {
         if (actionable) {
           autoClose(service, row, judgment, fireTier)
         } else {
-          // C（或开关关闭/observe 干跑）：仅提醒；滞留达阈值×倍数升级语气二次催办（H2）。
-          // observe 模式的 A/B 卡同样走提醒（干跑不能把催办也干掉），另加判定留痕事件。
-          // C（或开关关闭）：仅提醒；滞留达阈值×倍数升级语气二次催办（H2）。
+          // C 档、开关关闭或 observe 干跑都只提醒：滞留达阈值×倍数时升级语气二次催办。
+          // observe 干跑的 A/B 卡同样只提醒，另加判定留痕事件。
           // 前缀按 locale 落库：缺省英文 [SYSTEM ALERT]，中文环境【系统指令】。
           const alertPrefix = systemAlertLabel(messageLocale(service.config, key => service.store.setting(key), service.runtime?.ctx?.get?.('loader')))
           const body = fireTier === 2
             ? `${alertPrefix}${label} 验收已滞留 ${idleMinutes} 分钟（超过 ${minutes * escalateMultiple} 分钟二次催办），请立即收口（accept/return），否则将按三档规则持续评估自动收口。`
             : `${alertPrefix}${label} 验收已滞留 ${idleMinutes} 分钟，核验若已闭环请尽快收口（accept/return）。`
           service.insertMessage({ projectId: row.project_id, senderType: 'system', senderId: 'system', taskId: row.id, body })
-          // H1：提醒不触发收口的老缺口——owner_bot 卡同时给总监排一次验收运行
+          // 提醒不触发收口：owner_bot 卡同时给总监排一次验收运行
           // （复用 owner_task_run outbox，消息本身仍不触发任何 bot 运行）；幂等键绑档位，
           // 去重表保证同档位只排一次。user 卡裁决归工作台 owner，只提醒不排运行。
           if ((row.review_target ?? 'user') === 'owner_bot') {
@@ -306,11 +303,11 @@ export function runReviewWatchdog(service) {
   }
 }
 
-// 面板同源视图（H3）：taskView 对 in_review 卡透出与守门同一 SQL 口径的滞留锚点
-// （含最新评论与 run 活动，UI badge 不再自算口径）+ 生效阈值/升级线 + 最近一次判定与依据。
+// 面板同源视图：taskView 对 in_review 卡透出与守门同一 SQL 口径的滞留锚点
+// （含最新评论与 run 活动，UI badge 复用这里的口径）+ 生效阈值/升级线 + 最近一次判定与依据。
 export const reviewWatchdogMethods = {
   reviewIdleView(task) {
-    // 评论锚点住任务所属项目的聊天库（chat-db-split Phase 3）；runs 锚点仍在顶库。
+    // 评论锚点住任务所属项目的聊天库；runs 锚点仍在顶库。
     const anchors = {
       last_comment_at: this.groupChatStore(task.project_id).get(
         'SELECT MAX(created_at) AS v FROM task_comments WHERE task_id = ?', task.id,

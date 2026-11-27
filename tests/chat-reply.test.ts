@@ -227,8 +227,8 @@ test('UI 源码包含引用回复的关键标记', async () => {
   // 气泡引用块
   assert.ok(appSource.includes('msg-quote'), '气泡顶部应有引用块')
   assert.ok(appSource.includes('↩ '), '引用块应带 ↩ 前缀')
-  // 发送 payload 带引用，成功后清除（DSHBOTS-165：乐观清空在出站前置空 state.replyTo，
-  // payload 改用出站前快照的 replyTo；快照语义锚一并收紧）
+  // 发送 payload 带引用，成功后清除（乐观清空在出站前置空 state.replyTo，
+  // payload 用出站前快照的 replyTo）
   assert.ok(appSource.includes('const replyTo = state.replyTo'), 'sendMessage 应在清空前快照引用状态')
   assert.ok(appSource.includes('replyTo: replyTo.id'), '发送 payload 应带 replyTo')
   assert.ok(/state\.replyTo = null/.test(appSource), '发送/取消后应清除引用状态')

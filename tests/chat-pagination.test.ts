@@ -1,4 +1,4 @@
-// DSHBOTS-33：聊天历史游标分页（messagesPage）——state 只回最后 200 条，更早历史按 created_at+id 游标向前翻。
+// 聊天历史游标分页（messagesPage）——state 只回最后 200 条，更早历史按 created_at+id 游标向前翻。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -159,8 +159,8 @@ test('参数校验：scope 二选一、游标缺一不可', async () => {
   }
 })
 
-// UI 源码断言：锁住 ui/app.js 里分片加载的接线不被无意拆断（DSHBOTS-33 UI 重放）。
-// 先剔行注释再断言顺序，防止「注释里的字也能让断言通过」的假锁（6040ea5 教训）。
+// UI 源码断言：锁住 ui/app.js 里分片加载的接线不被无意拆断。
+// 先剔行注释再断言顺序，防止「注释里的字也能让断言通过」的假锁。
 test('UI 接线：标记块存在、渲染/分发/样式接通、顺序正确', async () => {
   const app = readUiSource()
   const bare = app.replace(/\/\/[^\n]*/g, '')

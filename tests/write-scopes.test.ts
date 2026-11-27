@@ -8,7 +8,7 @@ import {
   WRITE_SCOPE_MAX,
   WRITE_SCOPE_MAX_LEN,
 } from '../src/service.js'
-// 兜底解析函数走域模块直连：门面按 DSHBOTS-16 纪律不加代码。
+// 兜底解析函数走域模块直连：门面不加代码。
 import { parseWriteScopesFromDescription } from '../src/services/write-scopes.js'
 
 // 写范围判定的纯函数：调度器据此决定同项目的两个写运行能否并行。

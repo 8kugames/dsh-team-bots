@@ -1,4 +1,4 @@
-// DSHBOTS-258 守门：项目外 director solo 运行的微信回推。
+// 项目外 director solo 运行微信回推的守门测试。
 // 正向：微信来源的自由文本触发 solo_chat 运行（trigger_type='wechat'），运行结束的
 // bot 回复（或失败提示）经 wechat.notify 推回，排版走 chatReply（bot 名 + 分隔线）。
 // 负向：普通 UI 单聊 solo run（trigger_type='mention'）绝不触发微信推送。
@@ -49,7 +49,7 @@ test('微信来源 director solo run：回复与失败提示都推回微信（ch
       status: () => ({ adminPeerId: 'wx_admin_peer' }),
     }
 
-    // 微信自由文本 → director solo 通道（DSHBOTS-258 绝对路由）
+    // 微信自由文本 → director solo 通道（绝对路由）
     const reply = await handleCommand(service, '帮我看下今天的安排', { boundKey: null, bind() {} })
     assert.ok(reply.includes('已直达【director】专属工作区'), '首触回执')
     const soloChat = service.soloChatStore(director.id)
@@ -80,7 +80,7 @@ test('微信来源 director solo run：回复与失败提示都推回微信（ch
       solo2.id, run.id,
     )
     await service.finishRun({ runId: run2.id, status: 'failed', error: { message: '模型超时' } } as any)
-    // DSHBOTS-267：失败只推「类别+摘要」，原始错误串不进微信。
+    // 失败只推「类别+摘要」，原始错误串不进微信。
     assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败（超时）：上游响应超时。', '失败提示推回微信（白名单分类）')
   } finally {
     store.close()

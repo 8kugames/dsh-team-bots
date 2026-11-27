@@ -114,8 +114,8 @@
 .message-meta strong {
     color: var(--ink-2);
     font-weight: 600;
-    /* 长名字截断而不是把整行撑宽（DSHBOTS-367：操作按钮 22→24px 后 meta 行余量更紧，
-       窄屏 360px 下长 bot 名会把两个操作按钮顶出气泡）。 */
+    /* 长名字截断而不是把整行撑宽：meta 行余量紧（操作按钮占 24px），
+       窄屏 360px 下长 bot 名会把两个操作按钮顶出气泡。 */
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;

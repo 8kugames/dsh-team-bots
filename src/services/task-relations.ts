@@ -7,8 +7,8 @@
 //   的 task run（run 留 queued，记一条 task_blocked_dep 事件）。依赖满足与否由调度器判断，
 //   不进 transitionTask。
 //
-// 迁移独立成文件的原因：src/db.js 已贴 800 行红线，迁移不写进 db.js（手法与
-// attention-schema.js / approvals.js 同款：schema_migrations 幂等守卫 + PRAGMA 判列 + ALTER TABLE）。
+// 迁移独立成文件的原因：src/db.js 已贴 800 行上限，迁移不写进 db.js（手法：
+// schema_migrations 幂等守卫 + PRAGMA 判列 + ALTER TABLE）。
 //
 // 环检测的定位：createTask 的边只指向已存在的任务，服务端又生成 taskId，公共 API 路径不可能成环；
 // DFS 防的是脏数据（直插库造出的互阻环挂新任务时要拒）与未来 updateTask 开放改关系时的校验复用。

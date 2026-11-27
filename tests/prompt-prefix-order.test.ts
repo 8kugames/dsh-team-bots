@@ -1,4 +1,4 @@
-// tests/prompt-prefix-order.test.js —— DSHBOTS-152：运行提示词「静态段前置、变化段后置」守门。
+// 运行提示词「静态段前置、变化段后置」守门。
 // 前缀缓存按最长公共前缀匹配：静态指令段若排在每卡变化字段（标题/描述/状态）之后，
 // 跨卡派发会在描述处分叉，固定段永远吃不到缓存。本文件按分支锁定段序：
 // 任何把静态段挪回变化段之后的改动都会在这里转红。语义口径见 src/services/runtime/prompt.js 头注。
@@ -135,7 +135,7 @@ test('review_delegate 分支：核验指令段先于任务字段块，above→be
       `# Subagent verification for task ORD-${card.number}`,
       'Description:',
     ], 'review_delegate 分支')
-    // 指令段前移后，写范围/证据的指代方向必须是 below（字段块在指令之后）。
+    // 写范围/证据的指代方向必须是 below（字段块在指令之后）。
     assert.ok(prompt.includes('declared write scopes below'), '指代词应随段序改为 below')
     assert.ok(prompt.includes('the evidence below'), '指代词应随段序改为 below')
     assert.ok(!prompt.includes('above'), '不得残留前移后方向不成立的 above')

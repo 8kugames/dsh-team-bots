@@ -1,4 +1,4 @@
-// src/services/core.js —— 服务核心域
+// 服务核心域
 // 服务生命周期、全局配置、审计写入与行读取。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
 // 因此方法体内的 this 与拆分前完全一致。
@@ -40,7 +40,7 @@ export const coreMethods = {
   async initialize() {
     if (this.ready) return this.ready
     this.ready = (async () => {
-      // 已停机的实例不再初始化：插件卸载会关闭底层库，初始化里的写库动作会撞上已关闭的库。
+      // 已停机的实例跳过初始化：插件卸载会关闭底层库，初始化里的写库动作会撞上已关闭的库。
       if (this.stopped) return
       await ensureDirResilient(this.config.dataDir)
       await ensureDirResilient(this.config.memoryDir)
@@ -112,7 +112,7 @@ export const coreMethods = {
          WHERE status = 'running'`,
       )
       for (const run of interrupted) {
-        // Phase 3：事件住运行归属聊天库（统一收口自动路由）。
+        // 事件住运行归属聊天库，写入时自动路由。
         this.insertRunEvent(run.id, 'recovered', '宿主重启，运行重新排队')
       }
       // 审批表与 messages 审批列的迁移由审批域自管（db.js 保持不超 800 行）；
@@ -135,14 +135,14 @@ export const coreMethods = {
       ensureWechatTriggerSchema(this.store)
       // 外部触发留痕表：GitHub 源的 (source, external_id) 已见集合。
       ensureExternalTriggerSchema(this.store)
-      // 聊天分库 Phase 1（docs/plans/chat-db-split.md）：messages/solo_messages/
+      // 聊天分库（docs/plans/chat-db-split.md）：messages/solo_messages/
       // message_images/run_trajectory 一次性迁入各聊天库；账本闸保证只跑一次，
       // 崩溃重启续跑。必须在正文读写路径工作前完成。
       this.migrateChatSplitP1()
       this.migrateChatSplitP2()
       this.migrateChatSplitP3()
       // 终端命令随服务进程生死：重启后 running 行已无进程可停，统一置 interrupted，不留僵尸。
-      // Phase 3：terminal_commands 住各聊天库，重启置 interrupted 扇出执行。
+      // terminal_commands 住各聊天库，逐库扇出执行。
       for (const chat of this.allChatStores()) {
         chat.run(
           `UPDATE terminal_commands SET status = 'interrupted', error_message = '服务重启中断', ended_at = ? WHERE status = 'running'`,
@@ -166,7 +166,7 @@ export const coreMethods = {
           this.logger.warn?.(`[wechat] 通道加载失败，已跳过: ${error?.message ?? error}`)
         }
       }
-      // 飞书机器人通道（DSHBOTS-323 卡①）：与微信通道同款可选挂载——按需动态 import，
+      // 飞书机器人通道：与微信通道同款可选挂载——按需动态 import，
       // 缺失/损坏只降级该通道，不让整个插件加载失败。
       if (this.config.feishu?.enabled) {
         try {
@@ -345,8 +345,6 @@ export const coreMethods = {
       // 乐观并发令牌随保存推进：settings_revision 不是 settingsView 键，
       // 不可经 patch 直接写，只在这里单调递增。
       this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
-      // A4/DSHBOTS-330 修复：此前本行是六参误用（audit 只收五参），values 被静默丢弃、
-      // 审计行只剩 data='global'——变更历史的「改了什么」从此处起才有值。
       this.audit(actor, 'settings.update', 'settings', 'global', values)
       // 运行时效单列一条 global.run_limits 审计，便于按目标检索改值历史。
       const limitKeys = Object.keys(RUN_LIMIT_RANGES)
@@ -453,9 +451,8 @@ export const coreMethods = {
     void this.feishu?.stop()
   },
   /**
- * 出站通道分发助手：出站事件统一从这里扇出到各已启用通道——
- * 微信与飞书各推一份，不再出现「某事件只到微信不到飞书」。逐通道 try/catch：
- * 单通道失败只 warn 留痕，不阻断其他通道（一路通道坏了不该让另一路收不到）。
+ * 出站通道分发助手：出站事件统一从这里扇出到各已启用通道，微信与飞书各推一份。
+ * 逐通道 try/catch：单通道失败只 warn 留痕，不阻断其他通道。
  * 通道在位即已启用（挂载由 config 开关决定），通道自身的连接/绑定态门禁在各自
  * notify 内部（未连上时只落盘不外发）。同一 receiptKey 在各通道 outbox 内各自
  * 幂等——两套 outbox 是彼此独立的库与唯一索引，键空间互不干扰。

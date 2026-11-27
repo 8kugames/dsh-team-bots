@@ -4,7 +4,7 @@ export default {
   "toast.wechatConnected": "微信通道已连接",
   // 全局配置页
   "channel.sectionWechat": "微信通道",
-  // DSHBOTS-220: ui/modules 文案（原文即键）
+  // ui/modules 文案（原文即键）
   "二维码已生成，请用微信扫码": "二维码已生成，请用微信扫码",
   "已退出微信绑定": "已退出微信绑定",
   "待扫码": "待扫码",

@@ -1,4 +1,4 @@
-// DSHBOTS-79：微信扫码绑定报「服务端处理失败」——channel.js 抛裸 Error，http.js 的 errorResponse
+// 微信扫码绑定报「服务端处理失败」——channel.js 抛裸 Error，http.js 的 errorResponse
 // 只认 AppError，非 AppError 一律 500「服务端处理失败」。本文件锁服务边界包装：
 // 守卫文案 → 409 原文透传；上游失败 → 502 可读原文 + logger.warn 记原始 stack。
 import { test } from 'node:test'

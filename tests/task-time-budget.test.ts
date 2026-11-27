@@ -1,7 +1,7 @@
-// DSHBOTS-125：任务发布支持「时效要求」（time_budget_minutes）。
+// 任务发布「时效要求」（time_budget_minutes）的守门测试。
 // 覆盖：createTask 落库与 taskView 快照（双命名/缺省/钳制）、owner 派单透传、
 // 任务提示词注入与不注入两分支（硬口径文案 + runTimeoutMs 取更短者）、迁移幂等（含老库升级）。
-// DSHBOTS-131：运行时效上限 min(全局 runTimeoutMs, budget) 的纯计算、startRun 启动期定格、
+// 运行时效上限 min(全局 runTimeoutMs, budget) 的纯计算、startRun 启动期定格、
 // 到期即超时中止（run 置 failed/RUN_TIMEOUT + run_events 留痕）、budget 大于全局时按全局中止、
 // 派生运行（review/handle/memory_review）提示词同步同一时效口径。
 import { test } from 'node:test'
@@ -149,7 +149,7 @@ test('提示词注入两分支：有时效注入硬口径段并写明与 runTime
     const actor = ctx.service.actor()
     const budgeted = await ctx.service.createTask({ projectId: project.id, title: '限时任务', time_budget_minutes: 30 }, actor)
     const plain = await ctx.service.createTask({ projectId: project.id, title: '普通任务' }, actor)
-    // DSHBOTS-198：建档即补缺省预算，NULL 分支只剩存量老卡——直改库置 NULL 模拟。
+    // 建档即补缺省预算，NULL 分支只剩存量老卡——直改库置 NULL 模拟。
     ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', plain.id)
 
     const withBudget = runtime.promptFor({
@@ -175,7 +175,7 @@ test('派生运行提示词同步时效：review/handle/memory_review 与任务�
   const ctx = await setup()
   try {
     const { dev, project } = await primeProject(ctx.service, ctx.store)
-    // Phase 3：派生运行提示词读源运行 output（run_payload）与交付评论，均住聊天库——运行时按 run 路由取库。
+    // 派生运行提示词读源运行 output（run_payload）与交付评论，均住聊天库——运行时按 run 路由取库。
     const runtime = new DshRuntime({ ctx: null, config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => ctx.service.runChatStore(run) } })
     const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
@@ -202,7 +202,7 @@ test('派生运行提示词同步时效：review/handle/memory_review 与任务�
     const review = insertRun('run-review', { kind: 'review', taskId: budgeted.id })
     const handle = insertRun('run-handle', { kind: 'handle', taskId: budgeted.id })
     const finished = insertRun('run-finished', { kind: 'task', taskId: budgeted.id, status: 'succeeded' })
-    // Phase 3：output 住运行归属聊天库的 run_payload（顶库 runs.output 恒 NULL）。
+    // output 住运行归属聊天库的 run_payload（顶库 runs.output 恒 NULL）。
     ctx.service.saveRunPayload(finished, { output: '交付说明' })
     const memory = insertRun('run-memory', { kind: 'memory_review', taskId: budgeted.id, triggerRef: finished.id })
 
@@ -308,7 +308,7 @@ test('startRun 启动期定格：带时效任务上限 = min(全局, budget)，�
     const actor = ctx.service.actor()
     const budgeted = await ctx.service.createTask({ projectId: project.id, title: '限时任务', time_budget_minutes: 30 }, actor)
     const plain = await ctx.service.createTask({ projectId: project.id, title: '普通任务' }, actor)
-    // DSHBOTS-198：建档即补缺省预算；「无时效沿用全局」分支只剩存量老卡，直改库置 NULL 模拟。
+    // 建档即补缺省预算；「无时效沿用全局」分支只剩存量老卡，直改库置 NULL 模拟。
     ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', plain.id)
     const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
@@ -344,7 +344,7 @@ test('时效到期即中止：到点杀运行，run 置 failed/RUN_TIMEOUT 且 r
     const task = await ctx.service.createTask({ projectId: project.id, title: '到期任务', time_budget_minutes: 30 }, actor)
     const botRow = ctx.store.get('SELECT * FROM bots WHERE id = ?', dev.id)
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
-    // Phase 3：run_events 住聊天库——运行时按 run 路由取库；run 种子对象须带路由列
+    // run_events 住聊天库——运行时按 run 路由取库；run 种子对象须带路由列
     // （project_id/bot_id），与 insertTaskRun 落库的行一致，缺列会错路由到 solo-undefined。
     const runtime = new DshRuntime({ ctx: stubHost(), config: ctx.config, store: ctx.store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => ctx.service.runChatStore(run) } })
     ctx.service.attachRuntime(runtime)
@@ -414,7 +414,7 @@ test('budget 大于全局时按全局中止：effective timeout 取更短者', a
   }
 })
 
-// DSHBOTS-198：任务卡默认带时间预算（用户 2026-11-04 拍板 A：跟随看门狗）。
+// 任务卡默认带时间预算，缺省值跟随看门狗。
 // 缺省链 = 显式 time_budget_minutes > env DSH_TEAM_TASK_TIME_BUDGET_MINUTES >
 // 无进展看门狗（分钟）生效值 > 兜底 40（看门狗未配置与配 0 关闭同值；预算不得变 0/无限）。
 test('缺省预算链：未传补 20、env 覆盖、看门狗配置覆盖、看门狗 0 兜底 40、显式不覆盖', async () => {

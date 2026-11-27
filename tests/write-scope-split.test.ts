@@ -1,7 +1,7 @@
-// 大卡拆分闸（2026-11-13 产品化派单纪律）：派单建卡路径写范围条目超过
+// 大卡拆分闸守门：派单建卡路径写范围条目超过
 // maxWriteScopesPerTask（默认 8）时拒绝，要求拆成 parent_task_id 子卡并行施工。
 // 守门三向：a) 超限拒绝且不落卡不建运行；b) 恰好等于上限放行；c) 重派既有大卡
-// 不受此闸（闸只拦新建，存量卡改卡/重派口径不变）。
+// 不受此闸（闸只拦新建，存量卡改卡/重派照常）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'

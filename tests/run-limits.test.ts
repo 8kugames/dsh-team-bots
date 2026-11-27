@@ -166,7 +166,7 @@ test('state 大视图带 runLimits 供回显，env 覆盖时给出标志', async
 
 test('全局配置页渲染运行时效卡与保存动作', () => {
   assert.match(source, /function renderRunLimitsCard\(\)/)
-  // DSHBOTS-214 起全局配置页走 page-shell 槽位：运行时效卡与运维卡并排两个半宽槽位。
+  // 全局配置页走 page-shell 槽位：运行时效卡与运维卡并排两个半宽槽位。
   assert.match(source, /slot\('half', renderRunLimitsCard\(\)\)/)
   assert.match(source, /id="settings-run-timeout"/)
   assert.match(source, /id="settings-stall-watchdog"/)
@@ -175,7 +175,7 @@ test('全局配置页渲染运行时效卡与保存动作', () => {
   // 输入 name 与后端 settings 键一致，保存走 update_settings。
   assert.match(source, /name="run_timeout_minutes"/)
   assert.match(source, /name="stall_watchdog_minutes"/)
-  // B2/DSHBOTS-325 起三处设置保存统一走 saveSettingsWithMerge（key→inputId 映射驱动）。
+  // 三处设置保存统一走 saveSettingsWithMerge（key→inputId 映射驱动）。
   assert.match(source, /run_timeout_minutes: 'settings-run-timeout'/)
   // 生效语义说明：进行中不追溯。
   assert.match(source, /进行中的运行不追溯/)

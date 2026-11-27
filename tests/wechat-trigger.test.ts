@@ -1,6 +1,6 @@
-// tests/wechat-trigger.test.ts —— B4-①/DSHBOTS-328：微信入站 Trigger 留痕守门。
-// 吸收原型 sources 层「不收的消息仍进系统并记 reason」：每条入站事件按稳定 id 落
-// wechat_inbound（handled/filtered/rejected/duplicate + route + reason），回答「为什么没触发」。
+// tests/wechat-trigger.test.ts —— 微信入站 Trigger 留痕守门。
+// 每条入站事件按稳定 id 落 wechat_inbound（handled/filtered/rejected/duplicate + route + reason），
+// 回答「为什么没触发」。
 // 守门四向：① 服务层落痕去重与封顶；② 通道层各处置路径（welcome/指令/业务拒绝/非管理员/
 // 无正文）；③ 视图映射；④ 命令层 ctx.trigger 分类回填（不改变返回契约）。
 import { test } from 'node:test'

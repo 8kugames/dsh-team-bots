@@ -1,4 +1,4 @@
-// DSHBOTS-63 派生子任务——源码断言 + 行为断言式测试。
+// 派生子任务——源码断言 + 行为断言式测试。
 // 任务详情 modal footer 的「派生子任务」按钮：复用新建任务表单并预填 parentTaskId，
 // 预填必须让父任务下拉真正选中该任务（值与显示一致），不是值带了、下拉仍显示「无（顶层任务）」。
 import { test } from 'node:test'
@@ -48,7 +48,7 @@ test('行为：taskRelationOptions 给指定任务打 selected，其余不打', 
       { id: 't1', identifier: 'DSH-1', title: '父任务' },
       { id: 't2', identifier: 'DSH-2', title: '另一个' },
     ] } };
-    ${/\/\/ 任务关系选项（DSHBOTS-58）[\s\S]*?\n\}/.exec(source)?.[0] ?? ''}
+    ${/\/\/ 任务关系选项：[\s\S]*?\n\}/.exec(source)?.[0] ?? ''}
     return taskRelationOptions;
   `)()
   const html = fn('t1')

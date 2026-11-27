@@ -1,4 +1,4 @@
-// DSHBOTS-260：发版流水线工具化守门——用临时 git 仓库端到端演练 scripts/release.mjs 的五个步骤。
+// 发版流水线工具化守门——用临时 git 仓库端到端演练 scripts/release.mjs 的五个步骤。
 //
 // 覆盖：①正常路径五步全绿：main 是与 dev 无共同历史的孤儿分支、main↔dev 树差异很大（新增/删除/修改并存），
 //         read-tree 换树无冲突，发布快照提交前后 package.json 保持 0.2.338 不被 bump，

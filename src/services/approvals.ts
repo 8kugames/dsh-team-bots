@@ -1,8 +1,8 @@
-// DSHBOTS-32 群聊审批：宿主 approval/request waterfall 的插件侧应答器。
+// 群聊审批：宿主 approval/request waterfall 的插件侧应答器。
 // 认领 session_bindings 命中的 bot 会话：绑定到项目的走群聊卡片；绑定为单聊（kind='solo'、
 // project_id 为空）的走单聊卡片；其余 next 透传（人类会话审批继续走 Web UI）。
 // 决策权仅用户（type=user）持有，bot 一律 forbidden 不能自批；pending 之外拒绝重复应答，动作写审计。
-// DSHBOTS-365 免审白名单：命中规则的提权请求不落待办卡，插件在认领入口即时替 owner 应答
+// 免审白名单：命中规则的提权请求不落待办卡，插件在认领入口即时替 owner 应答
 // allowed-once；approvals 行照落（status='allowed'、decided_by='auto:rule:<id>'）+ 审计事件
 // approval.auto_allow，免审不免留痕。规则存 settings 'approval_auto_rules'（JSON 数组，仿
 // prompt_overrides 独立编辑面先例，不进 settingsView 单值键域），仅 type=user 可写。
@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS approvals_project_idx ON approvals(project_id, create
 // 重启清理也在此——宿主侧请求随进程消失，不可能再被应答，库里残留的 pending 一律置 timeout。
 export function ensureApprovalSchema(store) {
   store.exec(APPROVALS_DDL)
-  // 旧库 approvals.project_id 是 NOT NULL（群聊专用时期），单聊会话无处归属：重建放宽为可空。
+  // approvals.project_id 需可空（单聊会话无处归属）：旧库若为 NOT NULL 则重建放宽。
   if (columnNotNull(store.db, 'approvals', 'project_id')) {
     rebuildTable(store.db, 'approvals', `CREATE TABLE approvals (${APPROVALS_TABLE_DDL})`)
     store.exec('CREATE INDEX IF NOT EXISTS approvals_status_idx ON approvals(status, created_at)')
@@ -77,13 +77,13 @@ export function ensureApprovalSchema(store) {
   store.run(
     "UPDATE approvals SET status = 'timeout' WHERE status = 'pending'",
   )
-  // 出厂预置默认免审规则（DSHBOTS-365 增量）：仅键未初始化（null）时播种一次；非-null
+  // 出厂预置默认免审规则：仅键未初始化（null）时播种一次；非-null
   // 一律不动——'[]' 是 owner 显式清空，永不回播；重复执行幂等，不做回填迁移。
   if (store.setting(APPROVAL_RULES_SETTING) === null) {
     store.setSetting(APPROVAL_RULES_SETTING, JSON.stringify(DEFAULT_APPROVAL_AUTO_RULES))
   }
-  // 存量预置行迁移（口径改 glob）：仍是出厂原样的预置行替换为三条关键词 glob；owner 自建或
-  // 改过的行不动，显式清空（[]）不回播。迁移后预置行都带通配符，重复执行不再命中。
+  // 存量预置行迁移：仍是出厂原样的预置行替换为三条关键词 glob；owner 自建或改过的行不动，
+  // 显式清空（[]）不回播。迁移后预置行都带通配符，重复执行不再命中。
   const migrated = migrateApprovalPresetRules(store.setting(APPROVAL_RULES_SETTING))
   if (migrated) store.setSetting(APPROVAL_RULES_SETTING, migrated)
 }
@@ -124,7 +124,7 @@ export const APPROVAL_RULE_SANDBOXES = ['workspace-write', 'danger-full-access']
 // 关键词 glob 覆盖不到——单独一行兜底；Linux 的 tmpdir 就是 /tmp，已被覆盖就不重复一行。
 const OS_TMPDIR = tmpdir().replace(/[/\\]+$/, '')
 
-// 出厂预置默认规则（DSHBOTS-365 增量改口径）：关键词 glob 三条——
+// 出厂预置默认规则：关键词 glob 三条——
 // **/temp/**、**/.tmp/**、**/tmp/** 命中即免审（路径与命令同一套 glob 方言），
 // 再加系统临时目录一行（未被关键词覆盖时）。预置行仍是普通规则行，owner 可自行删改。
 const KEYWORD_APPROVAL_AUTO_RULES = [
@@ -311,7 +311,7 @@ export const approvalsMethods = {
     const off = runtime.ctx.on('approval/request', (req, next) => this.handleApprovalRequest(req, next), { prepend: true })
     // approval/request 事件不带工具参数，目标取数只能从 tools/pre-execute 透传监听来：
     // 宿主先过 pre-execute 网关、gate 返回 ask 才发起审批，此刻 exec 里带着 callId/name/arguments。
-    // 按 callId 记已提取目标与目标沙箱档（DSHBOTS-365 辅维度；先提短串再掩码，只存小字符串），
+    // 按 callId 记已提取目标与目标沙箱档（先提短串再掩码，只存小字符串），
     // 审批发起时一次性取走；超量 FIFO 驱逐。
     const offPreExecute = runtime.ctx.on('tools/pre-execute', (exec, next) => {
       const callId = exec?.callId ? String(exec.callId) : ''
@@ -345,7 +345,7 @@ export const approvalsMethods = {
     if (!binding) return next()
 
     const store = this.store
-    // DSHBOTS-294：与 questions.ts 同款——solo 判定按「无 project 上下文的控制面会话」。
+    // 与 questions.ts 同款：solo 判定按「无 project 上下文的控制面会话」。
     const isSolo = !binding.project_id && (binding.kind === 'solo' || (binding.kind === 'bot' && !botInActiveProject(store, binding.bot_id)))
     if (!binding.project_id && !isSolo) return next()
     const bot = store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
@@ -361,7 +361,7 @@ export const approvalsMethods = {
     const displayReason = req.displayReason?.zh ? this.maskSecretValues(String(req.displayReason.zh).slice(0, 2_000)) : null
     const reason = this.maskSecretValues(String(req.reason ?? '').slice(0, 2_000))
     // 本次调用的操作目标：pre-execute 阶段按 callId 记下，这里一次性取走（不留残页）；没有则为 NULL，
-    // UI 回退到从摘要正则猜测的旧口径。sandbox 是目标沙箱档（免审规则辅维度，DSHBOTS-365）。
+    // UI 回退到从摘要正则猜测。sandbox 是目标沙箱档（免审规则辅维度）。
     const callId = req.callId ? String(req.callId) : null
     const cachedTarget = callId ? (this.approvalTargets.get(callId) ?? null) : null
     const toolTarget = cachedTarget?.target ?? null
@@ -376,7 +376,7 @@ export const approvalsMethods = {
       createdAt, new Date(Date.parse(createdAt) + timeoutMs).toISOString(),
     )
 
-    // DSHBOTS-365 免审白名单：命中规则的提权请求不落待办卡、不发群聊锚点/微信转发/通知，
+    // 免审白名单：命中规则的提权请求不落待办卡、不发群聊锚点/微信转发/通知，
     // 插件即时替 owner 应答 allowed-once。留痕两件套缺一不可：approvals 行 status='allowed'
     // + decided_by='auto:rule:<id>'（复用 settleApproval，decided_at 同步落库），审计事件
     // approval.auto_allow。每次调用一放行一结：规则每次现读，改规则即时生效，无持久授权。
@@ -402,7 +402,7 @@ export const approvalsMethods = {
       })
     } else {
       const group = this.groupOf(project.id)
-      // 卡片锚点住项目聊天库（chat-db-split Phase 1）。
+      // 卡片锚点住项目聊天库。
       this.groupChatStore(project.id).run(
         `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, kind, approval_id, created_at)
          VALUES (?, ?, ?, 'system', ?, ?, '[]', 'approval', ?, ?)`,
@@ -410,7 +410,7 @@ export const approvalsMethods = {
       )
     }
 
-    // DSHBOTS-215 问答回路：审批转发微信管理员（通道可用时）。只推纯文本镜像，
+    // 问答回路：审批转发微信管理员（通道可用时）。只推纯文本镜像，
     // 状态仍由群卡片/工作台承载；管理员决定经「批 <token> 允许|拒绝」路由回本条目。
     // 单聊没有项目语境，不转发（微信侧只服务项目管理者）。
     if (project) {
@@ -533,7 +533,7 @@ export const approvalsMethods = {
     // 不 bump 的话保存后客户端轮询命中 unchanged 短路，规则列表最长 60s 才刷出来。
     this.store.setSetting('settings_revision', String(this.settingsRevision() + 1))
     // 追溯放行：发起时未命中而落卡的 pending 审批，保存规则后立刻重判一遍——命中即按同口径
-    // allowed-once 放行并留痕，「先见卡、后补规则」不再要求重跑流程。沙箱档不入 approvals 表，
+    // allowed-once 放行并留痕：先见卡、后补规则的场景无需重跑流程。沙箱档不入 approvals 表，
     // 限档规则（sandbox 非空）拿空档冒充命中不稳，不参与追溯。
     const pendingRows = this.store.all("SELECT id, bot_id, tool_name, tool_target FROM approvals WHERE status = 'pending'") ?? []
     for (const pendingRow of pendingRows) {
@@ -551,7 +551,7 @@ export const approvalsMethods = {
     return this.approvalRulesView()
   },
 
-  // 完全权限总开关（DSHBOTS-366 免审权限卡）：读侧每次现读现解析——无缓存，改开关对
+  // 完全权限总开关：读侧每次现读现解析——无缓存，改开关对
   // 下一次会话/运行即时生效（applyFilePolicy 每次会话创建/复用都重读）。
   fullAccessAllEnabled() {
     return this.store.setting(APPROVAL_FULL_ACCESS_SETTING, '0') === '1'

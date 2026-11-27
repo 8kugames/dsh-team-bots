@@ -1,4 +1,4 @@
-// DSHBOTS-212：任务级 usage 聚合——「一个任务端到端花多少 token」的判定口径。
+// 任务级 usage 聚合——「一个任务端到端花多少 token」的判定口径。
 // 覆盖：记账写入路径带 task_id（usage_events.task_id 修复）；taskUsageTotals 双路径归因
 // （新明细 u.task_id + 历史明细 task_id NULL 经 run_id JOIN runs 追认）；失败重试运行全计入；
 // 缓存读写分列；taskSubtreeIds 子树（含脏环收敛）与 taskTreeUsageTotals（主项+后代、兄弟不含）；
@@ -66,8 +66,8 @@ test('taskUsageTotals 双路径归因：新明细直读 + 历史明细经 run_id
     // 路径 1（修复后的新明细）：recordUsage 带 task_id。
     const failedRun = insertRun(ctx.store, { id: 'run_fail', projectId: project.id, botId: dev.id, taskId: main.id, status: 'failed' })
     recordUsage(ctx.store, { chatStore: ctx.service.groupChatStore(project.id), sourceKey: 'f1', run: failedRun, provider: 'fake', model: 'model-a', usage: { inputTokens: 300, cacheReadTokens: 100, outputTokens: 80 } })
-    // 路径 2（历史明细）：迁移把 task_id 回填进明细（chat-db-split Phase 2 起
-    // 归因只认明细自身的 task_id，聊天库里没有 runs 表可 JOIN 追认）。
+    // 路径 2（历史明细）：迁移把 task_id 回填进明细（归因只认明细自身的 task_id，
+    // 聊天库里没有 runs 表可 JOIN 追认）。
     const retryRun = insertRun(ctx.store, { id: 'run_retry', projectId: project.id, botId: dev.id, taskId: main.id })
     ctx.service.groupChatStore(project.id).run(
       `INSERT INTO usage_events(id, source_key, run_id, project_id, bot_id, task_id, provider, model, purpose, currency,

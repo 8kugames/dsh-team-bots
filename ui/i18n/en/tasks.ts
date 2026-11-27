@@ -83,7 +83,7 @@ export default {
   "待执行": "To do",
   "后台等待": "Waiting in background",
   "空闲": "Idle",
-  // DSHBOTS-220: ui/modules copy
+  // ui/modules copy
   "${model} 已恢复默认价格": "${model} restored to default price",
   "Bot 已创建": "Bot created",
   "Bot 配置已更新": "Bot settings updated",
@@ -227,13 +227,13 @@ export default {
   "项目级密钥必须选择项目": "Project-level keys require a project",
   "项目设置已保存": "Project settings saved",
   "（": " (",
-  // DSHBOTS-246: keys added by the full t literal audit
+  // keys added by the full t literal audit
   "（待办不含已取消）": " (todo excludes canceled)",
   "，按": "; ",
-  // DSHBOTS-345: deliverables declaration on the task card
+  // deliverables declaration on the task card
   "交付产物": "Deliverables",
   "核验按路径直接读文件；交付报告只引用路径，不复述正文。": "Verification reads the files at these paths; the delivery report references paths only, never file contents.",
-  // DSHBOTS-347: in-app preview for text-like files
+  // in-app preview for text-like files
   "文件预览": "File preview",
   "文件较大，已截断，仅显示开头部分。": "Large file; showing a truncated head only.",
   "新窗口打开": "Open in new window",

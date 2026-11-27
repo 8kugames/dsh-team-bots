@@ -1,5 +1,5 @@
 // 本地预览静态切片与线上路由对齐。
-// 背景（DSHBOTS-124 预览复现）：scripts/dev-server.mjs 不提供 /api/dsh-team/i18n/*
+// 背景：scripts/dev-server.mjs 不提供 /api/dsh-team/i18n/*
 // 与 /api/dsh-team/vendor/*，而 ui/modules/i18n.js 以相对路径 import '../i18n/<lang>.js'
 // → 浏览器解析成 /api/dsh-team/i18n/<lang>.js，404 让整个 app.js 模块图加载失败，
 // 页面停在 boot screen「正在连接团队空间」。线上 src/http.js 有这些路由，故只在预览复现。

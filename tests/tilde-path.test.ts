@@ -1,4 +1,4 @@
-// DSHBOTS-186：工作区路径显示缩写 tildePath 的语义边界 + 前端接线回归锁。
+// 工作区路径显示缩写 tildePath 的语义边界 + 前端接线回归锁。
 // 口径：缩写只发生在展示位（pathCode、终端标题栏文本）；data-copy、title 与请求载荷
 // 一律保留完整路径——复制与跳转仍给全路径是本卡硬约束，接线锁专门断言这一点。
 import test from 'node:test'
@@ -51,9 +51,8 @@ test('前端接线锁：展示位走 tildePath，data-copy/title/copyPath 保留
   assert.equal(count(chat, `data-copy="\${attr(bot.soloWorkspace ?? '')}"`), 2, '单聊两处复制按钮必须保留完整路径')
 
   const settings = read('ui/modules/settings.js')
-  // D-186 卡面口径的「当前生效」行仍在 settings.js；DSH 路径卡的「工作区」行随关于内容
-  // 回迁 settings.js，缩写与完整路径复制语义不变。DSHBOTS-357 补齐 DSH 路径卡
-  // 其余三行（dshHome/skillRoot/dataDir）与「管理数据」行：六个 pathCode 展示位全部缩写。
+  // settings.js 侧六个 pathCode 展示位（当前生效 + DSH 路径卡四行 + 管理数据）全部缩写，
+  // 缩写与完整路径复制语义不变。
   assert.equal(count(settings, 'pathCode(tildePath('), 6, 'settings.js 六处路径展示位缩写（当前生效 + DSH 路径卡四行 + 管理数据）')
   assert.ok(settings.includes('copyPath(project.workspace_path)'), '当前生效的复制必须保留完整路径')
   assert.ok(settings.includes('copyPath(paths.workspace)'), '全局工作区的复制必须保留完整路径')

@@ -1,4 +1,4 @@
-// tests/dispatch-policy-gate.test.ts —— DSHBOTS-314 派单策略闸。
+// 派单策略闸的守门测试。
 // 写卡（write_scopes 非空）派 file_policy=read-only 的 bot 在 assignFromBot 两路（新卡/
 // 重派）入口 badRequest 拒绝并回执指引——把「执行到落盘才撞只读沙箱」前移到派单时显式
 // 拦截；可写策略放行、无 write_scopes 卡放行、无策略空值按可写放行（兼容存量）。
@@ -94,7 +94,7 @@ test('d) 重派带写范围的卡给只读 bot 同闸被拒；空策略值按可
     await t.service.assignFromBot(t.sessionId, {
       assignee: 'Builder', title: '写范围卡', description: '实施。', write_scopes: ['src/a.js'],
     })
-    // 首卡 autoStart 的施工运行占住换负责人闸（D-169 既有口径）：清掉再验证重派闸。
+    // 首卡 autoStart 的施工运行占住换负责人闸：清掉再验证重派闸。
     for (const run of t.store.all("SELECT id FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?) AND status IN ('queued', 'running')", t.project.id)) {
       await t.service.cancelRunInternal(run.id, false)
     }

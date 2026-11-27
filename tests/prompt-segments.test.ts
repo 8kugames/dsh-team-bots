@@ -1,8 +1,8 @@
-// tests/prompt-segments.test.ts —— B1/DSHBOTS-324：分段可编辑提示词守门。
+// 分段可编辑提示词守门。
 // ① 默认组合与硬编码时代逐字节等价（prompt-budget/prefix-order 继续守门）；
 // ② 覆盖生效：新会话 identity 含自定义通信纪律、任务卡注入自定义拆分段；
 // ③ 保存不唤醒会话：已冻结的旧会话 identity 逐字节不变；
-// ④ Default updated 三方取舍：base_hash 过期 → 视图标 defaultChanged，恢复默认后清除；
+// ④ Default updated 口径：base_hash 过期 → 视图标 defaultChanged，恢复默认后清除；
 // ⑤ 预算闸：拆卡段超 1200 三段合计直接拒绝（badRequest），2000 字上限拒绝。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

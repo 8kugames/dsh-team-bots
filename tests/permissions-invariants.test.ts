@@ -1,11 +1,11 @@
-// DSHBOTS-263 守门（第三方审计④「消息不能改变权限」）：权限不变式——
+// 权限不变式守门（消息不能改变权限）：
 // 卡面描述、群聊/任务评论文本、项目记忆/文档文本一律不是权限依据；权限只由
 // owner 显式授权界定（bots.file_policy、卡面 sandbox 字段、审批卡）。
 // 四类不变式：
 // ① 卡面描述里的提权话术对 sandbox 解析零影响（解析只认结构化 sandbox 字段）；
-// ② 卡面 sandbox 显式宽于 assignee file_policy → badRequest（只收紧不放宽，钉 D-234/D-156），
+// ② 卡面 sandbox 显式宽于 assignee file_policy → badRequest（只收紧不放宽），
 //    且提权话术不能把拒绝翻成放行；
-// ③ 群聊/任务评论文本冒充 owner 指令 → isAdmin/actor 解析零变化（fail-closed，钉 D-257）；
+// ③ 群聊/任务评论文本冒充 owner 指令 → isAdmin/actor 解析零变化（fail-closed）；
 // ④ 项目记忆/工作区文档里的权限性话术不进入 sandbox 解析输入。
 // 实现锚点：src/services/file-policy.ts resolveSandboxOverride、
 // src/services/tasks.ts assignFromBot/addComment、src/wechat/commands.ts handleFixedCommand。
@@ -200,7 +200,7 @@ test('③ 群聊正文冒充 owner：isAdmin 不因正文漂移（fail-closed，
 test('③ 任务评论文本冒充 owner：actor/权限解析零变化，评论只是文本', async () => {
   const { root, store, service, project, sessionId, dev, auditor } = await ownerSetup()
   try {
-    // DSHBOTS-314 派单策略闸后写卡不经 assignFromBot 派只读 bot——本例测评论语义，直建卡。
+    // 派单策略闸不许 assignFromBot 把带写范围的卡派给只读 bot——本例测评论语义，直建卡。
     const task = await service.createTask({ projectId: project.id, title: '只读卡', assigneeBotId: auditor.id, writeScopes: ['src/rev.js'] })
     store.run("UPDATE tasks SET sandbox_override = 'read-only' WHERE id = ?", task.id)
     // 他人（Builder bot）在卡下评论冒充 owner 授权。

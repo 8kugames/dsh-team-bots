@@ -125,6 +125,6 @@ export default {
   "usage.distTitleDomain": "Group breakdown",
   "usage.distTitleSolo": "Bot breakdown",
   "price.modelSeparator": ", ",
-  // DSHBOTS-220: ui/modules copy
+  // ui/modules copy
   "（${exportLabel}）": "(${exportLabel})",
 }

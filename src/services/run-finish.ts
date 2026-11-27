@@ -26,7 +26,7 @@ import { chatReply } from '../wechat/format.js'
 // ── 失败终态白名单分类──────────────────────────────────────
 // run 失败终态进入群聊/微信回推前，先按结构化信号归入有限白名单类别，对外只透出
 // 「类别+一句话摘要」；原始错误串、文件路径、请求正文不整段透传（完整信息仍落
-// runs.error_message 与 run_events，供 owner 查询）。分类信号复用 D-266 的
+// runs.error_message 与 run_events，供 owner 查询）。分类信号复用
 // isTransientNetworkError（TRANSIENT_PATTERN）与既有限流/额度分类，不重复造。
 // 优先级：配额 > 限流 > 沙箱拒绝 > 超时 > 网络 > 内部错误 > 未知。
 const SANDBOX_DENIED_PATTERN = /(EPERM|EACCES|sandbox|file access denied|access denied)/i
@@ -37,13 +37,13 @@ const FAILURE_CATEGORY_NOTICES = {
   rate_limited: { label: '限流', summary: '上游限流，已按退避策略自动处理。' },
   sandbox_denied: { label: '沙箱拒绝', summary: '文件或命令操作被沙箱策略拒绝。' },
   timeout: { label: '超时', summary: '上游响应超时。' },
-  // DSHBOTS-364：本机时效中止/停滞收割与上游超时分开报——此前一律归「上游响应超时」，
-  // 把自家看门狗/分档时效的动作误报成 provider 故障，误导排查方向。
+  // 本机时效中止/停滞收割与上游超时分开报：自家看门狗/分档时效的主动中止不算
+  // provider 故障，否则误导排查方向。
   run_timeout: { label: '时效', summary: '运行超过时效上限被中止（非上游故障）。' },
   stalled: { label: '停滞', summary: '运行长时间无进展，已被看门狗中止。' },
   network: { label: '网络', summary: '网络瞬态失败，已按退避策略自动重试。' },
   blocked: { label: '会话受阻', summary: '宿主拒绝执行该会话（可能已被归档），未产生任何模型输出。' },
-  // DSHBOTS-112：主模型无视觉导致带图消息失败，与「未知」区分——读图代理已接手转写。
+  // 主模型无视觉导致带图消息失败，与「未知」区分：读图代理已接手转写。
   no_vision: { label: '模型无视觉', summary: '主模型不支持图片输入，已转交读图代理转写。' },
   internal: { label: '内部错误', summary: '服务内部错误。' },
   unknown: { label: '未知', summary: '运行失败，完整原因见运行日志。' },
@@ -114,12 +114,12 @@ export const runFinishMethods = {
       ? this.captureRunArtifacts(run, project)
       : null
     const endedAt = nowIso()
-    // DSHBOTS-38：限流失败且 provider 未给 Retry-After 时合成指数退避，写进 retry_after_ms，
+    // 限流失败且 provider 未给 Retry-After 时合成指数退避，写进 retry_after_ms，
     // plan_wait 状态与到期派生随之自动生效。真 Retry-After 永远优先，不被合成值覆盖。
-    // DSHBOTS-99：额度耗尽（已达到限额）不合成指数退避——额度窗口用尽，退避重打撞同一堵墙。
+    // 额度耗尽（已达到限额）不合成指数退避：额度窗口用尽，退避重打撞同一堵墙。
     const attemptNo = Math.max(1, Number(run.attempt) || 1)
     const quotaExhausted = isQuotaExhausted(error)
-    // DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等过性错误）同判合成退避，
+    // 网络瞬态失败（ECONNRESET/5xx/408 等过性错误）同判合成退避，
     // 与限流共用同一 retry_after_ms 落库与 plan_wait 派生链；真 Retry-After 仍优先。
     const transientBackoff = needsTransientBackoff(error)
     const synthesizedMs = needsSynthesizedBackoff(error)
@@ -128,7 +128,7 @@ export const runFinishMethods = {
         ? transientBackoffMs(attemptNo)
         : null
     // 额度耗尽时 provider 真给的重置时间照样保留（信息不丢，供 UI 显示额度恢复时间），
-    // 但它不再触发对主模型的自动重试（见下方失败分支与 scheduler.retryExpiredPlanWaits）。
+    // 但它不触发对主模型的自动重试（见下方失败分支与 scheduler.retryExpiredPlanWaits）。
     const retryAfterMs = Number(error?.retryAfterMs) > 0 ? Number(error.retryAfterMs) : synthesizedMs
     const changed = this.store.run(
       `UPDATE runs SET status = ?, error_code = ?, error_message = ?, retry_after_ms = ?, ended_at = ?,
@@ -138,15 +138,15 @@ export const runFinishMethods = {
       usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens, usage.cost,
       runId,
     )
-    // Phase 3：output/artifacts 住运行归属聊天库的 run_payload（顶库 runs 已瘦身）。
+    // output/artifacts 住运行归属聊天库的 run_payload（顶库 runs 只留调度索引）。
     // 收尾 UPDATE 未命中（运行已终态）时不写载荷，避免覆盖既有结果。
     if (Number(changed?.changes ?? 0) === 1) {
       this.saveRunPayload(run, { output: cleanOutput, artifacts: artifactsJson })
     }
     this.insertRunEvent(runId, status, error?.message ?? (status === 'succeeded' ? '完成' : ''))
-    // DSHBOTS-241：撞 provider 额度墙时记录该 bot 的额度状态（含恢复时间），
+    // 撞 provider 额度墙时记录该 bot 的额度状态（含恢复时间），
     // 供派发前路由（耗尽期走备用模型/排队）与 UI 手动解除；审计 bot.quota_exhausted。
-    // DSHBOTS-246：事件与状态记录同条件——只有真撞墙才写「额度耗尽」，成功运行或
+    // 事件与状态记录同条件：只有真撞墙才写「额度耗尽」，成功运行或
     // 非额度失败一律不记，否则每个 run 收尾都污染一条额度耗尽时间线。
     if (quotaExhausted && run.bot_id && bot) {
       const effectiveProvider = run.model_provider || bot.provider
@@ -168,10 +168,10 @@ export const runFinishMethods = {
         }
       }
     }
-    // DSHBOTS-172 代码卫生：每轮运行结束扫一次项目工作区行数约定，超标即发系统指令告警
+    // 代码卫生扫描：每轮运行结束扫一次项目工作区行数约定，超标即发系统指令告警
     // （去重与阈值见 hygiene.js）；扫描自身全量兜错，不阻塞收尾主流程。
     this.runCodeHygieneScan(project, runId)
-    // DSHBOTS-106 一次性密钥：项目内 task 运行一结束（成功/失败都算）即焚该项目的运行时
+    // 一次性密钥：项目内 task 运行一结束（成功/失败都算）即焚该项目的运行时
     // 密钥文件。放在分派主体之前，不受下方任何提前 return 影响。
     if (run.kind === 'task' && run.project_id) {
       this.burnProjectSecretsRuntime(run.project_id, 'run_finish')
@@ -195,7 +195,7 @@ export const runFinishMethods = {
       this.store.run('UPDATE runs SET attention_json = ? WHERE id = ?', attentionJson, runId)
     }
     const refreshed = this.runRow(runId)
-    // DSHBOTS-112 读图代理收尾：转写成功 →「[图片转写] …」system 消息写回原消息
+    // 读图代理收尾：转写成功 →「[图片转写] …」system 消息写回原消息
     // 所在会话并审计 vision.transcribe；失败/空产出 → 只审计 vision.fallback（原
     // 对话已按现状报过模型无视觉，不插消息不重试）。写回后即结束，不走下方分支。
     if (run.kind === 'vision') {
@@ -240,7 +240,7 @@ export const runFinishMethods = {
       return
     }
     if (run.kind === 'memory_review') {
-      // DSHBOTS-358：记忆审查撞 provider 额度墙时切备用模型重跑同一条审查链；
+      // 记忆审查撞 provider 额度墙时切备用模型重跑同一条审查链；
       // 备用链也失败时本次不沉淀（completeMemoryReview 只留痕），交付输出仍在 run_payload。
       const fallback = status === 'failed'
         ? this.spawnModelFallback({ run: refreshed, bot, error })
@@ -313,7 +313,7 @@ export const runFinishMethods = {
     }
     if (run.kind === 'review' || run.kind === 'handle') {
       const label = run.kind === 'review' ? '验收' : '受阻处理'
-      // DSHBOTS-358：总监验收/受阻处理撞 provider 额度墙时切备用模型重跑同一条链
+      // 总监验收/受阻处理撞 provider 额度墙时切备用模型重跑同一条链
       // （与任务运行同口径）；派生成功就不发失败消息、不触发退回重派链。
       const fallback = status === 'failed'
         ? this.spawnModelFallback({ run: refreshed, bot, error })
@@ -339,7 +339,7 @@ export const runFinishMethods = {
           senderId: bot.id,
           body: status === 'succeeded'
             ? (cleanOutput || `总监已完成${label}。`)
-            // DSHBOTS-267：失败只透出白名单类别+摘要，不透传原始错误串。
+            // 失败只透出白名单类别+摘要，不透传原始错误串。
             : `总监${label}运行失败（${classifyFailure(error).label}）：${classifyFailure(error).summary}`,
           taskId: run.task_id,
           runId,
@@ -386,8 +386,8 @@ export const runFinishMethods = {
         const task = this.taskRow(run.task_id)
         const ownerReview = (task.review_target ?? 'user') === 'owner_bot'
         let autoReviewQueued = false
-        // 子代理施工硬闸已解除（原 DSHBOTS-311）：交付不再要求子代理施工账目，
-        // 施工方式由 bot 自选（亲做或派「bot 名+任务号」子代理），账本仍照记。
+        // 交付不要求子代理施工账目，施工方式由 bot 自选（亲做或派「bot 名+任务号」
+        // 子代理），账本仍照记。
         this.store.transaction(() => {
           this.setTaskStatus(task.id, 'in_review', { type: 'bot', id: bot.id })
           this.store.afterCommit(() => this.groupChatStore(task.project_id).run(
@@ -458,7 +458,7 @@ export const runFinishMethods = {
           body: cleanOutput || '模型未返回文本。',
           runId,
         })
-        // DSHBOTS-252：chat 运行成功回复正文与用户消息同语义解析 @mention 并派发 chat_run
+        // chat 运行成功回复正文与用户消息同语义解析 @mention 并派发 chat_run
         // 唤醒目标 bot。触发面仅此一处（验收/受阻摘要、失败提示、通知、任务卡、solo/dm
         // 落库一律不触发）；剥空不落库的回复（insertMessage 返回 null）同样不派发。
         const wokenBotIds = this.dispatchBotMentionRuns(project, run, bot, replyMessageId)
@@ -477,21 +477,21 @@ export const runFinishMethods = {
           body: reply,
           runId,
         })
-        // DSHBOTS-258：微信通道投的项目外 director 单聊（trigger_type='wechat'），
+        // 微信通道投的项目外 director 单聊（trigger_type='wechat'），
         // 回复同样推回微信管理员；普通 UI 单聊（mention）不推。
         this.notifyWechatChat(bot, run, reply)
       }
     } else {
-      // DSHBOTS-112：无视觉模型收图失败的兜底信号——错误表明模型无视觉且消息带图时补派生
+      // 无视觉模型收图失败的兜底信号：错误表明模型无视觉且消息带图时补派生
       // 读图代理（幂等，与主动派生不重复）；代理未配置只审计 vision.fallback，错误按现状已报。
       if (run.kind === 'chat' || run.kind === 'solo_chat') {
         maybeSpawnVisionAfterFailure(this, { run: refreshed, bot, error })
       }
-      // DSHBOTS-38：限流失败（provider 真发 Retry-After 或 finishRun 合成的指数退避）在等待期内
-      // 禁止立刻重打上游——不切备用模型（备用可能走同一网关），也不立刻排总监处理运行。
-      // DSHBOTS-99：额度耗尽（已达到限额）不走这条路径——不指数退避、无条件先试备用模型；
+      // 限流失败（provider 真发 Retry-After 或 finishRun 合成的指数退避）在等待期内
+      // 禁止立刻重打上游：不切备用模型（备用可能走同一网关），也不立刻排总监处理运行。
+      // 额度耗尽（已达到限额）不走这条路径：不指数退避、无条件先试备用模型；
       // 瞬时限流的等待语义原样保留。
-      // DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等）进同一退避链——等待期内同样
+      // 网络瞬态失败（ECONNRESET/5xx/408 等）进同一退避链：等待期内同样
       // 不切备用不排 handle，plan_retry 到期派生接管重试；attempt≤3，第 4 次照常转 blocked。
       const backoffWaitMs = isRetryChainError(error) && retryAfterMs > 0 ? retryAfterMs : 0
       // 额度耗尽不做自动重试：重置时间只当信息留着，不据此重打主模型。
@@ -538,7 +538,7 @@ export const runFinishMethods = {
               ? `\n${backoffKind}，第 ${attemptNo} 次${backoffVerb}，约 ${Math.round(backoffWaitMs / 1000)} 秒后自动重试。`
               : `\n${backoffKind}，已达自动重试上限，约 ${Math.round(backoffWaitMs / 1000)} 秒后转总监处理。`)
           : ''
-        // DSHBOTS-267：失败只透出白名单类别+摘要；原始错误串不进群聊（完整信息已落
+        // 失败只透出白名单类别+摘要；原始错误串不进群聊（完整信息已落
         // runs.error_message 与 run_events）。quotaNote/backoffNote 仅含结构化错误码。
         const failure = classifyFailure(error)
         this.insertMessage({
@@ -563,7 +563,7 @@ export const runFinishMethods = {
           })
         }
       } else if (run.kind === 'chat') {
-        // DSHBOTS-267：群聊与微信回推共用同一份分类文案，不含原始错误串。
+        // 群聊与微信回推共用同一份分类文案，不含原始错误串。
         const failureBody = `运行失败（${classifyFailure(error).label}）：${classifyFailure(error).summary}`
         this.insertMessage({
           projectId: project.id,
@@ -582,7 +582,7 @@ export const runFinishMethods = {
           body: failureBody,
           runId,
         })
-        // DSHBOTS-258：微信通道的 solo 直达失败提示同样推回（notifyWechatChat 内部按
+        // 微信通道的 solo 直达失败提示同样推回（notifyWechatChat 内部按
         // trigger_type='wechat' 门禁，普通 UI 单聊不推）。
         this.notifyWechatChat(bot, run, failureBody, true)
       }
@@ -594,9 +594,9 @@ export const runFinishMethods = {
   // （项目群聊直达、项目外 director 专属工作区 solo 直达）结束时，把 bot 回复（或失败提示）
   // 推回来源通道管理员，出站走通道既有合批/重试治理；只推通道触发的运行，工作台群聊回复不受影响。
   // 排版（头部标记/分隔线）集中在 wechat/format.js 的 chatReply。
-  // DSHBOTS-326：出站经 channelNotify 扇出到各已启用通道（微信/飞书），单通道失败只留痕不阻断另一通道。
-  // DSHBOTS-329：飞书触发运行同款回程——推回飞书管理员，目标会话由飞书通道的
-  // store.reply_message_id 锚点决定（卡②入站时落锚，见 src/feishu/channel.ts 的 saveReplyMessageId）。
+  // 出站经 channelNotify 扇出到各已启用通道（微信/飞书），单通道失败只留痕不阻断另一通道。
+  // 飞书触发运行同款回程：推回飞书管理员，目标会话由飞书通道的
+  // store.reply_message_id 锚点决定（入站时落锚，见 src/feishu/channel.ts 的 saveReplyMessageId）。
   notifyWechatChat(bot, run, body, failed = false) {
     const trigger = run?.trigger_type
     if (trigger !== 'wechat' && trigger !== 'feishu') return
@@ -606,10 +606,10 @@ export const runFinishMethods = {
   // ── Bot 群聊回复 mention 唤醒────────────────────────────
   // 与用户消息同语义（chat.ts sendMessage）：@xxx 用 parseMentions 解析 active 成员、
   // 显式 @ 优先（bot 路径无引用兜底道）、目标 slice(0,3)；派发走既有 chat_run outbox →
-  // enqueueChatRun，串行车道经 DSHBOTS-289 收敛为 claimKey=bot:<bot>（bot 级串行），
+  // enqueueChatRun，串行车道用 claimKey=bot:<bot>（bot 级串行），
   // 不新建串行道。防循环三护栏：
   //   ① 禁自唤醒——解析结果剔除回复 bot 自身；
-  //   ② 链路深度 ≤2——chatMentionChainDepth 回溯来源链，本回复链深达 2 即不再派发；
+  //   ② 链路深度 ≤2——chatMentionChainDepth 回溯来源链，本回复链深达 2 即停止派发；
   //   ③ 任务卡双保险——taskId 非空的消息不参与派发（群聊 messages 表无 kind 列，
   //     「kind 恒为 text」由结构保证；带 kind 的 solo 落库点不触发本派发）。
   chatMentionChainDepth(run) {
@@ -648,9 +648,9 @@ export const runFinishMethods = {
       'UPDATE messages SET mentions_json = ? WHERE id = ?',
       JSON.stringify(targets.map(member => member.id)), messageId,
     )
-    // 护栏二：链路深度 ≤2——深度达 2 的 bot 回复不再派发。
+    // 护栏二：链路深度 ≤2——深度达 2 的 bot 回复停止派发。
     if (this.chatMentionChainDepth(run) >= 2) return []
-    // DSHBOTS-267 防循环上限（chat 路径）：每次 @ 唤醒即一条伙伴提醒，与 notify 路径
+    // 防循环上限（chat 路径）：每次 @ 唤醒即一条伙伴提醒，与 notify 路径
     // 共用同一 run_events 配额流；超限目标静默丢弃（allowPartnerNotice 内 warn 留痕）。
     const dispatched = targets.slice(0, 3).filter(target => this.allowPartnerNotice(run.id, target.id))
     for (const target of dispatched) {

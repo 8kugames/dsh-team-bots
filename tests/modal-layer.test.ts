@@ -66,7 +66,7 @@ const load = (doc, renderModal) =>
     { ...doc, createElement: () => { const n = makeNode(); n.parse = h => { if (doc._trees[h]) n.children = [doc._trees[h]] }; return n } },
     renderModal,
     FakeHTMLElement,
-    // DSHBOTS-367：遮罩开合切 #app inert——桩只记录调用，不做真实 DOM 操作。
+    // 遮罩开合切 #app inert——桩只记录调用，不做真实 DOM 操作。
     () => {},
     () => false,
   )
@@ -198,7 +198,7 @@ test('接线③：closeModal 只经 renderModalLayer 清 modal-root，不走全�
   assert.match(source, /  if \(!html\) \{\n    root\.replaceChildren\(\)\n    return\n  \}/, '弹窗层清空只 replaceChildren modal-root')
 })
 
-// —— DSHBOTS-98：遮罩闸门（行为级）——
+// —— 遮罩闸门（行为级）——
 // modal-layer 块与 render 在真实代码里互相调用（render 顶部问 overlayOpen，
 // 块内 flushAppRender 调 render），所以把两者放进同一作用域求值。
 const renderSrc = /function render\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
@@ -297,8 +297,7 @@ test('接线④：轮询/刷新不因弹窗早退，遮罩关闭路径都补渲�
   const pollSrc = /async function poll\(\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(pollSrc, 'ui/app.js 缺少 poll()')
   assert.doesNotMatch(pollSrc, /state\.modal/, '轮询不再因弹窗早退：遮罩期间照常取数，数据不丢')
-  // DSHBOTS-123：poll 的 render 改为经焦点渲染闸门放行（composer 正在输入时让路，其余照常），
-  // 取数仍无条件先行；断言随行为同步迁移。
+  // poll 的 render 经焦点渲染闸门放行（composer 正在输入时让路，其余照常），取数仍无条件先行。
   assert.match(pollSrc, /\/\/ 版本短路[\s\S]*?await loadState\(state\.projectId, \{ quiet: true \}\)[\s\S]*?\/\/ 渲染闸门[\s\S]*?if \(!pollRenderBlockedByFocus\(document\.activeElement[\s\S]*?\)\) render\(\)/, '取数后仍走 render()（版本短路零变化提前 return；焦点渲染闸门与遮罩闸门各自决定是否重建）')
   const refreshSrc = /async function refresh\([^)]*\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(refreshSrc, 'ui/app.js 缺少 refresh()')
@@ -315,7 +314,7 @@ test('接线④：轮询/刷新不因弹窗早退，遮罩关闭路径都补渲�
   assert.match(renderSrc, /if \(overlayOpen\(\)\) \{\n    markAppRenderPending\(\)\n    return\n  \}/, 'render() 顶部是唯一的重建闸门')
 })
 
-// —— DSHBOTS-111：断言③（同类型刷新不重播入场动画）——
+// —— 同类型刷新不重播入场动画——
 // 入场动画重播只有两条路：承载节点被重建（root.innerHTML 整层重写），或节点上的
 // 动画 class 被重复加/重写。原位刷新两条路都不存在：遮罩/面板节点实例保持，
 // 遮罩 class 零触碰，面板只做同值同步（同值 className 赋值不触发样式重算，动画无从重起）。

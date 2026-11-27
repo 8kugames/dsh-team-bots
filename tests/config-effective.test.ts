@@ -1,5 +1,5 @@
-// tests/config-effective.test.ts —— DSHBOTS-309 审批/提问等待超时生效链守门。
-// 默认终调 5 分钟（300_000ms，DSHBOTS-313）；settings 键 approval_timeout_minutes / question_timeout_minutes
+// 审批/提问等待超时生效链守门测试。
+// 默认 5 分钟（300_000ms）；settings 键 approval_timeout_minutes / question_timeout_minutes
 // （分钟整数 [1,60]，越界/非法回退默认）；优先级与 run_timeout 同款——env 显式最高
 // （resolveConfig 已烘进 config.*TimeoutMs）> settings > 默认。
 import { test } from 'node:test'

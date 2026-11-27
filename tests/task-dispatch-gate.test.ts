@@ -1,10 +1,10 @@
-// tests/task-dispatch-gate.test.ts —— DSHBOTS-303 核验纪律派单闸。
+// 核验纪律派单闸的守门测试。
 // owner 硬口径：核验/审计/复核类卡不派成员 bot（该类工作由总监自有子代理执行），
-// 与 D-302 提示词边界守门（review-auto 源码锚）构成双层防线。守门：
+// 与提示词边界守门（review-auto 源码锚）构成双层防线。守门：
 // a) 核验类卡派成员被拒（badRequest + 指引文案，标题/描述/复合词三形态）；
 // b) 同卡派 director 放行；
 // c) 实施卡含「验证/验收」不误伤（负例）；
-// d) 关键词常量锚（保守三词取舍见 task-dispatch.ts 常量注释）；
+// d) 关键词常量锚（保守三词，理由见 task-dispatch.ts 常量注释）；
 // e) 重派/改卡路径同闸（改卡面为核验措辞派成员被拒，派 director 放行）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -128,7 +128,7 @@ test('e) 重派/改卡同闸：卡面改成核验措辞派成员被拒，派 dir
       assignee: 'Builder', task: 'GATE-1', title: '改为核验交付', description: '子代理核验一遍',
     }))
     assert.equal(t.store.get('SELECT title FROM tasks WHERE id = ?', task.id).title, '实施卡', '拒绝发生在改卡生效前')
-    // 首卡 autoStart 的施工运行占住换负责人闸门（D-169 既有口径）：取消后再验证 director 放行。
+    // 首卡 autoStart 的施工运行占住换负责人闸门：取消后再验证 director 放行。
     for (const run of t.store.all("SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')", task.id)) {
       await t.service.cancelRunInternal(run.id, false)
     }

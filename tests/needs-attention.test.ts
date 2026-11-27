@@ -1,4 +1,4 @@
-// tests/needs-attention.test.ts —— A2+B9/DSHBOTS-322：needs-attention 聚合守门。
+// needs-attention 聚合守门测试。
 // health 与 state 同源消费 needsAttentionView：待审/待答/待验收/滞留卡计数 + 系统问题
 // 条目（outbox 投递耗尽、微信通道异常）。反双真值：只读聚合，不改状态真值。
 import { test } from 'node:test'

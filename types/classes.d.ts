@@ -283,7 +283,7 @@ declare module '../src/service.js' {
     stateCache: { key: string; version: string; at: number } | null
     wechat: WechatChannel | null
     feishu: FeishuChannel | null
-    /** 微信通道 store 复用句柄（DSHBOTS-334 启停开关）：unmount 不关库，remount 复用。 */
+    /** 微信通道 store 复用句柄：unmount 不关库，remount 复用。 */
     _wechatStore: import('../src/wechat/store.js').WechatStore | null
     /** SecretBox 缓存（services/secrets.js ensureSecretBox）。 */
     _secretBox: unknown

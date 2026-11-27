@@ -65,7 +65,7 @@ async function manualSetup() {
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  // DSHBOTS-290：bot 级串行（one_active_run_per_bot）下同 bot 双运行必串行（第二条直接挂起
+  // bot 级串行（one_active_run_per_bot）下同 bot 双运行必串行（第二条直接挂起
   // 不落 runs 行）；需要并行的用例把第二条任务/消息路由到 dev2 车道。
   const dev2 = await service.createBot({
     name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
@@ -96,7 +96,7 @@ async function closeQuietly(store, timeout = 2000) {
 }
 
 // 驱动 tick 直到目标条件成立：任务交付级联出的 memory_review/核验运行会占住 bot 车道
-// （DSHBOTS-290 同 bot 至多一条活跃运行），逐拍完成中间运行让 bot 回到空闲，挂起的
+// （同 bot 至多一条活跃运行），逐拍完成中间运行让 bot 回到空闲，挂起的
 // 任务/消息才能建回。命中即停，不完成目标运行。构造与 tests/run-coalesce.test.js 同款。
 async function drainUntilStarted(service, runtime, predicate, maxTicks = 8) {
   for (let i = 0; i < maxTicks; i += 1) {
@@ -152,7 +152,7 @@ test('同项目写运行：声明的写范围不重叠时并行放行', async ()
       projectId: project.id, title: '改聊天模块', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
     })
-    // DSHBOTS-290：第二条走 dev2 车道，两条运行同时排队供闸门比对。
+    // 第二条走 dev2 车道，两条运行同时排队供闸门比对。
     const second = await service.createTask({
       projectId: project.id, title: '改调度模块', assigneeBotId: dev2.id,
       writeScopes: ['ui/modules/scheduler.js'], autoStart: true,
@@ -190,7 +190,7 @@ test('同 Bot 任务运行与群聊回复并行（任务豁免 bot 串行域）�
     assert.equal(runningRuns(store).length, 1)
 
     // 任务运行豁免 bot 串行域（单 bot 多任务并行）：dev 的任务在跑时，@Builder 的群聊
-    // 回复不再挂待处理队列——chat 与 task 分属不同串行键，同 bot 也可并行。
+    // 回复不挂待处理队列——chat 与 task 分属不同串行键，同 bot 也可并行。
     await service.sendMessage(project.id, '@Builder @Builder2 顺便回复一句')
     await service.tick()
     const devChat = runningRuns(store).find(run => run.kind === 'chat' && run.bot_id === dev.id)
@@ -217,7 +217,7 @@ test('出队顺序按任务优先级，紧急任务不被积压拖死', async ()
   try {
     const project = await service.createProject({ name: 'Prio', key: 'PRI', ownerBotId: director.id, memberIds: [dev.id, dev2.id] })
     // 同项目只有一个写运行槽位：先入队的低优先级任务不应挡住后入队的紧急任务。
-    // DSHBOTS-290：领取顺序的比对需要两条运行同时排队，两条任务分属 dev/dev2 车道。
+    // 领取顺序的比对需要两条运行同时排队，两条任务分属 dev/dev2 车道。
     const backlog = await service.createTask({ projectId: project.id, title: 'Backlog', priority: 'low', assigneeBotId: dev.id, autoStart: true })
     const urgent = await service.createTask({ projectId: project.id, title: 'Hotfix', priority: 'urgent', assigneeBotId: dev2.id, autoStart: true })
 
@@ -322,12 +322,12 @@ test('旧库的 session_bindings 迁移后可容纳每任务会话', async () =>
         'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',
         's3', 'b1', 'p1', 'task', 't2', now,
       )
-      // DSHBOTS-285：车道唯一索引已退役，project 车道行可共存（历史/过渡态），不再被拒
+      // 车道无唯一索引：project 车道行可与其它绑定共存（历史/过渡态），插入不被拒
       store.run(
         'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?,?,?,?,?,?)',
         's4', 'b1', 'p1', 'project', null, now,
       )
-      // 收敛不变量：迁移已把旧 project 活跃行转为该 bot 的控制面绑定，每 bot 恰一条 kind='bot' 活跃绑定
+      // 不变量：迁移把旧 project 活跃行转为该 bot 的控制面绑定，每 bot 恰一条 kind='bot' 活跃绑定
       assert.equal(store.get('SELECT kind FROM session_bindings WHERE session_id = ?', 's1').kind, 'bot')
       assert.throws(() => store.run(
         "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at, alias) VALUES (?,?,?,?,?,?,0)",
@@ -509,11 +509,10 @@ test('system 区会话级冻结，记忆块走 runtime context 尾部快照', as
   }
 })
 
-// DSHBOTS-300 守门：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后
-// 各自 INSERT，后者撞 one_active_run_per_bot 直抛——outbox 计为投递失败重试耗尽置
-// failed。单进程可测等价：预插同 bot queued 运行（对端落行）后把 botBusy 桩成 false
-// （模拟竞态窗），断言 enqueueTaskRun/enqueueOwnerTaskRun 不抛错、落挂起队列、
-// bot 空闲后 drainPendingMessages 建回运行。
+// busy 闸竞态守门：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后
+// 各自 INSERT，后者会撞 one_active_run_per_bot。单进程可测等价：预插同 bot queued 运行
+// （对端落行）后把 botBusy 桩成 false（模拟竞态窗），断言 enqueueTaskRun/enqueueOwnerTaskRun
+// 不抛错、落挂起队列、bot 空闲后 drainPendingMessages 建回运行。
 test('查后插竞态撞 one_active_run_per_bot：task/owner_task 入队落挂起队列不抛错，空闲建回', async () => {
   const { root, store, service, director, dev } = await manualSetup()
   try {

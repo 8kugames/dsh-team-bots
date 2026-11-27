@@ -1,4 +1,4 @@
-// DSHBOTS-116：宿主 user-questions/request 瀑布 → 群聊提问卡片 → 工作台作答。
+// 宿主 user-questions/request 瀑布 → 群聊提问卡片 → 工作台作答。
 // 认领/透传、owner 鉴权、单选/多选作答映射、超时/abort/重启清理、密钥掩码、上下文隔离、prepend 抢跑。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -136,9 +136,9 @@ test('命中 bot 会话：落 pending 提问与 kind=question 消息，单选映
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-190：ask_user_question 收紧为项目总监（owner bot）专属。
+// ask_user_question 收紧为项目总监（owner bot）专属。
 // 非总监 bot 的项目群会话、单聊 bot 会话都要拿到明确拒绝文案（reject 回宿主 ask 工具结果），
-// 不能再 next 透传——透传等于把提问落回原生界面，收紧形同虚设。
+// 不得 next 透传——透传等于把提问落回原生界面，收紧形同虚设。
 test('权限收紧：非总监 bot 在项目群发起 ask 被明确拒绝，不落卡不透传', async () => {
   const { root, store, service } = await setup()
   try {
@@ -158,9 +158,9 @@ test('权限收紧：非总监 bot 在项目群发起 ask 被明确拒绝，不�
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-190 视图契约：作答后的服务端视图必须带 answered_at（=ended_at）。
+// 视图契约：作答后的服务端视图必须带 answered_at（=ended_at）。
 // 客户端 preserveAnsweredQuestions 以 previous.questions[].answered_at 为本地终态键，
-// 视图缺该字段时终态键丢失，下一轮旧 pending 轮询快照会把「已回答」卡闪回问题卡（D-190 症状）。
+// 视图缺该字段时终态键丢失，下一轮旧 pending 轮询快照会把「已回答」卡闪回问题卡。
 test('作答后的服务端视图带 answered_at=ended_at：终态不被旧轮询闪回的前提', async () => {
   const { root, store, service } = await setup()
   try {
@@ -193,7 +193,7 @@ test('未绑定会话透传：next() 接管，不落提问（D-190 后仅此路�
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-218：单聊会话（kind='solo'、project_id 为空）由工作台单聊卡片承接——单聊里 bot 就是
+// 单聊会话（kind='solo'、project_id 为空）由工作台单聊卡片承接——单聊里 bot 就是
 // 对话方，没有群聊可发，无需总监归属闸门，也不再透传原生界面。
 test('单聊会话发起 ask 由工作台单聊卡片承接，不落群聊、不透传', async () => {
   const { root, store, service } = await setup()
@@ -445,9 +445,9 @@ test('未绑定会话仍透传：原生面板照常接管，不落提问', async
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-170：群聊提示词须告知 ask_user_question（能力补全的缺口在指引不在链路），
+// 群聊提示词须告知 ask_user_question（能力补全的缺口在指引不在链路），
 // 且指引边界与 questions.js 认领条件一致：项目绑定会话可用，单聊（solo）不可用。
-// task 会话同样被认领，但本卡按最小改动只在群聊分支注入指引，此处钉住该口径。
+// task 会话同样被认领，但指引只在群聊分支注入，此处钉住该口径。
 test('提示词指引：群聊会话含 ask_user_question 指引，solo/task 提示词不含', async () => {
   const { root, store, service } = await setup()
   try {
@@ -469,7 +469,7 @@ test('提示词指引：群聊会话含 ask_user_question 指引，solo/task 提
     assert.match(chat, /Director-only/, 'D-190：总监指引应注明专属')
     assert.match(chat, /not in solo sessions/, '指引应写明单聊会话不可用')
 
-    // D-190：非总监成员 bot 的群聊提示词只留路由指引，不给完整用法。
+    // 非总监成员 bot 的群聊提示词只留路由指引，不给完整用法。
     const programmer = store.get("SELECT * FROM bots WHERE name = 'programmer'")
     bindSession(store, { sessionId: 'sess-prompt-member', botId: programmer.id, projectId: project.id })
     const member = runtime.systemPromptFor({ agent: { id: 'sess-prompt-member' } })
@@ -490,7 +490,7 @@ test('提示词指引：群聊会话含 ask_user_question 指引，solo/task 提
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// DSHBOTS-177：宿主 timed 前台等待到期（ASK_TIMED_OUT abort）宿主语义是 {pending:true}、
+// 宿主 timed 前台等待到期（ASK_TIMED_OUT abort）宿主语义是 {pending:true}、
 // 问题保持可答——插件不得杀卡；窗口内迟到作答经宿主 userQuestions.answer 回投原 agent。
 test('timed abort：前台等待断开但条目保持可答，迟到答案经 userQuestions.answer 回投', async () => {
   const ctx = new FakeCordisCtx()
@@ -629,8 +629,8 @@ test('迟到回投失败（run 已结束/宿主不再认领）：答案仍落库
   }
 })
 
-// DSHBOTS-312 来源群聊标识（数据面守门）：审批视图与列表均带 project_key/project_name，
-// 单聊（project_id 空）归 null+solo（D-218 口径）——UI 据此渲染 [KEY] 群名 chip 或「单聊」。
+// 来源群聊标识（数据面守门）：审批视图与列表均带 project_key/project_name，
+// 单聊（project_id 空）归 null+solo——UI 据此渲染 [KEY] 群名 chip 或「单聊」。
 test('审批来源标识：群聊向带 projectKey/projectName，单聊向归 null+solo', async () => {
   const { root, store, service } = await setup()
   try {
@@ -651,7 +651,7 @@ test('审批来源标识：群聊向带 projectKey/projectName，单聊向归 nu
     const listed = service.approvalsForProject(project.id).find(row => row.id === 'apr_src_proj')
     assert.equal(listed.projectKey, 'LABELSRC', '列表带 projectKey（D-240 JOIN 既有）')
     assert.equal(listed.projectName, 'LabelSrc', '列表带 projectName')
-    // 单行口径（DSHBOTS-312 新增）：approvalView 直查也补齐来源字段。
+    // 单行口径：approvalView 直查也补齐来源字段。
     const projView = service.approvalView(store.get('SELECT * FROM approvals WHERE id = ?', 'apr_src_proj'))
     assert.equal(projView.projectKey, 'LABELSRC', 'approvalView 单行路径带 projectKey')
     assert.equal(projView.projectName, 'LabelSrc', 'approvalView 单行路径带 projectName')

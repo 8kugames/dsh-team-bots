@@ -1,4 +1,4 @@
-// tests/trust-boundary.test.ts —— B6/DSHBOTS-327：信赖边界显式化守门（源码级，不建库）。
+// 信赖边界显式化守门（源码级，不建库）。
 // 契约：消息正文/引用摘录/微信文本/记忆内容/提案说明一律是数据——没有任何代码路径把
 // 它们解析成权限、角色、模型或写范围；鉴权只认会话身份与 DB 状态。钉五件事：
 // ① 模型面声明（identity 段数据非指令行 + 记忆块既有声明）；
@@ -31,13 +31,13 @@ test('模型面：identity 段声明外部文本是数据，记忆块保留既�
 })
 
 test('工具面：tools.ts 头部信赖边界契约（鉴权三层 + 文本不可改写）', () => {
-  assert.match(toolsSource, /信赖边界（B6\/DSHBOTS-327/, '契约注释在场')
+  assert.match(toolsSource, /信赖边界：/, '契约注释在场')
   assert.match(toolsSource, /ownerContextFor[\s\S]*?applyBotToolPolicy[\s\S]*?applyFilePolicy/, '鉴权三层被点名')
   assert.match(toolsSource, /没有任何代码路径把它们解析成权限、角色、模型或写范围/, '数据非权限断言在场')
 })
 
 test('微信面：白名单指令显式解析 + admin-peer 写门 + 未命中按数据路由', () => {
-  assert.match(commandsSource, /信赖边界（B6\/DSHBOTS-327/, '微信面边界注释在场')
+  assert.match(commandsSource, /信赖边界：/, '微信面边界注释在场')
   assert.match(commandsSource, /const ANSWER_PATTERN = /, '答 指令固定模式')
   assert.match(commandsSource, /const APPROVAL_PATTERN = /, '批 指令固定模式')
   assert.match(commandsSource, /const ADMIN_VERBS = new Set\(/, '写操作指令 admin 门集合')

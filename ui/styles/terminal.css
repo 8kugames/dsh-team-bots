@@ -24,7 +24,7 @@
     align-items: flex-start;
     gap: 8px;
     color: var(--ink-2);
-    /* 提示是旁注不是警报：左端一条 --star 竖线 + 淡洗底，不再用整圈描边抢主卡的视觉重量。 */
+    /* 提示是旁注不是警报：左端一条 --star 竖线 + 淡洗底，不抢主卡的视觉重量。 */
     border: 0;
     border-left: 2px solid var(--star);
     background: var(--star-wash);
@@ -309,7 +309,7 @@
     background: var(--ink-3);
     background-clip: padding-box;
 }
-/* 空列表：与普通卡片空态同一口径，不再靠行内样式撑开。 */
+/* 空列表：与普通卡片空态同一口径，不靠行内样式撑开。 */
 .terminal-history-empty {
     padding: 16px 14px;
     color: var(--ink-3);

@@ -1,16 +1,14 @@
-// tests/run-coalesce.test.js —— 入站消息合批守门（D-231 拍板语义；D-287 入队合并；
-// D-289 争用口径 A 后由 DSHBOTS-290 改钉「bot 忙挂待处理队列 + 空闲建回时合批」）。
-// 用户拍板：同一 bot 排队尚未处理的多条消息，合并注入同一次运行，不再一条消息一次运行。
-// 现行时机：bot 忙时消息挂 bot_pending_msgs:<bot>:<domain>（不落 runs 行）；bot 空闲时
+// 入站消息合批守门：同一 bot 排队尚未处理的多条消息，合并注入同一次运行。
+// 时机：bot 忙时消息挂 bot_pending_msgs:<bot>:<domain>（不落 runs 行）；bot 空闲时
 // drainPendingMessages 建回运行——chat/solo_chat 相邻同 kind（同项目）合批成一条
 // （merged_messages 注入），首条消息的运行立即执行、后续消息并入下一次建回。
 // 守五条边界：
 // ①同 bot 多条挂起消息 → 空闲后单次运行携带全部消息（群聊与单聊各一组）；
-// ②跨项目/跨 kind 不合批（D-219 解耦在合批键上保留：kind+projectId）；
+// ②跨项目/跨 kind 不合批（合批键：kind+projectId）；
 // ③合并条数上限走 settings（coalesce_max_messages，默认 5，≤1 关闭）；
 // ④合并窗口走 settings（coalesce_window_ms，默认 30s，与组首入队时间差超窗不并）；
-// ⑤并发护栏（M4 模拟竞争）：建回 INSERT 撞 UNIQUE（botBusy 检查后、INSERT 前被抢占）
-// 返回 null 不抛错，消息全量留队列不丢（D-287 原子抢占守卫的口径 A 后继）。
+// ⑤并发护栏（模拟竞争）：建回 INSERT 撞 UNIQUE（botBusy 检查后、INSERT 前被抢占）
+// 返回 null 不抛错，消息全量留队列不丢。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -90,7 +88,7 @@ function groupPrompt(t, run, chatMessage, extraMessages) {
   })
 }
 
-// DSHBOTS-308 域化：挂起队列按 (bot, 工作区) 分键（bot_pending_msgs:<bot>:<domain>）。
+// 挂起队列按 (bot, 工作区) 分键（bot_pending_msgs:<bot>:<domain>）。
 // 默认读该 bot 全部域键并合并（域无关视角），需要精确域时传 domain。
 const heldItems = (t, botId = t.dev.id, domain?: string) => {
   if (domain !== undefined) {
@@ -224,7 +222,7 @@ test('跨项目/跨 kind 不合批（DSHBOTS-308 域化）：跨工作区消息�
   }
 })
 
-// DSHBOTS-308 旧键迁移守门：域化前播种的旧格式键（bot_pending_msgs:<bot>，无域段）
+// 旧键迁移守门：旧格式键（bot_pending_msgs:<bot>，无域段）
 // 必须在首次 drain 时并入对应域队列（按 item.projectId ?? '~solo'）后被消费，消息不丢。
 test('旧格式挂起队列键一次性迁移：旧键项并入本域队列并建回，不丢消息', async () => {
   const t = await setup()
@@ -343,9 +341,9 @@ test('M4 模拟竞争：建回前 bot 被抢占则消息全量留队列；INSERT
   }
 })
 
-// DSHBOTS-291 卡面增补①（D-290 红线臂 4d70a415：M4 跨项目不合批键 0 覆盖）：
-// 现有跨项目用例两条挂起项 kind 不同（chat vs solo_chat），kind 判定已必然分组、projectId
-// 分支恒不可达——本例两条挂起项同为 chat、分属不同项目，钉住「跨项目同 kind 不合批」键。
+// 跨项目不合批键的覆盖：前面的跨项目用例两条挂起项 kind 不同（chat vs solo_chat），
+// kind 判定已必然分组、projectId 分支恒不可达——本例两条挂起项同为 chat、分属不同项目，
+// 钉住「跨项目同 kind 不合批」键。
 test('跨项目同 kind 不合批（回归·DSHBOTS-308 域化）：同域挂起待建回、跨域直接独立成轮', async () => {
   const t = await setup()
   try {
@@ -380,7 +378,7 @@ test('跨项目同 kind 不合批（回归·DSHBOTS-308 域化）：同域挂起
   }
 })
 
-// DSHBOTS-300 守门：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后
+// 查后插竞态守门：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后
 // 各自 INSERT，后者撞 one_active_run_per_bot 直抛——outbox 会把它计为投递失败重试
 // 耗尽置 failed，消息卡死。单进程可测等价：预插一条同 bot queued 运行（对端进程的
 // 落行）后把 botBusy 桩成 false（模拟「查后插之间」的竞态窗），断言 enqueue 不抛错、
@@ -409,7 +407,7 @@ test('查后插竞态撞 one_active_run_per_bot：入队不抛错落挂起队列
     t.service.botBusy = realBusy
     assert.equal(chatRunId, null, 'chat 撞 UNIQUE 返 null 不抛错')
     assert.equal(dmRunId, null, 'dm 同款兜底')
-    // DSHBOTS-308 域化：solo_chat 落 solo 域，与对端 chat 运行（COA 域）不同域——不撞
+    // solo_chat 落 solo 域，与对端 chat 运行（COA 域）不同域——不撞
     // UNIQUE，直接建行（跨工作区并行）；同域的 chat/dm 照旧挂起。
     assert.ok(soloRunId, 'solo_chat 跨域不受对端运行影响，直接建行')
     assert.deepEqual(heldItems(t).map(item => item.kind), ['chat', 'dm'], '同域两族消息落挂起队列')
@@ -424,10 +422,10 @@ test('查后插竞态撞 one_active_run_per_bot：入队不抛错落挂起队列
   }
 })
 
-// DSHBOTS-304 守门（同拍双投边界）：dispatchOutbox 无原子 claim，两进程双投同一行时失败方
-// 走 D-300 兜底落挂起，其挂起项与胜利方运行共存——不修则消息族 drain 建回永撞全局
+// 同拍双投边界守门：dispatchOutbox 无原子 claim，两进程双投同一行时失败方
+// 走查后插兜底落挂起，其挂起项与胜利方运行共存——不处理则消息族 drain 建回永撞全局
 // UNIQUE idempotency_key（任意状态）成永生占位、每 tick 队头 break 阻塞该 bot 全部挂起组；
-// 任务族在胜利方运行结束后按恒新幂等键重复建行。修法=入队 catch 合并（命中即返胜利方
+// 任务族在胜利方运行结束后按恒新幂等键重复建行。现行处理=入队 catch 合并（命中即返胜利方
 // id 不落挂起）+ drain 建回前去重清扫（含存量卡死项自愈）。
 test('DSHBOTS-304 双投（消息族）：胜利方运行共存时挂起项清扫消账，不永生不重建不阻塞后续组', async () => {
   const t = await setup()
@@ -441,7 +439,7 @@ test('DSHBOTS-304 双投（消息族）：胜利方运行共存时挂起项清�
        VALUES ('run_winner', ?, ?, 'chat', 'read', 'mention', ?, 'running', 1, ?, ?, ?, ?)`,
       t.project.id, t.dev.id, m1, `chat:${m1}:${t.dev.id}`, now, now, now,
     )
-    // 失败方：m1 已落挂起（双投兜底产物），m2 因忙正常挂起（域键=项目域，DSHBOTS-308）。
+    // 失败方：m1 已落挂起（双投兜底产物），m2 因忙正常挂起（域键=项目域）。
     t.service.holdPendingMessage(t.dev.id, t.project.id, { kind: 'chat', messageId: m1, projectId: t.project.id, origin: null, queuedAt: now })
     t.service.holdPendingMessage(t.dev.id, t.project.id, { kind: 'chat', messageId: m2, projectId: t.project.id, origin: null, queuedAt: now })
     // 胜利方运行期间 drain：bot 忙整体跳过建回，但去重清扫在忙检查之前——m1（幂等键

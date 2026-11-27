@@ -89,7 +89,7 @@ export const memoryMethods = {
       return `[${raw}] ${message.sender_type}:${message.sender_id} at ${message.created_at}\n\n${message.body}`
     }
     if (raw.startsWith('c_')) {
-      // Phase 3：task_comments 住项目聊天库；任务号回顶库 tasks 取。
+      // task_comments 住项目聊天库；任务号回顶库 tasks 取。
       const comment = this.groupChatStore(project.id).get(
         'SELECT * FROM task_comments WHERE substr(id, -6) = ?',
         raw.slice(2),
@@ -147,7 +147,7 @@ export const memoryMethods = {
     // 审查模型覆盖：配置了专用模型对时随运行下发（runs.model_* 三列既有通道，
     // startRun 的 modelOverrideFor 消费）；未配置为 NULL，沿用 Bot 主模型。
     const target = memoryReviewModelTarget(this.config)
-    // DSHBOTS-358：记忆审查属内部运行，同样接额度路由——主 provider 耗尽时走备用模型；
+    // 记忆审查属内部运行，同样接额度路由——主 provider 耗尽时走备用模型；
     // 主备都耗尽则不带模型覆盖，留 queued 等恢复（调度器额度闸门兜底）。
     // 专用审查模型配在别的 provider 且该 provider 未耗尽时，专用模型优先。
     const routing = this.quotaRoutingForBot(bot)
@@ -218,7 +218,7 @@ export const memoryMethods = {
     let updated = 0
     let deduped = 0
     // 拒写留痕：审查写入被拒时把拒因带内化——写进 run_events，
-    // 不再只丢一条系统日志（run_events 只说「写入 0 条」而无人知道为什么，锁定期会无限期无人处理）。
+    // 只丢一条系统日志的话，run_events 只说「写入 0 条」而无人知道为什么，锁定期会无限期无人处理。
     let rejected = 0
     let capacityRejected = 0
     const rejectReasons: string[] = []
@@ -245,8 +245,8 @@ export const memoryMethods = {
         continue
       }
       const confidence = Math.min(1, Math.max(0, Number(item.confidence) || 0.5))
-      // 同主题覆写（原 DSHBOTS-360 挂起项，owner 已批准落地）：同 scope+topic 已有 active
-      // 记忆时原地更新（revision+1、事件留痕），不再叠近义新条；无同名才走新建。
+      // 同主题覆写：同 scope+topic 已有 active 记忆时原地更新（revision+1、事件留痕），
+      // 不叠近义新条；无同名才走新建。
       // 覆写不占新行，天然不受容量闸约束，与 memoryWriteFromBot 的同名覆盖语义一致。
       const topic = text(item.topic, 120)
       // 同名条目含 pending：active 才覆写；pending 视为本批重复，跳过去重（防止同批同主题双落）。

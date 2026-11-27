@@ -1,4 +1,4 @@
-// DSHBOTS-241：provider 额度墙优化守门。
+// provider 额度墙优化守门。
 // ①撞墙记录恢复时间（绝对时刻 / 相对时长 / 兜底保守等待），主备 provider 两套额度互不顶替；
 // ②耗尽期新任务派发不撞墙——走备用模型或排队等待，恢复后自动回主模型；
 // ③手动解除限 owner/总监，审计留痕；非总监成员解除被拒。
@@ -75,7 +75,7 @@ async function pollRun(store, service, sql, ...params) {
   return store.get(sql, ...params)
 }
 
-// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
+// 挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
 const heldItems = (store, botId) => {
   const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
   const out = []
@@ -222,7 +222,7 @@ test('耗尽期派发走备用模型（新语义）：派发直落 runs 行带�
     assert.ok(derived, '撞墙时已派生备用模型运行')
 
     const next = await service.createTask({ projectId: project.id, title: '耗尽期新任务', assigneeBotId: bot.id })
-    // 任务运行豁免 bot 串行域（单 bot 多任务并行）：bot 忙时派发不再挂起，直落 runs 行——
+    // 任务运行豁免 bot 串行域（单 bot 多任务并行）：bot 忙时派发直落 runs 行——
     // 备用模型路由快照写进运行行（model_provider/model_model），并留痕 quota_fallback。
     const nextRunId = service.enqueueTaskRun(next, 'manual', { type: 'user', id: 'u' })
     assert.ok(nextRunId, 'bot 忙时派发仍直接落 runs 行（不挂起）')
@@ -262,7 +262,7 @@ test('主备都耗尽：派发排队等待，调度器不放行；解除后自�
     const derived = await pollRun(store, service, "SELECT * FROM runs WHERE parent_run_id = 'wall-0' AND status IN ('queued', 'running')")
     assert.ok(derived, '撞墙时已派生备用运行')
     // 备用运行也撞墙（同 bot 第二条撞墙样本需先等派生运行占道再收尾）：
-    // 链内已用过备用（fallbackUsedInChain），不再派生，主备两套额度都标记耗尽。
+    // 链内已用过备用（fallbackUsedInChain），不派生第二层备用，主备两套额度都标记耗尽。
     await flushTicks(service)
     await service.finishRun({
       runId: derived.id, status: 'failed', output: '',
@@ -393,7 +393,7 @@ test('director 工具入口：经会话绑定鉴权，按名字解除', async ()
   }
 })
 
-// DSHBOTS-358：内部运行（review / handle / memory_review）同样接额度路由与额度闸门。
+// 内部运行（review / handle / memory_review）同样接额度路由与额度闸门。
 test('内部运行入队也接额度路由：review 带备用模型快照', async () => {
   const { root, store, service } = await setup()
   try {

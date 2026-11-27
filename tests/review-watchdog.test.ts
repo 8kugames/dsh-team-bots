@@ -1,8 +1,8 @@
-// DSHBOTS-194 验收滞留守门：in_review 卡滞留检测 + owner 系统提醒。
+// 验收滞留守门：in_review 卡滞留检测 + owner 系统提醒。
 // 覆盖：effectiveReviewIdleMinutes 优先级（env > settings > 默认 30）、0 关闭、
 // 阈值边界（29m 不报 / 31m 报）、评论与 run 活动重置锚点、非 in_review 不扫、
 // 单卡去重与离开 in_review 重置、系统消息文案与 task_id 关联、scheduler/UI 接线锁。
-// DSHBOTS-235 扩展：三档规则（A 自动 accept 双证据链 / B 自动 return / C 仅提醒）、
+// 三档规则（A 自动 accept 双证据链 / B 自动 return / C 仅提醒）、
 // H1 滞留排总监验收运行、H2 分级升级、H3 taskView 同源锚点、H4 settings 白名单、
 // H5 逐卡容错与索引、自动收口开关关闭行为不变。
 import { test } from 'node:test'
@@ -48,7 +48,7 @@ async function seedReviewTask(service, project, idleMinutes, { title = '滞留�
 }
 
 const seedComment = (service, task, minutesAgo, body = '核验结论：建议 accept') => {
-  // Phase 3：task_comments 住任务所属项目的聊天库。
+  // task_comments 住任务所属项目的聊天库。
   service.groupChatStore(task.project_id).run(
     'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     `cmt-${task.id}-${minutesAgo}-${Math.floor(Math.random() * 1e6)}`, task.id, 'bot', 'reviewer', body, minutesAgoIso(minutesAgo),
@@ -71,7 +71,7 @@ const seedRunEnded = (service, task, minutesAgo, botId) => {
 const silenceWatchdog = (service) => service.store.setSetting('review_idle_minutes', '0')
 const primeThreshold = (service, value) => service.store.setSetting('review_idle_minutes', value)
 
-// 系统告警消息按前缀取回（DSHBOTS-228 后前缀随 locale：缺省英文 / 中文【系统指令】）。
+// 系统告警消息按前缀取回（前缀随 locale：缺省英文 / 中文【系统指令】）。
 const systemAlerts = (store, projectId) =>
   store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND (body LIKE '[SYSTEM ALERT]%' OR body LIKE '【系统指令】%') ORDER BY rowid", projectId)
 
@@ -231,10 +231,10 @@ test('接线锁：scheduler tick 调 runReviewWatchdog；UI badge 读 runLimits.
   assert.ok(core.includes('reviewIdleMinutes'), 'runLimitsView 应透出生效阈值')
 })
 
-// ── DSHBOTS-235 三档规则引擎守门 ─────────────────────────────────────────────
+// ── 三档规则引擎守门 ─────────────────────────────────────────────
 
 // 播种交付方 task 运行：kind='task'，可带 output（交付报告）与终态。
-// Phase 3：runs 留顶库当调度索引（output 恒 NULL），胖载荷经 saveRunPayload 落运行归属聊天库。
+// runs 留顶库当调度索引（output 恒 NULL），胖载荷经 saveRunPayload 落运行归属聊天库。
 const seedTaskRun = (service, task, minutesAgo, botId, { status = 'succeeded', output = null, kind = 'task', trigger = 'task_started', error_code = null } = {}) => {
   const runId = `trun-${task.id}-${minutesAgo}-${Math.floor(Math.random() * 1e6)}`
   service.store.run(
@@ -519,7 +519,7 @@ test('H5 扫描过滤归档项目 + 索引迁移落库', async (t) => {
   assert.deepEqual(result.alerted, [], '归档项目不扫')
   assert.equal(systemAlerts(service.groupChatStore(project.id), project.id).length, 0)
   const runIndexes = store.all('PRAGMA index_list(runs)').map(row => row.name)
-  // Phase 3：task_comments 表住项目聊天库，索引断言随之取聊天库句柄。
+  // task_comments 表住项目聊天库，索引断言随之取聊天库句柄。
   const commentIndexes = service.groupChatStore(project.id).all('PRAGMA index_list(task_comments)').map(row => row.name)
   assert.ok(runIndexes.includes('runs_task_idx'), 'runs.task_id 索引存在')
   assert.ok(commentIndexes.includes('task_comments_task_idx'), 'task_comments.task_id 索引存在')

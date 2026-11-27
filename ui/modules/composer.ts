@@ -334,7 +334,7 @@ function thumbnailFallback(name, iconHtml, doc = document) {
 
 // composer-file-input:start —— body 级 file input 单例（tests/chat-image-ui.test.js 抽取此块断言）
 // 选图的 <input> 不能进 renderShell：2.8s 轮询全量重建会换掉节点，用户在系统选框选完文件后
-// change 落在已脱离 document 的旧节点上，document 级委托收不到（DSHBOTS-64 根因）。
+// change 落在已脱离 document 的旧节点上，document 级委托收不到。
 // 挂在 body 上只建一次，任何重渲染都动不了它，change 始终能冒泡到委托层。
 function ensureComposerImageInput(doc = document) {
   let el = doc.getElementById('composer-image-input') as HTMLInputElement | null
@@ -515,7 +515,7 @@ function closeImageViewer() {
 }
 
 // 正文内嵌图（markdown 渲染的 <img>，file 路由/blob URL）点击放大：直接复用该 img 的现有 src，
-// 不再拉原图数据；关闭链路复用 close-image-viewer——它只 revoke 查看器自建的 blob: URL，
+// 不拉原图数据；关闭链路复用 close-image-viewer——它只 revoke 查看器自建的 blob: URL，
 // 对 file 路由 URL 是 no-op，正文里的原 img 不受影响。
 function openInlineImage(img) {
   const src = img.currentSrc || img.getAttribute('src') || ''
@@ -580,7 +580,7 @@ function syncComposerBox(input) {
 }
 
 // 双发防护：⌘Enter 按键重复、双击发送按钮、慢网下重复点击都会在出站未完成时
-// 再次进入 sendMessage，而旧实现草稿要等 api 成功才清空，同一草稿会被发出两遍。模块级在途
+// 再次进入 sendMessage，草稿要等 api 成功才清空，同一草稿会被发出两遍。模块级在途
 // 标志收口全部入口（发送按钮 / ⌘Enter / 自动补全回车）：在途时二次触发直接返回，finally 复位。
 let sendInFlight = false
 

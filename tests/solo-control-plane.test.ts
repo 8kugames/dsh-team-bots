@@ -1,7 +1,7 @@
-// DSHBOTS-294 守门②：isSolo 按「无 project 上下文的控制面会话」判定（kind='bot' 且无
+// 守门：isSolo 按「无 project 上下文的控制面会话」判定（kind='bot' 且无
 // project、该 bot 无活跃项目关系）——项目外 solo bot 的提问/审批由工作台单聊卡片承接
-// （D-218 语义不回退）；有项目语境（含绑定无 project 但仍有活跃项目关系的成员/总监）
-// 照旧走项目流或透传，owner 闸门不回退。历史 kind='solo' alias 行保持命中。
+// （承接语义不回退）；有项目语境（含绑定无 project 但仍有活跃项目关系的成员/总监）
+// 仍走项目流或透传，owner 闸门不回退。存量 kind='solo' alias 行保持命中。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'

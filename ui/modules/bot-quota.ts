@@ -1,4 +1,4 @@
-// DSHBOTS-241：bot 额度墙状态的展示块。
+// bot 额度墙状态的展示块。
 // 主 provider 耗尽期内派发走备用模型或排队等待；这里给出恢复时间与「解除额度耗尽」入口
 // （立即恢复派发，服务端限 owner/总监，见 src/services/bot-quota.ts）。
 import { attr, esc, formatTime } from './util.js'

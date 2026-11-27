@@ -122,7 +122,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
     const html = await readFile(join(UI, 'index.html'), 'utf8')
     // {{language}}：服务端解析 DSH 宿主语言设定注入 <html data-dsh-language>，
     // 客户端据此选 i18n 字典包（'auto' = 宿主未显式设定，交给浏览器语言）。
-    // DSHBOTS-162：页面保存值 zh/en 优先于宿主解析，'auto' 才回落宿主链。
+    // 页面保存值 zh/en 优先于宿主解析，'auto' 才回落宿主链。
     const language = await resolveUiLanguage({
       loader: ctx.get('loader'),
       dshHome: service?.config?.dshHome,
@@ -144,7 +144,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   const i18nDict = (name) => async () => response(
     await readFile(join(UI, 'i18n', name)), 'text/javascript; charset=utf-8',
   )
-  // styles 汇总直出：路由、MIME、缓存语义与拆分前完全一致，
+  // styles 汇总直出：路由、MIME、缓存语义不变，
   // 仅读取口径改为 readUiStyles 按 UI_STYLE_PARTS 拼接。
   const styles = async () => response(await readUiStyles(), 'text/css; charset=utf-8')
   const font = (weight) => async () => response(
@@ -197,7 +197,7 @@ export function installHttp(ctx, service, logger: DshLogger = console) {
   route('/api/dsh-team/modules/task-menu.js', ['GET'], moduleScript('task-menu.js'))
   route('/api/dsh-team/i18n/zh.js', ['GET'], i18nDict('zh.js'))
   route('/api/dsh-team/i18n/en.js', ['GET'], i18nDict('en.js'))
-  // DSHBOTS-233：词表按域拆分后，聚合入口（zh.js/en.js）相对导入域切片，
+  // 词表按域拆分后，聚合入口（zh.js/en.js）相对导入域切片，
   // 域切片同为浏览器模块图一环，沿用同一精确注册口径。
   route('/api/dsh-team/i18n/zh/common.js', ['GET'], i18nDict('zh/common.js'))
   route('/api/dsh-team/i18n/en/common.js', ['GET'], i18nDict('en/common.js'))

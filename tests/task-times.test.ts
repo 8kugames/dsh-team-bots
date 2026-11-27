@@ -8,7 +8,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { ensureTaskTimesSchema } from '../src/services/tasks.js'
 
-// DSHBOTS-34 后端：tasks.canceled_at 迁移与 done/canceled 终态时间戳对称维护。
+// tasks.canceled_at 迁移与 done/canceled 终态时间戳对称维护的守门测试。
 // 覆盖：状态流转写列/清列、迁移回填只补空行、时间筛选的数据基础（taskView 带列）。
 
 class StubRuntime {

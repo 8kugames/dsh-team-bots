@@ -119,7 +119,7 @@ export async function botWorkspaceDir(workspaceRoot, soloDir) {
   return targetReal
 }
 
-// DSHBOTS-282 展示层路径：home 前缀的绝对路径转 ~/ 形式（隐私友好+展示简洁）。
+// 展示层路径：home 前缀的绝对路径转 ~/ 形式（隐私友好+展示简洁）。
 // 只用于提示词/文本输出层；一切真实路径解析/读写消费原始绝对路径，不经本函数。
 // 非 home 前缀路径原样返回；home 参数仅供测试注入，生产调用不传。
 export function displayPath(path, home = homedir()) {
@@ -142,7 +142,7 @@ export function assertInside(root, path) {
   return target
 }
 
-// DSHBOTS-225 临时文件纪律：bot 名 → 临时目录名的安全化。
+// 临时文件纪律：bot 名 → 临时目录名的安全化。
 // 路径分隔符、Windows 保留字符与控制字符替换为 '-'，空白归一为 '-'，去前导点
 // （防隐藏目录）与首尾连字符，截断到 64；净化后为空回退 'bot'。
 export function sanitizeTmpBotDirName(name, fallback = 'bot') {
@@ -155,7 +155,7 @@ export function sanitizeTmpBotDirName(name, fallback = 'bot') {
   return safe || fallback
 }
 
-// DSHBOTS-225 临时文件纪律：项目工作区统一临时区 .tmp/bots/。
+// 临时文件纪律：项目工作区统一临时区 .tmp/bots/。
 // .tmp/.gitignore 写 "*"（整个 .tmp 不入 git）——ignore 文件自包含在项目工作区内，
 // 不碰仓库根 .gitignore；只在缺失时写入（wx），不覆盖用户自定义内容。
 // 每个成员 bot 一个 .tmp/bots/{安全化 bot 名}/ 子目录。调用方负责 try/catch 降级。

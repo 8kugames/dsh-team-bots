@@ -1,7 +1,7 @@
 // src/services/github-source.js —— GitHub 只读触发源。
-// 吸收原型 sources 层的读入面（Trigger 翻译 + scope + 留痕），按报告 B4 分步结论只做
-// 一个来源且不整套搬 Source 抽象。observe 口径（报告 B3 + B4）：GitHub issue 只产生
-// 「候选通知 + 留痕」，绝不直接建卡/派单——权威链仍是 director 派单，人评估后才立卡。
+// 读入面只做 Trigger 翻译 + scope + 留痕，不整套搬 Source 抽象。
+// observe 口径：GitHub issue 只产生「候选通知 + 留痕」，绝不直接建卡/派单——权威链仍是
+// director 派单，人评估后才立卡。
 //
 // 配置（env，启动 dsh 前导出；缺省全关）：
 //   DSH_TEAM_GITHUB_WATCH       JSON 数组 [{"projectKey":"ORD","repo":"owner/name"}]
@@ -133,7 +133,7 @@ export async function pollGithubSources(service) {
 }
 
 export const githubSourceMethods = {
-  // 外部触发流水（B4-②）：近 N 条 GitHub 触发留痕，回看「为什么触发/没触发」。
+  // 外部触发流水：近 N 条 GitHub 触发留痕，回看「为什么触发/没触发」。
   externalTriggersView(limit = 50) {
     const rows = this.store.all(
       `SELECT source, external_id, project_key, disposition, route, reason, preview, created_at

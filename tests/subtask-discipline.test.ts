@@ -1,4 +1,4 @@
-// DSHBOTS-132：子任务拆解产品化——team_assign_task 暴露 parent_task_id + 任务提示词注入拆解纪律。
+// 子任务拆解产品化——team_assign_task 暴露 parent_task_id + 任务提示词注入拆解纪律。
 // 覆盖：工具 schema 契约（additionalProperties=false 下不声明即传不进）、owner 派单透传落库、
 // 任务提示词注入纪律段（与时效/紧急段互不干扰）、非任务运行零注入、
 // parent_task_id 空串/不存在/跨项目 → 400（沿用 task-relations 校验，锁不回归）。
@@ -90,7 +90,7 @@ test('任务提示词注入纪律段：拆解义务 + 产品级子卡要求 + KE
     const projectRow = ctx.store.get('SELECT * FROM projects WHERE id = ?', project.id)
     const actor = ctx.service.actor()
     const plain = await ctx.service.createTask({ projectId: project.id, title: '普通任务', writeScopes: ['src/a.js'] }, actor)
-    // DSHBOTS-198 后建档即补缺省预算；「无时效卡」分支只剩存量老卡，直改库置 NULL 模拟。
+    // 建档即补缺省预算；「无时效卡」分支只剩存量老卡，直改库置 NULL 模拟。
     ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', plain.id)
     const urgentBudgeted = await ctx.service.createTask(
       { projectId: project.id, title: '紧急限时任务', priority: 'urgent', time_budget_minutes: 30, writeScopes: ['src/b.js'] },
@@ -101,7 +101,7 @@ test('任务提示词注入纪律段：拆解义务 + 产品级子卡要求 + KE
 
     const plainPrompt = promptOf(plain)
     assert.match(plainPrompt, /# Subtask discipline/, '所有任务卡都应注入纪律段标题')
-    // DSHBOTS-152 段序守门：纪律段属于全局静态段，必须先于每卡变化的「# Assigned task」字段块，
+    // 段序守门：纪律段属于全局静态段，必须先于每卡变化的「# Assigned task」字段块，
     // 否则跨卡派发在描述处分叉、静态段吃不到前缀缓存（详见 tests/prompt-prefix-order.test.js）。
     assert.ok(
       plainPrompt.indexOf('# Subtask discipline') < plainPrompt.indexOf('# Assigned task'),
@@ -229,7 +229,7 @@ test('工具 schema 契约：parent_task_id 描述含提速拆分语义（D-212 
   const tools = []
   installTeamTools({ tools: { register: (tool) => tools.push(tool) } }, {})
   const field = tools.find(item => item.name === 'team_assign_task').parameters.properties.parent_task_id
-  // 此前描述只有「做不完再立卡」的兜底语义，总监侧得不到「可以主动拆分提速」的信号。
+  // 描述须含提速拆分语义：总监侧要看到「可以主动拆分提速」的信号。
   assert.match(field.description, /split a large task into parallel subtask cards for speed/, '应注明提速拆分用法')
   assert.match(field.description, /disjoint write_scopes/, '应注明子卡写范围不相交')
   assert.match(field.description, /run concurrently/, '应注明并行收益')

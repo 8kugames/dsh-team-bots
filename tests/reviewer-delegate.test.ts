@@ -1,10 +1,10 @@
-// tests/reviewer-delegate.test.ts —— DSHBOTS-365：reviewer 产品默认角色。
+// reviewer 产品默认角色的守门测试。
 // ① 建群默认带 reviewer：不显式指定成员的新群自动带入种子 reviewer；显式 memberIds
 //    是用户裁剪过的名单，不擅自加人。
 // ② 核验委派承接人：项目内有可用 reviewer 时 spawnReviewDelegate 落到 reviewer 名下；
 //    移除 reviewer 后回落总监兜底（老链路）。
-// ③ 验收机械闸认领线扩到「本任务的委派核验运行」：reviewer 跑的核验账目放行总监
-//    team_review_task 裁决，不再要求「兜底验收」注记。
+// ③ 验收机械闸认领线含「本任务的委派核验运行」：reviewer 跑的核验账目放行总监
+//    team_review_task 裁决，不要求「兜底验收」注记。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'

@@ -1,4 +1,4 @@
-// tests/attention.test.js —— DSHBOTS-43 结构化提问（attention）后端通道。
+// 结构化提问（attention）后端通道的守门测试。
 // 覆盖：带 attention 的运行能被读出、回答后清空并写事件、无 attention 为 null、
 // 超长问题截断不报错、非 owner 调用被拒。
 

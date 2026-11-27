@@ -1,4 +1,4 @@
-// DSHBOTS-145：会话结转（单 bot 聊天会话超阈值后结转新会话并注入 bot 自写摘要）。
+// 会话结转守门：单 bot 聊天会话超阈值后结转新会话并注入 bot 自写摘要。
 // 覆盖：阈值未触发/触发、摘要未就绪继续复用旧会话（含幂等补排）、摘要就绪删旧绑定走新建、
 // 新会话首轮提示词注入摘要一次且清零后不重复注入、0=关闭、task 亲和不结转、dm 落控制面单绑定、
 // 摘要运行路由回旧会话、finishRun 成功落库/失败留痕、单聊（无项目）结转、
@@ -78,7 +78,7 @@ async function primeProject(service, store) {
   return { director, dev, project }
 }
 
-// 种子绑定默认即 bot 的 kind='bot' 控制面绑定（DSHBOTS-289 收敛后唯一活跃车道）。
+// 种子绑定默认即 bot 的 kind='bot' 控制面绑定（唯一活跃车道）。
 const bindSession = (store, { botId, projectId, sessionId, kind = 'bot', taskId = null }) => {
   store.run(
     'INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -100,7 +100,7 @@ const seedRuns = (store, { projectId, botId, sessionId, count, kind = 'chat', ta
 
 const rolloverRuns = (store) => store.all("SELECT * FROM runs WHERE kind = 'rollover_summary'")
 
-// 播种会话当前上下文规模（P2）：input+cache_read 之和即 sessionContextTokens 的取值。
+// 播种会话当前上下文规模：input+cache_read 之和即 sessionContextTokens 的取值。
 const seedUsage = (store, { sessionId, ctx: tokens, occurredAt }) => {
   const run = store.get('SELECT id FROM runs WHERE session_id = ? ORDER BY rowid DESC LIMIT 1', sessionId)
   if (!run) throw new Error('seedUsage 需要会话上已有运行行')
@@ -167,8 +167,8 @@ test('运行中触发摘要补排（生产断点回归）：bot 自己的运行�
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
     // 生产形态：当前运行已被领取（running、session_id 未回填），它的 (bot, project) 占着
-    // one_active_run_per_bot 串行域。修复前摘要 INSERT OR IGNORE 被静默吞掉（live 库实测：
-    // 索引激活 DSHBOTS-288 之后摘要运行 0 条入队，结转链路整体死亡）。
+    // one_active_run_per_bot 串行域。否则摘要 INSERT OR IGNORE 被静默吞掉（索引激活后实测摘要运行
+    // 0 条入队，结转链路整体死亡）。
     ctx.store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, status, attempt, idempotency_key, queued_at)
        VALUES ('run_current', ?, ?, 'chat', 'read', 'mention', 'running', 1, 'chat:cur:1', ?)`,
@@ -192,8 +192,8 @@ test('终态摘要运行不占死幂等键：取消/失败后再次触发必须�
     const { dev, project } = await primeProject(ctx.service, ctx.store)
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-old' })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-old', count: TURNS })
-    // 生产形态一（2026-11-13 director）：唯一一条摘要运行排队后被串行化一次性迁移取消，
-    // 固定会话级键被终态行占死，补排被 INSERT OR IGNORE 静默吞掉，结转从此卡死。
+    // 生产形态：唯一一条摘要运行进终态（被取消）后，固定会话级键被终态行占死，
+    // 补排被 INSERT OR IGNORE 静默吞掉，结转卡死。
     ctx.store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, session_id, queued_at, ended_at, error_code)
        VALUES ('run_summary_canceled', ?, ?, 'rollover_summary', 'read', 'rollover_summary', 'sess-old', 'canceled', 1, 'rollover_summary:sess-old', 'sess-old', ?, ?, 'BOT_SERIALIZATION')`,
@@ -288,7 +288,7 @@ test('摘要就绪后：旧绑定降级为授权别名并新建会话，旧 sess
     const sessionId = await runtime.ensureSession(dev, project, { run: { kind: 'chat' } })
 
     assert.equal(sessionId, 'sess-new-1', '摘要就绪后应开新会话')
-    // DSHBOTS-256：旧绑定不再删除，降级为 alias=1 授权别名（旧 session 仍解析到同 bot/项目）。
+    // 旧绑定不删除，降级为 alias=1 授权别名（旧 session 仍解析到同 bot/项目）。
     assert.equal(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', 'sess-old')?.alias, 1, '旧绑定应降级为授权别名')
     assert.equal(ctx.store.get('SELECT * FROM session_bindings WHERE session_id = ?', 'sess-new-1')?.alias, 0, '新绑定应是活跃绑定')
     assert.deepEqual(host.created, ['sess-new-1'], '只新建一次会话；旧 session 只降级绑定不删宿主会话')
@@ -510,7 +510,7 @@ test('单聊结转：无项目上下文也能排摘要运行、落库并注入',
   const ctx = await setup({ turns: 2 })
   try {
     const { dev } = await primeProject(ctx.service, ctx.store)
-    // 单聊会话即该 bot 的 kind='bot' 控制面绑定（project_id 空），不再有独立 solo 车道行。
+    // 单聊会话即该 bot 的 kind='bot' 控制面绑定（project_id 空），没有独立 solo 车道行。
     bindSession(ctx.store, { botId: dev.id, projectId: null, sessionId: 'sess-solo' })
     seedRuns(ctx.store, { projectId: null, botId: dev.id, sessionId: 'sess-solo', count: 2, kind: 'solo_chat' })
 
@@ -557,7 +557,7 @@ test('task 与 dm 不再走独立车道：task 亲和回原会话，dm 落控制
     const task = await ctx.service.createTask({ projectId: project.id, title: '任务会话', assigneeBotId: dev.id }, ctx.service.actor())
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-task', kind: 'task', taskId: task.id })
     seedRuns(ctx.store, { projectId: project.id, botId: dev.id, sessionId: 'sess-task', count: 50, kind: 'task', taskId: task.id })
-    // dm 半边：kind='dm' 车道已删，dm 流量落 bot 的 kind='bot' 控制面绑定；
+    // dm 半边：没有 kind='dm' 车道，dm 流量落 bot 的 kind='bot' 控制面绑定；
     // 该绑定无历史轮次，不触发结转。
     bindSession(ctx.store, { botId: dev.id, projectId: project.id, sessionId: 'sess-dm' })
 

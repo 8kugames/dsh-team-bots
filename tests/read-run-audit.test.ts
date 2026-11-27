@@ -1,4 +1,4 @@
-// tests/read-run-audit.test.js —— DSHBOTS-94：只读运行工作区审计的并发归因
+// 只读运行工作区审计并发归因的守门测试。
 // 覆盖 attributeWorkspaceChange 纯函数四个分支，以及并发写运行在场时
 // auditReadRunWrites 的静默与范围不匹配告警两条集成路径。
 import { test } from 'node:test'
@@ -169,7 +169,7 @@ test('集成：并发写运行范围对不上号时仍告警，嫌疑写运行�
     const project = await service.createProject({ name: 'Audit', key: 'AUD', ownerBotId: director.id, memberIds: [dev.id] })
     const dir = join(workspace, project.slug)
     execFileSync('git', ['init', '--quiet'], { cwd: dir, stdio: 'ignore' })
-    // 写范围声明到二级路径（DSHBOTS-168：一级目录声明派单即驳回，锚点从 ['src'] 迁移）
+    // 写范围声明到二级路径（一级目录声明派单即驳回）
     await service.createTask({
       projectId: project.id, title: 'Scoped write', assigneeBotId: dev.id, writeScopes: ['src/zone'], autoStart: true,
     })

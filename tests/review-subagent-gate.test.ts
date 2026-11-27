@@ -1,9 +1,9 @@
-// tests/review-subagent-gate.test.ts —— DSHBOTS-318/353 验收机械闸。
-// 353 起按「评审周期」查账：周期起点 T = 最近一次交付（task_events.run_succeeded）
+// 验收机械闸守门测试。
+// 按「评审周期」查账：周期起点 T = 最近一次交付（task_events.run_succeeded）
 // 或看板流转（task_events.type='status' 且 to='in_review'）的 MAX(created_at)；
 // 周期内存在 subagent_spawned 账目，且账目运行归属本任务的 owner 运行
 // （task_id+bot_id）或调用方会话 → 放行。两跳正规流程（review_delegate 派子代理 →
-// 新运行只裁决）的账目挂在上一跳已结束运行上，旧「当运行查账」必漏（353 缺陷）。
+// 新运行只裁决）的账目挂在上一跳已结束运行上，当运行查账必漏。
 // 守门方向 + 旁路锚：
 // ① 已结束 review 运行（本任务/owner）带账 + 裁决运行 running 无账 → 放行（核心回归）；
 // ② 同会话上一条已结束 chat 运行（task_id NULL）带账且在看板 in_review 之后 → 放行；
@@ -82,7 +82,7 @@ const T0 = '2026-11-13T03:00:00.000Z'
 const at = (offsetMs) => new Date(new Date(T0).getTime() + offsetMs).toISOString()
 
 // 交付锚点（交付路径）：直插 run_succeeded 事件 + 直改 in_review，复刻 run-finish
-// 同事务写入的事件形态（data: {runId, identifier}）。Phase 3：task_events 住项目聊天库
+// 同事务写入的事件形态（data: {runId, identifier}）。task_events 住项目聊天库
 // （显式 created_at 锚点，不走 addTaskEvent 的当下时间戳）。
 function deliverAt(t, task, when) {
   t.service.groupChatStore(t.project.id).run(
@@ -119,7 +119,7 @@ function seedRun(t: {
     sessionId, now, now, status === 'succeeded' ? now : null,
   )
   if (ledgerAt) {
-    // Phase 3：run_events 住运行归属聊天库（本播种恒为项目运行 → 项目聊天库）。
+    // run_events 住运行归属聊天库（本播种恒为项目运行 → 项目聊天库）。
     t.service.groupChatStore(t.project.id).run(
       "INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, 'subagent_spawned', ?, ?)",
       `evt-${id}`, id, 'GATE 核验子代理 spawned', ledgerAt,

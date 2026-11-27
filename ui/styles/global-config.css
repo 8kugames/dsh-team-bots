@@ -1,4 +1,4 @@
-/* DSHBOTS-184 全局配置页 + DSHBOTS-197 迁移落点页（global-pages.js 的通道/密钥/关于）共用：
+/* 全局配置页与 global-pages.js 的通道/密钥/关于页共用：
    信息架构分组 + 明暗双主题视觉。
    约定：颜色一律走 base.css 的 token（--surface / --line / --ink / --accent…），
    暗色与 Catppuccin 调色板都由 token 覆盖，本文件不写死任何色值。 */

@@ -94,7 +94,7 @@ function formatAmount(value) {
 }
 
 // 用量页成本口径：预算币种用符号式（¥42.64），其余币种进副行，
-// 同页不再混排「CNY 42.64」与「¥0.11」两种写法；小数位规则与全站 formatCost 一致。
+// 同页不混排「CNY 42.64」与「¥0.11」两种写法；小数位规则与全站 formatCost 一致。
 function usageCurrency(usage) {
   return String(usage?.currency ?? 'CNY').toUpperCase() || 'CNY'
 }
@@ -116,7 +116,7 @@ function usageCostParts(totals, currency) {
   }
 }
 
-// 成本文本：符号 + 金额；多币种时主币种在前，其余币种跟在后面（不再用 'CNY x / USD y'）。
+// 成本文本：符号 + 金额；多币种时主币种在前，其余币种跟在后面。
 function usageCostText(totals, currency) {
   const parts = usageCostParts(totals, currency)
   if (!parts.code) return t('usage.costUnconfigured')
@@ -207,7 +207,7 @@ function usageBotRow(item, max, drillable, currency) {
   return `<button type="button" class="usage-row usage-row-action${active ? ' active' : ''}" data-action="usage-drill" data-bot-id="${attr(botId)}" aria-pressed="${active}" title="${t('usage.drillTitle')}">${cells}</button>`
 }
 
-// 分项目行：行首只显示项目名/项目 key，不再回落到 prj_ raw id（D-67 P1-6），原始 id 只进 title。
+// 分项目行：行首只显示项目名/项目 key，不回落到 prj_ raw id，原始 id 只进 title。
 function usageProjectRow(item, max, currency) {
   const label = String(item.name ?? item.key ?? '').trim() || t('未命名项目')
   const hint = item.projectId ? ` · ${item.projectId}` : ''
@@ -259,7 +259,7 @@ function usageModelPanel(byModel, title, headerExtra = '', currency = 'CNY') {
   </div>`
 }
 
-// 四张 KPI 卡：同字重同字号（成本卡不再降级成小字），标签写清口径。
+// 四张 KPI 卡：同字重同字号（成本卡不降级成小字），标签写清口径。
 function usageMetricCards(totals, scopeLabel, usage) {
   const currency = usageCurrency(usage)
   const cost = usageCostParts(totals, currency)

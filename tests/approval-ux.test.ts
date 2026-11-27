@@ -1,4 +1,4 @@
-// DSHBOTS-102：审批交互优化——跨项目待审可见 + 决策即时回显 + 超时倒计时。
+// 审批交互优化：跨项目待审可见 + 决策即时回显 + 超时倒计时。
 // 后端用例真实建库验证「只计 pending、跨项目聚合、state 顶层与项目解耦」；
 // 前端用例沿用读源断言先例（tests/helpers/ui-sources.js）+ 标记块执行（tests/desktop-notify.test.js）。
 import { test } from 'node:test'

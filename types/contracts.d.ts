@@ -1,6 +1,5 @@
 // 全项目共享的类型契约。此文件只含类型，不产生运行时代码，也不参与 build.mjs。
-// 同一概念原先散落在 errors.js / config.js / api.js / tools.js / state.js / DDL 字符串里，
-// 这里统一收口，源码通过全局名字直接引用，无需新增 import。
+// 源码通过全局名字直接引用这些类型，无需新增 import。
 
 type SqlValue = string | number | bigint | Uint8Array | null
 type DbRow = Record<string, SqlValue>
@@ -170,7 +169,7 @@ interface TeamConfig {
   taskTimeBudgetMinutes: number
   sessionRolloverTurns: number
   sessionCompactTurns: number
-  // 上下文体积判据（单轮上下文治理 P2）：压缩下限/结转上限 token，0 = 关闭体积判据。
+  // 上下文体积判据：压缩下限/结转上限 token，0 = 关闭体积判据。
   sessionCompactCtxTokens: number
   sessionRolloverCtxTokens: number
   // 会话子代理消费判据：结转累计消费上限（个数），0 = 关闭该判据。

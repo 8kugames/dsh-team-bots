@@ -1,9 +1,9 @@
-// tests/feishu-prompt-context.test.ts —— DSHBOTS-330/331 守门：通道直达语境提示块按 trigger_type 分流。
+// 通道直达语境提示块按 trigger_type 分流的守门测试。
 // ① 飞书触发运行注入飞书版语境块（含多轮连续性/建卡派单/ask_user_question 指引，
 //    且不含微信专属的「禁 * #」条款——飞书出站走 messages-reply --markdown，原生 Markdown）；
 // ② 微信块内容逐字零改动；
 // ③ 普通 UI 触发（trigger_type='mention'）两块都不注入；
-// ④ DSHBOTS-331：生产入站走 solo 分支（kind='solo_chat'），语境块要注入到 solo：
+// ④ 生产入站走 solo 分支（kind='solo_chat'），语境块要注入到 solo：
 //    飞书 solo 注入（含建卡指引与无 KEY 追问锚点）/ 微信 solo 注入 / mention solo 不注入
 //    且「无项目禁 team_assign_task」禁令仍在。
 import { test } from 'node:test'
@@ -114,7 +114,7 @@ test('普通 UI 触发（mention）两块都不注入', async () => {
   }
 })
 
-// DSHBOTS-331：生产入站（微信/飞书直达落 director 专属工作区 solo 会话）走 solo 分支，
+// 生产入站（微信/飞书直达落 director 专属工作区 solo 会话）走 solo 分支，
 // 语境块必须落在这里——群聊分支那份对真实通道直达是死代码。
 test('飞书 solo 运行注入飞书版语境块：含建卡指引与无 KEY 追问锚点', async () => {
   const { root, store, runtime, director } = await setup()

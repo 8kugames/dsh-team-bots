@@ -1,4 +1,4 @@
-// DSHBOTS-109 大 PNG 入库/上传前转 JPEG：阈值可配、失败回退原图。
+// 大 PNG 入库/上传前转 JPEG：阈值可配、失败回退原图。
 // 转码成功路径用注入的假 sharp 覆盖（仓库依赖树里没有 sharp，不为此引入）；
 // 回退路径（无 sharp / 转码失败）走真实链路 sendMessage / steer 验证不阻塞发送。
 import { test } from 'node:test'

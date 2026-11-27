@@ -55,7 +55,7 @@ export async function handleBoardAction(action, target) {
       const navProjectId = target.dataset.projectId
       state.view = target.dataset.view || 'chat'
       // 用量页三态：侧栏入口=全局视图（与上下文零耦合）；群聊 tab=本群；单聊 tab=本 bot。
-      // 口径由入口决定，不再按当前上下文收敛。
+      // 口径由入口决定，不按当前上下文收敛。
       if (state.view === 'usage') {
         state.usageMode = target.dataset.usageMode === 'solo' || target.dataset.usageMode === 'domain'
           ? target.dataset.usageMode
@@ -150,12 +150,12 @@ export async function handleBoardAction(action, target) {
     // 由既有 syncLanguage 热切换（换字典 + toast.languageSwitched + render），无需重启。
     case 'save-ui-language': {
       const value = (document.getElementById('settings-ui-language') as HTMLInputElement | null)?.value ?? 'auto'
-      // B2/DSHBOTS-325 契约：patch 与 revision 分离；revision 仅在有值时携带。
+      // 更新契约：patch 与 revision 分离；revision 仅在有值时携带。
       const languagePayload: Record<string, unknown> = { patch: { ui_language: value } }
       if (Number.isFinite(Number(state.data?.settingsRevision))) languagePayload.revision = state.data?.settingsRevision
       await api('update_settings', languagePayload)
       await loadState(state.projectId)
-      // poll 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发（DSHBOTS-162 R1）。
+      // poll 只取数不切语言（ui/app.js:620-642），热切换必须由保存动作自己触发。
       syncLanguage()
       toast(t('toast.uiLanguageSaved'), 'success')
       break

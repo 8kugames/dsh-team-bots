@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 
-// 原位补丁：轮询不再整页拆节点，于是下拉弹层不被关、输入框不被重建、
+// 原位补丁：轮询不整页拆节点，于是下拉弹层不被关、输入框不被重建、
 // 看板动画不重启。这里守两条纯逻辑：身份键与子节点合并计划、属性/值同步策略。
 const source = readUiSource()
 
@@ -92,8 +92,8 @@ test('合并计划：live 侧多出来的重复键节点交回删除', () => {
 })
 
 test('合并计划：同键多节点按序一对一配对，轮询不再克隆置换（DSHBOTS-320）', () => {
-  // 记忆卡 approve/reject/edit/delete 四个按钮共用 data-memory-id：修复前 morphKey
-  // 只认领第一个，其余按钮每拍都被「删除旧 + 克隆插入新」，焦点与动画相位全丢。
+  // 记忆卡 approve/reject/edit/delete 四个按钮共用 data-memory-id：若 morphKey
+  // 只认领第一个，其余按钮每拍都会被「删除旧 + 克隆插入新」，焦点与动画相位全丢。
   const actions = ['approve-memory', 'reject-memory', 'edit-memory', 'delete-memory']
   const buttons = () => actions.map(action => elem('BUTTON', { attrs: { 'data-action': action, 'data-memory-id': 'M-27' } }))
   const live = buttons()

@@ -94,7 +94,7 @@ test('file input：body 级单例，不进 renderShell，change 委托读文件'
   assert.match(source, /addPendingImages\(files\)/)
 })
 
-// —— DSHBOTS-64：文件选择跨渲染周期不丢 ——
+// —— 文件选择跨渲染周期不丢 ——
 // 根因：input 渲染进 renderShell，2.8s 轮询 app.innerHTML 全量重建换掉节点，
 // 用户选完文件后 change 落在已脱离 document 的旧节点上，document 级委托收不到 → 静默丢失。
 // 修法：body 级单例。以下对真实 ensureComposerImageInput 做行为断言（不止源码文本）。
@@ -144,7 +144,7 @@ test('文件选择跨渲染周期不丢：单例挂 body 只建一次，任意�
   assert.equal(doc.bodyChildren.length, 1, '不重复挂载')
 
   // 对照旧结构（渲染进 shell 的 input）：一轮重建后从 document 查不到，
-  // change 落在这种节点上到不了 document 级委托 —— 这正是 DSHBOTS-64 的断点。
+  // change 落在这种节点上到不了 document 级委托 —— 这正是旧结构的断点。
   const shellInput = doc.createElement('input')
   shellInput.id = 'composer-image-input'
   doc.mountInApp(shellInput)
@@ -209,8 +209,8 @@ test('样式：附件按钮 / 缩略图条 / 附图块 / 查看器全部走主�
   assert.match(css, /\.image-viewer\[hidden\] \{/, '查看器隐藏态需显式声明')
 })
 
-// —— DSHBOTS-75：生产 CSP 曾用 img-src 'self' data: 拦下 blob: 缩略图 → 破图 + alt 文件名 ——
-// 修复：img-src 补 blob:。此锁防止 CSP 再被收紧回缺 blob: 的形态。
+// —— CSP 锁：img-src 缺 blob: 会拦下待发缩略图 → 破图 + alt 文件名 ——
+// 此锁防止 CSP 被收紧回缺 blob: 的形态。
 test('CSP 回归锁：img-src 必须放行 blob:（待发缩略图预览依赖）', () => {
   const http = readFileSync(fileURLToPath(new URL('../src/http.js', import.meta.url)), 'utf8')
   const imgSrc = /img-src ([^;]+);/.exec(http)?.[1]

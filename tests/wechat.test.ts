@@ -41,8 +41,8 @@ const SERVICE_STUB = (): any => ({
     this.seen = { identifier, decision, comment }
     return `已${decision === 'accept' ? '验收' : '驳回'} ${identifier}`
   },
-  // DSHBOTS-208/258 直达对话桩：记录调用。key 非空（/tr 显式转发）按命中/未命中模拟
-  // 项目解析；自由文本按新口径返回 director solo 形态。
+  // 直达对话桩：记录调用。key 非空（/tr 显式转发）按命中/未命中模拟
+  // 项目解析；自由文本返回 director solo 形态。
   chatted: null,
   async wechatChat(key, body, fallbackKey) {
     this.chatted = { key, body, fallbackKey }
@@ -86,7 +86,7 @@ test('wechat store 持久化凭证、游标、管理员与发件箱', async () =
 test('wechat commands /? /states /detail /reject 路由（DSHBOTS-249）', async () => {
   assert.ok((await handleCommand({}, '/?')).includes('可用指令'))
   assert.ok((await handleCommand({}, '')).includes('可用指令'))
-  // 旧触发式指令已收编进 / 前缀：中文词不再拦截，走直达对话（无可用项目时引导选项目）。
+  // 中文词不拦截，走直达对话（无可用项目时引导选项目）。
   const free = { stateView: () => ({ projects: [] }), async wechatChat() { return { error: 'no_target' } } }
   assert.ok((await handleCommand(free, 'foo')).includes('还没有选定直达的项目'))
 
@@ -237,8 +237,7 @@ test('wechat channel 只有 admin_peer_id 能执行管理指令，「绑定」�
     assert.equal(sent.length, before, '非管理员消息不应触发任何回复')
     assert.equal(store.getState().admin_peer_id, 'p-admin')
 
-    // 「绑定」口令已移除：管理员发「绑定」按自由文本走 director 专属工作区，
-    // 不再回写 direct_project_key 绑定。
+    // 管理员发「绑定」按自由文本走 director 专属工作区，不回写 direct_project_key 绑定。
     await channel.onInbound({ senderId: 'p-admin', contextToken: 'ctx-1', clientId: 'c3', text: '绑定' }, channel.transport)
     assert.ok(sent.at(-1).text.includes('已直达【director】专属工作区'), '「绑定」按自由文本走 director 通道')
     assert.equal(store.getState().admin_peer_id, 'p-admin', '管理员绑定不受影响')
@@ -535,7 +534,7 @@ test('wechat channel 扫码授权 begin 与 wait 必须同一 transport 实例',
   }
 })
 
-// —— DSHBOTS-183：help 变体、q 列项目 key；DSHBOTS-208：{key}: {msg} 直达 + 任意交互 ——
+// 派发桩：项目 key 列表 + 自由文本落 director solo。
 
 const DISPATCH_STUB = () => ({
   stateView() {
@@ -548,7 +547,7 @@ const DISPATCH_STUB = () => ({
       if (key.toLowerCase() !== 'web') return null
       return { project: { id: 'p-web', key: 'web', name: 'Web' }, messageId: 'msg_1', runBots: ['bot_director'] }
     }
-    // DSHBOTS-258：自由文本一律 director solo 形态（firstContact 可切换首触/静默）
+    // 自由文本一律 director solo 形态（firstContact 可切换首触/静默）
     return { director: { id: 'bot_director', name: 'director' }, messageId: 'msg_2', firstContact: true }
   },
 })
@@ -561,7 +560,7 @@ test('wechat commands /? 出帮助，旧 help/？ 触发词不再拦截', async 
   assert.ok(reply.includes('/reject'), '帮助里应提到 /reject 指令')
   assert.ok(reply.includes('任意消息') || reply.includes('其余消息'), '帮助里应说明自由文本直达')
 
-  // 旧触发词（help/?/帮助）已不再是指令：作为自由文本走直达路由
+  // 旧触发词（help/?/帮助）不是指令：作为自由文本走直达路由
   const free = { stateView: () => ({ projects: [{ key: 'web', name: 'Web', tasks: [] }] }), async wechatChat() { return { error: 'no_target' } } }
   for (const text of ['help', 'Help', '?', '帮助']) {
     assert.ok((await handleCommand(free, text)).includes('还没有选定直达的项目'), `「${text}」应按自由文本直达`)
@@ -603,7 +602,7 @@ test('wechat commands /tr 显式转发命中：按 key 调 wechatChat 并回执�
 
 test('wechat commands 自由文本一律走 director solo：原 <key>: 派单写法也按自由文本处理', async () => {
   const service = DISPATCH_STUB()
-  // 原「web: 消息」派单转发已收编：不再路由进项目，原文按自由文本落 director 通道
+  // 「web: 消息」不路由进项目，原文按自由文本落 director 通道
   const reply = await handleCommand(service, 'web: 上线新版官网')
   assert.ok(reply.includes('已直达【director】专属工作区'), `冒号写法应按自由文本走 director：${reply}`)
   assert.deepEqual(service.chatted, { key: null, body: 'web: 上线新版官网' })
@@ -656,7 +655,7 @@ test('wechat commands 固定指令照旧：/states /reject /detail 路由不变'
   assert.ok(states.includes('web-5 [in_review] 等验收'))
   assert.ok((await handleCommand(service, '/reject web-5 差', { isAdmin: true })).includes('已驳回 web-5'))
   assert.ok((await handleCommand(service, '/detail web-5')).includes('写登录页'))
-  // 非指令文本不再回「未识别」，直达路由由 wechatChat 承接（258 后一律 director solo）
+  // 非指令文本不回「未识别」，直达路由由 wechatChat 承接（一律 director solo）
   const free = await handleCommand(SERVICE_STUB(), 'foo')
   assert.ok(free.includes('已直达【director】专属工作区'), '自由文本首触回执 director 通道')
 })
@@ -721,8 +720,8 @@ test('wechat 直达真 service：/tr 直达项目群聊（chat 运行 trigger_ty
     await service.finishRun({ runId: run.id, status: 'succeeded', output: '收到，我来安排上线。' } as any)
     assert.deepEqual(pushed, ['director\n———————————————\n收到，我来安排上线。'], '直达运行的 bot 回复要推回微信')
 
-    // 自由文本（含已绑定场景）仍落 director 专属工作区（DSHBOTS-258 口径不变）；
-    // /tr 不再首触 solo 通道，本条才是首触回执。
+    // 自由文本（含已绑定场景）仍落 director 专属工作区；
+    // /tr 不走首触 solo 通道，本条才是首触回执。
     const first = await handleCommand(service, '顺带把首页也改了', { boundKey: 'DISPATCH', bind() {} })
     assert.ok(first.includes('已直达【director】专属工作区'), `自由文本首触回执 director 通道：${first}`)
     const soloMessage = service.soloChatStore(director.id).get("SELECT * FROM solo_messages WHERE sender_id = 'wx_admin_peer' AND body LIKE ?", '%顺带把首页也改了')
@@ -734,7 +733,7 @@ test('wechat 直达真 service：/tr 直达项目群聊（chat 运行 trigger_ty
     assert.equal(soloRun.trigger_type, 'wechat', '微信来源 solo 运行打 wechat 标记')
 
     await service.finishRun({ runId: soloRun.id, status: 'failed', error: { message: '模型超时' } } as any)
-    // DSHBOTS-267：失败只推「类别+摘要」，原始错误串不进微信。
+    // 失败只推「类别+摘要」，原始错误串不进微信。
     assert.equal(pushed.at(-1), '[失败] director\n———————————————\n运行失败（超时）：上游响应超时。', 'solo 通道失败提示同样推回（白名单分类）')
 
     await service.sendMessage(store.get("SELECT id FROM projects WHERE key = 'DISPATCH'").id, '工作台普通群聊消息', { type: 'user', id: service.localUserId })
@@ -766,7 +765,7 @@ test('wechat store 直达项目绑定：保存/读取随通道持久化，登出
   }
 })
 
-// DSHBOTS-217：微信出站一律纯文本，全部排版函数渲染结果不得含 emoji/符号标记。
+// 微信出站一律纯文本，全部排版函数渲染结果不得含 emoji/符号标记。
 const NO_EMOJI = /[\u{1F000}-\u{1FAFF}\u{2500}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}]/u
 
 test('wechat 排版纯文本：全部 format 渲染结果无 emoji', () => {

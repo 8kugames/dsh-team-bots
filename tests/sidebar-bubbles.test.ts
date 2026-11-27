@@ -29,7 +29,7 @@ test('收件箱入口：群聊列表上方常驻，徽标是四类待办之和�
   assert.match(inboxSource, /proposals: \(data\?\.proposals \?\? \[\]\)\.filter\(item => item\?\.status === 'pending'\)\.length/, '进化审批只计 pending')
   assert.match(inboxSource, /mentions: Number\(data\?\.pendingOwnerMentions\?\.count \?\? 0\)/, '总监 @owner 计未读')
   assert.match(inboxSource, /data-action="nav" data-view="inbox"/, '点击进收件箱页')
-  // 入口在群聊列表之前（同一模板内先渲染），且不再随待办数隐现。
+  // 入口在群聊列表之前（同一模板内先渲染），且常驻不随待办数隐现。
   const entryAt = appSource.indexOf('${inboxEntryView()}')
   const chatsAt = appSource.indexOf('data-tree="chats"')
   assert.ok(entryAt > 0 && chatsAt > entryAt, '入口在群聊列表上方')
@@ -66,6 +66,6 @@ test('设置变更历史卡撤除：读模型/action/视图全链不在，audit 
 test('health() 的 needsAttention 保留（外部巡检口径，A5 patrol 依赖）', () => {
   assert.match(systemSource, /needsAttentionView\(\)/, '聚合方法保留')
   assert.match(systemSource, /needsAttention: this\.needsAttentionView\(\)/, 'health 下发保留')
-  // state 不再透出（UI 已不消费）。
+  // state 不透出（UI 已不消费）。
   assert.doesNotMatch(systemSource, /needsAttention: this\.needsAttentionView\(\),\n      settings:/, 'state 不重复透出')
 })

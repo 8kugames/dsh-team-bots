@@ -1,8 +1,7 @@
-// DSHBOTS-328：任务通知域的出站通道扇出守门。
-// task-created / task-done 两个锚点此前硬编码 this.wechat?.notify——任务创建/完成事件
-// 「只到微信不到飞书」。本卡改走 core.ts 的 channelNotify（DSHBOTS-326 落码）：
+// 任务通知域的出站通道扇出守门。
+// task-created / task-done 两个锚点走 core.ts 的 channelNotify：
 // ①两通道都启用→同一事件两边各收一条（正文一致、各沿用既有收据键）；
-// ②仅微信启用→与现状零回归（单发一条、同一收据键、飞书未挂载不报错）；
+// ②仅微信启用→行为不变（单发一条、同一收据键、飞书未挂载不报错）；
 // ③飞书失败→微信照收且留痕 warn（单通道失败不阻断另一通道）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

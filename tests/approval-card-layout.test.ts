@@ -1,7 +1,7 @@
-// DSHBOTS-173：审批卡片整行化 + 审批按钮右对齐。
+// 审批卡片整行化 + 审批按钮右对齐的守门测试。
 // 口径：读线上同一份 CSS 汇总（tests/ui-styles-source.js，与 readUiStyles 同函数同顺序），
 // 断言「卡片占满消息行可用宽度」与「双按钮贴右」两条规格；同时钉住两处不该动的行
-// （倒计时行/进度条行保持左对齐）与本卡范围外的东西（提问卡片仍是 480px 小卡）。
+// （倒计时行/进度条行保持左对齐），以及提问卡与审批卡同口径。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { uiStylesSource } from './ui-styles-source.js'
@@ -42,14 +42,13 @@ test('倒计时行与进度条行不随按钮行一起右对齐', () => {
 })
 
 test('本卡只动审批卡：提问卡已随 D-190 对齐整行化（不再是 480px 小卡）', () => {
-  // D-173 时提问卡是范围外、钉 480px 不动；DSHBOTS-190 把提问卡对齐审批卡口径，
-  // 旧的 480px 栅栏随之反转——具体规格由 tests/question-card-layout.test.js 对称锁定。
+  // 提问卡与审批卡同口径（整行化）；具体规格由 tests/question-card-layout.test.js 对称锁定。
   const question = ruleBody('.question-card')
   assert.doesNotMatch(question, /max-width:\s*480px/, '提问卡上限已放开（D-190 对齐审批卡）')
   assert.match(question, /max-width:\s*100%/, '提问卡与审批卡同口径：max-width 100%')
 })
 
-// DSHBOTS-312 来源群聊 chip（源码锚）：审批卡头部 tools 行带 [KEY] 群名 chip（复用
+// 来源群聊 chip（源码锚）：审批卡头部 tools 行带 [KEY] 群名 chip（复用
 // .approval-chip mono），单聊向显示「单聊」——与通知头同口径。
 test('审批卡头部来源 chip：群聊 [KEY] 群名 / 单聊标注（源码锚）', async () => {
   const { readFileSync } = await import('node:fs')

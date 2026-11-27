@@ -1,9 +1,9 @@
-// src/wechat/format.ts —— 微信出站消息排版层（纯文本，DSHBOTS-217）
+// src/wechat/format.ts —— 微信出站消息排版层（纯文本）
 // 通道全部回程/回执文案在此集中格式化：分段、分隔线、缩进、关键标识前置。
 // 只改样式不改语义（状态码、任务号、标题、指派等信息原样保留）；
 // 消费点（commands / channel / run-finish / task-notify / service.wechatReview）
 // 只传数据不拼文案，后续调样式只动本文件。
-// 排版一律纯文本，不用 emoji（D-211 实机验收驳回口径）：状态一律写成 [状态码] 纯文字。
+// 排版一律纯文本，不用 emoji：状态一律写成 [状态码] 纯文字。
 
 /** 纯文本分隔线：区分消息头与正文。 */
 export const RULE = '———————————————'
@@ -167,7 +167,6 @@ export function wechatToken(rowId) {
 /**
  * 提问转发微信：群聊提问卡片的微信镜像。
  * 带短 token 与回复格式，管理员的答复经 commands 的「答 <token> …」路由回原问题。
- * 微信出站一律纯文本、不用 emoji（D-211 实机验收驳回口径，重做卡 D-217）。
  */
 export function questionCard(projectName, botName, items, token) {
   const lines = [`【提问】${botName}（${projectName}）`, RULE]

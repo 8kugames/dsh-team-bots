@@ -1,6 +1,4 @@
-// DSHBOTS-99：达到限额不指数退避——先切备用模型，主备都限额才进受阻。
-// 用户口径（2026-11-03）：「如果提示达到限额，不要做指数退避，有备用模型直接切备用模型，
-// 只有当备用模型和主模型都限额了才进受阻。」
+// 达到限额不指数退避——先切备用模型，主备都限额才进受阻。
 // 瞬时限流（网关节流、秒级 Retry-After）保持原语义：退避重打，不切备用。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -148,7 +146,7 @@ test('主备都限额才进受阻：备用运行再次额度耗尽 → 不派生
     assert.ok(fallbackRun, '主模型限额先切备用')
     assert.notEqual(store.get('SELECT status FROM tasks WHERE id = ?', task.id).status, 'blocked')
 
-    // 备用模型也限额：不再派生、不再退避、任务转受阻。
+    // 备用模型也限额：不派生、不退避、任务转受阻。
     store.run("UPDATE runs SET status = 'running', started_at = ? WHERE id = ?", mins(-1), fallbackRun.id)
     await service.finishRun({
       runId: fallbackRun.id, status: 'failed', output: '',
@@ -251,7 +249,7 @@ test('scheduler 不为额度耗尽类 run 派生 plan_retry', async () => {
   }
 })
 
-// DSHBOTS-103：Token Plan「用量上限」形态与白名单外额度码补漏。
+// Token Plan「用量上限」形态与白名单外额度码补漏。
 test('Token Plan 用量上限（含内嵌码 2056）：判额度耗尽、不退避、切备用', () => {
   const error = { code: 'RATE_LIMIT', message: TOKEN_PLAN_LIMIT_MESSAGE }
   assert.equal(isQuotaExhausted(error), true, '「用量上限」措辞 + (2056) 内嵌码 = 额度耗尽')
@@ -360,7 +358,7 @@ test('网关节流走真实失败路径：不派生备用运行（不回归）',
   }
 })
 
-// DSHBOTS-358：额度耗尽对内部运行（review / handle / memory_review）同样切备用模型，
+// 额度耗尽对内部运行（review / handle / memory_review）同样切备用模型，
 // 聊天类维持现状不自动重发。
 test('review 运行撞墙切备用：派生 review 备用运行，任务状态不受影响', async () => {
   const { root, store, service } = await setup()

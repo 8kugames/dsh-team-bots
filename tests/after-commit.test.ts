@@ -79,7 +79,7 @@ test('事务内 enqueueOutbox 站点登记在允许清单（新增站点须显�
 
 test('store.transaction 纪律注释与 BEGIN IMMEDIATE/ROLLBACK 锚点在场', () => {
   const dbSource = readFileSync(join(SRC, 'db.ts'), 'utf8')
-  assert.match(dbSource, /事务纪律（B7\/DSHBOTS-332）/, 'transaction 方法带纪律注释')
+  assert.match(dbSource, /事务纪律：/, 'transaction 方法带纪律注释')
   assert.match(dbSource, /BEGIN IMMEDIATE/, '写事务用 BEGIN IMMEDIATE（并发下排队而非脏读）')
   assert.match(dbSource, /ROLLBACK/, '异常路径回滚')
   const schedulerSource = readFileSync(join(SRC, 'services', 'scheduler.ts'), 'utf8')

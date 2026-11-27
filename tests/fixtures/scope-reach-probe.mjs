@@ -1,4 +1,4 @@
-// DSHBOTS-294 根级注册面与 cordis dispatch 可达性实测探针（D-292 限制③）。
+// 根级注册面与 cordis dispatch 可达性实测探针。
 // 由 tests/subagent-ledger.test.ts 子进程执行：真 cordis Context + 真 dsh-scope 子 scope
 // 发射事件，断言插件根 ctx（untagged）监听可达 emit 与 waterfall 两条派发面。
 import { existsSync } from 'node:fs'

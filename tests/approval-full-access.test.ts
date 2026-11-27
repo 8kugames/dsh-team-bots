@@ -1,4 +1,4 @@
-// DSHBOTS-366 完全权限总开关（总览 bots 页「免审权限」卡）：settings 'approval_full_access'
+// 完全权限总开关（总览 bots 页「免审权限」卡）：settings 'approval_full_access'
 // 存 '1'/'0'——打开后所有 bot 与派发任务的生效沙箱统一 danger-full-access，优先于
 // 非写运行的 run_type 降档与任务派发覆盖（只收紧档不再生效）；派单策略闸不再拦
 // 配置只读的 bot；bot 不能自批开关（与免审规则同一信任边界）；bump settings_revision

@@ -101,7 +101,7 @@ export function readWriteScopes(raw) {
 
 // ── 交付产物（deliverables）──────────────────────────────────────────
 // 卡面声明的交付物文件路径（相对项目工作目录，路径归一化与写范围同一条 normalizeScopePath）。
-// 核验方按路径直接读文件，交付报告降级为声明清单——不复述文件正文（DSHBOTS-345 复盘）。
+// 核验方按路径直接读文件，交付报告降级为声明清单——不复述文件正文。
 export const DELIVERABLES_MAX = 20
 
 // 解析外部输入（数组或 JSON 字符串）：非法条目直接报错，不静默降级。

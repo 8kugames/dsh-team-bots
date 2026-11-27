@@ -7,7 +7,7 @@
     gap: 8px;
     min-width: 0;
 }
-/* 成本卡与其余三张 KPI 卡同字号同字重；货币符号走 .unit，金额不再降级成小字。 */
+/* 成本卡与其余三张 KPI 卡同字号同字重；货币符号走 .unit，金额不降级成小字。 */
 .metric strong.metric-cost .unit {
     color: var(--ink-2);
     font-size: 0.72em;

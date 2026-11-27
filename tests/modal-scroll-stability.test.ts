@@ -7,7 +7,7 @@ import { readUiSource } from './helpers/ui-sources.js'
 const source = readUiSource()
 const modalCss = readFileSync(fileURLToPath(new URL('../ui/styles/modal.css', import.meta.url)), 'utf8')
 
-// —— DSHBOTS-154：任务详情 modal 滚动稳定性 ——
+// —— 任务详情 modal 滚动稳定性 ——
 // 取证结论（CDP 活体）：2.8s 轮询期间 renderModalLayer 根本不被调（render 的遮罩闸门
 // 拦截，#app 与 #modal-root 零 DOM 写入）；滚动中唯一的正文重建路径是动作触发的
 // reloadTaskModal，而 modalTask 运行行内嵌的 duration（running 无 end、按 Date.now 计）
@@ -87,7 +87,7 @@ const makeLayerHarness = ({ trees }: { trees?: Record<string, any> } = {}) => {
     FakeHTMLElement,
     { now: () => now },
     cb => { scheduled = cb; return 1 },
-    // DSHBOTS-367：遮罩开合切 #app inert——桩只记录调用，不做真实 DOM 操作。
+    // 遮罩开合切 #app inert——桩只记录调用，不做真实 DOM 操作。
     () => {},
     () => false,
   )
@@ -122,7 +122,7 @@ test('runClockSpan：running 运行产出稳定占位（不含时长文本），
   assert.doesNotMatch(ended, /run-clock|data-started/, '终态不占刷新通道')
 })
 
-// —— ① 易变内容移除：modalTask 源码不再内嵌裸 duration
+// —— ① 易变内容移除：modalTask 源码不内嵌裸 duration
 test('modalTask：运行行时长改走 runClockSpan，模板内不再内嵌 duration()（易变内容出字符串）', () => {
   const modalTaskSrc = /function modalTask\(task\) \{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(modalTaskSrc, 'ui/app.js 缺少 modalTask()')
@@ -191,15 +191,15 @@ test('时钟通道：1s 定时器与 renderModalLayer 共用 updateRunClocks，�
   assert.equal(hydrations.length, 3, '三条写入路径（首挂/兜底整写/原位补丁）挂载即水化占位，不等 1s 定时器')
 })
 
-// —— DSHBOTS-166：滚动区合成层化（闪烁根因修复）——
-// 取证结论（CDP Tracing + 真 GPU）：D-154 的 DOM 侧修复已上线且生效（滚动期 DOM 零写入），
+// —— 滚动区合成层化（闪烁根因修复）——
+// 取证结论（CDP Tracing + 真 GPU）：DOM 侧修复已生效（滚动期 DOM 零写入），
 // 但滚动容器 .modal-body 未被合成 → 滚动走主线程 → 滚动期间祖先链被反复重录（实测约三成主帧；
 // 一次 250px 滚动产生 37 次全视口级 Paint，#document 与带 backdrop-filter 的 .modal-backdrop
 // 各一次，单次 8.2M 设备像素），空闲对照为 0 次 → 闪烁来自合成层重绘（backdrop-filter 表面
-// 随之被重算重栅格 + 面板内容被重栅格），与 DOM 写入无关（DSHBOTS-98 已有同机制先例：遮罩下
+// 随之被重算重栅格 + 面板内容被重栅格），与 DOM 写入无关（已有同机制先例：遮罩下
 // 底页滚动即全屏闪烁）。滤镜不是祖先被重录的原因，只让这次重绘可见——去掉滤镜后遮罩仍被重录。
 // 修复：.modal-body 提升为合成层（will-change: transform），滚动内容在自有层位移，祖先链
-// 不再参与滚动期的重录——实测该变体下 .modal-backdrop 从滚动期的 Paint 名单中消失。
+// 不参与滚动期的重录——实测该变体下 .modal-backdrop 从滚动期的 Paint 名单中消失。
 const cssRule = (selector) => {
   const m = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(modalCss)
   assert.ok(m, `ui/styles/modal.css 缺少 ${selector} 规则`)
@@ -223,8 +223,8 @@ test('滚动区合成层不改变滚动串联口径：overscroll-behavior: conta
   assert.match(cssRule('.modal-body'), /overscroll-behavior:\s*contain/, '面板滚到尽头不得把滚动串到底层页面')
 })
 
-// —— DSHBOTS-210：遮罩打开时底页冻结（复发闪屏的第二个驱动源）——
-// D-98 只闸住「整页重建」、D-166 只闸住「滚动期重录」，但 1s 定时器对 #app 的秒级局部刷新
+// —— 遮罩打开时底页冻结（复发闪屏的第二个驱动源）——
+// 只闸住「整页重建」与「滚动期重录」，但 1s 定时器对 #app 的秒级局部刷新
 // （run-clock 文本、终态气泡淡出、审批/提问倒计时与进度条）从未被闸。#app 正是 .modal-backdrop
 // 上 backdrop-filter 的输入：每写一次，整视口模糊层就重算重栅格一次 = 肉眼看得到的全屏闪。
 // 该机制与滚动无关（用户恰好在滚动时注意到），修复口径=遮罩打开期间底页一律不写。

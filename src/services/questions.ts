@@ -1,8 +1,8 @@
-// DSHBOTS-116 群聊提问：宿主 user-questions/request waterfall 的插件侧应答器。
+// 群聊提问：宿主 user-questions/request waterfall 的插件侧应答器。
 // 认领 session_bindings 命中的 bot 会话：绑定到项目的走群聊卡片；绑定为单聊（kind='solo'、
 // project_id 为空）的走单聊卡片；其余 next 透传（人类会话提问继续走原生界面）。
 // 应答权仅用户（type=user）持有，bot 一律 forbidden 不能自答；pending 之外拒绝重复应答，动作写审计。
-// DSHBOTS-177：宿主 timed 前台等待到期（ASK_TIMED_OUT abort）不杀卡——条目保持可答至插件
+// 宿主 timed 前台等待到期（ASK_TIMED_OUT abort）不杀卡——条目保持可答至插件
 // questionTimeoutMs 窗口，窗口内迟到作答经宿主 userQuestions.answer 回投原 agent；其余 abort 立即失效。
 // 注意：本域自管迁移（db.js 已贴 800 行上限，一行不加），手法与 approvals.js 一致。
 import { badRequest, conflict, forbidden, notFound } from '../errors.js'
@@ -88,7 +88,7 @@ export function cleanQuestionItem(item) {
 }
 
 // 答案条目清洗：selected 是选项 label（与 cleanQuestionItem 同口径，保证前端高亮匹配），
-// custom 是自由文本——同样折成单行，答复回宿主时不再带坏版面。
+// custom 是自由文本——同样折成单行，答复回宿主时不撑坏版面。
 export function cleanAnswerItem(answer) {
   const cleaned: any = { id: String(answer?.id ?? '') }
   cleaned.selected = (Array.isArray(answer?.selected) ? answer.selected : [])
@@ -106,7 +106,7 @@ export function cleanAnswerPayload(answer) {
   return { ...answer, answers: answer.answers.map(cleanAnswerItem) }
 }
 
-// DSHBOTS-294：该 bot 是否仍有活跃项目语境（成员或总监）。无语境的控制面会话按单聊承接。
+// 该 bot 是否仍有活跃项目语境（成员或总监）。无语境的控制面会话按单聊承接。
 export function botInActiveProject(store, botId) {
   if (!botId) return false
   return Boolean(
@@ -134,12 +134,12 @@ export const questionsMethods = {
     }, 'dsh-team: user question request binding')
   },
 
-  // waterfall 监听器：DSHBOTS-190 起，项目会话的提问能力收紧为项目总监（owner bot）专属。
-  // 未绑定会话无法归因，保持透传原生界面；命中 bot 会话一律先过归属闸门，不再透传——
-  // 透传会把提问落回宿主面板，收紧形同虚设。拒绝以 rejected promise 回宿主，错误文案
+  // waterfall 监听器：项目会话的提问能力为项目总监（owner bot）专属。
+  // 未绑定会话无法归因，透传原生界面；命中 bot 会话一律先过归属闸门，不透传——
+  // 透传会把提问落回宿主面板，闸门形同虚设。拒绝以 rejected promise 回宿主，错误文案
   // 即调用 bot 收到的 ask_user_question 工具结果。
-  // DSHBOTS-218：单聊会话（kind='solo'）由工作台单聊卡片承接——单聊里 bot 就是对话方，
-  // 没有群聊可发，无需总监归属闸门；bot 间私信（kind='dm'）没有人类作答方，照旧透传。
+  // 单聊会话（kind='solo'）由工作台单聊卡片承接——单聊里 bot 就是对话方，
+  // 没有群聊可发，无需总监归属闸门；bot 间私信（kind='dm'）没有人类作答方，透传。
   async handleQuestionRequest(req, next) {
     const sessionId = req?.agent?.session?.id
     // bindingOfSession 在 DshRuntime 原型上，服务层拿不到 this 绑定，这里直查同款 SQL。
@@ -149,9 +149,9 @@ export const questionsMethods = {
     if (!binding) return next()
 
     const store = this.store
-    // DSHBOTS-294：四车道收敛后 solo 判定改按「无 project 上下文的控制面会话」——
-    // kind='bot' 且绑定无 project、该 bot 亦无活跃项目关系（成员或总监；历史 kind='solo'
-    // alias 行保持命中）才由工作台单聊卡片承接；有项目语境照旧走项目流，owner 闸门不回退。
+    // solo 判定按「无 project 上下文的控制面会话」：kind='bot' 且绑定无 project、该 bot 亦无
+    // 活跃项目关系（成员或总监；存量 kind='solo' 别名行同样命中）才由工作台单聊卡片承接；
+    // 有项目语境走项目流，owner 闸门不回退。
     const isSolo = !binding.project_id && (binding.kind === 'solo' || (binding.kind === 'bot' && !botInActiveProject(store, binding.bot_id)))
     if (!binding.project_id && !isSolo) return next()
     const bot = store.get('SELECT * FROM bots WHERE id = ?', binding.bot_id)
@@ -211,7 +211,7 @@ export const questionsMethods = {
       })
     } else {
       const group = this.groupOf(project.id)
-      // 卡片锚点住项目聊天库（chat-db-split Phase 1）。
+      // 卡片锚点住项目聊天库。
       this.groupChatStore(project.id).run(
         `INSERT INTO messages(id, project_id, group_chat_id, sender_type, sender_id, body, mentions_json, kind, question_id, created_at)
          VALUES (?, ?, ?, 'system', ?, ?, '[]', 'question', ?, ?)`,
@@ -219,7 +219,7 @@ export const questionsMethods = {
       )
     }
 
-    // DSHBOTS-215 问答回路：提问转发微信管理员（通道可用时）。只推纯文本镜像，
+    // 问答回路：提问转发微信管理员（通道可用时）。只推纯文本镜像，
     // 状态仍由群卡片/工作台承载；管理员答复经「答 <token> …」路由回本条目。
     // 单聊没有项目语境，不转发（微信侧只服务项目管理者）。
     if (project) {
@@ -344,7 +344,7 @@ export const questionsMethods = {
     const expiresAt = Date.parse(row.expires_at)
     return {
       ...row,
-      // DSHBOTS-190：answered 终态必须暴露 answered_at（=ended_at）。客户端
+      // answered 终态必须暴露 answered_at（=ended_at）。客户端
       // preserveAnsweredQuestions 以 previous.questions[].answered_at 为本地终态键——
       // 视图缺该字段时，提交作答后的服务端终态覆盖乐观对象即丢键，下一轮旧 pending
       // 轮询快照会把「已回答」卡闪回问题卡；提问卡 pill 的作答时间戳也读它。

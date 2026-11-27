@@ -7,7 +7,7 @@ import { t } from './i18n.js'
 // 消毒不可绕：marked 或 DOMPurify 缺席、或 DOMPurify.isSupported=false（node/损坏安装）时
 // mdCreateRenderer 返回 null，调用方回退 esc 纯文本，绝不裸插 HTML。
 // 工作区相对路径的图片与文件链接都改写成 GET /api/dsh-team/file（服务端再做 MIME 白名单与防穿越），
-// 与 DSH 宿主一致：消息里的本地文件引用可预览，而不是按页面 URL 解析成死链。
+// 消息里的本地文件引用可预览，而不是按页面 URL 解析成死链。
 const MD_SCHEME = /^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/i
 // 图片/链接语法同构：(!?) 前缀区分两种语法；href 允许含空格（到标题或右括号前止），
 // 标题可为 "..." / '...' / (...)。单遍匹配，已改写的图片 URL 不会被链接分支二次处理。

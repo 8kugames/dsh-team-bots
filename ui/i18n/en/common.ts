@@ -74,7 +74,7 @@ export default {
   "filePolicy.read-only": "Read-only",
   "filePolicy.workspace-write": "Workspace write",
   "filePolicy.danger-full-access": "Full access",
-  // DSHBOTS-220: ui/modules copy
+  // ui/modules 文案
   "Bot 已归档": "Bot archived",
   "」关闭": "\\\", disabled",
   "」恢复": "\\\", enabled",
@@ -148,7 +148,7 @@ export default {
   "限流等待，约 ${waitMin} 分钟后自动重试": "Rate-limited; auto-retrying in about ${waitMin} minutes",
   "项目已再开，恢复为进行中": "Project reopened and restored to in progress",
   "项目已归档": "Project archived",
-  // DSHBOTS-220：目录选择器与头像开关文案
+  // 目录选择器与头像开关文案
   "像素头像": "Pixel avatar",
   "像素头像已更新": "Pixel avatar updated",
   "已切回文字头像": "Switched back to the text avatar",
@@ -158,7 +158,7 @@ export default {
   "主目录": "Home",
   "选定此目录": "Choose this folder",
   "项目共 ${totalCount} 个 · 隐藏 ${hiddenCount} 个": "${totalCount} tasks in this project · ${hiddenCount} hidden",
-  // DSHBOTS-241：bot 额度墙状态与手动解除
+  // bot 额度墙状态与手动解除
   "额度状态": "Quota status",
   "额度": "Quota",
   "额度耗尽": "Quota exhausted",
@@ -168,7 +168,7 @@ export default {
   "解除额度耗尽": "Clear quota exhaustion",
   "立即恢复该 Bot 的派发？不等额度恢复时间。": "Resume this bot's dispatch now? This ignores the recorded quota reset time.",
   "额度耗尽已解除": "Quota exhaustion cleared",
-  // DSHBOTS-246: keys added by the full t literal audit
+  // Full t-argument list (the source text is the key)
   "主模型": "Primary model",
   "：": ": ",
   "）": ")",

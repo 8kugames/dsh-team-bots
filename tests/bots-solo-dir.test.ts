@@ -1,4 +1,4 @@
-// DSHBOTS-164：createBot 的 solo_dir 查重与 INSERT 竞态——权威候选在事务内生成、
+// createBot 的 solo_dir 查重与 INSERT 竞态——权威候选在事务内生成、
 // 唯一冲突事务内重生成 -N 后缀重试（有限次）、UNIQUE 失败转可读错误不裸抛 SQLITE。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-// DSHBOTS-150：排队气泡驻留——①入队乐观渲染（发送成功后不等下一拍轮询就画排队行）
+// 排队气泡驻留——①入队乐观渲染（发送成功后不等下一拍轮询就画排队行）
 // ②终态驻留（运行结束气泡再留几秒淡出；同拍已有真实回复则跳过驻留）。
-// 纯逻辑放在 ui/modules/typing-linger.js 的 typing-linger 标记块里（DSHBOTS-159 从 app.js 外迁），
+// 纯逻辑放在 ui/modules/typing-linger.js 的 typing-linger 标记块里，
 // 本文件按标记块抽出来跑真实实现；读源用 app.js + ui/modules/*.js 拼接，断言不随搬家失效。
 import { readUiSource } from './helpers/ui-sources.js'
 const source = readUiSource()
@@ -84,7 +84,7 @@ test('真实运行接管乐观气泡：状态与耗时起点以运行为准，�
   assert.equal(bubble.status, 'running')
   assert.equal(bubble.runId, 'run_1')
   assert.equal(bubble.startedAt, '2026-01-01T00:00:01Z')
-  // 活跃运行的 bot 不再出驻留行（DSHBOTS-1 的 typing 行负责画，避免同一 bot 两行）
+  // 活跃运行的 bot 不出驻留行（typing 行负责画，避免同一 bot 两行）
   const rows = api.typingLingerRows(merged, 'chat', [chatRun({ status: 'running' })], GROUP_SCOPE, 2000)
   assert.deepEqual(rows, [])
 })
@@ -225,16 +225,16 @@ test('接线：画气泡行时对齐台账、1s 定时器到期摘除气泡，�
   assert.ok(htmlBody, '未找到 typingLingerRowsHtml')
   assert.ok(htmlBody.indexOf('syncTypingBubbles(') > 0, '画气泡行前需对齐气泡台账')
   assert.ok(htmlBody.indexOf('syncTypingBubbles(') < htmlBody.indexOf('typingLingerRows('), '对齐必须早于取行')
-  // 轮询仍走取数 → 焦点渲染闸门 → render（DSHBOTS-72/D-123 的闸门结构不动；
+  // 轮询仍走取数 → 焦点渲染闸门 → render（闸门结构不动；
   // 版本短路插在取数与闸门之间：数据零变化时提前 return，闸门结构不变）
   const pollBody = /async function poll\(\)[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(pollBody, '未找到 poll')
   assert.match(pollBody, /\/\/ 版本短路[\s\S]*?await loadState\(state\.projectId, \{ quiet: true \}\)[\s\S]*?\/\/ 渲染闸门/)
   assert.match(pollBody, /if \(!pollRenderBlockedByFocus\(document\.activeElement[\s\S]*?\)\) render\(\)/)
   assert.match(source, /pruneTypingLinger\(\)/)
-  // 气泡块自身不碰滚动（滚动闸门 D-72 不回归）
+  // 气泡块自身不碰滚动（滚动闸门不回归）
   assert.doesNotMatch(block, /scroll/i)
-  // 不动 DSHBOTS-1 的 typing 行通道
+  // 不动 typing 行通道
   assert.match(source, /typingRows\(state\.data\.runs, 'chat'\)/)
   assert.match(source, /typingRows\(runs, 'solo_chat'\)/)
 })

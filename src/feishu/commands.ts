@@ -1,4 +1,4 @@
-// src/feishu/commands.ts —— 飞书指令接线（DSHBOTS-323 卡②）
+// 飞书指令接线。
 // 复用微信 commands.ts 的通道无关层（/ 前缀指令集 + 答/批 token 回路 + 自由文本
 // 直达 director）：路由语义零复制，只把自由文本的落点从微信管理员通道换到飞书
 // 管理员通道（service.feishuChat，source mark 与 solo origin 均按 channel='feishu'

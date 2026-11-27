@@ -1,4 +1,4 @@
-// src/services/task-dispatch.js —— 任务派单与改派域
+// 任务派单与改派域
 // 覆盖：派发门禁（assertDispatchTarget）、派单/重派（assignTask / assignFromBot）、
 // 看板拖拽联动（transitionTask / applyBoardDragDirective）、总监强制受阻（forceBlockTask）、
 // Bot 会话入口（forceBlockFromBot）与派单辅助（写范围清洗/重复卡检测/任务号解析/owner 上下文）。
@@ -14,16 +14,14 @@ import { resolveSandboxOverride } from './file-policy.js'
 import { ensureTaskSandboxSchema } from './task-sandbox-schema.js'
 import { parseGoalInput, readTaskGoal } from './task-goal.js'
 
-// 勘误并卡提示（DSHBOTS-276，P1 派单质量前置）的判定常量：新卡标题含修正类关键词 +
-// 同项目同承接人近 7 天 done 卡写范围有交集，双条件同时命中才在卡面描述尾部追加并卡提示行。
-// 仅提示不拦截：D-82 重复卡闸、D-270 领取闸等既有拒绝行为一概不变。
+// 勘误并卡提示的判定常量：新卡标题含修正类关键词 + 同项目同承接人近 7 天 done 卡写范围
+// 有交集，双条件同时命中才在卡面描述尾部追加并卡提示行。仅提示不拦截：重复卡闸、领取闸等
+// 既有拒绝行为一概不变。
 const CORRECTION_TITLE_RE = /修正|勘误|补充|改写/
 const RECENT_DONE_WINDOW_MS = 7 * 86_400_000
 
-// 核验纪律派单闸关键词（DSHBOTS-303，保守集合，取舍锚）：只取「核验/审计/复核」三词。
-// 「验收」单用常出现在实施卡（如「跑通验收流程」），「验证」是普遍实施动词（如「跑通验证
-// 流程」）——纳入即误伤实施卡，均不含；「红验证/子代理核验/验收核验」等复合词已被「核验」
-// 覆盖。成员卡面自校要求（交付前自跑测试）不含三词，天然不命中。
+// 核验纪律派单闸关键词：保守集合，只取「核验/审计/复核」三词——「验收」「验证」常出现在
+// 实施卡标题里（如「跑通验收流程」），纳入会误伤实施卡。
 export const VERIFICATION_TASK_KEYWORDS = ['核验', '审计', '复核']
 
 // 派单预算优先级分档兜底：漏传 time_budget_minutes 时按卡 priority
@@ -34,7 +32,7 @@ const dispatchBudgetTier = priority =>
 
 export const taskDispatchMethods = {
   // 派发门禁：暂停中的 Bot 不接新卡——新建派单、改派、重派一律拒绝，
-  // 先恢复（bot status → active）再派；归档/移除等其余不可用态沿用 assertMember 既有口径。
+  // 先恢复（bot status → active）再派；归档/移除等其余不可用态由 assertMember 判定。
   assertDispatchTarget(projectId, botId) {
     const bot = this.store.get('SELECT name, status FROM bots WHERE id = ?', botId)
     if (bot?.status === 'paused') throw badRequest(`Bot ${bot.name} 已暂停，先恢复再派卡`)
@@ -47,7 +45,7 @@ export const taskDispatchMethods = {
   assertWritableDispatch(botId, writeScopes) {
     if (!writeScopes?.length) return
     // 完全权限总开关打开时生效档恒 danger-full-access，配置只读的
-    // bot 实际可写，本闸不再拦截；关掉即恢复按配置档判定。
+    // bot 实际可写，本闸不拦截；关掉开关即恢复按配置档判定。
     if (this.fullAccessAllEnabled()) return
     if (this.botRow(botId)?.file_policy !== 'read-only') return
     const name = this.store.get('SELECT name FROM bots WHERE id = ?', botId)?.name ?? botId
@@ -56,7 +54,7 @@ export const taskDispatchMethods = {
     )
   },
   // 核验纪律派单闸：核验/审计/复核类卡不派成员 bot（owner 硬口径）
-  // 该类工作由总监（owner bot）自有子代理执行。与 D-302 提示词边界守门（review-auto 源码锚）
+  // 该类工作由总监（owner bot）自有子代理执行。与提示词边界守门（review-auto 源码锚）
   // 构成双层防线：提示词管会话内指引，本闸管派单行为。派给 director 本身不受限。
   // 标题/描述任一命中关键词即视为核验类；重派改卡按改后生效卡面判定。
   assertNotVerificationDispatch(project, botId, title, description) {
@@ -105,8 +103,8 @@ export const taskDispatchMethods = {
       taskId,
     )
     // 换负责人闸门：queued 占位运行（死队列，永远不会被领取）不是执行中，
-    // 不再阻断改派——事务内按 SUPERSEDED 口径清掉后放行；只有 running 的任务运行照旧阻断
-    // （文案不变）。同负责人重派不走此闸，行为不变。
+    // 不阻断改派——事务内按 SUPERSEDED 口径清掉后放行；只有 running 的任务运行才阻断。
+    // 同负责人重派不走此闸。
     const reassigning = task.assignee_bot_id !== botId
     if (reassigning && this.store.get(
       "SELECT id FROM runs WHERE task_id = ? AND kind = 'task' AND status = 'running' LIMIT 1",
@@ -119,7 +117,7 @@ export const taskDispatchMethods = {
     ensureTaskSandboxSchema(this.store)
     const sandboxTouched = sandboxOverride !== undefined
     // 存量 NULL 预算卡补挂：COALESCE 只补空，显式已设的卡不覆盖。
-    // DSHBOTS-325：派单路径传 priority 分档兜底，非派单直派沿用全局缺省链。
+    // 派单路径传 priority 分档兜底，非派单直派取全局缺省链。
     const defaultTimeBudget = timeBudgetFallback ?? this.defaultTaskTimeBudget()
     this.store.transaction(() => {
       // queued 占位清理与改派同事务：SUPERSEDED 不进任务执行历史，run 事件可审计。
@@ -143,7 +141,7 @@ export const taskDispatchMethods = {
     // 总监bot的验收/受阻处理运行本身占用任务的唯一活动运行名额，
     // 此时由 finishRun 的收尾逻辑负责重新排队执行，这里跳过。
     // 换负责人清掉 queued 占位后名额已空：重算判定才会按新负责人重排 task_run。
-    // 幂等键：task_run 是先写者赢闸（ON CONFLICT DO NOTHING 且撞键不再 applyOutboxRow），
+    // 幂等键：task_run 是先写者赢闸（ON CONFLICT DO NOTHING，撞键时跳过 applyOutboxRow），
     // 稳定键 task:<id>:assigned 会在再次改派时撞上历史 delivered 行而被静默吞掉、排不出新运行
     // （不限清 queued 占位场景，无活跃运行的改派同样会写键）。凡换负责人一律带事务内单调自增
     // 的 task.version 后缀（确定性、跨改派不碰撞）；同负责人重派保持稳定键，slotHeld 已提供幂等。
@@ -174,7 +172,7 @@ export const taskDispatchMethods = {
       "SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
       taskId,
     )?.n ?? 0)
-    // 看板拖拽沿用 D-54 的运行触发类型（board_resume）：拖入「执行中」的通知与开工由
+    // 看板拖拽的运行触发类型为 board_resume：拖入「执行中」的通知与开工由
     // updateTask 内的统一触发点完成（同一任务只发一条消息、只入队一次运行）。
     await this.updateTask(taskId, { status }, actor, { startTriggerType: 'board_resume' })
     await this.applyBoardDragDirective(before, status, { activeRuns })
@@ -182,9 +180,9 @@ export const taskDispatchMethods = {
     return this.taskView(this.taskRow(taskId))
   },
   // 看板拖拽联动：拖出到 todo/blocked 自动暂停。
-  // 拖入「执行中」一侧的通知与开工已收进 updateTask 内的统一触发点：
+  // 拖入「执行中」的通知与开工在 updateTask 内的统一触发点：
   // blocked/in_review → in_progress 与编辑表单改状态同样要通知并开工，逻辑只有那一处，
-  // 这里不再重复发消息、重复入队（同一任务只发一条）。
+  // 这里不重复发消息、不重复入队（同一任务只发一条）。
   // 指令消息由系统直接发（sender_type='system'，不触发 bot 运行）；
   // 出向 in_review/done/canceled 的写运行中止由 updateTask 内的写占用释放统一处理。
   async applyBoardDragDirective(before, afterStatus, { activeRuns = 0 } = {}) {
@@ -203,7 +201,7 @@ export const taskDispatchMethods = {
       }
     }
   },
-  // 总监强制受阻（DSHBOTS-232 ②）：把「进行中」任务强制移「受阻」并中止其名下全部
+  // 总监强制受阻：把「进行中」任务强制移「受阻」并中止其名下全部
   // 排队/执行中运行。运行中止走既有 abort 链路（cancelRunInternal → runtime.cancelRun），
   // 与看板暂停（PAUSED_BY_BOARD，可续跑的暂停语义）区分：强制受阻是中止语义，
   // 稳定码 TASK_FORCE_BLOCKED + run 事件 force_blocked + 审计 task.force_blocked 留痕。
@@ -269,7 +267,7 @@ export const taskDispatchMethods = {
     if (!binding) throw forbidden('只有项目群中的 Bot 可以执行该操作')
     if (!binding.project_id) throw forbidden('单聊会话不在项目中，无法管理任务')
     const project = this.projectRow(binding.project_id)
-    // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令/正确下一步。
+    // 拒绝文案 = 原因 + 替代命令/正确下一步。
     if (project.owner_bot_id !== binding.bot_id) {
       throw forbidden(
         '只有项目总监 Bot 可以执行该操作：总监命令（如 team_assign_task 派单/重派、'
@@ -299,8 +297,8 @@ export const taskDispatchMethods = {
     return null
   },
   // 勘误并卡引导：找同项目同承接人「近 7 天内 done」且写范围与本次声明有
-  // 交集（元素级，路径前缀不展开——与 D-82 完全一致检测同一口径的读取函数）的最近一张卡。
-  // 时间基准用 COALESCE(completed_at, updated_at)：done 终态时刻优先（D-69 回填保证存量行有值）。
+  // 交集（元素级，路径前缀不展开——与完全一致检测同一口径的读取函数）的最近一张卡。
+  // 时间基准用 COALESCE(completed_at, updated_at)：done 终态时刻优先（存量行已回填）。
   findRecentDoneOverlapTask(projectId, assigneeBotId, scopes) {
     const target = new Set(scopes)
     if (!target.size) return null
@@ -322,7 +320,7 @@ export const taskDispatchMethods = {
   // createTask 同一清洗）、taskUpdateScopes（改卡入口）。两步：
   // ① ignored 染色——命中项目 .gitignore 的条目没有写保护价值，不进 write_scopes
   //   （并行锁只认有效范围），但保留进 ignored_write_scopes 供卡面展示：全染色卡
-  //   不再触发「必须声明写范围」拒绝，也不与任何写运行串行（同文件也并行）。审计落
+  //   不触发「必须声明写范围」拒绝，也不与任何写运行串行（同文件也并行）。审计落
   //   task.scopes_normalize（ignored=[...]）。非 git 目录 / git 不可用时保守放行不清洗。
   // ② 一级目录驳回——清洗后仍不含 / 的条目（src、tests 这类整目录声明）直接拒绝：
   //   整目录会把同项目全部写运行判为冲突锁死并发，这不是清洗能救的，必须改卡。
@@ -353,22 +351,22 @@ export const taskDispatchMethods = {
     if (input.taskId || input.task) {
       const task = this.resolveBotTask(project, input.taskId ?? input.task)
       if (['done', 'canceled'].includes(task.status)) throw conflict(`任务 ${project.key}-${task.number} 已结束，不能重派`)
-      // 变更栅栏（吸收 dsh-agent-team mutation-fence 理念）：改卡可选带 expected_version
-      // （bot 最后看到的卡 version）。不匹配即拒，拒绝附最近变更事实，写者可就地重新
-      // 裁决；不带该参数保持既有 last-write-wins 行为（看板 UI 有自己的刷新闭环）。
+      // 变更栅栏：改卡可选带 expected_version（bot 最后看到的卡 version）。
+      // 不匹配即拒，拒绝附最近变更事实，写者可就地重新裁决；
+      // 不带该参数保持 last-write-wins 行为（看板 UI 有自己的刷新闭环）。
       if (input.expected_version !== undefined
         && Number(input.expected_version) !== Number(task.version)) {
         throw this.staleTaskConflict(task, input.expected_version)
       }
       // 核验纪律派单闸：重派/改卡按生效卡面（本次传入优先，缺省回落原卡）。
       this.assertNotVerificationDispatch(project, member.id, input.title ?? task.title, input.description ?? task.description)
-      // 派单策略闸：重派按原卡声明写范围同闸（重派不改写范围，D-232 口径）。
+      // 派单策略闸：重派按原卡声明写范围同闸（重派不改写范围）。
       // 有效范围 + 染色条目合并判定：染色路径一样会被写盘，不能因染色漏拦只读 bot。
       this.assertWritableDispatch(member.id, [
         ...readWriteScopes(task.write_scopes),
         ...readWriteScopes(task.ignored_write_scopes),
       ])
-      // 任务卡修正闭环（DSHBOTS-232 ①）：重派可同时改卡面（标题/描述/优先级）——先经
+      // 重派可同时改卡面（标题/描述/优先级）：先经
       // updateTask 落卡，卡面变化由其统一触发点通知负责人修正，再走原重派链路。
       // 写范围不在此口改：入队运行快照与调度闸门消费的不是同一份数据，
       // 改范围走工作台 taskUpdateScopes（含排队运行快照同步），不在这里开第二入口。
@@ -391,7 +389,7 @@ export const taskDispatchMethods = {
       if (Object.keys(patch).length) await this.updateTask(task.id, patch, actor)
       // 派单预算优先级分档兜底重派路：input.priority 已被 updateTask
       // 校验（无效即抛，到不了这里），按改后生效优先级取档；COALESCE 只补存量 NULL
-      // 预算卡，已有预算不重算（②）。
+      // 预算卡，已有预算不重算。
       const updated = await this.assignTask(task.id, member.id, actor, {
         autoStart: false, sandboxOverride,
         timeBudgetFallback: dispatchBudgetTier(input.priority ?? task.priority),
@@ -400,8 +398,8 @@ export const taskDispatchMethods = {
       return updated
     }
     // 派单必须声明写范围（程序化闸门，不靠派单方自觉）：未声明写范围的任务其写运行会与
-    // 同项目所有写运行判为冲突并保守串行，一条空范围任务就能把整队堵死。这里直接拒绝，
-    // 而不是留到调度器里把并发能力悄悄吃掉。命中 .gitignore 的染色条目算已声明：
+    // 同项目所有写运行判为冲突并保守串行，一条空范围任务就能把整队堵死，故在入口直接拒绝。
+    // 命中 .gitignore 的染色条目算已声明：
     // 它们进 ignored_write_scopes、不参与并行锁，全染色卡照常派发且不堵任何队列。
     const parsedScopes = input.write_scopes === undefined || input.write_scopes === null
       ? parseWriteScopesFromDescription(input.description)
@@ -418,10 +416,9 @@ export const taskDispatchMethods = {
     // 派单策略闸：写卡派只读 bot 在入口拒绝；重派分支按原卡声明补一道。
     // 判定用完整声明清单：染色路径一样会被写盘，不能因染色漏拦只读 bot。
     this.assertWritableDispatch(member.id, parsedScopes)
-    // 大卡拆分闸（产品化派单纪律）：写范围条目超过 maxWriteScopesPerTask 时拒绝整卡
-    // 派发——超大范围卡与同项目一切写运行按保守串行互斥，一条卡即可吃掉整队并行能力
-    // （2026-11-13 生产实测 run_parallel 触发率仅 26%，主因即大范围声明）。拒绝文案
-    // 按 D-269 口径 = 原因 + 替代命令（parent_task_id 拆子卡，子卡范围不相交即并行）。
+    // 大卡拆分闸：写范围条目超过 maxWriteScopesPerTask 时拒绝整卡派发——超大范围卡与
+    // 同项目一切写运行按保守串行互斥，一条卡即可吃掉整队并行能力。拒绝文案 = 原因 +
+    // 替代命令（parent_task_id 拆子卡，子卡范围不相交即并行）。
     const maxScopes = Number(this.config.maxWriteScopesPerTask)
     if (scopes.length > maxScopes) {
       throw badRequest(
@@ -440,16 +437,16 @@ export const taskDispatchMethods = {
     const forceDuplicate = input.force_duplicate === true
     const urgentExempt = input.priority === 'urgent'
     if (duplicate && !forceDuplicate && !urgentExempt) {
-      // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令（改卡重派而非新开卡）。
+      // 拒绝文案 = 原因 + 替代命令（改卡重派而非新开卡）。
       throw conflict(
         `已存在同写范围任务 ${project.key}-${duplicate.number} ${duplicate.title}，请勿重复派单：`
         + '请用 team_assign_task 重派原任务改卡（task=原任务号，附 title/description 即修正卡面），不要为新内容新开卡；'
         + '确需第二张同范围卡时传 force_duplicate=true（每次使用留审计）；紧急任务（priority=urgent）豁免此拦截，可立即派单施工。',
       )
     }
-    // 勘误并卡提示（DSHBOTS-276，不强制）：双条件命中（标题关键词 + 近期 done 卡写范围交集）
+    // 勘误并卡提示（不强制）：双条件命中（标题关键词 + 近期 done 卡写范围交集）
     // 时在卡面描述尾部追加一行并卡建议。仅追加描述，不拦截派单、不改任何拒绝行为；
-    // 未命中时描述原样透传，createTask 路径零变化。
+    // 未命中时描述原样透传。
     let description = input.description
     if (CORRECTION_TITLE_RE.test(String(input.title ?? ''))) {
       const overlap = this.findRecentDoneOverlapTask(project.id, member.id, scopes)
@@ -458,7 +455,7 @@ export const taskDispatchMethods = {
       }
     }
     // 派单预算优先级分档兜底建卡路：漏传 time_budget_minutes 时按卡
-    // priority 分档落库，不再落全局缺省值；显式值永远优先（②）。
+    // priority 分档落库；显式值永远优先。
     const explicitBudget = input.time_budget_minutes ?? input.timeBudgetMinutes
     // 版本化 Goal 锚点：director 显式填写才是 v1；两个字段都没传即本卡没有 Goal。
     const goal = input.goal_statement !== undefined || input.completion_criteria !== undefined
@@ -473,7 +470,7 @@ export const taskDispatchMethods = {
       priority: input.priority,
       // 透传原始清单：清洗+审计由 createTask 统一做（审计挂真实 taskId）。
       writeScopes: parsedScopes,
-      // 交付物路径声明（DSHBOTS-345 复盘）：新卡可带；重派已有任务经改卡分支同步修正。
+      // 交付物路径声明：新卡可带；重派已有任务经改卡分支同步修正。
       deliverables: input.deliverables,
       // 总监派单可带父子/依赖关系（snake_case 透传，createTask 内统一校验与落库）。
       parentTaskId: input.parent_task_id,
@@ -488,7 +485,7 @@ export const taskDispatchMethods = {
       autoStart: true,
       postCard: true,
     }, actor)
-    // 「N 分钟档」提示（DSHBOTS-325 ④）：卡面描述写了预算档但与兜底档不一致时回执
+    // 「N 分钟档」提示：卡面描述写了预算档但与兜底档不一致时回执
     // 提示一行，仅提示不拦截——确需按描述档执行就显式传 time_budget_minutes。
     const describedTier = Number(String(input.description ?? '').match(/(\d+)\s*分钟档/)?.[1] ?? 0)
     if (explicitBudget === undefined || explicitBudget === null) {

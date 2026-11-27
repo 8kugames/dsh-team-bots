@@ -1,5 +1,4 @@
-// src/db-migrations.js —— 旧库增量迁移（自 db.js 外置：db.js 贴 800 行红线，迁移不再回填进 db.js）。
-// 这里只做「把老库结构补到与 SCHEMA 一致」的幂等迁移：addColumn/rebuildTable 自带存在性检查，
+// 旧库增量迁移：把老库结构补到与 SCHEMA 一致。addColumn/rebuildTable 自带存在性检查，
 // 每个迁移名记入 schema_migrations 账本。新库由 db.js 的 SCHEMA 直接建出全量结构，
 // 本文件的迁移对新库全部空转（列已存在即跳过）。
 
@@ -53,8 +52,8 @@ export const RUNS_INDEXES = `
   CREATE INDEX IF NOT EXISTS runs_bot_status_idx
     ON runs(bot_id, COALESCE(ended_at, queued_at) DESC);
 `
-// 注意：one_active_run_per_bot（同 bot 同时至多一条 queued/running，DSHBOTS-285/ADR §2.3）
-// 不放在这里——它的激活与 §5.2-2 入站路由收敛同车（见 activateBotRunSerialization 注释）。
+// 注意：one_active_run_per_bot（同 bot 同时至多一条 queued/running，ADR §2.3）
+// 不放在这里，由 activateBotRunSerialization 系列迁移建出（见其注释）。
 
 export const BINDINGS_DDL = `
   session_id TEXT PRIMARY KEY,
@@ -66,11 +65,10 @@ export const BINDINGS_DDL = `
   alias INTEGER NOT NULL DEFAULT 0
 `
 
-// 库与绑定收敛（DSHBOTS-285，ADR §4.1）：活跃绑定收敛为 kind='bot' 控制面绑定，
-// 旧 task/project/dm/solo 四道唯一索引删除；task_id 列保留仅供历史行解析。
-// 会话域三分：唯一性放宽为每 (bot, project) 一条——solo 域是
+// 会话绑定索引（ADR §4.1）：活跃绑定是 kind='bot' 控制面绑定，task_id 列仅供历史行解析。
+// 唯一性为每 (bot, project) 一条——solo 域是
 // project_id NULL，SQLite 唯一索引对 NULL 判互异，须 COALESCE 归一后才保住
-// 「每 bot 一条 solo 绑定」；项目维度则恢复多项目 owner bot 的项目间隔离。
+// 「每 bot 一条 solo 绑定」；项目维度保住多项目 owner bot 的项目间隔离。
 // 新库建表（db.js SCHEMA）与旧库迁移重建共用同一段 DDL，避免两处定义漂移。
 const BINDING_INDEXES = `
   CREATE UNIQUE INDEX IF NOT EXISTS one_bot_binding
@@ -115,11 +113,10 @@ export function runMigrations(db) {
   migrateSessionBindingAlias(db)
   migrateSessionBindingBotConvergence(db)
   migrateSessionBindingProjectScope(db)
-  // one_active_run_per_bot 激活（DSHBOTS-289，ADR §5.2-2）：控制面会话收敛（上迁移）+
-  // 争用口径 A（enqueue 家族 bot 忙时挂待处理队列不落 runs 行）同车后激活——存量串行化
+  // one_active_run_per_bot 激活（ADR §5.2-2）：存量串行化
   // （同 bot 多条 queued/running 只留最早一条，其余 canceled）+ 建 bot 级部分唯一索引。
   activateBotRunSerialization(db)
-  // DSHBOTS-308：串行域收窄为 (bot, 工作区)，见 activateBotRunSerializationDomain。
+  // 串行域收窄为 (bot, 工作区)，见 activateBotRunSerializationDomain。
   activateBotRunSerializationDomain(db)
   // 任务运行豁免 bot 串行域（单 bot 多任务并行）：见 exemptTaskRunsFromBotSerialization。
   exemptTaskRunsFromBotSerialization(db)
@@ -210,17 +207,17 @@ function migrateRuns(db) {
   addColumn(db, 'runs', 'model_effort', 'TEXT')
   // 入站消息合批：领取时同通道排队消息被合并进来，存被合并消息的 id 列表（JSON）。
   addColumn(db, 'runs', 'merged_messages', 'TEXT')
-  // 续答运行（DSHBOTS-112 闭环）：转写写回后同消息再排一次 chat/solo_chat，
+  // 续答运行：转写写回后同消息再排一次 chat/solo_chat，
   // 不下发二进制图（首轮已因主模型无视觉失败），转写正文由提示词近期窗口带入。
   addColumn(db, 'runs', 'image_offload', "INTEGER NOT NULL DEFAULT 0")
   db.exec(`UPDATE runs SET mode = 'read' WHERE kind IN ('chat', 'review', 'handle') AND mode = 'write'`)
 }
 
 // tasks.write_scopes 存任务声明的写范围（JSON 路径数组）；空数组 = 未声明，
-// 调度器据此把同项目写运行改为「范围不重叠才并行」。
+// 调度器据此让同项目写运行只在范围不重叠时并行。
 // tasks.time_budget_minutes 存发布时的时效要求（分钟，NULL = 未声明不注入提示词）。
 // tasks.deliverables 存卡面声明的交付物文件路径（JSON 路径数组）；核验按路径直接读文件，
-// 交付报告只引用路径不复述正文（DSHBOTS-345 复盘）。
+// 交付报告只引用路径不复述正文。
 // tasks.ignored_write_scopes 存声明中被 .gitignore 命中的「染色」条目（JSON 路径数组）：
 // 进卡面展示但不参与并行锁判定（全染色卡不与任何写运行串行，见 scheduler 写范围闸门）。
 function migrateTasks(db) {
@@ -311,17 +308,11 @@ function migrateSessionBindingAlias(db) {
   db.exec(BINDING_INDEXES)
 }
 
-// 库与绑定收敛（DSHBOTS-285，ADR §4.1/§5.2-1）：四车道收敛为每 bot 单条 kind='bot' 控制面绑定。
-// 索引部分无条件幂等（drop 旧三索引 + 建 one_bot_binding / one_active_run_per_bot）；
-// 数据部分记入 schema_migrations 账本只跑一次——中间版本（本卡已合、路由未收敛）的运行时会
-// 按需重建四车道，若每次开库都重跑 alias 化会把重建出来的车道会话反复作废。
+// 会话绑定收敛（ADR §4.1/§5.2-1）：四车道的活跃绑定转为每 bot 单条 kind='bot' 控制面绑定。
+// 索引部分无条件幂等（drop 旧三索引 + 建 one_bot_binding）；数据部分由账本守卫保证只跑一次：
+// alias 化若重跑，会作废运行时按需重建的车道会话。
 // 回退口径（ADR §7.2）：旧版本代码不含本迁移，alias 化后的旧道按需重建，历史 session id 仍可解析。
-// 冗余是有意兜底（DSHBOTS-288 备案，红线变异 M3/M4 存活的定性）：
-// - one_bot_binding 双重建（本迁移内 CREATE + runMigrations 末尾 BINDING_INDEXES）：两条路径
-//   （收敛迁移、表重建后的兜底）各自独立到达时都保证索引在，删任一处不红不等于它是死代码；
-// - 账本守卫的价值不在 UPDATE 幂等（UPDATE 重跑天然命中 0 行），而在挡住上述中间版本
-//   「运行时重建四车道 → 下次开库又被 alias 化作废」的循环；路由收敛合入后该窗口关闭，
-//   守卫转为纯防御留存。
+// one_bot_binding 在 runMigrations 末尾 BINDING_INDEXES 也会重建（表重建后的兜底），不是死代码。
 function migrateSessionBindingBotConvergence(db) {
   db.exec(`
     DROP INDEX IF EXISTS one_project_binding;
@@ -370,17 +361,10 @@ function migrateSessionBindingProjectScope(db) {
   recordMigration(db, 'session_binding_project_scope')
 }
 
-// one_active_run_per_bot（同 bot 同时至多一条 queued/running，ADR §2.3）：机制在本卡
-// 完整落地，但激活必须与 §5.2-2 入站路由收敛同车——现行运行时仍是「同 bot 多条 queued 领取时
-// 合批」（scheduler.coalesceQueuedRuns）与四车道并行，先建索引会让 enqueue 家族直接撞唯一约束
-// （实测全量 1540 例红 68，全部为 UNIQUE constraint failed: runs.bot_id）。步骤 2 把合批改为
-// 入队合并后，在 runMigrations 里调用本函数激活。
-// 账本闸（ZONGM-140 三会话事故复盘）：串行化收口是一次性存量迁移，不是每次开库的常驻
-// 逻辑——无闸时每次宿主重启都会把同 bot「较新的活跃运行」再收一遍，且下方 UPDATE 的
-// 收口口径（全 bot、不限 kind）与最终豁免口径（task/治理运行免串行，见 exempt 系列
-// 索引谓词）并不一致，生产表现是每次重启杀掉新排队的任务卡/治理运行（ZONGM-140 首发
-// 运行 10:40:25 入队 15 秒后被杀、DSHBOTS-368 两次被杀、11-13 两条治理运行被杀）。
-// 已记录账本即跳过：索引重建由 exempt 系列每次开库兜底，收口 UPDATE 只跑一次。
+// one_active_run_per_bot（同 bot 同时至多一条 queued/running，ADR §2.3）：存量串行化是
+// 一次性迁移，靠账本闸保证只跑一次——下方 UPDATE 的收口口径（全 bot、不限 kind）比最终
+// 索引谓词（task/治理运行免串行，见 exempt 系列）宽，每次开库重跑会把新排队的任务卡/
+// 治理运行误杀。已记录账本即跳过：索引重建由 exempt 系列每次开库兜底，收口 UPDATE 只跑一次。
 export function activateBotRunSerialization(db) {
   if (db.prepare("SELECT 1 FROM schema_migrations WHERE name = 'bot_run_serialization'").get()) return
   // 存量运行串行化（ADR §2.3）：同 bot 多条 queued/running 只保留最早一条，其余置 canceled。
@@ -401,11 +385,11 @@ export function activateBotRunSerialization(db) {
   recordMigration(db, 'bot_run_serialization')
 }
 
-// 串行域收窄（DSHBOTS-308，owner 拍板同一 bot 跨工作区并行）：one_active_run_per_bot 从
+// 串行域收窄：同一 bot 可跨工作区并行，one_active_run_per_bot 从
 // bot 全局收窄为 (bot, 工作区) 域，solo 域归一口径与 one_bot_binding 的 COALESCE 一致。
 // 同名索引列集已变，IF NOT EXISTS 不替换旧列集，须 DROP 再建；必须排 activateBotRunSerialization
-// 之后——前者未记账本时可能重建出 bot 级旧索引，靠本函数收口到域级。账本闸同前者（一次性
-// 存量迁移，重复执行的取消 UPDATE 会在每次重启时误杀活跃运行，见前者注释）。
+// 之后——前者未记账本时可能重建出 bot 级旧索引，靠本函数收口到域级。账本闸同前者
+// （一次性存量迁移，重复执行的取消 UPDATE 会在每次重启时误杀活跃运行）。
 export function activateBotRunSerializationDomain(db) {
   if (db.prepare("SELECT 1 FROM schema_migrations WHERE name = 'bot_run_serialization_domain'").get()) return
   // 存量按域分桶重做串行化：每 (bot, 域) 桶只留最早一条（queued_at, rowid），其余取消留痕。
@@ -429,19 +413,16 @@ export function activateBotRunSerializationDomain(db) {
   recordMigration(db, 'bot_run_serialization_domain')
 }
 
-// 任务运行豁免 bot 串行域（单 bot 多任务并行）：one_active_run_per_bot 加 kind <> 'task'
-// 谓词——施工运行不再受「同 (bot, 工作区) 至多一条活跃运行」约束，可多卡并行；任务维度的
-// 重复由 one_active_run_per_task 兜底，写安全由调度器写范围闸门兜底。review/handle（owner_task）
+// 任务运行豁免 bot 串行域（单 bot 多任务并行）：索引谓词排除任务运行（kind <> 'task'），
+// 施工运行不受「同 (bot, 工作区) 至多一条活跃运行」约束，可多卡并行；任务维度的重复由
+// one_active_run_per_task 兜底，写安全由调度器写范围闸门兜底。review/handle（owner_task）
 // 与消息族照旧串行。不追改存量（历史串行取消行为不回滚）。
 export function exemptTaskRunsFromBotSerialization(db) {
   // 本函数与 exemptGovernanceRunsFromBotSerialization 一样无账本闸（每次开库 DROP+重建，
-  // 兜住中间版本/损坏库的索引漂移）。但中间谓词（只豁免 task）比最终谓词（再豁免治理
-  // 运行）窄：库内存在最终态合法共存（如 review:running + rollover_summary:queued）时，
-  // 本步 CREATE UNIQUE INDEX 直接撞约束，宿主启动崩溃且 DROP 已执行、索引缺失→每次
-  // 启动都崩（生产实测 0.3.51：exemptTaskRunsFromBotSerialization UNIQUE constraint
-  // failed: one_active_run_per_bot）。修复：重建谓词直接收敛到最终口径（两步语义上
-  // 原本就是同车演进的收窄链，中间索引只活到下一行执行，不承担运行期约束），
-  // 并在 CREATE 前按最终谓词收口重复活跃运行自愈脏数据。
+  // 兜住索引漂移）。重建谓词直接用最终口径（豁免 task 与治理运行）而不是只豁免 task：
+  // 库内存在最终态合法共存的运行（如 review:running + rollover_summary:queued）时，按窄谓词
+  // 建 UNIQUE 索引会撞约束，宿主启动崩溃且 DROP 已执行、索引缺失，之后每次启动都崩。
+  // CREATE 前先按最终谓词收口重复的活跃运行，自愈脏数据。
   convergeActiveRunsForDomainIndex(db, ['task', 'session_compact', 'rollover_summary'])
   db.exec(`
     DROP INDEX IF EXISTS one_active_run_per_bot;
@@ -473,11 +454,10 @@ function convergeActiveRunsForDomainIndex(db, exemptKinds) {
   ).run(nowIso(), ...exemptKinds, ...exemptKinds)
 }
 
-// 只读治理运行豁免 bot 串行域（单轮上下文治理 P3）：session_compact / rollover_summary
+// 只读治理运行豁免 bot 串行域：session_compact / rollover_summary
 // 由 ensureSession 在 bot 自己的运行进行中排入（startRun 路径，当前运行此刻必占串行域），
 // 不豁免时 INSERT OR IGNORE 被 one_active_run_per_bot 部分唯一索引静默吞掉（changes=0 被
-// 当作幂等命中，无行无事件无报错）——生产实测 session_compact 0 次执行、结转摘要 3 次
-// 全落在索引激活之前。豁免后执行侧仍按 claimKey（bot 域键）串行领取，
+// 当作幂等命中，无行无事件无报错）。豁免后执行侧仍按 claimKey（bot 域键）串行领取，
 // 闲时语义由领取顺序保住；botBusy 查询口径不变（治理运行排队/执行中视为忙，消息族
 // 照旧挂待处理队列，不与治理运行互抢）。
 export function exemptGovernanceRunsFromBotSerialization(db) {

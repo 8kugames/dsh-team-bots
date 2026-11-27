@@ -1,6 +1,5 @@
-// DSHBOTS-294 子代理账本（ADR §4.2.1）：宿主事件缝 → 所属 task 运行的 run_events
-// （chat-db-split Phase 3 起事件住运行归属聊天库，路由器 { forRun } 由调用方注入，
-// 未注入时回落顶库，行为与分库前一致）。
+// 子代理账本（ADR §4.2.1）：宿主事件缝 → 所属 task 运行的 run_events
+// （事件住运行归属聊天库，路由器 { forRun } 由调用方注入，未注入时回落顶库）。
 // 双缝互补：tools 瀑布带 caller agent（父归属权威源，任务号标签在参数里）；
 // subagent/start|end 带 stopReason+lastAssistantMessage（终态摘要源，载荷无父身份，
 // 靠 tools/result 配对或唯一 running task 运行兜底归属）。子代理不占 runs 行（§4.2）。
@@ -39,7 +38,7 @@ export function runningSubagentCount(botId) {
   return runningByBot.get(botId) ?? 0
 }
 
-// 任务号标签（DSHBOTS-292 约定标签=任务号，如 DSHBOTS-294）：优先 description，其次 prompt。
+// 任务号标签（约定标签=任务号，如 DSHBOTS-294）：优先 description，其次 prompt。
 export function taskLabelOf(args) {
   const source = typeof args?.description === 'string' ? args.description
     : typeof args?.prompt === 'string' ? args.prompt : ''
@@ -65,9 +64,9 @@ export function installSubagentLedger(ctx, store, logger, chatStores = null) {
   // 暂存 subagent/end 载荷：childId → info，tools/result 到达时按 id 出现在结果 JSON 里配对
   const endsByChild = new Map()
 
-  // DSHBOTS-353 落账放宽：owner bot 的派单账优先记 kind='task' running（D-294 施工账语义），
+  // 落账放宽：owner bot 的派单账优先记 kind='task' running（施工账语义），
   // 无施工运行时回退该 bot 任意 kind 的 running 运行（review/chat）——总监验收链的核验
-  // 子代理（review_delegate 运行）此前永远查不中而不落账。域串行（D-308 one_active_run_per_bot）
+  // 子代理（review_delegate 运行）同样落账。域串行（one_active_run_per_bot）
   // 保证该 bot 当前 running 即派单所在运行。
   const ownerRunOf = (agentSessionId) => {
     const binding = agentSessionId

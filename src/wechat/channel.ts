@@ -401,8 +401,8 @@ export class WechatChannel {
       this.recordTrigger(message, 'filtered', 'non-admin', '发送者不是已绑定管理员')
       return
     }
-    // DSHBOTS-208 直达对话上下文：管理员会话绑定的项目 key（路由成功后由命令层回写）。
-    // ctx.trigger 由命令层回填分类（B4-①），成功/失败路径据此留痕；声明在 try 外供 catch 读取。
+    // 直达对话上下文：管理员会话绑定的项目 key（路由成功后由命令层回写）。
+    // ctx.trigger 由命令层回填分类，成功/失败路径据此留痕；声明在 try 外供 catch 读取。
     const ctx: any = {
       boundKey: this.store.getDirectProjectKey?.() ?? null,
       bind: key => this.store.saveDirectProjectKey?.(key),
@@ -486,8 +486,8 @@ export class WechatChannel {
 
   /**
    * 对外事件推送入口：入队后经合批窗口合并发送；未连接时仅落盘，链接建立后由新事件触发。
-   * A3/DSHBOTS-323：可带 receiptKey 幂等收据键——同键在存留期内重复推送被吸收（duplicate），
-   * 调用方无需自建防重；不带键的旧形态行为不变。
+   * 可带 receiptKey 幂等收据键：同键在存留期内重复推送被吸收（duplicate），
+   * 调用方无需自建防重；不带键的调用方行为不变。
    */
   notify(text, { receiptKey = null } = {}) {
     if (!this.enabled()) return
@@ -567,7 +567,7 @@ export class WechatChannel {
   }
 
   /** 失败记账：可重试错误计一次尝试，达到上限废弃；不可重试错误直接废弃。废弃后永不补发。
-   *  失败原因落 last_error（A3/DSHBOTS-323：sent/gone 终态可解释「为什么没收到」。 */
+   *  失败原因落 last_error（sent/gone 终态可解释「为什么没收到」）。 */
   recordOutboxFailure(item, error) {
     const retryable = isRetryable(error)
     const reason = this.errorText(error)

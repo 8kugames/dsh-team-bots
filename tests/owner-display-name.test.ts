@@ -1,4 +1,4 @@
-// tests/owner-display-name.test.ts —— DSHBOTS-341 守门：本地用户显示名 You→Owner。
+// 守门：本地用户显示名 You→Owner。
 // 锁定四件事：
 // ① 初始化后 users.name 与工作台 state.me.name 均为 'Owner'（新库种子与旧库 'You' 收敛两条路都覆盖）；
 //  ② 用户消息 messageView senderName='Owner'（时间线/署名全链取 actorName，根改即全改）；

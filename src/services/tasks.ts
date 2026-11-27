@@ -29,16 +29,13 @@ export const TRANSITIONS = {
   in_progress: new Set(['todo', 'blocked', 'in_review', 'canceled']),
   blocked: new Set(['todo', 'in_progress', 'canceled']),
   in_review: new Set(['in_progress', 'done', 'canceled']),
-  // 终态回流：done/canceled → backlog 是「驳回」（旧板 task-6 口径），→ todo 是「重新派单」，
+  // 终态回流：done/canceled → backlog 是「驳回」，→ todo 是「重新派单」，
   // 两条路径都在这里放行；离开终态时的活跃运行守卫见 updateTask。
   done: new Set(['todo', 'backlog']),
   canceled: new Set(['todo', 'backlog']),
 }
 
-// task-stage 域已拆至 src/services/task-stage.js（工单七态判定表 + 标签口径唯一来源），
-// 此处经顶部 import 引入 taskStage/taskStageLabel 供 taskView 派生 stage/stageLabel。
-
-// tasks 表时间列迁移（外置自管：db.js 已贴 800 行红线不再加行，approvals/message-images 同款先例）。
+// tasks 表时间列迁移（外置自管：db.js 已贴 800 行红线不再加行）。
 // canceled_at 与 completed_at 对称：进 canceled 写、离开清；老数据回填 canceled_at=updated_at，仅补空行。
 export function ensureTaskTimesSchema(store) {
   if (store.get('SELECT 1 AS ok FROM schema_migrations WHERE name = ?', 'tasks_canceled_at')) return
@@ -73,14 +70,12 @@ export function ensureTaskDeadlineSchema(store) {
 // 允许轮数：整卡死线 = 派发基准 + time_budget_minutes × TASK_BUDGET_ROUNDS。
 export const TASK_BUDGET_ROUNDS = 2
 
-// 任务级死线纯计算（DSHBOTS-274 立卡，DSHBOTS-281 基准升级）：
-// 治「time_budget_minutes 只约束单运行、多轮派发各自重置预算、累计耗时无上限」。
-// - 派发基准 = 最新一次派发（latestDispatchAt）：重派即新窗口——重派动作本身视为预算决策，
-//   存量老卡重派不再立即升级，也无需先实改 time_budget_minutes 延期；
-// - 延期阀兼容：owner 实改预算后死线按新预算×轮数从最新派发基准重算；改后尚未重派时
-//   基准仍取最新派发（不早于旧口径的「退回首次派发」），budget_updated_at 只标记新预算生效；
-// - 真超时仍拦截：新窗口内预算×轮数耗尽后，下一次领取照常升级（escalateTaskPastDeadline）；
-// - 无预算（NULL/≤0）或无派发记录返回 null，死线不约束（与 D-131 无时效口径一致）。
+// 任务级死线纯计算，治「time_budget_minutes 只约束单运行、多轮派发各自重置预算、累计耗时无上限」：
+// - 派发基准 = 最新一次派发（latestDispatchAt）：重派即新窗口，重派动作本身视为预算决策；
+// - owner 实改预算后死线按新预算×轮数从最新派发基准重算；改后尚未重派时基准也取最新派发，
+//   budget_updated_at 只标记新预算生效；
+// - 新窗口内预算×轮数耗尽后，下一次领取照常升级（escalateTaskPastDeadline）；
+// - 无预算（NULL/≤0）或无派发记录返回 null，死线不约束。
 export const taskDeadlineMs = ({ budgetMinutes, firstDispatchAt, latestDispatchAt }) => {
   const minutes = Number(budgetMinutes)
   if (!Number.isFinite(minutes) || minutes <= 0) return null
@@ -90,7 +85,7 @@ export const taskDeadlineMs = ({ budgetMinutes, firstDispatchAt, latestDispatchA
   return base + minutes * TASK_BUDGET_ROUNDS * 60_000
 }
 
-// 任务级死线信息（DSHBOTS-274；DSHBOTS-281 基准=最新派发）：派发时刻口径 = runs 表
+// 任务级死线信息：派发时刻口径 = runs 表
 // kind='task' 的 queued_at（入队即派发；started_at 领取后才写，未被领取过的派发拿不到
 // 时刻，故不用 started_at）。review/handle 等派生运行 kind!=='task' 天然不计入派发史。
 export function taskDeadlineInfo(store, task) {
@@ -100,7 +95,7 @@ export function taskDeadlineInfo(store, task) {
     task.id,
   )?.v ?? null
   // 重派即新窗口：每次派发都把死线基准推到本次 queued_at，重派（含无主卡领取）自动重置，
-  // 不依赖任何显式预算实改（与 D-274「改后首个派发」同构，把重派本身视为预算决策）。
+  // 不依赖任何显式预算实改。
   const latestDispatchAt = store.get(
     "SELECT MAX(queued_at) AS v FROM runs WHERE task_id = ? AND kind = 'task'",
     task.id,
@@ -123,8 +118,8 @@ export const tasksMethods = {
     return effectiveTaskTimeBudgetMinutes(this.config, key => this.store.setting(key))
   },
   async createTask(input, actor = this.actor()) {
-    // DSHBOTS-237：建卡强制项目编号（项目 KEY-N）。无项目语境直接报错引导，
-    // 不再允许脱离项目建卡（共享板 task-N 口径废弃：存量可读，新建一律走项目编号）。
+    // 建卡强制项目编号（项目 KEY-N）：无项目语境直接报错引导，
+    // 不允许脱离项目建卡（共享板 task-N 存量可读，新建一律走项目编号）。
     if (input.projectId === undefined || input.projectId === null || String(input.projectId).trim() === '') {
       throw badRequest('建卡必须归属项目：请指定项目后再建卡，任务卡编号统一为「项目 KEY-N」（如 DSHBOTS-1），不再支持无项目的共享板建卡')
     }
@@ -142,9 +137,9 @@ export const tasksMethods = {
       : parseWriteScopes(input.writeScopes)
     // 时效要求：发布方可传交付时限（分钟）；钳制到 1..10080（一分钟到一周）：
     // 只挡垃圾值，不替发布方做取舍；0/负数视为未提。
-    // DSHBOTS-198：产品规则=每卡必有预算——未显式提时按缺省链补挂
+    // 每卡必有预算：未显式提时按缺省链补挂
     // （env DSH_TEAM_TASK_TIME_BUDGET_MINUTES > 看门狗分钟生效值 > 兜底 20），显式值优先不覆盖。
-    // DSHBOTS-131：该任务派生运行的超时上限取 min(本字段, 全局 runTimeoutMs)，到期即超时中止。
+    // 该任务派生运行的超时上限取 min(本字段, 全局 runTimeoutMs)，到期即超时中止。
     const rawTimeBudget = input.timeBudgetMinutes ?? input.time_budget_minutes
     const timeBudgetMinutes = (Number(rawTimeBudget) > 0 ? clampNumber(rawTimeBudget, 1, 10_080, null) : null)
       ?? this.defaultTaskTimeBudget()
@@ -157,7 +152,7 @@ export const tasksMethods = {
       throw badRequest(`沙箱覆盖无效，允许值：inherit / ${SANDBOX_OVERRIDES.join(' / ')}`)
     }
     const sandboxOverride = !rawSandboxOverride || rawSandboxOverride === 'inherit' ? null : rawSandboxOverride
-    // 交付物路径声明（DSHBOTS-345 复盘）：卡面声明的交付文件，核验按路径直接读文件；
+    // 交付物路径声明：卡面声明的交付文件，核验按路径直接读文件；
     // camelCase 与 snake_case 都收，空数组 = 未声明。
     const deliverables = parseDeliverables(input.deliverables ?? input.deliverables_paths ?? undefined)
     const taskId = id('task')
@@ -239,23 +234,23 @@ export const tasksMethods = {
         idempotencyKey: `task:${taskId}:task_created`,
       })
     }
-    // 微信推送闭环（DSHBOTS-182 增补）：创建成功即推一条（KEY-N/标题/派给谁），
-    // 与完成推送同锚定一次性事件（创建是单次 INSERT），交付节点仍不推。
+    // 微信推送闭环：创建成功即推一条（KEY-N/标题/派给谁），
+    // 与完成推送同锚定一次性事件（创建是单次 INSERT），交付节点不推。
     this.notifyTaskCreated(this.taskRow(taskId))
     void this.tick()
     return this.taskView(this.taskRow(taskId))
   },
   addTaskEvent(taskId, type, actor, data = {}) {
-    // 任务事件住任务所属项目的聊天库（chat-db-split Phase 3）：task 行在顶库，按 project_id 路由。
+    // 任务事件住任务所属项目的聊天库：task 行在顶库，按 project_id 路由。
     const projectId = this.store.get('SELECT * FROM tasks WHERE id = ?', taskId)?.project_id
     // afterCommit：调用方常包在顶库事务里（setTaskStatus 等）——聊天库写跟随顶库
-    // 提交/回滚，外层回滚不残留事件（Phase 3 跨库原子性收口）。
+    // 提交/回滚，外层回滚不残留事件。
     this.store.afterCommit(() => this.groupChatStore(projectId).run(
       'INSERT INTO task_events(id, task_id, type, actor_type, actor_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       id('tevt'), taskId, type, actor.type, actor.id, JSON.stringify(data), nowIso(),
     ))
   },
-  // 统一状态迁移落点（吸收 dsh-agent-team「账本为权威、投影可重放」理念）：所有直接改
+  // 统一状态迁移落点：所有直接改
   // tasks.status 的路径都经此走——同一事务内 UPDATE + 权威 'status' 事件（from/to），
   // 事件流因此能完整重放任务状态机（见 taskProjectionDrift）。守卫防终态覆盖/非法源态；
   // 返回是否实际迁移（未命中守卫为 no-op，调用方保持原语义）。
@@ -302,7 +297,7 @@ export const tasksMethods = {
     }
     return drifted
   },
-  // 变更栅栏的事实面（吸收 dsh-agent-team mutation-fence 理念）：版本冲突的拒绝不只说
+  // 变更栅栏的事实面：版本冲突的拒绝不只说
   // 「请刷新」，还附最近变更事实，让写者就地重新裁决，不必整卡重读。事件与 version
   // 增量非一一对应（交付是一事件一增量，updateTask 是一增量多事件），故按时间取最近
   // N 条而非按版本切割。
@@ -384,7 +379,7 @@ export const tasksMethods = {
       stageLabel: taskStageLabel(stage),
       reviewStatus: this.taskReviewStatus(task),
       // 验收滞留同源视图：锚点/阈值/最近判定由 review-watchdog 域统一供出，
-      // UI badge 与后端守门同一口径（H3），面板据此展示三档判定与依据。
+      // UI badge 与后端守门同一口径，面板据此展示三档判定与依据。
       reviewIdle: task.status === 'in_review' ? this.reviewIdleView(task) : null,
     }
   },
@@ -428,7 +423,7 @@ export const tasksMethods = {
     if (failedSpawn) return 'failed'
     return 'none'
   },
-  // options.startTriggerType：进入「进行中」时给运行用的触发类型标签（看板拖拽沿用 D-54 的 board_resume，
+  // options.startTriggerType：进入「进行中」时给运行用的触发类型标签（看板拖拽传 board_resume，
   // 其余路径默认 task_started）。只影响运行元数据与幂等键，不影响行为口径。
   async updateTask(taskId, patch, actor = this.actor(), options = {} as any) {
     const task = this.taskRow(taskId)
@@ -479,7 +474,7 @@ export const tasksMethods = {
     // 改目标是一次显式的版本修订：只有 patch 带 goal 才产生新版本，状态、负责人、评论、
     // 交付物、写作用域的变更都不碰 goal_* 列。
     if (patch.goal !== undefined) {
-      // 终态卡的 Goal 不再修订（与写范围终态闸同口径）：验收已对照当时版本关单，事后改目标
+      // 终态卡的 Goal 不修订（与写范围终态闸同口径）：验收已对照当时版本关单，事后改目标
       // 只会让「对着哪一版验收的」失去意义。
       if (task.status === 'done' || task.status === 'canceled') throw conflict('任务已结束，不能修改 Goal')
       ensureTaskGoalSchema(this.store)
@@ -490,7 +485,7 @@ export const tasksMethods = {
       }
     }
     // 延期阀：update_task 实改 time_budget_minutes 后整卡死线按新预算重算
-    // 记 budget_updated_at 标记新预算生效；派发基准统一为最新派发（DSHBOTS-281 重派即新窗口），
+    // 记 budget_updated_at 标记新预算生效；派发基准统一为最新派发（重派即新窗口），
     // 改预算与重派各自独立生效，改后重派拿到「新预算 × 新窗口」。
     if (patch.timeBudgetMinutes !== undefined || patch.time_budget_minutes !== undefined) {
       const rawBudget = patch.timeBudgetMinutes ?? patch.time_budget_minutes
@@ -551,7 +546,7 @@ export const tasksMethods = {
     if (updates.status && updates.status !== task.status && (updates.status === 'done' || updates.status === 'canceled')) {
       this.cancelSupersededQueuedRuns(taskId)
     }
-    // 写占用释放（DSHBOTS-73，用户口径）：任务状态离开「进行中」就中止它名下仍在跑/排队的写运行，
+    // 写占用释放：任务状态离开「进行中」就中止它名下仍在跑/排队的写运行，
     // 写占用/锁定随之解除。单一触发点：所有任务状态变更都经过 updateTask 这一处，不在别处散着写。
     if (updates.status && updates.status !== task.status && updates.status !== 'in_progress') {
       await this.releaseTaskWriteLocks(taskId, { fromStatus: task.status, toStatus: updates.status })
@@ -569,7 +564,7 @@ export const tasksMethods = {
     if (updates.status === 'done' && task.status !== 'done') {
       this.notifyTaskDone(this.taskRow(taskId))
     }
-    // 任务卡修正闭环（DSHBOTS-232 ①）：已派单卡的卡面（标题/描述/优先级/写范围/Goal）实际变值时
+    // 任务卡修正闭环：已派单卡的卡面（标题/描述/优先级/写范围/Goal）实际变值时
     // 通知负责人修正。只认卡面字段——状态/负责人等流转字段各有自己的通知口径，不在此重复；
     // 值未变的字段（同值重写）不触发。Goal 以版本是否推进为准（只改完成标准时陈述不变）。
     if (task.assignee_bot_id) {
@@ -617,7 +612,7 @@ export const tasksMethods = {
   async taskDetail(taskId) {
     const task = this.taskRow(taskId)
     const project = this.projectRow(task.project_id)
-    // 评论与事件住任务所属项目的聊天库（chat-db-split Phase 3）；runs/依赖仍在顶库。
+    // 评论与事件住任务所属项目的聊天库；runs/依赖在顶库。
     const comments = this.groupChatStore(task.project_id).all('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at', taskId)
     const events = this.groupChatStore(task.project_id).all('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at', taskId)
     const runs = this.store.all("SELECT * FROM runs WHERE task_id = ? AND COALESCE(error_code, '') <> 'SUPERSEDED' ORDER BY queued_at DESC", taskId)
@@ -631,7 +626,7 @@ export const tasksMethods = {
     // 只挂 taskDetail 单卡详情，不进 taskView 列表热路径（每卡一次聚合会放大列表查询）。
     const subtreeIds = taskSubtreeIds(this.store, taskId)
     const budgetCurrency = this.budgetCurrency()
-    // 任务用量明细住该任务项目的聊天库（chat-db-split Phase 2）；子树 id 集来自顶库 tasks。
+    // 任务用量明细住该任务项目的聊天库；子树 id 集来自顶库 tasks。
     const usageStore = this.groupChatStore(project.id)
     return {
       ...this.taskView(task),

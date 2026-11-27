@@ -55,7 +55,7 @@ test('installHttp registers switch entry into host index injection', () => {
 })
 
 // 宿主 0.2.3 起 remote-connection 占用精确路由 `/`，插件再注册同名路由会让
-// 整个插件加载失败。首页直达改为 webserver/request waterfall 拦截。
+// 整个插件加载失败。首页直达走 webserver/request waterfall 拦截。
 async function runRootRequest({ method = 'GET', url = '/', admitted = true } = {}) {
   const { ctx, listeners } = fakeCtx({ admitted })
   installHttp(ctx, { localUserId: 'u1' }, { info() {}, warn() {}, error() {} })

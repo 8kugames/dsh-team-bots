@@ -1,5 +1,5 @@
-// DSHBOTS-174：单聊「查看更早归档消息」入口可达。
-// 后端 state 增 view.solo.archived={count,hasMore} 契约（复用 DSBOTS-171 soloVisibleMessages 窗口口径）；
+// 单聊「查看更早归档消息」入口可达。
+// 后端 state 增 view.solo.archived={count,hasMore} 契约（复用 soloVisibleMessages 窗口口径）；
 // 前端 canLoadOlder 单聊分支接契约门控（归档过滤后首屏恒 <CHAT_PAGE_SIZE，旧满页阈值永不满足），
 // 取数零新请求路径——仍走既有 chatOlder 分片桶 + messagesPage 单聊游标；群聊按钮条件不变。
 // 后端例走 service 行为断言（与 tests/solo-archive.test.js 同口径）；UI 例走 readUiSource 防假锁

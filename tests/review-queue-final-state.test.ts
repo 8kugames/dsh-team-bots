@@ -1,11 +1,11 @@
-// tests/review-queue-final-state.test.js —— DSHBOTS-275 review 运行入队前终态预检守门
-// 纯源码级断言钉住入队点改造，另用临时库（openDatabase 全量迁移基建）做端到端：
+// review 运行入队前终态预检的守门测试。
+// 纯源码级断言钉住入队点，另用临时库（openDatabase 全量迁移基建）做端到端：
 // ① 终态预检代码路径：enqueueOwnerTaskRun 在 INSERT INTO runs 之前按库内最新任务状态
 //    （this.taskRow 重读，不吃调用方过期行）预检，done/canceled 直接 return null 不产生 run 行；
-// ② 兜底取消路径保留：任务流转终态时的 cancelSupersededQueuedRuns / cancelStaleQueuedTaskRuns
-//    与「任务已结束，排队运行被清理」（SUPERSEDED + stale_superseded）文案一行不动，仍治
-//    「入队后才到终态」的残留排队运行；run-finish 的 owner_task_run outbox 投递链路不变；
-// ③ 端到端：终态任务经 enqueueOwnerTaskRun 不再产生 review run 行；非终态照常入队（语义不变）；
+// ② 兜底取消路径：任务流转终态时仍由 cancelSupersededQueuedRuns / cancelStaleQueuedTaskRuns
+//    清理「入队后才到终态」的残留排队运行（SUPERSEDED + stale_superseded 文案）；
+//    run-finish 的 owner_task_run outbox 投递链路照常；
+// ③ 端到端：终态任务经 enqueueOwnerTaskRun 不产生 review run 行；非终态照常入队；
 //    已排队 review 运行遇任务关单仍走兜底取消文案。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

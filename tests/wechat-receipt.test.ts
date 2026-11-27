@@ -1,4 +1,4 @@
-// tests/wechat-receipt.test.ts —— A3/DSHBOTS-323：外发幂等收据与可解释终态守门。
+// 外发幂等收据与可解释终态的守门测试。
 // 收据真值唯一落通道出站库（wechat-channel.sqlite，反双真值不在插件库建第二张表）：
 // ① receipt_key 幂等吸收（同键存留期内只入队一次）；② sent/gone 终态带原因（last_error）；
 // ③ 插件四个外发调用点带稳定键；④ notifyReceiptsView 同源读取并映射终态。

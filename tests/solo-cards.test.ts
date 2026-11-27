@@ -1,4 +1,4 @@
-// DSHBOTS-218：工作台单聊（kind='solo'、project_id 为空）承接 ask_user 提问卡与 approval 审批卡。
+// 工作台单聊（kind='solo'、project_id 为空）承接 ask_user 提问卡与 approval 审批卡。
 // 覆盖：单聊认领落卡片锚点（solo_messages）、不转发微信、不进群消息、state 视图合并单聊条目、
 // 用户作答/决策闭环、非单聊绑定仍透传、群聊口径不回归、旧库 NOT NULL project_id 迁移重建。
 import { test } from 'node:test'
@@ -39,7 +39,7 @@ async function setup() {
   return { root, store, service, config }
 }
 
-// 聊天分库 Phase 1：正文表分住各聊天库，跨库计数用这个小助手逐库求和。
+// 聊天分库：正文表分住各聊天库，跨库计数用这个小助手逐库求和。
 function sumChatColumn(service, sql, ...params) {
   return service.allChatStores().reduce((sum, chatStore) => sum + Number(chatStore.get(sql, ...params)?.n ?? 0), 0)
 }

@@ -61,7 +61,7 @@ export class WechatStore {
   }
 
   /**
- * 旧库补列迁移：直达对话引入项目绑定列之前的库缺这一列。
+ * 旧库缺列时补上直达对话的项目绑定列（direct_project_key）。
  * 幂等：列已存在则跳过；补列无默认值，旧行语义等价于「未绑定」。
  */
   async migrateChannelStateColumns() {
@@ -74,8 +74,8 @@ export class WechatStore {
   }
 
   /**
- * 旧库补列迁移：outbox 引入重试上限（attempts）与废弃标记（gave_up_at）前的库缺这两列；
- * 幂等收据键与最近失败原因（last_error）同批补齐。
+ * 旧库缺列时补上 outbox 的重试上限（attempts）、废弃标记（gave_up_at）、
+ * 幂等收据键与最近失败原因（last_error）。
  * 幂等：列已存在则跳过；补列带默认值，旧行语义等价于「未重试过、未废弃、无收据键」。
  */
   async migrateOutboxColumns() {
@@ -237,7 +237,7 @@ export class WechatStore {
   }
 
   /** 记一次发送失败（可重试），返回该条累计尝试次数（含本次；持久化，重启不重置）。
-   *  last_error 存最近一次失败原因（A3/DSHBOTS-323：废弃后可解释「为什么没收到」。 */
+   *  last_error 存最近一次失败原因（废弃后可解释「为什么没收到」）。 */
   markAttempt(id, error = '') {
     const result = this.db.prepare(
       "UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ? AND sent_at IS NULL AND gave_up_at IS NULL",

@@ -222,7 +222,7 @@ function renderShell() {
   const project = inSolo ? null : activeProject()
   const projectRunning = project?.stats?.running ?? 0
   const tokenTotal = usageTotals('project').totalTokens ?? 0
-  // 全局一级视图（DSHBOTS-197 起含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。页壳页冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；main-head 整块不渲染，避免空粘头残影。
+  // 全局一级视图（含迁移落点页 通道/密钥）：无项目 tab 导航，侧栏直达。页壳页冗余 topbar 不渲染，页头由 global-head 唯一承担（总览bots 仍走 topbar）；main-head 整块不渲染，避免空粘头残影。
   const isGlobal = GLOBAL_VIEWS.has(state.view) || (state.view === 'usage' && usageMode() === 'global')
   const shellGlobalPage = isGlobal && state.view !== 'bots-overview'
   const showMainHead = !shellGlobalPage
@@ -619,7 +619,7 @@ function formPayload(form) {
 
 async function poll() {
   // 遮罩打开时照常取数（数据不丢），整页重建由 render 内部的遮罩闸门跳过。
-  // 焦点不再挡取数：焦点常驻 composer 时若连 fetch 都跳过，运行结束后
+  // 焦点不挡取数：焦点常驻 composer 时若连 fetch 都跳过，运行结束后
   // 「正在思考与回复…」与新消息会一直冻结，直到点击页面令 composer 失焦。焦点只在下方渲染半边设闸。
   if (!state.data || state.busy > 0) return
   // 目录选择器开着或表单有未保存修改时暂停自动刷新：整页重渲染会吞掉选择器与已选/已填的值。
@@ -709,8 +709,8 @@ window.addEventListener('error', (event) => {
   img.replaceWith(chip)
 }, true)
 
-// proposal 表单随弹窗层落进 #modal-root：改盯弹窗层的子树变化（含原位内容更新），
-// #app 的全量重建不再牵动弹窗，也就不再需要靠 app 重建来重绑表单。
+// proposal 表单随弹窗层落进 #modal-root：盯弹窗层的子树变化（含原位内容更新），
+// #app 的全量重建不牵动弹窗，也不靠 app 重建来重绑表单。
 const observer = new MutationObserver(() => {
   if (state.modal?.type === 'proposal') bindProposalForm()
 })
@@ -727,14 +727,14 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void poll()
 })
 
-// 秒级时钟定点刷新（DSHBOTS-154 抽出共用）：消息流 typing 行、调度页运行行与任务弹窗
+// 秒级时钟定点刷新：消息流 typing 行、调度页运行行与任务弹窗
 // 运行行（runClockSpan 产出的占位）同一通道——只改 textContent，不重建节点。renderModalLayer
 // 挂载/补丁后同步调用一次，占位符不会等满 1s 才补上真实时长。
 function updateRunClocks(root = document) {
   const overlay = overlayOpen() // 遮罩打开时底页在模糊后不可见：底页时钟跳过，只刷弹窗层
   for (const el of root.querySelectorAll('.run-clock[data-started]') as NodeListOf<HTMLElement>) {
     if (overlay && !el.closest('#modal-root')) continue
-    const next = duration(el.dataset.started); if (el.textContent !== next) el.textContent = next // DSHBOTS-255 等值守卫：值相同也写会替换文本节点
+    const next = duration(el.dataset.started); if (el.textContent !== next) el.textContent = next // 等值守卫：值相同也写会替换文本节点
   }
 }
 
@@ -785,7 +785,6 @@ setInterval(() => {
 }, 1000)
 void init()
 
-// DSHBOTS-15 批次3：IIFE 包裹已拆除（模块作用域等价于原 IIFE 私有作用域，模块天然 strict）。
 // 以下导出仅供后续批次外迁的 ui/modules/*.js 反向依赖（调用期解析）；随各域搬出逐步收缩。
 export { app, UI_SCALE_KEY, UI_THEME_KEY, UI_COLOR_SCHEME_KEY, savedScale, refresh, startWechatPoll, stopWechatPoll, startTerminalPoll, stopTerminalPoll, syncTerminalPoll, updateTerminalDom, bootError, isTyping, pendingProposals, tabDot, renderShell, syncChromeHeight, renderKeepingChatScroll, panelKey, isPanelOpen, panelOpenAttr }
 export { applyPanelToggle, panelAttrs, lastRenderedView, captureViewScroll, restoreViewScroll, CHAT_BOTTOM_THRESHOLD, nextChatAtBottom, render, renderView, noProject, runStatusLabel, sideRowStatusHtml, runKindLabel, chatContextPending, beginChatPending, endChatPending }

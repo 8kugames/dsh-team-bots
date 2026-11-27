@@ -1,7 +1,7 @@
-// src/services/projects.js —— 项目与成员域
+// 项目与成员域
 // 项目建档、档案更新、归档、成员增删与成员视图。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 方法体内的 this 即宿主实例。
 
 import { readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -30,7 +30,7 @@ export const projectsMethods = {
 
   // 群聊未读计数（IM 式）：以该读者对各项目的已读水位为界，统计其后到达的 bot 群聊消息。
   // 没有水位的项目以项目创建时间为基线，历史消息不会一上来就全红。
-  // 聊天正文已分库（chat-db-split Phase 1）：按项目聊天库逐库计数，库数是个位数。
+  // 聊天正文已分库：按项目聊天库逐库计数，库数是个位数。
   unreadChatCounts() {
     const rows = []
     for (const project of this.store.all('SELECT id, created_at FROM projects')) {
@@ -70,7 +70,7 @@ export const projectsMethods = {
   },
 
   // 成员列表带本项目聚合口径：busy=本项目有排队/运行中的 run，或该 bot 有在跑的子代理
-  //（子代理不占 runs 行，与总览 bots 页同款判定，DSHBOTS-294）；usage 四项与 cost 为本项目全部 run 的累计。
+  //（子代理不占 runs 行，与总览 bots 页同款判定）；usage 四项与 cost 为本项目全部 run 的累计。
   // controlSessionId = 该成员在本项目的控制面绑定会话（kind='bot' 活跃行），供「跳原生界面」入口。
   // run_status 用 bot 全局口径（不限本项目）：failed 根因（模型/AUTH）是 bot 级，单聊 run 的 project_id 为 NULL，
   // 按项目口径会把「单聊跑着/刚挂」错显 idle——busy 的 run 部分维持项目口径不动。
@@ -322,7 +322,7 @@ export const projectsMethods = {
       }
       this.audit(actor, 'project.create', 'project', projectId, { name, key, owner: owner.id })
     })
-    // 团队级密钥已存在时，新项目只做旧架构 .team/secrets.env 残留清理（DSHBOTS-106 起不物化明文）。
+    // 团队级密钥已存在时，新项目不物化明文 secrets.env，只清理旧架构 .team/secrets.env 残留。
     const teamSecrets = this.store.get("SELECT COUNT(*) AS n FROM secrets WHERE scope = 'team'")
     if (Number(teamSecrets?.n) > 0) {
       try {
@@ -331,7 +331,7 @@ export const projectsMethods = {
         this.logger.warn?.(`dsh-team: 新项目 ${projectId} 清理旧 .team/secrets.env 残留失败：${error?.message ?? error}`)
       }
     }
-    // DSHBOTS-225 临时文件纪律：建群即落 .tmp/bots/（ignore 文件 + 各成员目录）。
+    // 临时文件纪律：建群即落 .tmp/bots/（ignore 文件 + 各成员目录）。
     // 创建失败只告警，不阻塞建群主流程。
     try {
       await ensureBotTmpDirs(
@@ -380,7 +380,7 @@ export const projectsMethods = {
     if (memberIds) {
       for (const botId of memberIds) this.botRow(botId)
     } else if (updates.owner_bot_id) {
-      // 不带 memberIds 的增量更新（设置页已不再全量提交成员）：换总监时补齐成员表，
+      // 不带 memberIds 的增量更新：换总监时补齐成员表，
       // 维持「总监恒为成员」不变量；角色同步为 owner，原总监降为普通成员。
       this.botRow(updates.owner_bot_id)
       this.store.run(
@@ -471,7 +471,7 @@ export const projectsMethods = {
       }
       this.audit(actor, 'project.update', 'project', projectId, updates)
     })
-    // 生产目录切换后：旧目录的明文 secrets.env 不许留下（新目录不再物化，DSHBOTS-106 起明文走数据目录一次性文件）。
+    // 生产目录切换后：旧目录的明文 secrets.env 不许留下（新目录不物化，明文走数据目录一次性文件）。
     if (productionDirChanged && project.production_dir) {
       try {
         rmSync(join(project.production_dir, '.team', 'secrets.env'), { force: true })
@@ -519,8 +519,8 @@ export const projectsMethods = {
     )
     if (Number(active?.n) > 0) throw badRequest('项目仍有排队或运行中的 run，不能移除追踪')
     const dir = this.projectWorkDir(project)
-    // 群聊正文（messages/message_images/run_trajectory，Phase 1）与任务评论/事件、终端命令
-    // 住项目聊天库：管理数据清完后整库文件删除即完成正文清理，不再逐表 DELETE。
+    // 群聊正文（messages/message_images/run_trajectory）与任务评论/事件、终端命令
+    // 住项目聊天库：管理数据清完后整库文件删除即完成正文清理，无需逐表 DELETE。
     this.store.transaction(() => {
       const runIds = 'SELECT id FROM runs WHERE project_id = ?'
       const taskIds = 'SELECT id FROM tasks WHERE project_id = ?'
@@ -585,14 +585,14 @@ export const projectsMethods = {
       )
       this.audit(actor, 'project.add_member', 'project', projectId, { botId, botName: bot.name })
     })
-    // DSHBOTS-225 临时文件纪律：新成员入群即有自己的 .tmp/bots/{bot名}/ 目录；
+    // 临时文件纪律：新成员入群即有自己的 .tmp/bots/{bot名}/ 目录；
     // 创建失败只告警，不阻塞入群主流程。
     try {
       await ensureBotTmpDirs(this.projectWorkDir(project), [bot.name])
     } catch (error: any) {
       this.logger.warn?.(`dsh-team: 项目 ${project.key} 为成员 ${bot.name} 创建临时目录失败：${error?.message ?? error}`)
     }
-    // DSHBOTS-229 入群通知：新成员入群后向其他成员发群系统消息（纯文本，无 emoji）。
+    // 入群通知：新成员入群后向其他成员发群系统消息（纯文本，无 emoji）。
     // 与临时目录同口径：通知失败只告警，不阻塞入群主流程。
     try {
       const others = this.membersOf(projectId).filter(member => member.id !== botId)

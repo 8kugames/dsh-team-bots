@@ -3,7 +3,7 @@
 // 各推一条（创建→完成闭环），交付（in_review/待验收）节点不推。幂等不靠通知键，
 // 靠锚定一次性事件本身：创建是单次 INSERT；done 是受 TRANSITIONS 守卫的状态转换
 // （done→done 不构成转换）。通道未启用时静默（无可用通道即 no-op）；
-// DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
+// 出站经 channelNotify 扇出到各已启用通道（微信/飞书）。
 // 通知失败不能把已落库的变更打挂。
 // notifyTaskStarted是群内开工通知+运行入队（非微信推送），
 // 与两个微信锚点同属任务通知域，一并落在本文件。
@@ -57,7 +57,7 @@ export const taskNotifyMethods = {
     void this.tick()
     return { taskId: task.id, triggerType }
   },
-  // 任务卡修正闭环（DSHBOTS-232 ①）：已派单卡的卡面（标题/描述/优先级/写范围）变更时，
+  // 任务卡修正闭环：已派单卡的卡面（标题/描述/优先级/写范围）变更时，
   // 群内发系统消息点名负责人「按新卡面修正」；负责人名下该任务有正在执行的运行时，
   // 再向其会话注入一条修正提示（复用 steer 通道，与评论直通同机制）。
   // 通知失败不回滚已落库的卡面变更（与 notifyTaskStarted 同口径）。
@@ -100,7 +100,7 @@ export const taskNotifyMethods = {
   },
   // 任务完成通知：锚定 →done 转换，触发点在 updateTask。
   // 幂等收据键：task-done:<task.id>——同卡重复推送在通道存留期内被吸收。
-  // DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
+  // 出站经 channelNotify 扇出到各已启用通道（微信/飞书）。
   notifyTaskDone(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
@@ -110,10 +110,10 @@ export const taskNotifyMethods = {
       this.logger.warn?.('dsh-team: 任务完成通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },
-  // 任务创建通知（DSHBOTS-182 增补）：锚定创建成功（单次 INSERT），触发点在 createTask。
+  // 任务创建通知：锚定创建成功（单次 INSERT），触发点在 createTask。
   // 文案含 KEY-N/标题/派给谁；无负责人时如实注明「暂未指派」。
   // 幂等收据键：task-created:<task.id>。
-  // DSHBOTS-328：出站经 channelNotify 扇出到各已启用通道（微信/飞书），不再只到微信。
+  // 出站经 channelNotify 扇出到各已启用通道（微信/飞书）。
   notifyTaskCreated(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`
@@ -124,10 +124,10 @@ export const taskNotifyMethods = {
       this.logger.warn?.('dsh-team: 任务创建通知失败 %s: %s', identifier, error?.message ?? error)
     }
   },
-  // 验收边界沉淀提醒（吸收 dsh-agent-team acceptance-boundary 理念，搭车投递形态）：
+  // 验收边界沉淀提醒（搭车投递形态）：
   // 验收通过只落一个 per-(bot, project) 待提醒标记（上限 3 条），负责人在该项目的下一次
   // 运行提示词里渲染一次性提醒块（见 prompt.ts acceptReminderBlock）并清标记——零额外
-  // 轮次、不往会话日志注入外来消息、不依赖会话存续（steer 形态的三个毛病都没有）。
+  // 轮次、不往会话日志注入外来消息、不依赖会话存续。
   noteTaskAccepted(task) {
     const project = this.projectRow(task.project_id)
     const identifier = `${project.key}-${task.number}`

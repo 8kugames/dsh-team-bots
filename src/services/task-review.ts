@@ -79,7 +79,7 @@ export const taskReviewMethods = {
       ? this.store.get('SELECT * FROM runs WHERE id = ?', deliveredRunId)
       : null
     if (delivered && this.readOnlyDelivery(delivered, task)) return
-    // 委派核验闭环即证据（DSHBOTS-365 后续）：核验外包给承接人（种子 reviewer 或总监）后，
+    // 委派核验闭环即证据：核验外包给承接人（种子 reviewer 或总监）后，
     // 只认 subagent_spawned 账目会漏掉「承接人亲自核验」的正规闭环——review_delegate 运行
     // 跑完即核验完成，结论已由 finishRun 写回任务评论（总监裁决时读的就是它），承接人没有
     // 义务再派一层子代理。周期内存在已完成的委派核验运行即放行；账目判定留给总监
@@ -101,7 +101,7 @@ export const taskReviewMethods = {
       run.id, windowStart,
     ))
     if (ledger) return
-    // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 正确下一步。
+    // 失败语义引导：拒绝文案 = 原因 + 正确下一步。
     throw badRequest(
       '本次评审没有核验证据（周期内既无 subagent_spawned 账目，也无已完成的委派核验运行）：'
       + '先派验收子代理（subagent/subagent_fork）做范围比对/目标测试/红线预测，'
@@ -151,7 +151,7 @@ export const taskReviewMethods = {
   /** 验收/退回的共用流程：owner Bot 会话与微信管理员共用。 */
   async applyReview(task, project, decision, comment, actor) {
     const identifier = `${project.key}-${task.number}`
-    // DSHBOTS-269 失败语义引导：拒绝文案 = 原因 + 替代命令/正确下一步（工具调用返回层，
+    // 失败语义引导：拒绝文案 = 原因 + 替代命令/正确下一步（工具调用返回层，
     // 与 run-finish 群聊/微信失败终态白名单契约不同层，互不影响）。
     if (task.status !== 'in_review') {
       throw conflict(
@@ -195,7 +195,7 @@ export const taskReviewMethods = {
     return this.taskView(this.taskRow(task.id))
   },
 
-  // 验收核验委派（DSHBOTS-107；DSHBOTS-365 承接人默认 reviewer）：待验收任务上，owner
+  // 验收核验委派：待验收任务上，owner
   // 一键委派子代理核验——承接人优先项目内种子 reviewer（reviewDelegateBotFor），无则
   // 总监 Bot 兜底，由其会话内的 subagent/subagent_fork 并行完成（提示词见
   // runtime/prompt.js 的 review-verification 模板）。核验结论以任务评论写回（finishRun
@@ -247,7 +247,7 @@ export const taskReviewMethods = {
     return this.taskView(this.taskRow(taskId))
   },
 
-  // 核验承接人（DSHBOTS-365 产品默认）：项目成员里的种子 reviewer 优先（固定名识别，
+  // 核验承接人：项目成员里的种子 reviewer 优先（固定名识别，
   // 改名/移除/不可用即失效），回落总监自行核验（兜底）。裁决权不变：仍归 owner。
   reviewDelegateBotFor(project) {
     if (!project.owner_bot_id) return null
@@ -284,7 +284,7 @@ export const taskReviewMethods = {
       if (active.trigger_type === 'review_delegate') return { runId: active.id, reused: true }
       throw conflict(`任务 ${identifier} 已有运行在排队或执行，请先停止再委派核验`)
     }
-    // DSHBOTS-358：额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，
+    // 额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，
     // 无可用备用则留 queued 等恢复；路由快照写进运行行的 model_* 三列。
     const routing = this.quotaRoutingForBot(verifier)
     const routeProvider = routing.mode === 'fallback' ? routing.provider : null
@@ -317,7 +317,7 @@ export const taskReviewMethods = {
         routeProvider, routeModel, routeEffort, createdAt,
       )
     } catch (error) {
-      // 查后插竞态（DSHBOTS-300 同款）：busy 检查与 INSERT 之间承接人被占用，撞
+      // 查后插竞态：busy 检查与 INSERT 之间承接人被占用，撞
       // one_active_run_per_bot——挂待处理队列空闲建回，同 busy 闸返回 deferred，不向上抛。
       if (this.isRunBotUniqueViolation(error)) {
         hold()

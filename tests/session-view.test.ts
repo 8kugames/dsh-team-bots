@@ -1,6 +1,6 @@
 // 会话查看域（session-view）守门：宿主事件日志 → 查看器条目的抽取口径
 //（append 面语义、tool/call 配对、增量游标、翻旧页、runId 归属解析、错误映射）
-// 与子代理会话链（P2）：账本落表、授权追溯、目录并集。
+// 与子代理会话链：账本落表、授权追溯、目录并集。
 // 宿主 sessionQuery 用桩观察 lease 复刻（live/prepared 两种来源、Symbol.dispose 契约）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -9,8 +9,8 @@ import { setupTeam } from './helpers/harness.js'
 import { installSubagentLedger } from '../src/subagent-ledger.js'
 
 // 桩运行时：ctx.get('sessionQuery')（cordis 无 inject 要求的可选服务访问口）→ 桩观察
-// lease。刻意不提供 ctx.sessionQuery 属性——生产事故（2026-11-25）就是属性访问在
-// cordis 里触发 "cannot get property without inject"，服务方法必须走 ctx.get。
+// lease。刻意不提供 ctx.sessionQuery 属性——属性访问在 cordis 里会触发
+// "cannot get property without inject"，服务方法必须走 ctx.get。
 class SessionQueryStubRuntime {
   declare ctx: any
   constructor(observations: Map<string, any>) {

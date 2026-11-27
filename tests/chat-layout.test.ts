@@ -13,9 +13,8 @@ const chatSide = [...source.matchAll(/<aside class="chat-side">([\s\S]*?)<\/asid
 assert.ok(chatSide, '找不到群聊右栏 aside.chat-side')
 
 test('群聊右栏顺序：工作区 → 项目总监 → 项目成员 → 活跃任务', () => {
-  // DSHBOTS-5：项目成员面板移入「成员」tab，右栏收敛为三张卡（工作区/项目总监/活跃任务）。
-  // DSHBOTS-49：项目成员以只读概览卡回归右栏（活跃任务卡之后），管理操作仍在「成员」tab。
-  // DSHBOTS-55：概览卡按 232f1c8 的双行方案恢复到「项目总监」卡正下方（活跃任务之前）。
+  // 右栏卡片顺序：工作区 → 项目总监 → 项目成员概览卡（只读双行）→ 活跃任务；
+  // 成员的管理操作仍在「成员」tab。
   const idxWorkspace = chatSide.indexOf("<h3>${t('card.workspace')}</h3>")
   const idxOwner = chatSide.indexOf("<h3>${t('card.projectOwner')}</h3>")
   const idxTasks = chatSide.indexOf("<h3>${t('card.activeTasks')}</h3>")
@@ -51,7 +50,7 @@ test('超出上限时提示剩余条数', () => {
 })
 
 test('项目成员概览卡不再有「管理成员请前往…」提示行', () => {
-  // 用户 m_6f8d93：概览卡只留成员列表与计数，冗余的跳转提示整行删掉。
+  // 概览卡只留成员列表与计数，冗余的跳转提示整行删掉。
   const card = /function renderChatMembersCard\(\)\s*\{[\s\S]*?\n\}/.exec(source)?.[0]
   assert.ok(card, '找不到 renderChatMembersCard')
   assert.ok(!/管理成员请前往/.test(card), '概览卡不再渲染跳转提示行')

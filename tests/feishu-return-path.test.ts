@@ -1,4 +1,4 @@
-// DSHBOTS-329 守门：飞书回程闭环（入站出站成环）。
+// 飞书回程闭环（入站出站成环）的守门测试。
 // ①origin='feishu' 的运行 trigger_type 落 'feishu'（solo 直达 + 群聊直达两条路径）；
 // ②该运行收尾后回复回到飞书管理员消息锚点（store.reply_message_id，lark-cli 出站参数断言）；
 // ③origin='wechat' 回程零回归（微信通道照收一条、排版不变）；
@@ -81,7 +81,7 @@ test('origin=feishu：solo 直达与群聊直达的运行 trigger_type 都落 fe
     assert.equal(chatRun.trigger_type, 'feishu', '飞书来源群聊运行打 feishu 标记')
 
     // /tr <key> 显式直达（feishuChat 带非空 key）：同落项目群聊，管理员身份插群；
-    // 先给首条 chat 运行置终态腾出 (director, FSR) 域槽（同域串行，DSHBOTS-308）。
+    // 先给首条 chat 运行置终态腾出 (director, FSR) 域槽（同域串行）。
     store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), chatRun.id)
     ;(service as any).feishu = { status: () => ({ adminOuId: 'ou_admin_1' }) }
     const tr = await service.feishuChat('FSR', '@director /tr 直达的项目消息')
@@ -105,7 +105,7 @@ test('飞书触发运行收尾：回复推到飞书管理员消息锚点（reply
   await feishuStore.open()
   let channel: FeishuChannel | null = null
   try {
-    // 卡②入站时落的出站锚点：管理员最近一条消息 id（飞书回复据此定位话题）
+    // 入站时落的出站锚点：管理员最近一条消息 id（飞书回复据此定位话题）
     feishuStore.saveReplyMessageId('om_admin_msg_001', 'ou_admin_1')
     const sent: Array<{ messageId: string, text: string, uuid: string }> = []
     channel = new FeishuChannel({

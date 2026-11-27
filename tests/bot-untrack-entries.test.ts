@@ -1,10 +1,10 @@
-// DSHBOTS-195 入口行为锁：移除追踪双入口——总览 bots 页归档卡片 + solo-config 配置页归档后原地显示。
+// 入口行为锁：移除追踪双入口——总览 bots 页归档卡片 + solo-config 配置页归档后原地显示。
 // 手法对齐 tests/bot-untrack-confirm.test.js：真实源码求值（tasks.js renderBots / events-click click 监听器）
-// + 归档态条件锁 + 反向断言 active 态不渲染入口。链路本身（弹窗 markup/提交契约）由 D-193 既有
+// + 归档态条件锁 + 反向断言 active 态不渲染入口。链路本身（弹窗 markup/提交契约）另有
 // 守门覆盖，本文件不重复；此处锁的是「入口存在且可达」：
 //   1) 总览归档卡片渲染入口按钮（真实 renderBots 求值，active 卡反向不含）；
 //   2) 总览上下文点击入口经既有 case 开两步弹窗，零 api 副作用；
-//   3) 配置页可达性根因锁：归档后不再踢出 solo-config（D-193 的 archived 分支从死分支变可达）；
+//   3) 配置页可达性根因锁：归档后不踢出 solo-config（archived 分支可达）；
 //   4) confirm 导航重置只作用于单聊/配置页，总览页移除不传送视图；
 //   5) 执行链唯一：全仓 events-click.js 只有一处 api('remove_bot_tracking') 调用。
 import { test } from 'node:test'

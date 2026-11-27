@@ -87,14 +87,14 @@ test('比较器返回值的符号方向正确（负数表示 a 排在 b 前）',
 
 test('看板接线：filteredTasks 走排序，看板分组沿用该顺序', () => {
   assert.match(source, /return sortTasksByPriority\(\(state\.data\?\.tasks \?\? \[\]\)\.filter/)
-  // 分组内顺序直接来自 filteredTasks 的结果，不再另行排序
-  // （DSHBOTS-58 起按状态分组渲染，列内容改由 renderTaskGroup 输出）
+  // 分组内顺序直接来自 filteredTasks 的结果，不另行排序
+  // （按状态分组渲染，列内容由 renderTaskGroup 输出）
   // [修剪] 代码形状断言
-  // 组内行由 renderTaskRows 输出（DSHBOTS-58 第二笔起按 parent_task_id 组树，顺序仍取分组过滤结果）
+  // 组内行由 renderTaskRows 输出（按 parent_task_id 组树，顺序仍取分组过滤结果）
   assert.match(source, /renderTaskRows\(tasks\)/)
   assert.match(source, /renderTaskCard\(task, \{ depth, childCount: children\.length, expanded \}\)/)
-  // 卡片上的优先级也走归一化，旧数据不再显示空白
-  // （DSHBOTS-58 起优先级渲染为图标：taskPriorityIcon 内 taskPriorityKey 归一 + PRIORITY 取中文标签）
+  // 卡片上的优先级也走归一化，不显示空白
+  // （优先级渲染为图标：taskPriorityIcon 内 taskPriorityKey 归一 + PRIORITY 取中文标签）
   assert.match(source, /function taskPriorityIcon\(task\)/)
   // [修剪] 代码形状断言
   assert.match(source, /PRIORITY\[key\] \?\? key/)

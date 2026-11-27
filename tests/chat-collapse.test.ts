@@ -1,4 +1,4 @@
-// tests/chat-collapse.test.ts —— B8/DSHBOTS-336：连续系统通知折叠守门。
+// 连续系统通知折叠守门。
 // 前端用例沿用仓库先例：标记块 new Function 执行真实源码。守门四向：
 // ①纯函数行为——≥3 条连续 system 折叠、<3 原样、非 system 断组、组键按首条 id 跨轮询稳定；
 // ②展开态持久——state.expandedCollapses 命中的组整组原样展开（2.8s 轮询不重开）；

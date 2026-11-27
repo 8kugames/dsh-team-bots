@@ -131,7 +131,7 @@ test('单聊消息走 solo_chat 运行并回写单聊消息', async () => {
     const failing = store.get("SELECT * FROM runs WHERE kind = 'solo_chat' AND status = 'running'")
     await runtime.complete(failing.id, 'failed', '', { code: 'X', message: 'boom' })
     const failReply = service.soloChatStore(dev.id).get('SELECT * FROM solo_messages WHERE run_id = ?', failing.id)
-    // DSHBOTS-267：失败只落白名单类别+摘要，原始错误串 boom 不透传。
+    // 失败只落白名单类别+摘要，原始错误串 boom 不透传。
     assert.match(failReply.body, /运行失败（未知）：/)
     assert.doesNotMatch(failReply.body, /boom/)
     assert.equal(second.messageId, failing.trigger_ref)
@@ -186,7 +186,7 @@ test('state 携带 solo 段：单聊消息、运行与 bot 视图', async () => 
     // 群聊段不受影响
     assert.equal(view.project.id, project.id)
 
-    // DSHBOTS-338：该 bot 的运行记录默认视图封顶 10 条（用量 tab 第三分区数据源）。
+    // 该 bot 的运行记录默认视图封顶 10 条（用量 tab 第三分区数据源）。
     // 预插 12 条 project_id IS NULL 的 run（queued_at 递增错开）→ 恰回 10 条且排头为最新。
     const base = Date.parse(run.queued_at)
     for (let i = 1; i <= 12; i++) {
@@ -206,8 +206,8 @@ test('state 携带 solo 段：单聊消息、运行与 bot 视图', async () => 
   }
 })
 
-// DSHBOTS-308 域化：串行域 = (bot, 工作区)——单聊域 '~solo' 与项目域互不阻塞（旧语义
-// 「单聊与同 bot 群聊互相阻塞」反转），同域仍互斥；挂起队列按 bot_pending_msgs:<bot>:<domain> 分键。
+// 串行域 = (bot, 工作区)——单聊域 '~solo' 与项目域互不阻塞，同域仍互斥；
+// 挂起队列按 bot_pending_msgs:<bot>:<domain> 分键。
 test('单聊与同 Bot 群聊跨域并行、同域仍互斥（DSHBOTS-308 串行域收窄新语义）', async () => {
   const { root, store, service, runtime, director, dev } = await soloSetup()
   try {
@@ -346,7 +346,7 @@ test('runs 与 session_bindings 的 project_id 迁移为可空', async () => {
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo', (SELECT id FROM bots WHERE name = 'director'), NULL, 'solo', NULL, ?)",
       now,
     )
-    // DSHBOTS-285：solo 车道唯一索引已退役，车道行可共存（历史/过渡态），不再被拒
+    // solo 车道唯一索引已退役，车道行可共存（历史/过渡态），不再被拒
     store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES ('s-solo2', (SELECT id FROM bots WHERE name = 'director'), NULL, 'solo', NULL, ?)",
       now,

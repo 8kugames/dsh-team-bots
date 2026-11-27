@@ -1,4 +1,4 @@
-// DSHBOTS-151 任务写范围 owner 可编辑：task_update_scopes 的行为测试（DB 行为）+ api.js 分发守门。
+// 任务写范围 owner 可编辑：task_update_scopes 的行为测试（DB 行为）+ api.js 分发守门。
 // 行为口径：
 // ① owner-only：非 user actor 一律 forbidden；
 // ② running 写运行拒改（400，提示先等运行结束或取消）；
@@ -182,7 +182,7 @@ test('归一化：trim/去重/去尾斜杠后落库；空集合与终态卡拒�
   }
 })
 
-// ── api.js 分发守门（UI 编辑态的接线守门随 UI 段子卡补齐）─────────────────────────
+// ── api.js 分发守门 ───────────────────────────────────────────────
 test('api.js 分发收录 task_update_scopes（ACTIONS + case 双口径）', () => {
   const apiSource = readFileSync(new URL('../src/api.js', import.meta.url), 'utf8')
   assert.match(apiSource, /'task_update_scopes',/, 'ACTIONS Set 收录')
@@ -216,7 +216,7 @@ test('handleAction 分发层：write_scopes 与 writeScopes 双口径收参一�
   }
 })
 
-// ── UI 编辑态源码守门（DSHBOTS-155：modal 两态切换 + handler 接线）──────────────────
+// ── UI 编辑态源码守门（modal 两态切换 + handler 接线）──────────────────
 function stripLineComments(source) {
   return source.split('\n').filter(line => !line.trim().startsWith('//')).join('\n')
 }
@@ -227,7 +227,7 @@ test('任务详情 modal：写范围段两态——只读 chips 保留 + 编辑�
   const end = source.indexOf('\nfunction ', start + 1)
   const modalTaskBody = stripLineComments(source.slice(start, end > 0 ? end : undefined))
   assert.ok(start >= 0 && end > start, '前置：能截取 modalTask 函数体')
-  // 只读态保持（D-124 口径不回归）
+  // 只读态保持（口径不回归）
   assert.match(modalTaskBody, /scope-chips/, 'chips 展示保留')
   assert.match(modalTaskBody, /未声明（保守串行）/, '未声明兜底文案保留')
   // 终态闸：终态卡不渲染编辑入口，与后端 taskUpdateScopes 终态拒改同口径

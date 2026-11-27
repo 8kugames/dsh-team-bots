@@ -360,7 +360,7 @@ test('taskUpdateScopes 改卡入口：ignored 染色+审计+快照刷新；一�
     assert.equal(audits[0].target_id, task.id)
     assert.deepEqual(JSON.parse(audits[0].data_json), { ignored: ['dist/build'] })
 
-    // 全染色改卡：不再拒绝，有效清单空 + 染色清单落库。
+    // 全染色改卡：不拒绝，有效清单空 + 染色清单落库。
     const dyed = await service.taskUpdateScopes(task.id, ['dist/all'], userActor(service))
     assert.deepEqual(dyed.writeScopes, [])
     assert.deepEqual(dyed.ignoredWriteScopes, ['dist/all'])

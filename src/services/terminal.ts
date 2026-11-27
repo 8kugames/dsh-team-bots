@@ -51,7 +51,7 @@ export const terminalMethods = {
     const createdAt = nowIso()
     // 命令与聊天消息同一姿势：可能拼进密钥值，入库（行、审计）前先过掩码，密钥原文不落库。
     const storableCommand = this.maskSecretValues(clean)
-    // 终端命令住各项目聊天库（chat-db-split Phase 3）：按 project_id 路由。
+    // 终端命令住各项目聊天库：按 project_id 路由。
     this.groupChatStore(project.id).run(
       `INSERT INTO terminal_commands(id, project_id, command, status, created_at) VALUES (?, ?, ?, 'running', ?)`,
       commandId, project.id, storableCommand, createdAt,

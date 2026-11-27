@@ -1,4 +1,4 @@
-// tests/vision-proxy.test.js —— DSHBOTS-112：读图代理产品化护栏。
+// 读图代理护栏。
 // 主模型无视觉（发送前预判 modalities 无 image，或宿主报 does not support image input）
 // 时自动派生 kind='vision'、mode='read' 只读转写运行；代理未配置/转写失败只审计
 // 降级、按现状报错；同消息幂等不双派。
@@ -25,7 +25,7 @@ const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8
 const imageInput = () => [{ mediaType: 'image/png', data: TINY_PNG }]
 
 // 可控 modalities 的运行时：默认挂起全部运行供状态断言；auto=true 时全部自动收尾
-// （vision 按 failVision 成功转写/失败，其余运行一律成功回 'ok'）——争用口径 A 下
+// （vision 按 failVision 成功转写/失败，其余运行一律成功回 'ok'）——
 // 同 bot 至多一条活跃运行，不自动收尾前一条，后续运行就永远轮不到执行。
 class ModalitiesRuntime { declare modalities: unknown; declare failVision: boolean; declare auto: boolean; declare handler: (...args: unknown[]) => unknown;
   constructor(modalities, { failVision = false, auto = false } = {}) {
@@ -69,11 +69,11 @@ async function waitFor(predicate, timeout = 3000) {
   throw new Error('timeout waiting for condition')
 }
 
-// 争用口径 A：one_active_run_per_bot 激活后同 bot 同时至多一条
+// one_active_run_per_bot：同 bot 同时至多一条
 // queued/running。sendXxx 的消息运行在 enqueueOutbox 里同步建行，bot 槽随即被占，
 // 而 vision 派生是无 busy 闸的直接 INSERT——忙时撞 UNIQUE 静默返回 null。所以凡
 // 「先发消息再派生/断言 vision」的用例都要先腾槽：占用运行对本套件只是夹具背景，
-// 直接置终态即可；auto 运行时的用例改为等运行自然收尾（waitForBotIdle）。
+// 直接置终态即可；auto 运行时的用例则等运行自然收尾（waitForBotIdle）。
 const settleActiveRuns = (store) => store.run(
   "UPDATE runs SET status = 'succeeded', ended_at = ? WHERE status IN ('queued', 'running')",
   new Date().toISOString(),
@@ -276,7 +276,7 @@ test('能力声明缺失（modalities undefined）：主动预判不派生，失
       t.project.id,
     )
     assert.ok(failureNotice, '失败消息仍落群聊可见（DSHBOTS-267 白名单分类文案）')
-    // DSHBOTS-267：只透出类别+摘要，原始错误串（含模型名）不得透传。
+    // 只透出类别+摘要，原始错误串（含模型名）不得透传。
     assert.match(failureNotice.body, /运行失败（模型无视觉）：/)
     assert.doesNotMatch(failureNotice.body, /does not support image input/)
   } finally { await t.close() }

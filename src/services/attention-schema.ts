@@ -3,7 +3,7 @@
 // 背景：bot 想问人时过去只能写自由文本，接收方无法区分「在问人」与「在陈述」。
 // 这里只接受显式给出的结构化字段，不从任何自由文本反推（正则猜问号一律不做）。
 //
-// 迁移独立成文件的原因：src/db.js 已贴 800 行红线（HEAD 版本已 818 行），迁移不写进 db.js。
+// 迁移独立成文件的原因：src/db.js 已贴 800 行红线，迁移不写进 db.js。
 // 手法与 src/services/approvals.js 的 ensureApprovalSchema、src/services/tasks.js 的
 // ensureTaskTimesSchema 同款：schema_migrations 幂等守卫 + PRAGMA 判列 + ALTER TABLE。
 

@@ -209,7 +209,7 @@ async function backupExtras({ dataDir, outDir, base }) {
     extras.push({ name: 'wechat-channel.sqlite', source: wechatDb, backup: null, missing: true })
   }
 
-  // 聊天分库（chat-db-split Phase 1）：每个群聊/单聊一个库文件，正文数据全在其中，
+  // 聊天分库：每个群聊/单聊一个库文件，正文数据全在其中，
   // 逐库 VACUUM INTO 备份；目录不存在（尚未分库的旧数据目录）时记一条缺失留痕。
   const chatsDir = join(dataDir, 'chats')
   if (existsSync(chatsDir)) {

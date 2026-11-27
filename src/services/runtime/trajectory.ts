@@ -119,7 +119,7 @@ export const trajectoryMethods = {
     if (!pending.toolNames) pending.toolNames = new Map()
     const entries = this.trajectoryEntries(pending, event, options)
     if (!entries.length) return
-    // 聊天分库（chat-db-split Phase 1）：轨迹落运行归属的聊天库；无归属信息时回落顶库。
+    // 轨迹落运行归属的聊天库；无归属信息时回落顶库。
     const store = pending.chatStore ?? this.store
     const createdAt = Number.isFinite(event?.time) ? new Date(event.time).toISOString() : nowIso()
     for (const entry of entries) {

@@ -1,4 +1,4 @@
-// DSHBOTS-82：派单侧同写范围重复检测（合批程序化）。
+// 派单侧同写范围重复检测的守门测试（合批程序化）。
 // 同一文件上叠 N 张小卡时，各卡各立各排，后面的卡只能等前一张跑完，形成排队空转。
 // 派单入口拦截「写范围完全一致」的同项目在办卡；相交但不同的放行；force_duplicate 是逃生口。
 import { test } from 'node:test'
@@ -190,7 +190,7 @@ test('写范围相交但不完全相同：放行（串行正确性交给调度�
       assignee: 'Builder', title: '两个文件', write_scopes: ['src/a.js', 'src/b.js'],
     })
     assert.equal(wider.identifier, 'GATE-2')
-    // 二级目录前缀与文件路径相交但集合不同 → 放行（一级目录声明已被 DSHBOTS-168 驳回，锚点迁到二级）
+    // 二级目录前缀与文件路径相交但集合不同 → 放行
     const prefixed = await service.assignFromBot(sessionId, {
       assignee: 'Builder', title: '目录范围', write_scopes: ['src/a'],
     })

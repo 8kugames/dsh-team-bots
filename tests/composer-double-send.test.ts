@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const source = readFileSync(fileURLToPath(new URL('../ui/modules/composer.js', import.meta.url)), 'utf8')
 
-// —— DSHBOTS-165：sendMessage 双发防护 ——
+// sendMessage 双发防护
 // 根因：sendMessage 无在途守卫，草稿要等出站成功才清空；⌘Enter 按键重复 / 双击发送按钮 /
 // 慢网重复点击在出站窗口内再次进入，同一草稿被发出两遍；catch {} 还吞掉出站失败。
 // 修复口径：①模块级 sendInFlight 收口全部入口；②草稿乐观清空（拿到入站参数立刻清 + 重画），

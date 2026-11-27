@@ -1,6 +1,6 @@
 // tests/task-parallel-sessions.test.ts —— 单 bot 多任务并行守门：
 //  ① 派单即建运行：同 bot 两张卡（写范围不重叠）同时 queued，领取后两条并行 running
-//     （claimKey 按任务维度，不再被 bot 串行域互斥）；
+//     （claimKey 按任务维度，不被 bot 串行域互斥）；
 //  ② 任务专属会话：两条运行的会话各自独立，绑定行 kind='task' 带 task_id，
 //     会话标题命名 `${bot.name} · ${project.key}-${task.number}`；
 //  ③ 同任务幂等：重复入队返回既有 active 运行（one_active_run_per_task 口径）；
@@ -129,7 +129,7 @@ test('源码锚：任务专属会话命名口径与串行豁免', () => {
 
 // 总监侧运行（review/handle，owner_task 运行族）不吃任务亲和：亲和按 assignee 归属解析，
 // 会把总监的核验/受阻处置运行开进成员的任务专属会话——会话绑定属成员（ownerContextFor
-// 按 session_bindings 判身份，总监专权工具 403，与 D-306 治的验收错位同款），总监话语
+// 按 session_bindings 判身份，总监专权工具 403），总监话语
 // 也会混进成员任务上下文。应落总监自己的 (owner,project) 控制面绑定（ensureSession ③）。
 // 守门三向：①blocked 卡上 handle 运行落总监控制面，不进成员任务会话；②in_review 卡上
 // review 运行同样落总监控制面；③成员自己的 task 运行照旧亲和回任务会话（不回归）。
@@ -200,11 +200,11 @@ test('总监侧 review/handle 运行不进成员任务会话，落总监控制�
   } finally { await t.close() }
 })
 
-// ZONGM-140 三会话事故复盘②：宿主重启把 running 运行重排队时置空 runs.session_id，
+// 宿主重启把 running 运行重排队时置空 runs.session_id，
 // runs 归属亲和（taskAffinityBinding）随之断链——直落 ensureTaskSession 首建会开出一张
 // 新任务会话，旧会话（绑定行 kind='task' 仍在、宿主仍活）被孤儿化：同一张卡每重启一次
-// 多一个会话。守门：ensureTaskSession 先按 (bot, task) 找活跃绑定复用，死了才退役重建；
-// 多活跃行（历史孤儿）只保留最新、其余 alias 化收敛。
+// 多一个会话。ensureTaskSession 先按 (bot, task) 找活跃绑定复用，死了才退役重建；
+// 多活跃行（孤儿）只保留最新、其余 alias 化收敛。
 test('任务会话复用：runs 亲和断链（重启置空 session_id）时按绑定行回到原会话，不孤儿化', async () => {
   const t = await setup()
   try {
@@ -213,7 +213,7 @@ test('任务会话复用：runs 亲和断链（重启置空 session_id）时按�
     const card = await service.createTask({ projectId: project.id, title: '重启卡', assigneeBotId: dev.id, writeScopes: ['src/r/'], postCard: false }, actor)
     const task = service.taskRow(card.id)
     const at = (ms) => new Date(Date.parse('2026-11-15T11:40:00Z') + ms).toISOString()
-    // 事故形状：首发运行曾开进 sess-task-1（绑定行在场），宿主重启把它重排队并置空
+    // 场景形状：首发运行开进 sess-task-1（绑定行在场），宿主重启把它重排队并置空
     // runs.session_id——runs 亲和查不到任何归属。
     store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES ('sess-task-1', ?, ?, 'task', ?, 0, ?)",
@@ -259,8 +259,8 @@ test('任务会话复用：runs 亲和断链（重启置空 session_id）时按�
     assert.match(second, /sess-task-new-/, '改派新负责人落新建任务会话')
     assert.equal(created, 1)
 
-    // ③ 孤儿收敛：同 (bot, task) 两条活跃绑定（历史重启孤儿形状）——复用最新一条，
-    // 旧的 alias 化，不再叠第三张。
+    // ③ 孤儿收敛：同 (bot, task) 两条活跃绑定（重启孤儿形状）——复用最新一条，
+    // 旧的 alias 化，不叠第三张。
     store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES ('sess-task-0', ?, ?, 'task', ?, 0, ?)",
       dev.id, project.id, task.id, at(-1_000),

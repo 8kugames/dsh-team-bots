@@ -1,5 +1,5 @@
-// tests/avatar-lanes.test.js —— 争用口径 A后的串行守门。
-// DSHBOTS-308：串行域收窄为 (bot, 工作区)，domain = project_id ?? '~solo'——
+// 争用口径 A 后的串行守门。
+// 串行域为 (bot, 工作区)，domain = project_id ?? '~solo'——
 // 同 bot 同工作区互斥：忙时入站消息不落 runs 行，挂 settings 键 bot_pending_msgs:<bot>:<domain>，
 // 空闲后 drainPendingMessages 合批建回；同一 bot 跨工作区并行（键不同即不互斥），跨 bot 并行不受限。
 // claimKey 收敛为 bot:<bot_id>:<domain>（施工运行 kind='task' 豁免串行域，按 task:<id> 取键）。
@@ -59,7 +59,7 @@ function seedRun(store, { kind, botId, projectId = null, taskId = null, triggerR
   return store.get('SELECT * FROM runs WHERE id = ?', runId)
 }
 
-// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取，
+// 挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取，
 // 测试不假设某个具体域（同一 bot 可同时有项目域与 solo 域的挂起项）。
 const heldItems = (store, botId) => {
   const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
@@ -163,7 +163,7 @@ test('单聊占道时同域消息挂起、跨工作区并行（DSHBOTS-308 域�
     // 单聊先跑起来（ManualRuntime 不收尾即模拟卡在提权/提问 pending）——单聊域 = '~solo'。
     await service.sendSoloMessage(dev.id, '单聊里申请提权')
     await service.sendSoloMessage(dev.id, '单聊追问第二条')
-    // 同 bot 的甲项目群聊：跨工作区（域不同）不占道，直接建行并行（DSHBOTS-308 域化）。
+    // 同 bot 的甲项目群聊：跨工作区（域不同）不占道，直接建行并行。
     await service.sendMessage(alpha.id, '@Builder 甲项目问一句')
     // 跨 bot 的乙项目群聊（@总监）：照常并行。
     await service.sendMessage(beta.id, '@director 乙项目也问一句')
@@ -214,7 +214,7 @@ test('私信与群聊同道分离不回退为并行（新语义）：dm 占道�
     }
     const firstRunId = service.enqueueDmRun(seedDmMessage(), dev)
     assert.ok(firstRunId, '空闲时第一条 dm 直接落 runs 行')
-    // DSHBOTS-308 域化：dm 与群聊同属该项目工作区（同一域）——同域仍互斥，第二条 dm 挂起。
+    // dm 与群聊同属该项目工作区（同一域）——同域仍互斥，第二条 dm 挂起。
     assert.equal(service.enqueueDmRun(seedDmMessage(), dev), null, 'dm 占道时第二条 dm 挂起不落 runs 行')
     await service.sendMessage(project.id, '@Builder 群里同步一句')
 
@@ -251,7 +251,7 @@ test('同会话串行不回退：总监验收运行占道时，同 bot 群聊挂
     const task = await service.createTask({ projectId: project.id, title: '待验收', assigneeBotId: dev.id })
     // 总监验收运行（review，落总监 bot）先入队。
     service.enqueueOwnerTaskRun(task, 'review')
-    // 同项目 @总监 的群聊随后到达：同域（同一工作区）总监忙，挂待处理队列（DSHBOTS-308 域化）。
+    // 同项目 @总监 的群聊随后到达：同域（同一工作区）总监忙，挂待处理队列。
     const messageId = service.insertMessage({
       projectId: project.id, senderType: 'user', senderId: service.localUserId,
       body: '@director 群里问总监', mentions: [director.id],

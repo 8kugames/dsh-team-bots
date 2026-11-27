@@ -1,4 +1,4 @@
-// DSHBOTS-25：Bot 备用模型——主 provider 不可用时临时切备用模型继续执行任务，运行结束自动回退。
+// Bot 备用模型：主 provider 不可用时临时切备用模型继续执行任务，运行结束自动回退。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
@@ -242,8 +242,8 @@ test('自动回退：下一条运行不带 override，按 Bot 主模型下发', 
   }
 })
 
-// DSHBOTS-358：备用模型切换覆盖内部运行（review / handle / memory_review），
-// 聊天类维持现状不自动重发。
+// 备用模型切换覆盖内部运行（review / handle / memory_review），
+// 聊天类不自动重发。
 test('内部运行撞墙派生备用：review 派生 review 运行；chat 不派生', async () => {
   const { root, store, service } = await setup()
   try {

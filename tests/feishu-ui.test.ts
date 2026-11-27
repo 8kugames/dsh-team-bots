@@ -1,4 +1,4 @@
-// DSHBOTS-327 守门：通道页飞书状态卡。
+// 通道页飞书状态卡的守门测试。
 // ① 禁用态（DSH_BOTS_FEISHU 未开）整卡不渲染；② 启用+ready 显示相位/管理员 ou_id/元信息；
 // ③ conflict 相出警示（amber + 冲突文案）；④ i18n 键双语齐平且无死键。
 // 渲染口径与 tests/global-config-layout.test.ts 同款：真实渲染 ui/modules/global-pages.js 的

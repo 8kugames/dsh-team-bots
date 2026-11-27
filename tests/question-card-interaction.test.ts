@@ -1,11 +1,11 @@
-// DSHBOTS-176 交互测试：ask 提问卡片的选项选择 / 自定义回复 / 提交链路。
+// ask 提问卡片的选项选择 / 自定义回复 / 提交链路的交互测试。
 // 与 tests/question-ui.test.js（纯函数与 markup）互补：本文件驱动「真实事件监听器」——
 // 从 ui/modules/events-click.js 提取 document click 委托、ui/modules/events-misc.js 提取
-// document input 监听（均为拆分外迁后的线上实现，非复制），用最小 DOM shim 解析
+// document input 监听（均为线上实现，非复制），用最小 DOM shim 解析
 // ui/modules/cards.js question-card 标记块渲染出的真实 HTML，派发 click/input，
 // 断言委托链路（data-action=question-option/question-submit、.question-custom 输入）
 // 从事件到草稿、DOM 态、api('question_answer') 载荷与失败回滚的完整行为。
-// D-159 第九批外迁后此链路无 DOM 级测试兜底；本文件即为此而设，锚点全部语义化。
+// 本文件为这条链路补 DOM 级测试兜底，锚点全部语义化。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
@@ -153,7 +153,7 @@ function loadModule(source, stubs) {
     querySelectorAll: () => [],
   }
   const globals = {
-    // DSHBOTS-220：源码已 t 化，求值沙箱需注入 t（测试只关心链路，文案回键本身即可）
+    // 源码走 t() 取文案，求值沙箱需注入 t（测试只关心链路，文案回键本身即可）
     t: (key) => key,
     document: documentStub,
     window: { addEventListener: noop, confirm: () => false, open: noop, prompt: () => null },
@@ -383,16 +383,14 @@ test('守卫：question-option 点击对已失效（非 pending）问题不写�
   assert.deepEqual(h.apiCalls, [], '不得触发任何 api 调用')
 })
 
-// ---------- DSHBOTS-190 闪回竞态锁 ----------
-// 症状：点击授权选项提交后「已回答」闪回问题卡再闪回「已回答」。
-// 根因：提交 handler 用服务端返回的终态整体替换乐观对象（events-click.js `list[index] = updated`），
-// 而服务端 questionView 只展开 questions 表行——表内只有 ended_at 没有 answered_at 列，终态键
-// answered_at 丢失；下一轮在途旧轮询（快照仍 pending）经 loadState 写回 state.data 时，
-// preserveAnsweredQuestions 在 previous 里找不到 answered_at，不保护，pending 快照盖掉已答终态=闪回。
-// 修复：服务端视图给 answered 行补 answered_at=ended_at（src/services/questions.js questionView，
-// 契约由 tests/questions.test.js 锁定）。本测试用真实 click 链 + 真实 api.js 的
-// loadState/preserveAnsweredQuestions 驱动完整时序：提交成功（服务端契约终态替换乐观对象）→
-// 迟到的旧 pending 轮询到达 → 状态保持 answered 不闪回。
+// ---------- 闪回竞态锁 ----------
+// 提交 handler 用服务端返回的终态整体替换乐观对象（events-click.js `list[index] = updated`）。
+// questions 表只有 ended_at 没有 answered_at 列，所以服务端 questionView 给 answered 行补
+// answered_at=ended_at（src/services/questions.js，契约由 tests/questions.test.js 锁定）；
+// loadState 的 preserveAnsweredQuestions 靠这个终态键认出已答终态——缺键时，迟到的旧 pending
+// 轮询快照（经 loadState 写回 state.data）会把「已回答」盖回问题卡。本测试用真实 click 链 +
+// 真实 api.js 的 loadState/preserveAnsweredQuestions 驱动完整时序：提交成功 → 迟到的旧 pending
+// 轮询到达 → 状态保持 answered 不闪回。
 {
   const apiSource = readFileSync(join(root, 'ui', 'modules', 'api.js'), 'utf8')
   const fnSource = (name) => {
@@ -426,7 +424,7 @@ test('守卫：question-option 点击对已失效（非 pending）问题不写�
     assert.equal(question.status, 'answered', '提交成功后终态为 answered')
     assert.equal(question.answered_at, endedAt, '服务端终态替换乐观对象后 answered_at 仍在（终态键不断链）')
 
-    // T3：在途旧轮询此刻返回（快照抓于提交之前，服务端仍是 pending）——真实 loadState + preserve 驱动。
+    // 在途旧轮询此刻返回（快照抓于提交之前，服务端仍是 pending）——真实 loadState + preserve 驱动。
     const apiFns = realApiFns(h.state, async (action, payload, opts) => {
       h.apiCalls.push({ action, payload, opts })
       return {
@@ -456,8 +454,8 @@ test('守卫：question-option 点击对已失效（非 pending）问题不写�
     const kept = apiFns.preserveAnsweredQuestions(previous, JSON.parse(JSON.stringify(next)))
     assert.equal(kept.questions[0].status, 'answered', '带 answered_at 的本地终态受保护')
     assert.equal(kept.pendingQuestions.count, 0, '旧 pending 清单被过滤')
-    // 服务端视图缺 answered_at（修复前的形状）时 previous 无键可依——这正是 D-190 服务端
-    // 契约测试存在的原因：两端必须一起守住 answered_at 键。
+    // 服务端视图缺 answered_at 时 previous 无键可依：键即契约，两端（服务端补键 + 客户端
+    // 按键保护）必须一起守住 answered_at。
     const bare = apiFns.preserveAnsweredQuestions(
       { questions: [{ id: 'qst_1', status: 'answered', ended_at: 't1' }] },
       JSON.parse(JSON.stringify(next)),

@@ -1,4 +1,4 @@
-// DSHBOTS-171：私信（solo 单聊）默认视图自动归档——只留「最近 dmKeepRecent 条 且
+// 私信（solo 单聊）默认视图自动归档的守门测试——只留「最近 dmKeepRecent 条 且
 // dmArchiveDays 天内」交集；归档=默认视图隐去不删，messagesPage 游标翻页仍可查回。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

@@ -1,4 +1,4 @@
-// DSHBOTS-325：派单 time_budget 程序化兜底（漏传时按 priority 分档落库）。
+// 派单 time_budget 程序化兜底（漏传时按 priority 分档落库）。
 // 守门五向：a) 漏传 + high → 45 落库；b) 显式 90 → 90 不被覆盖；c) low → 15；
 // d) 重派已有预算不重算（存量 NULL 卡补挂按档）；e) 无效 priority 回退 medium 档。
 // 另守：直建卡（不经派单）仍走全局缺省链 20（③）；描述「N 分钟档」与兜底档不一致时
@@ -113,7 +113,7 @@ test('d) 重派已有预算不重算（90 保留）；存量 NULL 预算卡重�
     await dispatch(ctx, sessionId, { task: 'GATE-1', priority: 'low' })
     assert.equal(budgetOf(ctx.store, task.id).v, 90, '重派不重算已有预算')
 
-    // 存量 NULL 预算卡（D-198 之前的老卡形态）重派：按改后生效 priority=high 补挂 45。
+    // 存量 NULL 预算卡重派：按改后生效 priority=high 补挂 45。
     const legacy = await dispatch(ctx, sessionId, { title: '老卡', write_scopes: ['src/f.js'], priority: 'medium' })
     ctx.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', legacy.id)
     await dispatch(ctx, sessionId, { task: 'GATE-2', priority: 'high' })

@@ -2,12 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 
-// DSHBOTS-123：「正在思考与回复…」不随 2.8s 轮询清除。
-// 根因：poll 的 `!state.data || state.busy > 0 || isTyping` 把「焦点在 composer」当成
-// 「正在输入」，取数与渲染一起跳过；sendMessage 尾部回焦 composer、切走再切回焦点恢复，
-// 轮询被无限短路，typing 行与新消息冻结，直到点击（如思考气泡）令 composer 失焦。
-// 修复口径：取数不再被焦点挡；渲染闸门收窄为「composer 静默窗内有输入或 IME 组词中」，
-// 其余输入控件维持原焦点挡渲染语义；render 重建后恢复 composer 焦点与光标。
+// 「正在思考与回复…」不随 2.8s 轮询清除的守门测试。
+// 要防的缺陷：poll 把「焦点在 composer」当成「正在输入」并连取数一起跳过；sendMessage
+// 尾部回焦 composer、切走再切回焦点恢复，轮询被无限短路，typing 行与新消息冻结，
+// 直到点击（如思考气泡）令 composer 失焦。
+// 现行口径：取数不被焦点挡；渲染闸门收窄为「composer 静默窗内有输入或 IME 组词中」，
+// 其余输入控件仍按焦点挡渲染；render 重建后恢复 composer 焦点与光标。
 
 const source = readUiSource()
 

@@ -4,7 +4,7 @@ export default {
   "toast.wechatConnected": "WeChat channel connected",
   // Global configuration page
   "channel.sectionWechat": "WeChat channel",
-  // DSHBOTS-220: ui/modules copy
+  // ui/modules copy
   "二维码已生成，请用微信扫码": "QR code generated; scan it with WeChat",
   "已退出微信绑定": "WeChat binding removed",
   "待扫码": "Waiting to scan",

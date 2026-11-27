@@ -7,7 +7,7 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 
-// DSHBOTS-37 后端：taskView 的 latestRun 与 runs 忽略管理清理产生的 SUPERSEDED 运行，
+// taskView 的 latestRun 与 runs 忽略管理清理产生的 SUPERSEDED 运行，
 // 避免 done/canceled 任务的最新运行被清理产物顶掉而误显示「已取消/运行中」。
 // SUPERSEDED 不来自任何代码路径，是生产库手工收口留下的标记，故测试直插 runs 表模拟。
 

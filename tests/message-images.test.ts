@@ -1,4 +1,4 @@
-// DSHBOTS-36 聊天图片输入：落库、校验、runtime 组装与读取鉴权。
+// 聊天图片输入：落库、校验、runtime 组装与读取鉴权。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'

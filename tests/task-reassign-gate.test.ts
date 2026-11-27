@@ -1,5 +1,5 @@
-// DSHBOTS-169：assignTask 改派闸门——queued 占位运行（死队列）不再阻断换负责人，
-// 按 SUPERSEDED 口径清理后放行并按新负责人重排 task_run；running 照旧阻断；同负责人重派不清理。
+// assignTask 改派闸门守门测试——queued 占位运行（死队列）不阻断换负责人，
+// 按 SUPERSEDED 口径清理后放行并按新负责人重排 task_run；running 阻断；同负责人重派不清理。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -160,7 +160,7 @@ test('同负责人重派：queued 占位不清理、不另排新运行', async (
 })
 
 test('无活跃运行的改派：库中已有历史 delivered 稳定键行仍排得出新运行', async () => {
-  // R1 返工：任务 blocked/in_review → 改派给 B（无活跃运行，写稳定键）→ B 跑完仍非 todo/in_progress
+  // 任务 blocked/in_review → 改派给 B（无活跃运行，写稳定键）→ B 跑完仍非 todo/in_progress
   // → 再改派给 C 时稳定键撞历史 delivered 行被先写者赢吞掉，C 收不到运行。钉死任何换负责人都带 version 后缀。
   const { root, store, service, dev, artist, project } = await setup()
   try {

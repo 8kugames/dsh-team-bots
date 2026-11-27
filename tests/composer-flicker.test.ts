@@ -4,7 +4,7 @@ import { readUiSource } from './helpers/ui-sources.js'
 
 const source = readUiSource()
 
-// DSHBOTS-153（composer-flicker）：轮询全量重建出的新 textarea 一开始没有内联高度，
+// 输入框高度闪烁：轮询全量重建出的新 textarea 一开始没有内联高度，
 // 浏览器先把 rows=2 内在高度（约 57.5px）画出去，下一帧 rAF 里 applyComposerHeight
 // 才设回目标 px——空输入即每 2.8s 一次高度跳变（实测 57.5↔58，jumps=8/12.5s）。
 // 修法：applyComposerHeight 记录最近一次应用的 px（composerAppliedHeightPx），

@@ -2,7 +2,7 @@
 // Bot 主模型无视觉能力却收到带图消息时，自动派生 kind='vision'、mode='read' 的
 // 只读转写运行：用配置的代理模型（visionProxyProvider/visionProxyModel）把图片
 // 转写成中文结构化文本，以「[图片转写] …」system 消息写回原消息所在会话，并给同
-// 一条消息派生续答运行（image_offload=1，不再下发二进制图），主模型当轮即可基于
+// 一条消息派生续答运行（image_offload=1，不下发二进制图），主模型当轮即可基于
 // 转写正文回答用户。原对话不受派生阻塞：原 chat 运行照常带图下发，
 // 宿主仍按现状报「模型不支持图片」（不静默）；转写失败或代理未配置时同样
 // 只留审计（vision.fallback），不重试、不刷额度。
@@ -77,7 +77,7 @@ export function spawnVisionProxyRun(service, { bot, message, target }) {
         runId, message.project_id ?? null, bot.id, message.id, idempotencyKey,
         proxy.provider, proxy.model, createdAt,
       )
-      // run_events 住运行归属的聊天库（chat-db-split Phase 3）：路由行取自本回调刚
+      // run_events 住运行归属的聊天库：路由行取自本回调刚
       // 插入的 runs 参数（project_id/bot_id），与 runs 插入同回调保持撞车不落事件。
       service.runChatStore({ id: runId, project_id: message.project_id ?? null, bot_id: bot.id }).run(
         'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -100,7 +100,7 @@ export function spawnVisionProxyRun(service, { bot, message, target }) {
 // 主动评估入口（sendMessage / sendSoloMessage 落库投递后 fire-and-forget 调用）：
 // 消息带图 && 主模型确定无视觉 → 已配置代理则派生转写运行；未配置则只记
 // vision.fallback 审计（按现状报错，不派生不重试）。任何异常只告警，绝不阻塞发送。
-// messageStore（chat-db-split Phase 1）：附图所在聊天库，由调用方随消息上下文带入。
+// messageStore：附图所在聊天库，由调用方随消息上下文带入。
 export async function considerVisionProxy(service, { bot, message, messageStore = null }) {
   try {
     if (!bot || !message?.id) return null
@@ -201,7 +201,7 @@ export function spawnVisionFollowupRun(service, { run, bot, message }) {
 // 转写运行收尾（runs.finishRun 的 kind='vision' 分支）：成功且产出非空 → 以
 // 「[图片转写] …」system 消息写回原消息所在会话（群聊挂 reply_to 原消息，单聊
 // 落 solo_messages），并审计 vision.transcribe，随后派生续答运行；失败或空产出 → 只审计
-// vision.fallback（原对话已按现状报过「模型不支持图片」，这里不再插消息、不重试）。
+// vision.fallback（原对话已按现状报过「模型不支持图片」，这里不插消息、不重试）。
 export async function completeVisionRun(service, { run, bot, status, output, error }) {
   const actor = { type: 'bot', id: bot?.id }
   const message = run.trigger_ref

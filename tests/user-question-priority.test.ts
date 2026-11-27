@@ -1,14 +1,13 @@
-// tests/user-question-priority.test.ts —— DSHBOTS-272 用户提问运行优先级守门
-// （DSHBOTS-290 随争用口径 A 改钉挂起队列语义：bot 忙时消息挂起，空闲建回合批）。
-// 事故（2026-11-06）：owner 群内提问被后台通知触发的 chat 运行先占道/先落屏，真答询延后，
-// 且提示层无「直接回答」锚点，通知运行回一条轻备忘就算处理完。守门四类：
+// 用户提问运行优先级守门测试（挂起队列语义：bot 忙时消息挂起，空闲建回合批）。
+// 要防的情形：owner 群内提问被后台通知触发的 chat 运行先占道/先落屏，真答询延后，
+// 且提示层无「直接回答」锚点，通知运行回一条轻备忘就算处理完。守门五类：
 // ①判定：heldItemIsUserQuestion 按触发消息 sender_type 区分用户提问与通知/唤醒消息；
-// ②合批保护：用户提问挂起组不得并入非用户触发的挂起组（D-231 用户→用户合批不回退）；
+// ②合批保护：用户提问挂起组不得并入非用户触发的挂起组（用户→用户消息仍合批）；
 // ③建回优先：用户提问组先于更早挂起的通知组放行（不被静默压后）；
 // ④提示层：chatRunPrompt 用户触发注入直接回答锚点，通知触发（sender_type='bot'）不注入；
-// 既有锚点（# Group message / Reply as 前缀）不回归（D-269 手法：源码级钉住）。
-// DSHBOTS-283 守门（同文件承载）：⑤群聊回复 Markdown 结构化分级锚点（长文固定小标题/
-// 短回复自然语言）+ 微信分支纯文本版式锚点（源码锚与渲染行为两层）。
+// 既有锚点（# Group message / Reply as 前缀）不回归（源码级钉住）。
+// ⑤群聊回复 Markdown 结构化分级锚点（长文固定小标题/短回复自然语言）
+// + 微信分支纯文本版式锚点（源码锚与渲染行为两层）。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -108,8 +107,7 @@ test('判定：heldItemIsUserQuestion 按触发消息 sender_type 区分用户�
   try {
     const userMsg = userMessage(t.service, t.project.id, '评估一下 GS 生产数据')
     const noticeMsg = noticeMessage(t.service, t.project.id, '【通知】备忘一条', t.director.id)
-    // DSHBOTS-290：run 向判定随 mergeRunIntoQueuedLane 删除，语义迁到挂起消息向
-    // （drainPendingMessages 分组用 heldItemIsUserQuestion）。挂起项带 projectId
+    // 判定面向挂起消息（drainPendingMessages 分组用 heldItemIsUserQuestion）。挂起项带 projectId
     // （与 holdPendingMessage 落项同形），聊天分库后按它路由群聊库。
     assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', projectId: t.project.id, messageId: userMsg }), true, '用户消息触发的 chat 运行是用户提问')
     assert.equal(t.service.heldItemIsUserQuestion({ kind: 'chat', projectId: t.project.id, messageId: noticeMsg }), false, '通知（bot 消息）触发的 chat 运行不是用户提问')
@@ -132,7 +130,7 @@ async function drainUntilChatStarted(t, messageId, maxTicks = 8) {
   return t.runtime.started.find(item => item.chatMessage?.id === messageId)
 }
 
-// DSHBOTS-308 域化：挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
+// 挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
 // 断言跨域扫描本 bot 的全部域队列合并后读取（域内语义不变：同域仍合批保护/提问优先）。
 const heldItems = (t, botId = t.dev.id) => {
   const rows = t.store.all("SELECT key, value FROM settings WHERE key LIKE ?", `bot_pending_msgs:${botId}:%`)
@@ -156,7 +154,7 @@ test('合批保护：用户提问不并入通知触发的挂起组，独立建�
     const noticeMsg2 = noticeMessage(t.service, t.project.id, '【通知】第二条备忘', t.director.id)
     assert.equal(t.service.enqueueChatRun(t.project, t.dev, noticeMsg2), null, '后续通知同样挂起')
     assert.deepEqual(heldItems(t).map(item => item.messageId), [userMsg, noticeMsg2], '挂起队列保序')
-    // DSHBOTS-308 域化：本例消息都在同一工作区，挂起项落在该工作区的域键下。
+    // 本例消息都在同一工作区，挂起项落在该工作区的域键下。
     assert.equal(
       JSON.parse(t.store.setting(`bot_pending_msgs:${t.dev.id}:${t.project.id}`) ?? '[]').length,
       2,
@@ -243,8 +241,8 @@ test('建回优先：用户提问组先于更早挂起的通知组放行（不�
   }
 })
 
-// DSHBOTS-308 域化：串行域 = (bot, 工作区)——本域占道只挂起本域消息，他域消息照常建回
-// 运行（旧语义「同 bot 忙时一律挂起」反转）；同域消息仍照旧挂起。
+// 串行域 = (bot, 工作区)——本域占道只挂起本域消息，他域消息照常建回
+// 运行（不是「同 bot 忙时一律挂起」）；同域消息仍照旧挂起。
 test('跨域并行：他域消息不被本域占道阻塞，同域消息照旧挂起（DSHBOTS-308 域化）', async () => {
   const t = await setup()
   try {
@@ -301,8 +299,8 @@ test('提示层：用户触发的 chat 运行注入直接回答锚点，通知�
 })
 
 test('源码锚点：挂起分组的提问保护/窗口/上限与出队降档的代码路径被钉住', () => {
-  // DSHBOTS-290：合批语义随争用口径 A 迁到 runs.ts drainPendingMessages（入队合并已删）。
-  // 聊天分库后 heldItemIsUserQuestion 增加 botId 参（单聊路由到对应单聊库），锚点同步跟签。
+  // 合批语义在 runs.ts drainPendingMessages（入队时不合并）。
+  // heldItemIsUserQuestion 带 botId 参（单聊路由到对应单聊库），锚点按该签名钉住。
   assert.ok(
     RUNS_SRC.includes('this.heldItemIsUserQuestion(item, botId) === this.heldItemIsUserQuestion(last.first, botId)'),
     '合批保护守卫必须在 drainPendingMessages 分组循环内（用户提问不被通知挂起组吸收）',

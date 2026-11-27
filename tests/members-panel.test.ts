@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
 
-// DSHBOTS-49：群聊右栏恢复「项目成员」只读概览卡（用户 m_6d43b5 要求恢复 D-5 删掉的面板）。
-// 锁定三件事：①卡片结构与数据源；②只读——卡内没有任何写操作控件（防回退到旧版复选框全量提交）；
-// ③管理入口指向「成员」tab。
+// 群聊右栏「项目成员」只读概览卡。
+// 锁定三件事：①卡片结构与数据源；②只读——卡内没有任何写操作控件（防误清空成员）；
+// ③不渲染指向「成员」tab 的提示行，卡内没有任何交互动作。
 
 const source = readUiSource()
 const css = await uiStylesSource()
@@ -73,7 +73,7 @@ test('概览卡是只读的：没有任何写操作控件', () => {
   for (const token of forbidden) {
     assert.ok(!cardBody.includes(token), `概览卡不应出现写操作控件：${token}`)
   }
-  // 概览卡整体只读：连跳转「成员」tab 的提示行都去掉了（用户 m_6f8d93），因此没有任何交互动作。
+  // 概览卡整体只读：连跳转「成员」tab 的提示行都没有，因此没有任何交互动作。
   const actions = [...cardBody.matchAll(/data-action="([^"]+)"/g)].map(m => m[1])
   assert.deepEqual([...new Set(actions)], [], '概览卡内不再有任何交互动作')
 })
@@ -91,7 +91,7 @@ test('概览卡样式对齐现有 side-card 视觉规格', () => {
   assert.ok(!/\.side-link\s*\{/.test(css), '跳转链接样式已随提示行一并移除')
 })
 
-// DSHBOTS-50：成员邀请改为弹窗选人（用户 m_6b76a2 要求去掉下拉默认填充）。
+// 成员邀请走弹窗选人。
 // 锁定五件事：①成员页只剩一个「邀请加入」按钮，没有内联下拉；
 // ②弹窗只列未入项目且 status=active 的 bot，单选（radio）后确认提交 add_member；
 // ③无可选 bot 时给空态文案，不给提交动作；④未选人时提交零变更；
@@ -151,9 +151,9 @@ test('弹窗关闭/取消/遮罩/ESC 都是零变更', () => {
   assert.ok(!/case 'close-modal'[\s\S]{0,200}add_member/.test(source), '关闭动作不触发 add_member')
 })
 
-// DSHBOTS-52：成员 tab 改卡片式（用户 m_fd1b36）——成员行列表改为卡片网格，单卡宽高比锁定
-// 0.618:1（宽:高，竖向黄金比），上头像 / 中名称+角色 / 下状态点与用量合计；总监卡保留 violet 标识；
-// busy 状态点沿用 run-dot 语义不变色；悬停/焦点给轻量描边；移除操作收进卡片角标（hover 显出）。
+// 成员 tab 卡片式：成员行列表是卡片网格，上头像 / 中名称+角色 / 下任务统计与用量合计；
+// 总监卡保留 violet 标识；busy 状态点沿用 run-dot 语义不变色；悬停/焦点给轻量描边；
+// 移除操作收进卡片角标（hover 显出）。
 const cardCss = /\.member-card \{([\s\S]*?)\n\}/.exec(css)?.[1]
 assert.ok(cardCss, '找不到 .member-card 样式块')
 const gridCss = /\.members-grid \{([\s\S]*?)\n\}/.exec(css)?.[1]
@@ -186,8 +186,8 @@ test('卡片信息布局：上头像、中名称+角色、下任务统计与用�
   assert.match(membersFn, /member-card-foot[\s\S]*?formatCost\(Number\(member\.usage_cost \?\? 0\)\)/, '底部有 cost 合计')
 })
 
-// DSHBOTS-57：卡片放大（max-width 320px / 头像 56px），角色标签与模型分两行——
-// 名称 / 角色标签 / provider·model 小字三行式，模型不再收进 title 提示。
+// 卡片规格：max-width 320px / 头像 56px；名称 / 角色标签 / provider·model 小字三行式，
+// 模型直接上卡面而不收进 title 提示。
 test('卡片放大：max-width 320px、头像 56px，网格列宽与「总览bots」同口径', () => {
   assert.match(cardCss, /max-width:\s*320px/, '卡片最大宽度提到 320px')
   assert.match(gridCss, /minmax\(min\(280px, 100%\), 320px\)/, '网格列宽基准 280px、封顶 320px')
@@ -196,7 +196,7 @@ test('卡片放大：max-width 320px、头像 56px，网格列宽与「总览bot
   assert.match(avatarCss, /height:\s*56px/, '头像 56px')
 })
 
-// 用户 m_c2ff7f：成员卡太大，取消 0.618:1 宽高比，改与「总览bots」的 bot 卡片同口径。
+// 成员卡与「总览bots」的 bot 卡片同口径，不设宽高比。
 test('成员卡与 bot 卡片同口径：内边距 16px、圆角 12px，无宽高比', () => {
   const botCardCss = /\.bot-card \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
   assert.ok(botCardCss, '找不到 .bot-card 样式块')
@@ -240,7 +240,7 @@ test('busy 状态点沿用 run-dot 语义且不改色', () => {
   assert.match(css, /\.run-dot\.running \{[\s\S]*?background: var\(--star\)|\.run-dot\.running \{[\s\S]*?background: var\(--amber\)/, '运行中仍用既有配色变量')
 })
 
-// DSHBOTS-65：成员卡去掉与 busy pill 重复的运行状态行，改显本项目任务统计（已完成 n · 待办 m）。
+// 成员卡不渲染与 busy pill 重复的运行状态行，改显本项目任务统计（已完成 n · 待办 m）。
 test('成员卡不再渲染 .member-card-status 运行状态行（DSHBOTS-65）', () => {
   assert.ok(!membersFn.includes('member-card-status'), '卡片不再渲染运行状态行——与右侧「任务中/空闲中」pill 重复')
   assert.ok(!css.includes('.member-card-status'), '对应样式规则一并移除')

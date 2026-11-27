@@ -9,7 +9,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { nowIso, id } from '../src/util.js'
 
-// DSHBOTS-106 一次性密钥运行时：明文只在批准后写 <dataDir>/secrets-runtime/<projectId>.env，
+// 一次性密钥运行时的守门测试：明文只在批准后写 <dataDir>/secrets-runtime/<projectId>.env，
 // 三种先到者焚毁——任务运行 finishRun / TTL / 吊销删除；旧 .team/secrets.env 残留迁移清理。
 class ManualRuntime { declare handler: (...args: unknown[]) => unknown;
   setCompletionHandler(handler) { this.handler = handler }

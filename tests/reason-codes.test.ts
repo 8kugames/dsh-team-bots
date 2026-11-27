@@ -1,4 +1,4 @@
-// tests/reason-codes.test.ts —— B10/DSHBOTS-337：run_events 事件类型注册表守门。
+// run_events 事件类型注册表守门。
 // 「新闸门必须登记码」的可执行形态：静态扫描全部 run_events type 字面量 ⊆ RUN_EVENT_TYPES。
 // ①全集登记：扫描 insertRunEvent/INSERT INTO run_events 两种形态的 type 字面量，未登记即红；
 // ②登记条目完整：domain 合法、zh/en 非空；③释义函数按域双语、未知码原样回退；
@@ -67,5 +67,5 @@ test('释义函数：双语按域回显，未知码原样回退不抛错', () =>
 test('设计口径钉住：type 即码、message 为站点语境，不引入第二层文案真值', () => {
   const source = readFileSync(join(SRC, 'services', 'reason-codes.ts'), 'utf8')
   assert.match(source, /run_events\.type 本就是结构化码/, '头注口径在场')
-  assert.match(source, /双真值，不引入/, '反双真值裁决在场')
+  assert.match(source, /否则会与 type 列形成双真值/, '反双真值裁决在场')
 })

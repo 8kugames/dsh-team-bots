@@ -1,4 +1,4 @@
-// DSHBOTS-266：网络瞬态失败（ECONNRESET/5xx/408 等过性错误）分类接入既有重试链。
+// 网络瞬态失败（ECONNRESET/5xx/408 等过性错误）分类接入既有重试链。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'

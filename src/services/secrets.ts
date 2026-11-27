@@ -100,7 +100,7 @@ export const secretsMethods = {
   },
 
   // ===== 一次性密钥运行时 =====
-  // 明文不再进项目工作区：批准后写 <dataDir>/secrets-runtime/<projectId>.env（目录 0700、文件 0600），
+  // 明文不进项目工作区：批准后写 <dataDir>/secrets-runtime/<projectId>.env（目录 0700、文件 0600），
   // 在先到者发生时焚毁：①该项目下一条 task 运行 finishRun（成功/失败都删，见 runs.js）；
   // ②TTL（config.secretsRuntimeTtlMs）到期，sweepSecretsRuntime 巡检；③密钥吊销/删除。
   // 重新使用需再次批准，每次批准都重新物化。路径只通过批准回执向 Bot 披露，不进 state 视图。
@@ -135,8 +135,8 @@ export const secretsMethods = {
     return true
   },
 
-  // 旧残留清理（DSHBOTS-106 迁移）：物化改走数据目录后，项目侧 .team/secrets.env 全是历史
-  // 遗留，启动巡检与批准/删除时顺带删除；管理目录与生产目录都查，能删空的 .team 目录一并收走。
+  // 清理项目侧 .team/secrets.env 残留：启动巡检与批准/删除时顺带删除；
+  // 管理目录与生产目录都查，能删空的 .team 目录一并收走。
   cleanupLegacyProjectSecretFile(project) {
     const dirs = new Set([join(this.config.workspace, project.slug)])
     if (project.production_dir) dirs.add(project.production_dir)
@@ -179,7 +179,7 @@ export const secretsMethods = {
     }
   },
 
-  // 兼容旧调用点（projects.js 建项目/切生产目录）：一次性语义下不再物化明文，只清旧残留。
+  // 兼容旧调用点（projects.js 建项目/切生产目录）：一次性语义下不物化明文，只清旧残留。
   async materializeProjectSecrets(project) {
     this.cleanupLegacyProjectSecretFile(project)
     return null
@@ -221,7 +221,7 @@ export const secretsMethods = {
       this.audit(actor, existing ? 'secret.update' : 'secret.create', 'secret', secretId, { scope, name: normalized })
     })
     this._secretEntries = null
-    // DSHBOTS-106：入库不再落盘——明文只在批准（approveSecretRequest）时一次性物化到数据目录。
+    // 入库不落盘：明文只在批准（approveSecretRequest）时一次性物化到数据目录。
     return { id: secretId, name: normalized, fingerprint }
   },
   async deleteSecret(secretId, actor = this.actor()) {
@@ -232,7 +232,7 @@ export const secretsMethods = {
       this.audit(actor, 'secret.delete', 'secret', secretId, { scope: row.scope, name: row.name })
     })
     this._secretEntries = null
-    // DSHBOTS-106：吊销/删除即焚——受影响项目的一次性运行时文件当场删掉，重新使用需再次批准；
+    // 吊销/删除即焚：受影响项目的一次性运行时文件当场删掉，重新使用需再次批准；
     // 项目侧旧 .team/secrets.env 残留顺带清理。
     const targets = row.scope === 'team'
       ? this.store.all("SELECT * FROM projects WHERE status = 'active'")
@@ -260,7 +260,7 @@ export const secretsMethods = {
       requestId, binding.project_id, binding.bot_id, normalized, text(reason, 500) ?? '', nowIso(),
     )
     const project = this.projectRow(binding.project_id)
-    // 长理由围栏化（DSHBOTS-96 P3-2）：正文保持一句话可扫读，>100 字符的理由单独成块。
+    // 长理由围栏化：正文保持一句话可扫读，>100 字符的理由单独成块。
     const reasonText = text(reason, 300) ?? '（未说明）'
     const reasonBlock = reasonText.length > 100 ? `理由：\n\`\`\`\n${reasonText}\n\`\`\`` : `理由：${reasonText}`
     this.insertMessage({
@@ -304,7 +304,7 @@ export const secretsMethods = {
     )
     if (request.project_id) {
       const project = this.projectRow(request.project_id)
-      // 批准时顺带清掉项目侧旧 .team/secrets.env 残留（迁移），再一次性物化到数据目录。
+      // 批准时顺带清掉项目侧旧 .team/secrets.env 残留，再一次性物化到数据目录。
       this.cleanupLegacyProjectSecretFile(project)
       const envPath = this.materializeSecretsRuntime(project, actor)
       const ttlMinutes = Math.max(1, Math.round(this.config.secretsRuntimeTtlMs / 60_000))

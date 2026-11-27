@@ -9,7 +9,7 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { StubRuntime } from './helpers/runtime-stub.js'
 
-// 聊天分库 Phase 1（docs/plans/chat-db-split.md）：正文四表出顶库，
+// 聊天分库（docs/plans/chat-db-split.md）：正文四表出顶库，
 // 每群聊（项目）/单聊（bot）一个库文件；顶库只留控制面与全局数据。
 
 async function setup(prefix: string) {
@@ -146,9 +146,8 @@ test('聊天分库：移除追踪删除整个聊天库文件', async () => {
 })
 
 test('聊天分库：memory_review 引用单聊源运行读对库，不再产生 solo-undefined', async () => {
-  // 生产事故（2026-11-18 15:54）：memory_review 的源运行查询漏选路由列
-  // （project_id/bot_id），chatStoreForRun 把 undefined 当单聊 bot id，
-  // 凭空造出 solo-undefined.sqlite，且单聊源消息永远读不到。
+  // memory_review 的源运行查询若漏选路由列（project_id/bot_id），chatStoreForRun 会把
+  // undefined 当单聊 bot id，凭空造出 solo-undefined.sqlite，且单聊源消息永远读不到。
   const t = await setup('dsh-chatdb-mrev-')
   try {
     const bot = await t.service.createBot({ name: '记忆审阅', role: '开发', instructions: 'X.', provider: 'fake', model: 'm' })
@@ -326,8 +325,8 @@ test('聊天分库 Phase 3：insertRunEvent 统一收口按运行归属落库', 
 })
 
 test('聊天分库：领取定档按聊天库 sender_type 实测（bot 派发降机器档）', async () => {
-  // Phase 1 回归修正：候选排序的 LEFT JOIN messages 在分库后恒 NULL，
-  // bot @mention 派发的群聊运行不再被降到机器流量档。定档改为按聊天库实测。
+  // 分库后顶库 messages 恒空，定档须按聊天库里的 sender_type 实测，
+  // bot @mention 派发的群聊运行才会被降到机器流量档。
   const t = await setup('dsh-chatdb-tier-')
   try {
     const project = await t.makeProject('TIER')
@@ -343,9 +342,9 @@ test('聊天分库：领取定档按聊天库 sender_type 实测（bot 派发降
 })
 
 test('聊天分库：批量快照不返回 LRU 淘汰关闭的句柄', async () => {
-  // 生产事故（2026-11-18）：聊天库数超过 LRU 上限时，allChatStores() 边开边淘汰，
-  // 淘汰当场关闭了本轮已收集进数组的句柄，applyRetention 随后的扇出清理
-  // 打到已关闭的库报 "database is not open"。批量快照期间必须不做淘汰。
+  // 聊天库数超过 LRU 上限时，allChatStores() 若边开边淘汰，淘汰会当场关闭本轮
+  // 已收集进数组的句柄，applyRetention 随后的扇出清理打到已关闭的库报
+  // "database is not open"。批量快照期间必须不做淘汰。
   const t = await setup('dsh-chatdb-batch-')
   try {
     // 建出超过 LRU 上限（32）的聊天库数，逐个落一条消息让文件真实存在。

@@ -1,4 +1,4 @@
-// tests/i18n.test.js —— DSHBOTS-120 Phase 1：locale 读取链、t 行为与注入接线。
+// locale 读取链、t 行为与注入接线的守门测试。
 // 三层：①src/services/locale.js 纯函数 + 三级兜底（临时 dshHome，不碰真实 ~/.dsh）；
 // ②ui/modules/i18n.js 的 t 插值/回退；③http.js / index.html / system.js / app.js 注入接线守门。
 import { test } from 'node:test'
@@ -210,7 +210,7 @@ test('字典守门：插值占位必须是 ${\\w+} 形态，与 t() 的正则一
 })
 
 test('字典守门：用户实证的三键 t() 实测插值成功，无 @{ 残留', () => {
-  // viewTitle.dispatch / config / usageSolo 曾整键写成 @{name} 原样渲染（DSHBOTS-147 问题①）。
+  // viewTitle.dispatch / config / usageSolo 三键的 @{name} 必须被 t() 插值，不得原样渲染。
   for (const lang of ['zh', 'en']) {
     setLanguage(lang)
     for (const key of ['viewTitle.dispatch', 'viewTitle.config', 'viewTitle.usageSolo']) {

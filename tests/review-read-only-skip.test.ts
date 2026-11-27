@@ -1,4 +1,4 @@
-// tests/review-read-only-skip.test.js —— 验收核验分档（P0）：只读档交付免自动核验。
+// 验收核验分档的守门测试：只读档交付免自动核验。
 // 单一口径 readOnlyDelivery（task-review.js）：交付运行生效沙箱 read-only
 // （任务覆盖 override 或负责人配置档 bot_config）时——
 // ① queueAutoReviewDelegate 跳过（审计 skipped:'read_only'，不排 outbox）；

@@ -1,8 +1,8 @@
-// tests/join-notify.test.ts —— DSHBOTS-229 ② 守门：入群通知。
+// 入群通知的守门测试。
 // 锁定三件事：
 //  ① addProjectMember 入群后向其他成员发群系统消息（纯文本、无 emoji，@其他成员）；
 //  ② 通知失败只告警，不阻塞入群主流程（成员仍入群、临时目录仍创建）；
-//  ③ D-225 临时目录钩子仍随入群创建（通知是同一链路的顺带动作，不替换原钩子）。
+//  ③ 临时目录钩子仍随入群创建（通知是同一链路的顺带动作，不替换原钩子）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'

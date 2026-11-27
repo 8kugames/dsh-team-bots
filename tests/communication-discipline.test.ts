@@ -1,9 +1,8 @@
-// tests/communication-discipline.test.ts —— A1/DSHBOTS-321：通信纪律身份段守门。
-// 吸收 superagent 原型 prompts/team/communication.md 的「默认沉默、只在需人时外发、
-// 一次一个具体问题、发送前去冗不裁句（保完整自然句子）」，落点为项目会话身份段的 owner/member 变体
-// （COMMUNICATION_RULES，src/services/runtime/prompt.ts）。
+// tests/communication-discipline.test.ts —— 通信纪律身份段守门。
+// 纪律口径：「默认沉默、只在需人时外发、一次一个具体问题、发送前去冗不裁句（保完整自然句子）」，
+// 落点为项目会话身份段的 owner/member 变体（COMMUNICATION_RULES，src/services/runtime/prompt.ts）。
 // 守门三点：① owner 变体在；② member 变体在；③ 作用域锁——任务会话与单聊身份段
-// 不注入（任务交付纪律归 deliverySelfcheckBlock D-276，单聊是用户主动问的直接应答面），
+// 不注入（任务交付纪律归 deliverySelfcheckBlock，单聊是用户主动问的直接应答面），
 // 防止「少说话」纪律误伤必需的交付报告。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

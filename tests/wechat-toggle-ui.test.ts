@@ -1,5 +1,5 @@
-// DSHBOTS-334 守门（卡面扩展③）：微信通道 enable 开关上通道页。
-// f) 关=state.wechat 停用且出站不推（channelNotify 不再扇出到微信）；
+// 守门：微信通道 enable 开关上通道页。
+// f) 关=state.wechat 停用且出站不推（channelNotify 不扇出到微信）；
 // g) 开=恢复挂载（真实 WechatChannel 挂载 + start，无既有绑定时回 unbound 待扫码）；
 // h) settings 显式值覆盖 patch.yml/env 默认（含 core 挂载决策源码锚与生效值纯函数）；
 // 另含 UI 渲染守门：停用态出「启用通道」、启用态出「停用通道」，i18n 双语齐平。

@@ -198,13 +198,13 @@ document.addEventListener('click', (event) => {
 })
 
 // 粘贴分发：document 级委托——#composer-input 在 renderShell 里被 2.8s 轮询重建，
-// 监听挂节点会随节点一起被换掉（D-64 同类根因）。target 不是 composer 就完全放行，纯文本粘贴行为不变。
+// 监听挂节点会随节点一起被换掉。target 不是 composer 就完全放行，纯文本粘贴行为不变。
 document.addEventListener('paste', (event) => {
   const input = event.target as HTMLInputElement
   if (input?.id !== 'composer-input') return
   const files = Array.from(event.clipboardData?.files ?? [])
   if (files.length === 0) return
-  // 剪贴板里是文件（截图/复制的文件），接管默认行为：图片走现有校验与待发通道（顺带补上粘贴截图能力），
+  // 剪贴板里是文件（截图/复制的文件），接管默认行为：图片走现有校验与待发通道（粘贴截图也走这条路），
   // 不支持的类型从剪贴板文本里找 file:// 绝对路径；都拿不到就明说，不静默、不猜路径。
   event.preventDefault()
   const images = files.filter(file => resolveImageMediaType(file.type, file.name))

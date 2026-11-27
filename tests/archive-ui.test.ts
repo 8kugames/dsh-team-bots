@@ -1,4 +1,4 @@
-// DSHBOTS-10：群聊归档改造的 UI 断言（读源码断言风格，先例 tests/dispatch-ui.test.js）。
+// 群聊归档的 UI 断言（读源码断言风格，先例 tests/dispatch-ui.test.js）。
 // ui/app.js 是浏览器 IIFE 单测跑不起来，锁住抽屉结构、两层确认弹窗、按钮标记与样式接线。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -19,7 +19,7 @@ test('② 抽屉条目：群聊组只列 active，归档项收进抽屉并带操
 // [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 // [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 // [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
-  // DSHBOTS-44：抽屉条目只负责选中，「再开 / 移除追踪」移入项目设置的「项目状态」卡内。
+  // 抽屉条目只负责选中，「再开 / 移除追踪」在项目设置的「项目状态」卡内。
   assert.doesNotMatch(source, /tree-item-actions/, '抽屉条目不再挂逐项操作按钮')
   assert.doesNotMatch(source, /class="tree-act/, '抽屉不再渲染 tree-act 小按钮')
 })

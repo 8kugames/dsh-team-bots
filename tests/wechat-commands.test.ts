@@ -1,8 +1,8 @@
-// DSHBOTS-249 守门：微信 / 前缀固定指令集。
+// 微信 / 前缀固定指令集的守门测试。
 // 覆盖：①七条指令（/? /keys /bots /states /detail /reject /tr）解析与路由；
 // ②/reject 缺理由拒绝；③未知 /xxx 回简短帮助提示；④权限门（非 admin 对写操作 /reject /tr 拒绝，
-// 只读指令不设门）；⑤无前缀消息仍走 director 对话链路（D-208 行为不动）。
-// DSHBOTS-257 守门：⑥写指令权限门 fail-closed（未传 ctx / 未显式 isAdmin=true 即拒）；
+// 只读指令不设门）；⑤无前缀消息仍走 director 对话链路。
+// ⑥写指令权限门 fail-closed（未传 ctx / 未显式 isAdmin=true 即拒）；
 // ⑦/detail 指派名走真 TeamService 解析（临时库），不靠桩直造 assigneeName 字段。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -149,8 +149,8 @@ test('权限门 fail-closed：未传 ctx 或未显式 isAdmin=true 拒绝写指�
   assert.ok((await handleCommand(service, '/keys')).includes('web'))
 })
 
-// DSHBOTS-257 守门①：/detail 指派名走真 TeamService（临时库）解析——taskViewByIdentifier
-// 按 assignee_bot_id 产出 assigneeName，不靠桩直造字段（此前生产恒显「暂未指派」的回归）。
+// /detail 指派名走真 TeamService（临时库）解析——taskViewByIdentifier
+// 按 assignee_bot_id 产出 assigneeName，不靠桩直造字段（否则恒显「暂未指派」）。
 class RealServiceRuntime {
   setCompletionHandler() {}
   async catalog() { return [] }
@@ -199,10 +199,10 @@ test('无前缀消息仍走 director 对话链路，不被固定指令截获', a
   const service = SERVICE_STUB()
   const silent = await handleCommand(service, '把首页改成深色模式', ADMIN_CTX)
   assert.equal(silent, '', '非首触自由文本静默直达 director')
-  // DSHBOTS-258 绝对口径：自由文本不传绑定（路由层无绑定判断），key 恒为 null
+  // 绝对口径：自由文本不传绑定（路由层无绑定判断），key 恒为 null
   assert.deepEqual(service.chatted, { key: null, body: '把首页改成深色模式', fallbackKey: undefined })
 
-  // 旧触发式指令词也已收编：作为普通文本进对话，不再被指令层拦截
+  // 旧触发式指令词按普通文本进对话，不被指令层拦截
   await handleCommand(service, '验收 web-5 干得漂亮', ADMIN_CTX)
   assert.deepEqual(service.chatted, { key: null, body: '验收 web-5 干得漂亮', fallbackKey: undefined })
   assert.equal(service.seen, null, '旧触发词不得再触发验收路由')

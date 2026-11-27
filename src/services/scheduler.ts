@@ -20,10 +20,10 @@ import { originTriggerType } from './runs.js'
 // plan_wait 到期派生的宽限上界：退避到期超过这个时长视为时过境迁，不再自动续跑。
 const PLAN_RETRY_MAX_LATE_SECONDS = 24 * 3600
 
-// DSHBOTS-43 人的消息保底槽：人触发的运行判定。
-// 现有字段口径：chat/solo_chat 的 trigger_type 是 'mention'（微信直达为 'wechat'，DSHBOTS-208；
-// DSHBOTS-258 起项目外 director 专属工作区的 solo 直达同为 'wechat'），dm 是 'dm'，dm_reply 是
-// 'dm_reply'；用 kind 判定最稳（solo_chat 也命中），以现有字段为准不新增列。
+// 人的消息保底槽：人触发的运行判定。
+// 字段口径：chat/solo_chat 的 trigger_type 是 'mention'（微信直达为 'wechat'，项目外 director
+// 专属工作区的 solo 直达同为 'wechat'），dm 是 'dm'，dm_reply 是 'dm_reply'；用 kind 判定最稳
+// （solo_chat 也命中），以现有字段为准不新增列。
 const HUMAN_RUN_KINDS = new Set(['chat', 'solo_chat', 'dm', 'dm_reply'])
 function isHumanRun(run) {
   return HUMAN_RUN_KINDS.has(run.kind)
@@ -234,8 +234,8 @@ export const schedulerMethods = {
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', payload.botId)
       if (!bot || bot.status !== 'active') return null
       // payload.origin='wechat'：微信通道投的项目外 director 单聊，
-      // solo 运行打 wechat 标记，运行收尾的回复据此推回微信；'feishu' 同款（DSHBOTS-329：
-      // 飞书触发运行的回复推回飞书管理员）；普通 UI 单聊保持 mention。
+      // solo 运行打 wechat 标记，运行收尾的回复据此推回微信；'feishu' 同款（飞书触发运行的
+      // 回复推回飞书管理员）；普通 UI 单聊保持 mention。
       return this.enqueueSoloChatRun(bot, payload.messageId, {
         triggerType: originTriggerType(payload.origin),
       })
@@ -263,9 +263,8 @@ export const schedulerMethods = {
     throw error
   },
 
-  // 串行键（DSHBOTS-308，DSHBOTS-289 的 bot 全局串行收窄）：串行域 = (bot, 工作区)，
-  // domain 取 run.project_id ?? '~solo'（与 D-299 one_bot_binding 的 COALESCE 口径一致，
-  // 项目外 solo/单聊落 bot 自有工作区）。跨工作区并行由 owner 拍板；同域运行仍互斥。
+  // 串行键：串行域 = (bot, 工作区)，domain 取 run.project_id ?? '~solo'（项目外 solo/单聊落
+  // bot 自有工作区），与 one_bot_binding 的 COALESCE 口径一致。跨工作区可并行，同域运行仍互斥。
   // domain 以 run.project_id 为准：dm_reply 入队处即落 origin 推导的 project_id
   // （deliverBotReply 写 message.project_id，见 runs.ts），键推导不读 trigger_ref/session_id。
   // 施工运行（kind='task'）豁免 bot 串行域（单 bot 多任务并行）：串行键按任务维度取
@@ -282,11 +281,11 @@ export const schedulerMethods = {
     const stallMs = effectiveRunLimits(this.config, key => this.store.setting(key)).stallTimeoutMs
     if (!stallMs) return
     const cutoff = new Date(Date.now() - stallMs).toISOString()
-    // DSHBOTS-181：提问 pending 期间 run 没有进展事件是等待人类作答的常态，不算 stall——
+    // 提问 pending 期间 run 没有进展事件是等待人类作答的常态，不算 stall——
     // 存在 run_id 匹配且未过 expires_at 的 pending 提问时豁免；豁免期被提问窗口
     // （questionTimeoutMs，默认 180s）自然封顶：窗口一过（提问置 timeout/answered 或残留
     // pending 的 expires_at 已过）超龄 run 下一拍照常回收，泄漏 pending 不可能永久豁免。
-    // DSHBOTS-222：审批与提问同口径——等待审批中的 run 同样没有进展事件，pending 审批
+    // 审批与提问同口径——等待审批中的 run 同样没有进展事件，pending 审批
     // 未过 expires_at 时一并豁免；豁免期被审批窗口（approvalTimeoutMs）自然封顶。
     const stalled = this.store.all(
       `SELECT id, kind, started_at, last_progress_at FROM runs
@@ -319,15 +318,15 @@ export const schedulerMethods = {
       })
     }
   },
-  // 限流失败的自动重试（DSHBOTS-24；DSHBOTS-38 放开到 3 次并支持合成退避）：
+  // 限流失败的自动重试：
   // 失败 run 带 retry_after_ms（provider 真发过 Retry-After，或限流/瞬态无头时 finishRun 合成的指数退避），
   // 到期派生一次新运行。重试链最多跑到 attempt=3（1→2→3），之后转常规失败处置；
-  // DSHBOTS-266：链内错误判定移到下方 JS——限流码集合之外，网络瞬态失败（ECONNRESET/5xx/408
+  // 链内错误判定在下方 JS 做——限流码集合之外，网络瞬态失败（ECONNRESET/5xx/408
   // 等，错误码/正文双匹配，见 backoff.ts 的 isRetryChainError）同样进本路径；SQL 表达不了该正则。
   // 只针对任务运行——solo/私信运行显示 plan_wait 状态但不自动派生，避免对同一个对话者重复发信。
   // 过期超过 24h 视为时过境迁不派生（服务停摆/长期搁置后不补跑旧任务）。
   // 幂等闸：task_id 非空 + 原 run 无 plan_retry 事件；idempotency_key UNIQUE 兜底并发 tick。
-  // DSHBOTS-99：额度耗尽类运行（已达限额）与备用链上的运行不派生——受阻后不自己空转重试。
+  // 额度耗尽类运行（已达限额）与备用链上的运行不派生——受阻后不自己空转重试。
   retryExpiredPlanWaits() {
     const expired = this.store.all(
       `SELECT r.* FROM runs r
@@ -340,18 +339,18 @@ export const schedulerMethods = {
         `,
     )
     for (const run of expired) {
-      // 幂等闸（Phase 3 起事件住聊天库）：已派生过的运行跳过。
+      // 幂等闸：已派生过的运行跳过。
       if (this.runChatStore(run).get(
         "SELECT 1 AS ok FROM run_events WHERE run_id = ? AND type = 'plan_retry'", run.id,
       )) continue
-      // DSHBOTS-266：重试链判定（限流码 ∪ 网络瞬态）在 JS 做；非链内错误码不派生（现状不变）。
+      // 重试链判定（限流码 ∪ 网络瞬态）在 JS 做；非链内错误码不派生。
       if (!isRetryChainError({ code: run.error_code, message: run.error_message })) continue
-      // DSHBOTS-99：额度耗尽（已达到限额）的运行不再自动派生重试——额度窗口用尽时重打主模型
+      // 额度耗尽（已达到限额）的运行不派生重试——额度窗口用尽时重打主模型
       // 只会再撞一次额度，任务已经转受阻，不能让它自己空转。
       // 备用链上的运行同理：每条链只切一次备用，plan_retry 派生出来的是主模型运行，等于绕开限额口径。
       if (run.model_provider) continue
       // 只看错误码与错误正文：retry_after_ms 在库里既可能是 provider 的重置时间，
-      // 也可能是限流链的合成退避（既有测试用 10 分钟退避当到期样本），拿它判额度会误伤 D-24/D-38 的退避派生。
+      // 也可能是限流链的合成退避（既有测试用 10 分钟退避当到期样本），拿它判额度会误伤退避派生。
       if (isQuotaExhausted({ code: run.error_code, message: run.error_message })) continue
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', run.task_id)
       if (!task || ['done', 'canceled'].includes(task.status)) continue
@@ -423,11 +422,10 @@ export const schedulerMethods = {
     return canceled
   },
 
-  // 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：in_review 超 24h /
-  // blocked 超 48h / 待执行（backlog/todo，D-295 调查：tasks 表无 'pending' 态）超 72h
-  // 的卡向项目 owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），只提醒不自动
-  // 处置——不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick（与 D-194
-  // 验收守门同拍接入，不新增常驻进程）；判定与防重见 notify.ts 的纯函数与每日上限。
+  // 滞留阈值兜底扫描：in_review 超 24h / blocked 超 48h / 待执行（backlog/todo，tasks 表无
+  // 'pending' 态）超 72h 的卡向项目 owner 发一条滞留提醒（notify.ts notifyStaleCardOwner），
+  // 只提醒不自动处置——不自动关单、不自动转状态、不重派。选点：复用 scheduler 周期 tick
+  // （与验收守门同拍接入，不新增常驻进程）；判定与防重见 notify.ts 的纯函数与每日上限。
   // 逐卡容错：单卡异常只 warn，不拖垮整轮扫描。
   scanStaleCards() {
     const rows = this.store.all(
@@ -460,9 +458,9 @@ export const schedulerMethods = {
     return deadlineMs !== null && Date.now() > deadlineMs
   },
 
-  // 任务级死线升级（DSHBOTS-274；DSHBOTS-281 口径升级）：超线的 queued 施工运行拒绝启动
+  // 任务级死线升级：超线的 queued 施工运行拒绝启动
   // ——运行置 canceled（TASK_DEADLINE，run_events 留 task_deadline 锚），卡面落系统评论
-  // （D-269 口径=原因+事实：点名项目总监，重派即自动重置死线窗口，不再写转接 owner 的话术），
+  // （口径=原因+事实：点名项目总监，重派即自动重置死线窗口，不写转接 owner 的话术），
   // status 转 blocked（走 updateTask 单一状态流转漏斗，非法转换只评论不转），并复用系统消息
   // 通道通知项目总监（notify.ts insertMessage 同款，进任务线程 + mentions 点名 owner_bot_id）。
   // 幂等：enqueueTaskRun 同卡同时只有一条活跃运行，运行取消后不再进候选，每次派发至多升级
@@ -557,20 +555,19 @@ export const schedulerMethods = {
       // 验收滞留守门：in_review 卡静置超阈值即注入 owner 系统提醒；
       // 内部自容错（异常只 warn），阈值 0 = 关闭时直接返回。
       runReviewWatchdog(this)
-      // 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：in_review/blocked/
-      // 待执行（todo/backlog）超 24h/48h/72h 三档向 owner 只提醒不自动处置；
-      // 内部逐卡容错（单卡异常只 warn）。
+      // 滞留阈值兜底扫描：in_review/blocked/待执行（todo/backlog）超 24h/48h/72h 三档向 owner
+      // 只提醒不自动处置；内部逐卡容错（单卡异常只 warn）。
       this.scanStaleCards()
       // GitHub 只读触发源：间隔闸 + 逐源容错，缺省全关零开销。
       void pollGithubSources(this).catch(error => {
         this.logger?.warn?.('github source poll failed: %s', error?.message ?? error)
       })
       const activeRows = this.store.all(
-        // 写占用只看「进行中」的任务（DSHBOTS-73，用户口径）：join tasks 取任务当前状态，
-        // 任务不在 in_progress 的写运行不再占槽——离开进行中即释放占用/锁定。
+        // 写占用只看「进行中」的任务：join tasks 取任务当前状态，
+        // 任务不在 in_progress 的写运行不占槽——离开进行中即释放占用/锁定。
         // 非任务运行 LEFT JOIN 出的 task_status 为空，按运行自身判定，不受这条闸门影响。
         // claimKey 串行域 = (bot, 工作区)：键只读 bot_id/project_id（均在列面），
-        // 在跑侧与候选侧算的是同一 run 行的同一列，串行不失效（承 DSHBOTS-219 口径）。
+        // 在跑侧与候选侧算的是同一 run 行的同一列，串行不失效。
         `SELECT r.bot_id, r.kind, r.task_id, r.project_id, r.mode, r.write_scopes, r.trigger_type,
                 t.status AS task_status, t.ignored_write_scopes AS task_ignored_scopes
            FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
@@ -594,7 +591,7 @@ export const schedulerMethods = {
         activeWriteScopes.set(row.project_id, list)
       }
       let activeTotal = activeRows.length
-      // DSHBOTS-43 人的消息保底槽：并发上限之外额外留 1 条，专给人触发的运行
+      // 人的消息保底槽：并发上限之外额外留 1 条，专给人触发的运行
       // （kind ∈ chat/solo_chat/dm/dm_reply）用——人的追问不能被机器任务队列挤死。
       // 额外槽同一时刻只放行 1 条；写范围冲突闸门照旧生效，绝不绕过。
       const maxRuns = Number(this.config.maxConcurrentRuns)
@@ -602,7 +599,7 @@ export const schedulerMethods = {
       if (activeTotal >= maxRuns + 1) return
       // 出队顺序：任务运行按任务优先级（urgent 先），其余运行视同 high——用户交互不能被任务积压拖死；
       // 同优先级按入队时间，保证 FIFO 不饿死老运行。
-      // DSHBOTS-272 用户提问不被静默压后：不动用户运行的档位（同车道先入队的 review/handle
+      // 用户提问不被静默压后：不动用户运行的档位（同车道先入队的 review/handle
       // 等人机运行契约不变，见 tests/avatar-lanes.test.js），改为把通知/伙伴唤醒触发的 chat
       // 运行（触发消息 sender_type='bot'）降到机器流量档——同车道内用户提问（tier 1）必然
       // 先于它领取，即使提问后到；通知备忘让位于一切人机交互与 urgent/high 任务。
@@ -616,9 +613,9 @@ export const schedulerMethods = {
            AND NOT (r.kind = 'task' AND COALESCE(t.status, '') IN ('done', 'canceled', 'backlog'))
           LIMIT 200`,
       )
-      // 出队定档移到 JS：分库后 messages 住各聊天库（顶库 messages 已空，
-      // 旧 LEFT JOIN 恒 NULL，DSHBOTS-272 的机器流量档自 Phase 1 起失效）——
-      // 群聊运行改按触发消息的 sender_type 实测定档，任务优先级档照旧。
+      // 出队定档在 JS 做：messages 住各聊天库（顶库 messages 已空，旧 LEFT JOIN 恒 NULL，
+      // 机器流量档在 SQL 侧取不到）——群聊运行改按触发消息的 sender_type 实测定档，
+      // 任务优先级档照旧。
       for (const run of candidates) run.claim_tier = this.claimTierOf(run)
       candidates.sort((a, b) =>
         (a.claim_tier - b.claim_tier) || String(a.queued_at ?? '').localeCompare(String(b.queued_at ?? '')))
@@ -643,10 +640,10 @@ export const schedulerMethods = {
           const runningScopes = activeWriteScopes.get(run.project_id) ?? []
           if (runningScopes.some(other => writeScopesOverlap(writeScopes, other))) continue
         }
-        // DSHBOTS-112：单聊读图代理运行与 solo_chat 同样不带 project_id，豁免项目闸门。
-        // DSHBOTS-145：结转摘要运行同理——单聊摘要运行不带 project_id，只有项目摘要运行
+        // 单聊读图代理运行与 solo_chat 同样不带 project_id，豁免项目闸门。
+        // 结转摘要运行同理——单聊摘要运行不带 project_id，只有项目摘要运行
         // 才需要项目上下文；否则 solo 摘要会被误判 MISSING_CONTEXT 直接失败。
-        // DSHBOTS-286：闲时压缩运行同理。
+        // 闲时压缩运行同理。
         const needsProject = run.kind === 'rollover_summary' || run.kind === 'session_compact'
           ? Boolean(run.project_id)
           : run.kind !== 'solo_chat' && !(run.kind === 'vision' && !run.project_id)
@@ -660,9 +657,9 @@ export const schedulerMethods = {
           await this.finishRun({ runId: run.id, status: 'failed', output: '', error: { code: 'UNAVAILABLE', message: '项目或 Bot 不可用' } })
           continue
         }
-        // DSHBOTS-241 额度闸门：主 provider 仍在耗尽期、且本次没走备用模型的任务运行不领取——
+        // 额度闸门：主 provider 仍在耗尽期、且本次没走备用模型的运行不领取——
         // 留 queued，恢复时间过后下一拍自动回主模型（避免每拍撞同一堵墙）。
-        // DSHBOTS-358：闸门扩到内部运行种类（任务/验收/受阻处理/记忆审查），
+        // 闸门扩到内部运行种类（任务/验收/受阻处理/记忆审查），
         // mode='wait' 的内部运行同样留 queued 等恢复，不空转撞墙。
         // 走备用的运行（model_provider 非空）不受此闸影响，主备两套额度各自独立。
         // 聊天类运行不在此列：照发现行下发，失败文案与重试口径不动。
@@ -723,8 +720,8 @@ export const schedulerMethods = {
           nowIso(), nowIso(), run.id,
         )
         if (Number(claimed.changes) !== 1) continue
-        // 消息合批（DSHBOTS-290 语义回补）：合批在 bot 空闲建回时完成（drainPendingMessages，
-        // 含 D-272 用户提问保护/窗口/上限），领取侧不二次合批——窗口/上限已在建回侧消费。
+        // 消息合批在 bot 空闲建回时完成（drainPendingMessages，含用户提问保护/窗口/上限），
+        // 领取侧不二次合批——窗口/上限已在建回侧消费。
         // 借用了人的消息保底槽（超出并发上限放行）：记事件并占住额外槽，下一次归还前不再放第二条。
         if (human && activeTotal >= maxRuns) {
           humanSlotTaken = true
@@ -774,7 +771,7 @@ export const schedulerMethods = {
     return { reconciliation, retention, reapedMessages }
   },
 
-  // 领取定档（DSHBOTS-272 口径，分库修正）：任务运行按任务优先级（urgent 先），
+  // 领取定档：任务运行按任务优先级（urgent 先），
   // 其余运行视同 high；群聊运行的触发消息来自 bot（@mention 派发）时降到机器流量档，
   // 同车道内用户提问（tier 1）必然先于它领取。sender_type 住聊天库，按运行归属实测。
   claimTierOf(run) {

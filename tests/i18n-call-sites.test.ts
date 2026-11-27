@@ -1,6 +1,6 @@
-// DSHBOTS-246：i18n 调用点守门——ui 内 t("字面量") 实参必须已在词典注册。
-// 背景：既有结构守门（tests/i18n-split.test.ts）只查词典内部 zh/en 键集一致，不查调用点；
-// DSHBOTS-241 关单后新增 UI 代码绕过守门引入字面量，英文环境回退中文原文并 console.warn。
+// i18n 调用点守门——ui 内 t("字面量") 实参必须已在词典注册。
+// 既有结构守门（tests/i18n-split.test.ts）只查词典内部 zh/en 键集一致，不查调用点；
+// 新增 UI 代码若绕过守门引入字面量，英文环境会回退中文原文并 console.warn。
 // 本测试扫描 ui 源码（排除词典目录与 .js 产物），对「纯字面量实参」断言已注册；
 // 动态键（t('prefix' + var)、t(`${prefix}${key}`)）不是字面量，跳过。
 import { test } from 'node:test'
@@ -46,7 +46,7 @@ test('i18n 调用点守门：ui 内 t() 纯字面量实参必须已注册（DSHB
   assert.deepEqual(missing, [], `t() 实参缺键（英文环境会回退中文）：\n${missing.join('\n')}`)
 })
 
-// DSHBOTS-300：动态键守门。字面量之外的键（keyed 表、t('前缀' + x)、t(`前缀${x}`)）
+// 动态键守门。字面量之外的键（keyed 表、t('前缀' + x)、t(`前缀${x}`)）
 // 上面的用例看不见，缺键同样会让英文界面回退中文，故逐族核对。
 const KEYED = /\bkeyed\(\s*(['"`])([\w.]*)\1\s*,\s*\[([^\]]*)\]/g
 const CONCAT = /\bt\(\s*(['"`])([A-Za-z][\w.]*)\1\s*\+/g

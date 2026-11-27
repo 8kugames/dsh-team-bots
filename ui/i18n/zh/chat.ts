@@ -74,10 +74,10 @@ export default {
   "solo.recentRuns": "最近调度运行",
   "solo.noRuns": "还没有调度运行。",
   "solo.workspace": "专属工作区",
-  // DSHBOTS-220: ui/modules 文案（原文即键）
+  // ui/modules 文案（原文即键）
   "等待审批": "等待审批",
   "已允许一次": "已允许一次",
-  // DSHBOTS-365：免审放行的独立状态文案（decided_by=auto:rule:*）
+  // 免审放行的独立状态文案（decided_by=auto:rule:*）
   "规则自动放行": "规则自动放行",
   "已拒绝": "已拒绝",
   "已超时": "已超时",
@@ -138,7 +138,7 @@ export default {
   "还没有选择": "还没有选择",
   "选择 · Enter 或 Tab 插入 · Esc 关闭": "选择 · Enter 或 Tab 插入 · Esc 关闭",
   "问）": "问）",
-  // DSHBOTS-246：全量 t 实参清点补齐（原文即键）
+  // 全量 t 实参清单（原文即键）
   "（无说明）": "（无说明）",
   "（未选择）": "（未选择）",
   "（共": "（共",

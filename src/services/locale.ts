@@ -1,4 +1,4 @@
-// src/services/locale.js —— DSH 宿主语言偏好读取（DSHBOTS-120 Phase 1）
+// src/services/locale.js —— DSH 宿主语言偏好读取
 // 官方 locale 插件 @deepseek-ai/dsh-client-locale 把用户选择持久在
 // ~/.dsh/profiles/<profile>/cordis.patch.yml 的 `- id: locale` 条目 config.preference；
 // 插件页面拿不到 __DSH_LOCALE__ 桥与 gateway RPC，只能在服务端读取。
@@ -114,7 +114,7 @@ export async function resolveUiLanguage({ loader = null, dshHome = null, profile
 }
 
 // ── 出站系统消息的系统告警前缀─────────────────────────────────
-// 用户拍板：前缀缺省英文 SYSTEM ALERT（注意拼写 ALERT），中文环境显示【系统指令】。
+// 前缀缺省英文 SYSTEM ALERT（注意拼写 ALERT），中文环境显示【系统指令】。
 // zh* → 【系统指令】；其余（en/未知/未设定）→ [SYSTEM ALERT] （缺省英文）。
 export function systemAlertLabel(locale) {
   return clampLocaleId(locale) === 'zh' ? '【系统指令】' : '[SYSTEM ALERT] '

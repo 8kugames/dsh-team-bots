@@ -72,7 +72,7 @@ function approvalProgressRatio(remainingMs, windowMs) {
   if (total <= 0) return 0
   return Math.max(0, Math.min(1, (Number(remainingMs) || 0) / total))
 }
-// 旧数据兜底：approvals 表落 tool_target 列之前的历史卡片没有目标，从摘要里取第一个路径片段
+// 旧数据兜底：没有 tool_target 的卡片从摘要里取第一个路径片段
 // （绝对路径，或带扩展名的相对路径）；取不到不出 chip。新数据不走这里。
 function approvalPath(text) {
   const match = String(text ?? '').match(/(?:^|[\s"'`(（])((?:~|\.{1,2})?\/[\w.\-@]+(?:\/[\w.\-@]*)+|[\w.\-@]+\/[\w.\-@]+\.[A-Za-z0-9]+)/)
@@ -305,9 +305,9 @@ function renderQuestionCard(message) {
 }
 // ===== question-card:end =====
 
-// 收件箱点「查看来源」：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把提问卡滚动到可视区。
-// 乐观切换（与侧栏 select-project 同构，DSHBOTS-167）：目标视图的 state 组装在大库上要数秒，
-// 没有骨架时点击像死点（用户报「点了跳不过去」）——先收面板出骨架，数据到位再落卡片并滚动。
+// 收件箱点「查看来源」：聚焦窗口，跳到对应会话（项目群聊或单聊）并把提问卡滚动到可视区。
+// 乐观切换（与侧栏 select-project 同构）：目标视图的 state 组装在大库上要数秒，
+// 没有骨架时点击像没反应——先收面板出骨架，数据到位再落卡片并滚动。
 function focusQuestionCard(question) {
   if (!question) return
   if (question.project_id) {
@@ -511,7 +511,7 @@ function inboxItemOnScreen(entry, { hidden = document.hidden, focused = document
 
 // 取数后比较收件箱增量：通知开启时，新到达且用户此刻看不见的事项各弹一次（tag 防同条重复弹，
 // 会话级去重保证每条只弹一次）。首拍只记基线：页面加载时已存在的事项不算新到达——init 载入即喂第一拍，
-// 之后到达的第一条就能被认出来（早先基线拖到第一次轮询才记，把第一条新事项一并吞进基线）。
+// 之后到达的第一条就能被认出来（基线若拖到第一次轮询才记，第一条新事项会被吞进基线）。
 function notifyInbox(data, { enabled = notifyOn(), hidden = document.hidden, focused = document.hasFocus() } = {}) {
   const entries = inboxNotifyEntries(data)
   const fresh = inboxBaselineReady ? entries.filter(entry => !knownInboxIds.has(entry.id)) : []
@@ -532,7 +532,7 @@ function notifyInbox(data, { enabled = notifyOn(), hidden = document.hidden, foc
 }
 // desktop-notify:end
 
-// 收件箱点「查看来源」：聚焦窗口，跳到对应会话（项目群聊或单聊，DSHBOTS-218）并把审批卡滚动到可视区。
+// 收件箱点「查看来源」：聚焦窗口，跳到对应会话（项目群聊或单聊）并把审批卡滚动到可视区。
 // 乐观切换与 focusQuestionCard 同构：先出骨架给点击即时反馈，数据到位再滚动定位。
 function focusApprovalCard(approval) {
   if (!approval) return

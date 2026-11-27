@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
 
-// DSHBOTS-80：消息图片缩略图化 + 点击放大预览（复用 image-viewer）。
-// ① 附图瓦片从「图标 + 文件名」文本条改成真缩略图（blob: URL，会话级缓存，base64 不进 DOM）；
+// 消息图片缩略图 + 点击放大预览（复用 image-viewer）的守门测试。
+// ① 附图瓦片是真缩略图（blob: URL，会话级缓存，base64 不进 DOM）；
 // ② markdown 正文内嵌 <img> 点击委托放大（复用全屏查看器，直接用现有 src）。
 const source = readUiSource()
 const css = await uiStylesSource()
@@ -90,7 +90,7 @@ test('正文内嵌图点击放大：委托先于 data-action，openInlineImage �
     },
     () => viewer,
     { href: 'http://localhost/' },
-    // DSHBOTS-367：查看器打开时背景 #app 置 inert——桩只记录调用，不做真实 DOM 操作。
+    // 查看器打开时背景 #app 置 inert——桩只记录调用，不做真实 DOM 操作。
     () => {},
     () => false,
   )

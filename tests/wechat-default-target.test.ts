@@ -1,6 +1,6 @@
-// DSHBOTS-258 守门：微信自由文本默认投递 director 专属工作区（项目外 director 通道）。
-// 口径以第三次 amend 为准：路由收敛为两条——/tr <key>: 显式转发 → 对应项目；
-// 其余一切自由文本（含已绑定、单项目、原 <key>: 冒号写法）→ director solo 通道，
+// 微信自由文本默认投递的守门测试：自由文本进 director 专属工作区（项目外 director 通道）。
+// 路由两条——/tr <key>: 显式转发 → 对应项目；
+// 其余一切自由文本（含已绑定、单项目、<key>: 冒号写法）→ director solo 通道，
 // 用户不直接进任何项目群聊；自由文本永不触发 no_target/needPickProject。
 // 全部用真 TeamService（临时库）跑，不用桩替代路由链。
 import { test } from 'node:test'
@@ -22,7 +22,7 @@ class StubRuntime {
 }
 
 const count = (store, sql, ...args) => Number(store.get(sql, ...args)?.n ?? 0)
-// 聊天分库 Phase 1：正文表分住各聊天库——跨库计数遍历聊天库求和，solo 通道固定读 director 单聊库。
+// 聊天分库：正文表分住各聊天库——跨库计数遍历聊天库求和，solo 通道固定读 director 单聊库。
 const chatCount = (service, sql, ...args) =>
   service.allChatStores().reduce((sum, chatStore) => sum + Number(chatStore.get(sql, ...args)?.n ?? 0), 0)
 const soloDbOf = (service, directorId) => service.soloChatStore(directorId)
@@ -172,7 +172,7 @@ test('③ 已绑定 direct_project_key 且恰有一个 active 项目：自由文
       '绑定项目与唯一 active 项目都不得截走自由文本（负向）',
     )
 
-    // 原 <key>: 冒号派单写法也已收编为自由文本：不再路由进项目
+    // <key>: 冒号派单写法也算自由文本：不路由进项目
     const colon = await handleCommand(service, 'alpha: 上线新版官网', {
       boundKey: 'ALPHA',
       bind() {},

@@ -12,7 +12,7 @@ import {
   effectiveWriteScopes,
 } from '../src/services/write-scopes.js'
 
-// DSHBOTS-133：package.json 是版本钩子的机械改动（pre-commit 每次提交 bump patch 位），
+// package.json 是版本钩子的机械改动（pre-commit 每次提交 bump patch 位），
 // 不纳入写范围锁。这里锁两件事：
 //   ① 闸门侧：比对前双侧剥掉 package.json（存量 queued 运行快照也带它，靠闸门过滤兜住）；
 //   ② 声明侧：parseWriteScopes 出口剥掉，新任务从源头不带。
@@ -69,7 +69,7 @@ async function manualSetup() {
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  // DSHBOTS-290：bot 级串行（one_active_run_per_bot）下并行断言需要异 bot——补第二成员。
+  // bot 级串行（one_active_run_per_bot）下并行断言需要异 bot——补第二成员。
   const dev2 = await service.createBot({
     name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })

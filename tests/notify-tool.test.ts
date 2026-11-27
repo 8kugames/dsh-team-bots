@@ -1,4 +1,4 @@
-// tests/notify-tool.test.ts —— DSHBOTS-243 守门：team_notify 通知通道。
+// team_notify 通知通道守门测试。
 // 锁定四支：
 //  ① target=member 双写（宿主通道 steer + 插件 messages 留痕）与降级单写（宿主句柄
 //     不可达 / 投递失败 → 群聊流 insertMessage + chat_run），失败只 warn 不抛；

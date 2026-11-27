@@ -16,7 +16,7 @@ import { isProviderUnavailableCode } from './model-fallback.js'
 import { effectiveSandbox, PROMPT_SEGMENT_DEFAULTS, parsePromptOverrides } from './runtime/prompt.js'
 import { ensureAttentionSchema, parseAttention } from './attention-schema.js'
 
-// 合批窗口与上限默认值（DSHBOTS-231/287，DSHBOTS-290 随语义回补从 scheduler.ts 迁来）：
+// 合批窗口与上限默认值：
 // 只合并入队时间相差 30 秒内的挂起消息，单组消息总数封顶 5；settings 可覆盖
 // （coalesce_window_ms / coalesce_max_messages）。
 const COALESCE_MAX_MESSAGES_DEFAULT = 5
@@ -81,27 +81,27 @@ export function attributeWorkspaceChange({ before, after, concurrentWrites = [] 
 
 export const runsMethods = {
 
-  // ── 争用口径 A（DSHBOTS-289，ADR §5.2-2，owner 拍板）─────────────────────────
+  // ── 争用口径 A（ADR §5.2-2）───────────────────────────────────────
   // one_active_run_per_bot 激活后，bot 忙（有 queued/running 运行）时入站消息不落 runs 行
   // （第二条 queued 会直接撞唯一索引），挂入按 bot 的待处理队列（settings 持久化，重启不丢）；
   // bot 空闲时 drainPendingMessages 把挂起消息建回运行——chat/solo_chat 同类合批成一条，
   // dm/dm_reply 按一条来信一条回信契约逐条放行不合批；task/review 运行照常落 runs 行排队，
   // 不被消息合批吞并（与本队列互斥串行，靠 claimKey=bot 的领取闸保证）。
-  // DSHBOTS-300：busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后各自
+  // busy 闸是先查后插，多进程共享 team.sqlite 时两进程可同拍过检后各自
   // INSERT，后者撞 one_active_run_per_bot——以唯一索引为串行化真值，命中即视为
   // 「查后插之间 bot 转忙」，入队路径按争用口径 A 落挂起队列返 null（outbox 对 null
   // 按「已消费/挂起」收单），绝不向上抛（直抛会被计为投递失败重试耗尽置 failed）。
   // task_id 维度的 one_active_run_per_task 撞车不在内：重试下一拍 active 预检即自愈。
   isRunBotUniqueViolation(error) {
     const message = String(error?.message ?? error)
-    // DSHBOTS-308：索引改 (bot_id, COALESCE(project_id,'~solo')) 表达式后，撞车文本可能
-    // 只含 COALESCE 列名而不再含 runs.bot_id——放宽匹配并保持旧文本兼容；task 维度的
+    // 唯一索引含 COALESCE(project_id,'~solo') 表达式，撞车文本可能只含 COALESCE 列名
+    // 而不再含 runs.bot_id——放宽匹配并保持旧文本兼容；task 维度的
     // one_active_run_per_task 撞车仍不在内（口径不变）。
     return message.includes('UNIQUE')
       && (message.includes('runs.bot_id') || message.includes('one_active_run_per_bot')
         || message.includes('COALESCE(project_id'))
   },
-  // DSHBOTS-304 同拍双投合并辅助：按幂等键 / task_id 找既有 active 运行（双投胜利方）。
+  // 同拍双投合并辅助：按幂等键 / task_id 找既有 active 运行（双投胜利方）。
   activeRunByIdempotencyKey(key) {
     return this.store.get(
       "SELECT id FROM runs WHERE idempotency_key = ? AND status IN ('queued', 'running')",
@@ -114,7 +114,7 @@ export const runsMethods = {
       taskId,
     )?.id ?? null
   },
-  // DSHBOTS-304：挂起项是否已被既有运行覆盖或作废（true=drain 清扫时丢弃）。双投失败方的
+  // 挂起项是否已被既有运行覆盖或作废（true=drain 清扫时丢弃）。双投失败方的
   // 挂起项与胜利方运行共存的两类恶果：消息族 drain 建回永撞全局 UNIQUE idempotency_key
   // （任意状态）→返 null 永不消费→每 tick 队头 break 阻塞该 bot 全部挂起组；任务族幂等键
   // 恒新会在原运行结束后重复建行。清扫口径：消息族=同幂等键运行已存在（胜利方已处理，
@@ -132,10 +132,9 @@ export const runsMethods = {
     if (!idem) return true
     return Boolean(this.store.get('SELECT id FROM runs WHERE idempotency_key = ?', idem))
   },
-  // DSHBOTS-308（owner 拍板跨工作区并行）：bot 串行域从 bot 全局收窄为 (bot, 工作区)，
-  // domain = project_id ?? '~solo'，与 D-299 one_bot_binding 的 COALESCE 口径一致——
-  // 不同工作区的运行互不占位，可并行。
-  // 任务运行豁免（单 bot 多任务并行）：任务在独立任务会话执行，不再占消息族的
+  // bot 串行域为 (bot, 工作区)：domain = project_id ?? '~solo'，与 one_bot_binding
+  // 的 COALESCE 口径一致——不同工作区的运行互不占位，可并行。
+  // 任务运行豁免（单 bot 多任务并行）：任务在独立任务会话执行，不占消息族的
   // bot 车道——busy 判定只看非任务运行，chat/dm/solo 消息不必等任务跑完。
   botBusy(botId, domain) {
     return Boolean(this.store.get(
@@ -161,7 +160,7 @@ export const runsMethods = {
     const mergedIds = group.merge.map(entry => entry.messageId)
     const createdAt = nowIso()
     const runId = id('run')
-    // 任务挂起项（DSHBOTS-290 busy 闸）：按入队时快照建回写运行——列面与
+    // 任务挂起项（busy 闸）：按入队时快照建回写运行——列面与
     // enqueueTaskRun 的直接 INSERT 一致（task_id/write_scopes/备用模型三列），
     // UNIQUE 撞车（并发领取窗口）与消息族同口径返回 null 留队列。
     if (item.kind === 'task') {
@@ -190,9 +189,9 @@ export const runsMethods = {
       }
       return runId
     }
-    // owner 任务运行挂起项（review/handle/review_delegate，DSHBOTS-290 busy 闸）：
+    // owner 任务运行挂起项（review/handle/review_delegate，busy 闸）：
     // 只读任务运行，按入队时快照建回，列面与 enqueueOwnerTaskRun 一致。
-    // DSHBOTS-358：额度路由快照随挂起项带回来，建回时同样落 model_* 三列。
+    // 额度路由快照随挂起项带回来，建回时同样落 model_* 三列。
     if (item.kind === 'owner_task') {
       const routing = item.routing ?? {}
       try {
@@ -248,13 +247,12 @@ export const runsMethods = {
       `bot 空闲，待处理消息建回运行${mergedIds.length ? `（合批 ${mergedIds.length} 条）` : ''}`)
     return runId
   },
-  // D-272 用户提问判定（挂起消息向，DSHBOTS-290 语义回补）：按触发消息的 sender_type
-  // 判定——chat 查 messages、solo_chat 查 solo_messages（单聊消息独立表）。用户发的消息
-  // 是「提问」，bot 触发（通知降级、@mention 唤醒、回信）不算。
-  // 注：卡面原文写「chat/solo_chat 查 messages」，实测单聊落 solo_messages 表，按实际表改；
-  // dm/dm_reply 查 bot_messages（DSHBOTS-291 覆盖补测实测）——该表无 sender_type 列且
-  // from_bot_id 恒为 bot（bot 间私信），不存在用户触发形态，恒为 false（逐条放行不参与合批，
-  // 该标记对 dm 组也无分组意义）。
+  // 用户提问判定（挂起消息向）：按触发消息的 sender_type 判定——chat 查 messages、
+  // solo_chat 查 solo_messages（单聊消息独立表）。用户发的消息是「提问」，bot 触发
+  // （通知降级、@mention 唤醒、回信）不算。
+  // dm/dm_reply 查 bot_messages——该表无 sender_type 列且 from_bot_id 恒为 bot
+  // （bot 间私信），不存在用户触发形态，恒为 false（逐条放行不参与合批，该标记对 dm 组
+  // 也无分组意义）。
   heldItemIsUserQuestion(item, botId = null) {
     if (item?.kind === 'chat') {
       const row = this.groupChatStore(item.projectId).get('SELECT sender_type FROM messages WHERE id = ?', item.messageId)
@@ -269,17 +267,17 @@ export const runsMethods = {
   // 争用口径 A 收口：bot 空闲时把挂起消息建回运行。chat/solo_chat 各取首条建运行、其余
   // 同 kind 并入 merged_messages 同轮注入（合批成一条）；dm/dm_reply 一次只放行一条（回信
   // 契约），余量留队列下一拍。建行失败（并发撞 UNIQUE）的消息全部留队列，不丢消息。
-  // D-287 合批语义回补（DSHBOTS-290，ADR §2.3）：①D-272 用户提问保护——用户提问不并入
-  // 非用户触发的挂起组（并入后提问只能挤在 Merged messages 段、没有直接回答锚点），提问
-  // 组单独成组且优先放行；②窗口 coalesce_window_ms（默认 30s）——与组首入队时间差超过
-  // 窗口不并；③上限 coalesce_max_messages（默认 5）——单组消息总数（首条+合并）封顶。
+  // 合批口径（ADR §2.3）：①用户提问保护——用户提问不并入非用户触发的挂起组（并入后提问
+  // 只能挤在 Merged messages 段、没有直接回答锚点），提问组单独成组且优先放行；②窗口
+  // coalesce_window_ms（默认 30s）——与组首入队时间差超过窗口不并；③上限
+  // coalesce_max_messages（默认 5）——单组消息总数（首条+合并）封顶。
   drainPendingMessages() {
     const prefix = 'bot_pending_msgs:'
     const max = Number(this.store.setting('coalesce_max_messages', String(COALESCE_MAX_MESSAGES_DEFAULT)))
-    // max<=1 = 关闭合批（与 D-287 入队合并同口径）；非法值同样回退为不并。
+    // max<=1 = 关闭合批；非法值同样回退为不并。
     const cap = Number.isFinite(max) && max > 1 ? max : 1
     const windowMs = Number(this.store.setting('coalesce_window_ms', String(COALESCE_WINDOW_MS_DEFAULT)))
-    // DSHBOTS-308 旧键一次性迁移：308 前队列键无域段（bot_pending_msgs:<botId>），按
+    // 旧键一次性迁移：域段引入前的队列键无域段（bot_pending_msgs:<botId>），按
     // item.projectId ?? '~solo' 并入对应域键后删旧键（先写后删、按 messageId 去重，中断
     // 重跑幂等），防丢挂起消息——chat 项有 projectId、solo 项无=天然落 '~solo' 域。
     for (const row of this.store.all(`SELECT key, value FROM settings WHERE key LIKE '${prefix}%'`)) {
@@ -308,7 +306,7 @@ export const runsMethods = {
       const domain = rest.slice(colon + 1)
       let items = jsonParse(row.value, [])
       if (!Array.isArray(items) || !items.length) continue
-      // DSHBOTS-304 挂起项去重清扫（建回前预检）：双投失败方挂起项与胜利方运行共存时——
+      // 挂起项去重清扫（建回前预检）：双投失败方挂起项与胜利方运行共存时——
       // 消息族建回永撞全局 UNIQUE idempotency_key 成永生占位，任务族按恒新幂等键重复建行；
       // 清扫在分组前完成，被覆盖/作废项直接消账，余项自然重组（同组合并不受影响）。
       // 幂等键/task 维度与域无关（全局口径），保持现状。
@@ -318,7 +316,7 @@ export const runsMethods = {
         if (!kept.length) continue
         items = kept
       }
-      // DSHBOTS-308：busy 只看本域（bot, domain），他工作区队列本轮照常建回（并行）。
+      // busy 只看本域（bot, domain），他工作区队列本轮照常建回（并行）。
       if (this.botBusy(botId, domain)) continue
       const bot = this.store.get('SELECT * FROM bots WHERE id = ?', botId)
       if (!bot || bot.status !== 'active') {
@@ -343,7 +341,7 @@ export const runsMethods = {
           groups.push({ first: item, merge: [] })
         }
       }
-      // 用户提问组优先放行（D-272 出队优先的队列侧对偶），sort 稳定保住组间先后。
+      // 用户提问组优先放行，sort 稳定保住组间先后。
       groups.sort((a, b) => Number(this.heldItemIsUserQuestion(b.first, botId)) - Number(this.heldItemIsUserQuestion(a.first, botId)))
       const consumed = new Set()
       for (const group of groups) {
@@ -367,7 +365,7 @@ export const runsMethods = {
     )
     if (existing) return existing.id
     // 争用口径 A：bot 忙时不落 runs 行，挂待处理队列（一条来信一条回信，不合批）。
-    // 域=dm 所属项目（项目外私信 project_id 为 NULL → '~solo'，DSHBOTS-308）。
+    // 域=dm 所属项目（项目外私信 project_id 为 NULL → '~solo'）。
     const domain = message.project_id ?? '~solo'
     if (this.botBusy(target.id, domain)) {
       this.holdPendingMessage(target.id, domain, { kind: 'dm', messageId: message.id, projectId: message.project_id, queuedAt: nowIso() })
@@ -573,7 +571,7 @@ export const runsMethods = {
   },
 
   // 运行轨迹：模型回合、思考文本、助手文本、工具调用与工具结果的展示账本。
-  // 轨迹住运行归属的聊天库（chat-db-split Phase 1）。
+  // 轨迹住运行归属的聊天库。
   runTrajectory(runId) {
     const run = this.runRow(runId)
     const rows = this.runChatStore(run).all(
@@ -645,7 +643,7 @@ export const runsMethods = {
     const project = run.project_id ? this.store.get('SELECT * FROM projects WHERE id = ?', run.project_id) : null
     // 配置版本快照：任务运行独占会话，本运行的治理配置即
     // 派发时刻的生效值——bot 角色版本（bots.current_revision）+ 可编辑提示词段覆盖正文
-    // （缺省段记 null，默认文本随发版可追溯）+ 实际下发模型（runs 行三列，D-25）。
+    // （缺省段记 null，默认文本随发版可追溯）+ 实际下发模型（runs 行三列）。
     // 回答「这张卡按哪版规则跑的」；只记账不闸门（ADR §3：变更不撤销在途，恢复前复核
     // 由派发链闸门承担）。只对 kind='task' 记：消息族运行共用控制面冻结会话，
     // 生效文本是冻结时的旧值，快照「当时 settings」反而误导。
@@ -662,7 +660,7 @@ export const runsMethods = {
     }
     try {
       const task = run.task_id ? this.taskRow(run.task_id) : null
-      // DSHBOTS-112：vision 派生运行按 project_id 归位原消息（群聊 messages / 单聊
+      // vision 派生运行按 project_id 归位原消息（群聊 messages / 单聊
       // solo_messages），trigger_ref 即原消息 id——startRun 据此把附图随首条 prompt
       // 带给代理模型（与 chat/solo_chat 同一链路）。
       const chatMessage = (run.kind === 'chat' || (run.kind === 'vision' && run.project_id)) && run.trigger_ref
@@ -700,7 +698,7 @@ export const runsMethods = {
 
   // 跨类别运行的目标会话类别：dm_reply 按来信来源的类别。
   sessionKindFor(run) {
-    // DSHBOTS-112：单聊读图代理运行落 bot 的 solo 会话（与 solo_chat 同一绑定）。
+    // 单聊读图代理运行落 bot 的 solo 会话（与 solo_chat 同一绑定）。
     if (run.kind === 'vision' && !run.project_id) return 'solo'
     if (run.kind === 'dm_reply') {
       const message = run.trigger_ref
@@ -747,7 +745,7 @@ if (run.kind === 'dm_reply') {
   },
   insertRunEvent(runId, type, message) {
     if (!runId) return
-    // Phase 3：事件住运行归属的聊天库（全站写入的统一收口点，调用方无感）。
+    // 事件住运行归属的聊天库（全站写入的统一收口点，调用方无感）。
     // 运行行已不在（删除竞态的孤儿事件）时回落顶库留痕，不丢审计线索。
     const run = this.store.get('SELECT id, project_id, bot_id FROM runs WHERE id = ?', runId)
     const target = run ? this.runChatStore(run) : this.store
@@ -851,7 +849,7 @@ if (run.kind === 'dm_reply') {
   },
 
   // 只读运行（群聊、验收、受阻处理）不应该改文件；改了就在群里点名。
-  // DSHBOTS-94：指纹变化先归因——窗口内（started_at→结束时刻）存在并发写运行且变化
+  // 指纹变化先归因——窗口内（started_at→结束时刻）存在并发写运行且变化
   // 落在其写范围内（或其未声明范围）时不点名，改记 run_event 留痕；只有无人认领的
   // 变化才维持点名告警，告警里带上对不上号的并发写运行号。
   auditReadRunWrites(run, project) {
@@ -891,7 +889,7 @@ if (run.kind === 'dm_reply') {
     const suspectNote = decision.suspects.length
       ? `（存在并发写运行 ${decision.suspects.join('、')}，但变化不在其写范围内）`
       : ''
-    // 同指纹去重（DSHBOTS-96 P1-2）：after 内容 hash 相同说明是同一工作区状态再次被扫到，
+    // 同指纹去重：after 内容 hash 相同说明是同一工作区状态再次被扫到，
     // 已点名过就不再重复插群消息，只留 run_event 供追溯。
     const dedupKey = `${project.id}:${sha256(after)}`
     if (this.readAuditAlerted.has(dedupKey)) {

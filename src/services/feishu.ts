@@ -1,4 +1,4 @@
-// src/services/feishu.ts —— 飞书通道域（DSHBOTS-323 卡②）
+// 飞书通道域。
 // 本文件只放方法体，方法挂到 TeamService 原型上（见 src/service.ts 的 defineMethods 调用），
 // 方法体内的 this 与微信域（services/wechat.ts）完全同语义。
 
@@ -16,7 +16,7 @@ const FEISHU_SOLO_SOURCE_MARK = '[飞书管理员] '
 export const FEISHU_CRED_APP_ID = 'FEISHU_APP_ID'
 export const FEISHU_CRED_APP_SECRET = 'FEISHU_APP_SECRET'
 
-/** AppID 展示脱敏：前 8 位 + …（DSHBOTS-334 口径；不足 8 位原样）。 */
+/** AppID 展示脱敏：前 8 位 + …（不足 8 位原样）。 */
 export function maskFeishuAppId(appId) {
   const raw = String(appId ?? '').trim()
   return raw.length > 8 ? `${raw.slice(0, 8)}…` : raw
@@ -101,7 +101,7 @@ export const feishuMethods = {
   },
 
   /**
-   * 入站 Trigger 留痕（对齐微信 B4-① 观测面，channel='feishu'）：复用 wechat_inbound
+   * 入站 Trigger 留痕（对齐微信观测面）：复用 wechat_inbound 表结构
    * 表结构（disposition/route/reason 语义同款），稳定 id 前缀 feishu: 与微信留痕同表
    * 不同键空间，peer_id 记 lane 编码（g/{chatId}[/{threadId}] 或 p2p open_id）。
    */

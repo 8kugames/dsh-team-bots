@@ -62,7 +62,7 @@ export default {
   "global.approvalRuleChipSandbox": "Sandbox",
   "global.approvalRuleChipNote": "Note",
   "global.saveApprovalRules": "Save auto-allow rules",
-  // Full-access master toggle (DSHBOTS-366, top of the approval permissions card)
+  // Full-access master toggle (top of the approval permissions card)
   "global.approvalFullAccess": "Full access",
   "global.approvalFullAccessHint": "When on, every bot and dispatched task runs at full access (danger-full-access) with no read-only tightening. Per-bot file policies and dispatch overrides are kept untouched and apply again once this is off. Only the workbench owner can toggle it.",
   "完全权限已开启：所有 Bot 与派发任务统一按完全访问运行": "Full access on: all bots and dispatched tasks now run at full access",
@@ -193,7 +193,7 @@ export default {
   "默认开启：首次点击页面时浏览器会询问通知权限，允许后生效。": "On by default: the browser asks for notification permission on your first click; allow it to enable.",
   "新值只对之后启动的运行生效，进行中的运行不追溯。": "New values apply only to runs started afterwards; runs already in progress are not affected.",
   "可升级": "Update available",
-  // DSHBOTS-220: ui/modules copy
+  // ui/modules copy
   "（失败）": " (failed)",
   "第 ${n} 轮开始": "Turn ${n} started",
   "运行结束": "Run finished",
@@ -445,7 +445,7 @@ export default {
   "项目：": "Project: ",
   "预算": "Budget",
   "高": "High",
-  // DSHBOTS-246: keys added by the full t literal audit
+  // keys added by the full t literal audit
   "（当前": " (current ",
   "（可选）": " (optional)",
   "（不做物理删除）。": " (no physical deletion).",

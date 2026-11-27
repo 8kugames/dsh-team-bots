@@ -9,14 +9,14 @@ import { id, nowIso, text } from '../util.js'
 import { readWriteScopes } from './write-scopes.js'
 
 export const taskRunMethods = {
-  // 写占用释放（DSHBOTS-73，用户口径）：写范围占用只看「进行中」的任务，
+  // 写占用释放：写范围占用只看「进行中」的任务，
   // 任务一旦离开「进行中」就立刻解除占用/锁定——中止它名下仍在跑/排队的写运行，
   // 写槽让给同项目其他写运行（调度器侧另有 write-lock-scope 闸门兜底）。
   // 只停写运行：只读运行（验收/受阻处理/记忆复盘）不停，否则会打断验收流程。
   // 看板拖出到 todo/blocked 沿用既有暂停口径（PAUSED_BY_BOARD + board_pause 事件），其余目的地用稳定码。
   async releaseTaskWriteLocks(taskId, { fromStatus = null, toStatus = null } = {}) {
     if (fromStatus === 'in_progress' && (toStatus === 'todo' || toStatus === 'blocked')) {
-      // 看板暂停路径：取消该任务全部在跑/排队运行并写 PAUSED_BY_BOARD（DSHBOTS-54 既有口径）。
+      // 看板暂停路径：取消该任务全部在跑/排队运行并写 PAUSED_BY_BOARD。
       return await this.pauseRunsForBoard(taskId)
     }
     const runs = this.store.all(
@@ -109,7 +109,7 @@ export const taskRunMethods = {
     const createdAt = nowIso()
     // 写范围在入队时快照：任务后续改声明不影响已排队的运行。
     const writeScopes = JSON.stringify(readWriteScopes(task.write_scopes))
-    // DSHBOTS-241：额度耗尽期内派发不撞墙——主 provider 耗尽时直接走备用模型；
+    // 额度耗尽期内派发不撞墙——主 provider 耗尽时直接走备用模型；
     // 未配备用或备用同样耗尽则留 queued 等恢复（调度器按额度状态放行，恢复后自动回主模型）。
     const bot = this.store.get(
       'SELECT id, status, provider, fallback_provider, fallback_model, fallback_effort FROM bots WHERE id = ?',
@@ -122,8 +122,8 @@ export const taskRunMethods = {
     const fallbackProvider = routing.mode === 'fallback' ? routing.provider : null
     const fallbackModel = routing.mode === 'fallback' ? routing.model : null
     const fallbackEffort = routing.mode === 'fallback' ? routing.effort : null
-    // 单 bot 多任务并行（任务运行豁免 bot 串行域）：任务运行直插 queued，不再查 bot 忙
-    // 挂待处理队列——重复施工由 one_active_run_per_task 唯一索引兜底（上方 active 预检 +
+    // 单 bot 多任务并行（任务运行豁免 bot 串行域）：任务运行直插 queued，不查 bot 忙、
+    // 不挂待处理队列——重复施工由 one_active_run_per_task 唯一索引兜底（上方 active 预检 +
     // 下方 catch 合并），写安全由调度器写范围闸门兜底。消息族/owner_task 照旧走 busy 闸。
     try {
       this.store.run(
@@ -135,11 +135,11 @@ export const taskRunMethods = {
       )
     } catch (error: any) {
       // 查后插竞态撞 one_active_run_per_task（bot 维度索引已不含 task 运行）——双投胜利方
-      // 的同任务 active 运行已在→合并返回其 id 消算，不抛不挂起（D-304 口径沿用到任务维度）。
+      // 的同任务 active 运行已在→合并返回其 id 消算，不抛不挂起。
       if (this.activeRunByTaskId(task.id)) return this.activeRunByTaskId(task.id)
       throw error
     }
-    // run_events 住运行归属的聊天库（chat-db-split Phase 3）：取回 run 行统一路由，
+    // run_events 住运行归属的聊天库：取回 run 行统一路由，
     // queued 沿用与 runs.queued_at 同刻的 createdAt。
     const run = this.store.get('SELECT * FROM runs WHERE id = ?', runId)
     const chatStore = this.runChatStore(run)
@@ -192,8 +192,8 @@ export const taskRunMethods = {
     const triggerType = kind === 'review' ? 'review_requested' : 'blocked_handoff'
     // busy 闸：owner 忙时 review/handle 运行同样不落 runs 行（撞
     // one_active_run_per_bot），挂待处理队列空闲建回——与 enqueueTaskRun 同口径。
-    // DSHBOTS-300：挂起项提为 hold 闭包，busy 分支与查后插竞态兜底共用。
-    // DSHBOTS-358：额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，
+    // 挂起项提为 hold 闭包，busy 分支与查后插竞态兜底共用。
+    // 额度路由（与任务运行同口径）——主 provider 耗尽时走备用模型，
     // 无可用备用则留 queued 等恢复；路由快照写进运行行的 model_* 三列。
     // 路由在 busy 闸之前算好：挂起项要带同一份快照，空闲建回时列面与直插一致。
     const routing = this.quotaRoutingForBot(owner)
@@ -223,7 +223,7 @@ export const taskRunMethods = {
         routeProvider, routeModel, routeEffort, createdAt,
       )
     } catch (error: any) {
-      // DSHBOTS-304：双投胜利方同任务 active 运行已在→合并返回其 id 消算（同 enqueueTaskRun）。
+      // 双投胜利方同任务 active 运行已在→合并返回其 id 消算（同 enqueueTaskRun）。
       if (this.isRunBotUniqueViolation(error)) {
         const merged = this.activeRunByTaskId(task.id)
         if (merged) return merged
@@ -241,8 +241,8 @@ export const taskRunMethods = {
       kind === 'review' ? '任务交付，转总监验收' : '任务受阻，转总监处理',
       createdAt,
     )
-    // DSHBOTS-358：内部运行同样接额度路由——主 provider 耗尽时直接走备用模型；
-    // 无可用备用则留 queued 等恢复（调度器额度闸门兜底），不再照常下发撞墙。
+    // 内部运行同样接额度路由——主 provider 耗尽时直接走备用模型；
+    // 无可用备用则留 queued 等恢复（调度器额度闸门兜底），不照常下发撞墙。
     if (routing.mode === 'fallback') {
       chatStore.run(
         'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',

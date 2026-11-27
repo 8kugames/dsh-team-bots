@@ -1,13 +1,12 @@
-// tests/stale-card-reminder.test.ts —— DSHBOTS-280 守门：in_review/blocked 滞留阈值兜底。
-// DSHBOTS-295 扩待执行宽档：四态三档梯度（待执行 backlog/todo 72h / in_review 24h / blocked 48h）。
+// 滞留阈值兜底守门：四态三档梯度（待执行 backlog/todo 72h / in_review 24h / blocked 48h）。
 // 锁定四支：
 //  ① 阈值常量在场（STALE_PENDING_HOURS=72 / STALE_REVIEW_HOURS=24 / STALE_BLOCKED_HOURS=48，
 //     集中定义可调，三档梯度 72>48>24）；
 //  ② 各状态判定纯逻辑阈值内/外两向（pending 71h/73h、in_review 23h/25h、blocked 47h/49h，
 //     非目标状态不判）；
 //  ③ 同卡每日 ≤1 条防重（同日二次扫描静默：留痕不新增、返回空）；
-//  ④ D-269 口径文案点名总监（DSHBOTS-281：in_review→待总监验收收口；blocked→待总监解阻/收口，
-//     D-295：待执行→待总监派发或推进 team_assign_task，均不写「owner 可改/可用」转接话术），
+//  ④ 口径文案点名总监（in_review→待总监验收收口；blocked→待总监解阻/收口，
+//     待执行→待总监派发或推进 team_assign_task，均不写「owner 可改/可用」转接话术），
 //     且只提醒不自动处置（扫描后卡状态原样不变）。
 // 运行态用例依赖 mkdtemp：沙箱 EPERM 时按卡面口径 skip（源码级断言仍执行）。
 import { test } from 'node:test'
@@ -177,8 +176,8 @@ test('运行态：pending/in_review/blocked 超阈值提醒 owner + 同日二次
 test('源码锚点：扫描点复用 scheduler 周期 tick（不新增常驻进程）', async () => {
   const { readFileSync } = await import('node:fs')
   const schedulerSrc = readFileSync(new URL('../src/services/scheduler.ts', import.meta.url), 'utf8')
-  assert.match(schedulerSrc, /runReviewWatchdog\(this\)\s*\n\s*\/\/ 滞留阈值兜底扫描（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）[\s\S]*?this\.scanStaleCards\(\)/,
-    'tick 应在 D-194 守门同拍调用 scanStaleCards')
+  assert.match(schedulerSrc, /runReviewWatchdog\(this\)\s*\n\s*\/\/ 滞留阈值兜底扫描：[\s\S]*?this\.scanStaleCards\(\)/,
+    'tick 应在验收守门同拍调用 scanStaleCards')
   assert.match(schedulerSrc, /t\.status IN \('in_review', 'blocked', 'todo', 'backlog'\)/,
     '扫描 IN 条件应含待执行两态 todo/backlog（D-295）')
   const notifySrc = readFileSync(new URL('../src/services/notify.ts', import.meta.url), 'utf8')

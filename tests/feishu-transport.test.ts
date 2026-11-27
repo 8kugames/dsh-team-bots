@@ -1,8 +1,8 @@
-// DSHBOTS-333 守门：飞书传输层换进程内官方 SDK（@larksuiteoapi/node-sdk）。
+// 飞书传输层换进程内官方 SDK（@larksuiteoapi/node-sdk）的守门测试。
 // ①连接建立（WSClient 长连接就绪 → phase=ready，generation 换代）；②SDK 形状事件
 // （顶层 sender/message）到达到 handleEventLine；③出站 reply 带 uuid（= outbox 行 id）；
 // ④凭据缺失 → unbound（文案只提应用凭据，不提 lark-cli）；⑤gone 判定按 SDK 错误码
-// 230011/2300xx；⑥源码锚：src/feishu 不再 spawn 子进程、不提 lark-cli。
+// 230011/2300xx；⑥源码锚：src/feishu 不 spawn 子进程、不提 lark-cli。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'

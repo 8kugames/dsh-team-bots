@@ -1,9 +1,9 @@
-// DSHBOTS-148：右侧「活跃任务」栏「进行中」状态标签在摆动之上
+// 右侧「活跃任务」栏「进行中」状态标签在摆动之上
 // 再叠一层流光——周期性扫过的高光带（shimmer sheen）。
 // 实现口径：覆盖层用 ::after + linear-gradient（透明→高光→透明）+ translateX 扫过，
 // 只动 transform 不触发布局重排；高光色由既有 token 用 color-mix 合成，零新增色值；
 // pointer-events:none 不拦截点击；prefers-reduced-motion 闸门同时覆盖摆动与流光。
-// 本文件读页面 CSS 汇总真源（ui/styles/* 拼接，DSHBOTS-160）做源码断言，不复制一份样式
+// 本文件读页面 CSS 汇总真源（ui/styles/* 拼接）做源码断言，不复制一份样式
 // 到测试里（仓库先例：tests/task-status-motion.test.js、tests/message-link-contrast.test.js）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -145,7 +145,7 @@ test('零新增色值：高光色由既有 token 的 color-mix 合成', () => {
 })
 
 test('明暗两套：深色压低高光占比避免刺眼，亮色保证可见', () => {
-  // DSHBOTS-349：暗色根块改由 :root[data-color-scheme="dark"] 承载（媒体查询包裹已删）。
+  // 暗色根块由 :root[data-color-scheme="dark"] 承载。
   const darkIndex = bare.indexOf(':root[data-color-scheme="dark"] {')
   assert.ok(darkIndex >= 0, 'CSS 缺少 :root[data-color-scheme="dark"] 暗色根块')
   const darkRoot = blockAt(bare, darkIndex)

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { readUiSource } from './helpers/ui-sources.js'
 
-// DSHBOTS-5 工作台信息架构改造：读源码断言（与 terminal-ui.test.js 同模式）。
+// 工作台信息架构改造：读源码断言（与 terminal-ui.test.js 同模式）。
 const source = readUiSource()
 // NAV/SOLO_NAV 已拆到 modules/state.js，从模块源码读取。
 const stateSource = readFileSync(fileURLToPath(new URL('../ui/modules/state.js', import.meta.url)), 'utf8')
@@ -55,7 +55,7 @@ test('② 侧栏「总览bots」入口在全局配置上方，需办红点由收
   assert.ok(idxOverview >= 0, '侧栏应有总览bots按钮')
   assert.ok(idxGlobal >= 0 && idxOverview < idxGlobal, '总览bots在全局配置上方')
   assert.match(source, /case 'bots-overview': return renderBotsOverview\(\)/, 'render 路由 bots-overview')
-  // 旧待审红点由侧栏收件箱入口替代（inbox.ts inboxEntryView，徽标含进化审批计数）。
+  // 待审红点由侧栏收件箱入口承担（inbox.ts inboxEntryView，徽标含进化审批计数）。
   assert.match(source, /\$\{inboxEntryView\(\)\}/, '侧栏挂收件箱入口')
   assert.doesNotMatch(source, /sidebar\.pendingProposals/, '旧红点撤除')
   assert.match(source, /case 'batch-decide-proposals':/, '批量审批 handler 存在')
@@ -87,8 +87,7 @@ test('② system.js：记忆查询按上下文收敛、提案全量', () => {
   assert.match(soloCtx, /scope_type = 'bot' AND scope_id = \?/, '单聊记忆仅该 bot scope')
 })
 
-// DSHBOTS-77/105 曾定侧栏状态行「全局口径 activeTasks」；DSHBOTS-301 owner 拍板整块移除
-// sidebar-meta 状态行（圆点+团队空闲·任务数·Bots 数·待审数），守门改为钉「不再回归」：
+// 侧栏状态行 sidebar-meta 整块移除（圆点+团队空闲·任务数·Bots 数·待审数），守门钉住「不回归」：
 // 区块、activeTasks 死代码与四个状态行 i18n 键全部不存在；topbar 仍按项目口径不受影响。
 test('DSHBOTS-301 侧栏状态行整块移除，不残留区块/死代码/死键', () => {
   const shell = /function renderShell\(\) \{[\s\S]*?\n\}/.exec(source)?.[0] ?? ''
@@ -102,7 +101,7 @@ test('DSHBOTS-301 侧栏状态行整块移除，不残留区块/死代码/死键
   assert.match(shell, /<b>\$\{projectRunning\}<\/b> \$\{projectRunning === 1/, 'topbar-meta 读项目口径变量')
 })
 
-// DSHBOTS-105 后端：state 顶层新增 activeTasks（tasks 表 in_progress 计数），activeRuns 原样保留。
+// 后端：state 顶层输出 activeTasks（tasks 表 in_progress 计数），activeRuns 原样保留。
 test('DSHBOTS-105 state 顶层输出 activeTasks 任务计数，activeRuns 保留', () => {
   const sysSource = readFileSync(fileURLToPath(new URL('../src/services/system.js', import.meta.url)), 'utf8')
   const stateFn = /async state\(projectId, soloBotId = null\) \{[\s\S]*?\n {2}\},/.exec(sysSource)?.[0] ?? ''
@@ -111,7 +110,7 @@ test('DSHBOTS-105 state 顶层输出 activeTasks 任务计数，activeRuns 保�
   assert.match(stateFn, /activeTasks: Number\(this\.store\.get\("SELECT COUNT\(\*\) AS count FROM tasks WHERE status = 'in_progress'"\)\?\.count \?\? 0\)/, 'activeTasks 为 tasks 表 in_progress 计数')
 })
 
-// DSHBOTS-223 待审批提案逐条审批：每条提案可展开看完整内容（rationale/payload/evaluation），
+// 待审批提案逐条审批：每条提案可展开看完整内容（rationale/payload/evaluation），
 // 各自带 通过/拒绝 按钮（复用既有 decide-proposal 动作），与「全部通过并应用 / 全部拒绝」批量入口并存。
 test('DSHBOTS-223 待审批提案逐条展开 + 单条通过/拒绝 + 批量入口并存', () => {
   const overviewFn = /function renderBotsOverview\(\) \{[\s\S]*?\n\}/.exec(source)?.[0] ?? ''

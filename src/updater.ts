@@ -154,7 +154,7 @@ export function detectHostDshVersionFromPlugin(startDir: string | null = null) {
 }
 
 // dsh 版本展示值归一：探测失败形态（null/undefined/'unknown'/空串/纯空白）
-// 一律归为 ''，UI 据此整行隐藏，不再展示 unknown 占位。
+// 一律归为 ''，UI 据此整行隐藏，不展示 unknown 占位。
 export function displayDshVersion(version) {
   const value = typeof version === 'string' ? version.trim() : ''
   return value && value !== 'unknown' ? value : ''

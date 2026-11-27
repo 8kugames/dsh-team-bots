@@ -1,8 +1,6 @@
-// tests/recall-boundary.test.ts —— B5/DSHBOTS-333：有界上下文 + 资源指针读边界守门。
-// 报告 B5 的两项价值核对结论：①有界上下文（尾窗 240 摘录 + m_/c_ 指针展开、任务分支 8k
-// 截断、评论 ≤1.5k）已由 D-96/113/254 等价实现（prompt-budget/prompt-segments 在守）；
-// ②「读权限与绑定隔离」——team 的隔离单元是项目（群聊共享上下文）+ 单聊私有（bot 维度），
-// per-Ticket 读 ACL 与项目共享模型相悖不引入。本测试钉隔离不变量：
+// 有界上下文 + 资源指针读边界守门。
+// 有界上下文（尾窗 240 摘录 + m_/c_ 指针展开、任务分支 8k 截断、评论 ≤1.5k）由
+// prompt-budget / prompt-segments 测试守；本文件钉隔离不变量（隔离单元 = 项目 + 单聊 bot 私有）：
 // ①项目会话只能展开本项目的 m_/c_/run_ 引用（跨项目 notFound）；
 // ②单聊会话只能展开本 bot 的 solo_messages（其他 bot 的 m_ 引用不可达）；
 // ③recall 无 bot_messages（bot 间私信）路径——私信上下文不进任何会话的按需展开面。

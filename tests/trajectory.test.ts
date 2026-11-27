@@ -35,7 +35,7 @@ function makeRuntime(store, service = null) {
     config: { runTimeoutMs: 60_000 },
     store,
     logger: { info() {}, warn() {}, error() {} },
-    // 聊天分库 Phase 1：与生产 index.ts 同款注入；不注入时回落顶库（本文件其余用例走该路径）。
+    // 与生产 index.ts 同款注入；不注入时回落顶库（本文件其余用例走该路径）。
     chatStores: service ? { forRun: run => service.runChatStore(run) } : null,
   })
   runtime.pending.set('sess-root', {

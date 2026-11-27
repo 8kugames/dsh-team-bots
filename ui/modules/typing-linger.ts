@@ -116,7 +116,7 @@ function reconcileTypingBubbles(ledger, { runs = [], messages = {}, scope = '', 
   const latest = latestTypingRuns(runs, scope)
   const next = new Map()
   for (const [key, run] of latest) {
-    // ① 真实活跃运行接管：状态与耗时起点以运行为准（乐观气泡就此让位，不再重复画）。
+    // ① 真实活跃运行接管：状态与耗时起点以运行为准（乐观气泡就此让位，不重复画）。
     if (!['queued', 'running'].includes(run.status)) continue
     const prior = ledger.get(key)
     // 乐观气泡只被比它更新的运行接管：更早的运行属于上一轮，不能盖掉本轮的排队行。
@@ -181,7 +181,7 @@ function typingLingerOpacity(bubble, now = Date.now()) {
   return Math.max(0, remaining / TYPING_LINGER_FADE_MS)
 }
 
-// 渲染行：真实活跃运行由 DSHBOTS-1 的 typingRows 负责；这里只补乐观气泡与终态驻留行，
+// 渲染行：真实活跃运行由 typingRows 负责；这里只补乐观气泡与终态驻留行，
 // 并按活跃 bot 去重——真实运行接管后同一 bot 只出现一行。
 function typingLingerRows(ledger, kind, runs, scope, now = Date.now()) {
   const activeBotIds = new Set((runs ?? [])

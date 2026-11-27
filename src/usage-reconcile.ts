@@ -53,8 +53,8 @@ export function setPrice(store, input) {
   return priceId
 }
 
-// 月度预算口径（chat-db-split Phase 2 起读顶库 usage_rollup）：
-// 小时桶的 UTC 月份与原明细 occurred_at 的 UTC 月份一致，口径不变。
+// 月度预算口径（读顶库 usage_rollup）：
+// 小时桶的 UTC 月份与明细 occurred_at 的 UTC 月份一致。
 export function monthUsageForProject(store, projectId, budgetCurrency = BUDGET_CURRENCY) {
   const month = new Date().toISOString().slice(0, 7)
   return rollupTotals(store, ['u.project_id = ?', 'substr(u.hour_utc, 1, 7) = ?'], [projectId, month], budgetCurrency)
@@ -69,7 +69,7 @@ export function monthUsageGlobal(store, budgetCurrency = BUDGET_CURRENCY) {
 // expiredBefore：用量明细的保留期清理边界（ISO 字符串或毫秒时间戳）。
 // 早于该边界、且明细已被清理的 run 判为 'expired'（不是丢数据，不计入不一致）。
 export function reconcileUsage(store, { days = 30, expiredBefore = null, chatStoreFor = null } = {}) {
-  // chatStoreFor(run)（chat-db-split Phase 2）：明细与对账行住运行归属的聊天库；
+  // chatStoreFor(run)：明细与对账行住运行归属的聊天库；
   // 未注入路由时回落顶库（测试/独立构造形态，明细仍在顶库）。
   const detailStoreFor = run => (chatStoreFor ? chatStoreFor(run) : store)
   const since = new Date(Date.now() - days * 86_400_000).toISOString()
@@ -176,7 +176,7 @@ export function reconcileUsage(store, { days = 30, expiredBefore = null, chatSto
 // 数据保留：按天清理明细与事件，审计与聚合结果保留。
 // 返回值里带上每类清理的时间边界（before = 被删掉内容的时间上界，ISO 字符串），
 // 调用方可以把 usage.before 传给 reconcileUsage，让「明细被清理」的 run 判为 expired。
-// chatStores（chat-db-split Phase 1）：正文类表（run_trajectory/messages/solo_messages）
+// chatStores：正文类表（run_trajectory/messages/solo_messages）
 // 已分住各聊天库，清理逐库执行；缺省空数组时跳过正文清理（调用方未接入分库的旧形态）。
 export function applyRetention(store, {
   usageDays = 0,
@@ -197,7 +197,7 @@ export function applyRetention(store, {
   const cutoff = days => new Date(Date.now() - days * 86_400_000).toISOString()
   if (usageDays > 0) {
     const before = cutoff(usageDays)
-    // 明细住各聊天库（Phase 2）；顶库兜底清无主遗留行，两边合计。
+    // 明细住各聊天库；顶库兜底清无主遗留行，两边合计。
     removed.usageEvents = Number(store.run('DELETE FROM usage_events WHERE occurred_at < ?', before).changes ?? 0)
     for (const chatStore of chatStores) {
       if (chatStore === store) continue
@@ -206,7 +206,7 @@ export function applyRetention(store, {
     removed.usage = { removed: removed.usageEvents, before }
   }
   if (runEventDays > 0) {
-    // run_events 住各聊天库（Phase 3）：逐库清理并合计，顶库只兜孤儿行。
+    // run_events 住各聊天库：逐库清理并合计，顶库只兜孤儿行。
     removed.runEvents = Number(store.run('DELETE FROM run_events WHERE created_at < ?', cutoff(runEventDays)).changes ?? 0)
     for (const chatStore of chatStores) {
       if (chatStore === store) continue
@@ -258,7 +258,7 @@ function csvCell(value) {
 }
 
 export function exportUsageCsv(store, { projectId = null, soloBotId = null, days = 30, window = null } = {}, detailStores = null) {
-  // 明细住各聊天库（chat-db-split Phase 2）：detailStores 为本口径涉及的明细库列表
+  // 明细住各聊天库：detailStores 为本口径涉及的明细库列表
   // （全局=allChatStores、项目/单聊=对应单库）；缺省回落顶库（测试/独立构造形态）。
   // projects/bots 的富化列在顶库 JS 侧补——聊天库里没有这两张表可 JOIN。
   const stores = detailStores && detailStores.length ? detailStores : [store]

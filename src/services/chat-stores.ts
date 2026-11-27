@@ -1,4 +1,4 @@
-// src/services/chat-stores.js —— 聊天分库域（chat-db-split Phase 1）
+// src/services/chat-stores.js —— 聊天分库域
 // 每个群聊（=项目）与每个单聊（=bot）各一个库文件，正文类数据（messages/
 // solo_messages/message_images/run_trajectory）住在聊天库里；顶库只留控制面与全局数据。
 // 库文件名是引用 id（项目 id / bot id，均不可变）的纯函数，不需要注册表。
@@ -331,7 +331,7 @@ export const chatStoreMethods = {
       try { rmSync(`${base}${suffix}`, { force: true }) } catch { /* 删除失败留人工处理 */ }
     }
   },
-  // Phase 3 路由助手：run 胖载荷住运行归属的聊天库。
+  // 路由助手：run 胖载荷住运行归属的聊天库。
   // 顶库 runs 已瘦身（output/artifacts 住 run_payload）：读取经助手并到载荷。
   runOutputOf(run) {
     if (!run) return ''
@@ -357,7 +357,7 @@ export const chatStoreMethods = {
     )
   },
 
-  // Phase 1 一次性迁移：见文件头注释。任意步崩溃重启续跑，最终记账后不再进入。
+  // 一次性迁移：见文件头注释。任意步崩溃重启续跑，最终记账后不再进入。
   migrateChatSplitP1() {
     const ledgerName = 'chat_split_p1'
     if (this.store.get('SELECT 1 FROM schema_migrations WHERE name = ?', ledgerName)) return
@@ -414,14 +414,14 @@ export const chatStoreMethods = {
     this.store.exec('VACUUM')
     this.logger?.info?.('dsh-team: 聊天分库 Phase 1 迁移完成：messages/solo_messages/message_images/run_trajectory 已迁入各聊天库')
   },
-  // Phase 2 一次性迁移：用量明细与对账迁入聊天库，顶库一次性构建 usage_rollup 汇总
+  // 一次性迁移：用量明细与对账迁入聊天库，顶库一次性构建 usage_rollup 汇总
   // （视图/预算自此只读汇总）。同样账本闸控、崩溃可续跑。
   migrateChatSplitP2() {
     const ledgerName = 'chat_split_p2'
     if (this.store.get('SELECT 1 FROM schema_migrations WHERE name = ?', ledgerName)) return
     mkdirSync(this.chatStoresDir(), { recursive: true })
-    // 历史行 task_id 预回填（DSHBOTS-212 之前的存量行）：聊天库里没有 runs 表可 JOIN
-    // 追认，迁移时在顶库一次性补齐，之后明细拷贝就是自足的。
+    // 历史行 task_id 预回填：聊天库里没有 runs 表可 JOIN 追认，迁移时在顶库一次性补齐，
+    // 之后明细拷贝就是自足的。
     this.store.run(
       `UPDATE usage_events SET task_id = (SELECT task_id FROM runs WHERE id = usage_events.run_id)
         WHERE task_id IS NULL AND run_id IS NOT NULL`,
@@ -504,7 +504,7 @@ export const chatStoreMethods = {
     this.store.exec('VACUUM')
     this.logger?.info?.('dsh-team: 聊天分库 Phase 2 迁移完成：usage_events/usage_reconciliation 已迁入各聊天库，顶库改读 usage_rollup 汇总')
   },
-  // Phase 3 一次性迁移：run_events/胖载荷/任务评论事件/终端命令迁入聊天库；
+  // 一次性迁移：run_events/胖载荷/任务评论事件/终端命令迁入聊天库；
   // runs 瘦身留顶库当调度索引（output/artifacts 清空转 run_payload）。
   migrateChatSplitP3() {
     const ledgerName = 'chat_split_p3'

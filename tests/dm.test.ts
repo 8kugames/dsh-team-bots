@@ -23,7 +23,7 @@ class ManualRuntime { declare started: any[]; declare steers: any[]; declare bus
 
   sessionBusy(sessionId) { return this.busySessions.has(sessionId) }
 
-  // 任务亲和绑定解析（对齐 src/services/runtime/session.ts 同名方法，DSHBOTS-286 亲和路由）：
+  // 任务亲和绑定解析（对齐 src/services/runtime/session.ts 同名方法）：
   // 回信投递按 runs.session_id 归位原任务会话；终态任务/无运行归属不享亲和。
   taskAffinityBinding(task) {
     if (!task?.id) return undefined
@@ -89,8 +89,8 @@ async function setup() {
   return { root, store, service, runtime, project, builder, task, originSession }
 }
 
-// DSHBOTS-308 域化：挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
-// 断言需跨域扫描合并本 bot 的全部域队列（不再有单一无域键）。
+// 挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
+// 断言需跨域扫描合并本 bot 的全部域队列。
 const heldItems = (store, botId) => {
   const rows = store.all("SELECT key, value FROM settings WHERE key LIKE ?", `bot_pending_msgs:${botId}:%`)
   const out = []
@@ -236,7 +236,6 @@ test('成员 Bot 名称解析大小写不敏感：私信 / /task @ / @提及', a
   }
 })
 
-// DSHBOTS-291 覆盖缺口补测①（D-289 红线臂实测发现 dm 逐条放行无覆盖）：
 // 同一 bot 忙时挂起多条 dm，空闲 drain 后同一 tick 只放行一条（回信契约），余量留队列下一拍。
 test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运行，余量留队列', async () => {
   const state = await setup()
@@ -259,7 +258,7 @@ test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运�
       return store.get('SELECT * FROM bot_messages WHERE id = ?', id)
     }
     const pending = () => heldItems(store, director.id)
-    // DSHBOTS-308 域化：dm 的串行域 = 私信所属工作区（message.project_id ?? '~solo'），
+    // dm 的串行域 = 私信所属工作区（message.project_id ?? '~solo'），
     // 本例私信都带 project_id → 挂起项落在该项目的域键上。
     const domainKey = `bot_pending_msgs:${director.id}:${project.id}`
     for (const mid of ['botm_dm1', 'botm_dm2', 'botm_dm3']) {
@@ -280,7 +279,7 @@ test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运�
     assert.equal(store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'dm'")?.n, 2, '下一拍再放行一条')
     assert.equal(pending().length, 1, '最后一条仍在队列')
 
-    // DSHBOTS-308 域化反转：占道运行在「本工作区」域上，另一工作区的私信属他域，
+    // 占道运行在「本工作区」域上，另一工作区的私信属他域，
     // 不被本域占道阻塞——直接落 runs 行，且不混入本域挂起队列。
     const other = await service.createProject({ name: 'Beta', key: 'BETA', memberIds: [builder.id] })
     store.run(
@@ -297,10 +296,10 @@ test('dm 逐条放行：忙时挂起多条，drain 同一 tick 只建一条运�
   }
 })
 
-// DSHBOTS-291 覆盖缺口补测②（messageId 去重 + 建回护栏）：同一 bot 忙时重复入队同一
-// messageId，队列不累积重复项。DSHBOTS-304 语义更新：挂起项之外已存在同 idempotency_key
-// 运行（终态也算，双投胜利方已处理）时，drain 去重清扫直接消账该挂起项——旧口径「撞
-// UNIQUE 返 null 留队列」即永生占位缺陷（每 tick 队头 break 阻塞该 bot 全部挂起组），已修。
+// messageId 去重 + 建回护栏：同一 bot 忙时重复入队同一 messageId，队列不累积重复项。
+// 挂起项之外已存在同 idempotency_key 运行（终态也算，双投胜利方已处理）时，
+// drain 去重清扫直接消账该挂起项——否则挂起项永生占位（每 tick 队头 break 阻塞该 bot
+// 全部挂起组）。
 test('messageId 去重：忙时重复挂起不累积；同幂等键运行已存在时挂起项清扫消账不永生', async () => {
   const state = await setup()
   globalThis.DM_ROOT = state.root
@@ -318,7 +317,7 @@ test('messageId 去重：忙时重复挂起不累积；同幂等键运行已存�
       project.id, builder.id, director.id, originSession, new Date().toISOString(),
     )
     const message = store.get('SELECT * FROM bot_messages WHERE id = ?', 'botm_dup1')
-    // DSHBOTS-308 域化：挂起队列按域分键，去重断言跨域扫描本 bot 的全部域队列。
+    // 挂起队列按域分键，去重断言跨域扫描本 bot 的全部域队列。
     const pending = () => heldItems(store, director.id)
     assert.equal(service.enqueueDmRun(message, director), null)
     assert.equal(service.enqueueDmRun(message, director), null, '重复入队同一 messageId 同样挂起')
@@ -329,7 +328,7 @@ test('messageId 去重：忙时重复挂起不累积；同幂等键运行已存�
       '挂起项记在本工作区域键下',
     )
 
-    // DSHBOTS-304：挂起项之外已存在同 idempotency_key 的运行（终态也算）＝双投胜利方已
+    // 挂起项之外已存在同 idempotency_key 的运行（终态也算）＝双投胜利方已
     // 处理该消息，失败方挂起副本作废——drain 清扫消账，不留永生占位，也不重复建行。
     store.run(
       `INSERT INTO runs(id, project_id, bot_id, kind, mode, trigger_type, trigger_ref, status, attempt, idempotency_key, queued_at, ended_at)

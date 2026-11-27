@@ -184,12 +184,11 @@ function collapseRowView(group) {
 }
 // ===== auto-collapse:end =====
 
-// 群聊右栏「项目成员」概览卡（只读）：DSHBOTS-49 恢复 D-5 信息架构收敛时删掉的面板，
-// DSHBOTS-55 按 232f1c8 的双行方案修正——①位置在「项目总监」卡正下方（活跃任务之前）；
+// 群聊右栏「项目成员」概览卡（只读）：①位置在「项目总监」卡正下方（活跃任务之前）；
 // ②成员行剔除总监（总监独占上方自己的 panel），计数同口径；
-// ③行样式回到成员两行式 .member-info：第一行 名称+角色标签，第二行 模型小字，状态点留在行尾。
+// ③行样式为成员两行式 .member-info：第一行 名称+角色标签，第二行 模型小字，状态点留在行尾。
 // 数据源与「成员」tab 同一张表（project.members）；状态点走 memberRunDot，与「成员」tab 一致。
-// 卡内不含任何管理操作——邀请与移除留在「成员」tab，避免旧版「复选框全量提交」式的误清空成员。
+// 卡内不含任何管理操作——邀请与移除留在「成员」tab，防止误清空成员。
 function renderChatMembersCard() {
   const project = activeProject()
   const members = project?.members ?? []
@@ -203,7 +202,7 @@ function renderChatMembersCard() {
           const bot = botById(member.id)
           if (!bot) return ''
           const dot = memberRunDot(member)
-          // modelRef 已是 provider/model 形态（如 deepseek/deepseek-chat），不再拼 provider；缺配置给兜底文案。
+          // modelRef 已是 provider/model 形态（如 deepseek/deepseek-chat），不拼 provider；缺配置给兜底文案。
           const modelRef = member.modelRef ?? bot.modelRef ?? bot.model ?? null
           const modelLine = modelRef ? String(modelRef) : t('common.modelUnset')
           return `<div class="side-row" title="${esc(bot.name)} · ${esc(bot.role || t('common.member'))} · ${esc(dot.text)}">
@@ -229,7 +228,7 @@ function renderChat() {
   const anchor = activeChatAnchor()
   const owner = botById(project.owner_bot_id)
   const members = project.members ?? []
-  // modelRef 本身已是 provider/model（如 deepseek/deepseek-chat），不再单独拼 provider，避免重复。
+  // modelRef 本身已是 provider/model（如 deepseek/deepseek-chat），不单独拼 provider，避免重复。
   const ownerModelRef = owner ? (owner.modelRef ?? owner.model ?? null) : null
   const ownerModelLine = ownerModelRef ? String(ownerModelRef) : t('common.modelUnset')
   // 总监也是 bot，状态点取同一成员表口径（bot 全局）。

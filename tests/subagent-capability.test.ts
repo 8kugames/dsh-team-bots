@@ -1,4 +1,4 @@
-// tests/subagent-capability.test.ts —— DSHBOTS-238 守门：子代理/智能体团队能力全员化。
+// 子代理/智能体团队能力全员化的守门测试。
 // 锁定三件事：
 //  ① 成员 bot 的子代理生成能力清单在场（subagent / subagent_fork / spawn_teammate 等），
 //     门控 = config.agentTeam 开启且 bot 类型支持（项目内 active bot）；
@@ -66,7 +66,7 @@ test('能力清单：子代理生成工具与总监专权工具边界清晰', ()
   for (const name of ['subagent', 'subagent_fork', 'workflow', 'spawn_teammate']) {
     assert.ok(generation.includes(name), `成员 bot 能力清单应含 ${name}`)
   }
-  // 记忆三工具已下放 bot 域自管（服务层 resolveMemoryScopeFor 分层），不再属总监专权清单。
+  // 记忆三工具属 bot 域自管（服务层 resolveMemoryScopeFor 分层），不在总监专权清单。
   assert.deepEqual(
     [...DIRECTOR_ONLY_TOOLS],
     ['team_assign_task', 'team_review_task', 'team_block_task', 'team_list_bots', 'team_add_member', 'team_create_bot', 'team_release_bot_quota'],
@@ -103,7 +103,7 @@ test('成员 bot 身份提示词含静态子代理使用指引，且位于 syste
     assert.match(prompt, /review their output yourself/, '应要求自行复核子代理产出')
     // 静态段必须在场且先于任何每卡变化字段（身份提示词整体即前缀区）。
     assert.ok(prompt.indexOf('# Subagent parallelization') < prompt.indexOf('# Group message') || !prompt.includes('# Group message'))
-    // 成员协作规则不再引导调用总监专权工具。
+    // 成员协作规则注明派单/验收为总监专权，不引导成员调用这些工具。
     assert.match(prompt, /director-only/, '成员规则应注明派单/验收为总监专权')
   } finally { await t.close() }
 })
@@ -153,7 +153,7 @@ test('工具层兜底：包装与裸 agent 两种形状都生效（DSHBOTS-247�
   assert.equal(wrappedCalls.length, 1, '包装形状应调用一次 restrict')
   assert.deepEqual([...wrappedCalls[0].deny], [...DIRECTOR_ONLY_TOOLS], 'deny 清单应为总监专权工具')
 
-  // 新建会话路径传裸 agent（session.ts:336）——旧实现只认包装形状会静默跳过。
+  // 新建会话路径传裸 agent（session.ts:336）——只认包装形状会静默跳过，故须兼容裸 agent。
   const bareCalls = []
   applyBotToolPolicy(
     { ctx: { tools: { restrict: (filter) => bareCalls.push(filter) } } },

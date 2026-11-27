@@ -1,4 +1,4 @@
-// ui/i18n/en.ts —— English copy dictionary聚合入口（按域拆分，DSHBOTS-233）
+// English copy dictionary 聚合入口（按域拆分）。
 // 源语言为 zh；en 与 zh 键集一一对应。聚合顺序即域顺序，键不重叠。
 import common from './en/common.js'
 import nav from './en/nav.js'

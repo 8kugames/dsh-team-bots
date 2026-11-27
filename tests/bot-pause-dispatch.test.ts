@@ -1,4 +1,4 @@
-// tests/bot-pause-dispatch.test.ts —— DSHBOTS-262 守门：paused 状态真正拦截派发。
+// paused 状态真正拦截派发的守门。
 // 拒绝式收口（不做「入队等 resume」新机制）：
 //  ① paused assignee 新建派单 / 改派 / 重派（task=KEY-N）→ badRequest 且 runs 零新行；
 //  ② team_notify 的 member/task 目标处于 paused → badRequest 不投递（无消息行、无 steer）；

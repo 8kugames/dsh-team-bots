@@ -1,4 +1,4 @@
-// DSHBOTS-38：限流失败（无 Retry-After）合成指数退避，等待期内禁止立刻重打上游。
+// 限流失败（无 Retry-After）合成指数退避，等待期内禁止立刻重打上游。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'

@@ -1,6 +1,6 @@
 // 记忆审查独立会话守门：
 // ①端到端：群聊回复派生的 memory_review 运行落 kind='review' 独立绑定会话，
-//   不再进 bot 控制面绑定（审查提示词自包含，控制面历史整段重放是纯成本）；
+// 不进 bot 控制面绑定（审查提示词自包含，控制面历史整段重放是纯成本）；
 // ②有界复用：同一 review 绑定服务 MEMORY_REVIEW_BINDING_MAX_RUNS 次审查后退役
 //   （alias=1）换新会话，宿主会话数与上下文都被钉在有界范围；
 // ③审查模型覆盖：配置 provider/model 对时随运行落 runs.model_*，未配置为 NULL。

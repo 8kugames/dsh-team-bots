@@ -9,8 +9,7 @@
 import { badRequest, notFound } from '../errors.js'
 import { findMemberByName, id, nowIso, text } from '../util.js'
 
-// ── 防循环三上限（DSHBOTS-267，配置默认值写死常量，KISS）──────────────────
-// 真实事故背书：伙伴回执淹没主对话、委派续跑近百轮重发已推翻目标。
+// ── 防循环三上限（配置默认值写死常量，KISS）──────────────────
 // ① 单 run 内经 notify/chat 产生的伙伴提醒（按去重目标计条数）上限：超出静默丢弃并记日志；
 // ② 同类提醒事件（同 run + 同目标 bot）每日次数上限：超出静默丢弃并记日志。
 // 每条放行的提醒在 run_events 记 type='partner_notice'，message 存 partner_notice:<目标bot>，
@@ -18,8 +17,8 @@ import { findMemberByName, id, nowIso, text } from '../util.js'
 export const RUN_PARTNER_NOTICE_CAP = 3
 export const PARTNER_NOTICE_DAILY_CAP = 5
 
-// ── 滞留阈值兜底（DSHBOTS-280；DSHBOTS-295 扩待执行宽档）：四态三档梯度 ──────
-// 只提醒不自动处置：不自动关单、不自动转状态、不重派，验收与解阻由项目总监闭环（DSHBOTS-281 口径）。
+// ── 滞留阈值兜底：四态三档梯度 ──────
+// 只提醒不自动处置：不自动关单、不自动转状态、不重派，验收与解阻由项目总监闭环。
 // 三档梯度：待执行 72h 宽档 / in_review 24h / blocked 48h。
 export const STALE_PENDING_HOURS = 72
 export const STALE_REVIEW_HOURS = 24
@@ -29,7 +28,7 @@ export const STALE_CARD_NOTICE_PREFIX = '【滞留提醒】'
 // 滞留判定（纯函数，供 scheduler 扫描与守门测试共用；阈值内/外两向可测）。
 // 基准时间 = tasks.updated_at：blocked 无专门「进入 blocked」时间戳列，用 updated_at 近似
 // ——转 blocked 走 updateTask 必刷 updated_at，其后任何卡面更新同样只推迟提醒，不会漏报。
-// 待执行态锚（D-295 调查）：tasks 表无 'pending' 状态（TASK_STATUSES =
+// 待执行态锚：tasks 表无 'pending' 状态（TASK_STATUSES =
 // backlog/todo/in_progress/blocked/in_review/done/canceled，tasks.ts），实际待执行态
 // = 'backlog'（立卡未派、无 assignee——没人派）与 'todo'（已派未领——没人领），与
 // system.ts pendingRows ['todo','backlog'] 同口径；两态共用 72h 宽档。
@@ -45,9 +44,9 @@ export function staleCardHit({ status, updated_at, now = Date.now() } = {} as an
   return hours > threshold ? { status, hours, threshold } : null
 }
 
-// D-269 口径文案 = 原因（滞留时长+阈值）+ 点名总监的处置方向（DSHBOTS-281：处置归项目
-// 总监自行闭环，不写「owner 可改/可用」转接话术；blocked 侧重派即自动重置死线窗口；
-// 待执行 D-295：派发/推进/合并/取消都是总监动作——team_assign_task，不转接 owner）。
+// 文案 = 原因（滞留时长+阈值）+ 点名总监的处置方向（处置归项目总监自行闭环，
+// 不写「owner 可改/可用」转接话术；blocked 侧重派即自动重置死线窗口；
+// 待执行态：派发/推进/合并/取消都是总监动作——team_assign_task，不转接 owner）。
 export function staleCardNoticeBody({ identifier, status, hours } = {} as any) {
   const idle = Math.floor(hours)
   if (status === 'in_review')
@@ -94,10 +93,10 @@ export const notifyMethods = {
     )
   },
 
-  // 滞留提醒投递：等价 owner 通知通道——与 D-274 死线升级同款
+  // 滞留提醒投递：等价 owner 通知通道——与死线升级同款
   // （insertMessage 系统留痕进任务线程 + mentions 点名项目 owner）。
   // 防重＝同卡每日 ≤1 条，以当日已有同前缀系统留痕为准，超限静默（只 warn 不投递）。
-  // 口径说明：D-267 配额闸（allowPartnerNotice）按 run_events type='partner_notice'
+  // 口径说明：配额闸（allowPartnerNotice）按 run_events type='partner_notice'
   // 的 run 维度计数，run_id 非空挂不上无 run 的 scheduler 扫描；带 run 上下文的
   // notifyMemberFromBot 路径照旧走同一配额流，本扫描路径的防重落点即消息留痕流。
   notifyStaleCardOwner({ project, task, hit }) {
@@ -145,7 +144,7 @@ export const notifyMethods = {
     // 暂停/不可用目标不投递：通知即唤醒信号，暂停中先恢复再通知。
     if (target.status === 'paused') throw badRequest(`Bot ${target.name} 已暂停，先恢复再通知`)
     if (target.status !== 'active') throw badRequest(`Bot ${target.name} 当前不可用（${target.status}）`)
-    // DSHBOTS-267 防循环上限：归属发起方当前活跃运行，配额闸不通过即静默丢弃（不落留痕不投递）。
+    // 防循环上限：归属发起方当前活跃运行，配额闸不通过即静默丢弃（不落留痕不投递）。
     const activeRun = this.store.get(
       "SELECT id FROM runs WHERE bot_id = ? AND project_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
       from.id, project.id,
@@ -162,9 +161,8 @@ export const notifyMethods = {
       body: notice,
       mentions: [target.id],
     })
-    // DSHBOTS-293 旧车道残留修复 → DSHBOTS-299 会话域三分：活跃绑定按 (bot, project)
-    // 各一条，这里按通知发起所在项目解析目标 bot 的对应控制面绑定——目标 bot 在该项目
-    // 尚无绑定时查空，照旧降级群聊流（chat_run 唤醒后自然建绑定），不再吸走其他项目的
+    // 活跃绑定按 (bot, project) 各一条，这里按通知发起所在项目解析目标 bot 的对应控制面绑定——目标 bot 在该项目
+    // 尚无绑定时查空，照旧降级群聊流（chat_run 唤醒后自然建绑定），不吸走其他项目的
     // 控制面会话（IS 兼容项目外通知的 NULL 维度）。
     const binding = this.store.get(
       "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0 AND project_id IS ?",
@@ -194,7 +192,7 @@ export const notifyMethods = {
   },
 
   // 任务提醒：留痕落任务线程（owner 验收面板可见）；有活跃运行（running + 会话）
-  // 再经宿主通道 steer 注入（复用 D-232 改卡通知第二段机制）。
+  // 再经宿主通道 steer 注入（复用改卡通知第二段机制）。
   async notifyTaskFromBot({ project, from, ref, body }) {
     const task = this.resolveBotTask(project, ref)
     const identifier = `${project.key}-${task.number}`

@@ -1,4 +1,4 @@
-// DSHBOTS-59：任务父子关系与依赖阻塞。
+// 任务父子关系与依赖阻塞的守门测试。
 // 纯函数（normalize/parse/环检测）、迁移幂等、createTask/assignFromBot 校验、
 // 调度闸门（依赖未 done/canceled 不领取 + task_blocked_dep 事件去重）、父子不级联。
 import { test } from 'node:test'

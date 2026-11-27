@@ -1,5 +1,4 @@
-// 架构守门合集（原 tasks-split / ui-modules-split / styles-split / i18n-split 合并，
-// 事故驱动防线 D-15/D-159/D-160/D-233/D-265，断言逐条保留，只收敛文件壳。）
+// 架构守门合集：任务/UI 模块/样式/i18n 拆分等事故驱动防线。
 import { UI_STYLE_PARTS, readUiStyles } from '../src/http.js'
 import en from '../ui/i18n/en.js'
 import enChat from '../ui/i18n/en/chat.js'
@@ -345,7 +344,7 @@ test('全局配置页视觉域已登记、层叠顺序正确、且不写死色�
   assert.ok(idx > 0, 'ui/styles/global-config.css 未登记进 UI_STYLE_PARTS')
   assert.equal(UI_STYLE_PARTS[idx - 1], 'styles/settings.css', 'global-config 域必须紧跟 settings 域')
   const css = await readFile(join(ROOT, 'ui', 'styles', 'global-config.css'), 'utf8')
-  // DSHBOTS-197：迁移完成后「计划迁移」标注（.g-move-note）随之退役，不再要求存在。
+  // .g-move-note「计划迁移」标注不再要求存在。
   for (const selector of ['.global-page', '.global-head', '.global-nav', '.gsec', '.gsec-body', '.g-slot']) {
     assert.ok(css.includes(selector), `global-config.css 缺少 ${selector}`)
   }

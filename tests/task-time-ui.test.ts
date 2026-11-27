@@ -1,4 +1,4 @@
-// DSHBOTS-44 任务终态时间 UI —— 断言式测试。
+// 任务终态时间 UI —— 断言式测试。
 // 约定：app.js 是浏览器 IIFE，无法直接单测内部函数，按本项目 UI 惯例做源码断言
 //（先剔行注释再断言，防止「断言写进注释里」的假锁——tests/chat-pagination.test.js 先例）；
 // CSS 规则断言沿用 tests/ui-button-semantics.test.js 的正则抽取法。
@@ -39,7 +39,7 @@ test('新增枚举「今天」与「近 30 天」：1d 按自然日 00:00 起算
   // 两个新枚举进入下拉，选中态按值精确匹配——不允许再出现 !== 'all' 兜底（1d/30d 会误显近 7 天）
   assert.match(app, /<option value="1d" \$\{state\.taskFilter\.timeRange === '1d' \? 'selected' : ''\}>\$\{t\('task\.timeToday'\)\}<\/option>/)
   assert.match(app, /<option value="30d" \$\{state\.taskFilter\.timeRange === '30d' \? 'selected' : ''\}>\$\{t\('task\.time30d'\)\}<\/option>/)
-  // 词表值锁既有口径：1d=今天、30d=近 30 天（标签走 i18n，不再写死在源码里）
+  // 词表值锁口径：1d=今天、30d=近 30 天（标签走 i18n，不写死在源码里）
   assert.equal(zh['task.timeToday'], '今天')
   assert.equal(zh['task.time30d'], '近 30 天')
 })

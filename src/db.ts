@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { nowIso } from './util.js'
 
-// 旧库增量迁移与共享 DDL 常量外置于 db-migrations.js（db.js 贴 800 行红线不再加行）：
+// 旧库增量迁移与共享 DDL 常量外置于 db-migrations.js（db.js 贴 800 行红线）：
 // RUNS_DDL/RUNS_INDEXES/BINDINGS_DDL 在新库建表（下方 SCHEMA）与旧库迁移重建间共用，防两处漂移。
 import { runMigrations, RUNS_DDL, RUNS_INDEXES, BINDINGS_DDL } from './db-migrations.js'
 
@@ -612,7 +612,7 @@ export class Store {
       const result = fn()
       this.db.exec('COMMIT')
       this.txDepth = 0
-      // 提交后钩子（Phase 3 跨库写）：顶库 COMMIT 成功后才把聊天库侧写真正落库，
+      // 提交后钩子（跨库写）：顶库 COMMIT 成功后才把聊天库侧写真正落库，
       // 外层回滚即丢弃——跨库跟随顶库事务的提交/回滚语义。
       const hooks = this.txHooks
       this.txHooks = null

@@ -1,10 +1,10 @@
-// DSHBOTS-187 守门：全仓「filter 祖先 × 滚动容器」组合审计锁。
-// 机制背景（DSHBOTS-166 CDP Tracing 真 GPU 取证）：滚动容器未合成 → 滚动走主线程 →
+// 全仓「filter 祖先 × 滚动容器」组合审计锁。
+// 机制背景（CDP Tracing 真 GPU 取证）：滚动容器未合成 → 滚动走主线程 →
 // 滚动期祖先链被反复重录（实测约三成主帧）→ 带 backdrop-filter 的祖先表面随之重算
 // 重栅格 = 肉眼闪烁。滤镜只是被重录的可见性放大器，不是重录的原因。
-// 修复口径（D-166 反证背书）：只提升滚动容器（will-change: transform），绝不提升
+// 修复口径：只提升滚动容器（will-change: transform），绝不提升
 // filter 元素自身——提升遮罩会使 Paint 面积暴涨 10 倍。
-// 本文件与 modal-scroll-stability.test.js（D-154/D-166 的 modal 交互口径 8 例）互不
+// 本文件与 modal-scroll-stability.test.js（modal 交互口径 8 例）互不
 // 重叠：那侧锁单个弹窗的行为，这侧锁全仓组合面——任何新 CSS 想引入「带滤镜的
 // fixed/sticky 表面」或「新的滚动容器」，都必须先在这里登记并过审。
 import test from 'node:test'
@@ -16,10 +16,10 @@ import { UI_STYLE_PARTS } from '../src/http.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-// —— 登记表：DSHBOTS-187 全仓审计结论（2026-11-04）。改 CSS 前先到这里登记/重审 ——
+// —— 登记表：全仓审计结论。改 CSS 前先到这里登记/重审 ——
 // verdict 取值：
 //   promoted            命中组合（filter 祖先后代滚动容器），已提升 will-change: transform
-//   covered             在 .modal-body（D-166 提升点）合成层内，无需自身提升
+//   covered             在 .modal-body（提升点）合成层内，无需自身提升
 //   structure-avoided   DOM 结构上滚动容器不在 filter 子树（互为兄弟）
 //   no-filter-ancestor  祖先链无 filter 元素，组合不成立
 //   leaf                filter 元素无后代（img 叶子）
@@ -194,8 +194,8 @@ test('filter 元素保持不提升：.modal-backdrop/.main-head/.global-nav 不�
 
 test('DOM 锚：tabbar 仍在 .main-head 子树且不再内插待办窄条、查看器 backdrop 与滚动体仍互为兄弟', async () => {
   const appSrc = await readFile(join(ROOT, 'ui', 'app.js'), 'utf8')
-  // 待办窄条已由收件箱页取代：.main-head 子树里不再有审批/提问下拉（.approval-menu/.question-menu），
-  // 两条 promoted 判定随之撤销；若把滚动下拉重新放回 .main-head，须按 D-166 口径重审并登记。
+  // .main-head 子树里不得有审批/提问下拉（.approval-menu/.question-menu）；若把滚动下拉放回
+  // .main-head，须按「只提升滚动容器」口径重审并登记。
   assert.doesNotMatch(appSrc, /approvalBannerView|questionBannerView|approval-menu|question-menu/, '.main-head 子树不得再内插待办窄条')
   assert.match(appSrc, /<div class="tabbar"/, '.tabbar 应仍在 .main-head 模板内（app.js:377）')
   // 图片查看器：backdrop 与 panel 互为兄弟、滚动体在 panel 内——「结构上避开」的结构前提。

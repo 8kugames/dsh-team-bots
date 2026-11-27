@@ -1,10 +1,10 @@
-// DSHBOTS-122：右侧「活跃任务」栏里的「进行中」状态标签加 swim 摆动动效。
+// 右侧「活跃任务」栏里的「进行中」状态标签加 swim 摆动动效。
 // 等效复刻 DSH 原生会话页 hero 的鱼尾动画——原生实现是构建期哈希类名的纯 CSS
 // 三帧 keyframes，不可直接引用（随宿主版本漂移），故本仓自己落地一份等价实现：
 //   @keyframes task-status-swim { 0%,100% none / 35% rotate(-4deg) / 70% rotate(1.6deg) }
 // 硬约束三条：①动效只挂在「进行中」标签上；②无障碍闸门——只有
 // prefers-reduced-motion: no-preference 时才启用（对齐宿主做法）；③只用 transform，
-// 不引发重排、不新增色值。本文件读页面 CSS 汇总真源（ui/styles/* 拼接，DSHBOTS-160）
+// 不引发重排、不新增色值。本文件读页面 CSS 汇总真源（ui/styles/* 拼接）
 // 与 ui/app.js 真源做断言（仓库先例：
 // tests/message-link-contrast.test.js、tests/question-ui.test.js），不复制一份样式到测试里。
 import { test } from 'node:test'

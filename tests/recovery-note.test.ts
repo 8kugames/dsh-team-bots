@@ -1,4 +1,4 @@
-// DSHBOTS-135：recovery note 重启恢复（superagent 移植卡 A，机制③）。
+// recovery note 重启恢复的守门测试（机制③）。
 // 覆盖：启动重排队置位（含 attempt 不受扰、既有清场行为保持）、任务提示词注入与不注入
 // 两分支、startRun 消费清除（一次性语义）、多次重启多次注入（每次重排队后首跑各一次）、
 // 域自管迁移幂等（老库无列 → 加列登记恰一次，进程重启语义下不重复登记）。
@@ -46,7 +46,7 @@ const captureHost = (sink) => ({
   sessionController: {
     resolveAgent: async () => ({}),
     selectModel: async () => ({}),
-    // DSHBOTS-289 后无 kind='bot' 绑定时 ensureBotBinding 走新建路径，桩需提供 create。
+    // 无 kind='bot' 绑定时 ensureBotBinding 走新建路径，桩需提供 create。
     create: async () => ({ sessionId: 'sess-recovery-stub' }),
     prompt: async (request) => { sink.push(request.content.map(part => part.text ?? '').join('\n')) },
     cancel: async () => {},

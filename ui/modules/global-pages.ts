@@ -4,8 +4,7 @@ import { t } from './i18n.js'
 import { attr, esc, formatTime, toast } from './util.js'
 import { pageHead, pageNav, pageSection, pageShell, refreshAction, slot } from './page-shell.js'
 
-// 微信通道卡（自配置页迁入）：绑定状态、扫码授权、验证码与退出；
-// DSHBOTS-334 加启停开关——停用态渲染开关卡（不再靠服务端注入才能启用）。
+// 微信通道卡：绑定状态、扫码授权、验证码与退出，含启停开关。
 function wechatCard() {
   const wechat = state.data.wechat ?? { enabled: false, phase: 'disabled' }
   const phaseText = {
@@ -52,7 +51,7 @@ function wechatCard() {
     </div>`
 }
 
-// 飞书通道卡（DSHBOTS-334 改可交互）：未绑定态给 AppID/AppSecret 输入 + 保存即连；
+// 飞书通道卡（可交互）：未绑定态给 AppID/AppSecret 输入 + 保存即连；
 // 已配置态显示脱敏 AppID（前 8 位+…）与清除按钮（服务端注入来源无清除）。
 // 飞书无扫码流程：绑定只认应用凭据，生效优先级 = 通道页保存 > 服务端注入。
 const maskAppId = (value) => {
@@ -145,7 +144,7 @@ function secretListCard(secrets) {
   </div>`
 }
 
-// 新增密钥卡：作用域/项目/名称/用途/值，保存后不再回显。
+// 密钥新增卡：作用域/项目/名称/用途/值，保存后不回显。
 function secretAddCard(projects) {
   return `
     <form class="card form-card g-card" data-form="upsert-secret">
@@ -185,7 +184,7 @@ export function renderChannel() {
     [
       pageSection({
         index: '01', id: 'c-wechat', title: t('channel.sectionWechat'),
-        // 停用态也渲染开关卡：启停入口常驻，不再依赖服务端注入。
+        // 停用态也渲染开关卡：启停入口常驻，不依赖服务端注入。
         body: slot('full', card),
       }),
       // 飞书未启用时整段不渲染（不显示死卡）；启用后凭据可在卡内配置。

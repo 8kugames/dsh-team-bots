@@ -1,4 +1,4 @@
-// tests/task-deliverables.test.ts —— DSHBOTS-345 复盘：卡面结构化交付物路径。
+// 卡面结构化交付物路径。
 // ① 迁移：tasks.deliverables 列随 openDatabase 落库；
 // ② createTask/updateTask：deliverables 校验（相对路径、拒绝对绝对路径与 ..）、落库、taskView 暴露；
 // ③ assignFromBot：新卡带 deliverables、重派改卡可同步修正；

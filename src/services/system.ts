@@ -20,7 +20,7 @@ import { staleCardHit } from './notify.js'
 // health 与「DSH 服务」卡展示同源。
 const PLUGIN_VERSION = String(createRequire(import.meta.url)('../../package.json').version ?? 'unknown')
 
-// 单聊默认视图在关闭条数维（dmKeepRecent=0）时的回退上限，保持 state 历史口径：
+// 单聊默认视图在关闭条数维（dmKeepRecent=0）时的回退上限：
 // 归档过滤关闭也不能让每次轮询拖全量历史。
 const SOLO_VIEW_FALLBACK_LIMIT = 200
 
@@ -61,17 +61,16 @@ function soloVisibleMessages(store, botId, { days = 0, keep = 0, beforeCreatedAt
 
 
 const systemMethodsBase = {
-  // state 版本（效率优化）：DB 变更计数（total_changes，O(1)）+ 两通道内存相位 + 模型目录
-  // 刷新时间戳。state 的全部数据源变更都会推进版本；轮询带 since 且版本相等时服务端直接
-  // 回 unchanged，跳过整套组装（几十次查询 + 序列化 + 传输）。usage 快照/设置/技能等均由
-  // DB 派生，被变更计数覆盖；微信/飞书连接相位与模型目录是不落库的易变成分，单独入版本。
+  // state 版本：各数据源的变更签名 + 两通道内存相位 + 模型目录刷新时间戳。state 的全部
+  // 数据源变更都会推进版本；轮询带 since 且版本相等时服务端直接回 unchanged，跳过整套
+  // 组装（几十次查询 + 序列化 + 传输）。微信/飞书连接相位与模型目录是不落库的易变成分，单独入版本。
   stateVersion() {
-    // 视图作用域版本（perf 实测修复）：旧口径用全库 total_changes，任何后台写入
-    // （usage_events/run_trajectory/普通 outbox 投递等高频表）都会打穿 since 短路，
-    // 活跃运行期间每拍 2.8s 轮询都全量组装并回传 1~2MB。这里改为只对 state 实读
-    // 的表取「行数 + 最新变更时刻」签名：与本视图无关的写入不再失效短路。
-    // 漏表的最坏后果由既有 60s 兜底上限覆盖（到期强制重组装一次）。
-    // 任一表/列不存在（老库、懒建表未建）时整体回退旧口径，宁可多传不可 500。
+    // 视图作用域版本：只对 state 实读的表取「行数 + 最新变更时刻」签名，与本视图无关的
+    // 写入不打穿 since 短路——若用全库 total_changes，任何后台写入（usage_events/
+    // run_trajectory/普通 outbox 投递等高频表）都会失效短路，活跃运行期间每拍 2.8s
+    // 轮询都全量组装并回传 1~2MB。
+    // 漏表的最坏后果由 60s 兜底上限覆盖（到期强制重组装一次）。
+    // 任一表/列不存在（老库、懒建表未建）时整体回退全库 total_changes，宁可多传不可 500。
     try {
       const sig = (sql: string) => {
         const row = this.store.get(sql) as { n?: number | string, m?: string } | undefined
@@ -87,9 +86,9 @@ const systemMethodsBase = {
         stamp('task_labels', 'rowid'),
         stamp('task_comments', 'rowid'),
         // runs 不含 updated_at：新运行看行数、启动/结束看 started_at/ended_at；
-        // last_progress_at 的巡检心跳不进签名——它不改变视图载荷，计入会重新引入高频失效。
+        // last_progress_at 的巡检心跳不进签名——它不改变视图载荷，计入会造成高频失效。
         sig(`SELECT COUNT(*) AS n, COALESCE(MAX(queued_at), '') || COALESCE(MAX(started_at), '') || COALESCE(MAX(ended_at), '') AS m FROM runs`),
-        // 聊天正文已分库（chat-db-split Phase 1）：messages/solo_messages 的签名由各聊天库
+        // 聊天正文已分库：messages/solo_messages 的签名由各聊天库
         // 的本连接累计变更数承接，任一库的写都会推进版本；读路径不触库。
         ...this.chatVersionParts(),
         // bot_messages 的 status/reply 变更不推 rowid，靠 replied_at 捕捉。
@@ -110,7 +109,7 @@ const systemMethodsBase = {
         sig(`SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(handled_at, created_at)), '') AS m FROM secret_requests`),
         count('model_prices'),
         // 只签 review 类 outbox 行（taskReviewStatus 实读口径）：计数与最新变更都按
-        // kind 过滤——普通投递行的高频 pending→done 翻转不再打穿短路。
+        // kind 过滤——普通投递行的高频 pending→done 翻转不会打穿短路。
         sig(`SELECT SUM(CASE WHEN kind = 'review_delegate_auto' THEN 1 ELSE 0 END) AS n, COALESCE(MAX(CASE WHEN kind = 'review_delegate_auto' THEN status || created_at ELSE NULL END), '') AS m FROM outbox`),
         this.settingsRevision(),
       ]
@@ -234,14 +233,14 @@ const systemMethodsBase = {
       // 配置里的默认价格，Web 中可据此一键恢复。
       priceDefaults: this.config.modelPrices ?? [],
       wechat: this.wechatStatus(),
-      // 飞书通道状态（DSHBOTS-323 卡②）：phase 广播含 conflict（exceed_conn_limit）。
+      // 飞书通道状态：phase 广播含 conflict（exceed_conn_limit）。
       feishu: this.feishuStatus(),
       now: nowIso(),
     }
     if (project) {
       const group = this.groupOf(project.id)
       view.project = this.projectView(project)
-      // 聊天正文住项目聊天库（chat-db-split Phase 1）。
+      // 聊天正文住项目聊天库。
       const messages = this.groupChatStore(project.id).all(
         `SELECT * FROM (SELECT * FROM messages WHERE project_id = ? ORDER BY created_at DESC LIMIT 200) ORDER BY created_at ASC`,
         project.id,
@@ -262,7 +261,7 @@ const systemMethodsBase = {
         'SELECT * FROM runs WHERE project_id = ? ORDER BY queued_at DESC LIMIT 60',
         project.id,
       ).map(run => this.runView(run))
-      // 记忆随上下文收敛：群聊只看当前项目 scope，不再并集成员 bot 与团队记忆。
+      // 群聊记忆只看当前项目 scope，不含成员 bot 与团队记忆。
       view.memories = this.store.all(
         `SELECT * FROM memories WHERE status = 'active' AND scope_type = 'project' AND scope_id = ?
          ORDER BY updated_at DESC LIMIT 100`,
@@ -273,7 +272,7 @@ const systemMethodsBase = {
          ORDER BY updated_at DESC LIMIT 100`,
         project.id,
       ).map(item => this.memoryView(item))
-      // 提案全量口径（与单聊对齐）：审批入口收敛到「总览bots」批量与单聊逐个，项目不再按 bot 并集过滤。
+      // 提案全量下发、不按项目成员 bot 过滤（与单聊对齐）：审批入口是「总览bots」批量与单聊逐个。
       view.proposals = this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100')
         .map(item => this.proposalView(item))
       view.prices = this.latestPrices()
@@ -319,7 +318,7 @@ const systemMethodsBase = {
         // 这里把单聊条目并进同一份列表，单聊里的卡片才查得到状态、不退化成纯文本。
         view.questions = [...(view.questions ?? []), ...soloQuestions]
         view.approvals = [...(view.approvals ?? []), ...soloApprovals]
-        // 单聊上下文口径（DSHBOTS-5 收敛）：记忆只看该 bot 自己的（不含团队）；运行只看该 bot 的项目外运行；
+        // 单聊上下文口径：记忆只看该 bot 自己的（不含团队）；运行只看该 bot 的项目外运行；
         // 提案保持全量（渲染层按 bot 过滤，逐个审批）。
         view.proposals = this.store.all('SELECT * FROM proposals ORDER BY created_at DESC LIMIT 100').map(item => this.proposalView(item))
         view.memories = this.store.all(
@@ -582,16 +581,13 @@ const systemMethodsBase = {
     }
   },
 
-  // needs-attention 聚合（A2/DSHBOTS-322，吸收 superagent 原型 overview「三问」+ B9 系统问题口径）：
-  // 把散在各域的「需要人」事项收进一个只读聚合，供 health（外部巡检）与 state（UI 顶部收口）
-  // 同源消费。反双真值：只做 COUNT 与既有谓词的复算，不改任何状态真值——待审/待答谓词与
-  // approvalsPending/questionsPending 同式，滞留判定复用 notify.js 的 staleCardHit 纯函数
-  // （与 scheduler 扫描同一口径），投递失败取 outboxCounts 的 failed 终态。
-  // B9 升级语义落在既有终态上：outbox failed = 退避重试耗尽（defer 不计数，D-136）；
-  // 微信通道异常取 channel status 的权威 phase（connecting 是扫码过渡态不算异常）——
-  // 不另建失败计数表（报告 D5 警示：原型「记录不删」类技术债不搬）。
-  // runs.attention_json 的待答面（answer_attention）无 UI 消费者，且 question 卡已覆盖
-  // 提问入口，这里不发明不可行动的数字。
+  // needs-attention 聚合：把散在各域的「需要人」事项收进一个只读聚合，供 health（外部巡检）
+  // 与 state（UI 顶部收口）同源消费。只做 COUNT 与既有谓词的复算，不改任何状态真值——
+  // 待审/待答谓词与 approvalsPending/questionsPending 同式，滞留判定复用 notify.js 的
+  // staleCardHit 纯函数（与 scheduler 扫描同一口径），投递失败取 outboxCounts 的 failed 终态
+  // （= 退避重试耗尽，defer 不计数）；微信通道异常取 channel status 的权威 phase
+  // （connecting 是扫码过渡态不算异常）。runs.attention_json 的待答面（answer_attention）
+  // 无 UI 消费者，不计入。
   needsAttentionView() {
     const staleRows = this.store.all(
       `SELECT status, updated_at FROM tasks
@@ -613,7 +609,7 @@ const systemMethodsBase = {
     if (wechat.enabled && wechat.phase && !['connected', 'connecting'].includes(wechat.phase)) {
       issues.push({ kind: 'wechat_channel', phase: wechat.phase, message: wechat.error ?? null })
     }
-    // 飞书通道异常同口径（DSHBOTS-323 卡②）：conflict（连接数冲突）/unbound/reconnecting
+    // 飞书通道异常同口径：conflict（连接数冲突）/unbound/reconnecting
     // 都是需要人看的状态，经 phase 广播进 needs-attention。
     const feishu = this.feishuStatus()
     if (feishu.enabled && feishu.phase && !['ready'].includes(feishu.phase)) {
@@ -623,12 +619,12 @@ const systemMethodsBase = {
   },
 }
 
-// 版本短路外壳（1030854）：api.ts 与测试的对外 state 入口（第 3 参 since = 上次响应
-// 的 version）。全量组装器保持上面 systemMethodsBase.state 的两参签名（DSHBOTS-105 的
-// workbench-ia 源锚点），不改写其形参。外壳提供两级省流：
+// 版本短路外壳：api.ts 与测试的对外 state 入口（第 3 参 since = 上次响应
+// 的 version）。全量组装器保持上面 systemMethodsBase.state 的两参签名，不改写其形参。
+// 外壳提供两级省流：
 // ① unchanged 短路——同视图、版本相等、60s 内，只回 { unchanged, version }（轮询路径）；
-// ② 视图载荷缓存——切换场景（客户端持别的视图 version 或不带 since）在目标视图
-//    版本未变时直接回放缓存载荷，不再整段重组（实测组装在共享事件循环下 1.2~2s，
+// ② 视图载荷缓存——切换场景（客户端持别的视图 version）在目标视图
+//    版本未变时直接回放缓存载荷而不整段重组（实测组装在共享事件循环下 1.2~2s，
 //    是切换「加载中…」的主导成本）。60s 兜底与 ① 同口径，防未入签名的易变字段
 //    （now 等）被永久冻结；缓存按 LRU 留最近 8 个视图。
 const assembleState = systemMethodsBase.state
@@ -648,8 +644,8 @@ systemMethodsBase.state = async function (this: any, projectId: any, soloBotId: 
   // 切换 SWR（与模型目录的 stale-while-revalidate 同哲学）：只服务「显式切换」——调用方
   // 携带的是别的视图键的 version（A→B→A 回环/会话内换视图）；本视图轮询（since 以
   // `${cacheKey}@` 开头）必须拿新数据，否则新消息可见性被推迟一轮。不带 since 的请求
-  // （首次加载/脚本直调/测试）一律现组装：无法与「切换」区分，回放旧载荷会让直调方
-  // 拿到 ≤5s 陈数据（实测打断 9 条服务层行为测试），切换收益只认显式持他视图版本的场景。
+  // （首次加载/脚本直调/测试）无法与「切换」区分，一律现组装，免得回放旧载荷让直调方
+  // 拿到 ≤5s 陈数据。
   const isSwitch = since != null && !String(since).startsWith(`${cacheKey}@`)
   if (cached && isSwitch && Date.now() - cached.at < 5_000) {
     void assembleState.call(this, projectId, soloBotId).then(result => {
@@ -661,7 +657,7 @@ systemMethodsBase.state = async function (this: any, projectId: any, soloBotId: 
     }).catch(() => {})
     // 版本号必须描述回传的数据本身：SWR 回放的是旧视图，必须配它自己的旧版本号。
     // 若配当前版本号，客户端下一拍轮询会因缓存同版本而收到 unchanged，新消息被
-    // 卡到再下一次版本变化才可见（实测「新消息进来页面不及时刷新」即此）。
+    // 卡到再下一次版本变化才可见。
     return { ...cached.view, version: cached.version }
   }
   const result = await assembleState.call(this, projectId, soloBotId)

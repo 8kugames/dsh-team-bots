@@ -1,4 +1,4 @@
-// tests/prompt-watermark.test.js —— DSHBOTS-96 P1-1：尾窗增量水位
+// 尾窗增量水位守门
 // 覆盖四条水位语义（前进/新会话全量/并发共用 session/不回退）、触发消息去双份、
 // 无 sessionId 的旧固定尾窗兼容路径，以及 solo 单聊同款水位。
 import { test } from 'node:test'

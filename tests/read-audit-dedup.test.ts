@@ -1,4 +1,4 @@
-// tests/read-audit-dedup.test.js —— DSHBOTS-96 P1-2：只读审计告警围栏化 + 同指纹跨运行去重
+// 只读审计告警围栏化 + 同指纹跨运行去重守门
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'

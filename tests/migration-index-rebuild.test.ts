@@ -1,8 +1,6 @@
-// 回归（生产 0.3.51 启动崩溃）：runMigrations 的 exemptTaskRunsFromBotSerialization 无
-// 账本闸、每次开库 DROP+重建，中间谓词（仅豁免 task）比最终治理豁免谓词窄——库内存在
-// 最终态合法共存（review:running + rollover_summary:queued 同域）时 CREATE UNIQUE INDEX
-// 撞 one_active_run_per_bot，宿主启动崩溃且 DROP 已执行（索引缺失）→每次启动都崩。
-// 修复：重建谓词收敛到最终口径 + CREATE 前按最终谓词收口重复活跃运行。
+// 开库迁移回归：库内存在按最终谓词合法共存（review:running + rollover_summary:queued 同域）
+// 或重复活跃运行时，重建 one_active_run_per_bot 不得撞唯一索引导致启动崩溃。
+// 迁移按最终治理豁免谓词重建索引，CREATE 前先按该谓词收口重复活跃运行。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -33,7 +31,7 @@ test('库内治理共存/重复活跃运行时开库迁移不再撞唯一索引'
     db.close()
   }
 
-  // 第二次开库 = 复现生产崩溃点（runMigrations 在 openDatabase 内执行）。
+  // 第二次开库：脏数据在场时跑迁移（runMigrations 在 openDatabase 内执行）。
   const db = openDatabase(dbPath)
   const index = db.get("SELECT sql FROM sqlite_master WHERE name = 'one_active_run_per_bot'")
   assert.ok(index, '索引已重建存在')

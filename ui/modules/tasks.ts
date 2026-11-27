@@ -95,7 +95,7 @@ function filteredTasks() {
     if (filter.status !== 'all' && task.status !== filter.status) return false
     if (filter.assignee !== 'all' && task.assignee_bot_id !== filter.assignee) return false
     // 时间筛选只对「有终态时间戳」的终态任务生效：缺时间戳的终态任务没有时间基准，
-    // 参与筛选会被整组清空（库里 done、面板「已完成」0 条的成因）；其余状态照常显示（D-34 口径）。
+    // 参与筛选会被整组清空（库里 done、面板「已完成」0 条的成因）；其余状态照常显示。
     if (taskTerminalTime(task) && taskEndsOutsideRange(task, filter.timeRange)) return false
     if (filter.search) {
       const haystack = `${task.identifier} ${task.title} ${task.description} ${task.labels?.join(' ') ?? ''}`.toLowerCase()
@@ -153,9 +153,9 @@ function renderTasks() {
   `
 }
 
-// 任务分组（DSHBOTS-58，参照 Linear）：按状态分组的树形分组列表，组头可折叠。
+// 任务分组（参照 Linear）：按状态分组的树形分组列表，组头可折叠。
 // 展开态记在 state.openPanels（key: task-group:<status>），组体容器带同一个 data-panel key —— 与 <details data-panel> 同一套通道。
-// 组 section 仍然带 data-drop-status：拖拽换状态的通道不变，拖到组头/组体即改状态（DSHBOTS-54 看板联动靠它）。
+// 组 section 带 data-drop-status：拖到组头/组体即改状态（看板联动靠它）。
 function taskGroupKey(status) {
   return `task-group:${status}`
 }
@@ -163,8 +163,8 @@ function taskGroupKey(status) {
 function renderTaskGroup(status, tasks) {
   const key = taskGroupKey(status)
   const expanded = state.openPanels.has(key)
-  // 空组不渲染组体（DSHBOTS-62 P1-4）：只留一行组头，去掉「拖到这里」占位留下的大块竖向空白；
-  // 组 section 仍带 data-drop-status，拖到组头照样能改状态，拖放通道不变。
+  // 空组不渲染组体：只留一行组头，不留大块竖向空白；
+  // 组 section 仍带 data-drop-status，拖到组头照样能改状态。
   const body = tasks.length === 0 ? '' : renderTaskRows(tasks)
   return `<section class="column task-group${expanded ? '' : ' collapsed'}" data-drop-status="${status}">
     <div class="column-head task-group-head">
@@ -194,9 +194,9 @@ function taskPriorityIcon(task) {
 }
 
 // task-card:start —— 任务行（DSHBOTS-58，参照 Linear）：紧凑单行 —— 状态图标 + 优先级图标 + 编号 + 标题 + 右簇（标签/依赖/运行态/终态时间/头像）。
-// 运行徽标文案来自后端 taskStage 纯函数查表的 stageLabel，不再从 latestRun.status 拼映射。
+// 运行徽标文案来自后端 taskStage 纯函数查表的 stageLabel，不从 latestRun.status 拼映射。
 // 终态（done/canceled → stage 'ended'）一律不渲染任何运行徽标：状态点、运行文案、计时与 running 高亮全部隐藏，
-// 已完成/已取消任务上挂着的遗留运行不再误导看板。
+// 以免已完成/已取消任务上挂着的遗留运行误导看板。
 // 验收滞留 badge：in_review 卡静置超阈值亮「滞留 Xm」，超 阈值×倍数 转红。
 // 锚点与升级线取后端 task.reviewIdle 同源数据（含最新评论与 run 活动，H3 两端口径统一）；
 // 阈值与后端守门同源（runLimits.reviewIdleMinutes，0=关闭）；滞留判定两端同式：
@@ -266,7 +266,7 @@ function renderTaskCard(task, options: TaskCardOptions = {}) {
 }
 // task-card:end
 
-// 任务父子层级（DSHBOTS-58 第二笔，依赖后端 D-59 落库的 parent_task_id）：分组内按 parent_task_id 组树——
+// 任务父子层级（依赖后端落库的 parent_task_id）：分组内按 parent_task_id 组树——
 // 子任务挂到父行下方、容器左缩进一级，父行可折叠子行；展开态记在 state.openPanels，key 形如
 // task-children:<taskId>（与 <details data-panel> 同一套 key 口径）。父任务被搜索/筛选掉或不在本组时，
 // 子任务回到本组顶层，避免任务因层级关系在看板上凭空消失。
@@ -279,7 +279,7 @@ function taskParentId(task) {
 }
 
 function renderTaskRows(tasks) {
-  // D-63：进组后先按当前排序档重排兄弟顺序，再组树——排序只影响同层先后，
+  // 进组后先按当前排序档重排兄弟顺序，再组树——排序只影响同层先后，
   // 父子挂载按 parent_task_id 判定，不因顺序变化拆树（分组结构在 renderTaskGroup 上游，不在本函数）。
   const sorted = sortTasksForPanel(tasks)
   const visible = new Set(sorted.map(task => task.id))
@@ -400,7 +400,7 @@ function renderBots() {
 }
 
 // 总览bots：全部 Bot 管理（复用 renderBots）+ 按 bot 分组的待审提案批量审批。
-// 进化审批从项目 NAV 移到这里（批量）与单聊 bot tab（逐个），项目群聊不再有进化入口。
+// 进化审批入口在这里（批量）与单聊 bot tab（逐个），项目群聊没有进化入口。
 function renderBotsOverview() {
   const pending = (state.data?.proposals ?? []).filter(item => item.status === 'pending')
   const groups = new Map()
@@ -460,12 +460,9 @@ function renderBotsOverview() {
 
 // 项目成员管理页：状态与用量均按当前项目聚合（busy=本项目有排队/运行中运行；
 // usage 四项与 cost 为该项目全部运行的累计）。邀请走 add_member API，移除走 remove_member。
-// DSHBOTS-52：成员行改卡片式网格；上头像、中名称+角色、下状态点与用量。
-// DSHBOTS-57：卡片放大（max-width 320px、头像 56px），中段改三行式——名称 / 角色标签 /
-// provider·model 小字，模型不再收进 title 提示，关键信息全部在卡面可见；
-// 尺寸与「总览bots」的 bot 卡片同口径，不再锁 0.618:1 宽高比（用户 m_c2ff7f）。
-// DSHBOTS-65：卡底去掉与 busy pill 重复的运行状态行，新增「已完成 n · 待办 m」任务统计
-// （member.taskStats，待办=未完成且未取消，与右侧 pill 各说各的：pill 说运行态，统计说任务量）。
+// 成员卡与「总览bots」的 bot 卡片同口径（max-width 320px、头像 56px，不锁宽高比）：上头像，
+// 中段三行式——名称 / 角色标签 / provider·model 小字（关键信息全部在卡面可见），下状态点与用量；
+// 卡底「已完成 n · 待办 m」任务统计（member.taskStats，待办=未完成且未取消；pill 说运行态，统计说任务量）。
 function renderMembers() {
   const project = activeProject()
   if (!project) return noProject()
@@ -609,8 +606,8 @@ async function searchMemories() {
 
 function renderMemory() {
   const project = pageProject()
-  // 记忆随上下文收敛：群聊=当前项目 scope、单聊=该 bot scope，服务端已按上下文过滤，
-  // 客户端不再有作用域筛选与「团队记忆」概念。
+  // 记忆按上下文区分：群聊=当前项目 scope、单聊=该 bot scope，服务端已按上下文过滤，
+  // 客户端没有作用域筛选与「团队记忆」概念。
   const memories = state.data?.memories ?? []
   const pending = pendingMemoryCount()
   const results = state.memoryResults
@@ -682,7 +679,7 @@ function skillVersions(skill, { rollback = true } = {}) {
 
 function renderEvolution() {
   const proposals = state.data?.proposals ?? []
-  // 单聊进化 tab 只看该 bot 自己的提案（逐个审批）；项目群聊不再挂进化入口（批量审批在「总览bots」）。
+  // 单聊进化 tab 只看该 bot 自己的提案（逐个审批）；项目群聊没有进化入口（批量审批在「总览bots」）。
   const scoped = inSoloContext() ? proposals.filter(item => item.bot_id === state.soloBotId) : proposals
   const pending = scoped.filter(item => item.status === 'pending')
   return `
@@ -711,7 +708,7 @@ export function taskUsageBlock(usage) {
     <div class="divider"></div>`
 }
 
-// 交付产物块（DSHBOTS-345 复盘）：卡面声明的交付文件路径，核验按路径直接读文件；未声明不渲染。
+// 交付产物块：卡面声明的交付文件路径，核验按路径直接读文件；未声明不渲染。
 // 文本型 chip 可点开应用内预览，其余保持纯文字。
 export function taskDeliverablesBlock(task) {
   const deliverables = Array.isArray(task?.deliverables) ? task.deliverables.filter(item => typeof item === 'string' && item) : []

@@ -1,9 +1,9 @@
-// DSHBOTS-182：微信推送收敛——创建→完成闭环：创建成功与真正进入「已完成」（→done 转换）
+// 微信推送收敛——创建→完成闭环：创建成功与真正进入「已完成」（→done 转换）
 // 各推恰一条（通知域统一收口在 src/services/task-notify.js），交付（→in_review/待验收）节点
 // 不推。done 的全部转换路径（总监验收 applyReview、微信「验收 KEY-N」指令 wechatReview、
 // 看板/编辑表单直接完成 transitionTask/updateTask）都收口在 updateTask 的 notifyTaskDone；
 // 重复提交 done 不会真的转换，也就不会重复推。
-// DSHBOTS-185：待发队列治理——通道级测试：推送失败重试设上限（超限废弃不补发）、
+// 待发队列治理——通道级测试：推送失败重试设上限（超限废弃不补发）、
 // 链接建立作废存量堆积（只发链接后新事件）、同轮多条推送合批为一次发送。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -242,7 +242,7 @@ test('创建任务（DSHBOTS-182 增补）：推恰一条含 KEY-N/标题/派给
   }
 })
 
-// ---- DSHBOTS-185：待发队列治理（通道级） ----
+// ---- 待发队列治理（通道级） ----
 
 // 真实 WechatStore 临时库 + 桩 transport：只关心 outbox 语义，不碰 vendor 协议。
 async function openChannelStore() {

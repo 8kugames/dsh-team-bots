@@ -229,7 +229,7 @@ export async function handleAction(service, action: TeamActionName, payload: Tea
     case 'settings':
       return service.settingsView()
     case 'update_settings':
-      // B2/DSHBOTS-325：UI 携带读取时的 settings_revision，不匹配即 409（乐观并发）。
+      // UI 携带读取时的 settings_revision，不匹配即 409（乐观并发）。
       return service.updateSettings(payload.patch ?? payload, actor, payload.revision)
     case 'update_prompt_segment':
       // 可编辑提示词段：空文本=恢复默认；保存经预算校验并审计。

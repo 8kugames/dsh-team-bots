@@ -1,6 +1,6 @@
-// 工作台启动冒烟：D-15 拆分后 ui 模块图必须在模块求值层不炸。
-// 背景（2026-11-03 生产事故）：state.js 顶层曾引用 app.js 局部函数 taskGroupKey，
-// 模块图 ReferenceError → app.js 永不执行 → 工作台卡「正在连接团队空间」。
+// 工作台启动冒烟：ui 模块图必须在模块求值层不炸。
+// 守的断裂形态：模块顶层引用 app.js 局部函数（如 taskGroupKey）→ 模块图 ReferenceError
+// → app.js 永不执行 → 工作台卡「正在连接团队空间」。
 // 既有读源码测试（helpers/ui-sources.js 拼接 app.js+modules）发现不了这类断裂，
 // 本文件用真实 ESM 导入补上这层保障。
 import test from 'node:test'
@@ -29,7 +29,7 @@ test('app.js 入口持有 task-group 预置循环（搬迁去向回归锁）', a
   assert.match(src, /for \(const status of STATUS_ORDER\) state\.openPanels\.add\(taskGroupKey\(status\)\)/)
 })
 
-// 批次2起每个新模块都必须能被真实 ESM 求值（顶层零 app.js 局部符号，同 state.js 事故防线）。
+// 每个新模块都必须能被真实 ESM 求值（顶层零 app.js 局部符号，同 state.js 事故防线）。
 test('ui/modules/markdown.js 与 api.js 可完整求值', async () => {
   globalThis.location = new URL('http://127.0.0.1:3080/api/dsh-team/ui?view=chat') as unknown as Location
   // util.js 顶层取 toastRoot、markdown.js 顶层读 window.marked：node 下给最小桩，走设计内兜底。

@@ -17,7 +17,7 @@ export async function api(action, payload = {}, { quiet = false } = {}) {
       const message = body?.error?.message ?? (response.status === 401 || response.status === 403
         ? t("登录状态已失效，请回到 DSH Web 登录后重新打开。")
         : t("请求失败，请稍后重试。"))
-      // B2/DSHBOTS-325：错误带码与状态（如 CONFLICT/409），调用方可按错误类别接管处理
+      // 错误带码与状态（如 CONFLICT/409），调用方可按错误类别接管处理
       // （静默 quiet 模式下自走合并/提示路径），其余调用方不受影响。
       const error = new Error(message) as Error & { code?: string | null; status?: number }
       error.code = body?.error?.code ?? null
@@ -76,7 +76,7 @@ export async function markVisibleChatRead(data) {
   try {
     await api('mark_chat_read', { projectId, readAt: newest }, { quiet: true })
   } catch {
-    // 上报失败回退水位，下一轮轮询自动重报（DSHBOTS-167：上报不再挡渲染）。
+    // 上报失败回退水位，下一轮轮询自动重报。
     // 上报是 fire-and-forget，旧响应可能晚于新上报失败；只有水位仍属自己时才回退，
     // 否则会把更新的水位（甚至别的项目的）抹掉。
     if (state.markedRead === key) state.markedRead = previous

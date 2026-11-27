@@ -1,4 +1,4 @@
-// DSHBOTS-333 守门：飞书通道骨架（传输层全 stub，走进程内官方 SDK 接口）。
+// 飞书通道骨架的守门测试（传输层全 stub，走进程内官方 SDK 接口）。
 // ①secret 不出现在 DSHBOTS 库/日志/env；②每条出站带 uuid=outbox 行 id；
 // ③outbox 3 次上限后废弃不补发；④绑定失败 phase='unbound' 不 crash；
 // ⑤不监听任何公网端口（无 webhook server 源码锚）。

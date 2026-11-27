@@ -1,4 +1,4 @@
-// DSHBOTS-143：「DSH 服务」卡收敛——删热升级死按钮，卡内展示四项版本。
+// 「DSH 服务」卡守门测试：版本展示与热升级死按钮清理。
 // 行为三例：health.version 读部署 package.json 真值；state 下发 pluginVersion；
 // dshUpdateInfo 同时回 dsh 与 dsh-team-bots 两套当前/最新版本与升级标记。
 // UI 三例：死按钮与 case 全删；检查更新接线保留 + 卡内渲染四项；API 层保留 upgrade_dsh/reboot_dsh。

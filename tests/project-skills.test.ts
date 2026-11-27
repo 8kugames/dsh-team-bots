@@ -211,7 +211,7 @@ test('生产目录：会话 cwd、prompt 与项目技能池都以生产目录为
     const director = store.get("SELECT * FROM bots WHERE name = 'director'")
     const prod = join(root, 'existing-repo')
     await mkdir(prod, { recursive: true })
-    // 技能池以生产目录为准：deploy 放生产目录；管理目录只放一个旧技能，证明不再进池
+    // 技能池以生产目录为准：deploy 放生产目录；管理目录只放一个旧技能，证明不进池
     await writeSkill(join(prod, '.agents', 'skills', 'deploy'), {
       name: 'deploy', description: 'Deploy helper',
     })

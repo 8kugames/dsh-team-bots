@@ -62,7 +62,7 @@ export default {
   "global.approvalRuleChipSandbox": "沙箱",
   "global.approvalRuleChipNote": "备注",
   "global.saveApprovalRules": "保存免审规则",
-  // 完全权限总开关（DSHBOTS-366，免审权限卡顶）
+  // 完全权限总开关（免审权限卡顶）
   "global.approvalFullAccess": "完全权限",
   "global.approvalFullAccessHint": "打开后所有 Bot 与派发任务统一按完全访问（danger-full-access）运行，不再收紧只读；各 Bot 的文件策略与派发覆盖原样保留，关闭后恢复原判定。仅工作台 owner 可切换。",
   "完全权限已开启：所有 Bot 与派发任务统一按完全访问运行": "完全权限已开启：所有 Bot 与派发任务统一按完全访问运行",
@@ -192,7 +192,7 @@ export default {
   "默认开启：首次点击页面时浏览器会询问通知权限，允许后生效。": "默认开启：首次点击页面时浏览器会询问通知权限，允许后生效。",
   "新值只对之后启动的运行生效，进行中的运行不追溯。": "新值只对之后启动的运行生效，进行中的运行不追溯。",
   "可升级": "可升级",
-  // DSHBOTS-220: ui/modules 文案（原文即键）
+  // ui/modules 文案（原文即键）
   "思考": "思考",
   "回复": "回复",
   "调用工具 ${name}": "调用工具 ${name}",
@@ -444,7 +444,7 @@ export default {
   "项目：": "项目：",
   "预算": "预算",
   "高": "高",
-  // DSHBOTS-246：全量 t 实参清点补齐（原文即键）
+  // 全量 t 实参清点补齐（原文即键）
   "（当前": "（当前",
   "（可选）": "（可选）",
   "（不做物理删除）。": "（不做物理删除）。",

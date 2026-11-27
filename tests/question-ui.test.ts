@@ -1,4 +1,4 @@
-// DSHBOTS-116 UI：提问卡片四态渲染 + 同卡多问的选项隔离。
+// 提问卡片四态渲染 + 同卡多问的选项隔离。
 // 沿用仓库先例：读源断言（tests/helpers/ui-sources.js）+ 标记块 new Function 执行真实源码
 // （tests/approval-ui-states.test.js）。执行的是 ui/app.js 里的实现，不是复制一份到测试里。
 import { test } from 'node:test'

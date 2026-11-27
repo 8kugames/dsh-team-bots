@@ -416,7 +416,7 @@ document.addEventListener('click', async (event) => {
         // 复选框状态在翻页时读取一次：第二步的确认文案与最终提交都以此为准。
         state.modal.purge = (document.getElementById('remove-tracking-purge') as HTMLInputElement | null)?.checked === true
         state.modal.step = 2
-        // 弹窗层只认 renderModalLayer 直调：modal 打开期间整页渲染被 D-98 遮罩闸门
+        // 弹窗层只认 renderModalLayer 直调：modal 打开期间整页渲染被遮罩闸门
         // 拦截（app.js 只记 pending 不碰 #modal-root），误走整页路径会让翻页零响应。
         renderModalLayer()
         break
@@ -429,7 +429,7 @@ document.addEventListener('click', async (event) => {
       }
       case 'bot-remove-tracking-open': {
         const bot = botById(target.dataset.botId)
-        // 仅已归档 Bot 可移除追踪（软移除，DSHBOTS-193）；未归档一律零响应。
+        // 仅已归档 Bot 可移除追踪（软移除）；未归档一律零响应。
         if (!bot || bot.status !== 'archived') break
         openModal({ type: 'bot-remove-tracking', botId: bot.id, name: bot.name, step: 1 })
         break
@@ -437,7 +437,7 @@ document.addEventListener('click', async (event) => {
       case 'bot-remove-tracking-step2': {
         if (state.modal?.type !== 'bot-remove-tracking') break
         state.modal.step = 2
-        // 弹窗层只认 renderModalLayer 直调（D-98 遮罩闸门，同 remove-tracking 口径）。
+        // 弹窗层只认 renderModalLayer 直调（同 remove-tracking 口径）。
         renderModalLayer()
         break
       }
@@ -577,7 +577,7 @@ document.addEventListener('click', async (event) => {
       }
       case 'delete-secret': {
         const name = target.dataset.secretName || t("该密钥")
-        // DSHBOTS-106 起明文只在批准时一次性物化到数据目录，项目工作区不再有明文密钥文件；
+        // 明文只在批准时一次性物化到数据目录，项目工作区没有明文密钥文件；
         // 删除即吊销：已下发的一次性运行时副本当场失效，重新使用要再走一次申请与批准。
         if (!window.confirm(t("删除密钥 ${name}？相关项目已下发的一次性运行时副本会立即失效，重新使用需再次申请。", { name: name }))) break
         await api('delete_secret', { secretId: target.dataset.secretId })

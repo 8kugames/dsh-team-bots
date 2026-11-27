@@ -14,7 +14,7 @@
     background: var(--surface);
     box-shadow: var(--shadow-1);
 }
-/* 整行化：审批卡占满消息行可用宽度，右侧按钮贴行右缘，不再停在 480px 小卡上。
+/* 整行化：审批卡占满消息行可用宽度，右侧按钮贴行右缘。
  选择器带 .message-body-wrap 是为了压过基线的 max-width: min(640px, 82%) 与窄屏的 88% 覆盖——
  它们同为单类选择器且排在本文件之后，靠源码顺序压不住，必须用双类选择器提特异性。
  min-width 取 min(240px, 100%)：容器窄于 240px 时收缩到容器宽，窄屏不出横向滚动。 */
@@ -72,7 +72,7 @@
 /* 正文：pending --ink，已决四态 --ink-2 */
 .approval-summary { font-size: var(--fs-body); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
 .approval-card[data-approval-status='pending'] .approval-summary { color: var(--ink); }
-/* 倒计时：秒级精确剩余时间，临期切 --star（D-101 规格的临期告警色）。 */
+/* 倒计时：秒级精确剩余时间，临期切 --star（临期告警色）。 */
 .approval-clock { font-variant-numeric: tabular-nums; }
 .approval-clock.urgent { color: var(--star); font-weight: 600; }
 /* 倒计时行（V2）：⏱ + 「剩余 X 分 Y 秒」，临期图标与文字一起转黄 */
@@ -175,7 +175,7 @@
 .approval-menu-card .message-row { gap: 0; }
 /* 提问卡片：与审批卡片同骨架，四态中只有 pending 是强调态；已答两态回中性底。
  圆角 12（卡）/ 8（问题块、选项）/ 6（图标徽章）/ 7（pill、进度条），间距 4-6-8-10。
- 整行化与右对齐：对齐审批卡 D-173/D-180 口径——占满消息行、按钮与 pill 贴右缘。 */
+ 整行化与右对齐：与审批卡同口径——占满消息行、按钮与 pill 贴右缘。 */
 .question-card {
     border: 1px solid transparent;
     border-left: 4px solid var(--accent);
@@ -189,7 +189,7 @@
     background: var(--surface);
     box-shadow: var(--shadow-1);
 }
-/* 整行化（DSHBOTS-190，同审批卡 D-173）：双类选择器压过基线 .message-body-wrap 的
+/* 整行化（同审批卡）：双类选择器压过基线 .message-body-wrap 的
    max-width: min(640px, 82%) 与窄屏 88% 覆盖；min-width 收缩防窄屏横向滚动。 */
 .message-body-wrap.question-card {
     width: 100%;

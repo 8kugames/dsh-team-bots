@@ -1,4 +1,4 @@
-// tests/loop-caps.test.ts —— DSHBOTS-267 守门：防循环三上限 + 失败终态白名单分类。
+// 防循环三上限 + 失败终态白名单分类的守门测试。
 // 三上限（配置默认值常量，写死在 notify.ts / run-finish.ts）：
 //  ① 单 run 伙伴提醒（去重目标计条）≤3：第 4 条静默丢弃并记日志（notify 与 chat 两条路径）；
 //  ② 同 run+同目标 bot 每日 ≤5：第 6 次静默丢弃并记日志；
@@ -53,8 +53,8 @@ async function setup() {
   })
   const wechatPushes: string[] = []
   ;(service as any).wechat = { notify(text: string) { wechatPushes.push(text) } }
-  // DSHBOTS-293：绑定夹具随四车道收敛改为 kind='bot' 控制面（与生产库一致，
-  // 原旧车道夹具会掩盖 notifyMemberFromBot 的控制面绑定解析）。
+  // 绑定夹具用 kind='bot' 控制面（与生产库一致；非控制面车道的夹具会掩盖
+  // notifyMemberFromBot 的控制面绑定解析）。
   const bindSession = ({ sessionId, botId }: { sessionId: string; botId: string }) => store.run(
     `INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, created_at) VALUES (?, ?, ?, 'bot', NULL, ?)`,
     sessionId, botId, project.id, new Date().toISOString(),

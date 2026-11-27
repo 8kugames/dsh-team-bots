@@ -1,4 +1,4 @@
-// DSHBOTS-333 守门：入站事件消费（传输层全 stub，进程内官方 SDK 接口）。
+// 入站事件消费的守门测试（传输层全 stub，进程内官方 SDK 接口）。
 // ①重复 (appId,message_id) 不重复起 turn（LRU 去重）；②TOFU 首私聊者成 owner 并持久化、
 // 非 owner 私聊丢弃留痕；③群聊无 @ 不起 turn、非 owner @bot 60s 冷却礼貌回应；
 // ④lane 编码形态；⑤generation 旧轮次整体丢弃；⑥同幂等键超时有界重试幂等；

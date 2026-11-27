@@ -89,7 +89,7 @@ test('add_member / remove_member manage membership with precise error semantics'
       (err: any) => err.code === 'FORBIDDEN',
     )
 
-    // 移除成员后不再出现在成员列表（mention 定向随 membersOf 自动失效）
+    // 移除成员后不出现在成员列表（mention 定向随 membersOf 自动失效）
     const removed = await handleAction(service, 'remove_member', { projectId: project.id, botId: builder.id }, actor)
     assert.equal(removed.members.some(row => row.id === builder.id), false)
     assert.equal(service.membersOf(project.id).some(row => row.member_id === builder.id), false)
@@ -274,7 +274,7 @@ test('update_project 不带 memberIds 时不动成员表；换总监自动补齐
     const project = await service.createProject({ name: 'Demo Project', key: 'DEMO', ownerBotId: director.id })
     await handleAction(service, 'add_member', { projectId: project.id, botId: builder.id }, actor)
 
-    // 设置页已不再全量提交 memberIds：纯信息更新（如改描述）不得触碰成员表
+    // 设置页不全量提交 memberIds：纯信息更新（如改描述）不得触碰成员表
     await handleAction(service, 'update_project', { projectId: project.id, patch: { description: 'changed' } }, actor)
     let roles = store.all('SELECT member_id, member_role FROM project_members WHERE project_id = ?', project.id)
     assert.equal(roles.length, 3, '纯信息更新后成员数不变（director+默认 reviewer+builder）')

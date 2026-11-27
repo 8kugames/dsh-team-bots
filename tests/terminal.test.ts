@@ -45,7 +45,7 @@ async function closeQuietly(store, chatStore, timeout = 3000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeout) {
     try {
-      // Phase 3：terminal_commands 住项目聊天库，轮询句柄随之切换。
+      // terminal_commands 住项目聊天库，轮询的是聊天库句柄。
       const running = chatStore.get("SELECT COUNT(*) AS n FROM terminal_commands WHERE status = 'running'")?.n ?? 0
       if (running === 0) break
     } catch {

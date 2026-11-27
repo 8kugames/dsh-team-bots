@@ -1,11 +1,10 @@
-// DSHBOTS-118：恢复默认模型报「HMR transactions cannot be nested」。
+// 恢复默认模型报「HMR transactions cannot be nested」。
 // 宿主 selectModel 会把下发模型写成默认模型，插件必须恢复运行前的默认值；恢复经
 // configEditor.edit → hmr.runExclusive，若调用点残留 HMR 事务的 AsyncLocalStorage
 // 上下文，runExclusive 会以「嵌套事务」直接 reject，恢复被 warn 吞掉。
-// DSHBOTS-175：逃逸口径改为宿主 HMR 服务的 executing.exit（exit 即
+// 逃逸口径：用宿主 HMR 服务的 executing.exit 逃出事务上下文（exit 即
 // run(undefined, fn)，把回调及其全部 async 延续的 store 置为 undefined），
-// 事务上下文里恢复不再被嵌套拒绝；「撞嵌套就重捕 scope」的自愈删除（它在污染
-// 调用链里造出的仍是污染 scope，还把模块级干净 scope 覆盖成污染的）。
+// 恢复在事务上下文里不被嵌套拒绝。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsyncLocalStorage } from 'node:async_hooks'

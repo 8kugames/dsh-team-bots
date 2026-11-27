@@ -97,7 +97,7 @@ test('task 运行入队恒 mode=write，沙箱解析取 bot.file_policy（两档
     await service.assignFromBot(sessionId, {
       assignee: 'Builder', title: '开发模块', description: '写代码。', write_scopes: ['src/module.js'],
     })
-    // DSHBOTS-314 派单策略闸后写卡不经 assignFromBot 派只读 bot——直建卡+入队保持测试意图。
+    // 派单策略闸后写卡不经 assignFromBot 派只读 bot——直建卡+入队保持测试意图。
     const auditTaskSeed = await service.createTask({ projectId: project.id, title: '审查模块', assigneeBotId: auditor.id, writeScopes: ['src/audit.js'] })
     service.enqueueTaskRun(auditTaskSeed, 'assigned', { type: 'bot', id: dev.id })
     const devRun = waitFor(() => store.get("SELECT * FROM runs WHERE task_id IN (SELECT id FROM tasks WHERE assignee_bot_id = ?) AND kind = 'task'", dev.id), 'dev run')
@@ -202,7 +202,7 @@ test('派发覆盖全链：落库 → 起会话生效 → run_events 留档 → 
     assert.deepEqual(effectiveSandbox(runRow, botRow, taskRow), { mode: 'read-only', source: 'override' })
 
     // 起会话：宿主 sandbox/mode 收到收紧档，run_events 落 sandbox_mode 事件（档位+来源）。
-    // Phase 3：run_events 住聊天库——运行时按 run 路由取库。
+    // run_events 住聊天库——运行时按 run 路由取库。
     const ctx = fakeCtx()
     const runtime = new DshRuntime({ ctx, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
     const sessionUsed = await runtime.ensureSession(botRow, project, { run: runRow, task: taskRow })
@@ -247,7 +247,7 @@ test('覆盖只收紧不放大；重派 inherit 清覆盖、缺省不动；垃�
     })
     await service.assignFromBot(sessionId, { task: `PA-${task.number}`, assignee: 'Builder', sandbox: 'read-only' })
     assert.equal(store.get('SELECT sandbox_override FROM tasks WHERE id = ?', task.id).sandbox_override, 'read-only')
-    // Phase 3：task_events 住项目聊天库。
+    // task_events 住项目聊天库。
     const assignedEvent = service.groupChatStore(project.id).get(
       "SELECT data_json FROM task_events WHERE task_id = ? AND type = 'assigned' ORDER BY created_at DESC LIMIT 1",
       task.id,

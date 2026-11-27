@@ -1,4 +1,4 @@
-// DSHBOTS-58 第二笔：任务父子层级 + 依赖徽标 + 新建任务的父任务/依赖任务字段——源码断言式测试。
+// 任务父子层级 + 依赖徽标 + 新建任务的父任务/依赖任务字段——源码断言式测试。
 // 约定同 task-panel-grouped.test.js：ui/app.js 做源码断言，CSS 用正则抽规则体。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -57,7 +57,7 @@ test('新建任务表单：可选父任务与依赖任务', () => {
   assert.match(source, /id="new-task-parent" name="parentTaskId"/, '有父任务下拉')
   assert.match(source, /<option value="">\$\{t\("无（顶层任务）"\)\}<\/option>/, '父任务默认不选')
   assert.match(source, /id="new-task-blocked" name="blockedBy" multiple/, '依赖任务是多选')
-  // D-63 派生子任务：taskRelationOptions 增加 selectedId 参数（预填父任务时给对应 option 打 selected），选项来源不变。
+  // 派生子任务：taskRelationOptions 增加 selectedId 参数（预填父任务时给对应 option 打 selected），选项来源不变。
 // [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 // [修剪] 改 UI 必红的代码形状断言（重构即碎，无契约价值）
 })

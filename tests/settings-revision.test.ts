@@ -1,6 +1,6 @@
-// tests/settings-revision.test.ts —— B2/DSHBOTS-325：设置乐观并发守门。
+// 设置乐观并发守门。
 // ① revision 匹配保存成功且令牌单调递增；② 不匹配 → conflict 409（后保存者不静默覆盖）；
-// ③ 不带 revision 的旧调用形态行为不变；④ state 下发 settingsRevision；⑤ settings_revision
+// ③ 不带 revision 的调用形态不做版本校验；④ state 下发 settingsRevision；⑤ settings_revision
 // 键不可经 patch 直写（防旁路伪造令牌）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -87,7 +87,7 @@ test('不带 revision 的旧调用形态不受影响；state 下发 settingsRevi
   }
 })
 
-// DSHBOTS-350：前端契约修复后，update_settings 的 HTTP 入口收 { patch, revision } 载荷。
+// update_settings 的 HTTP 入口收 { patch, revision } 载荷。
 test('handleAction update_settings 收 { patch, revision }：保存成功且 revision 不进白名单', async () => {
   const { root, store, service } = await setup()
   try {

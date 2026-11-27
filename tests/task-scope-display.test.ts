@@ -1,4 +1,4 @@
-// DSHBOTS-124 任务详情 modal 显式显示「写范围」——断言式测试。
+// 任务详情 modal 显式显示「写范围」——断言式测试。
 // 约定沿用 tests/task-time-ui.test.js：app.js 是浏览器脚本，按源码断言；先剔行注释再断言，
 // 防止「断言写进注释里」的假锁。CSS 规则断言沿用正则抽取法。
 import { test } from 'node:test'

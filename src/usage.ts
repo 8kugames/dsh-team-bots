@@ -42,7 +42,7 @@ export function recordUsage(store, {
   const output = count(usage.outputTokens ?? usage.output)
   const reasoning = count(usage.reasoningTokens ?? usage.reasoning)
   if (input + cacheRead + cacheWrite + output + reasoning === 0) return null
-  // 明细住运行归属的聊天库（chat-db-split Phase 2）；未注入路由（测试/独立构造）回落顶库。
+  // 明细住运行归属的聊天库；未注入路由（测试/独立构造）回落顶库。
   const detailStore = chatStore ?? store
   const existing = detailStore.get('SELECT * FROM usage_events WHERE source_key = ?', sourceKey)
   if (existing) return existing
@@ -117,7 +117,7 @@ export function recordUsage(store, {
   return detailStore.get('SELECT * FROM usage_events WHERE id = ?', eventId)
 }
 
-// —— 汇总读层（chat-db-split Phase 2）——
+// —— 汇总读层 ——
 // 视图/预算全部走顶库 usage_rollup（小时粒度）：滚动窗口最多带进边界处的
 // 不足一小时用量；日历日/月度分组按小时桶换算，与明细口径一致。
 // project_id/bot_id 空串哨兵对应「无归属」。
@@ -290,8 +290,8 @@ export function runUsageTotals(store, runId, budgetCurrency = BUDGET_CURRENCY, p
 
 // —— 任务级 usage 聚合
 // 口径：一个任务端到端花多少 token。明细按 task_id 归因（lifecycle 记账随 run 透传；
-// chat-db-split Phase 2 迁移把历史 NULL 行经顶库 runs 一次性回填），调用方传任务
-// 所属项目的聊天库（明细住那里），不再 JOIN runs——聊天库里没有 runs 表。
+// 迁移把历史 NULL 行经顶库 runs 一次性回填），调用方传任务所属项目的聊天库（明细住那里），
+// 不 JOIN runs——聊天库里没有 runs 表。
 // 覆盖该任务全部运行：成功交付、失败重试（attempt 递增仍同 run 行）、核验/受阻处理
 // 派生运行（task_id 相同）——「端到端成本」即该任务名下发生过的一切模型消费。
 // 缓存 token 分列（cache_read/cache_write），计价沿用 costForTokens 既有口径，不另算。
@@ -489,7 +489,7 @@ function zeroUsageBotRows(store, scope, budgetCurrency) {
   const { filters: eventFilters, params: eventParams } = scopeFilters(scope)
   const runWindow = runWindowFilter(scope)
   // 用 EXISTS 逐 bot 判定，不 JOIN runs：JOIN 会按「窗口内运行数 × bot」放大行数，
-  // 每个组合再跑一次相关子查询（旧版实测 5.8s）。bots 数量小，两次索引查找即可。
+  // 每个组合再跑一次相关子查询。bots 数量小，两次索引查找即可。
   const rows = store.all(
     `SELECT b.id AS bot_id, b.name AS name
        FROM bots b
@@ -833,8 +833,8 @@ function computeUsageSnapshot(store, projectId, days = 30, options = {} as any) 
 
 // 对账结果摘要（只读，不触发对账）。
 export function reconciliationSummary(store) {
-  // 对账明细住各聊天库（chat-db-split Phase 2）；顶库 usage_recon_state 存每轮对账的
-  // 权威计数，由 reconcileUsage 每轮整体覆写——摘要读它，不再扫明细表。
+  // 对账明细住各聊天库；顶库 usage_recon_state 存每轮对账的权威计数，由 reconcileUsage
+  // 每轮整体覆写——摘要读它，不扫明细表。
   const row = store.get('SELECT * FROM usage_recon_state WHERE id = 1')
   return {
     checkedAt: row?.checked_at ?? null,

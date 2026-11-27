@@ -61,7 +61,7 @@ test('终端样式齐全且走主题变量（明暗两套通用）', () => {
   assert.ok(outputBlock.includes('overflow: auto'), '输出区应可滚动')
 })
 
-// ── DSHBOTS-66：终端页视觉重构（修图标撑爆整屏 + 右列被挤成一字一行 + 补终端结构感）──
+// ── 终端页视觉（图标不撑爆整屏、右列不被挤成一字一行、终端结构感）──
 
 // 取顶层 CSS 规则块（闭合大括号回到行首）。
 function cssBlock(selector) {
@@ -132,7 +132,7 @@ test('输出区空态独立成层，不再由 pre 承载图标', () => {
   assert.match(cssBlock('.terminal-output-empty'), /justify-content:\s*center/, '空态说明层应居中')
 })
 
-// ── DSHBOTS-74：终端页布局继续美化（井的层次、右列视觉权重、节奏与细节）──
+// ── 终端页布局（井的层次、右列视觉权重、节奏与细节）──
 
 test('输出井有内描边，与机身条分层：井读成凹陷面而非浮板', () => {
   const output = cssBlock('.terminal-output')

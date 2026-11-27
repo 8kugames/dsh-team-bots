@@ -1,5 +1,5 @@
-// tests/review-auto.test.js —— DSHBOTS-113：验收自动委派护栏。
-// 任务交付迁移 in_review 的同一事务里自动派生 kind='review' 核验运行（复用 D-107 的
+// 验收自动委派护栏。
+// 任务交付迁移 in_review 的同一事务里自动派生 kind='review' 核验运行（走
 // spawnReviewDelegate 共享入口，手动按钮同源）；开关 autoReviewDelegate 默认开；派生
 // 失败走 outbox 退避重试、上限 3 次，耗尽后失败可见（任务卡「未核验」+消息+审计），
 // 任何失败都不阻塞交付迁移。owner_bot 卡串联两跳：核验→总监裁决；user 卡核验后人工裁决。
@@ -94,7 +94,7 @@ async function setup({ auto = false, autoReviewDelegate }: { auto?: boolean; aut
   const project = await service.createProject({
     name: 'AutoDelegate', key: 'ADL', ownerBotId: director.id, memberIds: [dev.id],
   })
-  // 提示词断言用真实 DshRuntime（FakeRuntime 无 promptFor）；Phase 3 后评论/载荷住聊天库，
+  // 提示词断言用真实 DshRuntime（FakeRuntime 无 promptFor）；评论/载荷住聊天库，
   // 运行时按 run 路由取库（与 questions/chat-reply 等测试同款接线）。
   const promptRuntime = new DshRuntime({ ctx: null, config, store, logger: { info() {}, warn() {}, error() {} }, chatStores: { forRun: run => service.runChatStore(run) } })
   const actor = { type: 'user', id: service.localUserId }
@@ -132,7 +132,7 @@ function runRow(t, where, ...args) {
   return t.store.get(`SELECT * FROM runs WHERE ${where}`, ...args)
 }
 
-// DSHBOTS-308 域化：挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
+// 挂起队列按 (bot, 域) 分键存放（bot_pending_msgs:<bot>:<domain>），
 // 断言跨域扫描本 bot 的全部域队列合并后读取。
 function heldItems(t, botId) {
   const rows = t.store.all("SELECT key, value FROM settings WHERE key LIKE ?", `bot_pending_msgs:${botId}:%`)
@@ -264,7 +264,7 @@ test('手动与自动入口幂等不双派：两个方向都复看同一运行',
       "SELECT * FROM outbox WHERE kind = 'review_delegate_auto' AND task_id = ?", first.id,
     )
     assert.equal(dupOutbox.status, 'delivered', '复看也算投递成功，不进重试')
-    // DSHBOTS-290：one_active_run_per_bot 下方向二的自动派生也占 owner 运行位——先完结
+    // one_active_run_per_bot 下方向二的自动派生也占 owner 运行位——先完结
     // 方向一的委派运行再验方向二（幂等语义与运行位无关）。
     t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), manual.id)
 
@@ -394,7 +394,7 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
       projectId: t.project.id, title: '超长卡', assigneeBotId: t.dev.id,
       description: 'x'.repeat(9_000), postCard: false,
     })
-    // DSHBOTS-198 后建档即补缺省预算；本例锁 8K 截断管线的原始余量，直改库置 NULL 模拟存量老卡。
+    // 建档即补缺省预算；本例锁 8K 截断管线的原始余量，直改库置 NULL 模拟存量老卡。
     t.store.run('UPDATE tasks SET time_budget_minutes = NULL WHERE id = ?', long.id)
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", long.id)
     const longView = await t.service.taskReviewDelegate(long.id, t.actor)
@@ -413,7 +413,7 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
       description: '实现登录页。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", short.id)
-    // DSHBOTS-290：owner 忙时第二次委派走挂起（runId null）——先完结第一条再委派短卡。
+    // owner 忙时第二次委派走挂起（runId null）——先完结第一条再委派短卡。
     t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), longView.id)
     const shortView = await t.service.taskReviewDelegate(short.id, t.actor)
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortView.id)
@@ -427,11 +427,11 @@ test('核验提示词超长防护：任务描述超 8K 截断并注明，短描�
   } finally { await t.close() }
 })
 
-// DSHBOTS-140：owner review（review_requested）与 handle（blocked_handoff）分支与
-// review_delegate 共用同一 8K 截断管线——超长描述不再全文拼装（防 400 Prompt exceeds
-// max length 重演）；标题/状态/写范围/最近交付评论开头是截断点外的保底字段，恒在场。
+// owner review（review_requested）与 handle（blocked_handoff）分支与
+// review_delegate 共用同一 8K 截断管线——超长描述不全文拼装（防 400 Prompt exceeds
+// max length）；标题/状态/写范围/最近交付评论开头是截断点外的保底字段，恒在场。
 function insertDeliveryComment(t, taskId, body) {
-  // Phase 3：task_comments 住任务所属项目的聊天库。
+  // task_comments 住任务所属项目的聊天库。
   t.service.groupChatStore(t.project.id).run(
     'INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     `task_c_${taskId.slice(-6)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -469,7 +469,7 @@ test('owner review 提示词超长防护：8K 截断同口径，保底字段在�
       description: '实现注册页。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'in_review' WHERE id = ?", short.id)
-    // DSHBOTS-290：同上，两次入队间释放 owner 运行位。
+    // 同上，两次入队间释放 owner 运行位。
     t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), ownerRunId)
     const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'review')
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
@@ -520,7 +520,7 @@ test('handle 提示词超长防护：8K 截断同口径，保底字段与失败�
       description: '修复支付回调。', postCard: false,
     })
     t.store.run("UPDATE tasks SET status = 'blocked' WHERE id = ?", short.id)
-    // DSHBOTS-290：同上，两次入队间释放 owner 运行位。
+    // 同上，两次入队间释放 owner 运行位。
     t.store.run("UPDATE runs SET status = 'succeeded', ended_at = ? WHERE id = ?", new Date().toISOString(), handleRunId)
     const shortRunId = t.service.enqueueOwnerTaskRun(t.service.taskRow(short.id), 'handle')
     const shortRow = t.store.get('SELECT * FROM runs WHERE id = ?', shortRunId)
@@ -579,10 +579,8 @@ test('交付带提问（attention）不派核验也不排总监验收：先让 o
   } finally { await t.close() }
 })
 
-// DSHBOTS-291 卡面增补②（D-290 红线臂 4d70a415：M5a owner_task busy 闸 0 直接覆盖）：
 // owner 真忙（有 queued/running 运行）时 enqueueOwnerTaskRun 返回 null 不落 runs 行、
 // 挂待处理队列；owner 空闲后 drainPendingMessages 建回一条 review 运行。
-// 现有用例都在第二次入队前把第一条 run 置 succeeded 释放 owner，未覆盖真忙场景。
 test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行，空闲 drain 建回一条', async () => {
   const t = await setup()
   try {
@@ -595,7 +593,7 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
        VALUES ('run_owner_busy', ?, ?, 'chat', 'read', 'test', 'running', 1, 'busy:owner_gate', ?)`,
       t.project.id, t.director.id, new Date().toISOString(),
     )
-    // DSHBOTS-308 域化：owner_task 挂起域 = 任务所属工作区，断言按域键读取。
+    // owner_task 挂起域 = 任务所属工作区，断言按域键读取。
     const pending = () => heldItems(t, t.director.id)
     assert.equal(t.service.enqueueOwnerTaskRun(t.service.taskRow(task.id), 'review'), null, 'owner 真忙时返回 null')
     assert.equal(t.store.get("SELECT COUNT(*) AS n FROM runs WHERE kind = 'review'")?.n, 0, '不落 runs 行')
@@ -615,7 +613,7 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
     assert.equal(review.task_id, task.id)
     assert.deepEqual(pending(), [], '挂起队列清空')
 
-    // DSHBOTS-308 域化反转：占道运行在「本工作区」域上，另一工作区的验收属他域，
+    // 占道运行在「本工作区」域上，另一工作区的验收属他域，
     // 不被本域占道阻塞——直接落 runs 行，且不挂起。
     const otherProject = await t.service.createProject({
       name: 'Other', key: 'OTH', ownerBotId: t.director.id, memberIds: [t.dev.id],
@@ -648,8 +646,8 @@ test('owner 真忙时 enqueueOwnerTaskRun 挂起：返回 null 不落 runs 行�
   } finally { await t.close() }
 })
 
-// 核验纪律提示词守门（DSHBOTS-302，owner 硬口径）：核验/审计/复核他人交付=director 专属，
-// 成员 bot 模板只保留自校段（验自己的活）。源码锚（D-269 手法）：核验/验收模板指令只允许
+// 核验纪律提示词守门：核验/审计/复核他人交付=director 专属，
+// 成员 bot 模板只保留自校段（验自己的活）。核验/验收模板指令只允许
 // 出现在 prompt.ts 的 review/handle 分支之后；分支之前的成员/通用模板不得含任何核验类指令
 // 标记；委派核验模板保持「不代 owner 裁决」，owner 验收模板才持有 team_review_task 裁决入口。
 test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/handle 分支，成员模板只有自校', () => {
@@ -669,8 +667,8 @@ test('DSHBOTS-302 核验纪律提示词不漂移：核验模板只落 review/han
   assert.match(reviewSide, /spawn one verification subagent/, '无委派结论时 owner 自派核验子代理')
 })
 
-// 子代理施工硬闸解除守门（原 DSHBOTS-311 撤销）：亲做交付不再要求 subagent_spawned
-// 账目——无账目照转 in_review，治强制子代理造成的施工堵塞；子代理账本仍照记。
+// 子代理施工硬闸解除守门：亲做交付不要求 subagent_spawned
+// 账目——无账目照转 in_review；子代理账本仍照记。
 test('硬闸解除：无子代理账目亲做交付照转 in_review', async () => {
   const t = await setup()
   try {
@@ -708,11 +706,11 @@ test('硬闸解除源码锚：交付链无闸痕迹，提示词无强制每卡�
   assert.doesNotMatch(finishSource, /subagent_spawned|subagent_delivery_gate/, '交付链不再查子代理账目/闸门键')
 })
 
-// DSHBOTS-306 验收期亲和改判 owner：任务 in_review 后卡线程消息按 assignee 任务亲和
+// 验收期亲和改判 owner：任务 in_review 后卡线程消息按 assignee 任务亲和
 // 落承接 bot 会话，而验收动作 team_review_task 仅 owner bot 可调
 // 指令路由与动作权限错位，每卡绕一步。守门四向：①in_review 亲和改判项目 owner bot 的
 // 控制面绑定（优先于 runs 归属/结转亲和）；②in_progress 维持 assignee 亲和（含结转后
-// alias 旧会话，D-286 不回归）；③done 无亲和不变；④退回 todo 恢复 assignee 亲和。
+// alias 旧会话）；③done 无亲和不变；④退回 todo 恢复 assignee 亲和。
 test('DSHBOTS-306 验收期亲和改判 owner：in_review 落总监控制面，in_progress 维持 assignee 亲和', async () => {
   const t = await setup()
   try {
@@ -720,7 +718,7 @@ test('DSHBOTS-306 验收期亲和改判 owner：in_review 落总监控制面，i
     const affinity = (task) => sessionMethods.taskAffinityBinding.call(service, task)
     const task = await service.createTask({ projectId: project.id, title: '亲和任务', assigneeBotId: dev.id })
     const now = new Date().toISOString()
-    // assignee 任务会话（alias=1 模拟 D-286 结转后的旧任务绑定）+ 该任务的运行归属。
+    // assignee 任务会话（alias=1 模拟结转后的旧任务绑定）+ 该任务的运行归属。
     store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, task_id, alias, created_at) VALUES (?, ?, ?, 'task', ?, 1, ?)",
       'sess-task-dev', dev.id, project.id, task.id, now,
@@ -730,7 +728,7 @@ test('DSHBOTS-306 验收期亲和改判 owner：in_review 落总监控制面，i
        VALUES ('run_aff_dev', ?, ?, ?, 'task', 'write', 'assigned', 'succeeded', 1, 'aff:1', 'sess-task-dev', ?)`,
       project.id, dev.id, task.id, now,
     )
-    // 总监控制面绑定（D-299 三分：每 (owner, project) 一条 kind='bot'）。
+    // 总监控制面绑定（每 (owner, project) 一条 kind='bot'）。
     store.run(
       "INSERT INTO session_bindings(session_id, bot_id, project_id, kind, alias, created_at) VALUES (?, ?, ?, 'bot', 0, ?)",
       'sess-director-proj', director.id, project.id, now,
@@ -753,7 +751,7 @@ test('DSHBOTS-306 验收期亲和改判 owner：in_review 落总监控制面，i
 })
 
 // 总监核验运行不得劫持任务亲和：真实交付链是「assignee 施工（早）→ 交付 in_review →
-// review_delegate 核验运行落总监控制面（晚）→ 退回重做」。D-306 的 runs 归属亲和按
+// review_delegate 核验运行落总监控制面（晚）→ 退回重做」。runs 归属亲和按
 // COALESCE(started_at, queued_at) DESC 取最近一条运行会话，不区分 bot/kind——核验运行
 // 一旦存在，退回后的重做 task 运行与卡线程回信全部亲和到总监会话（「成员任务卡发给
 // 总监」）。守门三向：①成员卡退回 in_progress 亲和仍是 assignee 任务会话；②owner 卡

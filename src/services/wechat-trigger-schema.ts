@@ -1,12 +1,10 @@
-// src/services/wechat-trigger-schema.js —— 微信入站 Trigger 留痕表。
-// 吸收原型 sources 层「不收的消息仍进系统并记 reason」的口径：微信是当前唯一外部入口，
+// 微信入站 Trigger 留痕表。
 // 每条入站事件按稳定 id 留痕（disposition：handled/filtered/rejected/duplicate + route +
-// reason），面板与巡检可回答「这条消息为什么没有触发」。不做整套 Source 抽象（报告 B4
-// 结论：按通道分步，勿整体搬 Source 层）；读入（Trigger 翻译）与写出（notify 收据）分离
-// 各自留痕，通道出站侧收据见 wechat/store.ts 的 receipt_key（A3）。
+// reason），面板与巡检可回答「这条消息为什么没有触发」。
+// 读入（Trigger 翻译）与写出（notify 收据）分离各自留痕，通道出站侧收据见
+// wechat/store.ts 的 receipt_key。
 //
-// 迁移独立成文件的原因：与 attention-schema/recovery-schema 同款手法——src/db.js 贴 800
-// 行红线，独立迁移文件 + schema_migrations 幂等登记。
+// 迁移独立成文件的原因：src/db.js 贴 800 行红线；schema_migrations 幂等登记。
 
 import { nowIso } from '../util.js'
 

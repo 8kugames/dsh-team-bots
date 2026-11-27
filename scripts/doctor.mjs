@@ -2,8 +2,7 @@
 // and reports anything that would stop the service from writing to its own
 // directories.
 //
-// 退出码分级（A5/DSHBOTS-329，吸收原型 dsh-superagent 守护脚本的 outcome 语义）：
-// 让 CI/定时巡检能区分「自己能修」与「必须叫人」——
+// 退出码分级：让 CI/定时巡检能区分「自己能修」与「必须叫人」——
 //   0  ok：目录可写、host refs 全部存在
 //   1  目录/权限问题（workspace/data/skill 目录缺失或不可写）：多为环境可修复
 //   2  host refs 缺失（patch 文件指向不存在的绝对路径）：必须人工改 patch 文件

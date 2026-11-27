@@ -499,7 +499,7 @@
     text-overflow: ellipsis;
     color: var(--ink-2);
 }
-/* 调度页任务行（编号 + 标题 + 项目名）：三列并进一条不换行的横排，窄侧栏里不再各自折行。
+/* 调度页任务行（编号 + 标题 + 项目名）：三列并进一条不换行的横排，窄侧栏里不各自折行。
    放不下的部分由外层裁切，滚动距离要实测溢出宽度，纯 CSS 给不出，交给
    syncSideRowMarquees 写在行内动画上——行内样式是 dom-morph 的保留区，轮询补丁不会打断相位。 */
 .side-row-flow {
@@ -571,14 +571,14 @@
 }
 
 /* 群聊右栏「项目成员」概览卡（只读）：行高与 .side-row 对齐，卡内不放任何写操作控件，
-   也不再渲染指向「成员」tab 的提示行（用户 m_6f8d93 去掉冗余跳转提示）。 */
+   也不渲染指向「成员」tab 的提示行。 */
 .members-overview .side-row {
     min-height: 36px;
 }
 
-/* 「成员」tab 卡片式成员网格（DSHBOTS-52；DSHBOTS-57 卡片放大并三行式）：
+/* 「成员」tab 卡片式成员网格：
    尺寸与「总览bots」的 bot 卡片同口径——列基准 280px、内边距 16px、圆角 12px；
-   卡片自身封顶 320px。取消 0.618:1 宽高比锁定，高度由内容决定，内容装不下以卡片为准。 */
+   卡片自身封顶 320px，不锁宽高比，高度由内容决定，内容装不下以卡片为准。 */
 .members-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 320px));

@@ -52,11 +52,11 @@ export type RuntimeSettingDef = {
 // 设置键沿用 settings 表的 snake_case；范围单位为分钟，与页面保存校验一致。
 export const RUN_TIMEOUT_KEY = 'run_timeout_minutes'
 export const STALL_WATCHDOG_KEY = 'stall_watchdog_minutes'
-// 审批等待/提问转接超时：分钟整数 [1,60]，默认 10 分钟（原 3 分钟，
-// owner 2026-11-07 拍板上调）；空串/越界/非法回退默认，优先级与运行时效同款。
+// 审批等待/提问转接超时：分钟整数 [1,60]，默认 10 分钟；空串/越界/非法回退默认，
+// 优先级与运行时效同款。
 export const APPROVAL_TIMEOUT_KEY = 'approval_timeout_minutes'
 export const QUESTION_TIMEOUT_KEY = 'question_timeout_minutes'
-// 验收/受阻处理分档时效（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：键放这里进
+// 验收/受阻处理分档时效：键放这里进
 // RUN_LIMIT_RANGES，updateSettings 的范围校验即自动覆盖；生效值函数在
 // runtime/session.js 的 effectiveReviewTimeoutMinutes（消费点在 startRun）。
 export const REVIEW_TIMEOUT_KEY = 'review_timeout_minutes'
@@ -68,7 +68,7 @@ export const RUN_LIMIT_RANGES = {
   [REVIEW_TIMEOUT_KEY]: [0, 60],
 }
 
-// ── 验收滞留守门（DSHBOTS-194 / DSHBOTS-235）───────────────────────────────
+// ── 验收滞留守门────────────────────────────────────────────────────────────
 // in_review 任务超阈值分钟无新评论且无关联 run 活动 = 验收滞留；0 = 关闭守门。
 export const REVIEW_IDLE_MINUTES_KEY = 'review_idle_minutes'
 export const REVIEW_IDLE_MINUTES_RANGE = [0, 1440]
@@ -78,10 +78,10 @@ export const REVIEW_AUTO_CLOSE_KEY = 'review_auto_close'
 export const REVIEW_ESCALATE_KEY = 'review_idle_escalate_multiple'
 export const REVIEW_ESCALATE_RANGE = [2, 10]
 
-// ── 会话结转与闲时压缩（DSHBOTS-145 / DSHBOTS-286）─────────────────────────
+// ── 会话结转与闲时压缩──────────────────────────────────────────────────────
 // 同一绑定会话累计运行轮数超过阈值后结转：先排一次 bot 自写交接摘要，摘要就绪后
 // 旧绑定 alias 化并开新会话，摘要注入新会话首条对话提示词。0 = 关闭（阈值不生效）。
-// 结转阈值默认 512（DSHBOTS-286 由 256 上调）；alias 会话不重复结转。
+// 结转阈值默认 512；alias 会话不重复结转。
 export const SESSION_ROLLOVER_TURNS_KEY = 'session_rollover_turns'
 export const SESSION_ROLLOVER_TURNS_RANGE = [0, 10_000]
 
@@ -91,7 +91,7 @@ export const SESSION_ROLLOVER_TURNS_RANGE = [0, 10_000]
 export const SESSION_COMPACT_TURNS_KEY = 'session_compact_turns'
 export const SESSION_COMPACT_TURNS_RANGE = [0, 10_000]
 
-// 单轮上下文治理 P2：上下文体积判据（token）。会话当前规模 = 该会话最近一次模型调用的
+// 上下文体积判据（token）。会话当前规模 = 该会话最近一次模型调用的
 // input+cache_read（usage_events 按调用记账、runs.session_id 归属）。压缩在「跨过 N 轮
 // 窗口」之外还要求达到下限（瘦会话不压缩，省一次只读轮）；结转在轮数阈值之外、体积达
 // 上限也触发（胖会话不用等到 512 轮）。0 = 关闭体积判据（回到纯轮次口径）。生效链与
@@ -103,7 +103,7 @@ export const SESSION_ROLLOVER_CTX_TOKENS_RANGE = [0, 10_000_000]
 
 // 会话子代理消费判据：DSH 宿主对单个会话可派生的子代理数量有上限，长期复用的会话
 // （尤其总监控制面）派满后 subagent 派生开始失败且无自动恢复。口径 = 该会话名下运行
-// 的 run_events 中 type='subagent_spawned' 计数（DSHBOTS-294 子代理账本）。轮数/体积
+// 的 run_events 中 type='subagent_spawned' 计数。轮数/体积
 // 之外累计消费达到阈值同样触发结转。默认 128：结转在会话复用时判定、摘要就绪后下一次
 // 复用才换会话，阈值须低于宿主上限（口径 200）留出摘要往返期间继续消费的余量。
 // 0 = 关闭该判据；生效链与轮次键一致。
@@ -188,15 +188,14 @@ export function effectiveTaskTimeBudgetMinutes(config, getSetting: (key: string)
 // time_budget_minutes 时的卡级兜底档，按卡 priority 分档落库；显式值永远优先。
 // 与全局缺省链（effectiveTaskTimeBudgetMinutes）分工：本表只管派单路径，不经派单
 // 的直建卡仍走全局链。无效 priority 与 createTask 同口径回退 medium 档。
-// 2026-11-13 放宽：生产实测任务运行大量顶死在旧 medium 档 30 分钟（max 恰为 1800s），
-// 档位翻倍让大卡一轮做深，减少派生轮往返。
+// 档位给得宽：任务运行常顶到预算上限，大卡一轮做深可减少派生轮往返。
 export const PRIORITY_BUDGET_MINUTES: Record<string, number> = {
   urgent: 90, high: 90, medium: 60, low: 30, none: 30,
 }
 
 // 会话结转阈值生效值：优先级与运行时效一致——env 显式 > settings 表
-// 保存值 > 默认 512（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 会话复用检查，
-// DSHBOTS-289 起为 ensureBotBinding 复用分支）每次现算，改值对下一次会话复用生效。
+// 保存值 > 默认 512（设置页暂未开放该字段）；0 = 关闭。消费点（runtime 的
+// ensureBotBinding 复用分支）每次现算，改值对下一次会话复用生效。
 export function effectiveSessionRolloverTurns(config, getSetting: (key: string) => unknown = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_TURNS')
   const saved = savedInt(getSetting(SESSION_ROLLOVER_TURNS_KEY), SESSION_ROLLOVER_TURNS_RANGE)
@@ -211,14 +210,14 @@ export function effectiveSessionCompactTurns(config, getSetting: (key: string) =
   return !env && saved !== null ? saved : config.sessionCompactTurns
 }
 
-// 压缩体积下限生效值（单轮上下文治理 P2）：默认 80,000 token，0 = 关闭体积判据。
+// 压缩体积下限生效值：默认 80,000 token，0 = 关闭体积判据。
 export function effectiveSessionCompactCtxTokens(config, getSetting: (key: string) => unknown = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_COMPACT_CTX_TOKENS')
   const saved = savedInt(getSetting(SESSION_COMPACT_CTX_TOKENS_KEY), SESSION_COMPACT_CTX_TOKENS_RANGE)
   return !env && saved !== null ? saved : config.sessionCompactCtxTokens
 }
 
-// 结转体积上限生效值（单轮上下文治理 P2）：默认 150,000 token，0 = 关闭体积判据。
+// 结转体积上限生效值：默认 150,000 token，0 = 关闭体积判据。
 export function effectiveSessionRolloverCtxTokens(config, getSetting: (key: string) => unknown = () => null) {
   const env = envExplicit('DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS')
   const saved = savedInt(getSetting(SESSION_ROLLOVER_CTX_TOKENS_KEY), SESSION_ROLLOVER_CTX_TOKENS_RANGE)
@@ -472,7 +471,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 飞书机器人通道：默认关闭，DSH_BOTS_FEISHU=1 开启。
     // 传输层为进程内官方 SDK（@larksuiteoapi/node-sdk）：凭据 AppID/Secret 注入即连。
     // 这里只是「服务端注入」兜底来源（cordis.patch.yml / env）；生效优先级见
-    // effectiveFeishuCredentials（DSHBOTS-334：通道页保存的凭据优先）。
+    // effectiveFeishuCredentials（通道页保存的凭据优先）。
     feishu: {
       enabled: bool(config.feishuEnabled ?? process.env.DSH_BOTS_FEISHU, false),
       appId: String(config.feishuAppId ?? process.env.DSH_BOTS_FEISHU_APP_ID ?? '').trim(),
@@ -484,12 +483,11 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     skillRoot: resolve(config.skillRoot?.trim() || join(homedir(), '.agents')),
     // 并行的安全边界由写范围闸门保证（同项目写运行只在双方声明且路径不相交时才并行），
     // 这里的总数上限只防主机过载；读运行（chat/dm）与写运行共用一个池子。默认 10：
-    // 生产实测（2026-11-13 近 7 天）常态并发 2–3、峰值 7，原默认 6 偶尔成为硬约束，
-    // 且 quota_wait 7 天仅 1 次——并发位给足才可能吃满 coding plan 额度。
+    // 并发位给足才可能吃满 coding plan 额度（生产常态并发 2–3、峰值 7）。
     maxConcurrentRuns: int(config.maxConcurrentRuns ?? process.env.DSH_TEAM_MAX_RUNS, 10, 1, 16),
     // 大卡拆分闸（写范围条目上限）：单卡声明写范围超过该条数即拒绝派发，要求拆成
     // 不相交写范围的子任务卡（parent_task_id 挂主卡）并行施工——超大范围卡与同项目
-    // 一切写运行互斥，是并行闸触发率低的主因（2026-11-13 生产实测 26%）。
+    // 一切写运行互斥，是并行闸触发率低的主因。
     maxWriteScopesPerTask: int(config.maxWriteScopesPerTask ?? process.env.DSH_TEAM_MAX_WRITE_SCOPES, 8, 1, 64),
     runTimeoutMs: int(config.runTimeoutMs ?? process.env.DSH_TEAM_RUN_TIMEOUT_MS, 60 * 60_000, 30_000, 6 * 60 * 60_000),
     // 0 关闭：单次运行的 token 上限，超出即中止，避免一个运行吃掉整月预算。
@@ -510,7 +508,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     // 闲时总结压缩窗口：默认每 64 轮，0 = 关闭；生效值见
     // effectiveSessionCompactTurns（env 显式 > settings 表保存值 > 默认，设置页暂未开放）。
     sessionCompactTurns: int(config.sessionCompactTurns ?? process.env.DSH_TEAM_SESSION_COMPACT_TURNS, 64, 0, 10_000),
-    // 上下文体积判据（单轮上下文治理 P2）：压缩下限默认 80k、结转上限默认 150k token，
+    // 上下文体积判据：压缩下限默认 80k、结转上限默认 150k token，
     // 0 = 关闭体积判据；生效值见 effectiveSession{Compact,Rollover}CtxTokens。
     sessionCompactCtxTokens: int(config.sessionCompactCtxTokens ?? process.env.DSH_TEAM_SESSION_COMPACT_CTX_TOKENS, 80_000, 0, 10_000_000),
     sessionRolloverCtxTokens: int(config.sessionRolloverCtxTokens ?? process.env.DSH_TEAM_SESSION_ROLLOVER_CTX_TOKENS, 150_000, 0, 10_000_000),
@@ -525,7 +523,7 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     uiLanguage: normalizeUiLanguage(config.uiLanguage ?? process.env.DSH_TEAM_UI_LANGUAGE ?? 'auto'),
     // 群聊只放结论，完整交付进任务评论。
     chatReplyMaxChars: int(config.chatReplyMaxChars ?? process.env.DSH_TEAM_CHAT_MAX_CHARS, 800, 80, 8_000),
-    // 交付报告体量红线（DSHBOTS-345 复盘）：任务交付报告 ≤ 此字符数，且只引用交付物路径，
+    // 交付报告体量红线：任务交付报告 ≤ 此字符数，且只引用交付物路径，
     // 禁止把已写入工作区的文件正文复述进报告/聊天——生成侧 output 与复审上下文双省。
     deliveryReportMaxChars: int(config.deliveryReportMaxChars ?? process.env.DSH_TEAM_DELIVERY_REPORT_MAX_CHARS, 2_000, 200, 20_000),
     // 私信自动归档：单聊默认视图只留「每 bot 最近 keep 条 且 days 天内」的
@@ -534,9 +532,9 @@ export function resolveConfig(config: Partial<TeamConfig> = {}) {
     dmArchiveDays: int(config.dmArchiveDays ?? process.env.DSH_TEAM_DM_ARCHIVE_DAYS, 7, 0, 3650),
     dmKeepRecent: int(config.dmKeepRecent ?? process.env.DSH_TEAM_DM_KEEP_RECENT, 100, 0, 10_000),
     // 宿主审批请求在群聊条目上的等待时长：到时向宿主回 rejected、条目置 timeout。
-    // 默认 5 分钟（DSHBOTS-313 终调：3→10→5），settings approval_timeout_minutes 可调。
+    // 默认 5 分钟，settings approval_timeout_minutes 可调。
     approvalTimeoutMs: int(config.approvalTimeoutMs ?? process.env.DSH_TEAM_APPROVAL_TIMEOUT_MS, 300_000, 5_000, 3_600_000),
-    // 提问转接超时：与审批同默认 5 分钟（DSHBOTS-313 同步终调），最短 5s、最长 1 小时。
+    // 提问转接超时：与审批同默认 5 分钟，最短 5s、最长 1 小时。
     questionTimeoutMs: int(config.questionTimeoutMs ?? process.env.DSH_TEAM_QUESTION_TIMEOUT_MS, 300_000, 5_000, 3_600_000),
     // 一次性密钥运行时文件（<dataDir>/secrets-runtime/<projectId>.env）的存活窗口：
     // 批准后生成，项目下一条 task 运行结束或窗口到期先到即焚，再次使用需重新批准。

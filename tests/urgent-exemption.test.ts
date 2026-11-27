@@ -1,4 +1,4 @@
-// DSHBOTS-126：紧急任务豁免许可（priority='urgent' 无视排队立即施工，产品化而非口头指令）。
+// 紧急任务豁免许可（priority='urgent' 无视排队立即施工，产品化而非口头指令）。
 // 覆盖：任务提示词 urgent 注入豁免指令 / 非 urgent 零注入；
 // urgent 新卡对同写范围拒单守卫放行 + 创建消息报备共用车道；
 // 非 urgent 同写范围仍拒单（文案保留 + 豁免入口可见）；urgent 无重复卡时不误报共用车道。
@@ -84,7 +84,7 @@ const cleanup = async ({ root, store }) => {
 
 const taskRow = (store, id) => store.get('SELECT * FROM tasks WHERE id = ?', id)
 
-// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
+// 挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
 const heldItems = (store, botId) => {
   const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
   const out = []
@@ -159,7 +159,7 @@ test('urgent 新卡对同写范围拒单守卫放行：落卡带 priority、派�
     )
 
     // 任务运行豁免 bot 串行域（单 bot 多任务并行）：GATE-1 的运行还占着 Builder，
-    // urgent 派发也不再挂起——直落 runs 行（同项目并行安全由写范围闸门兜底）。
+    // urgent 派发不挂起——直落 runs 行（同项目并行安全由写范围闸门兜底）。
     await ctx.service.tick()
     const urgentRun = ctx.store.get("SELECT * FROM runs WHERE task_id = ?", urgent.id)
     assert.ok(urgentRun, 'urgent 派发直落 runs 行（不挂起）')

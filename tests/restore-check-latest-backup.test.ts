@@ -1,7 +1,7 @@
 // tests/restore-check-latest-backup.test.ts —— 「挑最新一份主备份」的判定守门。
 // 备份目录里主备份 `team-<stamp>.sqlite` 与附件同名前缀：附件库
 // `team-<stamp>.wechat.sqlite`、密钥 `team-<stamp>.secret.key`、清单 `team-<stamp>.json`。
-// 宽匹配会把附件当主备份挑走，演练随即报「找不到备份清单」而失败（DSHBOTS-354 复跑暴露）。
+// 宽匹配会把附件当主备份挑走，演练随即报「找不到备份清单」而失败。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'

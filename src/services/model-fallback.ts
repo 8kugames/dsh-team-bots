@@ -1,9 +1,9 @@
-// src/services/model-fallback.js —— 备用模型域
+// 备用模型域
 // 主 provider 不可用时，临时切到 Bot 配置的备用模型继续执行任务。
 // 派生运行只服务于这一条链：它结束后由「下一条运行按 Bot 主模型重新下发」实现自动回退，
 // 因此本文件不写任何回退代码——回退是默认路径的自然结果。
 // 方法挂到 TeamService 原型上（见 src/service.js 的 defineMethods 调用），
-// 因此方法体内的 this 与拆分前完全一致。
+// 方法体内的 this 即服务实例。
 
 import { id, nowIso } from '../util.js'
 import { isQuotaExhausted, isThrottleError } from './backoff.js'
@@ -28,7 +28,7 @@ export const PROVIDER_UNAVAILABLE_CODES = new Set([
   'INVALID_MODEL',
 ])
 
-// 等得起的限流：带 provider 退避时间时交给 DSHBOTS-24 的 plan_wait 等待路径，不切模型。
+// 等得起的限流：带 provider 退避时间时交给 plan_wait 等待路径，不切模型。
 // 额度耗尽不在此列——它没有可等的短窗口，必须换模型。
 const WAITABLE_CODES = new Set(['RATE_LIMIT', 'QUOTA'])
 
@@ -111,14 +111,14 @@ export const modelFallbackMethods = {
     if (chain.scope === 'task') {
       const task = this.store.get('SELECT * FROM tasks WHERE id = ?', chain.taskId)
       if (!task || ['done', 'canceled'].includes(task.status)) return null
-      // 任务已有排队/运行中的运行（唯一索引 one_active_run_per_task）就不再派生。
+      // 任务已有排队/运行中的运行（唯一索引 one_active_run_per_task）就不派生。
       const active = this.store.get(
         "SELECT id FROM runs WHERE task_id = ? AND status IN ('queued', 'running')",
         chain.taskId,
       )
       if (active) return null
     } else {
-      // 记忆审查链：同一条来源运行已有排队/运行中的审查运行就不再派生。
+      // 记忆审查链：同一条来源运行已有排队/运行中的审查运行就不派生。
       const active = this.store.get(
         "SELECT id FROM runs WHERE kind = 'memory_review' AND trigger_ref = ? AND status IN ('queued', 'running')",
         chain.sourceRunId,
@@ -143,7 +143,7 @@ export const modelFallbackMethods = {
           run.trigger_type, run.trigger_ref, attempt, `model_fallback:${run.id}`,
           fallback.provider, fallback.model, fallback.effort, createdAt,
         )
-        // run_events 住运行归属的聊天库（chat-db-split Phase 3）：事件挂在原运行 run 名下，
+        // run_events 住运行归属的聊天库：事件挂在原运行 run 名下，
         // 与 runs 插入同回调——UNIQUE 撞车时回调中止，事件不落，与原原子语义一致。
         this.runChatStore(run).run(
           'INSERT INTO run_events(id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?)',

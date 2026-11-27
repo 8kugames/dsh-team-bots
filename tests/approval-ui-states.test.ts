@@ -1,4 +1,4 @@
-// DSHBOTS-108：审批卡片视觉规格 V2——五态（pending/allowed/rejected/timeout/cancelled）。
+// 审批卡片视觉规格 V2——五态（pending/allowed/rejected/timeout/cancelled）。
 // 前端用例沿用仓库两条先例：读源断言（tests/helpers/ui-sources.js）+ 标记块 new Function 执行
 // （tests/desktop-notify.test.js）。执行的是真实源码，不是把实现复制一份到测试里。
 import { test } from 'node:test'
@@ -189,7 +189,7 @@ test('CSS：消息流与通知容器的 img/svg 有尺寸兜底，大图标不�
 })
 
 test('密钥删除确认文案：不再指向 .team/secrets.env 原路径', () => {
-  // DSHBOTS-106 起明文只一次性物化到数据目录，项目工作区不再有明文密钥文件。
+  // 明文只一次性物化到数据目录，项目工作区没有明文密钥文件。
   const branch = uiSource.match(/case 'delete-secret': \{[\s\S]*?\n      \}/)?.[0] ?? ''
   assert.ok(branch, '必须能定位 delete-secret 处理分支')
   assert.doesNotMatch(branch, /\.team\/secrets\.env/, '删除确认不再提 .team/secrets.env 原路径')

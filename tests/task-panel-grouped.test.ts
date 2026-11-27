@@ -1,5 +1,5 @@
-// DSHBOTS-58 任务面板改分组列表（参照 Linear）——源码断言式测试。
-// DSHBOTS-62 追加：已完成组收 done 任务、头部计数与各组计数之和一致、空组不渲染组体。
+// 任务面板分组列表（参照 Linear）的源码断言式测试。
+// 覆盖：已完成组收 done 任务、头部计数与各组计数之和一致、空组不渲染组体。
 // 约定：ui/app.js 是浏览器 IIFE，按本项目 UI 惯例做源码断言；CSS 沿用正则抽规则体。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -92,7 +92,7 @@ test('样式：看板纵向排列，分组是块级', () => {
   assert.match(block('.task-group-toggle'), /cursor:\s*pointer/, '折叠按钮可点')
 })
 
-// ── DSHBOTS-62：已完成组漏 done 任务、头部计数与分组对不上、空组大块空白 ──
+// ── 已完成组漏 done 任务、头部计数与分组对不上、空组大块空白 ──
 
 test('已完成组收 done 任务：终态缺时间戳不被时间窗清空（P1-1）', () => {
   // done 是分组之一，分组按 status 取任务——done 任务按定义落「已完成」组
@@ -154,7 +154,7 @@ test('空分组只留一行组头，不渲染组体占位（P1-4）', () => {
   assert.match(source, /<section class="column task-group[^"]*" data-drop-status="\$\{status\}">/, '空组仍是拖放目标')
 })
 
-// ── DSHBOTS-63：组内排序（创建/完成时间 × 正逆、优先级 × 正逆），不破坏分组与父子树 ──
+// ── 组内排序（创建/完成时间 × 正逆、优先级 × 正逆），不破坏分组与父子树 ──
 
 // 取 ui/app.js 的 task-sort 标记块求值（时间块一并注入：完成时间排序引用 taskTerminalTime），
 // 断言真实排序行为而不是复述源码文本。

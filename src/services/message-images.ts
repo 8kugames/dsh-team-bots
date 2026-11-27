@@ -1,4 +1,4 @@
-// DSHBOTS-36 聊天图片输入：消息附图的校验与存储。
+// 聊天图片输入：消息附图的校验与存储。
 // 迁移体自管（db.js 已贴 800 行上限，一行不加），手法与 approvals.js 一致。
 // 存储口径：base64 不进 messages.body，另存 message_images 表；正文与图片各行各司。
 // 口径来源：宿主 dsh-attachment 的 ImageMediaType 只有 png/jpeg/webp/gif 四种，插件与之对齐，

@@ -148,7 +148,7 @@ async function main() {
       if (!(table in manifestTables)) mismatch.push({ table, expected: null, actual: restoredTables[table], reason: '清单里没有该表' })
     }
 
-    // 附件校验（chat-db-split Phase 1 起聊天正文全在聊天库附件里）：逐个核对 sha256
+    // 附件校验（聊天正文全在聊天库附件里）：逐个核对 sha256
     // 与清单一致；聊天库附件缺失/损坏按演练失败处理，其余附件只报不判失败。
     const extrasMismatch                                          = []
     for (const extra of manifest?.extras ?? []) {

@@ -58,7 +58,7 @@ async function bareTask(t) {
   // tick 可能已把卡置 in_progress 并写过 status 事件：统一归一到 todo 并清掉 tick 的
   // status 事件（保留 created），测试从干净事件序列开始。
   t.store.run("UPDATE tasks SET status = 'todo' WHERE id = ?", task.id)
-  // Phase 3：task_events 住项目聊天库。
+  // task_events 住项目聊天库。
   t.service.groupChatStore(t.project.id).run(
     "DELETE FROM task_events WHERE task_id = ? AND type = 'status' AND json_extract(data_json, '$.field') = 'status'",
     task.id,
@@ -71,7 +71,7 @@ const bindOwner = (t) => t.store.run(
   'sess-ledger-owner', t.director.id, t.project.id, 'project', new Date().toISOString(),
 )
 
-// Phase 3：task_events 住项目聊天库，状态事件读取走聊天库句柄。
+// task_events 住项目聊天库，状态事件读取走聊天库句柄。
 const statusEvents = (t, taskId) => t.service.groupChatStore(t.project.id).all(
   `SELECT * FROM task_events WHERE task_id = ? AND type = 'status' AND json_extract(data_json, '$.field') = 'status' ORDER BY rowid`,
   taskId,
@@ -90,7 +90,7 @@ test('① setTaskStatus：UPDATE 与权威 status 事件同事务；守卫未命
       JSON.parse(events[0].data_json),
       { field: 'status', from: 'todo', to: 'in_progress' },
     )
-    // 终态守卫：done 卡再迁移被拒，且不再追加事件。
+    // 终态守卫：done 卡再迁移被拒，且不追加事件。
     t.service.setTaskStatus(task.id, 'done', actor)
     assert.equal(t.service.setTaskStatus(task.id, 'in_progress', actor), false, 'done 卡 no-op')
     assert.equal(statusEvents(t, task.id).length, 2, '守卫拒绝不写事件')

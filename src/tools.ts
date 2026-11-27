@@ -1,4 +1,4 @@
-// 信赖边界（B6/DSHBOTS-327，吸收原型「外部文本只是数据」显式化）：
+// 信赖边界：
 // 本文件注册的全部 team_* 工具的鉴权只认结构化事实——宿主会话身份（ownerContextFor/
 // memberContextFor 按 session_bindings 解析）、bot 行与运行上下文（applyBotToolPolicy）、
 // bot.file_policy 三档沙箱（applyFilePolicy）。消息正文、引用摘录、微信文本、记忆内容、
@@ -11,12 +11,12 @@ const stringOutput = {
   render: (_args, value) => [{ type: 'text', text: String(value ?? '') }],
 }
 
-// DSHBOTS-238：子代理/智能体团队能力全员化。
+// 子代理/智能体团队能力全员可用。
 // 「生成子代理/组建临时团队」能力由宿主 preset 注册（subagent/subagent_fork/workflow 与
 // spawn_teammate 等团队工具），插件侧只声明其可用清单与门控，不重复注册。
-// DSHBOTS-237：共享板建卡废弃——宿主共享板的建卡工具（task-N 无项目编号卡）
-// 不再作为成员能力宣告，新建卡一律走项目编号（team_assign_task 派单链，KEY-N）；
-// 存量共享板卡可读不可新建，list/get/update 保留读取与流转能力。
+// 宿主共享板的建卡工具（task-N 无项目编号卡）不在成员能力清单里：新建卡一律走
+// 项目编号（team_assign_task 派单链，KEY-N）；存量共享板卡可读不可新建，
+// list/get/update 保留读取与流转能力。
 export const SUBAGENT_GENERATION_TOOLS = [
   'subagent',
   'subagent_fork',
@@ -57,12 +57,10 @@ import { hiddenToolNames } from './services/runtime/tool-families.js'
 
 // 工具层兜底：成员 bot 隐藏总监专权工具，避免「误调被拒后才知情」；
 // 子代理生成工具由 preset 全局注册，成员 bot 默认可见，无需额外放行。
-// DSHBOTS-247：调用点形状不一——session.ts 的结转/复用路径传 resolveAgent 的
-// `{ agent }` 包装，新建会话路径传裸 agent。这里归一为句柄后取 restrict，两种形状都生效；
-// 旧实现只认包装形状时，裸形状会静默跳过（策略从未生效）。
-// DSHBOTS-359：restrict 必须以方法调用发出——宿主 ToolsService.restrict 首行读 this.ctx，
-// 摘下函数裸调用会让 this===undefined，抛 "reading 'ctx'" 被吞成 warn，策略自 DSHBOTS-238
-// 起从未真正生效（成员 bot 一直可见总监专权工具）。
+// 调用点形状不一：session.ts 的结转/复用路径传 resolveAgent 的 `{ agent }` 包装，
+// 新建会话路径传裸 agent，这里归一为句柄后取 restrict，两种形状都生效。
+// restrict 必须以方法调用发出——宿主 ToolsService.restrict 首行读 this.ctx，
+// 摘下函数裸调用会让 this===undefined，抛 "reading 'ctx'" 被吞成 warn，策略静默失效。
 // 宿主集成工具面（MCP / 引擎桥）对总监与成员一样按项目按需可见：toolPolicy 来自
 // runtime/botToolPolicyFor，hiddenToolNames 挑出本项目要隐藏的全局工具。会话复用时每个运行
 // 都会再走这里，denied 记下该 agent 上已隐藏的名字，只补新出现的，不反复叠加限制层。
@@ -188,7 +186,7 @@ export function installTeamTools(ctx, service) {
     },
   })
 
-  // DSHBOTS-229：成员查询——项目群内任意成员可查本项目名单/角色/状态。
+  // 成员查询——项目群内任意成员可查本项目名单/角色/状态。
   ctx.tools.register({
     name: 'team_list_members',
     description: 'List the bots in this project group with their project role, job role and status. Any bot in the project group may use this. The result is limited to this project\'s members; it never exposes other projects\' data.',
@@ -200,7 +198,7 @@ export function installTeamTools(ctx, service) {
     },
   })
 
-  // DSHBOTS-229：bots 池查询——总监可见含未入群的 bot；成员调用被服务层拒绝。
+  // bots 池查询——总监可见含未入群的 bot；成员调用被服务层拒绝。
   ctx.tools.register({
     name: 'team_list_bots',
     description: 'List the team bot pool for this project, including bots that are not in the project group yet, with their status and whether they already belong to this project. Only the project owner bot may use this. It shows each bot\'s own profile and this project\'s membership only; it never exposes other projects\' data.',
@@ -212,7 +210,7 @@ export function installTeamTools(ctx, service) {
     },
   })
 
-  // DSHBOTS-229：加人申请——复用 addProjectMember 的校验、审计与入群通知。
+  // 加人申请——复用 addProjectMember 的校验、审计与入群通知。
   ctx.tools.register({
     name: 'team_add_member',
     description: 'Invite an existing bot into this project group by its exact name. Only the project owner bot may use this. The invite rides the normal membership path: the bot must be active and cannot already be a member, the join is audited, and the other members are announced in the group automatically.',
@@ -232,7 +230,7 @@ export function installTeamTools(ctx, service) {
     },
   })
 
-  // DSHBOTS-229：建 bot 申请——仅申请入口，复用 createBot 的全部校验与审计。
+  // 建 bot 申请——仅申请入口，复用 createBot 的全部校验与审计。
   ctx.tools.register({
     name: 'team_create_bot',
     description: 'Request a brand-new bot for the team. Only the project owner bot may use this. The request goes through the normal bot creation path, so name format/uniqueness and provider/model validation still apply, and the audit records you as the requester. The new bot is not added to this project automatically; invite it with team_add_member.',
@@ -484,7 +482,7 @@ export function installTeamTools(ctx, service) {
     },
   })
 
-  // DSHBOTS-243：通知通道产品化——成员通知 / 任务提醒，项目内任意成员可用。
+  // 通知通道——成员通知 / 任务提醒，项目内任意成员可用。
   // 投递面是宿主会话通道（runtime.steer），插件 messages 落库为准绳；跨项目目标一律拒绝。
   ctx.tools.register({
     name: 'team_notify',

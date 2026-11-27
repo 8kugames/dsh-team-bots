@@ -156,7 +156,7 @@ test('结转/压缩运行指向归档会话：旧绑定降级别名，运行改�
   }
 })
 
-// ── lifecycle：blocked 且无输出按失败上报，不再假成功 ──────────────────────
+// ── lifecycle：blocked 且无输出按失败上报，不假成功 ──────────────────────
 
 function seedRun(store, { runId = 'r1', sessionId = 'sess-root' } = {}) {
   const now = new Date().toISOString()

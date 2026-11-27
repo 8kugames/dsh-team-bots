@@ -52,7 +52,7 @@
 .usage-panel > .usage-note {
     padding-top: 10px;
 }
-/* 用量页骨架（DSHBOTS-81，DSHBOTS-214 起与其余三个一级页共用 page-shell 页壳）：
+/* 用量页骨架（与其余三个一级页共用 page-shell 页壳）：
    页面头/分组/槽位样式在 global-config.css，这里只保留窗口切换与面板内部样式。
    所有颜色只用既有 token。 */
 .usage-window-row {

@@ -1,7 +1,7 @@
-// tests/wechat-ilink-ret.test.ts —— 微信通道 iLink 拒发细节透出（诊断辅助，未立项卡号）。
+// 微信通道 iLink 拒发细节透出的守门测试（诊断辅助）。
 // 日志现场：出站推送连续 4 条 `PROTOCOL_ERROR: iLink rejected the message.` 后废弃，
 // 上游 ret 码被 vendor 吞掉，凭证失效/频控/内容审核无法区分，第二步对症无从裁决。
-// 落地约束：vendor/wechat-ilink 是上游编译产物保持原样（用户拍板，NOTICE 口径），
+// 落地约束：vendor/wechat-ilink 是上游编译产物保持原样（NOTICE 口径），
 // ret 透出在本仓桥接层完成——channel.ts 的 observeIlinkReject 包装 makeTransport
 // 注入的 fetch 记录 ret!=0，attachRejectDetail 在 sendTo 捕获后拼进错误文案。
 // 本守门走「真 vendor + 桥接包装 + 桩 fetch」全链路，五向：

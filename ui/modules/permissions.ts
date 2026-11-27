@@ -3,7 +3,7 @@ import { t } from './i18n.js'
 import { icon } from './icons.js'
 import { attr, botById, esc } from './util.js'
 
-// 免审权限卡（DSHBOTS-365 编辑面在总览 bots 页）：每条规则一张独立卡片，只读展示 chip 摘要；
+// 免审权限卡（编辑面在总览 bots 页）：每条规则一张独立卡片，只读展示 chip 摘要；
 // 新增/编辑一律拉起 modal（modal-forms 的 approval-rule 弹窗）。
 // 服务端权威不变：保存 = 弹窗整行提交 → update_approval_rules 整表替换；删除 = 去行后整表提交；
 // 改规则即时生效，每次调用一放行一结。

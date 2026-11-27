@@ -10,8 +10,8 @@ import { openDatabase } from '../src/db.js'
 import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 
-// DSHBOTS-137（superagent 移植卡 C，机制⑤工单七态）：任务阶段不存状态位，由 taskStage
-// 纯函数按事实推导「在等谁」（第一匹配行获胜），判定表以 docs/superagent-port-plan.md §1.5 为准。
+// 任务阶段不存状态位，由 taskStage
+// 纯函数按事实推导「在等谁」（第一匹配行获胜）。
 // 中文标签由 TASK_STAGE_LABEL 查表，UI 只消费 taskView 下发的 stageLabel。
 // 存储真值仍归 tasks.status——stage 是展示层统一视图，不是新状态源（防双真值打架）。
 

@@ -1,13 +1,13 @@
-// tests/tool-denial-guidance.test.js —— DSHBOTS-269 工具失败语义引导 + 命令面显式化守门
+// 工具失败语义引导 + 命令面显式化守门
 // 纯源码级断言（不建库、不 mkdtemp），钉两件事：
-// ① 命令面显式化：team_review_task 描述首屏声明「验收关单/退回的唯一正规路径」；
+// 命令面显式化：team_review_task 描述首屏声明「验收关单/退回的唯一正规路径」；
 //    team_assign_task / team_block_task 描述首行说明用途与总监专属正规性。
-// ② 失败语义引导：三类高频拒绝文案各含「原因 + 替代命令/正确下一步」——
+// 失败语义引导：三类高频拒绝文案各含「原因 + 替代命令/正确下一步」——
 //    a) 非 in_review 调 team_review_task（applyReview 状态校验）→ 提示等交付或 team_assign_task 改卡重派；
 //    b) 权限不足（ownerContextFor 总监校验）→ 提示由项目 owner 总监 Bot 执行或项目群内请求；
 //    c) 同写范围重复派单（assignFromBot 重复检测）→ 提示 team_assign_task 改卡重派而非新开卡。
 // 边界：本守门只约束工具调用返回给调用方 bot 的错误文案层；run-finish 四出口的失败终态
-// 白名单（D-267，群聊/微信层只透类别+摘要）是另一层，互不影响，此文件不碰。
+// 白名单（群聊/微信层只透类别+摘要）是另一层，互不影响，此文件不碰。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -91,7 +91,7 @@ test('失败语义引导 c：重复派单拒绝文案带 amend 既有卡的替�
 test('层级边界：本卡改文案的三处均在工具调用返回层，未触碰 D-267 白名单层', () => {
   // 三处引导文案确实存在（源码级存在性）；run-finish 的失败终态透传不在本卡写范围，
   // 这里只断言引导文案挂在 services 校验层（tools.ts 包装层无新增 throw 文案）。
-  assert.match(reviewSource, /DSHBOTS-269 失败语义引导/, 'task-review.ts 应带引导注释锚点')
+  assert.match(reviewSource, /拒绝文案 = 原因 \+ (?:正确下一步|替代命令)/, 'task-review.ts 应带引导注释锚点')
   const toolThrows = toolsSource.match(/throw new Error\('[^']*'\)/g) ?? []
   assert.deepEqual(
     toolThrows.filter(msg => /总监|验收|重复派单|正规/.test(msg)),

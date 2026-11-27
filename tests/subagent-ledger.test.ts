@@ -1,6 +1,6 @@
-// DSHBOTS-294 守门①：子代理账本——模拟宿主事件（tools 瀑布 + subagent 生命周期）
+// 子代理账本守门：模拟宿主事件（tools 瀑布 + subagent 生命周期）
 // 断言 subagent_spawned/subagent_result 含任务号标签落入所属 task 运行的 run_events；
-// 根级注册面与 cordis dispatch 可达性用真 cordis+dsh-scope 运行实测（D-292 限制③）。
+// 根级注册面与 cordis dispatch 可达性用真 cordis+dsh-scope 运行实测。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
@@ -109,7 +109,7 @@ test('无所属 task 运行或非 subagent 工具不落账', async () => {
   }
 })
 
-// DSHBOTS-353 落账回退：owner bot 无 kind='task' running 时，subagent 派单账回退记到
+// 落账回退：owner bot 无 kind='task' running 时，subagent 派单账回退记到
 // 该 bot 任意 kind 的 running 运行（总监验收链的核验子代理挂在 review 运行上）。
 test('DSHBOTS-353 回退：无 task 运行时账落 owner bot 的 running review 运行', async () => {
   const { root, store, ctx, dispose } = await setup()
@@ -133,7 +133,7 @@ test('DSHBOTS-353 回退：无 task 运行时账落 owner bot 的 running review
   }
 })
 
-// kind='task' 优先（D-294 施工账语义）：task 与 review 运行并存时仍记 task 运行。
+// kind='task' 优先（施工账语义）：task 与 review 运行并存时仍记 task 运行。
 test('DSHBOTS-353 优先级：task 与 review 运行并存时账仍记 kind=\'task\'', async () => {
   const { root, store, ctx, dispose } = await setup()
   try {
@@ -161,7 +161,7 @@ test('taskLabelOf 优先任务号形态，缺省回退截断描述', () => {
   assert.equal(taskLabelOf({}), null)
 })
 
-// D-292 限制③运行实测：真 cordis + 真 dsh-scope 子 scope 发射，插件根 ctx（untagged）
+// 运行实测：真 cordis + 真 dsh-scope 子 scope 发射，插件根 ctx（untagged）
 // 监听可达 emit 与 waterfall。子进程执行探针，避免宿主 Context 句柄吊住测试进程。
 test('根级注册面与 cordis dispatch 可达性（真 cordis+dsh-scope 探针）', async () => {
   const { stdout } = await execFile(process.execPath,

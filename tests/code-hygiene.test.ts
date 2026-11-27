@@ -1,4 +1,4 @@
-// DSHBOTS-172 代码卫生：单文件行数约定。
+// 代码卫生守门：单文件行数约定。
 // 覆盖：默认 800 与 110% 判定线（880 不报、881 报）、0 关闭、项目级配置读写与钳制、
 // 白名单/忽略表排除（隐藏目录/node_modules/assets/锁文件/非白名单扩展）、超大文件跳过、
 // 告警去重（同文件不重复报、回落后再超标重报）、run-finish 钩子触发与 run_event 留痕。
@@ -46,7 +46,7 @@ const workFile = async (service, project, rel, content) => {
   return rel
 }
 
-// 系统告警消息按前缀取回（DSHBOTS-228 后前缀随 locale：缺省英文 / 中文【系统指令】）。
+// 系统告警消息按前缀取回（前缀随 locale：缺省英文 / 中文【系统指令】）。
 const systemAlerts = (store, projectId) =>
   store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND (body LIKE '[SYSTEM ALERT]%' OR body LIKE '【系统指令】%') ORDER BY rowid", projectId)
 

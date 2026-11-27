@@ -22,7 +22,7 @@ export function applyUiTheme(value) {
 // 宿主深色不走媒体查询（WebView 的 prefers-color-scheme 失真恒报 light），而是给
 // 同源祖先文档 body 打 data-ds-dark-theme：嵌入态自直接父逐层上溯到 window.top，
 // 任一祖先带属性才判 dark；祖先链全程无属性、跨源访问异常与独立态一律回落系统
-// 媒体查询——单一层级信号失真不再绝对压过系统偏好。
+// 媒体查询——单一层级信号失真不会绝对压过系统偏好。
 export function resolveColorScheme() {
   try {
     for (let current = window.parent; current && current !== window; current = current.parent) {
@@ -91,7 +91,7 @@ export const costValue = value => {
 export const clamp = (value, max, fallback = '') => String(value ?? fallback).slice(0, max)
 export const botById = (id) => state.data?.bots.find(bot => bot.id === id)
 // 审批人/决定人标识形如 `bot:<id>`、`user:<id>`：bot 显示「名称·角色标签」，user 显示本地用户名；
-// bot 已删除时回退短 id（对齐 team_recall 的 m_短id 口径，只取末 6 位），不暴露完整原始 id。
+// bot 已删除时回退短 id（只取末 6 位），不暴露完整原始 id。
 export const shortRefId = (id) => String(id ?? '').slice(-6)
 export function actorLabel(raw) {
   const value = String(raw ?? '').trim()
@@ -275,7 +275,7 @@ export function toast(message, type = '') {
   setTimeout(() => dismissToast(el), TOAST_TTL_MS)
 }
 
-// 提案展示辅助（DSHBOTS-223 自 tasks.ts 迁入，tasks.ts 触及 800 行铁律）：
+// 提案展示辅助：
 // 灰度范围、评估结论、payload 预览（instructions/skill 内容/兜底 JSON）三段纯格式化。
 export function canaryText(canary) {
   if (!canary) return ''

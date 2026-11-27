@@ -1,9 +1,9 @@
-// tests/delivery-selfcheck.test.ts —— DSHBOTS-276 派单质量前置守门（P1）。
-// 治 GS 实测 34% 补丁/返工卡：交付报告缺自跑验证证据 + 同范围勘误碎片化。
-// a) 任务模板含交付前自校段，既有锚点前缀不变（含 D-274 时效段 Deadline 结构），
-//    只追加（D-269 手法）；review 分支不注入该段；
+// 派单质量前置守门。
+// 守门目标：交付报告缺自跑验证证据 + 同范围勘误碎片化。
+// a) 任务模板含交付前自校段，既有锚点前缀不变（含时效段 Deadline 结构），只追加；
+//    review 分支不注入该段；
 // b) 勘误并卡提示双条件（标题关键词 + 近 7 天同承接人 done 卡写范围交集）+ 仅追加
-//    描述一行、不拦截派单（D-82/D-270 既有拒绝行为不变）；
+//    描述一行、不拦截派单（既有拒绝行为不变）；
 // c) 负锚：无交集 / 无关键词时不注入提示。
 
 import { test } from 'node:test'
@@ -67,10 +67,10 @@ async function setup(prefix: string) {
 
 const NOTE_MARK = '(note: recent done card'
 
-// ── a) 任务模板：自校段在场 + 既有锚点前缀不变（D-274 Deadline 结构原样）──
+// ── a) 任务模板：自校段在场 + 既有锚点前缀不变（Deadline 结构原样）──
 
 test('a1) 源码锚：自校段为固定追加段（marker 对 + 关键文案被钉），位置在 Status 与 Description 之间', () => {
-  // B1/DSHBOTS-324 起自校段正文可被团队覆盖：默认文案钉在 PROMPT_SEGMENT_DEFAULTS（同源码内），
+  // 自校段正文可被团队覆盖：默认文案钉在 PROMPT_SEGMENT_DEFAULTS（同源码内），
   // marker 块钉覆盖解析接线（promptSegmentText('selfcheck')），标题与注入点不变。
   assert.ok(PROMPT_SRC.includes('// delivery-selfcheck:start') && PROMPT_SRC.includes('// delivery-selfcheck:end'), '自校段须有 start/end marker（沿用既有静态段惯例）')
   const block = PROMPT_SRC.slice(PROMPT_SRC.indexOf('// delivery-selfcheck:start'), PROMPT_SRC.indexOf('// delivery-selfcheck:end'))
@@ -81,8 +81,8 @@ test('a1) 源码锚：自校段为固定追加段（marker 对 + 关键文案被
   assert.ok(defaultsSrc.includes('exact test/build commands') && defaultsSrc.includes('list of files you changed'), '测试命令+结果、改动文件清单要求被钉')
   assert.ok(defaultsSrc.includes('counts or links the acceptance criteria name'), '验收标准的计数/链接核对被钉')
   assert.ok(defaultsSrc.includes('Self-checking is always cheaper than rework'), '先自校再报交付的经济口径被钉')
-  // 只追加（D-269 手法）：自校段插在卡头 Status 行之后、Description 之前，既有锚点行原样保留。
-  // DSHBOTS-345：Status 与自校段之间追加了单行 deliverablesLine（卡面交付物路径声明，非空才注入）。
+  // 只追加：自校段插在卡头 Status 行之后、Description 之前，既有锚点行原样保留。
+  // Status 与自校段之间还有单行 deliverablesLine（卡面交付物路径声明，非空才注入）。
   // 任务卡 Goal 锚点：其后又接了骨架行（写范围 / 父任务）与 Goal 段——同属卡头，仍先于自校段与 Description。
   assert.ok(
     PROMPT_SRC.includes('Status: ${task.status}${deliverablesLine}${writeScopesLine}${parentLine}${goalBlock}${deliverySelfcheckBlock}\nDescription:'),
@@ -135,7 +135,7 @@ test('b1) 源码锚：关键词 + 交集 + 7 天窗口 + 仅追加（提示路�
   assert.ok(helper.includes('assignee_bot_id = ?'), '限定同承接人')
   assert.ok(helper.includes('other.some(scope => target.has(scope))'), '写范围交集判定（元素级）')
   // 仅追加不拦截：提示注入代码段（关键词判定 → createTask 前）不含任何 throw。
-  const inject = DISPATCH_SRC.slice(DISPATCH_SRC.indexOf('勘误并卡提示（DSHBOTS-276，不强制）'), DISPATCH_SRC.indexOf('const task = await this.createTask'))
+  const inject = DISPATCH_SRC.slice(DISPATCH_SRC.indexOf('勘误并卡提示（不强制）'), DISPATCH_SRC.indexOf('const task = await this.createTask'))
   assert.ok(inject.includes('CORRECTION_TITLE_RE.test') && inject.includes('findRecentDoneOverlapTask'), '双条件（关键词 + 交集）同时命中才注入')
   assert.ok(inject.includes(NOTE_MARK), '并卡提示行模板被钉')
   assert.ok(!inject.includes('throw'), '提示路径零拦截（不新增任何拒绝行为）')
@@ -169,7 +169,7 @@ test('b2/c) 运行态：双条件命中追加提示行且派单不被拦截；�
     assert.ok(hitRow.description.includes(`recent done card DSC-${done.number} `), '提示行点名近期 done 卡号')
     assert.ok(hitRow.description.endsWith('consider merging follow-up corrections into one card)'), '提示行追加在描述尾部')
     assert.ok(hitRow.description.includes('按反馈修正。'), '原描述保留，只追加不改写')
-    // c) 负锚一：标题无关键词（仍与 done 卡有交集）→ 不注入。scopes 加一项避开 D-82
+    // c) 负锚一：标题无关键词（仍与 done 卡有交集）→ 不注入。scopes 加一项避开
     //    完全一致检测（在办卡 DSC-hit 集合不相等即可，交集判定不受影响）。
     const noKeyword = await t.service.assignFromBot(t.sessionId, {
       assignee: 'SelfcheckDev', title: '新增独立功能', description: '全新模块。', write_scopes: ['src/x/', 'src/z/'],

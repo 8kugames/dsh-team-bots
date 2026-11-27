@@ -245,7 +245,7 @@ document.addEventListener('submit', async (event) => {
       return
     }
     if (type === 'save-project') {
-      // 成员改在「成员」tab 用邀请/移除管理（增量 API）；设置页不再全量提交成员表。
+      // 成员改在「成员」tab 用邀请/移除管理（增量 API）；设置页不全量提交成员表。
       await api('update_project', {
         projectId: payload.projectId,
         patch: {

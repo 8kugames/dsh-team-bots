@@ -1,4 +1,4 @@
-// src/services/task-stage.js —— 任务工单七态纯推导（唯一口径来源）。
+// 任务工单七态纯推导（唯一口径来源）。
 //
 // 哲学与 runHoldsWriteLock（scheduler.js）同构：stage 不落库、不新增存储状态位，
 // 由事实（任务状态、结构化提问、最近运行）派生「在等谁」，存储真值仍归 tasks.status，
@@ -6,12 +6,11 @@
 //   ended → person/answer → person/review → person/failed → person/blocked
 //   → working → working/queued → queued → idle。
 // 预留位（只占枚举与标签表，判定表恒不返回）：
-//   waiting —— 机制②（后台等待）落地后的后台态；当前无派生来源。
+//   waiting —— 预留给后台等待态；当前无派生来源。
 //   person/delivery —— 原型「投递失败重试中」；我们的映射表没有对应触发事实。
 // 返回两层结构 {stage, action?}，中文文案由 TASK_STAGE_LABEL 查表；调用方不得从
 // latestRun.status 自行拼接文案，UI 只消费 taskView 下发的 stageLabel。
-// 终态（done/canceled）一律 ended、不渲染任何徽标——即使任务上还挂着遗留运行
-// （回归锁：「已完成」列出现过「已取消/运行中」标签的历史 bug）。
+// 终态（done/canceled）一律 ended、不渲染任何徽标——即使任务上还挂着遗留运行。
 
 // attention 在多数调用点不传（无待答提问），标记为可选；用重载签名而非行内注解，
 // 保证擦除产物里实现行仍是 `export function taskStage(task, latestRun, attention) {`

@@ -32,10 +32,9 @@ export const modelOverrideFor = (run) => (run?.model_provider && run?.model_mode
 
 // 运行时效上限：任务派生运行（runs.task_id 非空）若任务声明了时效要求，
 // 其超时上限取 min(全局 runTimeoutMs, 时效分钟数)；无时效、非任务运行沿用全局值。
-// DSHBOTS-302 预算分档：review/handle（owner_task 运行族）在全局上限内再收紧到 review
-// 分档（0 = 关闭分档，默认；DSHBOTS-364）——验收长尾不再被硬上限误杀，真挂死由无进展
-// 看门狗兜底，director 单车道（one_active_run_per_bot）的排队语义不变；task 时效取
-// min 逻辑不变。
+// review/handle（owner_task 运行族）在全局上限内再收紧到 review 分档（0 = 关闭分档，
+// 默认）：验收长尾不被硬上限误杀，真挂死由无进展看门狗兜底；director 单车道
+// （one_active_run_per_bot）的排队语义不变。
 export const runTimeoutMsForTaskRun = ({ run, task, globalRunTimeoutMs, reviewTimeoutMs = null }) => {
   if ((run?.kind === 'review' || run?.kind === 'handle') && Number(reviewTimeoutMs) > 0) {
     return Math.min(globalRunTimeoutMs, reviewTimeoutMs)
@@ -45,7 +44,7 @@ export const runTimeoutMsForTaskRun = ({ run, task, globalRunTimeoutMs, reviewTi
   return Math.min(globalRunTimeoutMs, minutes * 60_000)
 }
 
-// review 分档分钟（DSHBOTS-302 起；DSHBOTS-364 默认改关闭）：env 显式 > settings 保存
+// review 分档分钟：env 显式 > settings 保存
 // 整数（范围随 RUN_LIMIT_RANGES，[0,60]，0 = 关闭分档、跟随全局运行时效）> 默认 0。
 // 默认关闭的理由：验收/受阻处理链自带子代理核验，慢而健康是常态，硬上限只会砍掉仍在
 // 推进的验收；真挂死由无进展看门狗兜底——子代理活动计入根运行进展（lifecycle 的子会话
@@ -215,7 +214,7 @@ export const sessionMethods = {
         // 恢复动作必须在事务之外的干净上下文执行，否则 configEditor.edit 里的
         // hmr.runExclusive 会以「嵌套事务」直接 reject。restoreDefaultModel 用宿主
         // HMR 服务的 executing.exit 逃逸出事务上下文；失败由它有界重试并落审计
-        // model_restore_failed，不再只 warn 吞掉。
+        // model_restore_failed。
         await restoreDefaultModel(defaults, before, {
           logger: this.logger,
           hmr: this.ctx.get?.('hmr'),
@@ -297,10 +296,10 @@ export const sessionMethods = {
     )?.ctx ?? 0
   },
   // 会话累计消费的子代理数（DSH 会话子代理上限口径）：该会话名下运行的 run_events 中
-  // type='subagent_spawned' 计数（DSHBOTS-294 账本落账）。无账本记录返回 0，不误触发。
+  // type='subagent_spawned' 计数（账本落账）。无账本记录返回 0，不误触发。
   sessionSubagentCount(sessionId) {
     if (!sessionId) return 0
-    // 事件住各运行归属的聊天库（chat-db-split Phase 3）：按会话名下运行逐库计数合并。
+    // 事件住各运行归属的聊天库：按会话名下运行逐库计数合并。
     const runs = this.store.all('SELECT id, project_id, bot_id FROM runs WHERE session_id = ?', sessionId)
     let n = 0
     for (const run of runs) {
@@ -311,7 +310,7 @@ export const sessionMethods = {
     }
     return n
   },
-  // 结转判定（DSHBOTS-145 / DSHBOTS-286）：旧会话是否该让位。返回 true 表示旧绑定已
+  // 结转判定：旧会话是否该让位。返回 true 表示旧绑定已
   // alias 化、调用方走新建路径；false 表示继续复用旧会话。
   // - 阈值 0 = 关闭（配置见 config.js 的 sessionRolloverTurns，默认 512）；
   // - 「轮次」口径 = runs 表按 session_id 的 COUNT(*)，不限 status——失败运行的提示词同样
@@ -324,7 +323,7 @@ export const sessionMethods = {
   //   加速被阻塞且无自动恢复；
   // - 幂等：alias 行永不触发结转——本判定只在活跃绑定上被调用
   //   （唯一调用点 ensureSession 以 !existing.alias 前置短路保证）；已结转的旧会话
-  //   即使轮数继续增长（承接未终态任务流量），也只参与闲时压缩，不再二次结转；
+  //   即使轮数继续增长（承接未终态任务流量），也只参与闲时压缩；
   // - 摘要就绪（settings 有值）→ 立即结转；
   // - 摘要未就绪 → 幂等补排一条摘要运行（不阻塞对话，摘要就绪后下一次复用自然结转）。
   shouldRolloverSession({ bot, project, existing }) {
@@ -351,9 +350,8 @@ export const sessionMethods = {
   // idempotency_key 的并发插入，避免唯一约束抛错把当前这条对话运行带崩。
   // 幂等键带尝试代次，代次 = 该会话已终态的摘要运行数（排队/在跑不计入）：入队本身
   // 不改终态数，并发双入队代次恒同，唯一约束照旧去重；终态（失败/取消/空产出）后
-  // 再次触发代次前进，键不再被历史终态行永久占坑。生产事故（2026-11-13 起）：固定
-  // 会话级键被唯一一条被取消的摘要运行占死，此后每次复用的补排都被 INSERT OR IGNORE
-  // 静默吞掉，director 控制面会话越过体积/子代理阈值后结转从未再发生。
+  // 代次前进，键不被终态行永久占坑——固定会话级键会被一条被取消的摘要运行占死，
+  // 补排被 INSERT OR IGNORE 静默吞掉，结转再不触发。
   enqueueRolloverSummary({ bot, project, sessionId }) {
     const runId = id('run')
     const queuedAt = new Date().toISOString()
@@ -383,20 +381,20 @@ export const sessionMethods = {
     )
     return runId
   },
-  // 任务亲和绑定解析（DSHBOTS-286，ADR「结转后的任务亲和路由」）：按 task_id + 当前负责人
+  // 任务亲和绑定解析（ADR「结转后的任务亲和路由」）：按 task_id + 当前负责人
   // 从 runs 表显式解析其施工会话（负责人自己的 task 运行）——结转只把绑定行 alias 化，
   // runs.task_id→session_id 的历史归属不动。
   // 未终态任务的后续消息据此回到原会话（即使该绑定已是 alias 行，如结转后的旧控制面会话）；
   // 新任务（无 runs 归属）与终态任务不享亲和，落活跃绑定/新建路径。
-  // 与 D-285 单绑定模型共存：kind='bot' 唯一活跃绑定只决定「新流量」的家，任务亲和优先于它。
+  // 与单绑定模型共存：kind='bot' 唯一活跃绑定只决定「新流量」的家，任务亲和优先于它。
   taskAffinityBinding(task) {
     if (!task?.id) return undefined
-    // 终态任务的会话不再需要亲和：done/canceled 与调度器候选过滤同口径。
+    // 终态任务不享亲和：done/canceled 与调度器候选过滤同口径。
     if (task.status === 'done' || task.status === 'canceled') return undefined
     // 验收期话语权在总监：in_review 期间卡线程消息（验收指令/评论直通/
-    // dm_reply 回投等经此亲和的流量）改判项目 owner bot 的控制面绑定——否则按 assignee
+    // dm_reply 回投等经此亲和的流量）落到项目 owner bot 的控制面绑定——否则按 assignee
     // 亲和落承接 bot 会话，验收动作 team_review_task 又仅 owner bot 可调，指令
-    // 路由与动作权限错位、每卡都要绕一步。本分支优先于下方 runs 归属亲和（含 D-286 结转
+    // 路由与动作权限错位、每卡都要绕一步。本分支优先于下方 runs 归属亲和（含结转
     // 后的 alias 旧会话）：验收期短暂，按当前 owner 会话走；退回 todo 即恢复 assignee 亲和。
     if (task.status === 'in_review') {
       const ownerBotId = this.store.get('SELECT owner_bot_id FROM projects WHERE id = ?', task.project_id)?.owner_bot_id
@@ -450,7 +448,7 @@ export const sessionMethods = {
   },
   // 宿主历史折叠（单轮上下文治理 P1）：session_compact 运行收尾后调用宿主
   // CompactionEngine.compactNow，把有用历史区间折叠为总结节点——会话前缀实际缩小。
-  // 自写总结轮只追加不折叠（DSHBOTS-286 既有行为），两者互补：总结轮管连续性叙事与
+  // 自写总结轮只追加不折叠，两者互补：总结轮管连续性叙事与
   // 记忆落库，折叠管体积。宿主未提供 compaction 服务（ctx.get 不可达/未装实现）时
   // 降级为「仅总结轮」，返回 unavailable 标记由收尾侧留痕；忙碌/取消等预期失败按
   // ManualCompactionError 的 code 留痕返回，不告警不重试（下一窗口自然再试）。
@@ -500,13 +498,13 @@ export const sessionMethods = {
     // 标记推进到窗口下界：即使压缩运行后续失败也不回退，失败留痕由下一窗口再补。
     this.store.setSetting(sessionCompactMarkerKey(sessionId), String(window * every))
   },
-  // 会话策略归属（2026-11-15「recall 拦截循环」事故）：复用分支的工具面/文件面/模型必须
-  // 跟「会话绑定行的 bot」走，而不是当前运行方 bot。in_review 亲和会把
+  // 会话策略归属：复用分支的工具面/文件面/模型必须跟「会话绑定行的 bot」走，
+  // 而不是当前运行方 bot。in_review 亲和会把
   // 成员运行送进项目 owner 的控制面会话：若按运行方套成员策略，applyBotToolPolicy 的
   // 总监专权 deny（宿主 restriction 粘滞、兜底路径丢弃 disposer）会挂在整个 owner 会话上，
   // owner 后续轮次丢 team_assign_task/team_review_task——模型层表现为 unknown tool 连发
   // 或退化成 team_recall 重复调用；selectModel 同理会把 owner 会话模型翻成成员模型。
-  // 绑定行缺失/查无此 bot 时回退运行方 bot（不改变既有行为）。
+  // 绑定行缺失/查无此 bot 时回退运行方 bot。
   sessionPolicyBot(binding: { bot_id?: string | null } | undefined | null, fallbackBot: any) {
     const botId = binding?.bot_id
     if (!botId || !fallbackBot || botId === fallbackBot.id) return fallbackBot
@@ -539,12 +537,12 @@ export const sessionMethods = {
     if (run?.kind === 'memory_review') {
       return this.ensureReviewSession(bot, project, { run, modelOverride })
     }
-    // ② 任务亲和（DSHBOTS-286/289，ADR §5.2-3）：未终态任务按 runs 归属回原会话——含
+    // ② 任务亲和（ADR §5.2-3）：未终态任务按 runs 归属回原会话——含
     // dm_reply 经 sessionTaskFor 解析出的任务（executeRun 已把任务行透传进来）与结转后
     // alias 行上的旧任务流量；终态任务不享亲和，落下方控制面单绑定。
     // 总监侧运行（review/handle，owner_task 运行族）除外：亲和按 assignee 归属解析，会把
     // 总监的核验/受阻处置运行开进成员任务会话——绑定属成员（ownerContextFor 按绑定行判
-    // 身份，总监专权工具 403，与 D-306 治的验收错位同款），且总监话语混进成员任务上下文。
+    // 身份，总监专权工具 403，与上面的验收错位同款），且总监话语混进成员任务上下文。
     // 一律落 ③ 总监自己的 (owner,project) 控制面绑定。
     const affinity = (run?.kind === 'review' || run?.kind === 'handle')
       ? undefined
@@ -564,7 +562,7 @@ export const sessionMethods = {
         })
         await this.selectModel(affinity.session_id, sessionBot, modelOverride)
         // 任务会话同样在承接流量：跨过压缩窗口且闲时排队总结压缩
-        // （结转仍豁免——任务会话生命周期短，DSHBOTS-286 口径不变）。
+        // （结转仍豁免——任务会话生命周期短）。
         this.maybeCompactSession({ bot: sessionBot, project, existing: affinity, currentRunId: run?.id })
         return affinity.session_id
       }
@@ -576,33 +574,33 @@ export const sessionMethods = {
     if (run?.kind === 'task' && task && project) {
       return this.ensureTaskSession(bot, project, { run, task, modelOverride })
     }
-    // ③ 控制面会话收敛（DSHBOTS-289/299，ADR §5.2-3）：其余运行（chat/dm/dm_reply/
+    // ③ 控制面会话收敛（ADR §5.2-3）：其余运行（chat/dm/dm_reply/
     // review/handle/vision 及无任务上下文的派生运行）一律落该 bot 在所属域的 kind='bot'
-    // 控制面会话——项目运行落 (bot, project) 绑定（每项目每 bot 一条，DSHBOTS-299 三分域），
+    // 控制面会话——项目运行落 (bot, project) 绑定（每项目每 bot 一条），
     // solo_chat/项目外流量落 (bot, NULL) 绑定即该 bot 专属工作区 solo 会话；ensureBotBinding
     // 是唯一建行点。
     return this.ensureBotBinding(bot, project, { run, task, modelOverride })
   },
-  // 控制面会话兜底与唯一建行点（DSHBOTS-285 落机制，289 生产接线，299 会话域三分，
-  // ADR §4.1/§5.2-3）：ensureSession 收敛顺序的终点——rollover/compact 复用、任务亲和
-  // 之外的运行一律解析到该 bot 在 (bot, project) 维度的 kind='bot' 控制面绑定；已有则复用
-  // （宿主失效或结转时退役重建）。project 为 NULL 即 solo 域：绑定行 project_id 亦为 NULL，
-  // 会话 cwd 落该 bot 专属工作区（resolveSessionCwd 的 solo 分支），与项目控制面双域分离。
-  // 复用分支补齐与旧 ensureSession 同款的策略面：applyFilePolicy / applyBotToolPolicy /
+  // 控制面会话兜底与唯一建行点（ADR §4.1/§5.2-3）：ensureSession 收敛顺序的终点——
+  // rollover/compact 复用、任务亲和之外的运行一律解析到该 bot 在 (bot, project) 维度的
+  // kind='bot' 控制面绑定；已有则复用（宿主失效或结转时退役重建）。project 为 NULL
+  // 即 solo 域：绑定行 project_id 亦为 NULL，会话 cwd 落该 bot 专属工作区
+  // （resolveSessionCwd 的 solo 分支），与项目控制面双域分离。
+  // 复用分支补齐完整策略面：applyFilePolicy / applyBotToolPolicy /
   // selectModel / maybeCompactSession / rolloverPending 消费闸。
   // 任务专属会话（单 bot 多任务并行）：每张施工卡一张「bot 名+任务号」会话——会话列表
-  // 显示名 `${bot.name} · ${project.key}-${task.number}`（D-315 命名口径），绑定行 kind='task'
+  // 显示名 `${bot.name} · ${project.key}-${task.number}`，绑定行 kind='task'
   // 带 task_id（任务亲和解析与 one_bot_binding 的 kind='bot' 谓词互不干扰）。生命周期短：
   // 不参与结转（会话轮次上限照旧兜底），压缩由亲和复用分支的 maybeCompactSession 承接。
   // 并发首建去重键带 task 维度，同任务并发首建共用同一 in-flight Promise。
   async ensureTaskSession(bot, project, { run, task, modelOverride } = {} as any) {
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
-    // 任务会话复用（ZONGM-140 三会话事故）：runs 归属亲和（taskAffinityBinding）只看
+    // 任务会话复用：runs 归属亲和（taskAffinityBinding）只看
     // runs.session_id，而宿主重启重排队会把 running 运行的 session_id 置空——亲和断链后
     // 直落下方首建，旧任务会话（绑定行 kind='task' 仍在、宿主仍活）被孤儿化，同一张卡
     // 每重启一次多一个会话。绑定行才是任务会话的家谱：先按 (bot, task) 找活跃绑定，
     // 宿主仍活就回本会话（策略面与亲和复用分支同款）；死了退役重建。多活跃行只可能来自
-    // 历史孤儿/并发残留，保留最新一条、其余 alias 化收敛。
+    // 孤儿行/并发残留，保留最新一条、其余 alias 化收敛。
     const bindings = this.store.all(
       "SELECT * FROM session_bindings WHERE bot_id = ? AND task_id = ? AND kind = 'task' AND alias = 0 ORDER BY created_at DESC, rowid DESC",
       bot.id, task.id,
@@ -736,8 +734,8 @@ export const sessionMethods = {
   },
   async ensureBotBinding(bot, project, { run, task, modelOverride } = {} as any) {
     const isOwner = Boolean(project && bot && project.owner_bot_id === bot.id)
-    // DSHBOTS-299：查询带 project 维度（IS 比 = 多兼容 NULL——solo 域按 (bot, NULL) 命中），
-    // 同一 bot 跨项目各自独立成会话，项目流量不再被单条全局绑定吸走。
+    // 查询带 project 维度（IS 比 = 多兼容 NULL——solo 域按 (bot, NULL) 命中），
+    // 同一 bot 跨项目各自独立成会话，项目流量不被单条全局绑定吸走。
     const existing = this.store.get(
       "SELECT * FROM session_bindings WHERE bot_id = ? AND kind = 'bot' AND alias = 0 AND project_id IS ?",
       bot.id,
@@ -754,8 +752,8 @@ export const sessionMethods = {
         if (!rolledOver) {
           this.applyFilePolicy(resolved, bot, run, task)
           applyBotToolPolicy(resolved, { isOwner, logger: this.logger, toolPolicy: botToolPolicyFor(this.config, project), denied: this.toolDenials })
-          // 存量坏显示名自愈：旧实现 slice(0,8) 把后缀截成字面量 session-，复用分支
-          // 遇到该已知坏值时重写为正确后缀；其他值（用户手工命名等）一律不动。
+          // 存量坏显示名自愈：后缀为字面量 session- 的坏值在复用分支重写为正确后缀；
+          // 其他值（用户手工命名等）一律不动。
           if (this.ctx.sessionTitle?.get && this.ctx.sessionTitle?.rename) {
             const liveSession = resolved?.agent?.session ?? resolved?.session
             if (liveSession) {
@@ -775,7 +773,7 @@ export const sessionMethods = {
       // 会话已失效（宿主查不到）或结转判定要求开新会话：旧绑定降级为授权别名。
       this.retireBinding(existing.session_id)
     }
-    // DSHBOTS-299：建行去重键同样带 project 维度——同 bot 在 A 项目与 solo 域并发首建
+    // 建行去重键同样带 project 维度——同 bot 在 A 项目与 solo 域并发首建
     // 互不挤兑，也不共用同一条 in-flight Promise（solo 会话 cwd 与项目会话不同）。
     const key = `${bot.id}:${project?.id ?? 'solo'}:bot`
     if (this.sessionCreates.has(key)) return this.sessionCreates.get(key)
@@ -843,7 +841,7 @@ export const sessionMethods = {
     const effectiveBot = modelOverride
       ? { ...bot, provider: modelOverride.provider, model: modelOverride.model, effort: modelOverride.effort ?? null }
       : bot
-    // sessionKind 入参保留兼容（调用方仍传），控制面收敛后不再参与会话解析。
+    // sessionKind 入参保留兼容（调用方仍传），不参与会话解析。
     const sessionId = await this.ensureSession(bot, project, { run, task, modelOverride })
     let prompt = this.promptFor({ run, bot, project, task, chatMessage, extraMessages, sessionId })
     // 任务卡驱动 run 的上下文清单落 run_events（非任务卡 run 没有暂存，直接返回）。
@@ -858,7 +856,7 @@ export const sessionMethods = {
       sessionId,
       bot: effectiveBot,
       projectId: project?.id ?? null,
-      // 聊天分库（chat-db-split Phase 1）：本运行的正文库（轨迹记账/附图读取用）。
+      // 聊天分库：本运行的正文库（轨迹记账/附图读取用）。
       chatStore: this.chatStoreForRun(run),
       // 任务归因：记账时透传到 usage_events.task_id；
       // 非任务运行为 null，沿用既有「无任务归因」口径。
@@ -906,7 +904,7 @@ export const sessionMethods = {
       // 聊天附图：首条 prompt 一并带上 image 分片，模型这轮就能看到用户发的图。
       // 宿主对吃不了图片的模型直接抛 attachment-invalid（不降级），所以续答运行
       // （image_offload=1）跳过附图，转写正文已由提示词近期窗口带入。
-      // 附图随消息住在聊天库里（chat-db-split Phase 1）。
+      // 附图随消息住在聊天库里。
       const imageParts = chatMessage?.id && !run.image_offload
         ? imageContentPartsForMessage(pending.chatStore ?? this.store, chatMessage.id)
         : []

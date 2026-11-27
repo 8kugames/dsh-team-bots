@@ -1,6 +1,6 @@
-// DSHBOTS-51：bot 版本历史只记角色/指令——模型类字段改动即生效不占版本；
+// bot 版本历史只记角色/指令——模型类字段改动即生效不占版本；
 // 快照内容与最新版本行比对，同内容重复保存不插行、不 bump，审计带 unchanged 标记。
-// DSHBOTS-336：滚动保留最近 10 版，超额最旧行先整行归档进 JSONL 再删；启动存量收敛。
+// 滚动保留最近 10 版，超额最旧行先整行归档进 JSONL 再删；启动存量收敛。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises'
@@ -186,7 +186,7 @@ test('DSHBOTS-336 b) 预插 13 行存量→初始化后收敛为 10 行+3 行入
     const data = JSON.parse(audits[0].data_json)
     assert.equal(data.archived, 3)
     assert.equal(data.versions, '1-3')
-    // 幂等：二次启动空转——行数不变、JSONL 不再追加、无新增归档审计。
+    // 幂等：二次启动空转——行数不变、JSONL 不追加、无新增归档审计。
     const again = new TeamService({ store, config, logger: silentLogger })
     again.attachRuntime(new StubRuntime())
     await again.initialize()

@@ -17,7 +17,7 @@ import { exportUsageCsv } from '../src/usage-reconcile.js'
 import { uiStylesSource } from './ui-styles-source.js'
 import { readUiSource } from './helpers/ui-sources.js'
 
-// DSHBOTS-121 用量页时间窗：今日 / 7 日 / 30 日 / 至今 四档。
+// 用量页时间窗：今日 / 7 日 / 30 日 / 至今 四档。
 // 后端口径：今日 = 产品时区（默认 Asia/Shanghai）当日 0 点起；7 日 / 30 日 = 滚动窗口；
 // 至今 = 不设下界。窗口起点先换算成 UTC ISO 再与明细的 occurred_at 比较。
 
@@ -51,9 +51,8 @@ async function withStore(fn) {
   }
 }
 
-// 造一条用量明细：occurred_at 由测试精确控制（窗口边界的关键）。
-// 造一条用量：经 recordUsage 落明细并同步累加顶库 usage_rollup（chat-db-split
-// Phase 2 起快照读汇总；occurred_at 由测试精确控制窗口边界）。
+// 造一条用量：经 recordUsage 落明细并同步累加顶库 usage_rollup（汇总读快照；
+// occurred_at 由测试精确控制窗口边界）。
 function seedEvent(store, { id, occurredAt, tokens = 100, projectId = null, botId = null }) {
   const row = recordUsage(store, {
     sourceKey: `d121:${id}`,

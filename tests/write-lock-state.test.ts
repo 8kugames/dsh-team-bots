@@ -1,4 +1,4 @@
-// DSHBOTS-73：写范围占用只看「进行中」的任务，任务离开「进行中」即释放占用/锁定。
+// 写范围占用守门：只看「进行中」的任务，任务离开「进行中」即释放占用/锁定。
 // 两层行为都锁进套件：
 // ① 纯函数层（src/services/scheduler.js 的 write-lock-scope 块）：一条写运行是否占住项目写槽。
 // ② 集成层：同项目两条相交写范围的任务，两个都在「进行中」时只放行一条；
@@ -69,7 +69,7 @@ async function setup({ maxConcurrentRuns }: { maxConcurrentRuns?: number } = {})
   const dev = await service.createBot({
     name: 'Builder', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
   })
-  // DSHBOTS-290：bot 级串行（one_active_run_per_bot）下同 bot 双任务必串行（第二条直接挂起
+  // bot 级串行（one_active_run_per_bot）下同 bot 双任务必串行（第二条直接挂起
   // 不落 runs 行）；写占用闸门与 bot 无关，需同时排队比对的两条任务分属两条 bot 车道。
   const dev2 = await service.createBot({
     name: 'Builder2', role: '开发', instructions: 'Build.', provider: 'fake', model: 'model-a',
@@ -146,7 +146,7 @@ test('同项目两条相交写范围：两个任务都在进行中时只放行�
       projectId: project.id, title: '改单个文件', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
     })
-    // DSHBOTS-290：第二条走 dev2 车道，与第一条同时排队，写占用闸门行为与 bot 无关。
+    // 第二条走 dev2 车道，与第一条同时排队，写占用闸门行为与 bot 无关。
     const second = await service.createTask({
       projectId: project.id, title: '改整个目录', assigneeBotId: dev2.id,
       writeScopes: ['ui/modules'], autoStart: true,
@@ -180,7 +180,7 @@ test('写占用随任务离开「进行中」释放：先跑那条取消后，�
       projectId: project.id, title: '改单个文件', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
     })
-    // DSHBOTS-290：第二条走 dev2 车道，占用释放后由它接棒。
+    // 第二条走 dev2 车道，占用释放后由它接棒。
     const second = await service.createTask({
       projectId: project.id, title: '改整个目录', assigneeBotId: dev2.id,
       writeScopes: ['ui/modules'], autoStart: true,
@@ -220,7 +220,7 @@ test('写占用随任务离开「进行中」释放：任务走到 done 后另�
       projectId: project.id, title: '改单个文件', assigneeBotId: dev.id,
       writeScopes: ['ui/modules/chat.js'], autoStart: true,
     })
-    // DSHBOTS-290：第二条走 dev2 车道，占用释放后由它接棒。
+    // 第二条走 dev2 车道，占用释放后由它接棒。
     const second = await service.createTask({
       projectId: project.id, title: '改整个目录', assigneeBotId: dev2.id,
       writeScopes: ['ui/modules'], autoStart: true,

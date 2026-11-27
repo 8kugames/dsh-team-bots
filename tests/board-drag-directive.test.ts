@@ -1,4 +1,4 @@
-// DSHBOTS-54：看板拖拽联动——拖入「执行中」自动入队开工并发系统指令消息；
+// 看板拖拽联动：拖入「执行中」自动入队开工并发系统指令消息；
 // 拖出到 todo/blocked 暂停活跃运行（PAUSED_BY_BOARD，区别于 SUPERSEDED）；
 // system 消息本身不触发 bot 运行；同状态重复拖拽零副作用。
 import { test } from 'node:test'
@@ -84,7 +84,7 @@ async function closeQuietly(store, timeout = 2000) {
 const systemMessages = (store, projectId) =>
   store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' ORDER BY rowid", projectId)
 
-// Phase 3：run_events 住运行归属聊天库（本项目任务运行 → 项目聊天库）。
+// run_events 住运行归属聊天库（本项目任务运行 → 项目聊天库）。
 const runEventTypes = (chatStore, runId) =>
   chatStore.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
 
@@ -190,7 +190,7 @@ test('重复拖拽零副作用；拖出到 in_review 释放写占用（中止写
     await service.transitionTask(task.id, 'in_progress', actor)
     await waitFor(() => store.get("SELECT status FROM runs WHERE task_id = ? AND status = 'running'", task.id))
 
-    // Phase 3：run_events 住聊天库、runs 留顶库——先取任务运行 id 清单，再回聊天库计数。
+    // run_events 住聊天库、runs 留顶库——先取任务运行 id 清单，再回聊天库计数。
     const counts = () => {
       const runIds = store.all('SELECT id FROM runs WHERE task_id = ?', task.id).map(row => row.id)
       return {
@@ -208,7 +208,7 @@ test('重复拖拽零副作用；拖出到 in_review 释放写占用（中止写
     await service.transitionTask(task.id, 'in_progress', actor)
     assert.deepEqual(counts(), before, '同状态重复拖拽：零新运行、零新消息、零新事件')
 
-    // DSHBOTS-73：任务离开「进行中」即释放写占用——写运行被中止，写槽让给同项目其他写运行。
+    // 任务离开「进行中」即释放写占用——写运行被中止，写槽让给同项目其他写运行。
     // 看板指令消息仍只覆盖 todo/blocked 两跳，拖到 in_review 不发消息、不新建运行。
     await service.transitionTask(task.id, 'in_review', actor)
     const after = counts()

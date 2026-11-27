@@ -1,10 +1,10 @@
-// DSHBOTS-193 交互行为锁：已归档 Bot「移除追踪」两步确认弹窗的完整链路（软移除，非物理删除）。
-// 语义对齐项目侧（DSHBOTS-192 的 remove-tracking 链）：确认弹窗 + 输入名称门禁 + 继续后执行；
+// 已归档 Bot「移除追踪」两步确认弹窗的完整链路（软移除，非物理删除）的交互行为锁。
+// 语义对齐项目侧的 remove-tracking 链：确认弹窗 + 输入名称门禁 + 继续后执行；
 // 差异点：Bot 侧数据全部保留（仅从工作台列表移除追踪），故无 purge 复选框、无目录删除。
 // 本文件从 ui/modules/events-click.js 提取真实 click 监听器，从 modal-layer.js / modal-forms.js
 // 提取真实 modalShell/modalRemoveBotTracking，用最小 DOM shim 驱动真实链路并锁定接线；
 // 服务层部分以真实 TeamService + handleAction 走 remove_bot_tracking 全契约（镜像 tests/archive.test.js）。
-// 桩语义镜像线上契约：render 桩 = D-98 遮罩闸门（弹窗期只计数不碰 #modal-root），
+// 桩语义镜像线上契约：render 桩 = 遮罩闸门（弹窗期只计数不碰 #modal-root），
 // renderModalLayer 桩 = #modal-root 唯一同步通道（经真实 modalRemoveBotTracking 重算内容）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

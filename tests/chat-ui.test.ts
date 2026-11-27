@@ -35,7 +35,7 @@ test('草稿接线：两个 composer 读 currentDraft，input 写回 map，发�
   assert.equal((source.match(/currentDraft\(state\)\.trim\(\) \|\| pendingImagesFor\(\)\.length/g) ?? []).length, 2, '群聊与单聊发送键在有草稿或有待发图片时都可点')
   assert.match(source, /state\.chatDrafts\[draftKey\(state\)\] = input\.value/)
   // [修剪] 代码形状断言
-  // DSHBOTS-165：sendMessage 改为出站前捕获当前键（失败恢复要写回同一键），清空写法随之变化。
+  // sendMessage 出站前捕获当前键（失败恢复要写回同一键），清空草稿写的也是这个 key。
   // [修剪] 代码形状断言
   assert.match(source, /state\.chatDrafts\[key\] = ''/)
   assert.ok(!source.includes('state.draft'), '旧的单值 state.draft 应已全部移除')
@@ -97,7 +97,7 @@ test('render()：重建后恢复 composer 内联高度与发送按钮态', () =>
   // [修剪] 代码形状断言
 })
 
-// —— 回归护栏：DSHBOTS-3 引用交互与 renderKeepingChatScroll 保留 ——
+// —— 回归护栏：引用交互与 renderKeepingChatScroll 保留 ——
 test('引用交互不回归：renderKeepingChatScroll 保留并仍聚焦输入框', () => {
   assert.match(source, /function renderKeepingChatScroll\(\) \{\s*\n\s*render\(\)\s*\n\s*document\.getElementById\('composer-input'\)\?\.focus\(\)/)
   assert.match(source, /renderKeepingChatScroll\(\)/)
@@ -106,7 +106,7 @@ test('引用交互不回归：renderKeepingChatScroll 保留并仍聚焦输入�
   // [修剪] 代码形状断言 '切换上下文仍清引用条')
 })
 
-// —— DSHBOTS-31：复制按钮 / chip 同行顺序 / 成员两行式 ——
+// —— 复制按钮 / chip 同行顺序 / 成员两行式 ——
 test('复制按钮：消息 hover 出现，复用统一 copy handler，复制原文并带无障碍属性', () => {
   const btn = /<button class="msg-copy-btn" data-action="copy" data-copy="\$\{attr\(message\.body\)\}"[^>]*>\$\{icon\('copy'\)\}<\/button>/.exec(source)?.[0]
   assert.ok(btn, '消息行应有 msg-copy-btn 复制按钮，data-copy 取 message.body 原文')
@@ -132,8 +132,7 @@ test('思考过程 chip 渲染在会话与任务 chip 之前，三者合并同�
 })
 
 test('成员卡片结构存在，模型行有可读兜底', () => {
-  // DSHBOTS-5：群聊侧栏成员面板移入「成员」tab，行结构从 side-row 迁到 list-row（两行式与状态点语义不变）。
-  // DSHBOTS-52：「成员」tab 的成员行进一步改卡片式网格，锁从 list-row 迁到 member-card。
+  // 「成员」tab 的成员行是卡片式网格（member-card）：两行式与状态点语义不变。
   assert.match(source, /<div class="member-card/)
   assert.match(source, /<span class="member-name-line"><strong>/, '第一行：名字 + 角色标签')
   assert.match(source, /class="member-role"/)

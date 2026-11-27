@@ -1,5 +1,5 @@
 // 全局配置页「界面语言」下拉的真实渲染守门。
-// tests/ui-language.test.js 覆盖解析优先级与保存链路；本文件补上「UI 真的渲染出来」这层：
+// tests/ui-language.test.js 覆盖解析优先级与保存链路；本文件守「UI 真的渲染出来」这层：
 // 用最小 DOM 桩真实导入 ui/modules/settings.js 并调用 renderGlobal，断言下拉存在、
 // 三选项齐全、按保存值选中，且 label/hint/按钮随当前语言换字典（i18n 键真实生效）。
 import { test } from 'node:test'

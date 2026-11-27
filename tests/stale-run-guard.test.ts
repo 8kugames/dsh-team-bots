@@ -8,9 +8,9 @@ import { resolveConfig } from '../src/config.js'
 import { TeamService } from '../src/service.js'
 import { nowIso } from '../src/util.js'
 
-// DSHBOTS-110：陈旧 queued 运行守卫。
+// 陈旧 queued 运行守卫。
 // 任务已进终态（done/canceled）后，残留的 queued 运行不得再被 tick 领取执行：
-// ①tick 前置清理 + 候选过滤；②任务流转终态时主动清理（含只读运行，补上写占用只清 mode='write' 的漏网）；
+// ①tick 前置清理 + 候选过滤；②任务流转终态时主动清理（含只读运行，写占用清理只清 mode='write'）；
 // ③重复触发不重复留痕。全部走真实 tick/updateTask 路径，不直接调私有函数绕过调度。
 // 注意：库上有 one_active_run_per_task 部分唯一索引（task_id 非空且 queued/running 唯一），
 // 同一任务同时最多一条活跃运行，故写运行与只读运行分用例构造。
@@ -81,7 +81,7 @@ function requeue(store, runId) {
   )
 }
 
-// 种子一条只读运行（review 模式）：复现 DSHBOTS-102 漏网的 read 模式排队运行。
+// 种子一条只读运行（review 模式）：复现漏网的 read 模式排队运行。
 // 事件播种走 insertRunEvent 统一收口（自动路由到运行归属聊天库）。
 function seedReadRun(service, store, { id, projectId, botId, taskId }) {
   store.run(
@@ -267,7 +267,7 @@ test('任务流转终态时清理残留的 queued 只读运行（补写占用只
 
     const actor = service.actor()
     // in_progress → in_review：写占用释放只清 mode='write'，只读运行会漏网；
-    // 随后 in_review → done 必须由终态清理把它收掉（DSHBOTS-102 事故场景）。
+    // 随后 in_review → done 必须由终态清理把它收掉。
     await service.updateTask(task.id, { status: 'in_progress' }, actor)
     assert.equal(runRow(store, 'run_stale_read').status, 'queued', '前置：离开「进行中」不该动只读运行')
     await service.updateTask(task.id, { status: 'in_review' }, actor)

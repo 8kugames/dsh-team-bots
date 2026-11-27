@@ -94,7 +94,7 @@ async function closeQuietly(store, timeout = 2000) {
 const cardChangedMessages = (store, projectId) =>
   store.all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' AND body LIKE '%卡面已变更%' ORDER BY rowid", projectId)
 
-// Phase 3：run_events 住运行归属聊天库（本项目任务运行 → 项目聊天库）。
+// run_events 住运行归属聊天库（本项目任务运行 → 项目聊天库）。
 const runEventTypes = (chatStore, runId) =>
   chatStore.all('SELECT type FROM run_events WHERE run_id = ?', runId).map(row => row.type)
 
@@ -213,7 +213,7 @@ test('强制受阻：进行中任务移 blocked，运行走既有 abort 链路�
     const last = service.groupChatStore(project.id).all("SELECT * FROM messages WHERE project_id = ? AND sender_type = 'system' ORDER BY rowid", project.id).at(-1)
     assert.equal(last.body, `任务 CFX-${task.number} 被总监强制移为受阻，运行已中止。`)
 
-    // 非进行中任务不可强制受阻（口径收紧：只收 in_progress）
+    // 非进行中任务不可强制受阻（只收 in_progress）
     await assert.rejects(
       () => service.forceBlockTask(task.id, { type: 'user', id: service.localUserId }),
       /不在进行中/,

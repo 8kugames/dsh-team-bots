@@ -249,7 +249,7 @@ function modalBot(detail) {
 
 // 任务关系选项：父任务与依赖任务都只从本项目已有任务里选
 // 后端只接受同项目内引用，跨项目与自引用会被直接拒绝，列表因此不给别的项目的任务。
-// selectedId（D-63 派生子任务）：给指定任务打 selected，让预填的父任务在下拉里真正选中显示，
+// selectedId：给指定任务打 selected，让预填的父任务在下拉里真正选中显示，
 // 而不是值带了、显示还停在「无（顶层任务）」。
 function taskRelationOptions(selectedId = '') {
   const tasks = state.data?.tasks ?? []
@@ -414,7 +414,7 @@ function modalTask(task) {
   const activeRun = (task.runs ?? []).find(run => ['queued', 'running'].includes(run.status))
   const latestFailed = (task.runs ?? []).find(run => ['failed', 'canceled'].includes(run.status))
   // 终态时间小字：与任务卡同口径——done 取 completed_at、canceled 取 canceled_at，缺列不造占位。
-  // 终态下 stageLabel 为 null（DSHBOTS-42 口径），badge 槽正好空出，用「完成于/取消于 + 时间」补位。
+  // 终态下 stageLabel 为 null，badge 槽正好空出，用「完成于/取消于 + 时间」补位。
   const endAt = task.status === 'done' ? task.completed_at : task.status === 'canceled' ? task.canceled_at : null
   // 任务关系：父任务取本项目任务表里的那条，依赖只列未满足项（blockedByNames）。
   const parentTask = (state.data?.tasks ?? []).find(item => item.id === (task.parent_task_id ?? task.parentTaskId ?? null)) ?? null
@@ -502,7 +502,7 @@ function modalTask(task) {
 }
 
 function modalMemory(memory) {
-  // 写作入口随上下文收敛：群聊只写当前项目记忆，单聊只写该 bot 记忆，不再可选 Bot 列表。
+  // 写作入口按上下文定域：群聊只写当前项目记忆，单聊只写该 bot 记忆，不提供 Bot 列表。
   const project = pageProject()
   const soloBot = inSoloContext() ? botById(state.soloBotId) : null
   const scope = soloBot
@@ -693,7 +693,7 @@ function trapModalFocus(event) {
 }
 
 // modal 开合只同步 #modal-root，不走 render 全量重建：
-// 开弹窗不再重建背后整页，关弹窗不再拆掉重排后的列表——滚动位与列表状态原样保留。
+// 开弹窗不重建背后整页，关弹窗不拆掉重排后的列表——滚动位与列表状态原样保留。
 function openModal(modal) {
   state.modal = modal
   lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readUiSource } from './helpers/ui-sources.js'
 import { uiStylesSource } from './ui-styles-source.js'
 
-// DSHBOTS-81 用量统计页重设计：群聊 / 单聊 / 全局三态共用一套视觉骨架。
+// 用量统计页：群聊 / 单聊 / 全局三态共用一套视觉骨架。
 // 读源码断言（与 usage-convergence 同模式），锁住：标题层级、KPI 口径、数值列对齐、
 // 成本写法统一、窗口口径单一、项目行不露 raw id、只用既有 token。
 const source = readUiSource()
@@ -49,7 +49,7 @@ test('② KPI 四卡口径写清，且不再有错名卡与假窗口卡', () => 
   assert.ok(!body.includes('统计窗口'), '不再有常量占位的统计窗口卡')
   // 窗口口径来自服务端真实值，不是写死的常量。
   assert.match(body, /Number\(usage\.days \?\? 30\)/, '窗口天数取服务端 usage.days')
-  // DSHBOTS-121：窗口口径从写死的「近 N 天」常量改成四档可切换（今日 / 7 日 / 30 日 / 至今）。
+  // 窗口口径为四档可切换（今日 / 7 日 / 30 日 / 至今），不是写死的「近 N 天」常量。
   assert.match(fnBody('usagePageHead'), /汇总窗口/, '页面头单一声明汇总窗口')
   assert.match(fnBody('usagePageHead'), /data-action="usage-window"/, '页面头提供四档时间窗切换')
 })
@@ -120,12 +120,12 @@ test('⑧ 重设计只使用既有 token，不新增色值', () => {
   assert.match(block, /var\(--star\)/, '未计价条形用既有 star token')
 })
 
-// DSHBOTS-142 用量页提示文案精简：只保留玩家能据以行动的规则信息，删纯实现口径说明。
-// 读源码断言（与本文件同模式）：旧文案不再出现、精简后的文案仍在、每条提示只占一行。
+// 用量页提示文案精简：只保留玩家能据以行动的规则信息，不含纯实现口径说明。
+// 读源码断言（与本文件同模式）：实现口径文案不出现、可据以行动的文案仍在、每条提示只占一行。
 const USAGE_PAGE_FNS = ['usageModelPanel', 'usageDayPanel', 'renderUsageGlobal', 'renderUsageDomain', 'renderUsageSolo']
 
 test('⑨ 用量页提示精简：实现口径说明已删，玩家可据以行动的信息仍在', () => {
-  // 已删 / 已改写的旧文案不再出现在源码里。
+  // 下列实现口径文案不得出现在源码里。
   for (const gone of [
     '未配置价格的成本不会按 0 计费',
     '按日明细由服务端保留最近 14 天',
@@ -154,7 +154,7 @@ test('⑨ 用量页提示精简：实现口径说明已删，玩家可据以行�
   }
   // 对账不一致提示可据以行动（数据可能不完整），保留不动。
   assert.ok(source.includes('数据可能不完整'), '对账不一致提示应保留')
-  // 全局视图不再挂「服务端尚未按口径过滤」这类开发元信息（该视图本来就展示全局数据）。
+  // 全局视图不带「服务端尚未按口径过滤」这类开发元信息（该视图本来就展示全局数据）。
   assert.ok(!fnBody('renderUsageGlobal').includes('usage.legacy'), '全局视图不再渲染 legacy 实现说明')
   // 本群 / 单聊视图的分组面板回落的是空数组（tier?.byModel ?? []），不是全局数据，
   // 因此提示不得声称「下方分组为全局数据」——那会让玩家以为看到的是全局口径。

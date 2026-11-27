@@ -123,7 +123,7 @@ test('移除追踪：逐表清空、usage_events 保留置空、audit 留痕、�
     )
     store.run("INSERT INTO task_labels(task_id, label) VALUES ('task-1', 'bug')")
     store.run("INSERT INTO task_dependencies(task_id, depends_on_task_id) VALUES ('task-1', 'task-2')")
-    // 任务评论/事件、运行事件、终端命令住项目聊天库（chat-db-split Phase 3）。
+    // 任务评论/事件、运行事件、终端命令住项目聊天库。
     service.groupChatStore(projectId).run(
       `INSERT INTO task_comments(id, task_id, author_type, author_id, body, created_at)
        VALUES ('tc-1', 'task-1', 'user', 'owner', '看下', ?)`,
@@ -200,8 +200,8 @@ test('移除追踪：逐表清空、usage_events 保留置空、audit 留痕、�
     assert.deepEqual(result, { removed: true, key: 'ARCHIVED' })
 
     // 逐表断言无残留（含跨表依赖：另一任务的 task_dependencies、proposals 的 SET NULL FK）。
-    // messages/message_images/run_trajectory（Phase 1）与 run_events/task_comments/task_events/
-    // terminal_commands/run_payload（Phase 3）住项目聊天库文件：移除追踪即整库删除——
+    // messages/message_images/run_trajectory 与 run_events/task_comments/task_events/
+    // terminal_commands/run_payload 住项目聊天库文件：移除追踪即整库删除——
     // 文件级断言覆盖这批表，顶库侧同名残留检查退化为防回归哨兵。
     assert.ok(
       !service.listChatStoreFiles().includes(service.groupChatFileName(projectId)),

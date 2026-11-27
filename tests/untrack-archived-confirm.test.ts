@@ -1,12 +1,12 @@
-// DSHBOTS-192 交互行为锁：已归档项目「移除追踪」两步确认弹窗的完整链路。
-// 根因复盘：step1→step2 / step2→step1 翻页 case 直改 state.modal 后曾误调 render，
-// 而 app.js 的 D-98 遮罩闸门在弹窗打开时 early-return（只记 pending，永不触碰 #modal-root），
-// 弹窗层只认 renderModalLayer 直调（modal-layer.js 的解耦契约，同文件 edit-scopes 先例）
-// 结果点「继续 / 上一步」零响应。本文件从 ui/modules/events-click.js、events-submit.js 提取
-// 真实监听器，从 modal-layer.js / modal-forms.js 提取真实 modalShell/modalRemoveTracking，
-// 用最小 DOM shim 驱动真实 click/submit 链路并锁定接线，锚点全部语义化（非复制实现）。
+// 已归档项目「移除追踪」两步确认弹窗的完整链路守门。
+// 弹窗层只认 renderModalLayer 直调（modal-layer.js 的解耦契约）：app.js 的遮罩闸门在
+// 弹窗打开时 early-return（只记 pending，永不触碰 #modal-root），直改 state.modal 后
+// 误调 render 会让点「继续 / 上一步」零响应。
+// 本文件从 ui/modules/events-click.js、events-submit.js 提取真实监听器，从 modal-layer.js
+// / modal-forms.js 提取真实 modalShell/modalRemoveTracking，用最小 DOM shim 驱动真实
+// click/submit 链路并锁定接线，锚点全部语义化（非复制实现）。
 // 桩语义镜像线上契约：render 桩=只计数不碰弹窗层（遮罩闸门），renderModalLayer 桩=经真实
-// modalRemoveTracking 重算 #modal-root 内容——修复前本套件前两例必须红（红验证锚）。
+// modalRemoveTracking 重算 #modal-root 内容——本套件前两例必须红（红验证锚）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
@@ -134,7 +134,7 @@ const escStub = (value) => String(value ?? '')
 
 // ---------- 组装可交互场景 ----------
 // 桩语义契约（与线上实现一致）：
-//   render 桩——D-98 遮罩闸门：弹窗打开期间只记 pending，不触碰 #modal-root（layerHtml 不变）；
+//   render 桩——遮罩闸门：弹窗打开期间只记 pending，不触碰 #modal-root（layerHtml 不变）；
 //   renderModalLayer 桩——#modal-root 唯一同步通道：经真实 modalRemoveTracking 重算内容。
 const noop = () => {}
 function makeHarness() {
@@ -191,7 +191,7 @@ return { modalShell, modalRemoveTracking }`)(state, escStub, escStub)
     beginChatPending: () => 1, endChatPending: noop, reloadTaskModal: async () => {},
     saveTaskFromForm: async () => null,
     questionDraftSelection: noop, questionSelectOption: noop,
-    // DSHBOTS-367：中央 submit 路径先过表单内联校验（真实实现见 ui/modules/form-validation.js）。
+    // 中央 submit 路径先过表单内联校验（真实实现见 ui/modules/form-validation.js）。
     validateForm: () => true,
   }
 
@@ -334,7 +334,7 @@ test('入口与服务端接线锁：settings 入口按钮 + events-click case �
   // settings.js 项目状态卡的入口按钮（已归档分支）。
   assert.match(settingsSource, /data-action="remove-tracking-open"/, 'settings.js 已归档分支保留移除追踪入口')
   // case 接线：两个翻页 case 的块体内必须直调 renderModalLayer 且不得调裸 render
-  // （D-98 遮罩闸门下 render 对弹窗层无效——D-192 根因锚；块体=case 起到同缩进下一 case 止）。
+  // （遮罩闸门下 render 对弹窗层无效；块体=case 起到同缩进下一 case 止）。
   const caseBlock = (name) => {
     const m = clickSource.match(new RegExp(`case '${name}': \\{([\\s\\S]*?)\\n      case `))
     assert.ok(m, `events-click.js 必须存在 case '${name}'`)

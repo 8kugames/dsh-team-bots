@@ -1,4 +1,4 @@
-// tests/human-slot.test.js —— DSHBOTS-43 人的消息保底并发槽。
+// 人的消息保底并发槽。
 // 覆盖：满并发时人消息运行仍能起来 1 条、第二条仍排队、写范围冲突时仍被拦。
 
 import test from 'node:test'
@@ -65,7 +65,7 @@ function primeChatRun(service, project, dev, body) {
 
 async function cleanup(root, store) { await store.close(); await rm(root, { recursive: true, force: true }) }
 
-// DSHBOTS-308：挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
+// 挂起队列键带域段（bot_pending_msgs:<bot>:<domain>）——按 bot 扫全部域键合并读取。
 const heldItems = (store, botId) => {
   const rows = store.all('SELECT value FROM settings WHERE key LIKE ?', `bot_pending_msgs:${botId}:%`)
   const out = []
@@ -104,7 +104,7 @@ test('第二条人消息在借槽运行期间挂起（保底槽仍只放行 1 �
     assert.ok(runtime.started.includes(first), '第一条人消息借槽启动')
     // 收尾会派生 memory_review 占住 bot，关掉让「空闲建回」可观测。
     store.setSetting('chat_memory_review', '0')
-    // bot 级串行（争用口径 A）：借槽运行在跑期间，同 bot 同一工作区的第二条人消息不再于
+    // bot 级串行（争用口径 A）：借槽运行在跑期间，同 bot 同一工作区的第二条人消息不在
     // 领取时合并，而是挂 bot_pending_msgs:<bot>:<domain> 待处理队列、不落 runs 行。
     const second = primeChatRun(service, project, dev2, '@Builder2 追问二')
     assert.equal(second, null, '忙时第二条人消息挂起不落 runs 行')
@@ -136,7 +136,7 @@ test('满并发时机器任务运行不借保底槽', async () => {
 test('写范围冲突时借槽的人消息运行仍被拦（write 运行不绕过写闸门）', async () => {
   const { root, store, service, runtime, director, dev, dev2, project } = await manualSetup({ maxConcurrentRuns: 1 })
   try {
-    // 占住正常槽的写运行声明 src/x/（DSHBOTS-168：一级目录声明派单即驳回，锚点迁到二级）
+    // 占住正常槽的写运行声明 src/x/（一级目录声明派单即驳回，锚点迁到二级）
     const task = await service.createTask({ projectId: project.id, title: '占槽任务', assigneeBotId: dev.id, writeScopes: ['src/x/'], autoStart: true })
     service.started = true
     await service.tick()

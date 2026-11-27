@@ -40,7 +40,7 @@ export const sessionViewMethods = {
   // 会话目录：插件绑定表（session_bindings，含 alias 行——结转后的旧会话仍可查历史）
   // 为家谱，逐行补 bot/项目/任务标识与运行态。projectId 给定时只列该域
   //（项目控制面 + 任务会话 + 审查会话）；solo 域（project_id IS NULL）只在全局目录出现。
-  // 子代理会话（P2）：subagent_sessions 表行并进目录（父绑定补标识），运行态按
+  // 子代理会话：subagent_sessions 表行并进目录（父绑定补标识），运行态按
   // stop_reason 是否已回写判定——start 落行、end 回写，表即子代理生命周期账。
   sessionCatalog(projectId = null) {
     ensureSubagentSessionSchema(this.store)
@@ -94,7 +94,7 @@ export const sessionViewMethods = {
       })
     }
     // 子代理行（含孙代理）：父链可能穿过多层子代理才到绑定行，SQL JOIN 表达不了，
-    // 改为全表取行 + JS 沿 subagent_sessions 逐跳追到最近的绑定行祖先（孤儿不进目录）。
+    // 所以全表取行 + JS 沿 subagent_sessions 逐跳追到最近的绑定行祖先（孤儿不进目录）。
     // 运行态 = end 未回写（stop_reason 仍 NULL，账本终态恒写非空哨兵）。
     const subRows = this.store.all(
       'SELECT session_id, parent_session_id, label, stop_reason, started_at FROM subagent_sessions ORDER BY started_at DESC, rowid DESC',
@@ -178,7 +178,7 @@ export const sessionViewMethods = {
     ensureSubagentSessionSchema(this.store)
     // 服务读取走 ctx.get（无 inject 要求的可选访问口，与 workspaceRegistry/compaction 同款）：
     // ctx.sessionQuery 属性访问在 cordis 里要求插件 inject 声明，未声明直接抛
-    // "cannot get property without inject"（生产事故 2026-11-25），回退分支永远走不到。
+    // "cannot get property without inject"，回退分支永远走不到。
     const query = this.runtime?.ctx?.get?.('sessionQuery')
     if (!query?.observeSession) {
       throw new AppError('DSH_UNAVAILABLE', '宿主未提供会话读取服务（sessionQuery）', 503)

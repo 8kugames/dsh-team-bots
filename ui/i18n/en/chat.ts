@@ -74,10 +74,10 @@ export default {
   "solo.recentRuns": "Recent dispatch runs",
   "solo.noRuns": "No dispatch runs yet.",
   "solo.workspace": "Dedicated workspace",
-  // DSHBOTS-220: ui/modules copy
+  // ui/modules copy (source literal as key)
   "等待审批": "Waiting for approval",
   "已允许一次": "Allowed once",
-  // DSHBOTS-365: distinct pill text for rule-based auto-allow (decided_by=auto:rule:*)
+  // distinct pill text for rule-based auto-allow (decided_by=auto:rule:*)
   "规则自动放行": "Auto-allowed by rule",
   "已拒绝": "Rejected",
   "已超时": "Timed out",
@@ -138,7 +138,7 @@ export default {
   "还没有选择": "None selected yet",
   "选择 · Enter 或 Tab 插入 · Esc 关闭": "Select · Enter or Tab to insert · Esc to close",
   "问）": " questions)",
-  // DSHBOTS-246: keys added by the full t literal audit
+  // keys from the full t literal audit (source literal as key)
   "（无说明）": "(no description)",
   "（未选择）": "(not selected)",
   "（共": " (",

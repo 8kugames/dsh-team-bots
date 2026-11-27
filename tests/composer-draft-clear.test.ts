@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const source = readFileSync(fileURLToPath(new URL('../ui/modules/composer.js', import.meta.url)), 'utf8')
 
-// —— DSHBOTS-244：已发消息偶现聊天框草稿残留（乐观清空 DOM 未同步）——
+// —— 守门：已发消息偶现聊天框草稿残留（乐观清空 DOM 未同步）——
 // 根因：乐观清空只写 state.chatDrafts 后靠 render 同步 DOM。morph 复用持焦 textarea 时
 // （⌘Enter 发送焦点必在输入框；Safari 点按钮也不转移焦点），dom-morph 的 syncFormValue 按
 // 「聚焦中控件的值归用户管」不覆写 .value——state 已清而 DOM 残留；render 的 rAF 里
@@ -66,7 +66,7 @@ const makeHarness = (over: {
   return { state, calls, box, sendMessage: scope.sendMessage, inFlight: scope.__inFlight }
 }
 
-// —— ① 源码接线：乐观清空段在 render 后显式清 DOM 值，收敛唯一出口 ——
+// —— 源码接线：乐观清空段在 render 后显式清 DOM 值，收敛唯一出口 ——
 test('源码接线：state 清空 + render 之后存在对 #composer-input 的显式 DOM 清空', () => {
   const clearAt = fnSrc.indexOf("state.chatDrafts[key] = ''")
   const renderAt = fnSrc.indexOf('render()')
@@ -76,7 +76,7 @@ test('源码接线：state 清空 + render 之后存在对 #composer-input 的�
   assert.ok(fnSrc.indexOf('await api(') > domClearAt, 'DOM 清空发生在出站 await 之前的同一同步段')
 })
 
-// —— ② DOM 级断言：出站成功 + 节点复用（持焦）场景，DOM 值与 state 同步为空 ——
+// —— DOM 级断言：出站成功 + 节点复用（持焦）场景，DOM 值与 state 同步为空 ——
 test('出站成功且 render 复用 textarea 节点：#composer-input.value 被显式清空，不残留', async () => {
   const h = makeHarness({ boxValue: 'hello' })
   h.state.chatDrafts['group:p1'] = 'hello'
@@ -87,7 +87,7 @@ test('出站成功且 render 复用 textarea 节点：#composer-input.value 被�
   assert.ok(h.box.focusCalls >= 1, '成功路径仍回焦输入框')
 })
 
-// —— ③ render 后 rAF 的 syncComposerBox 回写不再复活草稿 ——
+// —— render 后 rAF 的 syncComposerBox 回写不再复活草稿 ——
 test('render 后 rAF 回写（syncComposerBox 语义）不复活已清空的草稿', async () => {
   const h = makeHarness({ boxValue: 'hello' })
   h.state.chatDrafts['group:p1'] = 'hello'
@@ -99,7 +99,7 @@ test('render 后 rAF 回写（syncComposerBox 语义）不复活已清空的草�
   assert.equal(h.state.chatDrafts['group:p1'], '', '回写无害：DOM 值已清空，state 不被复活（修复前为 "hello"）')
 })
 
-// —— ④ 出站失败：残值不被误当窗口期新输入叠加，真输入仍保留在其后 ——
+// —— 出站失败：残值不被误当窗口期新输入叠加，真输入仍保留在其后 ——
 test('出站失败：窗口期仅 rAF 回写残值时恢复串不叠加；真输入保留在后', async () => {
   // 场景 a：窗口期用户无新输入，只有 render 的 rAF 把 DOM 残值回写 state（DOM→state）。
   // 修复前残值 'hello' 被误当 typed，恢复串叠加成 "hello\nhello"。

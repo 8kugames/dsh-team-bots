@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 推送前预检：与 .github/workflows/ci.yml 完全同源的两道闸（typecheck + test），
-// 外加工作区净树检查——并行会话的在途改动一旦被快照/打包进推送树，就是这次
-// CI 事故的根因。任一项失败即非零退出，pre-push 钩子据此拦截推送。
+// 外加工作区净树检查——并行会话的在途改动一旦被快照/打包进推送树，推送树就与验证树不一致。
+// 任一项失败即非零退出，pre-push 钩子据此拦截推送。
 import { execSync } from 'node:child_process'
 
 const root = execSync('git rev-parse --show-toplevel').toString().trim()

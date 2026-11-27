@@ -145,7 +145,7 @@ export const VIEW_ACTION = {
   settings: { icon: 'check', submit: 'project-settings-form' },
   'solo-config': { icon: 'check', submit: 'solo-config-form' },
 }
-// 项目导航：进化只挂在单聊 bot tab（逐个审批）与「总览bots」（批量审批），项目 NAV 不再出现。
+// 项目导航：进化只挂在单聊 bot tab（逐个审批）与「总览bots」（批量审批），项目 NAV 不出现。
 // 「用量」tab 只看本群；全局用量走侧栏「用量统计」。
 // 元组为 [view, icon]：展示名统一取 t('nav.' + view)（单聊 chat 用 nav.soloChat）。
 export const NAV = [
