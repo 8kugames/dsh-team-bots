@@ -1,5 +1,37 @@
 #!/bin/sh
-# main/dev 分支提交时把 package.json 的 patch 位 +1（见 scripts/version-bump.mjs），其余分支跳过。
-# 紧急/手工发版：DSH_SKIP_VERSION_BUMP=1 git commit ...
-command -v node >/dev/null 2>&1 || exit 0
-exec node "$(git rev-parse --show-toplevel)/scripts/version-bump.mjs"
+# 提交前依次执行（整体跳过：git commit --no-verify）：
+# 1. 路径清洗：git 跟踪的文本文件里本机 home 路径 /Users/<本机用户>/ → ~/，命中即改写并并入本次 commit。
+# 2. 版本号自增：main/dev 分支把 package.json 的 patch 位 +1（见 scripts/version-bump.mjs），其余分支跳过。
+#    紧急/手工发版：DSH_SKIP_VERSION_BUMP=1 git commit ...
+set -eu
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# 只匹配本机 $HOME/（仅 macOS 的 /Users/<名字> 形态）；-T 跳过二进制，改写后 git add，改写或 git add 失败即中止提交。
+git ls-files -z | perl -e '
+  my $home = $ENV{HOME} // "";
+  exit 0 unless $home =~ m{^/Users/[^/\s]+$};
+  my $prefix = "$home/";
+  my $quoted = quotemeta($prefix);
+  sub rewrite_failed { print STDERR "[pre-commit] ✗ 改写 $_[0] 失败, 中止 commit\n"; exit 1 }
+  $/ = "\0";
+  while (defined(my $f = <STDIN>)) {
+    chomp($f);
+    next if $f =~ m{^\.githooks/};
+    next unless -T $f;
+    open(my $in, "<", $f) or next;
+    my $c = do { local $/; <$in> } // "";
+    close($in);
+    next unless index($c, $prefix) >= 0;
+    $c =~ s{$quoted}{~/}g;
+    open(my $out, ">", $f) or rewrite_failed($f);
+    print($out $c) or rewrite_failed($f);
+    close($out) or rewrite_failed($f);
+    system("git", "add", "--", $f) == 0 or exit 1;
+    print "[pre-commit] ✓ 已清洗路径: $f\n";
+  }
+'
+
+if command -v node >/dev/null 2>&1; then
+  node "$ROOT/scripts/version-bump.mjs"
+fi
