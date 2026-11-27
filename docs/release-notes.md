@@ -4,6 +4,86 @@
 
 This file records the externally visible behaviour changes of every release; the newest version comes first. Each version lists the Chinese section before the English one.
 
+## v0.3.154
+
+### 中文
+
+**收件箱与通知**
+
+- **收件箱页上线**：侧栏新增收件箱入口，取代顶部审批/提问窄条；审批、提问、提案在收件箱就地处理，总监 @owner 事项点开按消息锚点回到群聊原消息，手动标已读后移出。桌面通知改为默认开启，按收件箱四类新到达事项触发。
+- **总监群 @owner 登记收件箱**：总监群消息写出 @owner 即登记为收件箱事项，支持手动标已读与按消息锚点取数。
+- **桌面通知改成看得到就不弹**：收件箱载入即记基线，页面聚焦不再一律静默；只有正看着该事项所在页面（收件箱、本项目群聊、对应单聊、进化页）才不弹，其他页面、弹窗遮住、失焦或后台标签页都照弹。
+
+**记忆**
+
+- **team_remember 同主题覆盖写**：同主题写入改为覆写存量条目，审查清单列出全部存量主题。
+- **team_memory_list 支持归档条目**：新参数 include_archived 可列出已归档记忆。
+- **触顶先轮换再拒写**：容量触顶先自动轮换可轮换条目，轮换空间耗尽后才拒绝写入；常态轮换日志降到 info，不进警告通道。
+
+**工具与收口**
+
+- **集成工具面标记映射自带按需语义**：只配「前缀=工作区标记」映射即按项目启用，隐藏清单可选。
+- **finalize 去厂商探测**：远端构建不再内置 TapTap Maker 专用探测，仓库里有 .project/project.json 也不再触发，只认 .finalize.json 配置。
+
+**核验**
+
+- **核验模板约束子代理分工与命名**：委派核验的子代理按模板限定分工与命名，owner 验收直接复用委派结论。
+
+**界面**
+
+- **删去冗余页头文案**：布局本身已能说明的页头与分组描述移除，页壳支持空说明不渲染。
+
+**健壮性**
+
+- **大图不再栈溢出**：base64 校验从整串正则改为逐字符扫描，多 MB 图片不再抛出调用栈溢出。
+
+**出厂净化（工程）**
+
+- **种子班子收敛**：出厂 bot 收敛为总监/程序/质量评审三个，人设改通用表述。
+- **去厂商与个人化引用**：清理 GS 背景叙述、cindy 口径与 taptap/godot/codegraph 专属示例，夹具改中性名，scope-reach 探针的宿主根改从 npm 全局根推导。
+- **注释去卡号去沿革**：分四批清掉注释里的卡号括注、段标记标签、溯源叙事与相对旧版本的表述，锚在注释上的测试断言同步；去掉注释后代码与原来逐字节一致。
+- **pre-commit 清洗本机路径**：git 跟踪的文本文件里 /Users/<本机用户>/ 自动改写为 ~/，只匹配本机 HOME。
+- **删空壳用例**：移除六个无断言的占位用例，行为已由契约级守门覆盖。
+
+### English
+
+**Inbox & notifications**
+
+- **Inbox page**: a sidebar inbox entry replaces the narrow approval/question strip on top. Approvals, questions and proposals are handled in place; director @owner items jump back to the originating group-chat message via its anchor and leave the inbox once manually read. Desktop notifications are now on by default, triggered by the four inbox item kinds.
+- **@owner in director group registers inbox items**: a director-group message mentioning @owner becomes an inbox item, with manual mark-as-read and anchor-based retrieval.
+- **Desktop notifications: silent only while visible**: the inbox records its baseline on load, and a focused page is no longer blanket-silent. Notifications are suppressed only while the relevant page is on screen (inbox, this project's group chat, the matching solo chat, the evolution page); other pages, covered modals, unfocused windows and background tabs all still notify.
+
+**Memory**
+
+- **team_remember overwrites same topic**: writing to an existing topic now overwrites the stored entry, and the review list shows every existing topic.
+- **team_memory_list can include archived**: a new include_archived parameter lists archived memories.
+- **Rotate before refusing**: when the capacity cap is hit, rotatable entries are rotated out automatically; writes are only refused once rotation space is exhausted, and routine rotation logs at info instead of warning.
+
+**Tools & finalization**
+
+- **Marker mapping implies on-demand**: configuring the prefix-to-marker map alone enables per-project tool families; a hide list is optional.
+- **Vendor probe removed from finalize**: the remote build no longer hard-codes the TapTap Maker probe — the presence of .project/project.json no longer triggers anything; only .finalize.json configuration counts.
+
+**Review**
+
+- **Verification template constrains subagents**: delegated verification subagents follow the template's division of work and naming, and the owner's acceptance reuses the delegation's conclusions.
+
+**UI**
+
+- **Redundant page-head copy removed**: headings and group descriptions the layout already conveys are gone, and the page shell renders cleanly without a description.
+
+**Robustness**
+
+- **No more stack overflow on large images**: base64 validation switched from whole-string regex to per-character scanning, so multi-megabyte images no longer blow the call stack.
+
+**Shipping cleanup (engineering)**
+
+- **Seed roster reduced**: the factory bots are now director / programmer / quality reviewer with generic personas.
+- **Vendor and personal references removed**: GS background narrative, cindy wording and taptap/godot/codegraph-specific examples are gone; fixtures use neutral names, and the scope-reach probe derives the host root from the npm global root.
+- **Comments stripped of card numbers and history**: four passes removed card-number asides, marker labels, provenance narrative and references to older versions, with comment-anchored test assertions updated in step; code without the comments is byte-identical.
+- **pre-commit rewrites local paths**: /Users/<local-user>/ in tracked text files is rewritten to ~/ on commit, matching only the local HOME.
+- **Assertion-free stubs removed**: six placeholder cases without any assertion are gone; their behaviour is already covered by contract-level guards.
+
 ## v0.3.137
 
 ### 中文
