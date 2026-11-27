@@ -27,12 +27,12 @@ test('parseFileUriList：uri-list 语法还原绝对路径，# 注释行跳过',
   const uriList = [
     '# clipboard data',
     '# 文件复制自访达',
-    'file:///Users/sile/Docs/%E6%8A%A5%E5%91%8A.pdf',
-    'file:///Users/sile/Docs/plan%20v2.md',
+    'file:///Users/sam/Docs/%E6%8A%A5%E5%91%8A.pdf',
+    'file:///Users/sam/Docs/plan%20v2.md',
   ].join('\r\n')
   assert.deepEqual(parseFileUriList(uriList), [
-    '/Users/sile/Docs/报告.pdf',
-    '/Users/sile/Docs/plan v2.md',
+    '/Users/sam/Docs/报告.pdf',
+    '/Users/sam/Docs/plan v2.md',
   ])
 })
 

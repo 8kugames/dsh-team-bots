@@ -117,7 +117,7 @@ test('toolTargetOf 纯函数：command 取首行截 120，file_path 原样，其
   assert.equal(toolTargetOf({ file_path: ' /a/b/c.js ' }), '/a/b/c.js')
   assert.equal(toolTargetOf({ file_path: '' }), null)
   // 路径位参数名兜底：工具换了参数名也能提到目标（免审不因此永远落卡）。
-  assert.equal(toolTargetOf({ target_dir: '/Users/x/.taptap-maker/preview' }), '/Users/x/.taptap-maker/preview')
+  assert.equal(toolTargetOf({ target_dir: '/Users/x/demo-project' }), '/Users/x/demo-project')
   assert.equal(toolTargetOf({ path: ' /rel/dir ' }), '/rel/dir')
   assert.equal(toolTargetOf({ cwd: '/tmp/work', query: 'x' }), '/tmp/work')
   assert.equal(toolTargetOf({ target_dir: '' }), null)

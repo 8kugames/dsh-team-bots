@@ -9,16 +9,16 @@ const homePatch = `# Home-level dsh patch: applied above every profile.
   config:
     enabled: false
 - insert:
-    - id: mcp-taptap-maker
+    - id: mcp-demo
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: taptap-maker
+        serverName: demo
         transport: stdio
         command: node
         args:
-          - /Users/someone/.taptap-maker/mcp-runtime/0.0.39/dist/maker.js
+          - /Users/someone/.demo/mcp-runtime/0.0.39/dist/server.js
         env:
-          TAPTAP_MCP_CLIENT_IDE: dsh
+          DEMO_MCP_CLIENT_IDE: dsh
         toolCallTimeoutMs: 3600000
 - id: mcp-other
   name: "@deepseek-ai/dsh-mcp-client"
@@ -29,7 +29,7 @@ const homePatch = `# Home-level dsh patch: applied above every profile.
 
 test('extractHostRefs finds absolute paths in values and list items', () => {
   assert.deepEqual(extractHostRefs(homePatch), [
-    '/Users/someone/.taptap-maker/mcp-runtime/0.0.39/dist/maker.js',
+    '/Users/someone/.demo/mcp-runtime/0.0.39/dist/server.js',
     '/opt/tools/serve.js',
     '/tmp/one',
   ])

@@ -21,7 +21,7 @@ export const CODE_HYGIENE_MAX_FILE_BYTES = 2 * 1024 * 1024
 // 告警消息里最多列出的文件数，超出折算成「……等 N 个」。
 export const CODE_HYGIENE_LIST_MAX = 10
 
-// 扫描时整目录跳过（目录名精确匹配；所有隐藏目录一律跳过，覆盖 .git/.codegraph 等）。
+// 扫描时整目录跳过（目录名精确匹配；所有隐藏目录一律跳过，覆盖 .git 等）。
 // assets 是本仓房规的媒体资产目录约定名，与 node_modules 等生成物目录并列排除。
 export const CODE_HYGIENE_IGNORED_DIRS = new Set([
   'node_modules', 'assets', 'dist', 'build', 'out', 'coverage', 'vendor', 'target', '__pycache__',

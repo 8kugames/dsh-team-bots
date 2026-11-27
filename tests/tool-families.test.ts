@@ -13,20 +13,20 @@ import {
 } from '../src/services/runtime/tool-families.js'
 
 test('解析：隐藏前缀清单（空白/逗号/分号分隔或数组）与「前缀=标记」映射（对象或分号分隔文本）', () => {
-  assert.deepEqual(parseHideToolPrefixes('mcp__, godot_ ;x'), ['mcp__', 'godot_', 'x'])
+  assert.deepEqual(parseHideToolPrefixes('mcp__, eng_ ;x'), ['mcp__', 'eng_', 'x'])
   assert.deepEqual(parseHideToolPrefixes(['a', ' b ']), ['a', 'b'])
   assert.deepEqual(parseHideToolPrefixes(''), [])
-  assert.deepEqual(parseToolFamilyMarkers('godot_=project.godot\nbad\nmcp__x__=a/b'), { godot_: 'project.godot', 'mcp__x__': 'a/b' })
-  assert.deepEqual(parseToolFamilyMarkers({ godot_: 'project.godot', bad: 3, '': 'x' }), { godot_: 'project.godot' })
+  assert.deepEqual(parseToolFamilyMarkers('eng_=project.eng\nbad\nmcp__x__=a/b'), { eng_: 'project.eng', 'mcp__x__': 'a/b' })
+  assert.deepEqual(parseToolFamilyMarkers({ eng_: 'project.eng', bad: 3, '': 'x' }), { eng_: 'project.eng' })
 })
 
 test('配置：缺省不隐藏任何工具（各部署的宿主集成面不同，不能写死）；显式配置才启用按需口径', () => {
   const defaults = resolveConfig({})
   assert.deepEqual(defaults.hideToolPrefixes, [])
   assert.deepEqual(defaults.toolFamilyMarkers, {})
-  const custom = resolveConfig({ hideToolPrefixes: 'mcp__,godot_', toolFamilyMarkers: 'godot_=x.godot' } as any)
-  assert.deepEqual(custom.hideToolPrefixes, ['mcp__', 'godot_'])
-  assert.deepEqual(custom.toolFamilyMarkers, { godot_: 'x.godot' })
+  const custom = resolveConfig({ hideToolPrefixes: 'mcp__,eng_', toolFamilyMarkers: 'eng_=x.eng' } as any)
+  assert.deepEqual(custom.hideToolPrefixes, ['mcp__', 'eng_'])
+  assert.deepEqual(custom.toolFamilyMarkers, { eng_: 'x.eng' })
   assert.deepEqual(resolveConfig({ hideToolPrefixes: '' } as any).hideToolPrefixes, [])
 })
 
@@ -34,17 +34,16 @@ test('按项目工作区标记放行：hide 清单里的前缀，工作区有对
   const root = await mkdtemp(join(tmpdir(), 'dsh-tool-families-'))
   try {
     const config = resolveConfig({
-      hideToolPrefixes: 'mcp__,godot_',
-      toolFamilyMarkers: 'mcp__codegraph__=.codegraph;mcp__taptap-maker__=.project/project.json;godot_=project.godot',
+      hideToolPrefixes: 'mcp__,eng_',
+      toolFamilyMarkers: 'mcp__docs__=.docs;mcp__db__=db.cfg;eng_=project.eng',
     } as any)
-    assert.deepEqual(toolPolicyFor(config, root), { hide: ['mcp__', 'godot_'], allow: [] }, '没有标记：配置里列的族全部隐藏')
-    await writeFile(join(root, 'project.godot'), '[application]')
-    assert.deepEqual(toolPolicyFor(config, root).allow, ['godot_'])
-    await mkdir(join(root, '.codegraph'))
-    await mkdir(join(root, '.project'))
-    await writeFile(join(root, '.project', 'project.json'), '{}')
-    assert.deepEqual(toolPolicyFor(config, root).allow, ['mcp__codegraph__', 'mcp__taptap-maker__', 'godot_'], '各族各有标记就都放行')
-    assert.deepEqual(toolPolicyFor(config, join(root, 'missing')), { hide: ['mcp__', 'godot_'], allow: [] }, '项目目录不存在视同没有标记')
+    assert.deepEqual(toolPolicyFor(config, root), { hide: ['mcp__', 'eng_'], allow: [] }, '没有标记：配置里列的族全部隐藏')
+    await writeFile(join(root, 'project.eng'), 'engine: on')
+    assert.deepEqual(toolPolicyFor(config, root).allow, ['eng_'])
+    await mkdir(join(root, '.docs'))
+    await writeFile(join(root, 'db.cfg'), '{}')
+    assert.deepEqual(toolPolicyFor(config, root).allow, ['mcp__docs__', 'mcp__db__', 'eng_'], '各族各有标记就都放行')
+    assert.deepEqual(toolPolicyFor(config, join(root, 'missing')), { hide: ['mcp__', 'eng_'], allow: [] }, '项目目录不存在视同没有标记')
     assert.deepEqual(toolPolicyFor(config, null), { hide: [], allow: [] }, '单聊没有项目目录：不隐藏')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -68,39 +67,39 @@ test('会话口径：按项目目录（production_dir 优先，其次 workspace/
   try {
     const workspace = join(root, 'ws')
     await mkdir(join(workspace, 'demo'), { recursive: true })
-    await writeFile(join(workspace, 'demo', 'project.godot'), '[application]')
+    await writeFile(join(workspace, 'demo', 'project.eng'), 'engine: on')
     await mkdir(join(root, 'elsewhere'))
-    const config = { ...resolveConfig({ hideToolPrefixes: 'godot_', toolFamilyMarkers: 'godot_=project.godot' } as any), workspace }
-    assert.deepEqual(botToolPolicyFor(config, { slug: 'demo' }).allow, ['godot_'])
+    const config = { ...resolveConfig({ hideToolPrefixes: 'eng_', toolFamilyMarkers: 'eng_=project.eng' } as any), workspace }
+    assert.deepEqual(botToolPolicyFor(config, { slug: 'demo' }).allow, ['eng_'])
     assert.deepEqual(botToolPolicyFor(config, { slug: 'demo', production_dir: join(root, 'elsewhere') }).allow, [], 'production_dir 优先于 workspace/slug')
     assert.deepEqual(botToolPolicyFor(config, null), { hide: [], allow: [] }, '单聊不隐藏')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('hiddenToolNames：命中的前缀隐藏，放行的前缀保留，其余工具不动', () => {
-  const names = ['mcp__taptap-maker__generate_image', 'godot_command', 'mcp__codegraph__codegraph_explore', 'bash', 'team_assign_task']
+  const names = ['mcp__docs__query', 'eng_command', 'mcp__db__exec', 'bash', 'team_assign_task']
   assert.deepEqual(
-    hiddenToolNames({ hide: ['mcp__', 'godot_'], allow: ['godot_'] }, names),
-    ['mcp__taptap-maker__generate_image', 'mcp__codegraph__codegraph_explore'],
+    hiddenToolNames({ hide: ['mcp__', 'eng_'], allow: ['eng_'] }, names),
+    ['mcp__docs__query', 'mcp__db__exec'],
   )
 })
 
 test('applyBotToolPolicy：总监与成员都隐藏宿主集成工具，成员另隐藏总监专权；会话复用只补新出现的工具', () => {
-  const names = ['mcp__taptap-maker__generate_image', 'godot_command', 'bash', 'team_assign_task']
-  const policy = { hide: ['mcp__', 'godot_'], allow: ['godot_'] }
+  const names = ['mcp__docs__query', 'eng_command', 'bash', 'team_assign_task']
+  const policy = { hide: ['mcp__', 'eng_'], allow: ['eng_'] }
   const make = () => {
     const calls = []
     return { calls, tools: { definitions: () => names.map(name => ({ name })), restrict: filter => calls.push(filter) } }
   }
   const owner = make()
   applyBotToolPolicy({ agent: { ctx: { tools: owner.tools } } }, { isOwner: true, toolPolicy: policy })
-  assert.deepEqual(owner.calls, [{ deny: ['mcp__taptap-maker__generate_image'] }], '总监只隐藏宿主集成工具')
+  assert.deepEqual(owner.calls, [{ deny: ['mcp__docs__query'] }], '总监只隐藏宿主集成工具')
 
   const member = make()
   const handle = { ctx: { tools: member.tools } }
   const denied = new WeakMap<object, Set<string>>()
   applyBotToolPolicy(handle, { isOwner: false, toolPolicy: policy, denied })
-  assert.deepEqual(member.calls, [{ deny: [...DIRECTOR_ONLY_TOOLS] }, { deny: ['mcp__taptap-maker__generate_image'] }])
+  assert.deepEqual(member.calls, [{ deny: [...DIRECTOR_ONLY_TOOLS] }, { deny: ['mcp__docs__query'] }])
   applyBotToolPolicy(handle, { isOwner: false, toolPolicy: policy, denied })
   assert.equal(member.calls.length, 3, '复用时成员兜底照做，宿主集成工具没有新名字就不重复叠层')
   member.tools.definitions = () => [...names, 'mcp__late__tool'].map(name => ({ name }))
